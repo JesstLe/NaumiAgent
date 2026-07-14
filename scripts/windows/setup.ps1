@@ -58,8 +58,8 @@ Set-Location -LiteralPath $repoRoot
 Write-Step "检查运行时"
 $python = Require-Command "python"
 $uv = Require-Command "uv"
-$node = Require-Command "node"
-$null = Require-Command "npm"
+$node = Get-Command "node" -ErrorAction SilentlyContinue
+$npm = Get-Command "npm" -ErrorAction SilentlyContinue
 $gitBash = Resolve-GitBash
 
 $pythonVersion = (& $python.Source --version 2>&1 | Select-Object -First 1)
@@ -70,17 +70,23 @@ if ([int]$Matches.major -lt 3 -or ([int]$Matches.major -eq 3 -and [int]$Matches.
     throw "NaumiAgent 需要 Python 3.12 或更高版本，当前为 $pythonVersion。"
 }
 
-$nodeVersion = (& $node.Source --version 2>&1 | Select-Object -First 1)
-if ($nodeVersion -notmatch "^v(?<major>\d+)") {
-    throw "无法识别 Node.js 版本：$nodeVersion"
-}
-if ([int]$Matches.major -lt 20) {
-    throw "终端 UI 需要 Node.js 20 或更高版本，当前为 $nodeVersion。"
+$terminalUiAvailable = $false
+$nodeVersion = "未安装"
+if ($node -and $npm) {
+    $nodeVersion = (& $node.Source --version 2>&1 | Select-Object -First 1)
+    if ($nodeVersion -match "^v(?<major>\d+)" -and [int]$Matches.major -ge 20) {
+        $terminalUiAvailable = $true
+    } else {
+        Write-Warning "Node.js 20+ 不可用，将使用 Textual TUI fallback。当前版本：$nodeVersion"
+    }
+} else {
+    Write-Warning "未检测到 Node.js 20+ 与 npm，将使用 Textual TUI fallback。"
 }
 
 Write-Host "  Python: $pythonVersion"
 Write-Host "  uv: $(& $uv.Source --version | Select-Object -First 1)"
 Write-Host "  Node.js: $nodeVersion"
+Write-Host "  Terminal UI available: $terminalUiAvailable"
 Write-Host "  Git Bash: $gitBash"
 
 Write-Step "同步 Python 3.12 开发环境"
@@ -100,10 +106,12 @@ Write-Step "安装 naumiagent 用户命令"
 if ($LASTEXITCODE -ne 0) {
     throw "naumiagent 命令安装失败，退出码：$LASTEXITCODE"
 }
+$naumi = Get-Command "naumi" -ErrorAction SilentlyContinue
 $naumiagent = Get-Command "naumiagent" -ErrorAction SilentlyContinue
-if (-not $naumiagent) {
-    throw "naumiagent 已安装，但用户命令目录不在 PATH。请运行 uv tool update-shell 后重新打开终端。"
+if (-not $naumi -or -not $naumiagent) {
+    throw "NaumiAgent 已安装，但 naumi/naumiagent 不在 PATH。请运行 uv tool update-shell 后重新打开终端。"
 }
+Write-Host "  naumi: $($naumi.Source)"
 Write-Host "  naumiagent: $($naumiagent.Source)"
 
 $configDir = Join-Path $repoRoot ".naumi"
@@ -198,8 +206,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Step "Windows 初始化完成"
-Write-Host "  TUI:  naumi"
-Write-Host "  Windows compatibility alias:  naumiagent --tui"
-Write-Host "  CLI:  uv run naumi chat"
-Write-Host "  UI:   uv run naumi ui"
+Write-Host "  默认入口:  naumi"
+Write-Host "  Textual:  naumi tui"
+Write-Host "  兼容别名:  naumiagent"
 Write-Host "  API:  uv run naumi serve"

@@ -22,12 +22,16 @@ def test_install_script_validates_python_without_platform_specific_sort() -> Non
     assert "sort -V" not in script
 
 
-def test_install_script_requires_supported_node_for_default_ui() -> None:
+def test_install_script_keeps_textual_available_without_node() -> None:
     script = _script()
 
-    assert "Node.js 20+" in script
-    assert "node_major" in script
-    assert 'if [ "$node_major" -lt 20 ]' in script
+    assert "terminal_ui_available=0" in script
+    assert "terminal_ui_available=1" in script
+    assert 'if [ "$terminal_ui_available" = 1 ]' in script
+    assert "将使用 Textual TUI fallback" in script
+    assert 'log_info "  naumi tui"' in script
+    assert "naumi chat --classic" not in script
+    assert "naumi ui --legacy" not in script
 
 
 def test_install_script_installs_managed_browser_runtime() -> None:
@@ -44,8 +48,6 @@ def test_install_script_updates_shell_path_idempotently() -> None:
     script = _script()
 
     assert "grep -Fqx" in script
-    assert "naumi chat --classic" in script
-    assert "naumi ui --legacy" in script
 
 
 def test_readme_declares_terminal_ui_as_default_entry() -> None:
