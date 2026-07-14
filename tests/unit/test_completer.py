@@ -67,6 +67,14 @@ class TestSlashCommandCompleter:
         for subcommand in ("reply", "resume", "abort", "manual"):
             assert subcommand in description
 
+    def test_reasoning_effort_command_registered_with_all_levels(self):
+        metadata = {cmd.name: cmd for cmd in COMMANDS_META}
+
+        assert "/effort" in _complete("/")
+        assert metadata["/effort"].takes_arg is True
+        assert "auto" in metadata["/effort"].arg_hint
+        assert "max" in metadata["/effort"].arg_hint
+
     def test_optional_analysis_commands_expose_argument_hints(self):
         metadata = {cmd.name: cmd for cmd in COMMANDS_META}
         flat_takes_arg = {cmd: takes_arg for cmd, _, takes_arg in COMMANDS}

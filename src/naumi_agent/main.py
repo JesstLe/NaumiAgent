@@ -1990,6 +1990,15 @@ async def _show_available_models(engine: Any, arg: str) -> None:
             row.append(model.canonical_id, style="cyan")
             row.append(name)
             row.append(f" [{source}]", style="dim")
+            if model.reasoning_efforts:
+                efforts = "/".join(value.value for value in model.reasoning_efforts)
+                row.append(f" [强度 {efforts}", style="magenta")
+                if model.default_reasoning_effort is not None:
+                    row.append(
+                        f" · 默认 {model.default_reasoning_effort.value}",
+                        style="dim",
+                    )
+                row.append("]", style="magenta")
             console.print(row)
         omitted = len(listing.models) - len(visible)
         if omitted:
@@ -2040,6 +2049,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(Markdown(_build_style_help_text(config)))
         case "/reasoning":
             _handle_reasoning_command(engine, arg)
+        case "/effort":
+            _handle_effort_command(engine, arg)
         case "/doctor":
             report = await run_doctor(
                 engine._config,
@@ -2148,6 +2159,9 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
+            _print_reasoning_effort_status(
+                engine.router.get_reasoning_effort_status()
+            )
         case "/models":
             await _show_available_models(engine, arg)
         case "/version" | "/v":
@@ -2516,6 +2530,49 @@ def _handle_reasoning_command(engine: Any, arg: str) -> None:
     console.print(f"[green]reasoning 文本显示已{status}[/green]")
 
 
+def _handle_effort_command(engine: Any, arg: str) -> None:
+    """Show or update the process-local model reasoning intensity."""
+    from naumi_agent.model.reasoning import ReasoningEffortError
+
+    value = arg.strip().lower()
+    try:
+        if not value:
+            status = engine.router.get_reasoning_effort_status()
+        elif value == "reset":
+            status = engine.router.reset_reasoning_effort()
+            console.print("[green]已清除临时思考强度，恢复配置解析。[/green]")
+        else:
+            status = engine.router.set_reasoning_effort(value)
+            if value == "auto":
+                console.print("[green]思考强度已切换为供应商默认（auto）。[/green]")
+            else:
+                console.print(f"[green]思考强度已切换为 {value}。[/green]")
+    except ReasoningEffortError as exc:
+        console.print(str(exc), style="yellow", markup=False)
+        return
+    _print_reasoning_effort_status(status)
+
+
+def _print_reasoning_effort_status(status: Any) -> None:
+    source_names = {
+        "runtime": "临时覆盖",
+        "model": "单模型配置",
+        "global": "全局配置",
+        "auto": "供应商默认",
+    }
+    source = source_names.get(str(status.source), str(status.source))
+    console.print(f"思考强度: [cyan]{status.effective.value}[/cyan]（来源: {source}）")
+    if status.supported:
+        supported = " / ".join(value.value for value in status.supported)
+        console.print(f"可选强度: {supported}")
+    else:
+        console.print("可选强度: [dim]未声明（仅可安全使用 auto）[/dim]")
+    if status.default is not None:
+        console.print(f"模型默认: {status.default.value}")
+    if status.warning:
+        console.print(status.warning, style="yellow", markup=False)
+
+
 def _print_banner(engine: Any) -> None:
     from naumi_agent import __version__
     from naumi_agent.assets import BANNER_TEXT
@@ -2539,7 +2596,8 @@ def _print_help() -> None:
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
-        ("/reasoning [on|off|toggle]", "显示或隐藏模型 reasoning/thinking 明文"),
+        ("/reasoning [on|off|toggle]", "显示或隐藏模型思考文本"),
+        ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),

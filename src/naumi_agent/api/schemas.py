@@ -180,12 +180,24 @@ class ModelInfo(BaseModel):
     max_output: int | None = None
     supports_tools: bool | None = None
     supports_reasoning: bool | None = None
+    reasoning_efforts: list[str] = Field(default_factory=list)
+    default_reasoning_effort: str | None = None
     supports_vision: bool | None = None
+
+
+class ReasoningEffortInfo(BaseModel):
+    model: str
+    effective: str
+    source: str
+    supported: list[str] = Field(default_factory=list)
+    default: str | None = None
+    warning: str | None = None
 
 
 class ConfigResponse(BaseModel):
     models: list[ModelInfo]
     model_warnings: list[str] = Field(default_factory=list)
+    reasoning_effort: ReasoningEffortInfo
     tools: list[ToolInfo]
     permission_mode: str
     max_budget_usd: float | None
