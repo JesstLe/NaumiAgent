@@ -2058,6 +2058,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 mcp_manager=getattr(engine, "_mcp_manager", None),
             )
             console.print(Markdown(render_doctor_report(report)))
+        case "/harness":
+            await _run_harness(engine, arg)
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -2599,6 +2601,7 @@ def _print_help() -> None:
         ("/reasoning [on|off|toggle]", "显示或隐藏模型思考文本"),
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
+        ("/harness [status|doctor|trust|untrust]", "管理仓库 Harness Profile"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -2699,6 +2702,89 @@ def _print_help() -> None:
     for cmd, desc in commands:
         console.print(f"  [cyan]{cmd:12s}[/cyan] {desc}")
     console.print()
+
+
+async def _run_harness(engine: Any, arg: str) -> None:
+    """Run user-only Harness commands through the shared service facade."""
+    from naumi_agent.harness.service import (
+        HarnessStatusCode,
+        render_harness_doctor,
+        render_harness_status,
+    )
+    from naumi_agent.harness.trust import HarnessTrustStoreError
+
+    usage = (
+        "用法：/harness [status|doctor|trust|untrust]\n"
+        "      /harness trust --confirm"
+    )
+    try:
+        parts = shlex.split(arg)
+    except ValueError as exc:
+        console.print(f"[yellow]Harness 参数解析失败：{exc}[/yellow]\n{usage}")
+        return
+    subcommand = parts[0].lower() if parts else "status"
+    service = getattr(engine, "harness_service", None)
+    if service is None:
+        console.print("[red]Harness Service 尚未初始化。请重启 NaumiAgent。[/red]")
+        return
+
+    if subcommand == "status" and len(parts) == 1:
+        console.print(Markdown(render_harness_status(await service.status())))
+        return
+    if subcommand == "doctor" and len(parts) == 1:
+        console.print(Markdown(render_harness_doctor(await service.doctor())))
+        return
+    if subcommand == "trust" and len(parts) == 1:
+        report = await service.doctor()
+        status = report.status
+        if status.code in {HarnessStatusCode.MISSING, HarnessStatusCode.INVALID}:
+            console.print(Markdown(render_harness_doctor(report)))
+            return
+        digest = status.profile_digest or "-"
+        lines = [
+            "## Harness 信任预览（仅预览）",
+            "",
+            f"工作区：`{service.workspace_root}`",
+            f"Profile digest：`{digest}`",
+            "",
+            "### 配置中的命令（H1 不执行）",
+        ]
+        lines.extend(
+            f"- `{command}`" for command in report.command_summaries
+        )
+        if not report.command_summaries:
+            lines.append("- 没有配置命令")
+        lines.extend(
+            (
+                "",
+                "下一步：确认内容无误后运行 `/harness trust --confirm`。",
+            )
+        )
+        console.print(Markdown("\n".join(lines)))
+        return
+    if subcommand == "trust" and parts == ["trust", "--confirm"]:
+        try:
+            record = await service.trust(source="user_slash")
+        except (ValueError, HarnessTrustStoreError) as exc:
+            console.print(f"[yellow]{exc}[/yellow]\n{usage}")
+            return
+        console.print(
+            "[green]Harness Profile 已信任。[/green]\n"
+            f"digest: [dim]{record.profile_digest}[/dim]"
+        )
+        return
+    if subcommand == "untrust" and len(parts) == 1:
+        try:
+            removed = await service.untrust()
+        except HarnessTrustStoreError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            return
+        if removed:
+            console.print("[green]Harness Profile 信任已撤销。[/green]")
+        else:
+            console.print("[yellow]当前工作区没有 Harness 信任记录。[/yellow]")
+        return
+    console.print(f"[yellow]{usage}[/yellow]")
 
 
 def _parse_scale_arg(arg: str) -> tuple[str, int]:

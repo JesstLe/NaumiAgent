@@ -1,0 +1,75 @@
+schema_version: 1
+
+knowledge:
+  entrypoints:
+    - AGENTS.md
+    - README.md
+    - docs/superpowers/specs/2026-07-14-harness-engineering-design.md
+  include:
+    - src/naumi_agent/harness/**/*.py
+    - src/naumi_agent/orchestrator/**/*.py
+    - tests/unit/test_harness_*.py
+    - tests/integration/test_harness_*.py
+  exclude:
+    - .naumi/data/**
+    - data/**
+    - .venv/**
+    - frontend/terminal-ui/node_modules/**
+  max_turn_tokens: 8000
+  max_file_bytes: 131072
+
+completion:
+  require_todo_reconciliation: true
+  require_change_evidence: true
+  correction_attempts: 1
+  unverified_status: completed_unverified
+
+checks:
+  - id: harness_python
+    label: Harness H1 Python 定向测试
+    argv:
+      - uv
+      - run
+      - pytest
+      - -q
+      - tests/unit/test_harness_profile.py
+      - tests/unit/test_harness_trust.py
+      - tests/unit/test_harness_service.py
+      - tests/unit/test_harness_tools.py
+      - tests/unit/test_harness_surfaces.py
+      - tests/integration/test_harness_h1_real_workspace.py
+    timeout_seconds: 180
+    when_changed:
+      - src/naumi_agent/harness/**/*.py
+      - tests/unit/test_harness_*.py
+      - tests/integration/test_harness_*.py
+    required_for:
+      - change
+
+  - id: harness_lint
+    label: Harness H1 静态检查
+    argv:
+      - uv
+      - run
+      - ruff
+      - check
+      - src/naumi_agent/harness
+      - tests/unit/test_harness_profile.py
+      - tests/unit/test_harness_trust.py
+      - tests/unit/test_harness_service.py
+      - tests/unit/test_harness_tools.py
+      - tests/unit/test_harness_surfaces.py
+      - tests/integration/test_harness_h1_real_workspace.py
+    timeout_seconds: 120
+    when_changed:
+      - src/naumi_agent/harness/**/*.py
+      - tests/unit/test_harness_*.py
+      - tests/integration/test_harness_*.py
+    required_for:
+      - change
+
+evals:
+  suites: []
+  live_default: false
+  max_cost_usd: 1.0
+  max_duration_seconds: 1800
