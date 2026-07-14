@@ -231,6 +231,17 @@ def _parse_native_provider(
     discovery = _parse_discovery(data.pop("discovery", {}), f"{path}.discovery")
     whitelist = _parse_filter(data.pop("whitelist", []), f"{path}.whitelist")
     blacklist = _parse_filter(data.pop("blacklist", []), f"{path}.blacklist")
+    raw_request_timeout = _take_alias(
+        data,
+        ("requestTimeoutMs", "request_timeout_ms"),
+        path,
+        required=False,
+    )
+    request_timeout = (
+        None
+        if raw_request_timeout is None
+        else _positive_int(raw_request_timeout, f"{path}.requestTimeoutMs")
+    )
     _reject_unknown(data, path)
     return _build_provider(
         provider_id=provider_id,
@@ -243,6 +254,7 @@ def _parse_native_provider(
         discovery=discovery,
         whitelist=whitelist,
         blacklist=blacklist,
+        request_timeout_ms=request_timeout,
     )
 
 
