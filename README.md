@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-`naumi` 默认启动新一代 Node Terminal UI，并以当前目录作为工作区。主界面聚焦对话与执行时间线，工具、权限、任务和运行状态通过结构化卡片持续更新；旧 Prompt Toolkit CLI 与 Textual TUI 仅作为显式兼容入口保留。
+`naumi` 默认启动新一代 Node Terminal UI，并以当前目录作为工作区；启动失败时自动回退到 Textual TUI。主界面聚焦对话与执行时间线，工具、权限、任务和运行状态通过结构化卡片持续更新。旧 Prompt Toolkit CLI 已退出公共入口，但实现代码继续保留。
 
 核心能力包括：
 
@@ -15,7 +15,7 @@
 - **会话与记忆**：SQLite 会话历史、Chroma 长期记忆、上下文压缩、`/resume` 与 `/history` 恢复链路。
 - **运行态面板**：`/todo`、`/tasks`、`/runtime` 汇总 todo、subagent、后台任务、浏览器任务和 hook 状态。
 - **自我演进**：`/self-review`、`/evolve`、`/forge`、`/pursue` 支持源码审查、自我修改、工具锻造和目标追踪。
-- **多界面**：Node Terminal UI、Prompt Toolkit 兼容 CLI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
+- **多界面**：Node Terminal UI、Textual fallback、REST API/WebSocket 和原生 Mac Workbench。
 
 ## 快速开始
 
@@ -31,11 +31,11 @@ curl -sSL https://raw.githubusercontent.com/JesstLe/NaumiAgent/main/scripts/inst
 
 安装脚本会自动：
 - 检测 Python 3.12+
-- 检测 Node.js 20+
+- 检测可选的 Node.js 20+；不可用时保留 Textual fallback
 - 使用 `uv` 或 `pip` 安装依赖
 - 安装浏览器自动化与搜索回退所需的 Chromium
 - 将 `naumi` 命令链接到 `~/.local/bin`
-- 安装 Node UI 依赖
+- Node.js 20+ 可用时安装 Node UI 依赖
 
 安装完成后直接运行：
 
@@ -74,7 +74,7 @@ pip install -e ".[dev]"
 
 ### Windows 初始化
 
-Windows 原生开发使用 Python/uv/Node.js，并通过 Git for Windows Bash 保持 Agent 的 Bash 命令语义。先用隐藏输入保存 Kimi 密钥到当前 Windows 用户环境：
+Windows 原生开发使用 Python/uv，并通过 Git for Windows Bash 保持 Agent 的 Bash 命令语义；Node.js 20+ 用于新 Terminal UI，缺失时仍可运行 Textual。先用隐藏输入保存 Kimi 密钥到当前 Windows 用户环境：
 
 ```powershell
 $kimiKey = Read-Host "Kimi API Key" -MaskInput
@@ -94,7 +94,7 @@ powershell -ExecutionPolicy Bypass -File scripts/windows/setup.ps1
 naumi
 ```
 
-`naumiagent --tui` 作为 Windows 早期版本的兼容别名继续可用。脚本会检查 Python 3.12+、uv、Node.js 20+ 与 Git Bash，创建 `.venv` 和无密钥的本地 `.naumi/config.yaml`，并验证配置。若 Git Bash 不在标准 Git for Windows 目录，可设置 `NAUMI_GIT_BASH` 指向 `bin\bash.exe`。脚本不会覆盖已有的现代配置；若发现旧根目录 `config.yaml`，会继续使用旧配置而不生成竞争副本。
+`naumiagent` 作为 Windows 早期版本的兼容别名继续可用，默认行为与 `naumi` 相同；`naumiagent --tui` 显式启动 Textual。脚本会检查 Python 3.12+、uv、可选 Node.js 20+ 与 Git Bash，创建 `.venv` 和无密钥的本地 `.naumi/config.yaml`，并验证配置。若 Git Bash 不在标准 Git for Windows 目录，可设置 `NAUMI_GIT_BASH` 指向 `bin\bash.exe`。脚本不会覆盖已有的现代配置；若发现旧根目录 `config.yaml`，会继续使用旧配置而不生成竞争副本。
 
 ### 配置
 
@@ -146,11 +146,8 @@ python -m naumi_agent.main
 # 显式启动新一代 Node 终端 UI
 naumi ui
 
-# 旧版 Prompt Toolkit CLI
-naumi chat --classic
-
-# 旧版 Textual TUI
-naumi ui --legacy
+# 显式启动 Textual TUI fallback
+naumi tui
 
 # 单任务执行
 naumi run "检查这个项目的测试风险"
@@ -159,7 +156,7 @@ naumi run "检查这个项目的测试风险"
 naumi serve
 ```
 
-`naumi`、`naumi chat` 与 `naumi ui` 需要 Node.js 20+；如果本机没有 Node 或版本过旧，可使用 `naumi chat --classic` 或 `naumi ui --legacy`。
+`naumi`、`naumi chat` 与 `naumi ui` 都优先使用 Node.js 20+ 的新 Terminal UI；Node 缺失、版本过旧、资源缺失或 UI 异常退出时，只自动回退一次到 Textual。`naumi --tui`、`naumi chat --tui` 与弃用别名 `naumi ui --legacy` 也会直接进入 Textual，推荐统一使用 `naumi tui`。旧 Prompt Toolkit CLI 源码、测试与必要依赖仍保留，但不再注册 `--classic` 公共入口。
 
 如果需要查看 LiteLLM 可选 provider 的启动 warning，可显式打开：
 
@@ -196,7 +193,7 @@ src/naumi_agent/
 ├── safety/           # 权限、预算、guardrails
 ├── memory/           # 会话持久化、长期记忆、上下文压缩
 ├── streaming/        # 事件总线
-├── cli/              # prompt_toolkit 全屏 CLI、命令补全、渲染器
+├── cli/              # 保留的 Prompt Toolkit legacy 实现与共享命令后端
 ├── tui/              # Textual TUI fallback
 ├── ui/               # Node terminal UI bridge、协议、共享渲染组件
 ├── api/              # FastAPI REST + WebSocket

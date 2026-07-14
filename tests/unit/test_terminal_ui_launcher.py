@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from types import SimpleNamespace
@@ -458,3 +461,24 @@ def test_terminal_ui_runtime_assets_are_included_in_wheel() -> None:
         "naumi_agent/frontend/terminal-ui/src"
     )
     assert "frontend/terminal-ui/test" not in force_include
+
+
+def test_help_suppresses_optional_litellm_provider_warnings() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env.pop("NAUMI_SHOW_STARTUP_WARNINGS", None)
+    env["PYTHONPATH"] = str(repo_root / "src")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "naumi_agent.main", "--help"],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+
+    assert result.returncode == 0
+    assert "could not pre-load" not in result.stderr
+    assert "Bedrock event-stream" not in result.stderr
