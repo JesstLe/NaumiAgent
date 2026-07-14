@@ -6,6 +6,7 @@ import type {
   WorkbenchCapabilitiesResponse,
   WorkbenchSnapshot,
   SessionListResponse,
+  Session,
   WorkbenchBootstrapResponse,
   MessageListResponse,
   MessageCreate,
@@ -35,6 +36,7 @@ import type {
   ChatSourceCreate,
   PermissionResolution,
   ChatEnvironmentResponse,
+  SessionUpdate,
 } from './types'
 
 export type TokenProvider = () => Promise<string | null>
@@ -141,6 +143,14 @@ export class WorkbenchApiClient {
       method: 'POST',
       url: this.route('create_session'),
       data: { title, model, system_prompt: systemPrompt },
+    })
+  }
+
+  async updateSession(sessionId: string, body: SessionUpdate): Promise<Session> {
+    return this.request<Session>({
+      method: 'PATCH',
+      url: this.route('sessions', { session_id: sessionId }),
+      data: body,
     })
   }
 

@@ -15,6 +15,12 @@ class SessionCreate(BaseModel):
     model: str | None = None
 
 
+class SessionUpdate(BaseModel):
+    title: str | None = None
+    model: str | None = None
+    system_prompt: str | None = None
+
+
 class SessionResponse(BaseModel):
     id: str
     title: str | None
