@@ -73,13 +73,8 @@ def build_provider_http_config(
             f"{provider.auth.scheme or 'Bearer'} {api_key}"
         )
 
-    timeout_seconds = 10.0
-    if provider.request_timeout_ms is not None:
-        if provider.request_timeout_ms <= 0:
-            raise ProviderRuntimeError(
-                f'provider "{provider.id}" 的 request timeout 必须大于 0。'
-            )
-        timeout_seconds = provider.request_timeout_ms / 1000
+    timeout_seconds = _provider_timeout_seconds(provider, default=10.0)
+    assert timeout_seconds is not None
 
     return ProviderHTTPConfig(
         base_url=provider.base_url,
@@ -130,6 +125,41 @@ def build_anthropic_messages_transport(
     )
 
 
+def build_google_genai_transport(
+    target: ResolvedModelTarget,
+    *,
+    catalog_source: str,
+) -> ProviderTransport:
+    """Map one catalog target to LiteLLM's native Gemini transport."""
+    provider = _require_catalog_provider(target)
+    _validate_provider_format(provider, expected_format=APIFormat.GOOGLE_GENAI)
+    model_id = _normalize_google_model_id(target)
+
+    static_headers = dict(provider.headers)
+    _assert_no_auth_header_conflict(provider, static_headers)
+    api_key, auth_header = _resolve_google_auth(
+        provider,
+        catalog_source=catalog_source,
+    )
+    if auth_header is not None:
+        header_name, header_value = auth_header
+        static_headers[header_name] = header_value
+
+    kwargs: dict[str, Any] = {
+        "api_base": provider.base_url.rstrip("/"),
+        "api_key": api_key,
+        "extra_headers": MappingProxyType(static_headers),
+    }
+    timeout_seconds = _provider_timeout_seconds(provider, default=None)
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
+
+    return ProviderTransport(
+        model=f"gemini/{model_id}",
+        kwargs=MappingProxyType(kwargs),
+    )
+
+
 def build_provider_transport(
     target: ResolvedModelTarget,
     *,
@@ -143,6 +173,11 @@ def build_provider_transport(
         return build_openai_responses_transport(target, catalog_source=catalog_source)
     if provider.api_format is APIFormat.ANTHROPIC_MESSAGES:
         return build_anthropic_messages_transport(
+            target,
+            catalog_source=catalog_source,
+        )
+    if provider.api_format is APIFormat.GOOGLE_GENAI:
+        return build_google_genai_transport(
             target,
             catalog_source=catalog_source,
         )
@@ -207,12 +242,9 @@ def _build_litellm_transport(
         "api_key": api_key,
         "extra_headers": MappingProxyType(static_headers),
     }
-    if provider.request_timeout_ms is not None:
-        if provider.request_timeout_ms <= 0:
-            raise ProviderRuntimeError(
-                f'provider "{provider.id}" 的 request timeout 必须大于 0。'
-            )
-        kwargs["timeout"] = provider.request_timeout_ms / 1000
+    timeout_seconds = _provider_timeout_seconds(provider, default=None)
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
 
     return ProviderTransport(
         model=f"{model_prefix}{target.upstream_model}",
@@ -257,11 +289,12 @@ def _assert_no_auth_header_conflict(
         return
     auth_header = provider.auth.header
     if not auth_header:
-        auth_header = (
-            "Authorization"
-            if provider.auth.type is AuthType.BEARER
-            else "X-API-Key"
-        )
+        if provider.auth.type is AuthType.BEARER:
+            auth_header = "Authorization"
+        elif provider.api_format is APIFormat.GOOGLE_GENAI:
+            auth_header = "X-Goog-Api-Key"
+        else:
+            auth_header = "X-API-Key"
     if any(name.casefold() == auth_header.casefold() for name in static_headers):
         raise ProviderRuntimeError(
             f'provider "{provider.id}" 的静态 header 与认证头冲突。'
@@ -332,6 +365,72 @@ def _resolve_anthropic_auth(
         scheme = auth.scheme or "Bearer"
         return NO_GLOBAL_API_KEY, (header, f"{scheme} {secret}")
     return _resolve_auth(provider, catalog_source=catalog_source)
+
+
+def _normalize_google_model_id(target: ResolvedModelTarget) -> str:
+    value = target.upstream_model.strip()
+    if value.startswith("models/"):
+        value = value.removeprefix("models/")
+    if (
+        not value
+        or len(value) > 256
+        or not value[0].isascii()
+        or not value[0].isalnum()
+        or any(
+            not char.isascii() or not (char.isalnum() or char in "._-")
+            for char in value
+        )
+    ):
+        raise ProviderRuntimeError("Google GenAI upstream model ID 无效。")
+    return value
+
+
+def _resolve_google_auth(
+    provider: ProviderSpec,
+    *,
+    catalog_source: str,
+) -> tuple[str, tuple[str, str] | None]:
+    auth = provider.auth
+    if auth.type is AuthType.NONE:
+        if any(
+            value is not None
+            for value in (auth.secret_source, auth.secret_ref, auth.header, auth.scheme)
+        ):
+            raise _invalid_auth(provider)
+        return NO_GLOBAL_API_KEY, None
+    if auth.secret_source is None or not auth.secret_ref:
+        raise _invalid_auth(provider)
+
+    secret = _resolve_secret(
+        provider,
+        auth,
+        catalog_source=catalog_source,
+    )
+    if auth.type is AuthType.API_KEY_HEADER:
+        header = auth.header or "X-Goog-Api-Key"
+        if header.casefold() == "x-goog-api-key":
+            return secret, None
+        return NO_GLOBAL_API_KEY, (header, secret)
+    if auth.type is AuthType.BEARER:
+        header = auth.header or "Authorization"
+        scheme = auth.scheme or "Bearer"
+        return NO_GLOBAL_API_KEY, (header, f"{scheme} {secret}")
+    raise _invalid_auth(provider)
+
+
+def _provider_timeout_seconds(
+    provider: ProviderSpec,
+    *,
+    default: float | None,
+) -> float | None:
+    timeout_ms = provider.request_timeout_ms
+    if timeout_ms is None:
+        return default
+    if timeout_ms <= 0:
+        raise ProviderRuntimeError(
+            f'provider "{provider.id}" 的 request timeout 必须大于 0。'
+        )
+    return timeout_ms / 1000
 
 
 def _resolve_secret(

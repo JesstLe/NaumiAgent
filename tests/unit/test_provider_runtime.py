@@ -23,6 +23,7 @@ from naumi_agent.model.provider_runtime import (
     ProviderHTTPConfig,
     ProviderRuntimeError,
     build_anthropic_messages_transport,
+    build_google_genai_transport,
     build_openai_chat_transport,
     build_openai_responses_transport,
     build_provider_http_config,
@@ -34,6 +35,7 @@ from naumi_agent.model.targets import ResolvedModelTarget
 def _target(
     *,
     api_format: APIFormat | None = APIFormat.OPENAI_CHAT,
+    upstream_model: str = "vendor/model-v2",
     base_url: str | None = "https://provider.example/v1",
     auth: ProviderAuthSpec | None = None,
     headers: dict[str, str] | None = None,
@@ -42,7 +44,7 @@ def _target(
 ) -> ResolvedModelTarget:
     model = ProviderModelSpec(
         id="chat",
-        upstream_id="vendor/model-v2",
+        upstream_id=upstream_model,
         name="Chat",
     )
     provider = ProviderSpec(
@@ -258,6 +260,7 @@ def test_maps_anthropic_messages_model_and_shared_provider_kwargs() -> None:
         (APIFormat.OPENAI_CHAT, "openai/vendor/model-v2"),
         (APIFormat.OPENAI_RESPONSES, "openai/responses/vendor/model-v2"),
         (APIFormat.ANTHROPIC_MESSAGES, "anthropic/vendor/model-v2"),
+        (APIFormat.GOOGLE_GENAI, "gemini/gemini-model-v2"),
     ],
 )
 def test_dispatches_supported_provider_api_formats(
@@ -265,7 +268,14 @@ def test_dispatches_supported_provider_api_formats(
     expected_model: str,
 ) -> None:
     transport = build_provider_transport(
-        _target(api_format=api_format),
+        _target(
+            api_format=api_format,
+            upstream_model=(
+                "gemini-model-v2"
+                if api_format is APIFormat.GOOGLE_GENAI
+                else "vendor/model-v2"
+            ),
+        ),
         catalog_source="/tmp/catalog.json",
     )
 
@@ -273,9 +283,9 @@ def test_dispatches_supported_provider_api_formats(
 
 
 def test_dispatcher_rejects_an_unimplemented_provider_format() -> None:
-    with pytest.raises(ProviderRuntimeError, match="google_genai.*尚未实现"):
+    with pytest.raises(ProviderRuntimeError, match="azure_openai.*尚未实现"):
         build_provider_transport(
-            _target(api_format=APIFormat.GOOGLE_GENAI),
+            _target(api_format=APIFormat.AZURE_OPENAI),
             catalog_source="/tmp/catalog.json",
         )
 
@@ -408,6 +418,220 @@ def test_anthropic_custom_api_key_header_is_preserved(monkeypatch) -> None:
     assert transport.kwargs["extra_headers"] == {
         "X-Provider-Key": "anthropic-custom-secret"
     }
+
+
+def test_google_genai_maps_standard_key_model_base_headers_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GEMINI_SELECTED_KEY", "google-selected-secret")
+    target = _target(
+        api_format=APIFormat.GOOGLE_GENAI,
+        upstream_model="gemini-model-v2",
+        base_url="https://generativelanguage.googleapis.com/v1beta/",
+        auth=_auth(
+            AuthType.API_KEY_HEADER,
+            SecretSource.ENV,
+            "GEMINI_SELECTED_KEY",
+            header="x-goog-api-key",
+        ),
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    transport = build_google_genai_transport(
+        target,
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert transport.model == "gemini/gemini-model-v2"
+    assert transport.kwargs == {
+        "api_base": "https://generativelanguage.googleapis.com/v1beta",
+        "api_key": "google-selected-secret",
+        "extra_headers": {"X-Tenant": "tenant-a"},
+        "timeout": 12.345,
+    }
+    assert "google-selected-secret" not in repr(transport)
+
+
+def test_google_genai_strips_one_official_models_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GEMINI_SELECTED_KEY", "secret")
+    target = replace(
+        _target(
+            api_format=APIFormat.GOOGLE_GENAI,
+            auth=_auth(
+                AuthType.API_KEY_HEADER,
+                SecretSource.ENV,
+                "GEMINI_SELECTED_KEY",
+                header="X-Goog-Api-Key",
+            ),
+        ),
+        upstream_model="models/gemini-3.5-flash",
+    )
+
+    transport = build_google_genai_transport(
+        target,
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert transport.model == "gemini/gemini-3.5-flash"
+
+
+@pytest.mark.parametrize(
+    ("auth", "expected_headers"),
+    [
+        (
+            _auth(AuthType.BEARER, SecretSource.ENV, "GOOGLE_CUSTOM_SECRET"),
+            {"Authorization": "Bearer custom-secret"},
+        ),
+        (
+            _auth(
+                AuthType.API_KEY_HEADER,
+                SecretSource.ENV,
+                "GOOGLE_CUSTOM_SECRET",
+                header="X-Proxy-Key",
+            ),
+            {"X-Proxy-Key": "custom-secret"},
+        ),
+    ],
+)
+def test_google_custom_auth_uses_header_and_nonsecret_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+    auth: ProviderAuthSpec,
+    expected_headers: dict[str, str],
+) -> None:
+    monkeypatch.setenv("GOOGLE_CUSTOM_SECRET", "custom-secret")
+    monkeypatch.setenv("GOOGLE_API_KEY", "ambient-must-not-win")
+    monkeypatch.setenv("GEMINI_API_KEY", "ambient-must-not-win")
+
+    transport = build_google_genai_transport(
+        _target(
+            api_format=APIFormat.GOOGLE_GENAI,
+            upstream_model="gemini-model-v2",
+            auth=auth,
+        ),
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert transport.kwargs["api_key"] == NO_GLOBAL_API_KEY
+    assert transport.kwargs["extra_headers"] == expected_headers
+
+
+def test_google_none_auth_never_reads_ambient_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GOOGLE_API_KEY", "ambient-must-not-win")
+    monkeypatch.setenv("GEMINI_API_KEY", "ambient-must-not-win")
+
+    transport = build_google_genai_transport(
+        _target(
+            api_format=APIFormat.GOOGLE_GENAI,
+            upstream_model="gemini-model-v2",
+            auth=_auth(AuthType.NONE, None, None),
+        ),
+        catalog_source="/tmp/providers.json",
+    )
+
+    assert transport.kwargs["api_key"] == NO_GLOBAL_API_KEY
+    assert transport.kwargs["extra_headers"] == {}
+
+
+@pytest.mark.parametrize(
+    "upstream_model",
+    [
+        "",
+        "models/",
+        "models/a/b",
+        "a:generateContent",
+        "a?key=x",
+        "a%2Fescaped",
+        "a\\backslash",
+        "a with-space",
+        "a\nunsafe",
+        "x" * 257,
+    ],
+)
+def test_google_genai_rejects_invalid_model_before_secret_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    upstream_model: str,
+) -> None:
+    calls = 0
+
+    def fail_if_called(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("credential lookup must not happen")
+
+    monkeypatch.setattr(
+        "naumi_agent.model.provider_runtime.load_model_api_key",
+        fail_if_called,
+    )
+    target = replace(
+        _target(
+            api_format=APIFormat.GOOGLE_GENAI,
+            auth=_auth(
+                AuthType.API_KEY_HEADER,
+                SecretSource.CREDENTIAL,
+                "google",
+                header="X-Goog-Api-Key",
+            ),
+        ),
+        upstream_model=upstream_model,
+    )
+
+    with pytest.raises(
+        ProviderRuntimeError,
+        match="Google GenAI upstream model ID 无效",
+    ) as error:
+        build_google_genai_transport(target, catalog_source="/tmp/providers.json")
+
+    assert calls == 0
+    if upstream_model:
+        assert upstream_model not in str(error.value)
+
+
+def test_google_genai_rejects_non_positive_timeout() -> None:
+    with pytest.raises(ProviderRuntimeError, match="request timeout 必须大于 0"):
+        build_google_genai_transport(
+            _target(
+                api_format=APIFormat.GOOGLE_GENAI,
+                upstream_model="gemini-model-v2",
+                request_timeout_ms=0,
+            ),
+            catalog_source="/tmp/providers.json",
+        )
+
+
+def test_google_genai_rejects_auth_header_conflict_before_secret_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def fail_if_called(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("credential lookup must not happen")
+
+    monkeypatch.setattr(
+        "naumi_agent.model.provider_runtime.load_model_api_key",
+        fail_if_called,
+    )
+    target = _target(
+        api_format=APIFormat.GOOGLE_GENAI,
+        upstream_model="gemini-model-v2",
+        auth=_auth(
+            AuthType.API_KEY_HEADER,
+            SecretSource.CREDENTIAL,
+            "google",
+            header="X-Goog-Api-Key",
+        ),
+        headers={"x-goog-api-key": "static"},
+    )
+
+    with pytest.raises(ProviderRuntimeError, match="认证头冲突"):
+        build_google_genai_transport(target, catalog_source="/tmp/providers.json")
+
+    assert calls == 0
 
 
 def test_rejects_missing_base_url() -> None:
