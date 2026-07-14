@@ -53,7 +53,8 @@ consistent.
 
 Replace the fixed `.tmp` write with a same-directory unique temporary file.
 Attempt atomic rename first. If Windows rejects replacement of an existing file,
-remove the destination and retry, then always clean up the temporary file.
+move the destination to a rollback backup, install the new file, and restore the
+backup if that second move fails. Temporary and backup files are always cleaned.
 Persistence errors are contained and reported as a false return instead of
 crashing the interactive UI.
 
@@ -70,4 +71,3 @@ Each implementation slice gets pure unit tests with simulated macOS, Linux,
 Windows Terminal, legacy Windows, non-TTY, `NO_COLOR`, and replacement failures.
 Process-level tests cover early rejection and cleanup. Verification remains
 targeted; the full suite is intentionally not run.
-
