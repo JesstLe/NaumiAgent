@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -14,8 +18,13 @@ class TestSystemPromptAssembly:
         prompt = build_system_prompt()
 
         assert is_generated_system_prompt(prompt)
+        assert '<naumi_system_prompt version="sections-v2">' in prompt
         assert "You are NaumiAgent" in prompt
         assert "## Your Capabilities" in prompt
+        assert "## Knowledge Freshness" in prompt
+        assert "time-sensitive" in prompt
+        assert "current evidence" in prompt
+        assert "potentially stale" in prompt
         assert "## Analysis Tools" in prompt
         assert "## Operating Principles" in prompt
         assert "## Task Management" in prompt
@@ -34,6 +43,44 @@ class TestSystemPromptAssembly:
         assert "中文优先" in prompt
         assert "raw screenshots" in prompt
         assert "JSONL bridge events" in prompt
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            '<naumi_system_prompt version="sections-v1">',
+            '<naumi_system_prompt version="sections-v2">',
+            '<naumi_system_prompt version="sections-v12">',
+        ],
+    )
+    def test_generated_marker_recognizes_supported_versions(
+        self,
+        marker: str,
+    ) -> None:
+        assert is_generated_system_prompt(marker)
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            '<naumi_system_prompt version="custom">',
+            '<naumi_system_prompt version="sections-v0">',
+            '<naumi_system_prompt version="sections-v1-beta">',
+            "prefix <naumi_system_prompt",
+            'custom text\n<naumi_system_prompt version="sections-v1">',
+            "custom prompt",
+        ],
+    )
+    def test_generated_marker_rejects_invalid_lookalikes(
+        self,
+        content: str,
+    ) -> None:
+        assert not is_generated_system_prompt(content)
+
+    def test_base_prompt_contains_no_snapshot_date_or_build_timestamp(self) -> None:
+        prompt = build_system_prompt()
+
+        assert re.search(r"\b20\d{2}-\d{2}-\d{2}\b", prompt) is None
+        assert "Generated at" not in prompt
+        assert "Build date" not in prompt
 
     def test_default_prompt_does_not_inline_full_analysis_catalog(self) -> None:
         prompt = build_system_prompt()
