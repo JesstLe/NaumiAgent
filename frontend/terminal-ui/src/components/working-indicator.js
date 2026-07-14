@@ -10,17 +10,17 @@ import {
 export const WORKING_FRAME_COUNT = 4;
 
 const FRAMES = Object.freeze([
-  { leftEye: "◉", rightEye: "•", core: "◐", coreStyle: ANSI.magenta },
-  { leftEye: "◉", rightEye: "◉", core: "◓", coreStyle: ANSI.blue },
-  { leftEye: "•", rightEye: "◉", core: "◑", coreStyle: ANSI.cyan },
-  { leftEye: "•", rightEye: "•", core: "◒", coreStyle: ANSI.green },
+  { leftEye: "◉", rightEye: "•", core: "◐", coreStyle: "magenta" },
+  { leftEye: "◉", rightEye: "◉", core: "◓", coreStyle: "blue" },
+  { leftEye: "•", rightEye: "◉", core: "◑", coreStyle: "cyan" },
+  { leftEye: "•", rightEye: "•", core: "◒", coreStyle: "green" },
 ]);
 
 const STATIC_FRAME = Object.freeze({
   leftEye: "•",
   rightEye: "•",
   core: "◇",
-  coreStyle: ANSI.yellow,
+  coreStyle: "yellow",
 });
 
 export function workingIndicatorStatus(state) {
@@ -80,7 +80,7 @@ export function renderWorkingIndicator(state, width, options = {}) {
     }
     const suffix = boundedPhaseSuffix(status, safeWidth - visibleWidth(plainBase));
     return [
-      `${color(frame.coreStyle, frame.core)} ${color(status.style, status.label)}${color(ANSI.dim, suffix)}`,
+      `${color(ANSI[frame.coreStyle], frame.core)} ${color(status.style, status.label)}${color(ANSI.dim, suffix)}`,
     ];
   }
 
@@ -89,7 +89,7 @@ export function renderWorkingIndicator(state, width, options = {}) {
   return [
     color(ANSI.cyan, "   ╭─────╮"),
     `${color(ANSI.cyan, "   │")} ${color(ANSI.yellow, frame.leftEye)} ${color(ANSI.yellow, frame.rightEye)} ${color(ANSI.cyan, "│")}   ${color(status.style, status.label)}${color(ANSI.dim, suffix)}`,
-    `${color(ANSI.cyan, "   ╰──")}${color(frame.coreStyle, frame.core)}${color(ANSI.cyan, "──╯")}`,
+    `${color(ANSI.cyan, "   ╰──")}${color(ANSI[frame.coreStyle], frame.core)}${color(ANSI.cyan, "──╯")}`,
   ];
 }
 

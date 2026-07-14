@@ -1350,6 +1350,7 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
       env: {
         ...process.env,
         FORCE_COLOR: "0",
+        NAUMI_TERMINAL_UI_ALLOW_NON_TTY: "1",
         NAUMI_TERMINAL_UI_STATE_PATH: options.statePath
           || path.join(tmpdir(), `naumi-terminal-ui-state-${Date.now()}-${Math.random()}.json`),
         NAUMI_TERMINAL_UI_DEBUG_LOG: debugLogPath,
