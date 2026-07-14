@@ -11,6 +11,8 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-log": "^2.9.0",
     "axios": "^1.18.1",
     "i18next": "^26.3.6",
     "lucide-react": "^1.24.0",
