@@ -432,46 +432,43 @@ class Evaluator:
 
 ## 5. System Prompt 构建
 
-System Prompt 是 Agent 行为的核心控制点。根据 Anthropic 最佳实践，动态构建。
+System Prompt 由命名分段组合，不再在 `engine.py` 中维护单个巨型常量。稳定的行为规则位于 `orchestrator/system_prompt.py`；工作区、权限模式、工具与 Skill 摘要由 Engine 在运行时加入。当前日期、时间、任务、后台运行和 Harness 状态不写入持久化基础提示词，而是在每次模型调用前通过临时 Harness 快照更新。
+
+```python
+# src/naumi_agent/orchestrator/system_prompt.py
+
+SYSTEM_PROMPT_MARKER = '<naumi_system_prompt version="sections-v2">'
+
+DEFAULT_PROMPT_SECTIONS = (
+    PromptSection("identity", IDENTITY_SECTION),
+    PromptSection("capabilities", CAPABILITY_SECTION),
+    PromptSection("knowledge_freshness", KNOWLEDGE_FRESHNESS_SECTION),
+    # 任务、上下文、输出、工具发现、UI 和完成纪律等稳定分段
+)
+
+def build_system_prompt(context: PromptAssemblyInput | None = None) -> str:
+    parts = [SYSTEM_PROMPT_MARKER]
+    parts.extend(section.content.strip() for section in DEFAULT_PROMPT_SECTIONS)
+    if runtime_section := _runtime_section(context):
+        parts.append(runtime_section)
+    return "\n\n".join(parts)
+```
+
+知识时效规则要求模型先区分稳定事实和易变化事实。涉及最新版本、价格、计划、法规、模型/API 能力、兼容性或新闻时，必须优先检查当前工作区源码、配置、锁文件、运行时元数据或权威一手来源；无法验证时明确标注“未验证、可能过时”。静态提示词、训练记忆和旧会话摘要不能作为当前状态的证据。
 
 ```python
 # src/naumi_agent/orchestrator/engine.py
 
-def _build_system_prompt(self, session: Session) -> str:
-    parts = [
-        BASE_SYSTEM_PROMPT,
-        self._build_tool_descriptions(),
-        self._build_memory_context(session),
-        self._build_safety_instructions(),
-    ]
-
-    if session.user_preferences:
-        parts.append(self._build_user_preferences(session))
-
-    return "\n\n".join(parts)
-
-BASE_SYSTEM_PROMPT = """你是 NaumiAgent，一个通用智能助手。
-
-## 核心行为
-- 在执行任务前，先理解用户意图并制定计划
-- 优先使用最简单有效的方法
-- 遇到不确定的情况，主动询问用户
-- 每次工具调用后，评估结果是否符合预期
-
-## 工作流程
-1. 理解任务 — 确认用户意图
-2. 制定计划 — 列出执行步骤
-3. 执行步骤 — 调用工具、收集信息
-4. 验证结果 — 确认任务完成
-5. 汇报总结 — 向用户展示结果
-
-## 限制
-- 不得执行可能导致数据丢失的危险操作（如 rm -rf）而不确认
-- 不得访问用户主目录之外的系统文件
-- 每次只能处理一个用户任务
-- 如果任务超出能力范围，明确告知用户
-"""
+def _build_system_prompt(self) -> str:
+    return build_system_prompt(PromptAssemblyInput(
+        workspace_root=str(self.workspace_root),
+        permission_mode=self._config.safety.permission_mode,
+        tool_names=tuple(sorted(self._tool_registry.names)),
+        skill_names=tuple(sorted(skill.name for skill in self.skill_loader.all())),
+    ))
 ```
+
+Engine 在每轮开始时刷新带合法 Naumi 标记的生成提示词，因此旧 `sections-v1` 会自动迁移到 v2。用户自定义 system prompt 不含起始标记，不会被覆盖。当前时间仍以 `HarnessContextAssembler` 生成的 `### 当前环境` 为准，避免持久化提示词自身随时间老化。
 
 ## 6. 会话管理
 

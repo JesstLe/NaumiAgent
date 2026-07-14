@@ -795,7 +795,8 @@ class TestSetSystemPrompt:
         system_messages = [m for m in engine._messages if m["role"] == "system"]
         assert len(system_messages) == 1
         content = system_messages[0]["content"]
-        assert '<naumi_system_prompt version="sections-v1">' in content
+        assert '<naumi_system_prompt version="sections-v2">' in content
+        assert "## Knowledge Freshness" in content
         assert "## Runtime Defaults" in content
         assert str(engine.workspace_root) in content
         assert "Registered tools:" in content
@@ -818,12 +819,50 @@ class TestSetSystemPrompt:
         assert after_count == before_count + 1
         assert len(engine._full_history) == 1
 
+    def test_ensure_system_prompt_migrates_legacy_generated_prompt(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        legacy = '<naumi_system_prompt version="sections-v1">\nlegacy rules'
+        engine._messages = [
+            {"role": "system", "content": legacy},
+            {"role": "user", "content": "hello"},
+        ]
+        engine._full_history = [
+            {"role": "system", "content": legacy},
+            {"role": "user", "content": "hello"},
+        ]
+
+        engine._ensure_system_prompt()
+
+        active = engine._messages[0]["content"]
+        persisted = engine._full_history[0]["content"]
+        assert '<naumi_system_prompt version="sections-v2">' in active
+        assert "## Knowledge Freshness" in active
+        assert persisted == active
+        assert "legacy rules" not in active
+
     def test_custom_system_prompt_is_not_overwritten(self, engine: AgentEngine) -> None:
         engine.set_system_prompt("custom prompt")
 
         engine._ensure_system_prompt()
 
         assert engine._messages[0]["content"] == "custom prompt"
+
+    def test_custom_system_prompt_quoting_marker_is_not_overwritten(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        custom = (
+            "Explain this literal marker without replacing my prompt:\n"
+            '<naumi_system_prompt version="sections-v1">'
+        )
+        engine.set_system_prompt(custom)
+
+        engine._ensure_system_prompt()
+
+        assert engine._messages[0]["content"] == custom
+        assert engine._full_history[0]["content"] == custom
 
     def test_replaces_existing(self, engine: AgentEngine) -> None:
         engine._messages.append({"role": "system", "content": "old"})

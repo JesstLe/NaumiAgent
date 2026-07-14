@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-SYSTEM_PROMPT_MARKER = '<naumi_system_prompt version="sections-v1">'
+SYSTEM_PROMPT_MARKER = '<naumi_system_prompt version="sections-v2">'
+_GENERATED_SYSTEM_PROMPT_MARKER_RE = re.compile(
+    r'\A<naumi_system_prompt version="sections-v[1-9][0-9]*">'
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,15 @@ CAPABILITY_SECTION = """\
 - Use browser, web, memory, task, background, worktree, MCP, and analysis tools.
 - Delegate specialized subtasks when the subtask has a clear contract.
 - Preserve durable facts, preferences, and decisions in memory when appropriate.
+"""
+
+KNOWLEDGE_FRESHNESS_SECTION = """\
+## Knowledge Freshness
+- Classify claims as stable or time-sensitive before answering.
+- Treat current/latest facts, versions, prices, schedules, laws, model/API capabilities, compatibility, and news as time-sensitive; verify with current evidence.
+- Prefer workspace source, config, lockfiles, runtime metadata, or primary official sources. Training memory, this prompt, and old summaries are not current proof.
+- State the basis and checked time; otherwise label the claim unverified and potentially stale. Inspect original referenced sources before precise claims.
+- Use the per-turn Harness snapshot for local date, time, timezone, tools, and runtime state; skip unnecessary searches for stable facts.
 """
 
 ANALYSIS_MODES_SECTION = """\
@@ -143,6 +156,7 @@ COMPLETION_DISCIPLINE_SECTION = """\
 DEFAULT_PROMPT_SECTIONS = (
     PromptSection("identity", IDENTITY_SECTION),
     PromptSection("capabilities", CAPABILITY_SECTION),
+    PromptSection("knowledge_freshness", KNOWLEDGE_FRESHNESS_SECTION),
     PromptSection("analysis_modes", ANALYSIS_MODES_SECTION),
     PromptSection("operating_principles", OPERATING_PRINCIPLES_SECTION),
     PromptSection("task_management", TASK_MANAGEMENT_SECTION),
@@ -173,7 +187,7 @@ def build_system_prompt(
 
 def is_generated_system_prompt(content: str) -> bool:
     """Return whether a system prompt came from this builder."""
-    return SYSTEM_PROMPT_MARKER in content
+    return _GENERATED_SYSTEM_PROMPT_MARKER_RE.search(content) is not None
 
 
 def _runtime_section(context: PromptAssemblyInput | None) -> str:
