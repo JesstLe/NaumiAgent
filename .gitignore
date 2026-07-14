@@ -22,3 +22,7 @@ chroma/
 .claude/.naumi/
 .naumi/terminal-ui-state.json
 .naumi/shell-output/
+
+# Local dev runtime logs (uvicorn/naumi serve output captured at repo root)
+backend.log
+*.log

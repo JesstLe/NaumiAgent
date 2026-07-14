@@ -51,7 +51,7 @@ pub fn log_dir() -> Result<PathBuf, String> {
 }
 
 /// Persists a JSON-serializable value to a file, creating parent directories if needed.
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|err| format!("无法创建目录 {}: {err}", parent.display()))?;
@@ -62,7 +62,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
 }
 
 /// Reads a JSON file and deserializes it; returns `None` if the file does not exist.
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, String> {
+pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, String> {
     match fs::read_to_string(path) {
         Ok(content) => {
             let value = serde_json::from_str(&content)

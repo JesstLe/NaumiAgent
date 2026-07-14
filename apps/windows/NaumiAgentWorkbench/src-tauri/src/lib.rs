@@ -1,3 +1,4 @@
+mod daemon;
 mod logging;
 mod secure_storage;
 mod storage;
@@ -24,6 +25,10 @@ pub fn run() {
             storage::get_daemon_launch_config,
             storage::set_daemon_launch_config,
             logging::write_app_log,
+            daemon::start_daemon,
+            daemon::stop_daemon,
+            daemon::get_daemon_status,
+            daemon::get_daemon_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
