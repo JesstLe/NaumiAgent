@@ -32,8 +32,10 @@ from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, St
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
 from naumi_agent.safety.permission_grants import PermissionGrant
 from naumi_agent.safety.permissions import PermissionMode
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolResult
@@ -1918,6 +1920,42 @@ async def test_bridge_streams_engine_events_as_ui_messages() -> None:
         for record in records
     )
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_passes_explicit_event_sink_to_engine() -> None:
+    class SinkRequiredEngine(_FakeEngine):
+        async def run_streaming(
+            self,
+            task: str,
+            event_sink: EventSink,
+        ) -> AgentResult:
+            assert isinstance(event_sink, EventSink)
+            publisher = RuntimeEventPublisher(
+                event_sink,
+                session_id="session-ui",
+                run_id="run-ui",
+            )
+            await publisher.publish(RuntimeEventType.RESPONSE_START, {})
+            await publisher.publish(RuntimeEventType.TOKEN, {"content": task})
+            await publisher.publish(RuntimeEventType.RESPONSE_END, {})
+            return AgentResult(status="completed", response=task, usage=self.usage)
+
+    engine = SinkRequiredEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("类型化 UI", request_id="sink-ui")
+    assert bridge._run_task is not None
+    await bridge._run_task
+
+    messages = [
+        record["payload"]
+        for record in _records(writer)
+        if record["type"] == "ui/message"
+    ]
+    assert any(message.get("type") == "assistant_stream" for message in messages)
 
 
 @pytest.mark.asyncio

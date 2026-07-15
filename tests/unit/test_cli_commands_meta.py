@@ -10,6 +10,7 @@ import pytest
 from rich.console import Console
 
 from naumi_agent.cli import commands_meta
+from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 
@@ -84,3 +85,51 @@ async def test_shared_meta_command_stops_after_engine_tool_failure(
     assert "权限策略拒绝了本次操作" in rendered
     assert "Worktree 隔离区" not in rendered
     assert engine.tool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_skill_run_passes_explicit_event_sink_to_engine(
+    rendered_console: StringIO,
+) -> None:
+    del rendered_console
+    received_sink: EventSink | None = None
+
+    class Skill:
+        arguments: list[object] = []
+
+        @staticmethod
+        def render(*, arguments: str) -> str:
+            return f"执行 {arguments}"
+
+    class SkillLoader:
+        @staticmethod
+        def get(name: str) -> Skill | None:
+            return Skill() if name == "demo" else None
+
+    class Engine:
+        skill_loader = SkillLoader()
+
+        async def run_streaming(
+            self,
+            task: str,
+            event_sink: EventSink,
+        ) -> object:
+            nonlocal received_sink
+            assert task == "执行 参数"
+            received_sink = event_sink
+            await event_sink.emit(RuntimeEvent.create(
+                event_type=RuntimeEventType.TOKEN,
+                data={"content": "完成"},
+                session_id="session-cli",
+                run_id="run-cli",
+                sequence=1,
+            ))
+            return type("Result", (), {
+                "status": "completed",
+                "error": None,
+                "response": "",
+            })()
+
+    await commands_meta.run_skill(Engine(), "demo", "参数")
+
+    assert isinstance(received_sink, EventSink)
