@@ -311,6 +311,53 @@ async def test_engine_public_facade_invokes_port_after_bypass_authorization(
 
 
 @pytest.mark.asyncio
+async def test_engine_tool_batches_dispatch_through_public_facade(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(_engine_config(tmp_path))
+    engine.tool_registry.register(_CallbackTool())
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session()
+    public_calls: list[tuple[str, str | None]] = []
+    original_execute_tool = engine.execute_tool
+
+    async def observed_execute_tool(
+        tool_call: ToolCall,
+        *,
+        on_event: ToolEventCallback | None = None,
+        agent_name: str | None = None,
+    ) -> Any:
+        public_calls.append((tool_call.id, agent_name))
+        return await original_execute_tool(
+            tool_call,
+            on_event=on_event,
+            agent_name=agent_name,
+        )
+
+    engine.execute_tool = observed_execute_tool  # type: ignore[method-assign]
+    try:
+        await engine._execute_tool_calls(
+            [
+                {
+                    "id": "batch-public-facade",
+                    "function": {
+                        "name": "callback_tool",
+                        "arguments": '{"value":"batch"}',
+                    },
+                }
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=1,
+            on_event=None,
+        )
+
+        assert public_calls == [("batch-public-facade", None)]
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_engine_normalizes_port_failure_but_propagates_cancellation(
     tmp_path: Path,
 ) -> None:
