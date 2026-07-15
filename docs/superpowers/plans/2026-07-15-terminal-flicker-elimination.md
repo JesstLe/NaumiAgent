@@ -31,7 +31,7 @@
 - Consumes: existing `ANSI.clear`, `ANSI.cursorTo(row, column)` and `createScreenPainter({ write })`.
 - Produces: `ANSI.synchronizedOutputOn`, `ANSI.synchronizedOutputOff`; full and diff writes wrapped by those constants without changing the painter return shape.
 
-- [ ] **Step 1: Write the failing synchronized full/diff/none tests**
+- [x] **Step 1: Write the failing synchronized full/diff/none tests**
 
 Update the first painter test so it requires exact transaction boundaries and zero writes for an unchanged frame:
 
@@ -49,7 +49,7 @@ assert.equal(writes.length, 2);
 
 Update the resize and failed-write assertions to require the same paired boundary. Add an assertion that each captured write contains exactly one start and one end sequence.
 
-- [ ] **Step 2: Run the painter test and verify RED**
+- [x] **Step 2: Run the painter test and verify RED**
 
 Run:
 
@@ -60,7 +60,7 @@ node --test test/screen-painter.test.js
 
 Expected: FAIL because `ANSI.synchronizedOutputOn` / `Off` do not exist and writes are not wrapped.
 
-- [ ] **Step 3: Add named ANSI constants**
+- [x] **Step 3: Add named ANSI constants**
 
 Add to `ANSI` in `src/ansi.js`:
 
@@ -69,7 +69,7 @@ synchronizedOutputOn: "\x1b[?2026h",
 synchronizedOutputOff: "\x1b[?2026l",
 ```
 
-- [ ] **Step 4: Route every actual painter write through one transaction helper**
+- [x] **Step 4: Route every actual painter write through one transaction helper**
 
 In `src/screen-painter.js`, replace both direct `write(output)` calls with a local helper:
 
@@ -81,7 +81,7 @@ function commit(output) {
 
 Call `commit(output)` for full paint and `commit(changes.join(""))` for diff paint. Do not call it in the `changes.length === 0` branch. Keep `remember(frame)` after the write returns so a failed write remains retryable.
 
-- [ ] **Step 5: Run focused GREEN verification**
+- [x] **Step 5: Run focused GREEN verification**
 
 Run:
 
@@ -92,7 +92,7 @@ node --test test/screen-painter.test.js test/terminal-session.test.js
 
 Expected: 7 tests pass, zero failures, and no warnings.
 
-- [ ] **Step 6: Review and commit atomic frame presentation**
+- [x] **Step 6: Review and commit atomic frame presentation**
 
 Review:
 
@@ -121,7 +121,7 @@ git commit -m "fix(ui): present terminal frames atomically"
 - Consumes: `redraw()` in `index.js`, injected timer functions, `screenPainter.paint()`.
 - Produces: `createRedrawScheduler({ onRedraw, setTimer, clearTimer, frameDelayMs = 16, initialSettleMs = 32 })` returning `schedule()`, `settleInitial()`, `markPainted()`, `cancel()`, `pending`, and `painted`.
 
-- [ ] **Step 1: Write failing deterministic scheduler tests**
+- [x] **Step 1: Write failing deterministic scheduler tests**
 
 Create `test/redraw-scheduler.test.js` with a tiny controllable timer harness and these behaviors:
 
@@ -155,7 +155,7 @@ Add separate tests proving:
 - `cancel()` clears exactly one pending timer and becomes idempotent;
 - a callback that throws leaves `painted === false` until `markPainted()` is explicitly called.
 
-- [ ] **Step 2: Run scheduler test and verify RED**
+- [x] **Step 2: Run scheduler test and verify RED**
 
 Run:
 
@@ -166,7 +166,7 @@ node --test test/redraw-scheduler.test.js
 
 Expected: FAIL with module-not-found for `src/redraw-scheduler.js`.
 
-- [ ] **Step 3: Implement the minimal scheduler**
+- [x] **Step 3: Implement the minimal scheduler**
 
 Create `src/redraw-scheduler.js` with validated callbacks, one timer slot, clamped numeric delays, and this behavior:
 
@@ -227,7 +227,7 @@ function normalizeDelay(value, fallback) {
 }
 ```
 
-- [ ] **Step 4: Run scheduler tests and verify GREEN**
+- [x] **Step 4: Run scheduler tests and verify GREEN**
 
 Run:
 
@@ -238,7 +238,7 @@ node --test test/redraw-scheduler.test.js
 
 Expected: all scheduler tests pass.
 
-- [ ] **Step 5: Write the failing process acceptance assertion**
+- [x] **Step 5: Write the failing process acceptance assertion**
 
 Extend only `terminal UI animates active work without repeatedly clearing the screen` in `test/index-process.test.js`:
 
@@ -284,7 +284,7 @@ node --test test/index-render-scheduling.test.js
 
 Expected: FAIL because `index.js` still owns `redrawTimer` and does not import or use the scheduler.
 
-- [ ] **Step 6: Wire the scheduler into `index.js`**
+- [x] **Step 6: Wire the scheduler into `index.js`**
 
 Make these narrow changes:
 
@@ -311,7 +311,7 @@ if (!redrawScheduler.painted) {
 
 After `screenPainter.paint()` returns successfully, call `redrawScheduler.markPainted()`. In `restoreTerminal()`, call `redrawScheduler.cancel()` before restoring terminal controls. Preserve all existing debug payloads and resize-anchor behavior after the first paint.
 
-- [ ] **Step 7: Run the focused scheduler and process tests**
+- [x] **Step 7: Run the focused scheduler and process tests**
 
 Run:
 
@@ -323,7 +323,7 @@ node --test --test-name-pattern="animates active work without repeatedly clearin
 
 Expected: focused unit tests pass; the selected process test passes while unrelated process tests are skipped by name filtering.
 
-- [ ] **Step 8: Run syntax and diff checks**
+- [x] **Step 8: Run syntax and diff checks**
 
 Run:
 
@@ -336,7 +336,7 @@ git diff --check
 
 Expected: syntax check and diff check pass.
 
-- [ ] **Step 9: Review and commit stable initial scheduling**
+- [x] **Step 9: Review and commit stable initial scheduling**
 
 Review the exact scope:
 
@@ -362,7 +362,7 @@ git commit -m "fix(ui): stabilize the initial terminal frame"
 - Consumes: debug events `render.screen`, `render.error`, `terminal_ui.fatal`; painter payload `paint_mode`, `changed_rows`, `terminal_write`.
 - Produces: recorded acceptance evidence and an auditable feature branch ready for fast-forward integration.
 
-- [ ] **Step 1: Run the complete focused test set once**
+- [x] **Step 1: Run the complete focused test set once**
 
 ```bash
 cd frontend/terminal-ui
@@ -373,7 +373,7 @@ node scripts/check-syntax.js
 
 Expected: all selected tests and syntax checks pass; no full suite is invoked.
 
-- [ ] **Step 2: Run a real interactive PTY launch/quit smoke**
+- [x] **Step 2: Run a real interactive PTY launch/quit smoke**
 
 Use the installed `expect` tool when available to start the actual `node src/index.js` with the real Python Bridge, wait for `NaumiAgent`, then send Ctrl-C. Set a temporary `NAUMI_TERMINAL_UI_DEBUG_LOG` so evidence is isolated. If `expect` is unavailable, use macOS `script` with the same actual entrypoint and controlled Ctrl-C; do not substitute `--self-test`.
 
@@ -386,11 +386,11 @@ first stable-size render.screen paint_mode = full
 all later same-size render.screen paint_mode != full
 ```
 
-- [ ] **Step 3: Record exact acceptance evidence**
+- [x] **Step 3: Record exact acceptance evidence**
 
 Append an “实施状态与验收证据” section to the design and mark the plan tasks complete. Record only actual counts, commands, terminal dimensions, and limitations observed in this run; do not claim Windows/Linux live verification from the macOS smoke.
 
-- [ ] **Step 4: Final self-review**
+- [x] **Step 4: Final self-review**
 
 Check:
 
@@ -403,7 +403,7 @@ git log --oneline --decorate -5
 
 Expected: no placeholders, no unrelated changes, clean diff, and one feature per code commit.
 
-- [ ] **Step 5: Commit acceptance evidence**
+- [x] **Step 5: Commit acceptance evidence**
 
 ```bash
 git add docs/superpowers/specs/2026-07-15-terminal-flicker-elimination-design.md docs/superpowers/plans/2026-07-15-terminal-flicker-elimination.md
@@ -419,4 +419,12 @@ git merge --ff-only codex/terminal-flicker-elimination
 git push origin main
 ```
 
-After push, compare `git rev-parse main` with `git rev-parse origin/main`, remove the worktree, delete the merged feature branch, and resume ARC-01.4b.
+After push, compare `git rev-parse main` with `git rev-parse origin/main`, remove the worktree, delete the merged feature branch, and build the cross-document dependency map before choosing any further ARC work.
+
+## Execution Evidence
+
+- Focused units: 14 passed (`redraw-scheduler`, `screen-painter`, `terminal-session`, entrypoint scheduling architecture).
+- Focused process acceptance: 1 passed; active animation did not add clear sequences and synchronized-output boundaries remained paired.
+- Syntax: 76 JavaScript files passed `scripts/check-syntax.js`.
+- Real PTY: actual Python Bridge emitted one `ready`; render modes were `full`, `diff`, `none`; errors and fatals were zero; normal Ctrl-C exit was recorded.
+- Scope: no full Node/Python suite was run, per user instruction.
