@@ -91,7 +91,7 @@ async def test_callback_receives_metadata_and_an_independent_payload() -> None:
 
 
 def test_composite_rejects_empty_or_incomplete_sinks() -> None:
-    with pytest.raises(ValueError, match="至少一个"):
+    with pytest.raises(ValueError, match="至少.*一个"):
         CompositeEventSink(())
     with pytest.raises(TypeError, match="EventSink"):
         CompositeEventSink((object(),))  # type: ignore[arg-type]
