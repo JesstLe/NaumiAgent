@@ -297,3 +297,113 @@ PYTHONPATH=src .venv/bin/python -m compileall -q \
 - 测试包含真实 Engine streaming，而不是只验证 import 或 dataclass。
 - 唯一尚未在本切片解决的全局注入是 analysis router；它依赖 ModelPort，但属于工具 bootstrap，已明确
   归入 4c，不在 4a 偷做半套迁移。
+
+## 实现与验收审计（2026-07-15）
+
+### 权威源码与提交
+
+4a 产品源码验收基准为：
+
+```text
+d92d90ad99b08b4884b93319f8ae39f444b3b1e8
+```
+
+独立提交链：
+
+| Commit | 交付物 |
+| --- | --- |
+| `e2a4cdfd` | 冻结、协议化的 RuntimePorts/RuntimePortOverrides 与 7 个契约测试 |
+| `0fce3cd1` | 唯一默认 Port builder 与 8 个 default/override/config 测试 |
+| `225b9864` | Engine bundle 注入、legacy 委托、具体 adapter import 清除 |
+| `d92d90ad` | TUI、fallback CLI、run、API、New UI Bridge 五入口收口 |
+
+`370b029d` 在 Task 2 前修复了实施计划的依赖顺序：root factory 先通过现有五个显式关键字形成可运行
+提交，Engine 接受 bundle 后再原子切换为 `AgentEngine(config, ports=ports)`，没有留下中间坏提交。
+
+### 静态事实
+
+- 生产源码中的 `AgentEngine(...)` 构造只有 1 处，位于 `runtime/composition.py`，且显式传
+  `ports=ports`；
+- `main.py` 有 3 个 `create_agent_engine(config)`：TUI、fallback CLI、run；
+- `api/app.py` 有 1 个 root 调用，FastAPI lifespan 仍负责 permission broker 与 shutdown；
+- New UI Bridge 的默认 factory 为 `create_agent_engine`，显式测试/嵌入 factory 保持原 identity；
+- Engine 对 SessionStore、PermissionChecker、ModelRouter、LocalToolExecutor、NullEventSink、
+  `load_provider_catalog` 的 import 和构造均为 0；
+- 测试 legacy `AgentEngine(...)`（无 `ports=`）预算保持 171，没有增长；新增 3 处均为显式 bundle
+  contract；
+- `runtime/dependencies.py` 只导入 dataclasses 与五个 Runtime Port 模块，不导入 adapter、Engine、
+  Any container 或 Service Locator；
+- `runtime/__init__.py` 未重新导出 composition，普通 `naumi_agent.runtime.*` import 不会因此提前加载
+  LiteLLM、SQLite 或具体 adapter。
+
+### 定向验证
+
+没有运行全量测试。四个独立小组的 fresh 结果为：
+
+```text
+19 passed  runtime dependencies + composition + Engine bundle
+89 passed  Session/Permission/Model/ToolExecution/EventSink + Engine event pipeline
+8 passed   main run + API lifespan/health + Bridge default/explicit factory
+28 passed  real composition streaming + composition AST gates + import graph scanner
+```
+
+此外：
+
+- Ruff 对全部 4a 变更源码和测试返回 `All checks passed!`；
+- compileall 覆盖 runtime、Engine、API、Bridge 与新增验收测试，退出码 0；
+- `git diff --check` 退出码 0；
+- legacy test constructor AST 计数为 171，explicit bundle 计数为 3。
+
+### 真实场景闭环
+
+`tests/integration/test_runtime_composition_streaming.py` 使用临时 workspace 和真实 SQLite，由
+`create_agent_engine()` 创建：
+
+1. 默认 SessionStore、bypass PermissionChecker 与 LocalToolExecutor；
+2. 显式 ModelRouter 与记录型 EventSink override，并保持 identity；
+3. 模型第一轮产生 `file_read` tool call，真实读取 `proof.txt`；
+4. 工具结果 `composition-root-proof` 进入并保存到 session；
+5. 第二轮返回 `Composition Root 流式完成`；
+6. Runtime event sequence 从 1 连续递增，包含 TOOL_START、TOOL_END；
+7. completion receipt 恰好 1 个；
+8. shutdown 后同一 SessionStore 的 SQLite connection 从非空变为 None。
+
+因此本验收不是 import smoke，也没有 mock 掉权限、工具执行、文件读取或会话持久化；仅替换了模型
+网络流，使场景确定且不消耗外部 API。
+
+### 架构扫描
+
+对同一源码独立生成 import graph、baseline 与 ownership 两次，三份结果均逐字节一致：
+
+```text
+modules=335
+all_static_edges=822
+SCC(import_time/typing/all_static)=0/1/2
+ownership=335 assigned, 0 issues
+owners=harness19 memory11 model7 runtime69 safety12 tasks17 tools139 ui61
+```
+
+临时验收工件 SHA-256：
+
+```text
+import report  45d298f124de7247046e3d4466cbcb673cce8cba95f09df615073f0efbd7c0da
+baseline       2413f1aa8abcf53f98a824ecfef509d83c7b297881599a0b8b81664460507c42
+ownership      67bf8e517b217b1a1659a068353ad5eff34f71b2acb015eddc68dd869f1fb767
+```
+
+模块数从 ARC-01.3e 的 333 增至 335，恰好是 `runtime.dependencies` 与 `runtime.composition` 两个设计
+模块；SCC 仍为 0/1/2，ownership issues 仍为 0。正式仓库 artifact 按总体设计留到 4d 与完整源码
+H1 互锁，4a 不用临时阶段 hash 覆盖官方基线。
+
+### 当前不足与后续门
+
+- Engine 仍构造 Store、Runner、Browser 与长期 Service；4b/4c 尚未完成；
+- `AgentEngine(config)` 和五个 individual Port 参数仍作为有预算的测试/第三方兼容入口；4d 必须删除；
+- shutdown 仍由 Engine 手写具体组件顺序，尚未注入 RuntimeLifecycle；4d 必须完成失败继续、反序、幂等
+  与构造回滚；
+- analysis router 的模块级全局注入仍存在，归 4c；
+- 171 个 legacy 测试构造点只是没有增长，并未迁移完成；总体 ARC-01.4 不能据此标记完成；
+- API/TUI/Bridge 本轮只验证受影响的构造与关闭小路径，没有运行其完整大文件或项目全量套件。
+
+结论：ARC-01.4a 已达到自己的完成定义；ARC-01.4 总体仍处于进行中，下一切片为 4b Paths、Store 与
+Resource ownership。
