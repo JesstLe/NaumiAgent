@@ -90,6 +90,69 @@ async def test_callback_receives_metadata_and_an_independent_payload() -> None:
     assert event.data["nested"]["items"] == (1,)
 
 
+@pytest.mark.asyncio
+async def test_callback_completion_receipt_includes_runtime_identity_by_default() -> None:
+    received: list[dict[str, object]] = []
+
+    async def callback(_: str, payload: dict[str, object]) -> None:
+        received.append(payload)
+
+    event = RuntimeEvent(
+        id="event-terminal",
+        type=RuntimeEventType.COMPLETION_RECEIPT,
+        data={"receipt_id": "receipt-1", "changes": ()},
+        timestamp=datetime.now(UTC).isoformat(),
+        session_id="session-1",
+        run_id="run-1",
+        turn=2,
+        sequence=8,
+    )
+    await CallbackEventSink(callback).emit(event)
+
+    assert received == [{
+        "receipt_id": "receipt-1",
+        "changes": [],
+        "event_id": "event-terminal",
+        "session_id": "session-1",
+        "run_id": "run-1",
+        "turn": 2,
+        "sequence": 8,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_callback_preserves_exact_legacy_completion_receipt_payload() -> None:
+    received: list[dict[str, object]] = []
+
+    async def callback(name: str, payload: dict[str, object]) -> None:
+        assert name == "completion_receipt"
+        received.append(payload)
+
+    event = RuntimeEvent(
+        id="event-terminal",
+        type=RuntimeEventType.COMPLETION_RECEIPT,
+        data={
+            "receipt_id": "receipt-1",
+            "outcome": "completed",
+            "changes": ({"path": "a.txt"},),
+            "unverified": ("未运行集成测试",),
+        },
+        timestamp=datetime.now(UTC).isoformat(),
+        session_id="session-1",
+        run_id="run-1",
+        turn=2,
+        sequence=8,
+    )
+    await coerce_event_sink(callback).emit(event)
+
+    assert received == [{
+        "receipt_id": "receipt-1",
+        "outcome": "completed",
+        "changes": ({"path": "a.txt"},),
+        "unverified": ("未运行集成测试",),
+    }]
+
+
 def test_composite_rejects_empty_or_incomplete_sinks() -> None:
     with pytest.raises(ValueError, match="至少.*一个"):
         CompositeEventSink(())

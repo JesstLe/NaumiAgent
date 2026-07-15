@@ -30,7 +30,7 @@ from naumi_agent.harness.trust import (
     resolve_harness_trust_db_path,
 )
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
-from naumi_agent.inspector import RuntimeInspectorService
+from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
 from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
@@ -59,9 +59,9 @@ from naumi_agent.orchestrator.tool_batches import (
     execute_tool_batch,
 )
 from naumi_agent.runs.models import CompletionReceipt
-from naumi_agent.runs.recorder import ChatRunRecorder
+from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.store import ChatRunStore
-from naumi_agent.runtime.ports.events import EventSink
+from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
@@ -78,7 +78,12 @@ from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_schedu
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
-from naumi_agent.streaming.sinks import NullEventSink
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
+from naumi_agent.streaming.sinks import (
+    CompositeEventSink,
+    NullEventSink,
+    coerce_event_sink,
+)
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.reconciliation import (
     TodoReconciliationAction,
@@ -2611,7 +2616,7 @@ class AgentEngine:
     async def run_streaming(
         self,
         task: str,
-        on_event: EventCallback,
+        on_event: EventSink | EventCallback,
         turn_context: str = "",
     ) -> AgentResult:
         """Execute and durably record one streamed Agent run."""
@@ -2623,50 +2628,78 @@ class AgentEngine:
             session_id=session.id,
             task=task,
         )
-
-        async def recorded_event(event: str, data: dict[str, Any]) -> None:
-            public_data = {
-                **data,
-                "run_id": recorder.run_id,
-                "session_id": session.id,
-            }
-            self.runtime_inspector.observe(event, public_data)
-            await recorder.observe(event, public_data)
-            await on_event(event, public_data)
+        caller_sink = coerce_event_sink(on_event)
+        publisher = RuntimeEventPublisher(
+            CompositeEventSink((
+                RuntimeInspectorEventSink(self.runtime_inspector.tracker),
+                ChatRunRecorderEventSink(recorder),
+                self._event_sink,
+                caller_sink,
+            )),
+            session_id=session.id,
+            run_id=recorder.run_id,
+        )
 
         try:
             result = await self._run_streaming_core(
                 task,
-                recorded_event,
+                publisher.legacy_callback(),
                 turn_context=turn_context,
                 harness_run_id=recorder.run_id,
             )
-        except asyncio.CancelledError:
-            receipt = await recorder.finish("cancelled", "运行已由用户取消。")
-            self.runtime_inspector.observe(
-                "completion_receipt",
-                {**receipt.to_dict(), "session_id": session.id},
+        except asyncio.CancelledError as exc:
+            await self._finish_streaming_run(
+                recorder=recorder,
+                publisher=publisher,
+                status="cancelled",
+                summary="运行已由用户取消。",
+                original_error=exc,
             )
-            await on_event("completion_receipt", receipt.to_dict())
             raise
         except Exception as exc:
-            receipt = await recorder.finish("failed", self._format_error(exc))
-            self.runtime_inspector.observe(
-                "completion_receipt",
-                {**receipt.to_dict(), "session_id": session.id},
+            await self._finish_streaming_run(
+                recorder=recorder,
+                publisher=publisher,
+                status="failed",
+                summary=self._format_error(exc),
+                original_error=exc,
             )
-            await on_event("completion_receipt", receipt.to_dict())
             raise
 
         summary = result.response or result.error or "本轮运行已结束。"
-        receipt = await recorder.finish(result.status, summary)
-        result.receipt = receipt
-        self.runtime_inspector.observe(
-            "completion_receipt",
-            {**receipt.to_dict(), "session_id": session.id},
+        receipt = await self._finish_streaming_run(
+            recorder=recorder,
+            publisher=publisher,
+            status=result.status,
+            summary=summary,
         )
-        await on_event("completion_receipt", receipt.to_dict())
+        result.receipt = receipt
         return result
+
+    async def _finish_streaming_run(
+        self,
+        *,
+        recorder: ChatRunRecorder,
+        publisher: RuntimeEventPublisher,
+        status: str,
+        summary: str,
+        original_error: BaseException | None = None,
+    ) -> CompletionReceipt:
+        """Persist one terminal receipt before attempting terminal delivery."""
+        receipt = await recorder.finish(status, summary)
+        try:
+            await publisher.publish(
+                RuntimeEventType.COMPLETION_RECEIPT,
+                receipt.to_dict(),
+            )
+        except Exception as delivery_error:
+            if original_error is None:
+                raise
+            original_error.add_note(
+                "完成回执已持久化，但终端事件发送失败："
+                f"{type(delivery_error).__name__}: {delivery_error}"
+            )
+        return receipt
 
     async def _run_streaming_core(
         self,
