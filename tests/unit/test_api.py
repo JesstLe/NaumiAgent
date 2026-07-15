@@ -28,6 +28,25 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 
 
+def _api_runtime_event(
+    event_type: RuntimeEventType,
+    data: dict,
+    *,
+    run_id: str = "run-fake",
+    sequence: int = 1,
+) -> RuntimeEvent:
+    return RuntimeEvent(
+        id=f"event-{event_type.value}-{sequence}",
+        type=event_type,
+        data=data,
+        timestamp="2026-07-15T08:00:00+08:00",
+        session_id="sess_1",
+        run_id=run_id,
+        turn=1,
+        sequence=sequence,
+    )
+
+
 class TestSchemas:
     def test_session_create(self) -> None:
         s = SessionCreate(title="test")
@@ -112,10 +131,17 @@ class _FakeEngine:
         usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
         return SimpleNamespace(status="completed", response="ok", usage=usage)
 
-    async def run_streaming(self, content: str, on_event, turn_context: str = ""):
+    async def run_streaming(
+        self,
+        content: str,
+        event_sink: EventSink,
+        turn_context: str = "",
+    ):
         self.ran.append(content)
         self.turn_contexts.append(turn_context)
-        await on_event("token", {"content": "你"})
+        await event_sink.emit(
+            _api_runtime_event(RuntimeEventType.TOKEN, {"content": "你"})
+        )
         usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
         return SimpleNamespace(status="completed", response="你", usage=usage)
 
@@ -440,6 +466,7 @@ class TestMessageRoutes:
         assert sse_records[0]["id"] == runtime_event.id
         assert sse_records[0]["event_id"] == runtime_event.id
         assert sse_records[0]["source_event"] == "runtime_notification"
+        assert sse_records[0]["run_id"] == runtime_event.run_id
         assert sse_records[0]["sequence"] == 11
         assert sse_records[0]["data"]["data"]["nested"] == {"items": [1, 2]}
 
@@ -475,7 +502,7 @@ class TestMessageRoutes:
             async def run_streaming(
                 self,
                 content: str,
-                on_event,
+                event_sink: EventSink,
                 turn_context: str = "",
             ):
                 run = await store.start_run(
@@ -483,7 +510,14 @@ class TestMessageRoutes:
                     user_message_id="msg-engine",
                     run_id="run-engine",
                 )
-                await on_event("run_started", {"task": content, "run_id": run.id})
+                await event_sink.emit(
+                    _api_runtime_event(
+                        RuntimeEventType.RUN_STARTED,
+                        {"task": content},
+                        run_id=run.id,
+                        sequence=1,
+                    )
+                )
                 receipt = CompletionReceipt.from_dict(
                     {
                         "schema_version": 1,
@@ -495,7 +529,14 @@ class TestMessageRoutes:
                     }
                 )
                 await store.finish_run(run.id, status="completed", receipt=receipt)
-                await on_event("completion_receipt", receipt.to_dict())
+                await event_sink.emit(
+                    _api_runtime_event(
+                        RuntimeEventType.COMPLETION_RECEIPT,
+                        receipt.to_dict(),
+                        run_id=run.id,
+                        sequence=2,
+                    )
+                )
                 usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
                 return SimpleNamespace(
                     status="completed",
@@ -536,9 +577,14 @@ class TestMessageRoutes:
     ) -> None:
         class SlowEngine(_FakeEngine):
             async def run_streaming(
-                self, content: str, on_event, turn_context: str = ""
+                self,
+                content: str,
+                event_sink: EventSink,
+                turn_context: str = "",
             ):
-                await on_event("turn_start", {})
+                await event_sink.emit(
+                    _api_runtime_event(RuntimeEventType.TURN_START, {})
+                )
                 await asyncio.Event().wait()
 
         engine = SlowEngine()
