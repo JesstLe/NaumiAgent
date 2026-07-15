@@ -307,8 +307,72 @@ ToolExecutionPort 的工具 API 目前通过 `event_callback` 向 delegate/subag
 
 - CLI、TUI、New UI bridge 的真实 handler 通过 CallbackEventSink 收到原事件；
 - SSE 与 WebSocket 从同一 RuntimeEvent 产生相同 source_event/event_id/sequence；
-- 30 个已知事件全部显式转换，非专属事件进入 RUNTIME_EVENT，不出现隐式 TURN_END；
+- 31 个已知事件全部显式转换，非专属事件进入 RUNTIME_EVENT，不出现隐式 TURN_END；
 - 旧 callback 调用路径保持兼容，但仓库产品代码不使用 union fallback。
+
+## 实现验收与自审（2026-07-15）
+
+ARC-01.3e 已按本设计完成，当前静态调用链与针对性验证证明 EventSink 是运行事实的唯一产品输出
+边界。验收没有使用全量测试。
+
+### 静态审计结果
+
+- `RuntimeEventType` 固定为 31 个值；Engine 的事件生产点全部调用
+  `RuntimeEventPublisher.publish(RuntimeEventType, data)`，没有自由字符串生产或
+  `await on_event(name, data)`；
+- CLI 两处、共享 CLI skill、TUI、New UI bridge 两处、SSE 与 WebSocket 共 8 个
+  `run_streaming()` 产品调用点全部显式传入 `CallbackEventSink` 或 `StreamEventSink`；
+- SSE 与 WebSocket 不再导入或调用 `_engine_event_to_stream_event`，也不存在
+  `.get(event, EventType.TURN_END)` 默认降级；31 个 Runtime 类型由完整映射表约束；
+- `AgentEngine.emitter` 仍按非目标保留兼容字段，但生产源码没有 `engine.emitter`、
+  `self.emitter.emit()` 或 subscribe 使用；它不是第二条产品总线；
+- 直接 legacy callback 调用只剩 4 个明确适配点：`CallbackEventSink`、SubAgent manager 的
+  child-event 验证/转发与 `subagent_event` 发送、team protocol 的 `team_event` 发送。后 3 个入口
+  只能接收 `RuntimeEventType` 已知值，并由 Engine 传入 `publisher.legacy_callback()` 回到同一
+  Publisher sequence；ToolExecutionPort 只透传 callback 参数，不自行生产事件；
+- `LegacyEventCallback` 只有 Runtime Port 中一个权威 type alias，`ToolEventCallback` 重复别名为 0。
+
+### 聚焦验收证据
+
+| 验收组 | 结果 | 覆盖内容 |
+| --- | ---: | --- |
+| Port、Sink、Publisher、注入 | 56 passed | JSON 冻结、falsey Sink、并发顺序、fan-out、失败/取消、注入前置校验 |
+| Engine、Harness、receipt | 12 passed | 正常/异常/取消、权限、Hook、tool prepare、Harness knowledge/invalidation、durable-first receipt |
+| Agent、SubAgent、Team、Tool adapter | 110 passed | 已知事件转发、未知事件拒绝、失败/取消、Agent 与 Tool 兼容签名 |
+| CLI、TUI、New UI | 6 passed | 显式 Sink、可见 runtime notification、TUI 创建与终端噪声隔离 |
+| StreamEvent、SSE、WebSocket、API | 71 passed | 31/31 映射、identity parity、脱敏、背压、失败/取消与 API 持久化 |
+
+Ruff 对本切片变更 Python 文件无错误，compileall 通过。运行 Engine Hook 节点时仅出现 ChromaDB
+对 Python 3.14 `asyncio.iscoroutinefunction` 的第三方弃用警告，与 EventSink 行为无关。
+
+### 语义逐项自审
+
+- **falsey/error/cancel：** `event_sink is None` 才选择 `NullEventSink`，falsey 实现不会被替换；
+  普通 Sink/transport 错误向上抛出，`CancelledError` 不被捕获；完成回执发送失败不会抹掉已持久化
+  receipt。
+- **sequence/backpressure：** 每个 run 的 Publisher 在同一锁内分配并投递连续 sequence；50 个并发
+  publish 的观察顺序连续。Composite 与 StreamEventSink 逐层 await，没有隐式任务、drop-oldest 或
+  新增第二队列；SSE 只保留原有一个响应 queue，并继续 await `queue.put()`，WebSocket 直接 await
+  `send_text()`。
+- **receipt durability：** recorder/Inspector 先于注入和调用表面 Sink；正常、异常、取消各最多产生
+  一个 completion receipt，且 `recorder.finish()` 先完成，之后才 publish terminal event。
+- **transport parity：** 同一 RuntimeEvent 经 SSE/WS 得到相同 `id`、`event_id`、`source_event`、
+  `run_id`、`session_id`、`turn`、`sequence`、timestamp 与 data。无专属类型的事件严格编码为
+  `runtime_event` 的 `{event, data}`，不会伪装为 `turn_end`；旧 v1 StreamEvent 的新增字段默认省略。
+- **所有产品表面：** CLI/TUI/New UI 只通过 CallbackEventSink 复用既有中文渲染；SSE/WebSocket 只
+  通过 StreamEventSink 做 transport 转换。EventSink 不负责颜色、Markdown、权限入站或业务判定。
+
+### 诚实保留项
+
+- `run_streaming()` 的 legacy callback union、`AgentEngine.emitter` 字段，以及 Tool/Agent callback
+  兼容签名仍按本设计保留；它们已不形成产品旁路，移除条件与迁移范围属于 ARC-01.5；
+- 架构 baseline/ownership artifact 尚需在源码提交 H1 后按 Task 12 双生成并绑定最终 digest；完成
+  该步骤前不能声称 ARC-01 整体完成，但 ARC-01.3 五个 Port 的实现门已通过；
+- EventSink 只保证单 run 严格顺序；跨 run 全局排序、远端 telemetry 与独立丢弃策略属于后续高并发
+  adapter，不应在本地权威链中偷偷增加队列。
+- SSE 的既有 `asyncio.Queue` 缓冲策略本切片没有改成 socket 级有界背压；Runtime/StreamEventSink
+  的 awaited 契约已成立，但慢 HTTP 客户端的内存上限仍应由 ARC-08 API reliability 独立设计并压测，
+  不能把“调用了 `await queue.put()`”夸大为已经完成端到端限流。
 
 ## 架构产物与验收门
 
