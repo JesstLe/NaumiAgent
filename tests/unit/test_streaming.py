@@ -1,5 +1,6 @@
 """流式事件系统单元测试."""
 
+import asyncio
 import json
 
 import pytest
@@ -195,6 +196,7 @@ class TestStreamEventSink:
         assert transport_event.source_event == runtime_type.value
         assert transport_event.sequence == runtime_event.sequence
         assert transport_event.session_id == runtime_event.session_id
+        assert transport_event.run_id == runtime_event.run_id
         assert transport_event.turn == runtime_event.turn
         expected_type = _RUNTIME_TRANSPORT_TYPES.get(
             runtime_type,
@@ -297,9 +299,47 @@ class TestStreamEventSink:
         assert sse_payload["id"] == runtime_event.id
         assert sse_payload["event_id"] == runtime_event.id
         assert sse_payload["source_event"] == "runtime_notification"
+        assert sse_payload["run_id"] == "run-1"
         assert sse_payload["sequence"] == 7
         assert sse_payload["data"]["event"] == "runtime_notification"
         assert sse_payload["data"]["data"]["nested"] == {"items": [1, 2]}
+
+    async def test_emit_awaits_transport_backpressure(self) -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_consumer(_event: StreamEvent) -> None:
+            entered.set()
+            await release.wait()
+
+        delivery = asyncio.create_task(
+            StreamEventSink(slow_consumer).emit(
+                _make_runtime_event(RuntimeEventType.RUNTIME_NOTIFICATION)
+            )
+        )
+        await entered.wait()
+
+        assert not delivery.done()
+        release.set()
+        await delivery
+
+    async def test_emit_propagates_transport_failure_and_cancellation(self) -> None:
+        runtime_event = _make_runtime_event(RuntimeEventType.RUNTIME_NOTIFICATION)
+
+        async def fail(_event: StreamEvent) -> None:
+            raise RuntimeError("transport closed")
+
+        async def cancel(_event: StreamEvent) -> None:
+            raise asyncio.CancelledError
+
+        with pytest.raises(RuntimeError, match="transport closed"):
+            await StreamEventSink(fail).emit(runtime_event)
+        with pytest.raises(asyncio.CancelledError):
+            await StreamEventSink(cancel).emit(runtime_event)
+
+    def test_rejects_non_callable_transport_consumer(self) -> None:
+        with pytest.raises(TypeError, match="异步发送器"):
+            StreamEventSink(None)  # type: ignore[arg-type]
 
     def test_version_one_stream_event_serialization_stays_compact(self) -> None:
         legacy_event = StreamEvent(
@@ -312,4 +352,5 @@ class TestStreamEventSink:
 
         assert "source_event" not in payload
         assert "event_id" not in payload
+        assert "run_id" not in payload
         assert "sequence" not in payload

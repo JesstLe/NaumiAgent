@@ -8,8 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from naumi_agent.api.routes.messages import _engine_event_to_stream_event
-from naumi_agent.streaming.events import EventType, StreamEvent
+from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
 router = APIRouter(tags=["websocket"])
 
@@ -115,9 +114,10 @@ async def _run_streaming_to_websocket(
         lock = asyncio.Lock()
         websocket.app.state.engine_lock = lock
 
-    async def on_event(event: str, data: dict[str, Any]) -> None:
-        stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
+    async def send_stream_event(stream_event: StreamEvent) -> None:
         await websocket.send_text(stream_event.to_ws())
+
+    event_sink = StreamEventSink(send_stream_event)
 
     async with lock:
         if not await engine.load_session(session_id):
@@ -129,4 +129,4 @@ async def _run_streaming_to_websocket(
                 ).to_ws()
             )
             raise RuntimeError("Session not found")
-        return await engine.run_streaming(content, on_event)
+        return await engine.run_streaming(content, event_sink)

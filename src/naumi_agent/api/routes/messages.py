@@ -38,7 +38,7 @@ from naumi_agent.api.schemas import (
     SessionUpdate,
 )
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
-from naumi_agent.streaming.events import EventType, StreamEvent
+from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
 router = APIRouter(tags=["sessions", "messages"])
 
@@ -530,9 +530,9 @@ async def _stream_response(
 
     await attach_artifacts()
 
-    async def on_event(event: str, data: dict[str, Any]) -> None:
+    async def on_stream_event(stream_event: StreamEvent) -> None:
         nonlocal run
-        event_run_id = str(data.get("run_id") or "")
+        event_run_id = stream_event.run_id
         if engine_manages_run and run is None and event_run_id:
             run = await store.get_run(session_id, event_run_id)
             if run is None:
@@ -541,12 +541,13 @@ async def _stream_response(
             current_task = asyncio.current_task()
             if current_task is not None:
                 _active_chat_run_tasks(request)[run.id] = (session_id, current_task)
-        stream_event = _engine_event_to_stream_event(event, data, session_id=session_id)
         if run is not None:
             stream_event = _stream_event_with_run_id(stream_event, run.id)
             if not engine_manages_run:
                 await _persist_stream_event(store, run.id, stream_event, step_sequences)
         await queue.put(stream_event)
+
+    event_sink = StreamEventSink(on_stream_event)
 
     async def run_agent() -> None:
         try:
@@ -558,7 +559,7 @@ async def _stream_response(
                 try:
                     result = await engine.run_streaming(
                         content,
-                        on_event,
+                        event_sink,
                         turn_context=turn_context,
                     )
                 finally:
@@ -763,13 +764,22 @@ def _chat_run_to_response(run: ChatRunRecord) -> ChatRunResponse:
 
 
 def _stream_event_with_run_id(event: StreamEvent, run_id: str) -> StreamEvent:
+    data = (
+        event.data
+        if event.type is EventType.RUNTIME_EVENT
+        else {**event.data, "run_id": run_id}
+    )
     return StreamEvent(
         id=event.id,
         type=event.type,
-        data={**event.data, "run_id": run_id},
+        data=data,
         timestamp=event.timestamp,
         session_id=event.session_id,
         turn=event.turn,
+        source_event=event.source_event,
+        event_id=event.event_id,
+        run_id=run_id,
+        sequence=event.sequence,
     )
 
 
@@ -905,72 +915,3 @@ async def _create_workbench_issue_from_message(
         "workbench_issue": issue,
         "workbench_snapshot": snapshot,
     }
-
-
-def _engine_event_to_stream_event(
-    event: str,
-    data: dict[str, Any],
-    *,
-    session_id: str,
-) -> StreamEvent:
-    if event == "thinking_delta":
-        return StreamEvent(
-            type=EventType.THINKING_DELTA,
-            data={},
-            session_id=session_id,
-        )
-    if event == "thinking_end":
-        return StreamEvent(
-            type=EventType.THINKING_END,
-            data={},
-            session_id=session_id,
-        )
-    if event == "permission_bubble":
-        safe_fields = (
-            "agent_name",
-            "tool_name",
-            "call_id",
-            "status",
-            "reason",
-            "risk_level",
-            "requires_confirmation",
-        )
-        return StreamEvent(
-            type=EventType.PERMISSION_REQUEST,
-            data={field: data[field] for field in safe_fields if field in data},
-            session_id=session_id,
-        )
-    if event == "tool_start":
-        call_id = data.get("call_id") or data.get("tool_call_id")
-        safe_data = {"name": str(data.get("name") or "tool")}
-        if call_id:
-            safe_data["call_id"] = str(call_id)
-        return StreamEvent(
-            type=EventType.TOOL_CALL_START,
-            data=safe_data,
-            session_id=session_id,
-        )
-
-    event_type = {
-        "turn_start": EventType.TURN_START,
-        "thinking_start": EventType.THINKING_START,
-        "thinking_delta": EventType.THINKING_DELTA,
-        "thinking_end": EventType.THINKING_END,
-        "tool_start": EventType.TOOL_CALL_START,
-        "tool_end": (
-            EventType.TOOL_CALL_END
-            if data.get("status") in (None, "success")
-            else EventType.TOOL_CALL_ERROR
-        ),
-        "token": EventType.TOKEN_DELTA,
-        "context_compacted": EventType.CONTEXT_COMPACTED,
-        "error": EventType.AGENT_ERROR,
-        "completion_receipt": EventType.COMPLETION_RECEIPT,
-        "response_start": EventType.AGENT_START,
-        "response_end": EventType.AGENT_END,
-    }.get(event, EventType.TURN_END)
-
-    payload = dict(data)
-    if event == "token" and "content" in payload:
-        payload["token"] = payload.pop("content")
-    return StreamEvent(type=event_type, data=payload, session_id=session_id)
