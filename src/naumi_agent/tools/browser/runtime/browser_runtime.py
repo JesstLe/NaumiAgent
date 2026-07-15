@@ -2298,9 +2298,7 @@ class BrowserRuntime:
         await self.ensure_started()
         is_error = False
         try:
-            result = await self.page.evaluate(
-                f"(() => {{ {expression} }})()"
-            )
+            result = await self.page.evaluate(expression)
         except Exception as exc:
             result = str(exc)
             is_error = True
