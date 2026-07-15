@@ -10,7 +10,9 @@ from typing import Any
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.receipt_builder import RunReceiptBuilder
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore
+from naumi_agent.runtime.ports.events import RuntimeEvent
 from naumi_agent.safety.guardrails import OutputGuardrail
+from naumi_agent.streaming.sinks import CallbackEventSink
 
 _SUCCESS_STATUSES = frozenset({"success", "succeeded", "completed"})
 _FAILURE_STATUSES = frozenset({"error", "failed", "aborted", "denied"})
@@ -139,6 +141,18 @@ class ChatRunRecorder:
         return _compact(self._guardrail.redact(str(value or "")), maximum)
 
 
+class ChatRunRecorderEventSink:
+    """Deliver immutable Runtime events to one durable run recorder."""
+
+    def __init__(self, recorder: ChatRunRecorder) -> None:
+        if not isinstance(recorder, ChatRunRecorder):
+            raise TypeError("ChatRunRecorderEventSink 需要 ChatRunRecorder")
+        self._sink = CallbackEventSink(recorder.observe)
+
+    async def emit(self, event: RuntimeEvent) -> None:
+        await self._sink.emit(event)
+
+
 def _step_fields(
     event: str,
     data: dict[str, Any],
@@ -201,4 +215,4 @@ def _compact(value: str, maximum: int) -> str:
     return f"{normalized[: maximum - 3]}..."
 
 
-__all__ = ["ChatRunRecorder"]
+__all__ = ["ChatRunRecorder", "ChatRunRecorderEventSink"]

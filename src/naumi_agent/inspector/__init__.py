@@ -15,7 +15,7 @@ from naumi_agent.inspector.models import (
     RuntimeInspectorSnapshot,
 )
 from naumi_agent.inspector.service import RuntimeInspectorService
-from naumi_agent.inspector.tracker import RuntimeInspectorTracker
+from naumi_agent.inspector.tracker import RuntimeInspectorEventSink, RuntimeInspectorTracker
 
 __all__ = [
     "INSPECTOR_SCHEMA_VERSION",
@@ -30,6 +30,7 @@ __all__ = [
     "InspectorTool",
     "InspectorTools",
     "RuntimeInspectorService",
+    "RuntimeInspectorEventSink",
     "RuntimeInspectorSnapshot",
     "RuntimeInspectorTracker",
 ]
