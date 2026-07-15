@@ -393,6 +393,35 @@ def test_permission_paths_preserve_existing_stable_order(tmp_path):
         str(tmp_path.resolve()),
         str((tmp_path / ".naumi" / "worktrees").resolve()),
     ]
+
+
+def test_create_agent_engine_injects_every_built_port(tmp_path):
+    from naumi_agent.runtime.composition import create_agent_engine
+
+    config = _config(tmp_path)
+    ports = build_runtime_ports(config)
+    sentinel = object()
+    with (
+        patch(
+            "naumi_agent.runtime.composition.build_runtime_ports",
+            return_value=ports,
+        ),
+        patch(
+            "naumi_agent.orchestrator.engine.AgentEngine",
+            return_value=sentinel,
+        ) as engine_type,
+    ):
+        result = create_agent_engine(config)
+
+    assert result is sentinel
+    engine_type.assert_called_once_with(
+        config,
+        session_port=ports.session_port,
+        permission_port=ports.permission_port,
+        model_port=ports.model_port,
+        tool_execution_port=ports.tool_execution_port,
+        event_sink=ports.event_sink,
+    )
 ```
 
 - [ ] **Step 2: Run the tests and verify the missing composition module failure**
@@ -496,16 +525,23 @@ def create_agent_engine(
 ) -> AgentEngine:
     from naumi_agent.orchestrator.engine import AgentEngine
 
+    ports = build_runtime_ports(config, overrides=port_overrides)
     return AgentEngine(
         config,
-        ports=build_runtime_ports(config, overrides=port_overrides),
+        session_port=ports.session_port,
+        permission_port=ports.permission_port,
+        model_port=ports.model_port,
+        tool_execution_port=ports.tool_execution_port,
+        event_sink=ports.event_sink,
     )
 
 
 __all__ = ["build_runtime_ports", "create_agent_engine"]
 ```
 
-Do not create directories and do not catch catalog/permission/config errors. Keep `runtime/__init__.py` unchanged;
+This Task 2 factory deliberately uses the Engine's existing five explicit keywords so the commit is independently
+runnable. Task 3 atomically changes the factory to `AgentEngine(config, ports=ports)` after the Engine accepts the
+bundle. Do not create directories and do not catch catalog/permission/config errors. Keep `runtime/__init__.py` unchanged;
 entrypoints import `naumi_agent.runtime.composition` explicitly so default adapters are never loaded as a side effect.
 
 - [ ] **Step 4: Run focused tests and verify current Port contracts did not regress**
@@ -681,6 +717,15 @@ self._tool_execution_port = ports.tool_execution_port
 ```
 
 Delete the five old default-resolution blocks and their duplicate TypeError checks. Keep workspace/path calculation immediately after bundle assignment so later resource construction remains unchanged.
+
+In `runtime/composition.py`, replace the five individual keyword arguments with the final bundle call:
+
+```python
+return AgentEngine(config, ports=ports)
+```
+
+Update `test_create_agent_engine_injects_every_built_port` to expect
+`engine_type.assert_called_once_with(config, ports=ports)` in the same Task 3 commit.
 
 - [ ] **Step 4: Move stale patch targets and run the focused Engine/Port tests**
 
