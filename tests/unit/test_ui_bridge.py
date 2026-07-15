@@ -381,6 +381,36 @@ class _FakeEngine:
         return True
 
 
+class _SlashToolTrap:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def execute(self, **kwargs: object) -> str:
+        self.calls.append(kwargs)
+        raise AssertionError("New UI slash 命令不得直接调用 Tool.execute")
+
+
+class _FacadeSlashEngine(_FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tool = _SlashToolTrap()
+        self.tool_registry = {"worktree_status": self.tool}
+        self.executed: list[tuple[ToolCall, str | None]] = []
+
+    async def execute_tool(
+        self,
+        tool_call: ToolCall,
+        *,
+        agent_name: str | None = None,
+    ) -> ToolResult:
+        self.executed.append((tool_call, agent_name))
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content="Worktree 状态已通过公共 facade 获取。",
+        )
+
+
 class _SlowFakeEngine(_FakeEngine):
     def __init__(self) -> None:
         super().__init__()
@@ -1759,6 +1789,42 @@ async def test_bridge_cli_backed_slash_commands_are_dispatched_via_capture(
 
 
 @pytest.mark.asyncio
+async def test_bridge_worktree_slash_reaches_public_engine_tool_facade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ui_bridge,
+        "_load_cli_slash_commands_with_alias",
+        lambda: ["/worktree"],
+    )
+    engine = _FacadeSlashEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "worktree-facade-1",
+        "type": ClientEventType.SUBMIT,
+        "payload": {"text": "/worktree status demo"},
+    })
+
+    assert engine.tool.calls == []
+    assert len(engine.executed) == 1
+    tool_call, agent_name = engine.executed[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "worktree_status"
+    assert json.loads(tool_call.arguments) == {"name": "demo"}
+    notices = [
+        record["payload"]
+        for record in _records(writer)
+        if record["type"] == "ui/message"
+        and record["payload"].get("type") == "system_notice"
+    ]
+    assert notices
+    assert "Worktree 状态已通过公共 facade 获取" in notices[-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_bridge_slash_reasoning_command_toggles_visibility() -> None:
     engine = _FakeEngine()
     writer = io.StringIO()
@@ -2279,7 +2345,7 @@ async def test_bridge_streams_real_engine_tool_lifecycle_without_external_api(
         )
     )
     engine._router.stream = stream_response  # type: ignore[method-assign]
-    engine._execute_tool = execute_tool  # type: ignore[method-assign]
+    engine.execute_tool = execute_tool  # type: ignore[method-assign]
 
     try:
         await bridge.submit("写入 demo 文件", request_id="submit-real-engine")
