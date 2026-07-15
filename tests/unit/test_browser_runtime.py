@@ -580,6 +580,54 @@ class TestBrowserRuntimeLifecycle:
 # ---------------------------------------------------------------------------
 
 
+def _managed_runtime_fixture(
+    tmp_path: Path,
+    *,
+    replay_recording_enabled: bool = False,
+) -> tuple[BrowserRuntime, MagicMock, MagicMock]:
+    runtime = BrowserRuntime(
+        tmp_path,
+        replay_recording_enabled=replay_recording_enabled,
+    )
+    runtime.artifacts.start_session()
+    fake_page = MagicMock()
+    fake_context = MagicMock()
+    fake_context.tracing.start = AsyncMock()
+    fake_context.new_page = AsyncMock(return_value=fake_page)
+    fake_context.add_init_script = AsyncMock()
+    fake_browser = MagicMock()
+    fake_browser.new_context = AsyncMock(return_value=fake_context)
+    fake_chromium = MagicMock()
+    fake_chromium.launch = AsyncMock(return_value=fake_browser)
+    runtime._playwright = MagicMock(chromium=fake_chromium)
+    return runtime, fake_browser, fake_context
+
+
+def _attached_runtime_fixture(
+    tmp_path: Path,
+    *,
+    replay_recording_enabled: bool = False,
+) -> tuple[BrowserRuntime, MagicMock]:
+    runtime = BrowserRuntime(
+        tmp_path,
+        replay_recording_enabled=replay_recording_enabled,
+    )
+    runtime.artifacts.start_session()
+    fake_page = MagicMock()
+    fake_page.url = "about:blank"
+    fake_context = MagicMock()
+    fake_context.tracing.start = AsyncMock()
+    fake_context.add_init_script = AsyncMock()
+    fake_context.pages = [fake_page]
+    fake_browser = MagicMock()
+    fake_browser.contexts = [fake_context]
+    fake_chromium = MagicMock()
+    fake_chromium.connect_over_cdp = AsyncMock(return_value=fake_browser)
+    runtime._playwright = MagicMock(chromium=fake_chromium)
+    runtime._start_attached_screencast = AsyncMock()
+    return runtime, fake_context
+
+
 class TestBrowserRuntimeInit:
     def test_import(self) -> None:
         pass
@@ -622,6 +670,25 @@ class TestBrowserRuntimeInit:
         state = rt.get_debug_state()
         assert not state["active"]
         assert state["browserMode"] == "stopped"
+        assert state["capabilities"]["videos"] is False
+        assert state["capabilities"]["traces"] is False
+
+    def test_get_debug_state_reports_enabled_managed_replay(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime = BrowserRuntime(
+            tmp_path,
+            replay_recording_enabled=True,
+        )
+        runtime.browser_mode = "headless"
+        runtime.session_source = "managed"
+        runtime.trace_active = True
+
+        state = runtime.get_debug_state()
+
+        assert state["capabilities"]["videos"] is True
+        assert state["capabilities"]["traces"] is True
 
     def test_record_event_no_session(self, tmp_path: Path) -> None:
         from naumi_agent.tools.browser.runtime.browser_runtime import (
@@ -749,33 +816,81 @@ class TestBrowserRuntimeInit:
         assert result == {"result": "page closed", "isError": True}
 
     @pytest.mark.asyncio
-    async def test_managed_launch_uses_python_playwright_video_options(
-        self, tmp_path: Path,
+    async def test_managed_launch_disables_replay_by_default(
+        self,
+        tmp_path: Path,
     ) -> None:
-        from naumi_agent.tools.browser.runtime.browser_runtime import (
-            BrowserRuntime,
-        )
+        runtime, fake_browser, fake_context = _managed_runtime_fixture(tmp_path)
 
-        rt = BrowserRuntime(tmp_path)
-        rt.artifacts.start_session()
-        fake_page = MagicMock()
-        fake_context = MagicMock()
-        fake_context.tracing.start = AsyncMock()
-        fake_context.new_page = AsyncMock(return_value=fake_page)
-        fake_context.add_init_script = AsyncMock()
-        fake_browser = MagicMock()
-        fake_browser.new_context = AsyncMock(return_value=fake_context)
-        fake_chromium = MagicMock()
-        fake_chromium.launch = AsyncMock(return_value=fake_browser)
-        rt._playwright = MagicMock(chromium=fake_chromium)
-
-        await rt._launch_browser_session(headless=True)
+        await runtime._launch_browser_session(headless=True)
 
         context_kwargs = fake_browser.new_context.await_args.kwargs
-        assert "record_video" not in context_kwargs
+        assert "record_video_dir" not in context_kwargs
+        assert "record_video_size" not in context_kwargs
+        fake_context.tracing.start.assert_not_awaited()
+        assert runtime.trace_active is False
+
+    @pytest.mark.asyncio
+    async def test_managed_launch_records_replay_when_enabled(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime, fake_browser, fake_context = _managed_runtime_fixture(
+            tmp_path,
+            replay_recording_enabled=True,
+        )
+
+        await runtime._launch_browser_session(headless=True)
+
+        context_kwargs = fake_browser.new_context.await_args.kwargs
         assert context_kwargs["record_video_dir"]
-        assert context_kwargs["record_video_size"] == {"width": 1280, "height": 800}
-        fake_context.add_init_script.assert_awaited_once()
+        assert context_kwargs["record_video_size"] == {
+            "width": 1280,
+            "height": 800,
+        }
+        fake_context.tracing.start.assert_awaited_once_with(
+            screenshots=True,
+            snapshots=True,
+            sources=True,
+        )
+        assert runtime.trace_active is True
+
+    @pytest.mark.asyncio
+    async def test_attached_launch_disables_replay_by_default(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime, fake_context = _attached_runtime_fixture(tmp_path)
+
+        await runtime._attach_browser_session(
+            endpoint="http://127.0.0.1:9222"
+        )
+
+        fake_context.tracing.start.assert_not_awaited()
+        runtime._start_attached_screencast.assert_not_awaited()
+        assert runtime.trace_active is False
+
+    @pytest.mark.asyncio
+    async def test_attached_launch_records_replay_when_enabled(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime, fake_context = _attached_runtime_fixture(
+            tmp_path,
+            replay_recording_enabled=True,
+        )
+
+        await runtime._attach_browser_session(
+            endpoint="http://127.0.0.1:9222"
+        )
+
+        fake_context.tracing.start.assert_awaited_once_with(
+            screenshots=True,
+            snapshots=True,
+            sources=True,
+        )
+        runtime._start_attached_screencast.assert_awaited_once()
+        assert runtime.trace_active is True
 
     @pytest.mark.asyncio
     async def test_managed_launch_falls_back_to_system_browser_when_bundle_missing(

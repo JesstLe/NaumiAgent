@@ -487,6 +487,34 @@ search:
 
         assert config.browser.max_concurrent_runs == 5
 
+    def test_browser_replay_recording_is_disabled_by_default(self) -> None:
+        assert AppConfig().browser.replay_recording_enabled is False
+
+    def test_browser_replay_recording_can_be_enabled_from_yaml(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(
+            "browser:\n  replay_recording_enabled: true\n",
+            encoding="utf-8",
+        )
+
+        config = AppConfig.from_yaml(config_path)
+
+        assert config.browser.replay_recording_enabled is True
+
+    def test_browser_replay_recording_loads_from_nested_environment(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            "NAUMI_BROWSER__REPLAY_RECORDING_ENABLED",
+            "true",
+        )
+
+        assert AppConfig().browser.replay_recording_enabled is True
+
     @pytest.mark.parametrize("value", [19, 5001])
     def test_browser_history_limit_rejects_out_of_range_values(
         self,

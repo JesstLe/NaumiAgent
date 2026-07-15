@@ -332,8 +332,21 @@ class TaskRunner:
         self._base_dir = base_dir
 
         runtime = options.get("runtime")
+        if isinstance(runtime, BrowserRuntime):
+            self._replay_recording_enabled = (
+                runtime.replay_recording_enabled
+            )
+        else:
+            self._replay_recording_enabled = bool(
+                options.get("replay_recording_enabled", False)
+            )
         if runtime is None:
-            runtime = BrowserRuntime(base_dir)
+            runtime = BrowserRuntime(
+                base_dir,
+                replay_recording_enabled=(
+                    self._replay_recording_enabled
+                ),
+            )
         self.runtime = runtime
 
         planner = options.get("planner")
@@ -406,7 +419,10 @@ class TaskRunner:
         if shared_state.is_file():
             run_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(shared_state, run_dir / shared_state.name)
-        return BrowserRuntime(run_dir)
+        return BrowserRuntime(
+            run_dir,
+            replay_recording_enabled=self._replay_recording_enabled,
+        )
 
     @property
     def max_concurrent_runs(self) -> int:

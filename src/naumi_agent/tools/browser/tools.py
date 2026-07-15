@@ -1322,7 +1322,7 @@ class BrowserStopTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Stop the browser and save debug trace recording. "
+            "Stop the browser and finalize enabled browser artifacts. "
             "Use when the testing task is complete."
         )
 

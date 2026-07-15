@@ -559,7 +559,10 @@ class AgentEngine:
         self._openai_tools_cache_key: tuple[tuple[str, int], ...] = ()
         self._openai_tools_cache: list[dict[str, Any]] | None = None
         self._browser_session = BrowserRuntime(
-            self._runtime_data_dir / "browser"
+            self._runtime_data_dir / "browser",
+            replay_recording_enabled=(
+                config.browser.replay_recording_enabled
+            ),
         )
         self.browser_daemon = BrowserDaemonClient(
             config.browser_daemon,
