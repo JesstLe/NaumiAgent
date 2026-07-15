@@ -2562,7 +2562,7 @@ class BrowserRuntime:
                         }
                         return false;
                     }""",
-                    text,
+                    arg=text,
                     timeout=timeout_ms,
                     polling=500,
                 )
@@ -2602,7 +2602,7 @@ class BrowserRuntime:
                         }
                         return true;
                     }""",
-                    text_gone,
+                    arg=text_gone,
                     timeout=timeout_ms,
                     polling=500,
                 )

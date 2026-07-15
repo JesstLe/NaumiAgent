@@ -641,6 +641,56 @@ class TestBrowserRuntimeInit:
         assert "platform" in info
 
     @pytest.mark.asyncio
+    async def test_wait_for_passes_text_as_keyword_argument(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = MagicMock()
+        runtime.page = MagicMock()
+        runtime.page.wait_for_function = AsyncMock()
+        runtime._capture_step_screenshot = AsyncMock(
+            return_value=str(tmp_path / "wait-text.png")
+        )
+
+        result = await runtime.wait_for(text="Welcome", timeout=5000)
+
+        call = runtime.page.wait_for_function.await_args
+        assert call is not None
+        assert len(call.args) == 1
+        assert call.kwargs["arg"] == "Welcome"
+        assert call.kwargs["timeout"] == 5000
+        assert call.kwargs["polling"] == 500
+        assert result["matched"] == "text"
+
+    @pytest.mark.asyncio
+    async def test_wait_for_passes_text_gone_as_keyword_argument(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = MagicMock()
+        runtime.page = MagicMock()
+        runtime.page.wait_for_function = AsyncMock()
+        runtime._capture_step_screenshot = AsyncMock(
+            return_value=str(tmp_path / "wait-gone.png")
+        )
+
+        result = await runtime.wait_for(
+            text_gone="Loading",
+            timeout=6000,
+        )
+
+        call = runtime.page.wait_for_function.await_args
+        assert call is not None
+        assert len(call.args) == 1
+        assert call.kwargs["arg"] == "Loading"
+        assert call.kwargs["timeout"] == 6000
+        assert result["matched"] == "textGone"
+
+    @pytest.mark.asyncio
     async def test_managed_launch_uses_python_playwright_video_options(
         self, tmp_path: Path,
     ) -> None:
