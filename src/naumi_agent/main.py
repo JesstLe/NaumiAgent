@@ -2712,7 +2712,7 @@ def _print_help() -> None:
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         (
-            "/harness [status|doctor|explain|knowledge|check|trust|untrust]",
+            "/harness [status|doctor|explain|replay|knowledge|check|trust|untrust]",
             "管理仓库 Harness Profile、运行解释、知识与验证检查",
         ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
@@ -2826,13 +2826,15 @@ async def _run_harness(engine: Any, arg: str) -> None:
         render_harness_check,
         render_harness_doctor,
         render_harness_knowledge,
+        render_harness_replay,
         render_harness_status,
     )
     from naumi_agent.harness.trust import HarnessTrustStoreError
 
     usage = (
-        "用法：/harness [status|doctor|explain|knowledge|check|trust|untrust]\n"
+        "用法：/harness [status|doctor|explain|replay|knowledge|check|trust|untrust]\n"
         "      /harness explain [run-id|latest]\n"
+        "      /harness replay [run-id|latest]\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness check <check-id>\n"
         "      /harness trust --confirm"
@@ -2862,6 +2864,15 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness 解释参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_explanation(result)))
+        return
+    if subcommand == "replay" and len(parts) <= 2:
+        target = parts[1] if len(parts) == 2 else None
+        try:
+            result = await service.replay_run(target)
+        except ValueError as exc:
+            console.print(f"[yellow]Harness Replay 参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_harness_replay(result)))
         return
     if subcommand == "knowledge":
         knowledge_args = parts[1:]

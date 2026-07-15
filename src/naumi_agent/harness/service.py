@@ -58,6 +58,8 @@ from naumi_agent.harness.models import (
     HarnessTaskKind,
 )
 from naumi_agent.harness.profile import load_harness_profile
+from naumi_agent.harness.replay import capture_replay_baseline, replay_stored_run
+from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.harness.store import HarnessStore, HarnessStoreError
 from naumi_agent.harness.trust import (
     HarnessTrustRecord,
@@ -313,6 +315,75 @@ class HarnessService:
             status="ok",
             explanation=self._explainer.explain(stored_run),
         )
+
+    async def replay_run(self, run_id: str | None = None) -> HarnessReplayLookup:
+        """Safely replay durable facts without tools, models, checks, or sessions."""
+        store = self._store
+        if store is None:
+            return HarnessReplayLookup(
+                status="unavailable",
+                message=(
+                    "Harness 状态库尚未初始化。请重启 NaumiAgent；若问题持续，"
+                    "运行 `/harness doctor` 检查用户状态目录。"
+                ),
+            )
+        normalized_run_id = None
+        if run_id is not None and run_id.strip().lower() != "latest":
+            normalized_run_id = validate_run_id(run_id)
+        try:
+            if normalized_run_id is None:
+                runs = await store.list_runs(self.workspace_root, limit=1)
+                stored_run = runs[0] if runs else None
+            else:
+                stored_run = await store.get_run(normalized_run_id)
+                if stored_run is not None and (
+                    Path(stored_run.workspace_root).resolve() != self.workspace_root
+                ):
+                    stored_run = None
+            if stored_run is None:
+                return HarnessReplayLookup(
+                    status="not_found",
+                    message=(
+                        "当前工作区没有匹配的 Harness 运行记录。"
+                        "请先执行一次任务，或检查 run id 是否属于当前工作区。"
+                    ),
+                )
+            baseline = await store.get_replay_baseline(stored_run.id)
+            legacy_created = baseline is None
+            if baseline is None:
+                payload = await asyncio.to_thread(
+                    capture_replay_baseline,
+                    stored_run,
+                    workspace_root=self.workspace_root,
+                )
+                baseline = await store.record_replay_baseline(
+                    payload,
+                    created_at=stored_run.completed_at or stored_run.started_at,
+                )
+            result = await asyncio.to_thread(
+                replay_stored_run,
+                stored_run,
+                baseline=baseline,
+                workspace_root=self.workspace_root,
+                legacy_baseline_created=legacy_created,
+            )
+        except HarnessStoreError:
+            return HarnessReplayLookup(
+                status="unavailable",
+                message=(
+                    "Harness Replay 数据损坏或暂时无法读取。"
+                    "请检查用户状态目录权限，然后运行 `/harness doctor`。"
+                ),
+            )
+        except (OSError, RuntimeError, ValueError):
+            return HarnessReplayLookup(
+                status="unavailable",
+                message=(
+                    "Harness Replay 无法安全重建。记录不会被执行或自动修复；"
+                    "请运行 `/harness doctor` 检查状态库。"
+                ),
+            )
+        return HarnessReplayLookup(status="ok", result=result)
 
     async def begin_completion_run(
         self,
@@ -1139,6 +1210,65 @@ def render_harness_knowledge(result: KnowledgeReadResult) -> str:
         f"状态：`{result.status}`\n\n"
         f"{result.message or '请提供更精确的知识路径或查询。'}"
     )
+
+
+def render_harness_replay(lookup: HarnessReplayLookup) -> str:
+    """Render one bounded Chinese Replay receipt without artifact contents."""
+    if lookup.status != "ok" or lookup.result is None:
+        title = (
+            "没有找到 Harness Replay"
+            if lookup.status == "not_found"
+            else "Harness Replay 暂不可用"
+        )
+        return f"## {title}\n\n{lookup.message}"
+    result = lookup.result
+    labels = {
+        "reproduced": "已复现",
+        "changed": "结果已变化",
+        "partial": "部分可回放",
+        "corrupt": "检测到损坏",
+    }
+    next_steps = {
+        "reproduced": "无需操作；该运行的持久化事实与分类结果保持一致。",
+        "changed": "审查规则版本和解释 digest 差异，再决定是否接受新分类。",
+        "partial": "补齐缺失 artifact 或审查不完整事件后再次回放。",
+        "corrupt": "停止信任受影响证据；从可信来源恢复状态库或 artifact。",
+    }
+    lines = [
+        "## Harness 安全回放",
+        "",
+        f"- 状态：**{labels[result.status]}** (`{result.status}`)",
+        f"- Run：`{result.run_id}`",
+        f"- Manifest：`{result.current_manifest_sha256}`",
+        (
+            "- 规则版本："
+            f"`{result.baseline_rule_version}` → `{result.current_rule_version}`"
+        ),
+        f"- 时间线事件：{len(result.timeline)}",
+        f"- Artifact/证据校验：{len(result.artifacts)}",
+    ]
+    if result.legacy_baseline_created:
+        lines.append("- 注意：本次为旧记录建立了首个基线，不能证明建立前的规则一致性。")
+    if result.anomalies:
+        lines.extend(("", "### 不完整项"))
+        lines.extend(f"- `{item}`" for item in result.anomalies)
+    if result.differences:
+        lines.extend(("", "### 差异"))
+        lines.extend(
+            f"- `{item.field}`：`{item.baseline}` → `{item.current}`"
+            for item in result.differences
+        )
+    failed_artifacts = tuple(
+        item for item in result.artifacts if item.status != "verified"
+    )
+    if failed_artifacts:
+        lines.extend(("", "### 证据校验"))
+        lines.extend(
+            f"- `{item.id}`：`{item.status}`（`{item.reference}`）"
+            for item in failed_artifacts
+        )
+    lines.extend(("", f"下一步：{next_steps[result.status]}"))
+    return "\n".join(lines)
 
 
 def _knowledge_unavailable(

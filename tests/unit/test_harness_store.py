@@ -109,7 +109,7 @@ def test_default_database_uses_user_state_not_workspace(
 
 
 @pytest.mark.asyncio
-async def test_schema_migration_is_idempotent_and_only_creates_h4_tables(
+async def test_schema_migration_is_idempotent_and_adds_replay_baseline_only(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "state" / "harness.db"
@@ -152,8 +152,9 @@ async def test_schema_migration_is_idempotent_and_only_creates_h4_tables(
         "harness_contract_criteria",
         "harness_checks",
         "harness_evidence",
+        "harness_replay_baselines",
     }
-    assert version == 1
+    assert version == 2
     assert rows == 1
 
 

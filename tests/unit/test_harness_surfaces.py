@@ -82,12 +82,15 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         status = engine.tool_registry.get("harness_status")
         doctor = engine.tool_registry.get("harness_doctor")
         explain = engine.tool_registry.get("harness_explain")
+        replay = engine.tool_registry.get("harness_replay")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
         assert doctor is not None and doctor.metadata.read_only
         assert explain is not None and explain.metadata.read_only
         assert explain.metadata.concurrency_safe
+        assert replay is not None and replay.metadata.read_only
+        assert replay.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -234,11 +237,20 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         explained = _plain(
             await execute_slash_command(engine, "/harness explain latest")
         )
+        replayed = _plain(
+            await execute_slash_command(engine, "/harness replay latest")
+        )
         explain_tool = engine.tool_registry.get("harness_explain")
         assert explain_tool is not None
         tool_explained = await explain_tool.execute(run_id=contract.run_id)
+        replay_tool = engine.tool_registry.get("harness_replay")
+        assert replay_tool is not None
+        tool_replayed = await replay_tool.execute(run_id=contract.run_id)
         invalid = _plain(
             await execute_slash_command(engine, "/harness explain one two")
+        )
+        invalid_replay = _plain(
+            await execute_slash_command(engine, "/harness replay one two")
         )
 
         assert "slash-failed-run" in explained
@@ -248,6 +260,11 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         assert "slash-failed-run" in tool_explained
         assert "verification_failure" in tool_explained
         assert "raw output must not be rendered" not in tool_explained
+        assert "Harness 安全回放" in replayed
+        assert "已复现" in replayed
+        assert "Harness 安全回放" in tool_replayed
+        assert "raw output must not be rendered" not in tool_replayed
         assert "用法" in invalid
+        assert "用法" in invalid_replay
     finally:
         await engine.shutdown()

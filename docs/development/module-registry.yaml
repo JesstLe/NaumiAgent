@@ -1,9 +1,9 @@
 schema_version: 1
 updated_at: "2026-07-15"
 statuses: [implemented, planned, blocked, superseded]
-implemented_baselines: [HAR-H4.4]
+implemented_baselines: [HAR-H4.4, HAR-05]
 modules:
-  - {id: HAR-05, status: planned, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
+  - {id: HAR-05, status: implemented, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
   - {id: HAR-06, status: planned, path: harness/HAR-06-session-lifecycle.md, depends_on: [HAR-05]}
   - {id: HAR-07, status: planned, path: harness/HAR-07-completion-ui.md, depends_on: [HAR-05]}
   - {id: HAR-08, status: planned, path: harness/HAR-08-eval-baseline.md, depends_on: [HAR-05, ARC-03]}

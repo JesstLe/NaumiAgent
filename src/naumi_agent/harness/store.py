@@ -23,10 +23,11 @@ from naumi_agent.harness.completion import (
     HarnessEvidenceRef,
 )
 from naumi_agent.harness.models import HarnessCompletionContract
+from naumi_agent.harness.replay_models import HarnessReplayBaselinePayload
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-_SCHEMA_VERSION = 1
+HARNESS_STORE_SCHEMA_VERSION = 2
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -130,6 +131,17 @@ class HarnessStoredRun:
     criteria: tuple[HarnessStoredCriterion, ...]
     checks: tuple[HarnessStoredCheck, ...]
     evidence: tuple[HarnessStoredEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredReplayBaseline:
+    run_id: str
+    manifest_json: str
+    manifest_sha256: str
+    rule_version: str
+    explanation_json: str
+    explanation_sha256: str
+    created_at: str
 
 
 def resolve_harness_db_path() -> Path:
@@ -609,7 +621,116 @@ class HarnessStore:
             ) from exc
         restored = await self.get_run(run_id)
         assert restored is not None
+        try:
+            from naumi_agent.harness.replay import capture_replay_baseline
+
+            payload = await asyncio.to_thread(
+                capture_replay_baseline,
+                restored,
+                workspace_root=restored.workspace_root,
+            )
+            await self.record_replay_baseline(payload, created_at=completed)
+        except (HarnessStoreError, OSError, RuntimeError, ValueError):
+            # The completion receipt is already durable. Replay will surface a
+            # missing baseline as a legacy/partial run instead of hiding success.
+            pass
         return restored
+
+    async def record_replay_baseline(
+        self,
+        payload: HarnessReplayBaselinePayload,
+        *,
+        created_at: str,
+    ) -> HarnessStoredReplayBaseline:
+        """Insert one immutable replay baseline, or return its identical record."""
+        run_id = _normalize_text(payload.run_id, field="run_id", max_length=128)
+        manifest_sha256 = _validate_sha256(
+            payload.manifest_sha256,
+            field="manifest_sha256",
+        )
+        explanation_sha256 = _validate_sha256(
+            payload.explanation_sha256,
+            field="explanation_sha256",
+        )
+        if _stable_digest(payload.manifest_json) != manifest_sha256:
+            raise ValueError("Replay manifest digest 与内容不一致。")
+        if _stable_digest(payload.explanation_json) != explanation_sha256:
+            raise ValueError("Replay explanation digest 与内容不一致。")
+        _validate_json_object(payload.manifest_json, field="manifest_json")
+        _validate_json_object(payload.explanation_json, field="explanation_json")
+        rule_version = _normalize_text(
+            payload.rule_version,
+            field="rule_version",
+            max_length=64,
+        )
+        created = _normalize_timestamp(created_at, field="created_at")
+        values = (
+            run_id,
+            payload.manifest_json,
+            manifest_sha256,
+            rule_version,
+            payload.explanation_json,
+            explanation_sha256,
+            created,
+        )
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await self._require_run(db, run_id)
+                cursor = await db.execute(
+                    "SELECT * FROM harness_replay_baselines WHERE run_id = ?",
+                    (run_id,),
+                )
+                existing = await cursor.fetchone()
+                if existing is not None:
+                    stored = _replay_baseline_from_row(existing)
+                    if stored != HarnessStoredReplayBaseline(*values):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            f"Harness run {run_id} 的 Replay 基线不可变，不能覆盖。"
+                        )
+                    await db.rollback()
+                    return stored
+                await db.execute(
+                    """
+                    INSERT INTO harness_replay_baselines (
+                        run_id, manifest_json, manifest_sha256, rule_version,
+                        explanation_json, explanation_sha256, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    values,
+                )
+                await db.commit()
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法保存 Harness Replay 基线。") from exc
+        return HarnessStoredReplayBaseline(*values)
+
+    async def get_replay_baseline(
+        self,
+        run_id: str,
+    ) -> HarnessStoredReplayBaseline | None:
+        """Read one replay baseline without creating or changing it."""
+        normalized_run_id = _normalize_text(run_id, field="run_id", max_length=128)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    "SELECT * FROM harness_replay_baselines WHERE run_id = ?",
+                    (normalized_run_id,),
+                )
+                row = await cursor.fetchone()
+                return _replay_baseline_from_row(row) if row is not None else None
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Harness Replay 基线。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Harness Replay 基线损坏或无法读取。") from exc
 
     async def get_run(self, run_id: str) -> HarnessStoredRun | None:
         normalized_run_id = _normalize_text(run_id, field="run_id", max_length=128)
@@ -699,13 +820,16 @@ class HarnessStore:
                 async with self._connection() as db:
                     cursor = await db.execute("PRAGMA user_version")
                     version = int((await cursor.fetchone())[0])
-                    if version > _SCHEMA_VERSION:
+                    if version > HARNESS_STORE_SCHEMA_VERSION:
                         raise HarnessStoreError(
                             "Harness 数据库版本高于当前程序支持范围，请升级 NaumiAgent。"
                         )
                     await db.execute("PRAGMA journal_mode = WAL")
                     await db.executescript(_SCHEMA_V1)
-                    await db.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+                    await db.executescript(_SCHEMA_V2)
+                    await db.execute(
+                        f"PRAGMA user_version = {HARNESS_STORE_SCHEMA_VERSION}"
+                    )
                     await db.commit()
             except HarnessStoreError:
                 raise
@@ -919,6 +1043,31 @@ def _evidence_from_row(row: aiosqlite.Row) -> HarnessStoredEvidence:
         created_at=str(row["created_at"]),
         criterion_ids=tuple(json.loads(str(row["criterion_ids_json"]))),
     )
+
+
+def _replay_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredReplayBaseline:
+    baseline = HarnessStoredReplayBaseline(
+        run_id=str(row["run_id"]),
+        manifest_json=str(row["manifest_json"]),
+        manifest_sha256=_validate_sha256(
+            str(row["manifest_sha256"]),
+            field="manifest_sha256",
+        ),
+        rule_version=_normalize_text(
+            str(row["rule_version"]),
+            field="rule_version",
+            max_length=64,
+        ),
+        explanation_json=str(row["explanation_json"]),
+        explanation_sha256=_validate_sha256(
+            str(row["explanation_sha256"]),
+            field="explanation_sha256",
+        ),
+        created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
+    )
+    _validate_json_object(baseline.manifest_json, field="manifest_json")
+    _validate_json_object(baseline.explanation_json, field="explanation_json")
+    return baseline
 
 
 def _check_row_payload(row: aiosqlite.Row) -> tuple[Any, ...]:
@@ -1148,6 +1297,19 @@ def _stable_id(*parts: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _stable_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _validate_json_object(value: str, *, field: str) -> None:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field} 必须是有效 JSON。") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field} 必须是 JSON object。")
+
+
 def _restrict_permissions(path: Path, mode: int) -> None:
     if os.name == "nt":
         return
@@ -1238,4 +1400,16 @@ CREATE TABLE IF NOT EXISTS harness_evidence (
 
 CREATE INDEX IF NOT EXISTS idx_harness_evidence_run_created
 ON harness_evidence (run_id, created_at, id);
+"""
+
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS harness_replay_baselines (
+    run_id TEXT PRIMARY KEY REFERENCES harness_runs(id) ON DELETE CASCADE,
+    manifest_json TEXT NOT NULL,
+    manifest_sha256 TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    explanation_json TEXT NOT NULL,
+    explanation_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """

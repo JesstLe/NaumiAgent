@@ -8,6 +8,8 @@ from typing import Literal
 
 from naumi_agent.harness.store import HarnessStoredRun
 
+HARNESS_EXPLAIN_RULE_VERSION = "1"
+
 
 class HarnessFailureClass(StrEnum):
     SPECIFICATION_GAP = "specification_gap"
@@ -416,6 +418,7 @@ def _merge_sources(left: str, right: str) -> str:
 
 
 __all__ = [
+    "HARNESS_EXPLAIN_RULE_VERSION",
     "HarnessExplainLookup",
     "HarnessExplainer",
     "HarnessFailureClass",

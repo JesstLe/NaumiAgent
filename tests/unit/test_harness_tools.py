@@ -26,11 +26,12 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_status",
         "harness_doctor",
         "harness_explain",
+        "harness_replay",
         "harness_read_knowledge",
         "harness_run_check",
     ]
-    assert all(tool.metadata.read_only for tool in tools[:4])
-    assert not tools[4].metadata.read_only
+    assert all(tool.metadata.read_only for tool in tools[:5])
+    assert not tools[5].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -52,7 +53,10 @@ async def test_harness_check_tool_uses_service_and_validates_arguments(
         workspace_root=workspace,
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
-    tool = create_harness_tools(service)[4]
+    tool = next(
+        item for item in create_harness_tools(service)
+        if item.name == "harness_run_check"
+    )
 
     assert tool.metadata.concurrency_safe
     assert tool.parameters_schema["required"] == ["check_id", "run_id"]
@@ -72,6 +76,30 @@ async def test_harness_explain_tool_validates_run_id(tmp_path: Path) -> None:
     tool = next(
         item for item in create_harness_tools(service)
         if item.name == "harness_explain"
+    )
+
+    assert tool.metadata.read_only
+    assert tool.metadata.concurrency_safe
+    assert set(tool.parameters_schema["properties"]) == {"run_id"}
+    assert tool.parameters_schema["additionalProperties"] is False
+    assert "参数无效" in await tool.execute(run_id=1)
+    assert "没有找到" in await tool.execute(run_id="latest")
+
+
+@pytest.mark.asyncio
+async def test_harness_replay_tool_is_read_only_and_validates_run_id(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        store=HarnessStore(tmp_path / "harness.db"),
+    )
+    tool = next(
+        item for item in create_harness_tools(service)
+        if item.name == "harness_replay"
     )
 
     assert tool.metadata.read_only

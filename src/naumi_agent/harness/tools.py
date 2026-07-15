@@ -10,6 +10,7 @@ from naumi_agent.harness.service import (
     render_harness_check,
     render_harness_doctor,
     render_harness_knowledge,
+    render_harness_replay,
     render_harness_status,
 )
 from naumi_agent.tools.base import Tool, ToolMetadata
@@ -20,6 +21,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessStatusTool(service),
         HarnessDoctorTool(service),
         HarnessExplainTool(service),
+        HarnessReplayTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -113,6 +115,52 @@ class HarnessExplainTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness 解释参数无效：{exc}"
         return render_harness_explanation(result)
+
+
+class HarnessReplayTool(_HarnessReadOnlyTool):
+    @property
+    def name(self) -> str:
+        return "harness_replay"
+
+    @property
+    def description(self) -> str:
+        return "安全回放当前工作区最近一次或指定 Harness 运行，不执行工具、模型或检查"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness replay deterministic receipt evidence artifact verify history"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "可选 Harness run id；省略或 latest 表示当前工作区最新运行",
+                }
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        run_id = kwargs.get("run_id")
+        if run_id is not None and not isinstance(run_id, str):
+            return "Harness Replay 参数无效：run_id 必须是字符串。"
+        try:
+            result = await self._service.replay_run(run_id)
+        except ValueError as exc:
+            return f"Harness Replay 参数无效：{exc}"
+        return render_harness_replay(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):
