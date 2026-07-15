@@ -11,6 +11,8 @@ from naumi_agent.agents.team_commands import run_team_command
 from naumi_agent.agents.team_protocol import execute_team_signal, execute_team_status
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tools.base import ToolCall
 
 
@@ -30,6 +32,56 @@ def engine(tmp_path, request) -> AgentEngine:
 
 
 class TestTeamProtocol:
+    @pytest.mark.asyncio
+    async def test_team_signal_enters_parent_publisher_sequence(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        events: list[RuntimeEvent] = []
+
+        class RecordingSink:
+            async def emit(self, event: RuntimeEvent) -> None:
+                events.append(event)
+
+        publisher = RuntimeEventPublisher(
+            RecordingSink(),
+            session_id="session-team",
+            run_id="run-team",
+        )
+        await execute_team_signal(
+            engine.subagent_manager,
+            event_type="handoff",
+            sender="coder",
+            recipient="researcher",
+            content="接手验证。",
+            event_callback=publisher.legacy_callback(),
+        )
+
+        assert [event.type for event in events] == [RuntimeEventType.TEAM_EVENT]
+        assert events[0].sequence == 1
+        assert events[0].run_id == "run-team"
+
+    @pytest.mark.asyncio
+    async def test_team_signal_rejects_unknown_protocol_event_before_callback(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        callback_called = False
+
+        async def callback(_: str, __: dict[str, object]) -> None:
+            nonlocal callback_called
+            callback_called = True
+
+        with pytest.raises(ValueError, match="无效团队事件类型"):
+            await execute_team_signal(
+                engine.subagent_manager,
+                event_type="invented",
+                sender="coder",
+                content="不会发送。",
+                event_callback=callback,
+            )
+        assert callback_called is False
+
     @pytest.mark.asyncio
     async def test_signal_delivers_direct_message_and_records_blackboard(
         self,
