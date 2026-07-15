@@ -12,7 +12,6 @@ from naumi_agent import __version__
 from naumi_agent.api.chat_runs import ChatRunStore
 from naumi_agent.api.permission_broker import PermissionApprovalBroker
 from naumi_agent.api.routes.messages import (
-    _engine_event_to_stream_event,
     _stream_response,
     add_chat_source,
     cancel_chat_run,
@@ -22,10 +21,11 @@ from naumi_agent.api.routes.messages import (
     list_messages,
     send_message,
 )
+from naumi_agent.api.routes.ws import _run_streaming_to_websocket
 from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.streaming.events import EventType
+from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 
 
 class TestSchemas:
@@ -378,6 +378,72 @@ class TestMessageRoutes:
         assert events[-1]["type"] == "agent_end"
 
     @pytest.mark.asyncio
+    async def test_sse_and_websocket_routes_pass_typed_sink_and_preserve_identity(
+        self,
+    ) -> None:
+        runtime_event = RuntimeEvent(
+            id="event-route-parity",
+            type=RuntimeEventType.RUNTIME_NOTIFICATION,
+            data={"message": "后台任务完成", "nested": {"items": [1, 2]}},
+            timestamp="2026-07-15T08:00:00+08:00",
+            session_id="sess_1",
+            run_id="run-route-parity",
+            turn=3,
+            sequence=11,
+        )
+
+        class IdentityEngine(_FakeEngine):
+            async def run_streaming(
+                self,
+                content: str,
+                event_sink: EventSink,
+                turn_context: str = "",
+            ):
+                assert isinstance(event_sink, EventSink)
+                self.ran.append(content)
+                self.turn_contexts.append(turn_context)
+                await event_sink.emit(runtime_event)
+                usage = SimpleNamespace(turns=1, total_cost_usd=0.01)
+                return SimpleNamespace(status="completed", response="ok", usage=usage)
+
+        class RecordingWebSocket:
+            def __init__(self, engine) -> None:
+                self.app = SimpleNamespace(
+                    state=SimpleNamespace(engine=engine, engine_lock=asyncio.Lock())
+                )
+                self.frames: list[str] = []
+
+            async def send_text(self, frame: str) -> None:
+                self.frames.append(frame)
+
+        sse_engine = IdentityEngine()
+        sse_records = [
+            json.loads(chunk.removeprefix("data: "))
+            async for chunk in _stream_response(
+                sse_engine,
+                "sess_1",
+                "hello",
+                _fake_request(sse_engine),
+            )
+        ]
+        websocket_engine = IdentityEngine()
+        websocket = RecordingWebSocket(websocket_engine)
+        await _run_streaming_to_websocket(
+            websocket,
+            websocket_engine,
+            "sess_1",
+            "hello",
+        )
+        websocket_record = json.loads(websocket.frames[0])
+
+        assert sse_records[0] == websocket_record
+        assert sse_records[0]["id"] == runtime_event.id
+        assert sse_records[0]["event_id"] == runtime_event.id
+        assert sse_records[0]["source_event"] == "runtime_notification"
+        assert sse_records[0]["sequence"] == 11
+        assert sse_records[0]["data"]["data"]["nested"] == {"items": [1, 2]}
+
+    @pytest.mark.asyncio
     async def test_stream_response_persists_run_and_list_endpoint(self, tmp_path) -> None:
         engine = _FakeEngine()
         store = ChatRunStore(tmp_path / "chat-runs.db")
@@ -635,68 +701,3 @@ class TestMessageRoutes:
         assert response.total == 1
         assert response.messages[0].role == "assistant"
         assert response.messages[0].content == ""
-
-    def test_engine_event_to_stream_event_normalizes_token(self) -> None:
-        event = _engine_event_to_stream_event(
-            "token",
-            {"content": "hi"},
-            session_id="sess_1",
-        )
-
-        assert event.type == EventType.TOKEN_DELTA
-        assert event.data == {"token": "hi"}
-
-    def test_permission_bubble_becomes_sanitized_stream_request(self) -> None:
-        event = _engine_event_to_stream_event(
-            "permission_bubble",
-            {
-                "agent_name": "main",
-                "tool_name": "bash_run",
-                "call_id": "call-1",
-                "status": "needs_confirmation",
-                "reason": "命令执行需要确认。",
-                "risk_level": "medium",
-                "requires_confirmation": True,
-                "arguments": {"command": "echo $API_KEY"},
-            },
-            session_id="sess_1",
-        )
-
-        assert event.type == EventType.PERMISSION_REQUEST
-        assert event.data == {
-            "agent_name": "main",
-            "tool_name": "bash_run",
-            "call_id": "call-1",
-            "status": "needs_confirmation",
-            "reason": "命令执行需要确认。",
-            "risk_level": "medium",
-            "requires_confirmation": True,
-        }
-
-    def test_tool_start_stream_omits_raw_arguments(self) -> None:
-        event = _engine_event_to_stream_event(
-            "tool_start",
-            {
-                "name": "bash_run",
-                "tool_call_id": "call-1",
-                "args": '{"command": "echo $API_KEY"}',
-                "argument_chars": 26,
-            },
-            session_id="sess_1",
-        )
-
-        assert event.type == EventType.TOOL_CALL_START
-        assert event.data == {
-            "name": "bash_run",
-            "call_id": "call-1",
-        }
-
-    def test_thinking_delta_stream_omits_internal_content(self) -> None:
-        event = _engine_event_to_stream_event(
-            "thinking_delta",
-            {"content": "内部推理不应离开引擎"},
-            session_id="sess_1",
-        )
-
-        assert event.type == EventType.THINKING_DELTA
-        assert event.data == {}
