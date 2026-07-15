@@ -96,20 +96,16 @@ async def run_analysis(engine: Any, mode: str, target: str) -> None:
     console.print(f"[bold magenta]🔬 {mode} 分析中...[/bold magenta]")
     with console.status("[bold green]分析中...[/bold green]"):
         kwargs = _build_analysis_kwargs(mode, target)
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            tool_call = ToolCall(
-                id=f"slash-analysis-{mode}-{uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-analysis-{mode}-{uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
 
     from rich.markdown import Markdown
     from rich.panel import Panel

@@ -25,13 +25,28 @@ class _FakeEngine:
     def __init__(self, tool_name: str, tool: _FakeTool) -> None:
         self.tool_registry = {tool_name: tool}
 
+    async def execute_tool(
+        self,
+        tool_call: ToolCall,
+        *,
+        agent_name: str | None = None,
+    ) -> ToolResult:
+        del agent_name
+        tool = self.tool_registry[tool_call.name]
+        content = await tool.execute(**json.loads(tool_call.arguments))
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content=content,
+        )
+
 
 class _EngineToolCallFake:
     def __init__(self, tool_name: str, tool: _FakeTool) -> None:
         self.tool_registry = {tool_name: tool}
         self.executed: list[tuple[ToolCall, str | None]] = []
 
-    async def _execute_tool(
+    async def execute_tool(
         self,
         tool_call: ToolCall,
         *,
