@@ -146,11 +146,11 @@ class RuntimePaths:
 ```python
 @dataclass(frozen=True, slots=True)
 class RuntimePorts[SessionT]:
-    session: SessionPort[SessionT]
-    permission: PermissionPort
-    model: ModelPort
-    tool_execution: ToolExecutionPort
-    events: EventSink
+    session_port: SessionPort[SessionT]
+    permission_port: PermissionPort
+    model_port: ModelPort
+    tool_execution_port: ToolExecutionPort
+    event_sink: EventSink
 ```
 
 该模块只导入 Port Protocol，不导入具体 adapter。`AgentEngine` 使用
@@ -161,11 +161,11 @@ class RuntimePorts[SessionT]:
 ```python
 @dataclass(frozen=True, slots=True)
 class RuntimePortOverrides[SessionT]:
-    session: SessionPort[SessionT] | None = None
-    permission: PermissionPort | None = None
-    model: ModelPort | None = None
-    tool_execution: ToolExecutionPort | None = None
-    events: EventSink | None = None
+    session_port: SessionPort[SessionT] | None = None
+    permission_port: PermissionPort | None = None
+    model_port: ModelPort | None = None
+    tool_execution_port: ToolExecutionPort | None = None
+    event_sink: EventSink | None = None
 ```
 
 `None` 是唯一“使用默认值”的信号。实现必须使用 `is None`，显式 falsey adapter 保持 identity。
@@ -244,8 +244,8 @@ def create_agent_engine(
 默认构造顺序固定为：Paths → validation of overrides → Ports → Resources → Services → Engine。构造函数
 不能修改传入 config，也不能读配置文件或环境变量；配置加载只发生在入口。
 
-同一个显式 override 必须原样出现在 `engine.session_port`、`engine.permission_port`、
-`engine.model_port`、`engine.tool_execution_port`、`engine.event_sink`，不得包装、复制或 truthiness
+同一个显式 override 必须原样出现在 `engine.session_store`、`engine._permission_port`、
+`engine.router`、`engine.tool_executor`、`engine.event_sink`，不得包装、复制或 truthiness
 替换。需要 adapter 包装时，调用方显式传 adapter 本身。
 
 ## 生命周期与失败语义
