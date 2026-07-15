@@ -870,7 +870,31 @@ async def test_bridge_returns_typed_harness_detail_unavailable_without_leaking_e
         async def explain_run(self, _run_id: str) -> HarnessExplainLookup:
             raise RuntimeError("private path: /Users/example/secret")
 
-    for service in (None, FailingService()):
+    class MalformedService:
+        async def explain_run(self, _run_id: str) -> HarnessExplainLookup:
+            return HarnessExplainLookup(status="ok", explanation=None)
+
+    class RunningService:
+        async def explain_run(self, run_id: str) -> HarnessExplainLookup:
+            return HarnessExplainLookup(
+                status="ok",
+                explanation=HarnessRunExplanation(
+                    run_id=run_id,
+                    status="running",
+                    objective="仍在运行",
+                    started_at="2026-07-15T10:00:00+00:00",
+                    completed_at="",
+                    verified=False,
+                    running=True,
+                    summary="仍在运行",
+                    failure_classes=(),
+                    findings=(),
+                    checks=(),
+                    evidence=(),
+                ),
+            )
+
+    for service in (None, FailingService(), MalformedService(), RunningService()):
         engine = _FakeEngine()
         if service is not None:
             engine.harness_service = service
@@ -893,6 +917,50 @@ async def test_bridge_returns_typed_harness_detail_unavailable_without_leaking_e
         assert response["payload"]["lookup_status"] == "unavailable"
         assert "explanation" not in response["payload"]
         assert "private path" not in json.dumps(response, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_bridge_returns_typed_unavailable_for_mutable_harness_replay() -> None:
+    class RunningReplayService:
+        async def replay_run(self, run_id: str) -> HarnessReplayLookup:
+            return HarnessReplayLookup(
+                status="ok",
+                result=HarnessReplayResult(
+                    run_id=run_id,
+                    status="partial",
+                    baseline_manifest_sha256="a" * 64,
+                    current_manifest_sha256="a" * 64,
+                    baseline_rule_version="1",
+                    current_rule_version="1",
+                    baseline_explanation_sha256="b" * 64,
+                    current_explanation_sha256="b" * 64,
+                    timeline=(),
+                    artifacts=(),
+                    anomalies=("run_not_finished",),
+                    differences=(),
+                ),
+            )
+
+    engine = _FakeEngine()
+    engine.harness_service = RunningReplayService()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "running-replay",
+            "type": ClientEventType.HARNESS_REPLAY_REQUEST,
+            "payload": {"run_id": "running-run", "known_revision": 0},
+        }
+    )
+
+    response = next(
+        record for record in _records(writer) if record["type"] == "harness/replay"
+    )
+    assert response["request_id"] == "running-replay"
+    assert response["payload"]["lookup_status"] == "unavailable"
+    assert "result" not in response["payload"]
 
 
 def test_protocol_contract_ui_message_fields_match_python_messages() -> None:

@@ -18,6 +18,37 @@ const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 const REASONING_EFFORTS = new Set(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"]);
 const MODEL_CONTRACT_STATUSES = new Set(["verified", "partial", "unverified", "incompatible"]);
+const HARNESS_LOOKUP_STATUSES = new Set(["ok", "not_found", "unavailable"]);
+const HARNESS_RUN_STATUSES = new Set([
+  "running",
+  "completed_verified",
+  "completed_unverified",
+  "blocked",
+]);
+const HARNESS_FAILURE_CLASSES = new Set([
+  "specification_gap",
+  "knowledge_gap",
+  "context_overflow",
+  "tool_contract_error",
+  "permission_block",
+  "environment_error",
+  "implementation_error",
+  "verification_failure",
+  "evaluation_error",
+  "agent_premature_finish",
+  "agent_repetition",
+  "human_judgment_required",
+]);
+const HARNESS_REPLAY_STATUSES = new Set(["reproduced", "changed", "partial", "corrupt"]);
+const HARNESS_ARTIFACT_STATUSES = new Set([
+  "verified",
+  "missing",
+  "digest_mismatch",
+  "unsafe_path",
+  "unsupported",
+  "malformed",
+  "unreadable",
+]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -152,6 +183,12 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/receipt") {
     return normalizeHarnessReceipt(payload);
+  }
+  if (type === "harness/explain") {
+    return normalizeHarnessExplain(payload);
+  }
+  if (type === "harness/replay") {
+    return normalizeHarnessReplay(payload);
   }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
@@ -594,6 +631,232 @@ function normalizeHarnessReceipt(payload) {
     warnings: normalizeTextArray(payload.warnings, 50).map(publicText),
     tree_fingerprint: publicText(payload.tree_fingerprint),
   };
+}
+
+function normalizeHarnessExplain(payload) {
+  const normalized = normalizeHarnessDetailHeader(payload, "harness/explain");
+  if (normalized.lookup_status !== "ok") return normalized;
+  const explanation = harnessObject(payload.explanation, "harness/explain explanation");
+  const status = harnessChoice(
+    explanation.status,
+    "harness/explain explanation.status",
+    HARNESS_RUN_STATUSES,
+  );
+  const running = harnessBoolean(explanation.running, "harness/explain running");
+  if (status === "running" || running) {
+    throw new Error("harness/explain 运行尚未完成，不能作为 revision 1 缓存");
+  }
+  return {
+    ...normalized,
+    explanation: {
+      status,
+      objective: harnessText(explanation.objective, "harness/explain objective"),
+      started_at: harnessText(explanation.started_at, "harness/explain started_at"),
+      completed_at: harnessText(explanation.completed_at, "harness/explain completed_at"),
+      verified: harnessBoolean(explanation.verified, "harness/explain verified"),
+      running,
+      summary: harnessText(explanation.summary, "harness/explain summary"),
+      failure_classes: harnessTextArray(
+        explanation.failure_classes,
+        "harness/explain failure_classes",
+        20,
+      ).map((item) => harnessChoice(item, "harness/explain failure_class", HARNESS_FAILURE_CLASSES)),
+      findings: harnessObjectArray(
+        explanation.findings,
+        "harness/explain findings",
+        20,
+      ).map((item) => ({
+        failure_class: harnessChoice(
+          item.failure_class,
+          "harness/explain finding.failure_class",
+          HARNESS_FAILURE_CLASSES,
+        ),
+        source: harnessText(item.source, "harness/explain finding.source"),
+        message: harnessText(item.message, "harness/explain finding.message"),
+        next_step: harnessText(item.next_step, "harness/explain finding.next_step"),
+        check_ids: harnessTextArray(
+          item.check_ids,
+          "harness/explain finding.check_ids",
+          50,
+        ),
+        evidence_ids: harnessTextArray(
+          item.evidence_ids,
+          "harness/explain finding.evidence_ids",
+          100,
+        ),
+      })),
+      checks: harnessObjectArray(explanation.checks, "harness/explain checks", 50)
+        .map((item) => ({
+          id: harnessText(item.id, "harness/explain check.id"),
+          status: harnessText(item.status, "harness/explain check.status"),
+          duration_ms: harnessNonnegativeInteger(
+            item.duration_ms,
+            "harness/explain check.duration_ms",
+          ),
+        })),
+      evidence: harnessObjectArray(explanation.evidence, "harness/explain evidence", 100)
+        .map((item) => ({
+          id: harnessText(item.id, "harness/explain evidence.id"),
+          kind: harnessText(item.kind, "harness/explain evidence.kind"),
+          status: harnessText(item.status, "harness/explain evidence.status"),
+          digest_prefix: harnessText(
+            item.digest_prefix,
+            "harness/explain evidence.digest_prefix",
+          ),
+          uri: harnessText(item.uri, "harness/explain evidence.uri"),
+        })),
+    },
+  };
+}
+
+function normalizeHarnessReplay(payload) {
+  const normalized = normalizeHarnessDetailHeader(payload, "harness/replay");
+  if (normalized.lookup_status !== "ok") return normalized;
+  const result = harnessObject(payload.result, "harness/replay result");
+  const anomalies = harnessTextArray(result.anomalies, "harness/replay anomalies", 50);
+  if (anomalies.includes("run_not_finished")) {
+    throw new Error("harness/replay 运行尚未完成，不能作为 revision 1 缓存");
+  }
+  return {
+    ...normalized,
+    result: {
+      status: harnessChoice(result.status, "harness/replay result.status", HARNESS_REPLAY_STATUSES),
+      baseline_manifest_sha256: harnessText(
+        result.baseline_manifest_sha256,
+        "harness/replay baseline_manifest_sha256",
+      ),
+      current_manifest_sha256: harnessText(
+        result.current_manifest_sha256,
+        "harness/replay current_manifest_sha256",
+      ),
+      baseline_rule_version: harnessText(
+        result.baseline_rule_version,
+        "harness/replay baseline_rule_version",
+      ),
+      current_rule_version: harnessText(
+        result.current_rule_version,
+        "harness/replay current_rule_version",
+      ),
+      baseline_explanation_sha256: harnessText(
+        result.baseline_explanation_sha256,
+        "harness/replay baseline_explanation_sha256",
+      ),
+      current_explanation_sha256: harnessText(
+        result.current_explanation_sha256,
+        "harness/replay current_explanation_sha256",
+      ),
+      timeline: harnessObjectArray(result.timeline, "harness/replay timeline", 200)
+        .map((item) => ({
+          kind: harnessText(item.kind, "harness/replay timeline.kind"),
+          id: harnessText(item.id, "harness/replay timeline.id"),
+          timestamp: harnessText(item.timestamp, "harness/replay timeline.timestamp"),
+          status: harnessText(item.status, "harness/replay timeline.status"),
+        })),
+      artifacts: harnessObjectArray(result.artifacts, "harness/replay artifacts", 100)
+        .map((item) => ({
+          id: harnessText(item.id, "harness/replay artifact.id"),
+          kind: harnessText(item.kind, "harness/replay artifact.kind"),
+          reference: harnessText(item.reference, "harness/replay artifact.reference"),
+          status: harnessChoice(
+            item.status,
+            "harness/replay artifact.status",
+            HARNESS_ARTIFACT_STATUSES,
+          ),
+          expected_sha256: harnessText(
+            item.expected_sha256,
+            "harness/replay artifact.expected_sha256",
+          ),
+          actual_sha256: harnessText(
+            item.actual_sha256,
+            "harness/replay artifact.actual_sha256",
+          ),
+        })),
+      anomalies,
+      differences: harnessObjectArray(
+        result.differences,
+        "harness/replay differences",
+        50,
+      ).map((item) => ({
+        field: harnessText(item.field, "harness/replay difference.field"),
+        baseline: harnessText(item.baseline, "harness/replay difference.baseline"),
+        current: harnessText(item.current, "harness/replay difference.current"),
+      })),
+      legacy_baseline_created: harnessBoolean(
+        result.legacy_baseline_created,
+        "harness/replay legacy_baseline_created",
+      ),
+    },
+  };
+}
+
+function normalizeHarnessDetailHeader(payload, eventName) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`${eventName} schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const revision = harnessPositiveInteger(payload.revision, `${eventName} revision`);
+  const runId = harnessText(payload.run_id, `${eventName} run_id`);
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(runId)) {
+    throw new Error(`${eventName} run_id 格式无效`);
+  }
+  const lookupStatus = harnessChoice(
+    payload.lookup_status,
+    `${eventName} lookup_status`,
+    HARNESS_LOOKUP_STATUSES,
+  );
+  return {
+    schema_version: 1,
+    revision,
+    run_id: runId,
+    lookup_status: lookupStatus,
+    message: harnessText(payload.message, `${eventName} message`),
+  };
+}
+
+function harnessObject(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${name} 必须是对象`);
+  }
+  return value;
+}
+
+function harnessObjectArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.slice(0, limit).map((item) => harnessObject(item, name));
+}
+
+function harnessTextArray(value, name, limit) {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.slice(0, limit).map((item) => harnessText(item, name));
+}
+
+function harnessText(value, name) {
+  if (typeof value !== "string") throw new Error(`${name} 必须是字符串`);
+  return value.trim().slice(0, 500);
+}
+
+function harnessChoice(value, name, allowed) {
+  const normalized = harnessText(value, name).toLowerCase();
+  if (!allowed.has(normalized)) throw new Error(`${name} 无效: ${normalized}`);
+  return normalized;
+}
+
+function harnessBoolean(value, name) {
+  if (typeof value !== "boolean") throw new Error(`${name} 必须是布尔值`);
+  return value;
+}
+
+function harnessNonnegativeInteger(value, name) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} 必须是非负整数`);
+  }
+  return value;
+}
+
+function harnessPositiveInteger(value, name) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${name} 必须是正整数`);
+  }
+  return value;
 }
 
 function normalizeInspectorSnapshot(payload) {

@@ -7,6 +7,8 @@
     "task_submit",
     "run_cancel",
     "receipt/request",
+    "harness/explain/request",
+    "harness/replay/request",
     "inspector/request",
     "agents/request",
     "agents/stop",
@@ -35,6 +37,8 @@
     "engine/event",
     "completion/receipt",
     "harness/receipt",
+    "harness/explain",
+    "harness/replay",
     "inspector/snapshot",
     "inspector/update",
     "agents/snapshot",
@@ -83,6 +87,35 @@
       "checks": 50,
       "criteria": 100,
       "warnings": 50,
+      "text_chars": 500,
+      "stored_runs": 100
+    }
+  },
+  "harness_explain": {
+    "schema_version": 1,
+    "fields": ["revision", "run_id", "lookup_status", "message", "explanation"],
+    "lookup_statuses": ["ok", "not_found", "unavailable"],
+    "limits": {
+      "failure_classes": 20,
+      "findings": 20,
+      "checks": 50,
+      "evidence": 100,
+      "finding_check_ids": 50,
+      "finding_evidence_ids": 100,
+      "text_chars": 500,
+      "stored_runs": 100
+    }
+  },
+  "harness_replay": {
+    "schema_version": 1,
+    "fields": ["revision", "run_id", "lookup_status", "message", "result"],
+    "lookup_statuses": ["ok", "not_found", "unavailable"],
+    "statuses": ["reproduced", "changed", "partial", "corrupt"],
+    "limits": {
+      "timeline": 200,
+      "artifacts": 100,
+      "anomalies": 50,
+      "differences": 50,
       "text_chars": 500,
       "stored_runs": 100
     }

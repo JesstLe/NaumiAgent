@@ -1207,9 +1207,20 @@ class JsonlEngineBridge:
                     status="unavailable",
                     message=_HARNESS_DETAIL_UNAVAILABLE,
                 )
+        try:
+            response = harness_explain_payload(run_id, lookup)
+        except Exception as exc:
+            self._trace_harness_lookup_failure("explain_payload", exc)
+            response = harness_explain_payload(
+                run_id,
+                HarnessExplainLookup(
+                    status="unavailable",
+                    message=_HARNESS_DETAIL_UNAVAILABLE,
+                ),
+            )
         await self.emit(
             ServerEventType.HARNESS_EXPLAIN,
-            harness_explain_payload(run_id, lookup),
+            response,
             request_id=request_id,
         )
 
@@ -1236,9 +1247,20 @@ class JsonlEngineBridge:
                     status="unavailable",
                     message=_HARNESS_DETAIL_UNAVAILABLE,
                 )
+        try:
+            response = harness_replay_payload(run_id, lookup)
+        except Exception as exc:
+            self._trace_harness_lookup_failure("replay_payload", exc)
+            response = harness_replay_payload(
+                run_id,
+                HarnessReplayLookup(
+                    status="unavailable",
+                    message=_HARNESS_DETAIL_UNAVAILABLE,
+                ),
+            )
         await self.emit(
             ServerEventType.HARNESS_REPLAY,
-            harness_replay_payload(run_id, lookup),
+            response,
             request_id=request_id,
         )
 
