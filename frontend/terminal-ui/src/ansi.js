@@ -12,6 +12,8 @@ const COLOR_CODES = Object.freeze({
 
 export const ANSI = {
   clear: "\x1b[2J\x1b[H",
+  synchronizedOutputOn: "\x1b[?2026h",
+  synchronizedOutputOff: "\x1b[?2026l",
   cursorTo(row, column = 1) {
     const safeRow = Math.max(1, Math.trunc(Number(row) || 1));
     const safeColumn = Math.max(1, Math.trunc(Number(column) || 1));

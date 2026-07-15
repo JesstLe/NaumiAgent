@@ -18,7 +18,7 @@ export function createScreenPainter({ write }) {
 
     if (requiresFullPaint) {
       const output = ANSI.clear + frame.lines.join("\n");
-      write(output);
+      commit(output);
       remember(frame);
       return { mode: "full", changedRows: frame.lines.length, written: true };
     }
@@ -33,9 +33,13 @@ export function createScreenPainter({ write }) {
       return { mode: "none", changedRows: 0, written: false };
     }
 
-    write(changes.join(""));
+    commit(changes.join(""));
     remember(frame);
     return { mode: "diff", changedRows: changes.length, written: true };
+  }
+
+  function commit(output) {
+    write(`${ANSI.synchronizedOutputOn}${output}${ANSI.synchronizedOutputOff}`);
   }
 
   function remember(frame) {
