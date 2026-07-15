@@ -35,9 +35,8 @@ from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_
 from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
 from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
-from naumi_agent.memory.session import Session, SessionStore
-from naumi_agent.model.catalog import load_provider_catalog
-from naumi_agent.model.router import ModelRouter, ModelTier, TokenUsage
+from naumi_agent.memory.session import Session
+from naumi_agent.model.router import ModelTier, TokenUsage
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
     HarnessContextAssembler,
@@ -61,6 +60,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
 from naumi_agent.runtime.ports.events import (
     EventSink,
     LegacyEventCallback,
@@ -74,11 +74,7 @@ from naumi_agent.runtime.ports.tool_execution import ToolExecutionPort
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
-from naumi_agent.safety.permissions import (
-    PermissionChecker,
-    PermissionMode,
-    PermissionOutcome,
-)
+from naumi_agent.safety.permissions import PermissionMode, PermissionOutcome
 from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
@@ -87,7 +83,6 @@ from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.streaming.sinks import (
     CallbackEventSink,
     CompositeEventSink,
-    NullEventSink,
     coerce_event_sink,
 )
 from naumi_agent.tasks.models import TaskStatus
@@ -101,7 +96,6 @@ from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
 from naumi_agent.tools.browser_daemon import BrowserDaemonClient, create_browser_daemon_tools
 from naumi_agent.tools.builtin import create_builtin_tools
-from naumi_agent.tools.execution import LocalToolExecutor
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
@@ -474,6 +468,7 @@ class AgentEngine:
         self,
         config: AppConfig,
         *,
+        ports: RuntimePorts[Session] | None = None,
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
@@ -481,71 +476,39 @@ class AgentEngine:
         event_sink: EventSink | None = None,
     ) -> None:
         self._config = config
-        resolved_event_sink = NullEventSink() if event_sink is None else event_sink
-        if not isinstance(resolved_event_sink, EventSink):
-            raise TypeError("event_sink 必须实现完整的 EventSink 契约：emit")
-        self._event_sink = resolved_event_sink
-        resolved_session_port = (
-            SessionStore(config.memory)
-            if session_port is None
-            else session_port
+        legacy_ports = (
+            session_port,
+            permission_port,
+            model_port,
+            tool_execution_port,
+            event_sink,
         )
-        if not isinstance(resolved_session_port, SessionPort):
-            raise TypeError(
-                "session_port 必须实现完整的 SessionPort 契约："
-                "create_session/save/load/list_sessions/delete/archive/close"
+        if ports is not None and any(value is not None for value in legacy_ports):
+            raise TypeError("ports 与单独 Port 参数不能同时提供")
+        if ports is not None and not isinstance(ports, RuntimePorts):
+            raise TypeError("ports 必须是完整的 RuntimePorts")
+        if ports is None:
+            from naumi_agent.runtime.composition import build_runtime_ports
+
+            ports = build_runtime_ports(
+                config,
+                overrides=RuntimePortOverrides(
+                    session_port=session_port,
+                    permission_port=permission_port,
+                    model_port=model_port,
+                    tool_execution_port=tool_execution_port,
+                    event_sink=event_sink,
+                ),
             )
-        self._session_port = resolved_session_port
+
+        self._event_sink = ports.event_sink
+        self._session_port = ports.session_port
+        self._permission_port = ports.permission_port
+        self._model_port = ports.model_port
+        self._tool_execution_port = ports.tool_execution_port
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
-        resolved_permission_port = (
-            PermissionChecker(
-                mode=PermissionMode(config.safety.permission_mode),
-                allowed_dirs=[
-                    *config.safety.allowed_dirs,
-                    str(self.workspace_root),
-                    str(self._worktree_storage_dir),
-                ],
-                workspace_root=str(self.workspace_root),
-            )
-            if permission_port is None
-            else permission_port
-        )
-        if not isinstance(resolved_permission_port, PermissionPort):
-            raise TypeError(
-                "permission_port 必须实现完整的 PermissionPort 契约："
-                "mode/set_mode/check/reset_counts"
-            )
-        self._permission_port = resolved_permission_port
-        if model_port is None:
-            catalog = (
-                load_provider_catalog(config.models.catalog_path)
-                if config.models.catalog_path
-                else None
-            )
-            resolved_model_port: ModelPort = ModelRouter(
-                config.models,
-                catalog=catalog,
-            )
-        else:
-            resolved_model_port = model_port
-        if not isinstance(resolved_model_port, ModelPort):
-            raise TypeError(
-                "model_port 必须实现完整的 ModelPort 契约："
-                "metadata/routing/capability/discovery/reasoning/call/stream"
-            )
-        self._model_port = resolved_model_port
-        resolved_tool_execution_port = (
-            LocalToolExecutor()
-            if tool_execution_port is None
-            else tool_execution_port
-        )
-        if not isinstance(resolved_tool_execution_port, ToolExecutionPort):
-            raise TypeError(
-                "tool_execution_port 必须实现完整的 ToolExecutionPort 契约：invoke"
-            )
-        self._tool_execution_port = resolved_tool_execution_port
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=HarnessTrustStore(

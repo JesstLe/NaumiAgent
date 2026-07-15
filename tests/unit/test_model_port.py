@@ -162,7 +162,7 @@ async def test_engine_uses_injected_model_port_everywhere(tmp_path: Path) -> Non
     from naumi_agent.tools import pursuit as pursuit_tools
 
     port = ModelRouter(ModelConfig())
-    with patch("naumi_agent.orchestrator.engine.load_provider_catalog") as load_catalog:
+    with patch("naumi_agent.runtime.composition.load_provider_catalog") as load_catalog:
         engine = AgentEngine(
             _config(tmp_path, catalog_path="must-not-load.yaml"),
             model_port=port,
