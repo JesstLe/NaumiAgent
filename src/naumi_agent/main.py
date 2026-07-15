@@ -741,7 +741,7 @@ def _parse_node_version(version: str) -> tuple[int, int, int] | None:
 def _launch_tui(config_path: str) -> None:
     from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
-    from naumi_agent.orchestrator.engine import AgentEngine
+    from naumi_agent.runtime.composition import create_agent_engine
     from naumi_agent.tui.app import NaumiApp
 
     resolved = _resolve_config_path(config_path)
@@ -752,7 +752,7 @@ def _launch_tui(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     with _capture_tui_launch_noise() as (stdout_buf, stderr_buf):
-        engine = AgentEngine(config)
+        engine = create_agent_engine(config)
         keybindings = build_keybindings(config.keybindings)
         style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
@@ -1487,13 +1487,13 @@ async def _chat(config_path: str) -> None:
     from naumi_agent.cli.layout import CLIApp
     from naumi_agent.debug_trace import DebugTrace
     from naumi_agent.log_setup import setup_logging
-    from naumi_agent.orchestrator.engine import AgentEngine
+    from naumi_agent.runtime.composition import create_agent_engine
 
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     _check_api_key(config)
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     keybindings = build_keybindings(config.keybindings)
     style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
@@ -1608,13 +1608,13 @@ def run(
 
 async def _run_task(task: str, config_path: str) -> None:
     from naumi_agent.log_setup import setup_logging
-    from naumi_agent.orchestrator.engine import AgentEngine
+    from naumi_agent.runtime.composition import create_agent_engine
 
     resolved = _resolve_config_path(config_path)
     config = AppConfig.from_yaml(resolved)
     setup_logging(config.log_level)
     _check_api_key(config)
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
 
     try:
         with console.status("[bold green]执行中...[/bold green]"):

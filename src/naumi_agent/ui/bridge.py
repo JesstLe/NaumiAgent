@@ -2251,9 +2251,9 @@ async def create_bridge(
     config.bind_runtime_workspace(Path.cwd())
     setup_logging(config.log_level)
     if engine_factory is None:
-        from naumi_agent.orchestrator.engine import AgentEngine
+        from naumi_agent.runtime.composition import create_agent_engine
 
-        engine_factory = AgentEngine
+        engine_factory = create_agent_engine
     engine = engine_factory(config)
     debug_trace = DebugTrace.create(
         interface="terminal-ui-bridge",
