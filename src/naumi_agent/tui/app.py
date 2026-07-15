@@ -10,6 +10,7 @@ import logging
 import shlex
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import rich.markup
 from rich.markdown import Markdown as RichMarkdown
@@ -37,6 +38,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.completion_receipt import (
     completion_outcome_label,
@@ -2630,6 +2632,21 @@ class NaumiApp(App):
         except Exception as e:
             status.status_text = f"删除失败: {e}"
 
+    async def _execute_registered_tool(
+        self,
+        tool_name: str,
+        **arguments: Any,
+    ) -> ToolResult:
+        """Execute one registered tool through the Engine's public facade."""
+        return await self.engine.execute_tool(
+            ToolCall(
+                id=f"tui-{tool_name}-{uuid4()}",
+                name=tool_name,
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+            agent_name="tui",
+        )
+
     @work(exclusive=True, exit_on_error=False)
     async def _run_pursue(self, goal: str) -> None:
         """执行目标追踪循环."""
@@ -2662,11 +2679,22 @@ class NaumiApp(App):
         chat.start_thinking()
 
         try:
-            result = await tool.execute(goal=goal)
+            tool_result = await self._execute_registered_tool(
+                "pursue_goal",
+                goal=goal,
+            )
             chat.end_thinking()
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**目标追踪失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
             chat.mount(
                 Markdown(
-                    f"## 🎯 目标追踪报告\n\n{result}",
+                    f"## 🎯 目标追踪报告\n\n{tool_result.content}",
                     classes="agent-msg",
                 )
             )
@@ -2703,13 +2731,23 @@ class NaumiApp(App):
             return
         status.status_text = "目标追踪状态处理中..."
         try:
-            if subcommand == "list":
-                result = await tool.execute(active_only="--active" in arg.split())
-            else:
-                result = await tool.execute(run_id=arg.strip())
+            arguments = (
+                {"active_only": "--active" in arg.split()}
+                if subcommand == "list"
+                else {"run_id": arg.strip()}
+            )
+            tool_result = await self._execute_registered_tool(tool_name, **arguments)
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**目标追踪状态失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
             chat.mount(
                 Markdown(
-                    f"## 目标追踪状态\n\n{result}",
+                    f"## 目标追踪状态\n\n{tool_result.content}",
                     classes="agent-msg",
                 )
             )
@@ -2730,10 +2768,18 @@ class NaumiApp(App):
                 chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
                 return
             status.status_text = "Worktree 操作中..."
-            result = await tool.execute(**kwargs)
+            tool_result = await self._execute_registered_tool(tool_name, **kwargs)
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**Worktree 命令失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
             chat.mount(
                 Markdown(
-                    f"## Worktree 隔离区\n\n{result}",
+                    f"## Worktree 隔离区\n\n{tool_result.content}",
                     classes="agent-msg",
                 )
             )
@@ -2794,10 +2840,18 @@ class NaumiApp(App):
                 chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
                 return
             status.status_text = "后台任务处理中..."
-            result = await tool.execute(**kwargs)
+            tool_result = await self._execute_registered_tool(tool_name, **kwargs)
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**后台任务命令失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
             chat.mount(
                 Markdown(
-                    f"## 后台任务\n\n{result}",
+                    f"## 后台任务\n\n{tool_result.content}",
                     classes="agent-msg",
                 )
             )
@@ -2861,10 +2915,18 @@ class NaumiApp(App):
                 chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
                 return
             status.status_text = "调度提醒处理中..."
-            result = await tool.execute(**kwargs)
+            tool_result = await self._execute_registered_tool(tool_name, **kwargs)
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**调度命令失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
             chat.mount(
                 Markdown(
-                    f"## 调度提醒\n\n{result}",
+                    f"## 调度提醒\n\n{tool_result.content}",
                     classes="agent-msg",
                 )
             )
@@ -3104,8 +3166,16 @@ class NaumiApp(App):
             if not tool:
                 chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
                 return
-            result = await tool.execute(**kwargs)
-            chat.mount(Markdown(result, classes="agent-msg"))
+            tool_result = await self._execute_registered_tool(tool_name, **kwargs)
+            if tool_result.status != "success":
+                chat.mount(
+                    Markdown(
+                        f"**Browser daemon 命令失败**: {tool_result.content}",
+                        classes="agent-msg",
+                    )
+                )
+                return
+            chat.mount(Markdown(tool_result.content, classes="agent-msg"))
 
         status.status_text = f"browser daemon: {subcommand}"
         self._set_input_enabled(False)
