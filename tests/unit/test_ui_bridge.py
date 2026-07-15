@@ -20,6 +20,8 @@ from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
+from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.reasoning import (
     ReasoningEffort,
@@ -758,6 +760,139 @@ async def test_bridge_emits_typed_harness_receipt_before_compatibility_message()
         "schema_version": 1,
         "revision": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_bridge_resends_harness_explain_request_at_same_revision() -> None:
+    class DetailService:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def explain_run(self, run_id: str) -> HarnessExplainLookup:
+            self.calls.append(run_id)
+            return HarnessExplainLookup(
+                status="ok",
+                explanation=HarnessRunExplanation(
+                    run_id=run_id,
+                    status="completed_verified",
+                    objective="验证类型化 Explain",
+                    started_at="2026-07-15T10:00:00+00:00",
+                    completed_at="2026-07-15T10:01:00+00:00",
+                    verified=True,
+                    running=False,
+                    summary="验证完成，无已知失败。",
+                    failure_classes=(),
+                    findings=(),
+                    checks=(),
+                    evidence=(),
+                ),
+            )
+
+    engine = _FakeEngine()
+    service = DetailService()
+    engine.harness_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    for request_id, known_revision in (("explain-first", 0), ("explain-resend", 1)):
+        await bridge.handle_client_record(
+            {
+                "id": request_id,
+                "type": ClientEventType.HARNESS_EXPLAIN_REQUEST,
+                "payload": {
+                    "run_id": "detail-run",
+                    "known_revision": known_revision,
+                },
+            }
+        )
+
+    responses = [
+        record for record in _records(writer) if record["type"] == "harness/explain"
+    ]
+    assert service.calls == ["detail-run", "detail-run"]
+    assert [record["request_id"] for record in responses] == [
+        "explain-first",
+        "explain-resend",
+    ]
+    assert responses[0]["payload"] == responses[1]["payload"]
+    assert responses[0]["payload"]["revision"] == 1
+    assert responses[0]["payload"]["explanation"]["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_handles_harness_replay_request() -> None:
+    class DetailService:
+        async def replay_run(self, run_id: str) -> HarnessReplayLookup:
+            return HarnessReplayLookup(
+                status="ok",
+                result=HarnessReplayResult(
+                    run_id=run_id,
+                    status="reproduced",
+                    baseline_manifest_sha256="a" * 64,
+                    current_manifest_sha256="a" * 64,
+                    baseline_rule_version="1",
+                    current_rule_version="1",
+                    baseline_explanation_sha256="b" * 64,
+                    current_explanation_sha256="b" * 64,
+                    timeline=(),
+                    artifacts=(),
+                    anomalies=(),
+                    differences=(),
+                ),
+            )
+
+    engine = _FakeEngine()
+    engine.harness_service = DetailService()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "replay-request",
+            "type": ClientEventType.HARNESS_REPLAY_REQUEST,
+            "payload": {"run_id": "detail-run", "known_revision": 0},
+        }
+    )
+
+    response = next(
+        record for record in _records(writer) if record["type"] == "harness/replay"
+    )
+    assert response["request_id"] == "replay-request"
+    assert response["payload"]["run_id"] == "detail-run"
+    assert response["payload"]["result"]["status"] == "reproduced"
+
+
+@pytest.mark.asyncio
+async def test_bridge_returns_typed_harness_detail_unavailable_without_leaking_error() -> None:
+    class FailingService:
+        async def explain_run(self, _run_id: str) -> HarnessExplainLookup:
+            raise RuntimeError("private path: /Users/example/secret")
+
+    for service in (None, FailingService()):
+        engine = _FakeEngine()
+        if service is not None:
+            engine.harness_service = service
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record(
+            {
+                "id": "unavailable-request",
+                "type": ClientEventType.HARNESS_EXPLAIN_REQUEST,
+                "payload": {"run_id": "detail-run", "known_revision": 1},
+            }
+        )
+
+        response = next(
+            record for record in _records(writer) if record["type"] == "harness/explain"
+        )
+        assert response["request_id"] == "unavailable-request"
+        assert response["payload"]["lookup_status"] == "unavailable"
+        assert "explanation" not in response["payload"]
+        assert "private path" not in json.dumps(response, ensure_ascii=False)
 
 
 def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
