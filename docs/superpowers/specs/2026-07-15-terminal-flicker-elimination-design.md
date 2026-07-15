@@ -108,3 +108,20 @@ CSI ?2026h + frame bytes + CSI ?2026l
 - 本轮不顺带调整动画图案、颜色、帧率或滚动速度，避免把视觉偏好混入重绘正确性修复。
 - 真实 PTY 验收只能证明当前 macOS 终端链路；Windows Terminal、Linux/SSH 的字节级兼容由纯测试覆盖，后续发布矩阵仍需
   在各平台实际终端执行同一冒烟脚本。
+
+## 9. 实施状态与验收证据
+
+实施完成于 2026-07-15：
+
+- `screen-painter.js` 的 full/diff 写入均由一对 `CSI ?2026h` / `CSI ?2026l` 包裹，none 帧保持零写入；
+- 新增 `redraw-scheduler.js`，首帧使用 32ms 稳定窗口，首帧前 resize 会重新计时，正常帧继续 16ms 合并；
+- `index.js` 不再直接持有 `redrawTimer`，启动、resize、绘制成功和退出分别接入 scheduler 的稳定、完成与清理语义；
+- 14 项 scheduler、painter、terminal session 和入口架构定向测试通过；
+- 单独运行的真实 Node 子进程动画测试通过，证明动画期间没有新增 clear，且同步输出 start/end 数量配对；
+- `node scripts/check-syntax.js` 检查 76 个 JavaScript 文件通过；
+- 实际 macOS PTY 使用本地 Python 虚拟环境启动真实 `naumi_agent.ui.bridge`，收到 1 个 `ready` 事件后正常 Ctrl-C
+  退出。隔离日志中 3 次 render 依次为 `full → diff → none`，full 仅 1 次，`render.error=0`、
+  `terminal_ui.fatal=0`、`terminal_ui.exit=1`；PTY 可用尺寸为 `60×12`。
+
+本轮没有运行全量 Node 或 Python 测试。Windows 与 Linux 的实机终端验证仍属于发布矩阵，不将 macOS PTY 结果外推为
+跨平台实机结论。
