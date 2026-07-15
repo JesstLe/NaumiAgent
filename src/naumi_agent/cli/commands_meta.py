@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import shlex
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,31 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from naumi_agent.cli.display import console
+from naumi_agent.tools.base import ToolCall, ToolResult
+
+
+async def _execute_tool_result(
+    engine: Any,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> ToolResult:
+    """Execute a CLI tool through the authoritative Engine facade."""
+    return await engine.execute_tool(
+        ToolCall(
+            id=f"slash-meta-{tool_name}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(arguments, ensure_ascii=False),
+        ),
+        agent_name="cli",
+    )
+
+
+def _successful_tool_content(result: ToolResult, action: str) -> str | None:
+    """Return successful content or render one terminal-safe failure."""
+    if result.status == "success":
+        return result.content
+    console.print(f"[yellow]{action}失败：{result.content}[/yellow]")
+    return None
 
 
 async def run_pursue(engine: Any, goal: str) -> None:
@@ -42,10 +69,19 @@ async def run_pursue(engine: Any, goal: str) -> None:
         progress.add_task("追踪中...", total=None)
 
         try:
-            result = await tool.execute(goal=goal)
+            result = _successful_tool_content(
+                await _execute_tool_result(
+                    engine,
+                    "pursue_goal",
+                    {"goal": goal},
+                ),
+                "目标追踪",
+            )
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️ 目标追踪被中断[/yellow]")
             return
+    if result is None:
+        return
 
     console.print(
         Panel(
@@ -72,9 +108,25 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         console.print(f"[yellow]用法: /pursue {subcommand} <运行ID>[/yellow]")
         return
     if subcommand == "list":
-        result = await tool.execute(active_only="--active" in arg.split())
+        result = _successful_tool_content(
+            await _execute_tool_result(
+                engine,
+                tool_name,
+                {"active_only": "--active" in arg.split()},
+            ),
+            "读取目标追踪状态",
+        )
     else:
-        result = await tool.execute(run_id=arg.strip())
+        result = _successful_tool_content(
+            await _execute_tool_result(
+                engine,
+                tool_name,
+                {"run_id": arg.strip()},
+            ),
+            "读取目标追踪状态",
+        )
+    if result is None:
+        return
     console.print(
         Panel(
             Markdown(result),
@@ -95,7 +147,12 @@ async def run_worktree(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        result = await tool.execute(**kwargs)
+        result = _successful_tool_content(
+            await _execute_tool_result(engine, tool_name, kwargs),
+            "Worktree 命令",
+        )
+        if result is None:
+            return
         console.print(
             Panel(
                 Markdown(result),
@@ -149,7 +206,12 @@ async def run_background(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        result = await tool.execute(**kwargs)
+        result = _successful_tool_content(
+            await _execute_tool_result(engine, tool_name, kwargs),
+            "后台任务命令",
+        )
+        if result is None:
+            return
         console.print(
             Panel(
                 Markdown(result),
@@ -206,7 +268,12 @@ async def run_schedule(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        result = await tool.execute(**kwargs)
+        result = _successful_tool_content(
+            await _execute_tool_result(engine, tool_name, kwargs),
+            "调度命令",
+        )
+        if result is None:
+            return
         console.print(
             Panel(
                 Markdown(result),
@@ -271,7 +338,16 @@ async def run_self_review(engine: Any, arg: str) -> None:
 
     console.print("[bold yellow]🔍 自我审查启动...[/bold yellow]")
     with console.status("[bold green]扫描自身源码中...[/bold green]"):
-        result = await tool.execute(focus=focus, module=module)
+        result = _successful_tool_content(
+            await _execute_tool_result(
+                engine,
+                "self_review",
+                {"focus": focus, "module": module},
+            ),
+            "自我审查",
+        )
+    if result is None:
+        return
 
     console.print()
     console.print(
@@ -436,11 +512,20 @@ async def run_evolve(engine: Any, arg: str) -> None:
     console.print("[dim]Phase 2: 验证并应用修改...[/dim]")
 
     with console.status("[bold green]验证中...[/bold green]"):
-        modify_result_str = await self_modify.execute(
-            target_file=target_file,
-            new_content=new_content,
-            description=change_desc,
+        modify_result_str = _successful_tool_content(
+            await _execute_tool_result(
+                engine,
+                "self_modify",
+                {
+                    "target_file": target_file,
+                    "new_content": new_content,
+                    "description": change_desc,
+                },
+            ),
+            "自我修改",
         )
+    if modify_result_str is None:
+        return
 
     if "已应用" not in modify_result_str:
         console.print()
@@ -600,7 +685,12 @@ async def run_forge(engine: Any, arg: str) -> None:
         kwargs = {"description": description}
         if llm_output:
             kwargs["llm_output"] = llm_output
-        result_str = await forge_tool_instance.execute(**kwargs)
+        result_str = _successful_tool_content(
+            await _execute_tool_result(engine, "forge_tool", kwargs),
+            "工具锻造",
+        )
+    if result_str is None:
+        return
 
     console.print()
     console.print(
