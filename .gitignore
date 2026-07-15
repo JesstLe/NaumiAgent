@@ -27,6 +27,7 @@ chroma/
 
 # Local agent workflow scratch state (PID files, previews, review caches)
 .superpowers/
+.worktrees/
 .release-smoke/
 frontend/terminal-ui/.packaging-smoke/
 
