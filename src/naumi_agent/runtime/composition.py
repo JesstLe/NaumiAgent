@@ -86,14 +86,7 @@ def create_agent_engine(
     from naumi_agent.orchestrator.engine import AgentEngine
 
     ports = build_runtime_ports(config, overrides=port_overrides)
-    return AgentEngine(
-        config,
-        session_port=ports.session_port,
-        permission_port=ports.permission_port,
-        model_port=ports.model_port,
-        tool_execution_port=ports.tool_execution_port,
-        event_sink=ports.event_sink,
-    )
+    return AgentEngine(config, ports=ports)
 
 
 __all__ = ["build_runtime_ports", "create_agent_engine"]

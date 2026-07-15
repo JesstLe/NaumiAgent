@@ -8,6 +8,7 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.ports.events import RuntimeEvent
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.streaming.sinks import NullEventSink
@@ -66,7 +67,7 @@ async def test_engine_preserves_explicit_falsey_event_sink(tmp_path: Path) -> No
 async def test_engine_uses_null_sink_by_default_and_keeps_legacy_emitter(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(_config(tmp_path))
+    engine = create_agent_engine(_config(tmp_path))
     try:
         assert isinstance(engine.event_sink, NullEventSink)
         assert isinstance(engine.emitter, EventEmitter)

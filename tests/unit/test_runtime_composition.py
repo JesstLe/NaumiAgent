@@ -172,11 +172,4 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
         result = create_agent_engine(config)
 
     assert result is sentinel
-    engine_type.assert_called_once_with(
-        config,
-        session_port=ports.session_port,
-        permission_port=ports.permission_port,
-        model_port=ports.model_port,
-        tool_execution_port=ports.tool_execution_port,
-        event_sink=ports.event_sink,
-    )
+    engine_type.assert_called_once_with(config, ports=ports)
