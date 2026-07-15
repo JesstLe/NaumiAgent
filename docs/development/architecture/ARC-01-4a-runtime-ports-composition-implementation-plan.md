@@ -53,7 +53,7 @@
 - Consumes: `SessionPort[SessionT]`, `PermissionPort`, `ModelPort`, `ToolExecutionPort`, `EventSink`.
 - Produces: `RuntimePorts[SessionT]`, `RuntimePortOverrides[SessionT]`, `validate_runtime_port_overrides(overrides) -> None`.
 
-- [ ] **Step 1: Write failing bundle contract tests**
+- [x] **Step 1: Write failing bundle contract tests**
 
 Create `tests/unit/test_runtime_dependencies.py` with concrete complete adapters and deliberately incomplete objects:
 
@@ -133,7 +133,7 @@ def test_overrides_allow_none_and_reject_non_none_partial_port():
         validate_runtime_port_overrides(invalid)
 ```
 
-- [ ] **Step 2: Run the test and verify the missing module failure**
+- [x] **Step 2: Run the test and verify the missing module failure**
 
 Run:
 
@@ -144,7 +144,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: collection fails with `ModuleNotFoundError: No module named 'naumi_agent.runtime.dependencies'`.
 
-- [ ] **Step 3: Implement exact bundle types and validation**
+- [x] **Step 3: Implement exact bundle types and validation**
 
 Create `src/naumi_agent/runtime/dependencies.py`:
 
@@ -236,7 +236,7 @@ Keep `runtime/__init__.py` unchanged. Callers import this focused contract from
 `naumi_agent.runtime.dependencies`, preventing an unrelated `naumi_agent.runtime.*` import from eagerly loading
 composition adapters.
 
-- [ ] **Step 4: Run focused contract, Ruff, and compile checks**
+- [x] **Step 4: Run focused contract, Ruff, and compile checks**
 
 Run:
 
@@ -252,7 +252,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m compileall -q 
 
 Expected: all new tests pass, Ruff exits 0, compileall exits 0.
 
-- [ ] **Step 5: Self-review and commit the contract**
+- [x] **Step 5: Self-review and commit the contract**
 
 Check:
 
@@ -284,7 +284,7 @@ git commit -m "feat(runtime): define composition port bundles [ARC-01.4a]"
 - Consumes: `AppConfig`, `RuntimePortOverrides[Session]` from Task 1, five concrete default adapters.
 - Produces: `build_runtime_ports(config, *, overrides=None) -> RuntimePorts[Session]` and `create_agent_engine(config, *, port_overrides=None) -> AgentEngine`.
 
-- [ ] **Step 1: Write failing default and override tests**
+- [x] **Step 1: Write failing default and override tests**
 
 Create `tests/unit/test_runtime_composition.py`. Use `_config(tmp_path)` with explicit workspace/session/chroma paths and these assertions:
 
@@ -424,7 +424,7 @@ def test_create_agent_engine_injects_every_built_port(tmp_path):
     )
 ```
 
-- [ ] **Step 2: Run the tests and verify the missing composition module failure**
+- [x] **Step 2: Run the tests and verify the missing composition module failure**
 
 Run:
 
@@ -435,7 +435,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: collection fails because `naumi_agent.runtime.composition` does not exist.
 
-- [ ] **Step 3: Implement the root builder**
+- [x] **Step 3: Implement the root builder**
 
 Create `src/naumi_agent/runtime/composition.py`:
 
@@ -544,7 +544,7 @@ runnable. Task 3 atomically changes the factory to `AgentEngine(config, ports=po
 bundle. Do not create directories and do not catch catalog/permission/config errors. Keep `runtime/__init__.py` unchanged;
 entrypoints import `naumi_agent.runtime.composition` explicitly so default adapters are never loaded as a side effect.
 
-- [ ] **Step 4: Run focused tests and verify current Port contracts did not regress**
+- [x] **Step 4: Run focused tests and verify current Port contracts did not regress**
 
 Run:
 
@@ -561,7 +561,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Self-review and commit the root builder**
+- [x] **Step 5: Self-review and commit the root builder**
 
 Run:
 
@@ -595,7 +595,7 @@ git commit -m "feat(runtime): add port composition root [ARC-01.4a]"
 - Consumes: `RuntimePorts[Session]`, `RuntimePortOverrides[Session]`, `build_runtime_ports()`.
 - Produces: `AgentEngine(config, *, ports=...)`; legacy individual args delegate to the root without concrete imports.
 
-- [ ] **Step 1: Write failing bundle, conflict, and delegation tests**
+- [x] **Step 1: Write failing bundle, conflict, and delegation tests**
 
 Create `tests/unit/test_engine_port_bundle.py`:
 
@@ -664,7 +664,7 @@ Change `test_engine_uses_null_sink_by_default_and_keeps_legacy_emitter` to const
 `create_agent_engine(_config(tmp_path))`. This removes one redundant legacy constructor while the new delegation test
 adds one, keeping the legacy test-construction budget from increasing.
 
-- [ ] **Step 2: Run the tests and verify `ports` is rejected by the current constructor**
+- [x] **Step 2: Run the tests and verify `ports` is rejected by the current constructor**
 
 Run:
 
@@ -675,7 +675,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: fails with `TypeError: AgentEngine.__init__() got an unexpected keyword argument 'ports'`.
 
-- [ ] **Step 3: Replace Engine adapter construction with bundle resolution**
+- [x] **Step 3: Replace Engine adapter construction with bundle resolution**
 
 Modify imports in `engine.py`:
 
@@ -727,7 +727,7 @@ return AgentEngine(config, ports=ports)
 Update `test_create_agent_engine_injects_every_built_port` to expect
 `engine_type.assert_called_once_with(config, ports=ports)` in the same Task 3 commit.
 
-- [ ] **Step 4: Move stale patch targets and run the focused Engine/Port tests**
+- [x] **Step 4: Move stale patch targets and run the focused Engine/Port tests**
 
 Update tests that patch `naumi_agent.orchestrator.engine.load_provider_catalog` to patch
 `naumi_agent.runtime.composition.load_provider_catalog`. Preserve the assertion that an injected model override does not load the catalog.
@@ -758,7 +758,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: all selected tests pass; explicit incomplete/falsey/default behavior remains green.
 
-- [ ] **Step 5: Prove Engine no longer owns concrete Port adapters and commit**
+- [x] **Step 5: Prove Engine no longer owns concrete Port adapters and commit**
 
 Run:
 
@@ -803,7 +803,7 @@ git commit -m "refactor(runtime): inject composed port bundle [ARC-01.4a]"
 - Consumes: `create_agent_engine(config)` from Task 2.
 - Produces: five product surfaces with no direct default AgentEngine construction.
 
-- [ ] **Step 1: Write failing routing and lifecycle tests**
+- [x] **Step 1: Write failing routing and lifecycle tests**
 
 Create `tests/unit/test_runtime_composition_entrypoints.py` with source-routing assertions plus executable API lifespan coverage:
 
@@ -916,7 +916,7 @@ monkeypatch.setattr(composition, "create_agent_engine", forbidden_default_root)
 
 The existing explicit factory test must still pass, proving test injection is not wrapped or replaced.
 
-- [ ] **Step 2: Run routing tests and verify they fail on current direct constructors**
+- [x] **Step 2: Run routing tests and verify they fail on current direct constructors**
 
 Run:
 
@@ -929,7 +929,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: source assertion or monkeypatch route fails because production entrypoints still import/call AgentEngine.
 
-- [ ] **Step 3: Migrate main, API, and Bridge defaults**
+- [x] **Step 3: Migrate main, API, and Bridge defaults**
 
 For each of `_launch_tui`, `_chat`, and `_run_task` in `main.py`, replace the local Engine import with:
 
@@ -952,7 +952,7 @@ if engine_factory is None:
 engine = engine_factory(config)
 ```
 
-- [ ] **Step 4: Run focused product-surface tests**
+- [x] **Step 4: Run focused product-surface tests**
 
 Run:
 
@@ -966,7 +966,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected: all selected tests pass. Do not run full `test_api.py` or full TUI tests.
 
-- [ ] **Step 5: Self-review direct-construction counts and commit**
+- [x] **Step 5: Self-review direct-construction counts and commit**
 
 Run:
 
@@ -1005,7 +1005,7 @@ git commit -m "refactor(runtime): route entrypoints through composition [ARC-01.
 - Consumes: completed RuntimePorts bundle, root factory, AgentEngine streaming/event/session contracts.
 - Produces: real execution evidence, static ownership gates, final 4a audit record.
 
-- [ ] **Step 1: Write the real streaming acceptance test**
+- [x] **Step 1: Write the real streaming acceptance test**
 
 Create `tests/integration/test_runtime_composition_streaming.py` with a real SQLite SessionStore, real bypass
 PermissionChecker, real LocalToolExecutor, actual `file_read` tool execution, a ModelRouter whose network stream is
@@ -1146,7 +1146,7 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
 The caller sink is deliberately a separate `NullEventSink`, so the injected base sink observes each authoritative
 event once and sequence assertions are not distorted by fan-out duplication.
 
-- [ ] **Step 2: Write AST/static architecture tests**
+- [x] **Step 2: Write AST/static architecture tests**
 
 Create `tests/unit/test_architecture_runtime_composition.py` using `ast.parse` instead of fragile raw substring
 checks:
@@ -1259,7 +1259,7 @@ This gate distinguishes new explicit `ports=` bundle tests from legacy default/i
 authoritative legacy baseline is 171; Task 3 replaces one redundant default test with the root as it adds one focused
 delegation test, so the budget stays flat or decreases.
 
-- [ ] **Step 3: Run red/green acceptance and architecture checks**
+- [x] **Step 3: Run red/green acceptance and architecture checks**
 
 Run the two tests before adding any missing implementation; expected failure must identify an actual uncovered route
 or contract, not a syntax error. Fix only the 4a behavior required by those failures, then rerun:
@@ -1272,7 +1272,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m pytest -q \
 
 Expected final result: all selected tests pass.
 
-- [ ] **Step 4: Run the complete ARC-01.4a focused verification matrix**
+- [x] **Step 4: Run the complete ARC-01.4a focused verification matrix**
 
 Run in separate small groups so a failure identifies its domain:
 
@@ -1330,7 +1330,7 @@ PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/python -m compileall -q 
 Expected: every command exits 0. Record exact pass counts in the design audit; do not report a total based on
 arithmetic without reading each command result.
 
-- [ ] **Step 5: Update documentation with authoritative audit evidence**
+- [x] **Step 5: Update documentation with authoritative audit evidence**
 
 Append to `ARC-01-4a-runtime-ports-composition-design.md`:
 
@@ -1350,7 +1350,7 @@ ARC-01.4 Composition root | 4a 已实现，4b 待开发
 
 Link the overall design, 4a design, implementation plan, and final audit section.
 
-- [ ] **Step 6: Self-review, commit acceptance evidence, and stop before 4b**
+- [x] **Step 6: Self-review, commit acceptance evidence, and stop before 4b**
 
 Run:
 
@@ -1380,16 +1380,16 @@ tests from the committed tree, and review the complete diff from the design comm
 
 ## Final Review Checklist
 
-- [ ] Exactly one production default Port builder exists.
-- [ ] Runtime dependency types import no concrete adapter or AgentEngine.
-- [ ] AgentEngine imports and constructs no default Port adapter.
-- [ ] Full bundle and legacy individual overrides preserve identity.
-- [ ] Bundle plus individual override is rejected explicitly.
-- [ ] Invalid override fails before any default construction.
-- [ ] Falsey complete override is never replaced.
-- [ ] TUI, fallback CLI, run, API, and New UI Bridge use the root.
-- [ ] Explicit Bridge factory override bypasses the default root exactly as requested.
-- [ ] A real streaming run reaches session persistence, model stream, events, receipt, and shutdown.
-- [ ] Direct production constructor count is zero; test count does not exceed 171.
-- [ ] Focused pytest, Ruff, compileall, and architecture checks are fresh and passing.
-- [ ] Documentation states that 4b/4c/4d remain incomplete; ARC-01.4 overall is not falsely marked complete.
+- [x] Exactly one production default Port builder exists.
+- [x] Runtime dependency types import no concrete adapter or AgentEngine.
+- [x] AgentEngine imports and constructs no default Port adapter.
+- [x] Full bundle and legacy individual overrides preserve identity.
+- [x] Bundle plus individual override is rejected explicitly.
+- [x] Invalid override fails before any default construction.
+- [x] Falsey complete override is never replaced.
+- [x] TUI, fallback CLI, run, API, and New UI Bridge use the root.
+- [x] Explicit Bridge factory override bypasses the default root exactly as requested.
+- [x] A real streaming run reaches session persistence, model stream, events, receipt, and shutdown.
+- [x] Direct production constructor count outside the root is zero; legacy test count does not exceed 171.
+- [x] Focused pytest, Ruff, compileall, and architecture checks are fresh and passing.
+- [x] Documentation states that 4b/4c/4d remain incomplete; ARC-01.4 overall is not falsely marked complete.
