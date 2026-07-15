@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { ANSI, configureAnsiColors, sanitizeTerminalText } from "./ansi.js";
+import { configureAnsiColors, sanitizeTerminalText } from "./ansi.js";
 import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
 import { createDebugLog } from "./debug-log.js";
 import { createHeartbeatController, heartbeatTimingFromEnv } from "./heartbeat.js";
@@ -80,6 +80,7 @@ import {
 import { createTrackpadScrollFilter } from "./scroll-input.js";
 import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
 import { createWorkingAnimationController } from "./working-animation.js";
+import { createScreenPainter } from "./screen-painter.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 import { createTerminalSession } from "./terminal-session.js";
 import {
@@ -119,6 +120,9 @@ const terminalSession = createTerminalSession({
   stdin: process.stdin,
   stdout: process.stdout,
   capabilities: terminalCapabilities,
+});
+const screenPainter = createScreenPainter({
+  write: (value) => process.stdout.write(value),
 });
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
@@ -923,10 +927,14 @@ function redraw() {
     const lines = renderScreen(state, width, height, terminalRenderEnvironment());
     viewportWidth = width;
     viewportHeight = height;
+    const paint = screenPainter.paint(lines, width, height);
     debugLog?.log("render.screen", {
       width,
       height,
       line_count: lines.length,
+      paint_mode: paint.mode,
+      changed_rows: paint.changedRows,
+      terminal_write: paint.written,
       messages: state.messages.length,
       running: state.running,
       mode: state.mode,
@@ -934,7 +942,6 @@ function redraw() {
       follow_tail: state.followTail,
       unread_output_count: state.unreadOutputCount,
     });
-    process.stdout.write(ANSI.clear + lines.join("\n"));
   } catch (error) {
     debugLog?.log("render.error", {
       width,

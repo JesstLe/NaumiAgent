@@ -141,6 +141,7 @@ attachJsonlLineReader(process.stdin, (line) => {
     emitUi({ type: "assistant_stream", phase: "start" });
     emitUi({ type: "assistant_stream", phase: "token", content: "任务已创建，正在执行。" });
     emitUi({ type: "assistant_stream", phase: "end" });
+    const taskDelayMs = Math.max(0, Number(process.env.NAUMI_TEST_TASK_DELAY_MS) || 120);
     setTimeout(() => {
       if (activeRun?.requestId !== record.id) return;
       const completedTask = { ...task, status: "completed" };
@@ -152,7 +153,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         intent: "task",
       }, record.id);
       activeRun = null;
-    }, 120);
+    }, taskDelayMs);
     return;
   }
 
