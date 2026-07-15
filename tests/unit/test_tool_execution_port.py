@@ -19,6 +19,7 @@ from naumi_agent.runtime.ports.tool_execution import (
     ToolExecutionOutcome,
     ToolExecutionPort,
 )
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import Tool, ToolCall
 from naumi_agent.tools.builtin import FileReadTool, FileWriteTool
 from naumi_agent.tools.execution import LocalToolExecutor
@@ -319,6 +320,41 @@ async def test_engine_rejections_never_reach_tool_execution_port(
 
 
 @pytest.mark.asyncio
+async def test_engine_permission_block_never_reaches_tool_execution_port(
+    tmp_path: Path,
+) -> None:
+    port = _RecordingExecutor()
+    permission = PermissionChecker(
+        PermissionMode.STRICT,
+        [str(tmp_path)],
+        str(tmp_path),
+    )
+    engine = AgentEngine(
+        _engine_config(tmp_path),
+        permission_port=permission,
+        tool_execution_port=port,
+    )
+    try:
+        result = await engine.execute_tool(
+            ToolCall(
+                id="permission-blocked",
+                name="file_write",
+                arguments=_json_arguments(
+                    path=str(tmp_path / "blocked.txt"),
+                    content="blocked",
+                ),
+            )
+        )
+
+        assert result.status == "error"
+        assert "权限拒绝" in result.content
+        assert port.calls == []
+        assert not (tmp_path / "blocked.txt").exists()
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_engine_public_facade_invokes_port_after_bypass_authorization(
     tmp_path: Path,
 ) -> None:
@@ -508,6 +544,50 @@ async def test_engine_port_failure_does_not_cancel_parallel_sibling(
         assert "isolated-port-failure" in tool_messages["parallel-failure"]
         assert "sibling completed" in tool_messages["parallel-success"]
         assert set(port.entered) == {str(failed_path), str(successful_path)}
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_mutating_port_failure_does_not_invalidate_harness_cache(
+    tmp_path: Path,
+) -> None:
+    port = _SelectiveFailingExecutor()
+    engine = AgentEngine(_engine_config(tmp_path), tool_execution_port=port)
+    engine.set_runtime_mode("bypass")
+    invalidations: list[str] = []
+
+    async def invalidate() -> None:
+        invalidations.append("invalidated")
+
+    engine.harness_service.invalidate_knowledge_cache = invalidate  # type: ignore[method-assign]
+    try:
+        failed = await engine.execute_tool(
+            ToolCall(
+                id="mutating-failure",
+                name="file_write",
+                arguments=_json_arguments(
+                    path=str(tmp_path / "fail.txt"),
+                    content="must not exist",
+                ),
+            )
+        )
+        succeeded = await engine.execute_tool(
+            ToolCall(
+                id="mutating-success",
+                name="file_write",
+                arguments=_json_arguments(
+                    path=str(tmp_path / "success.txt"),
+                    content="written",
+                ),
+            )
+        )
+
+        assert failed.status == "error"
+        assert succeeded.status == "success"
+        assert invalidations == ["invalidated"]
+        assert not (tmp_path / "fail.txt").exists()
+        assert (tmp_path / "success.txt").read_text(encoding="utf-8") == "written"
     finally:
         await engine.shutdown()
 
