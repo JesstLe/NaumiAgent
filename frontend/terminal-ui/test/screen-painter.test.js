@@ -16,11 +16,19 @@ test("screen painter clears once then updates only changed rows", () => {
   assert.deepEqual(animated, { mode: "diff", changedRows: 1, written: true });
   assert.deepEqual(unchanged, { mode: "none", changedRows: 0, written: false });
   assert.equal(writes.length, 2);
-  assert.equal(writes[0], `${ANSI.clear}header\nworking-0\nfooter`);
-  assert.equal(writes[1], `${ANSI.cursorTo(2, 1)}working-1`);
+  assert.equal(
+    writes[0],
+    `${ANSI.synchronizedOutputOn}${ANSI.clear}header\nworking-0\nfooter${ANSI.synchronizedOutputOff}`,
+  );
+  assert.equal(
+    writes[1],
+    `${ANSI.synchronizedOutputOn}${ANSI.cursorTo(2, 1)}working-1${ANSI.synchronizedOutputOff}`,
+  );
   assert.equal(writes[1].includes("\x1b[2J"), false);
   assert.equal(writes[1].includes("header"), false);
   assert.equal(writes[1].includes("footer"), false);
+  assert(writes.every((value) => count(value, ANSI.synchronizedOutputOn) === 1));
+  assert(writes.every((value) => count(value, ANSI.synchronizedOutputOff) === 1));
 });
 
 test("screen painter reinitializes after terminal dimensions change", () => {
@@ -31,7 +39,10 @@ test("screen painter reinitializes after terminal dimensions change", () => {
   const resized = painter.paint(["one", "two", "three"], 100, 3);
 
   assert.deepEqual(resized, { mode: "full", changedRows: 3, written: true });
-  assert.equal(writes[1], `${ANSI.clear}one\ntwo\nthree`);
+  assert.equal(
+    writes[1],
+    `${ANSI.synchronizedOutputOn}${ANSI.clear}one\ntwo\nthree${ANSI.synchronizedOutputOff}`,
+  );
 });
 
 test("screen painter validates complete frames before writing", () => {
@@ -62,5 +73,12 @@ test("screen painter retries a full frame after a failed write", () => {
     { mode: "full", changedRows: 1, written: true },
   );
   assert.equal(writes.length, 2);
-  assert(writes.every((value) => value.startsWith(ANSI.clear)));
+  assert(writes.every(
+    (value) => value.startsWith(`${ANSI.synchronizedOutputOn}${ANSI.clear}`)
+      && value.endsWith(ANSI.synchronizedOutputOff),
+  ));
 });
+
+function count(value, needle) {
+  return String(value).split(needle).length - 1;
+}
