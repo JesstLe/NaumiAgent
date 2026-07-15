@@ -38,6 +38,7 @@ from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.completion_receipt import (
@@ -2200,7 +2201,10 @@ class NaumiApp(App):
         captured_noise = ""
         try:
             with _capture_tui_terminal_noise() as (stdout_buf, stderr_buf):
-                result = await self.engine.run_streaming(task, on_event)
+                result = await self.engine.run_streaming(
+                    task,
+                    CallbackEventSink(on_event),
+                )
                 captured_noise = _captured_terminal_text(stdout_buf, stderr_buf)
             if self.debug_trace is not None:
                 self.debug_trace.event(

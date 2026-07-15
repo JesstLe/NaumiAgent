@@ -12,6 +12,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 
 from naumi_agent.cli.display import console
+from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 
@@ -931,7 +932,10 @@ async def run_skill(engine: Any, skill_name: str, arguments: str) -> None:
     rendered = skill.render(arguments=arguments)
 
     with console.status("[bold green]执行中...[/bold green]"):
-        result = await engine.run_streaming(rendered, cli_event_handler)
+        result = await engine.run_streaming(
+            rendered,
+            CallbackEventSink(cli_event_handler),
+        )
 
     if result.status == "error" and result.error:
         console.print(f"[red]错误: {result.error}[/red]")

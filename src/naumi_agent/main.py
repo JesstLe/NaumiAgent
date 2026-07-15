@@ -28,6 +28,7 @@ from naumi_agent.config.configurator import ConfigurationError, configure_projec
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.log_setup import suppress_startup_import_warnings
+from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import (
     DEFAULT_CODE_BLOCK_MAX_LINES,
@@ -1547,7 +1548,10 @@ async def _chat(config_path: str) -> None:
 
         event_handler = _cli_event_factory(cli)
         cli.record_debug_event("cli.agent_run_start", {"task": text})
-        result = await engine.run_streaming(text, event_handler)
+        result = await engine.run_streaming(
+            text,
+            CallbackEventSink(event_handler),
+        )
         cli.record_debug_event(
             "cli.agent_run_end",
             {
@@ -4596,7 +4600,10 @@ async def _run_skill(engine: Any, skill_name: str, arguments: str) -> None:
 
     # 将渲染后的指令作为用户消息注入 engine 执行
     with console.status("[bold green]执行中...[/bold green]"):
-        result = await engine.run_streaming(rendered, _cli_event_handler)
+        result = await engine.run_streaming(
+            rendered,
+            CallbackEventSink(_cli_event_handler),
+        )
 
     if result.status == "error" and result.error:
         console.print(f"[red]错误: {result.error}[/red]")

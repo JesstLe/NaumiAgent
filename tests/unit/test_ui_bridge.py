@@ -257,6 +257,19 @@ class _FakeRouter:
         return self.get_reasoning_effort_status(model)
 
 
+def _fake_event_callback(
+    event_sink: EventSink,
+    *,
+    run_id: str = "run-fake",
+) -> Any:
+    assert isinstance(event_sink, EventSink)
+    return RuntimeEventPublisher(
+        event_sink,
+        session_id="session-fake",
+        run_id=run_id,
+    ).legacy_callback()
+
+
 class _FakeEngine:
     def __init__(self) -> None:
         self.runtime_mode = AgentRuntimeMode.DEFAULT
@@ -331,6 +344,7 @@ class _FakeEngine:
         return count
 
     async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+        on_event = _fake_event_callback(on_event)
         await on_event("turn_start", {"turn": 1, "model": "fake-capable"})
         await on_event("response_start", {})
         await on_event("token", {"content": f"收到: {task}"})
@@ -421,6 +435,7 @@ class _SlowFakeEngine(_FakeEngine):
 
     async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
         self.run_tasks.append(task)
+        on_event = _fake_event_callback(on_event, run_id=f"run-{len(self.run_tasks)}")
         await on_event("response_start", {})
         await on_event("token", {"content": f"处理中: {task}"})
         await self.release_run.wait()
@@ -519,6 +534,7 @@ class _TaskSubmitFakeEngine(_FakeEngine):
         turn_context: str = "",
     ) -> AgentResult:
         self.turn_contexts.append(turn_context)
+        on_event = _fake_event_callback(on_event, run_id="run-task")
         await on_event("response_start", {})
         await on_event("token", {"content": f"执行: {task}"})
         await on_event("response_end", {})
@@ -1989,6 +2005,7 @@ async def test_bridge_emits_completion_receipt_before_correlated_run_completion(
 
     class ReceiptEngine(_FakeEngine):
         async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+            on_event = _fake_event_callback(on_event, run_id=receipt.run_id)
             await on_event("run_started", {"task": task, "run_id": receipt.run_id})
             await on_event("completion_receipt", receipt.to_dict())
             return AgentResult(

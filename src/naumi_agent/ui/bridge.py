@@ -24,6 +24,7 @@ from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.permission_confirmation import summarize_arguments
@@ -820,7 +821,10 @@ class JsonlEngineBridge:
         async def run() -> None:
             was_cancelled = False
             try:
-                result = await self.engine.run_streaming(text, self.handle_engine_event)
+                result = await self.engine.run_streaming(
+                    text,
+                    CallbackEventSink(self.handle_engine_event),
+                )
                 await self.emit(
                     ServerEventType.RUN_COMPLETED,
                     {
@@ -988,7 +992,7 @@ class JsonlEngineBridge:
             try:
                 result = await self.engine.run_streaming(
                     text,
-                    self.handle_engine_event,
+                    CallbackEventSink(self.handle_engine_event),
                     turn_context=context,
                 )
                 final_status = (
