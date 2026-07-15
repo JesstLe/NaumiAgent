@@ -691,6 +691,64 @@ class TestBrowserRuntimeInit:
         assert result["matched"] == "textGone"
 
     @pytest.mark.asyncio
+    async def test_evaluate_passes_raw_expression_and_returns_value(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = MagicMock()
+        runtime.page = MagicMock()
+        runtime.page.evaluate = AsyncMock(return_value="Naumi Repro")
+
+        result = await runtime.evaluate("document.title")
+
+        runtime.page.evaluate.assert_awaited_once_with("document.title")
+        assert result == {"result": "Naumi Repro", "isError": False}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("page_result", "serialized"),
+        [
+            ({"count": 2}, '{\n  "count": 2\n}'),
+            (None, ""),
+            ("x" * 9000, "x" * 8192),
+        ],
+    )
+    async def test_evaluate_serializes_supported_results(
+        self,
+        tmp_path: Path,
+        page_result: object,
+        serialized: str,
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = MagicMock()
+        runtime.page = MagicMock()
+        runtime.page.evaluate = AsyncMock(return_value=page_result)
+
+        result = await runtime.evaluate("window.__value")
+
+        assert result == {"result": serialized, "isError": False}
+
+    @pytest.mark.asyncio
+    async def test_evaluate_returns_page_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runtime = BrowserRuntime(tmp_path)
+        runtime.artifacts.start_session()
+        runtime.browser = MagicMock()
+        runtime.page = MagicMock()
+        runtime.page.evaluate = AsyncMock(
+            side_effect=RuntimeError("page closed")
+        )
+
+        result = await runtime.evaluate("document.title")
+
+        assert result == {"result": "page closed", "isError": True}
+
+    @pytest.mark.asyncio
     async def test_managed_launch_uses_python_playwright_video_options(
         self, tmp_path: Path,
     ) -> None:
