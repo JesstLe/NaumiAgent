@@ -5,6 +5,9 @@
 从持久化 Run/Check/Evidence/Receipt 重建规范化时间线并重新运行纯分类器，验证同一输入在
 相同规则版本下得到相同解释。Replay 不重放工具副作用，不调用模型。
 
+详细数据模型、安全边界与状态语义见
+[HAR-05-safe-replay-design.md](HAR-05-safe-replay-design.md)。
+
 ## 子模块
 
 | ID | 子模块 | 产物 |
