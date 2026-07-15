@@ -62,7 +62,7 @@ class _EngineToolCallFake:
         self.reload_domains: list[str] = []
         self.tool_outputs: dict[str, str] = {}
 
-    async def _execute_tool(
+    async def execute_tool(
         self,
         tool_call: ToolCall,
         *,

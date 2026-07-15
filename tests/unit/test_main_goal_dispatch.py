@@ -30,7 +30,7 @@ class _EngineFake:
         }
         self.executed: list[tuple[ToolCall, str | None]] = []
 
-    async def _execute_tool(
+    async def execute_tool(
         self,
         tool_call: ToolCall,
         *,
