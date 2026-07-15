@@ -28,8 +28,9 @@
 
 ## 接口
 
-- `HarnessReplayService.replay(run_id, *, verify_artifacts=True) -> HarnessReplayResult`
-- `HarnessReplayResult.status`: `reproduced|changed|partial|corrupt|not_found`
+- `HarnessService.replay_run(run_id) -> HarnessReplayLookup`
+- `HarnessReplayResult.status`: `reproduced|changed|partial|corrupt`
+- Lookup 层状态：`ok|not_found|unavailable`
 - Replay 只读取当前 workspace；显式外部 run id 按 not_found 处理。
 
 ## 必测失败路径
@@ -50,3 +51,31 @@
 ## 非目标
 
 不重放模型、不重新跑 check、不恢复 Session、不做 Eval 评分。
+
+## 实现状态（2026-07-15）
+
+HAR-05.1-HAR-05.6 已实现：
+
+- Harness Store schema v2 保存不可变 manifest、规则版本和 explanation digest；v1 增量迁移只
+  新增 Replay 基线表。
+- 新 Run 完成时捕获基线；旧 Run 首次回放明确标记 legacy baseline，避免伪称历史可复现。
+- 规范化时间线使用稳定排序；artifact、`artifact://` 与 `chat-run://` evidence 执行路径边界
+  和 SHA-256 校验。
+- `/harness replay [run-id|latest]` 与只读、可并发的 `harness_replay` Agent Tool 共用
+  `HarnessService.replay_run()`。
+- Replay 依赖中没有 ToolRegistry、ModelRouter、check 执行或 Session 恢复入口。
+
+### 定向验证
+
+- Ruff：所有 HAR-05 源文件和相关测试通过。
+- 单元/相邻模块：Replay、Store、Tool、Surface、Explain、Evidence、Runtime Persistence
+  定向测试通过。
+- A3：真实临时 Git 工作区和 SQLite 由一个 Python 进程完成 Run，另一个独立进程回放；
+  reproduced、artifact 删除 partial、artifact 篡改 corrupt 均通过，且 Harness check 执行
+  入口由失败 canary 保护，调用次数为 0。
+
+### 自我审视与限制
+
+- v1 历史记录没有完成时基线，首次回放只能建立 legacy baseline；该限制会在回执中显示。
+- `chat-run://` 验证的是已持久化的规范化 summary，不恢复或展示原始工具输出。
+- HAR-05 使用局部、只新增表的 v2 迁移；通用状态迁移治理仍属于 ARC-05，未在本模块扩做。
