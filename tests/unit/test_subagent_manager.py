@@ -12,6 +12,8 @@ from naumi_agent.orchestrator.subagent_manager import (
     SubAgentManager,
     SubTask,
 )
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 
 
 @pytest.fixture
@@ -487,6 +489,75 @@ class TestSubAgentManager:
         ]
         release.set()
         assert (await delegated).status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_delegate_rejects_unknown_child_runtime_event_before_forwarding(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        forwarded: list[str] = []
+
+        async def invalid_execute(*, event_callback: object, **_: object) -> AgentResult:
+            assert callable(event_callback)
+            await event_callback("invented_child_event", {"value": 1})
+            return AgentResult(status="completed")
+
+        async def callback(event: str, _: dict[str, object]) -> None:
+            forwarded.append(event)
+
+        monkeypatch.setattr(agent, "execute", invalid_execute)
+        result = await manager.delegate(
+            SubTask("invalid-event", "inspect", "coder"),
+            event_callback=callback,
+        )
+
+        assert result.status == "error"
+        assert "未知 Runtime 事件" in str(result.error)
+        assert "invented_child_event" not in forwarded
+
+    @pytest.mark.asyncio
+    async def test_delegate_events_share_parent_publisher_sequence(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        events: list[RuntimeEvent] = []
+
+        class RecordingSink:
+            async def emit(self, event: RuntimeEvent) -> None:
+                events.append(event)
+
+        async def tool_execute(*, event_callback: object, **_: object) -> AgentResult:
+            assert callable(event_callback)
+            await event_callback("tool_start", {"tool_name": "file_read"})
+            return AgentResult(status="completed", turns=1)
+
+        monkeypatch.setattr(agent, "execute", tool_execute)
+        publisher = RuntimeEventPublisher(
+            RecordingSink(),
+            session_id="session-parent",
+            run_id="run-parent",
+        )
+
+        result = await manager.delegate(
+            SubTask("typed-events", "inspect", "coder"),
+            event_callback=publisher.legacy_callback(),
+        )
+
+        assert result.status == "completed"
+        assert [event.type for event in events] == [
+            RuntimeEventType.SUBAGENT_EVENT,
+            RuntimeEventType.TOOL_START,
+            RuntimeEventType.SUBAGENT_EVENT,
+        ]
+        assert [event.sequence for event in events] == [1, 2, 3]
+        assert {event.session_id for event in events} == {"session-parent"}
+        assert {event.run_id for event in events} == {"run-parent"}
 
     @pytest.mark.asyncio
     async def test_execution_history_is_bounded_to_one_hundred_records(
