@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { stripAnsi } from "../src/ansi.js";
+import { ANSI, stripAnsi } from "../src/ansi.js";
 
 test("terminal UI startup welcome transitions from booting to ready and dismisses", async () => {
   const app = launchTerminalUi("fake-bridge.js", {
@@ -24,6 +24,43 @@ test("terminal UI startup welcome transitions from booting to ready and dismisse
     app.stdin.write("检查欢迎页\n");
     await waitForLatestScreenWithout(output, "NaumiAgent v0.1.214", 7000);
     await waitForLatestScreen(output, "检查欢迎页", 7000);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI animates active work without repeatedly clearing the screen", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: {
+      NAUMI_TEST_TASK_DELAY_MS: "520",
+      TERM: "xterm-256color",
+    },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    const clearsBeforeRun = output.text.split(ANSI.clear).length - 1;
+
+    app.stdin.write("\x14");
+    app.stdin.write("验证无闪烁动画\n");
+    await waitForLatestScreen(output, "任务已创建，正在执行。", 7000);
+    await delay(420);
+
+    const clearsDuringAnimation = output.text.split(ANSI.clear).length - 1;
+    const renderEvents = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "render.screen",
+    );
+    const diffFrames = renderEvents.filter(
+      (record) => record.payload.paint_mode === "diff"
+        && record.payload.changed_rows > 0,
+    );
+
+    assert.equal(clearsDuringAnimation, clearsBeforeRun);
+    assert(diffFrames.length >= 2);
+    assert(diffFrames.some((record) => record.payload.changed_rows <= 3));
+    await waitForLatestScreen(output, "任务 #41 · 已完成", 2000);
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);
@@ -1560,7 +1597,22 @@ function countLatestScreen(output, needle) {
 }
 
 function latestScreen(output) {
-  return stripAnsi(output.text.split("\x1b[2J\x1b[H").at(-1) ?? "");
+  const frame = output.text.split(ANSI.clear).at(-1) ?? "";
+  const cursorPattern = /\x1b\[(\d+);(\d+)H/g;
+  const firstUpdate = cursorPattern.exec(frame);
+  if (!firstUpdate) return stripAnsi(frame);
+
+  const rows = stripAnsi(frame.slice(0, firstUpdate.index)).split("\n");
+  const updates = [...frame.matchAll(/\x1b\[(\d+);(\d+)H([\s\S]*?)(?=\x1b\[\d+;\d+H|$)/g)];
+  for (const update of updates) {
+    const row = Number(update[1]) - 1;
+    const column = Number(update[2]) - 1;
+    if (row < 0 || column < 0) continue;
+    const content = stripAnsi(update[3]).replace(/[\r\n]+$/g, "");
+    const current = rows[row] ?? "";
+    rows[row] = current.slice(0, column) + content;
+  }
+  return rows.join("\n");
 }
 
 function readDebugEvents(filePath) {
