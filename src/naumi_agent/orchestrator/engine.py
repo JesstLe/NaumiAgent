@@ -61,6 +61,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.ports.events import EventSink
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
@@ -77,6 +78,7 @@ from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_schedu
 from naumi_agent.skills.loader import SkillLoader
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
+from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.reconciliation import (
     TodoReconciliationAction,
@@ -434,8 +436,13 @@ class AgentEngine:
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
         tool_execution_port: ToolExecutionPort | None = None,
+        event_sink: EventSink | None = None,
     ) -> None:
         self._config = config
+        resolved_event_sink = NullEventSink() if event_sink is None else event_sink
+        if not isinstance(resolved_event_sink, EventSink):
+            raise TypeError("event_sink 必须实现完整的 EventSink 契约：emit")
+        self._event_sink = resolved_event_sink
         resolved_session_port = (
             SessionStore(config.memory)
             if session_port is None
@@ -882,6 +889,11 @@ class AgentEngine:
     def tool_executor(self) -> ToolExecutionPort:
         """Return the authorized tool invocation port."""
         return self._tool_execution_port
+
+    @property
+    def event_sink(self) -> EventSink:
+        """Return the injected Runtime event-output port."""
+        return self._event_sink
 
     @property
     def session_store(self) -> SessionPort[Session]:
