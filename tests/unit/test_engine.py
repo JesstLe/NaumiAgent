@@ -58,6 +58,26 @@ class FakeTool(Tool):
         return "ok"
 
 
+@pytest.mark.asyncio
+async def test_engine_passes_browser_replay_policy_to_runtime(
+    tmp_path: Path,
+) -> None:
+    config = AppConfig(
+        workspace_root=str(tmp_path),
+        browser={"replay_recording_enabled": True},  # type: ignore[arg-type]
+        memory={
+            "session_db_path": str(tmp_path / "sessions.db"),
+            "vector_db_path": str(tmp_path / "vectors"),
+            "long_term_enabled": False,
+        },  # type: ignore[arg-type]
+    )
+    engine = AgentEngine(config)
+    try:
+        assert engine._browser_session.replay_recording_enabled is True
+    finally:
+        await engine.shutdown()
+
+
 class CoordinatedSafeTool(Tool):
     def __init__(
         self,

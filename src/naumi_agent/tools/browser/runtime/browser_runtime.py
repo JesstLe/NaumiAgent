@@ -532,8 +532,14 @@ async def _is_cdp_endpoint(endpoint: str) -> bool:
 
 
 class BrowserRuntime:
-    def __init__(self, base_dir: str | Path) -> None:
+    def __init__(
+        self,
+        base_dir: str | Path,
+        *,
+        replay_recording_enabled: bool = False,
+    ) -> None:
         self.base_dir = Path(base_dir)
+        self.replay_recording_enabled = replay_recording_enabled
         self.storage_state_path = self.base_dir / "storage_state.json"
         self.artifacts = ArtifactStore(base_dir)
         self.last_session_summary: dict[str, Any] | None = None
@@ -1045,19 +1051,29 @@ class BrowserRuntime:
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "Chrome/121.0.0.0 Safari/537.36"
             ),
-            "record_video_dir": str(self.artifacts.get_video_dir()),
-            "record_video_size": {"width": 1280, "height": 800},
         }
+        if self.replay_recording_enabled:
+            context_options.update({
+                "record_video_dir": str(self.artifacts.get_video_dir()),
+                "record_video_size": {"width": 1280, "height": 800},
+            })
 
         storage_state = await load_storage_state(self.storage_state_path)
         if storage_state:
             context_options["storage_state"] = storage_state
 
         self.context = await self.browser.new_context(**context_options)
-        await self.context.tracing.start(
-            screenshots=True, snapshots=True, sources=True
-        )
-        self.trace_active = True
+        if self.replay_recording_enabled:
+            await self.context.tracing.start(
+                screenshots=True, snapshots=True, sources=True
+            )
+            self.trace_active = True
+        else:
+            self.trace_active = False
+            self.artifacts.append_event(
+                "session_replay_recording_disabled",
+                {"videos": False, "traces": False},
+            )
         self.page = await self.context.new_page()
         self._attach_page_observers()
         self.network_recorder.clear()
@@ -1115,20 +1131,27 @@ class BrowserRuntime:
                 "Open a Chrome tab after enabling remote debugging."
             )
 
-        try:
-            await self.context.tracing.start(
-                screenshots=True, snapshots=True, sources=True
-            )
-            self.trace_active = True
-        except Exception as exc:
+        if self.replay_recording_enabled:
+            try:
+                await self.context.tracing.start(
+                    screenshots=True, snapshots=True, sources=True
+                )
+                self.trace_active = True
+            except Exception as exc:
+                self.trace_active = False
+                self.artifacts.append_event(
+                    "session_trace_unavailable",
+                    {
+                        "sessionSource": self.session_source,
+                        "browserMode": self.browser_mode,
+                        "error": str(exc),
+                    },
+                )
+        else:
             self.trace_active = False
             self.artifacts.append_event(
-                "session_trace_unavailable",
-                {
-                    "sessionSource": self.session_source,
-                    "browserMode": self.browser_mode,
-                    "error": str(exc),
-                },
+                "session_replay_recording_disabled",
+                {"videos": False, "traces": False},
             )
 
         pages = self.context.pages
@@ -1136,7 +1159,8 @@ class BrowserRuntime:
         self._attach_page_observers()
         self.network_recorder.clear()
         self.network_recorder.attach(self.context)
-        await self._start_attached_screencast()
+        if self.replay_recording_enabled:
+            await self._start_attached_screencast()
 
         self.artifacts.append_event(event_type, {
             "requestedSource": self.requested_source,
@@ -3575,16 +3599,25 @@ class BrowserRuntime:
             {
                 "sessionReuse": True,
                 "visibleBrowser": True,
-                "videos": self.attached_video_capability,
-                "traces": self.trace_active,
+                "videos": (
+                    self.replay_recording_enabled
+                    and self.attached_video_capability
+                ),
+                "traces": (
+                    self.replay_recording_enabled
+                    and self.trace_active
+                ),
                 "modeSwitching": False,
             }
             if self.session_source == "attached"
             else {
                 "sessionReuse": True,
                 "visibleBrowser": self.browser_mode == "headful",
-                "videos": True,
-                "traces": True,
+                "videos": self.replay_recording_enabled,
+                "traces": (
+                    self.replay_recording_enabled
+                    and self.trace_active
+                ),
                 "modeSwitching": True,
             }
         )

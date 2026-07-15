@@ -477,6 +477,13 @@ async def test_browser_stop() -> None:
     assert data["alreadyStopped"] is False
 
 
+def test_browser_stop_description_does_not_promise_trace() -> None:
+    tool = BrowserStopTool(_make_runtime())
+
+    assert "save debug trace" not in tool.description
+    assert "enabled browser artifacts" in tool.description
+
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------

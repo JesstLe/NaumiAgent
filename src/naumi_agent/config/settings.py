@@ -241,6 +241,7 @@ class BrowserAutomationConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="NAUMI_BROWSER__")
 
+    replay_recording_enabled: bool = False
     max_concurrent_runs: int = Field(default=2, ge=1, le=8)
     run_history_limit: int = Field(default=200, ge=20, le=5000)
 

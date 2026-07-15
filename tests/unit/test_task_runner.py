@@ -23,6 +23,7 @@ from naumi_agent.tools.browser.orchestrator.task_runner import (
     evaluate_rule,
     evaluate_template,
 )
+from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -646,6 +647,27 @@ class TestTaskRunnerCreateRun:
         assert runtime.storage_state_path.read_text(encoding="utf-8") == (
             state.read_text(encoding="utf-8")
         )
+
+    def test_isolated_runtime_inherits_replay_recording_policy(
+        self,
+        tmp_path,
+    ):
+        shared = BrowserRuntime(
+            tmp_path,
+            replay_recording_enabled=True,
+        )
+        runner = TaskRunner(
+            str(tmp_path),
+            options={
+                "runtime": shared,
+                "planner": MagicMock(),
+                "max_concurrent_runs": 2,
+            },
+        )
+
+        isolated = runner._create_isolated_runtime("run-a")
+
+        assert isolated.replay_recording_enabled is True
 
     @pytest.mark.asyncio
     async def test_runtime_allocation_failure_does_not_block_following_run(
