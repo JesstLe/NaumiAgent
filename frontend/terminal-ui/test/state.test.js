@@ -2675,6 +2675,57 @@ test("typed harness receipt keeps only the newest revision per run", () => {
   assert.equal(Object.hasOwn(state.harnessReceipts, "bounded-104"), true);
 });
 
+test("typed harness details keep newest bounded revisions without rendering", () => {
+  const state = createInitialState();
+  const explain = {
+    schema_version: 1,
+    revision: 2,
+    run_id: "detail-run",
+    lookup_status: "ok",
+    message: "",
+    explanation: { status: "completed_verified", verified: true },
+  };
+  const replay = {
+    schema_version: 1,
+    revision: 3,
+    run_id: "detail-run",
+    lookup_status: "ok",
+    message: "",
+    result: { status: "reproduced" },
+  };
+
+  reduceServerEvent(state, { type: "harness/explain", payload: explain });
+  reduceServerEvent(state, {
+    type: "harness/explain",
+    payload: { ...explain, revision: 1 },
+  });
+  reduceServerEvent(state, { type: "harness/replay", payload: replay });
+  reduceServerEvent(state, {
+    type: "harness/replay",
+    payload: { ...replay, revision: 3, result: { status: "corrupt" } },
+  });
+
+  assert.equal(state.harnessExplanations["detail-run"].revision, 2);
+  assert.equal(state.harnessReplays["detail-run"].revision, 3);
+  assert.equal(state.harnessReplays["detail-run"].result.status, "reproduced");
+  assert.equal(state.messages.length, 0);
+
+  for (let index = 0; index < 105; index += 1) {
+    reduceServerEvent(state, {
+      type: "harness/explain",
+      payload: { ...explain, run_id: `explain-${index}`, revision: 1 },
+    });
+    reduceServerEvent(state, {
+      type: "harness/replay",
+      payload: { ...replay, run_id: `replay-${index}`, revision: 1 },
+    });
+  }
+  assert.equal(Object.keys(state.harnessExplanations).length, 100);
+  assert.equal(Object.keys(state.harnessReplays).length, 100);
+  assert.equal(Object.hasOwn(state.harnessExplanations, "explain-104"), true);
+  assert.equal(Object.hasOwn(state.harnessReplays, "replay-104"), true);
+});
+
 test("run completion requests a missing authoritative receipt", () => {
   const state = createInitialState();
   reduceServerEvent(state, {

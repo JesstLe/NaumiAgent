@@ -24,7 +24,13 @@ def harness_explain_payload(
 ) -> dict[str, Any]:
     """Serialize one Explain lookup without leaking unbounded Store values."""
     payload = _lookup_header(run_id, lookup.status, lookup.message, revision)
-    if lookup.status == "ok" and lookup.explanation is not None:
+    if lookup.status == "ok":
+        if lookup.explanation is None:
+            raise ValueError("Harness Explain 成功结果缺少 explanation。")
+        if lookup.explanation.run_id != payload["run_id"]:
+            raise ValueError("Harness Explain explanation.run_id 与请求不一致。")
+        if lookup.explanation.running or lookup.explanation.status == "running":
+            raise ValueError("Harness Explain 运行尚未完成，不能固定为 revision 1。")
         payload["explanation"] = _serialize_explanation(lookup.explanation)
     return payload
 
@@ -37,7 +43,13 @@ def harness_replay_payload(
 ) -> dict[str, Any]:
     """Serialize one Replay lookup without executing or reading artifact bodies."""
     payload = _lookup_header(run_id, lookup.status, lookup.message, revision)
-    if lookup.status == "ok" and lookup.result is not None:
+    if lookup.status == "ok":
+        if lookup.result is None:
+            raise ValueError("Harness Replay 成功结果缺少 result。")
+        if lookup.result.run_id != payload["run_id"]:
+            raise ValueError("Harness Replay result.run_id 与请求不一致。")
+        if "run_not_finished" in lookup.result.anomalies:
+            raise ValueError("Harness Replay 运行尚未完成，不能固定为 revision 1。")
         payload["result"] = _serialize_replay(lookup.result)
     return payload
 

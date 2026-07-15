@@ -13,6 +13,89 @@ import {
   splitShellLike,
 } from "../src/protocol.js";
 
+function harnessExplainPayload(revision = 1) {
+  return {
+    schema_version: 1,
+    revision,
+    run_id: "detail-run",
+    lookup_status: "ok",
+    message: "",
+    private_payload: "must-drop",
+    explanation: {
+      status: "completed_unverified",
+      objective: "验证 Explain",
+      started_at: "2026-07-15T10:00:00+00:00",
+      completed_at: "2026-07-15T10:01:00+00:00",
+      verified: false,
+      running: false,
+      summary: "发现验证问题",
+      failure_classes: Array.from({ length: 25 }, () => "verification_failure"),
+      findings: Array.from({ length: 25 }, (_, index) => ({
+        failure_class: "verification_failure",
+        source: `check:${index}`,
+        message: "失败",
+        next_step: "重新运行",
+        check_ids: Array.from({ length: 55 }, (__, id) => `check-${id}`),
+        evidence_ids: Array.from({ length: 105 }, (__, id) => `evidence-${id}`),
+        private_payload: "must-drop",
+      })),
+      checks: Array.from({ length: 55 }, (_, index) => ({
+        id: `check-${index}`,
+        status: "failed",
+        duration_ms: index,
+      })),
+      evidence: Array.from({ length: 105 }, (_, index) => ({
+        id: `evidence-${index}`,
+        kind: "test_report",
+        status: "missing",
+        digest_prefix: "a".repeat(16),
+        uri: `artifact://${index}`,
+      })),
+    },
+  };
+}
+
+function harnessReplayPayload(revision = 1) {
+  return {
+    schema_version: 1,
+    revision,
+    run_id: "detail-run",
+    lookup_status: "ok",
+    message: "",
+    result: {
+      status: "partial",
+      baseline_manifest_sha256: "a".repeat(64),
+      current_manifest_sha256: "b".repeat(64),
+      baseline_rule_version: "1",
+      current_rule_version: "1",
+      baseline_explanation_sha256: "c".repeat(64),
+      current_explanation_sha256: "d".repeat(64),
+      timeline: Array.from({ length: 205 }, (_, index) => ({
+        kind: "check",
+        id: `timeline-${index}`,
+        timestamp: "2026-07-15T10:00:00+00:00",
+        status: "passed",
+      })),
+      artifacts: Array.from({ length: 105 }, (_, index) => ({
+        id: `artifact-${index}`,
+        kind: "test_report",
+        reference: `artifact://${index}`,
+        status: "verified",
+        expected_sha256: "e".repeat(64),
+        actual_sha256: "e".repeat(64),
+        private_payload: "must-drop",
+      })),
+      anomalies: Array.from({ length: 55 }, (_, index) => `anomaly-${index}`),
+      differences: Array.from({ length: 55 }, (_, index) => ({
+        field: `field-${index}`,
+        baseline: "before",
+        current: "after",
+      })),
+      legacy_baseline_created: true,
+    },
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -123,6 +206,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("harness/explain/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("harness/replay/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -131,6 +216,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
   assert(PROTOCOL_CONTRACT.server_events.includes("completion/receipt"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/receipt"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/explain"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/replay"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -198,6 +285,98 @@ test("typed harness receipt is strict and bounded", () => {
       payload: { schema_version: 1, run_id: "run", status: "guessed" },
     }),
     /status/,
+  );
+});
+
+test("harness explain response is strict and bounded", () => {
+  const normalized = normalizeServerRecord({
+    type: "harness/explain",
+    payload: harnessExplainPayload(3),
+  }).payload;
+
+  assert.deepEqual(Object.keys(normalized), [
+    "schema_version",
+    "revision",
+    "run_id",
+    "lookup_status",
+    "message",
+    "explanation",
+  ]);
+  assert.equal(normalized.revision, 3);
+  assert.equal(normalized.explanation.failure_classes.length, 20);
+  assert.equal(normalized.explanation.findings.length, 20);
+  assert.equal(normalized.explanation.findings[0].check_ids.length, 50);
+  assert.equal(normalized.explanation.findings[0].evidence_ids.length, 100);
+  assert.equal(normalized.explanation.checks.length, 50);
+  assert.equal(normalized.explanation.evidence.length, 100);
+  assert.equal(Object.hasOwn(normalized, "private_payload"), false);
+  assert.equal(Object.hasOwn(normalized.explanation.findings[0], "private_payload"), false);
+});
+
+test("harness replay response is strict and bounded", () => {
+  const normalized = normalizeServerRecord({
+    type: "harness/replay",
+    payload: harnessReplayPayload(4),
+  }).payload;
+
+  assert.equal(normalized.revision, 4);
+  assert.equal(normalized.result.status, "partial");
+  assert.equal(normalized.result.timeline.length, 200);
+  assert.equal(normalized.result.artifacts.length, 100);
+  assert.equal(normalized.result.anomalies.length, 50);
+  assert.equal(normalized.result.differences.length, 50);
+  assert.equal(Object.hasOwn(normalized.result.artifacts[0], "private_payload"), false);
+});
+
+test("harness detail responses reject malformed authoritative state", () => {
+  const invalidRevision = harnessExplainPayload(0);
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/explain", payload: invalidRevision }),
+    /revision/,
+  );
+
+  const missingExplanation = harnessExplainPayload();
+  delete missingExplanation.explanation;
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/explain", payload: missingExplanation }),
+    /explanation/,
+  );
+
+  const invalidBoolean = harnessExplainPayload();
+  invalidBoolean.explanation.verified = "false";
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/explain", payload: invalidBoolean }),
+    /verified/,
+  );
+
+  const runningExplain = harnessExplainPayload();
+  runningExplain.explanation.status = "running";
+  runningExplain.explanation.running = true;
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/explain", payload: runningExplain }),
+    /尚未完成/,
+  );
+
+  const invalidReplay = harnessReplayPayload();
+  invalidReplay.result.status = "executed_again";
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/replay", payload: invalidReplay }),
+    /status/,
+  );
+
+  const runningReplay = harnessReplayPayload();
+  runningReplay.result.anomalies = ["run_not_finished"];
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/replay", payload: runningReplay }),
+    /尚未完成/,
+  );
+
+  const unavailable = harnessReplayPayload();
+  unavailable.lookup_status = "unavailable";
+  delete unavailable.result;
+  assert.equal(
+    normalizeServerRecord({ type: "harness/replay", payload: unavailable }).payload.lookup_status,
+    "unavailable",
   );
 });
 

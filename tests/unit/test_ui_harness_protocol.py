@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from naumi_agent.harness.explain import (
@@ -174,6 +176,57 @@ def test_harness_lookup_failures_do_not_fabricate_results(status: str) -> None:
     assert "result" not in replay
     assert len(explain["message"]) == 500
     assert len(replay["message"]) == 500
+
+
+def test_successful_harness_lookups_require_authoritative_results() -> None:
+    with pytest.raises(ValueError, match="explanation"):
+        harness_explain_payload(
+            "detail-run",
+            HarnessExplainLookup(status="ok", explanation=None),
+        )
+    with pytest.raises(ValueError, match="result"):
+        harness_replay_payload(
+            "detail-run",
+            HarnessReplayLookup(status="ok", result=None),
+        )
+
+
+def test_harness_payloads_reject_mutable_or_mismatched_run_state() -> None:
+    explanation = _explanation()
+    with pytest.raises(ValueError, match="run_id"):
+        harness_explain_payload(
+            "detail-run",
+            HarnessExplainLookup(
+                status="ok",
+                explanation=replace(explanation, run_id="other-run"),
+            ),
+        )
+    with pytest.raises(ValueError, match="尚未完成"):
+        harness_explain_payload(
+            "detail-run",
+            HarnessExplainLookup(
+                status="ok",
+                explanation=replace(explanation, status="running", running=True),
+            ),
+        )
+
+    replay = _replay_result()
+    with pytest.raises(ValueError, match="run_id"):
+        harness_replay_payload(
+            "detail-run",
+            HarnessReplayLookup(
+                status="ok",
+                result=replace(replay, run_id="other-run"),
+            ),
+        )
+    with pytest.raises(ValueError, match="尚未完成"):
+        harness_replay_payload(
+            "detail-run",
+            HarnessReplayLookup(
+                status="ok",
+                result=replace(replay, anomalies=("run_not_finished",)),
+            ),
+        )
 
 
 @pytest.mark.parametrize(

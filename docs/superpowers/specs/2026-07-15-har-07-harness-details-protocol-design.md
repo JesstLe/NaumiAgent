@@ -63,8 +63,10 @@ Explain responses contain `explanation`; successful Replay responses contain `re
 responses contain no fabricated result.
 
 Revision `1` is sufficient for this slice because the UI entry point is a completed immutable
-Harness receipt and both Explain and Replay are deterministic projections of that persisted run. A
-future schema or mutable live-run subscription must introduce a durable monotonic revision rather
+Harness receipt and both Explain and Replay are deterministic projections of that persisted run.
+Schema v1 rejects a running explanation, a Replay containing `run_not_finished`, or a nested run id
+that differs from the request; the Bridge returns typed `unavailable` instead of caching mutable or
+cross-run facts. A future live-run subscription must introduce a durable monotonic revision rather
 than guessing one from frontend state.
 
 ## Public payload limits
@@ -88,7 +90,8 @@ text and bounded; the protocol never reads their targets.
 2. The Bridge obtains `engine.harness_service`. If absent, it emits a typed `unavailable` lookup with
    a Chinese recovery message.
 3. The existing service performs workspace-scoped durable lookup.
-4. A dedicated UI serializer converts the dataclass lookup into a strict bounded payload.
+4. A dedicated UI serializer converts the dataclass lookup into a strict bounded payload and rejects
+   missing results, mismatched run ids, and still-running state.
 5. The Bridge emits the response with the original request id. It does not emit a second
    `ui/message` and does not mutate the run.
 
@@ -126,6 +129,7 @@ it deliberately produces no second visible card.
   duplicate frontend state.
 - Missing/unavailable data is distinguishable without parsing Markdown or model prose.
 - No request can access a run from another workspace.
+- Running and mismatched runs cannot be cached as immutable revision 1 detail.
 - No Explain/Replay request invokes a model, tool, check command, or chat run.
 - Existing `harness/receipt`, completion receipts, compatibility notices, and visible rendering are
   unchanged.

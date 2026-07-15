@@ -14,6 +14,7 @@
 - Both operations must reuse `HarnessService.explain_run()` and `HarnessService.replay_run()`; no model, tool, check, or chat execution is allowed.
 - User-visible errors are Chinese and typed lookup failures do not require parsing Markdown.
 - Public text is capped at 500 characters; request run ids use the existing 1-128 character Harness grammar.
+- Schema v1 accepts only completed immutable detail; running or mismatched nested run state becomes typed `unavailable`.
 - Explain caps: 20 failure classes, 20 findings, 50 checks, 100 evidence records; Replay caps: 200 timeline events, 100 artifacts, 50 anomalies, 50 differences.
 - New UI keeps at most 100 Explain entries and 100 Replay entries and does not render a second card in this slice.
 - Run only focused module tests and one real SQLite-to-Bridge-to-Node scenario; do not run the full test suite.
@@ -57,7 +58,7 @@ def test_protocol_rejects_invalid_harness_detail_run_ids(run_id: str) -> None:
 
 - [ ] **Step 2: Run RED request tests**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness_detail'`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness_detail'`
 
 Expected: failure because the four enum members and payload normalization do not exist.
 
@@ -90,11 +91,11 @@ Both client event branches return this helper. Importing `validate_run_id` in th
 
 - [ ] **Step 4: Write failing bounded-serializer tests**
 
-Construct real `HarnessRunExplanation` and `HarnessReplayResult` dataclasses. Assert exact top-level and nested keys, enum-to-string conversion, `revision == 1`, public text truncation, every collection boundary, non-negative durations, and typed `not_found`/`unavailable` payloads without `explanation` or `result`.
+Construct real `HarnessRunExplanation` and `HarnessReplayResult` dataclasses. Assert exact top-level and nested keys, enum-to-string conversion, `revision == 1`, public text truncation, every collection boundary, non-negative durations, typed `not_found`/`unavailable` payloads without `explanation` or `result`, and rejection of missing, running, or mismatched successful results.
 
 - [ ] **Step 5: Run RED serializer tests**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_harness_protocol.py`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_harness_protocol.py`
 
 Expected: collection error because `naumi_agent.ui.harness_protocol` does not exist.
 
@@ -128,7 +129,9 @@ Implement each nested mapping field explicitly. `_lookup_header()` validates the
 
 - [ ] **Step 7: Run focused GREEN checks**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness_detail' tests/unit/test_ui_harness_protocol.py`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness_detail'`
+
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_harness_protocol.py`
 
 Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/ruff check src/naumi_agent/ui/protocol.py src/naumi_agent/ui/harness_protocol.py tests/unit/test_ui_protocol.py tests/unit/test_ui_harness_protocol.py`
 
@@ -161,7 +164,7 @@ Assert an engine without `harness_service` receives a typed `unavailable` respon
 
 - [ ] **Step 3: Run RED Bridge tests**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_bridge.py -k 'harness_explain_request or harness_replay_request or harness_detail_unavailable'`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_bridge.py -k 'harness_explain_request or harness_replay_request or harness_detail_unavailable'`
 
 Expected: failure because the Bridge does not dispatch the new events.
 
@@ -197,7 +200,7 @@ Implement the symmetric Replay method. The trace records only operation and exce
 
 - [ ] **Step 5: Run focused GREEN checks**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_bridge.py -k 'harness_explain_request or harness_replay_request or harness_detail_unavailable or typed_harness_receipt'`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_bridge.py -k 'harness_explain_request or harness_replay_request or harness_detail_unavailable or typed_harness_receipt'`
 
 Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/ruff check src/naumi_agent/ui/bridge.py tests/unit/test_ui_bridge.py`
 
@@ -275,7 +278,13 @@ Move HAR-07.1b from “尚未完成” to an implemented section that names the 
 
 - [ ] **Step 9: Run final focused verification**
 
-Run: `/Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness' tests/unit/test_ui_harness_protocol.py tests/unit/test_ui_bridge.py -k 'harness' tests/integration/test_ui_harness_details_protocol.py`
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_protocol.py -k 'harness or protocol_contract_matches_python_enums'`
+
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_harness_protocol.py`
+
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/unit/test_ui_bridge.py -k 'harness'`
+
+Run: `PYTHONPATH=src /Users/lv/Workspace/NaumiAgent/.venv/bin/pytest -q tests/integration/test_ui_harness_details_protocol.py`
 
 Run from `frontend/terminal-ui`: `node --test --test-name-pattern='harness|protocol contract' test/protocol.test.js test/state.test.js`
 
