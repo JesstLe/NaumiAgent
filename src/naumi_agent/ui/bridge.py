@@ -21,11 +21,17 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.harness.explain import HarnessExplainLookup
+from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
+from naumi_agent.ui.harness_protocol import (
+    harness_explain_payload,
+    harness_replay_payload,
+)
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
@@ -56,6 +62,9 @@ _TERMINAL_MISSION_STATUSES = frozenset({
 })
 _SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 _MAX_QUEUED_CONVERSATIONS = 20
+_HARNESS_DETAIL_UNAVAILABLE = (
+    "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
+)
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -704,6 +713,12 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.RECEIPT_REQUEST:
             await self.resend_completion_receipt(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.HARNESS_EXPLAIN_REQUEST:
+            await self.query_harness_explain(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.HARNESS_REPLAY_REQUEST:
+            await self.query_harness_replay(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.INSPECTOR_REQUEST:
             await self.show_inspector(payload, request_id=request_id)
             return
@@ -1168,6 +1183,80 @@ class JsonlEngineBridge:
             receipt.to_dict(),
             request_id=request_id,
         )
+
+    async def query_harness_explain(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Return one durable, workspace-scoped Harness explanation."""
+        run_id = str(payload["run_id"])
+        service = getattr(self.engine, "harness_service", None)
+        if service is None:
+            lookup = HarnessExplainLookup(
+                status="unavailable",
+                message=_HARNESS_DETAIL_UNAVAILABLE,
+            )
+        else:
+            try:
+                lookup = await service.explain_run(run_id)
+            except Exception as exc:
+                self._trace_harness_lookup_failure("explain", exc)
+                lookup = HarnessExplainLookup(
+                    status="unavailable",
+                    message=_HARNESS_DETAIL_UNAVAILABLE,
+                )
+        await self.emit(
+            ServerEventType.HARNESS_EXPLAIN,
+            harness_explain_payload(run_id, lookup),
+            request_id=request_id,
+        )
+
+    async def query_harness_replay(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Return one deterministic Harness replay without executing the run."""
+        run_id = str(payload["run_id"])
+        service = getattr(self.engine, "harness_service", None)
+        if service is None:
+            lookup = HarnessReplayLookup(
+                status="unavailable",
+                message=_HARNESS_DETAIL_UNAVAILABLE,
+            )
+        else:
+            try:
+                lookup = await service.replay_run(run_id)
+            except Exception as exc:
+                self._trace_harness_lookup_failure("replay", exc)
+                lookup = HarnessReplayLookup(
+                    status="unavailable",
+                    message=_HARNESS_DETAIL_UNAVAILABLE,
+                )
+        await self.emit(
+            ServerEventType.HARNESS_REPLAY,
+            harness_replay_payload(run_id, lookup),
+            request_id=request_id,
+        )
+
+    def _trace_harness_lookup_failure(self, operation: str, error: Exception) -> None:
+        error_type = type(error).__name__
+        logger.warning(
+            "Harness %s lookup failed (%s)",
+            operation,
+            error_type,
+        )
+        if self.debug_trace is not None:
+            self.debug_trace.event(
+                "harness.detail_lookup_failed",
+                {
+                    "operation": operation,
+                    "error_type": error_type,
+                },
+            )
 
     async def show_inspector(
         self,
