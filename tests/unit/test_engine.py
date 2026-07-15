@@ -26,6 +26,7 @@ from naumi_agent.orchestrator.engine import (
 )
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
     PermissionChecker,
@@ -34,6 +35,7 @@ from naumi_agent.safety.permissions import (
     PermissionOutcome,
     PermissionReasonCode,
 )
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolMetadata, ToolResult
 from naumi_agent.tools.builtin import BashRunTool
@@ -4391,6 +4393,59 @@ class TestPlanInjection:
 
 
 class TestStreamingStartupLatency:
+    @pytest.mark.asyncio
+    async def test_streaming_core_publishes_one_typed_ordered_event_sequence(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        config = AppConfig(
+            memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
+        )
+        engine = AgentEngine(config)
+        events: list[RuntimeEvent] = []
+
+        class RecordingSink:
+            async def emit(self, event: RuntimeEvent) -> None:
+                events.append(event)
+
+        async def stream_response(**_: object):
+            yield StreamChunk(thinking="检查")
+            yield StreamChunk(token="完成")
+            yield StreamChunk(finish_reason="stop")
+
+        publisher = RuntimeEventPublisher(
+            RecordingSink(),
+            session_id="session-typed",
+            run_id="run-typed",
+        )
+        try:
+            with patch.object(engine._router, "stream", new=stream_response):
+                result = await engine._run_streaming_core(
+                    "直接回答",
+                    publisher,
+                    harness_run_id="run-typed",
+                )
+
+            assert result.status == "completed"
+            assert [event.sequence for event in events] == list(
+                range(1, len(events) + 1)
+            )
+            assert len({event.id for event in events}) == len(events)
+            assert {event.session_id for event in events} == {"session-typed"}
+            assert {event.run_id for event in events} == {"run-typed"}
+            event_types = [event.type for event in events]
+            assert event_types.index(RuntimeEventType.RUN_STARTED) < event_types.index(
+                RuntimeEventType.TURN_START
+            )
+            assert event_types.index(RuntimeEventType.THINKING_START) < event_types.index(
+                RuntimeEventType.THINKING_END
+            )
+            assert event_types.index(RuntimeEventType.RESPONSE_START) < event_types.index(
+                RuntimeEventType.RESPONSE_END
+            )
+        finally:
+            await engine.shutdown()
+
     @pytest.mark.asyncio
     async def test_streaming_skips_preplanning_for_normal_turn(self, tmp_path) -> None:
         config = AppConfig(
