@@ -49,6 +49,8 @@ test("terminal UI animates active work without repeatedly clearing the screen", 
     await delay(420);
 
     const clearsDuringAnimation = output.text.split(ANSI.clear).length - 1;
+    const syncStarts = output.text.split(ANSI.synchronizedOutputOn).length - 1;
+    const syncEnds = output.text.split(ANSI.synchronizedOutputOff).length - 1;
     const renderEvents = readDebugEvents(app.debugLogPath).filter(
       (record) => record.event === "render.screen",
     );
@@ -58,6 +60,8 @@ test("terminal UI animates active work without repeatedly clearing the screen", 
     );
 
     assert.equal(clearsDuringAnimation, clearsBeforeRun);
+    assert(syncStarts >= 3);
+    assert.equal(syncStarts, syncEnds);
     assert(diffFrames.length >= 2);
     assert(diffFrames.some((record) => record.payload.changed_rows <= 3));
     await waitForLatestScreen(output, "任务 #41 · 已完成", 2000);
