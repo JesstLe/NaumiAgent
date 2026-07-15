@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from naumi_agent.agents.team_protocol import (
@@ -12,12 +11,12 @@ from naumi_agent.agents.team_protocol import (
     execute_team_status,
     format_team_signal_result,
 )
+from naumi_agent.runtime.ports.events import LegacyEventCallback
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 logger = logging.getLogger(__name__)
 
-EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 MAX_BLACKBOARD_KEY_CHARS = 120
 MAX_BLACKBOARD_VALUE_CHARS = 20_000
 MAX_TEAM_FIELD_CHARS = 120
@@ -106,7 +105,7 @@ class DelegateTaskTool(Tool):
         task_id: str | None = None,
         success_criteria: str = "",
         context: str = "",
-        event_callback: EventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
         **kwargs: Any,
     ) -> str:
         from naumi_agent.orchestrator.subagent_manager import SubTask
@@ -463,7 +462,7 @@ class TeamSignalTool(Tool):
         task_id: str = "",
         blackboard_key: str = "",
         record_to_blackboard: bool = True,
-        event_callback: EventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
         **kwargs: Any,
     ) -> str:
         try:

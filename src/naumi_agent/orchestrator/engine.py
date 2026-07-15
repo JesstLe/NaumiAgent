@@ -61,7 +61,12 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.store import ChatRunStore
-from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
+from naumi_agent.runtime.ports.events import (
+    EventSink,
+    LegacyEventCallback,
+    RuntimeEvent,
+    RuntimeEventType,
+)
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
@@ -107,7 +112,6 @@ from naumi_agent.workbench.tools import create_workbench_tools
 from naumi_agent.workbench.validation import ValidationRunner
 from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 
-EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 PermissionConfirmationCallback = Callable[[dict[str, Any]], Awaitable[str | bool]]
 UserInteractionCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
@@ -137,7 +141,7 @@ class _ObservedRuntimeEventPublisher:
         await self._observer(event_type, data, turn)
         return event
 
-    def legacy_callback(self) -> EventCallback:
+    def legacy_callback(self) -> LegacyEventCallback:
         return self._publisher.legacy_callback()
 
 
@@ -1741,7 +1745,7 @@ class AgentEngine:
 
     def _coerce_engine_events(
         self,
-        candidate: EngineEventPublisher | EventCallback | None,
+        candidate: EngineEventPublisher | LegacyEventCallback | None,
     ) -> EngineEventPublisher | None:
         """Normalize temporary direct callback callers at one Engine boundary."""
         if candidate is None:
@@ -1767,7 +1771,7 @@ class AgentEngine:
 
     async def _inject_background_notifications(
         self,
-        events: EngineEventPublisher | EventCallback | None = None,
+        events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> None:
         """Inject newly completed background task notifications into context."""
         events = self._coerce_engine_events(events)
@@ -1789,7 +1793,7 @@ class AgentEngine:
 
     async def _inject_scheduler_notifications(
         self,
-        events: EngineEventPublisher | EventCallback | None = None,
+        events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> None:
         """Inject due schedule notifications into context."""
         events = self._coerce_engine_events(events)
@@ -1867,7 +1871,7 @@ class AgentEngine:
 
     async def _maybe_compact(
         self,
-        events: EngineEventPublisher | EventCallback | None = None,
+        events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> None:
         """检查并执行上下文压缩."""
         events = self._coerce_engine_events(events)
@@ -2128,7 +2132,7 @@ class AgentEngine:
     async def _fire_hook(
         self,
         ctx: HookContext,
-        events: EngineEventPublisher | EventCallback | None = None,
+        events: EngineEventPublisher | LegacyEventCallback | None = None,
     ) -> HookContext:
         """Fire hooks and optionally emit user-visible trace events."""
         events = self._coerce_engine_events(events)
@@ -2682,7 +2686,7 @@ class AgentEngine:
     async def run_streaming(
         self,
         task: str,
-        on_event: EventSink | EventCallback,
+        on_event: EventSink | LegacyEventCallback,
         turn_context: str = "",
     ) -> AgentResult:
         """Execute and durably record one streamed Agent run."""
@@ -3542,7 +3546,7 @@ class AgentEngine:
     async def _react_loop_streaming(
         self,
         tools: list[dict[str, Any]] | None,
-        event_source: EngineEventPublisher | EventCallback,
+        event_source: EngineEventPublisher | LegacyEventCallback,
         plan: Plan | None = None,
     ) -> AgentResult:
         """流式 ReAct 循环：通过 router.stream() 逐 token 输出."""
@@ -4019,7 +4023,7 @@ class AgentEngine:
         self,
         tool_call: ToolCall,
         *,
-        on_event: EventCallback | None = None,
+        on_event: LegacyEventCallback | None = None,
         agent_name: str | None = None,
         _events: EngineEventPublisher | None = None,
     ) -> ToolResult:
@@ -4034,7 +4038,7 @@ class AgentEngine:
     async def _execute_tool(
         self,
         tc: ToolCall,
-        on_event: EventCallback | None = None,
+        on_event: LegacyEventCallback | None = None,
         agent_name: str | None = None,
         *,
         events: EngineEventPublisher | None = None,

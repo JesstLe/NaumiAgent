@@ -14,8 +14,10 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.ports.events import (
+    LegacyEventCallback as ToolEventCallback,
+)
 from naumi_agent.runtime.ports.tool_execution import (
-    ToolEventCallback,
     ToolExecutionOutcome,
     ToolExecutionPort,
 )

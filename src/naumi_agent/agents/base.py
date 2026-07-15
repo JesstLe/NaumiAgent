@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.hooks import HookContext, HookPoint
+from naumi_agent.runtime.ports.events import LegacyEventCallback
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tools.base import ToolCall
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
-EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 DEFAULT_AGENT_MAX_TURNS = 50
 
 
@@ -124,7 +123,7 @@ class BaseAgent:
         self,
         task: str,
         context: str = "",
-        event_callback: EventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
     ) -> AgentResult:
         """执行子任务."""
         from naumi_agent.model.router import ModelTier
