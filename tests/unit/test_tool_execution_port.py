@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Awaitable, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -78,6 +79,54 @@ class _BlockingExecutor:
         self._entered.set()
         await asyncio.Event().wait()
         return ToolExecutionOutcome(content="unreachable", duration_ms=0)
+
+
+class _CoordinatedExecutor(LocalToolExecutor):
+    def __init__(self) -> None:
+        self.entered: set[str] = set()
+        self.all_entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def invoke(
+        self,
+        tool: Any,
+        arguments: Mapping[str, object],
+        *,
+        event_callback: ToolEventCallback | None = None,
+    ) -> ToolExecutionOutcome:
+        path = str(arguments.get("path", ""))
+        self.entered.add(path)
+        if len(self.entered) == 2:
+            self.all_entered.set()
+        await self.release.wait()
+        return await super().invoke(
+            tool,
+            arguments,
+            event_callback=event_callback,
+        )
+
+
+class _SelectiveFailingExecutor(LocalToolExecutor):
+    def __init__(self) -> None:
+        self.entered: list[str] = []
+
+    async def invoke(
+        self,
+        tool: Any,
+        arguments: Mapping[str, object],
+        *,
+        event_callback: ToolEventCallback | None = None,
+    ) -> ToolExecutionOutcome:
+        path = str(arguments.get("path", ""))
+        self.entered.append(path)
+        if path.endswith("fail.txt"):
+            raise RuntimeError("isolated-port-failure")
+        await asyncio.sleep(0)
+        return await super().invoke(
+            tool,
+            arguments,
+            event_callback=event_callback,
+        )
 
 
 class _CallbackTool(Tool):
@@ -185,6 +234,10 @@ def _engine_config(tmp_path: Path) -> AppConfig:
             long_term_enabled=False,
         ),
     )
+
+
+def _json_arguments(**values: object) -> str:
+    return json.dumps(values, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
@@ -354,6 +407,155 @@ async def test_engine_tool_batches_dispatch_through_public_facade(
 
         assert public_calls == [("batch-public-facade", None)]
     finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_parallel_read_batch_enters_same_port_concurrently(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    port = _CoordinatedExecutor()
+    engine = AgentEngine(_engine_config(tmp_path), tool_execution_port=port)
+    session = await engine.get_or_create_session()
+    task = asyncio.create_task(
+        engine._execute_tool_calls(
+            [
+                {
+                    "id": "parallel-first",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(first)),
+                    },
+                },
+                {
+                    "id": "parallel-second",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(second)),
+                    },
+                },
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=1,
+            on_event=None,
+        )
+    )
+    try:
+        await asyncio.wait_for(port.all_entered.wait(), timeout=1)
+        assert port.entered == {str(first), str(second)}
+        port.release.set()
+        await task
+
+        tool_messages = {
+            str(message["tool_call_id"]): str(message["content"])
+            for message in engine._messages
+            if message.get("role") == "tool"
+        }
+        assert "first" in tool_messages["parallel-first"]
+        assert "second" in tool_messages["parallel-second"]
+    finally:
+        port.release.set()
+        if not task.done():
+            task.cancel()
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_port_failure_does_not_cancel_parallel_sibling(
+    tmp_path: Path,
+) -> None:
+    failed_path = tmp_path / "fail.txt"
+    successful_path = tmp_path / "success.txt"
+    failed_path.write_text("unused", encoding="utf-8")
+    successful_path.write_text("sibling completed", encoding="utf-8")
+    port = _SelectiveFailingExecutor()
+    engine = AgentEngine(_engine_config(tmp_path), tool_execution_port=port)
+    session = await engine.get_or_create_session()
+    try:
+        await engine._execute_tool_calls(
+            [
+                {
+                    "id": "parallel-failure",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(failed_path)),
+                    },
+                },
+                {
+                    "id": "parallel-success",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(successful_path)),
+                    },
+                },
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=1,
+            on_event=None,
+        )
+
+        tool_messages = {
+            str(message["tool_call_id"]): str(message["content"])
+            for message in engine._messages
+            if message.get("role") == "tool"
+        }
+        assert "isolated-port-failure" in tool_messages["parallel-failure"]
+        assert "sibling completed" in tool_messages["parallel-success"]
+        assert set(port.entered) == {str(failed_path), str(successful_path)}
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_parallel_batch_propagates_outer_cancellation(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "cancel-first.txt"
+    second = tmp_path / "cancel-second.txt"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    port = _CoordinatedExecutor()
+    engine = AgentEngine(_engine_config(tmp_path), tool_execution_port=port)
+    session = await engine.get_or_create_session()
+    task = asyncio.create_task(
+        engine._execute_tool_calls(
+            [
+                {
+                    "id": "cancel-first",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(first)),
+                    },
+                },
+                {
+                    "id": "cancel-second",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": _json_arguments(path=str(second)),
+                    },
+                },
+            ],
+            tool_call_history=[],
+            session_id=session.id,
+            turn=1,
+            on_event=None,
+        )
+    )
+    try:
+        await asyncio.wait_for(port.all_entered.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        port.release.set()
+        if not task.done():
+            task.cancel()
         await engine.shutdown()
 
 
