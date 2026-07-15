@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from naumi_agent.harness.checks import validate_run_id
 from naumi_agent.ui.messages.base import UIMessage
 
 PROTOCOL_VERSION = 1
@@ -28,6 +29,8 @@ class ClientEventType(StrEnum):
     TASK_SUBMIT = "task_submit"
     RUN_CANCEL = "run_cancel"
     RECEIPT_REQUEST = "receipt/request"
+    HARNESS_EXPLAIN_REQUEST = "harness/explain/request"
+    HARNESS_REPLAY_REQUEST = "harness/replay/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
@@ -66,6 +69,8 @@ class ServerEventType(StrEnum):
     ENGINE_EVENT = "engine/event"
     COMPLETION_RECEIPT = "completion/receipt"
     HARNESS_RECEIPT = "harness/receipt"
+    HARNESS_EXPLAIN = "harness/explain"
+    HARNESS_REPLAY = "harness/replay"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -240,6 +245,12 @@ def _normalize_client_payload(
             "run_id": run_id,
         }
 
+    if event_type in {
+        ClientEventType.HARNESS_EXPLAIN_REQUEST,
+        ClientEventType.HARNESS_REPLAY_REQUEST,
+    }:
+        return _normalize_harness_detail_request(payload)
+
     if event_type == ClientEventType.INSPECTOR_REQUEST:
         raw_revision = payload.get("known_revision", 0)
         if isinstance(raw_revision, bool):
@@ -377,6 +388,26 @@ def _normalize_client_payload(
         }
 
     return dict(payload)
+
+
+def _normalize_harness_detail_request(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        run_id = validate_run_id(str(payload.get("run_id") or ""))
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    raw_revision = payload.get("known_revision", 0)
+    if isinstance(raw_revision, bool):
+        raise ValueError("Harness known_revision 必须是非负整数。")
+    try:
+        known_revision = int(raw_revision)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Harness known_revision 必须是非负整数。") from exc
+    if known_revision < 0 or known_revision > 2_147_483_647:
+        raise ValueError("Harness known_revision 必须是非负整数。")
+    return {
+        "run_id": run_id,
+        "known_revision": known_revision,
+    }
 
 
 def _bounded_int(raw: Any, default: int, *, lower: int, upper: int) -> int:

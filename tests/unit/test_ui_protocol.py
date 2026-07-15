@@ -79,6 +79,49 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_harness_detail_requests() -> None:
+    for event_type in (
+        ClientEventType.HARNESS_EXPLAIN_REQUEST,
+        ClientEventType.HARNESS_REPLAY_REQUEST,
+    ):
+        record = normalize_client_record(
+            {
+                "type": event_type,
+                "payload": {"run_id": "run:detail-1", "known_revision": "3"},
+            }
+        )
+
+        assert record["payload"] == {
+            "run_id": "run:detail-1",
+            "known_revision": 3,
+        }
+
+
+@pytest.mark.parametrize("run_id", ["", " ", "../other", "x" * 129])
+def test_protocol_rejects_invalid_harness_detail_run_ids(run_id: str) -> None:
+    with pytest.raises(ValueError, match="run_id"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_EXPLAIN_REQUEST,
+                "payload": {"run_id": run_id},
+            }
+        )
+
+
+@pytest.mark.parametrize("revision", [True, -1, 2_147_483_648, "unknown"])
+def test_protocol_rejects_invalid_harness_detail_revisions(revision: object) -> None:
+    with pytest.raises(ValueError, match="known_revision"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_REPLAY_REQUEST,
+                "payload": {
+                    "run_id": "run:detail-1",
+                    "known_revision": revision,
+                },
+            }
+        )
+
+
 def test_argument_summary_redacts_and_bounds_output() -> None:
     summary = summarize_arguments(
         {
