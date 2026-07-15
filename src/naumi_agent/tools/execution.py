@@ -6,9 +6,9 @@ from collections.abc import Mapping
 from inspect import signature
 from time import perf_counter
 
+from naumi_agent.runtime.ports.events import LegacyEventCallback
 from naumi_agent.runtime.ports.tool_execution import (
     ExecutableTool,
-    ToolEventCallback,
     ToolExecutionOutcome,
 )
 
@@ -21,7 +21,7 @@ class LocalToolExecutor:
         tool: ExecutableTool,
         arguments: Mapping[str, object],
         *,
-        event_callback: ToolEventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
     ) -> ToolExecutionOutcome:
         invocation_arguments = dict(arguments)
         if (

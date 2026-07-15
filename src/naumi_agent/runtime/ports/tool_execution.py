@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-ToolEventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+from naumi_agent.runtime.ports.events import LegacyEventCallback
 
 
 class ExecutableTool(Protocol):
@@ -43,13 +43,12 @@ class ToolExecutionPort(Protocol):
         tool: ExecutableTool,
         arguments: Mapping[str, object],
         *,
-        event_callback: ToolEventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
     ) -> ToolExecutionOutcome: ...
 
 
 __all__ = [
     "ExecutableTool",
-    "ToolEventCallback",
     "ToolExecutionOutcome",
     "ToolExecutionPort",
 ]

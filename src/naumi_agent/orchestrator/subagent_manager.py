@@ -6,7 +6,6 @@ import asyncio
 import logging
 import math
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from inspect import signature
@@ -23,13 +22,12 @@ from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
+from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
 
 logger = logging.getLogger(__name__)
-
-EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
@@ -564,7 +562,7 @@ class SubAgentManager:
         self,
         task: SubTask,
         extra_context: str = "",
-        event_callback: EventCallback | None = None,
+        event_callback: LegacyEventCallback | None = None,
     ) -> AgentResult:
         """将子任务委派给合适的 Agent."""
         agent_name = task.agent_name or self.select_agent(task.description)
@@ -693,9 +691,17 @@ class SubAgentManager:
                     event: str,
                     data: dict[str, Any],
                 ) -> None:
-                    await self._observe_execution_event(task.id, event, data)
+                    try:
+                        event_type = RuntimeEventType(event)
+                    except ValueError as exc:
+                        raise ValueError(f"未知 Runtime 事件：{event}") from exc
+                    await self._observe_execution_event(
+                        task.id,
+                        event_type.value,
+                        data,
+                    )
                     if event_callback is not None:
-                        await event_callback(event, data)
+                        await event_callback(event_type.value, data)
 
                 execute_kwargs["event_callback"] = observed_event
             execute_task = asyncio.create_task(agent.execute(**execute_kwargs))
@@ -823,7 +829,7 @@ class SubAgentManager:
 
     async def _emit_subagent_event(
         self,
-        callback: EventCallback | None,
+        callback: LegacyEventCallback | None,
         *,
         status: str,
         task_id: str,
@@ -1069,7 +1075,7 @@ class SubAgentManager:
 
 
 async def _emit_subagent_event(
-    callback: EventCallback | None,
+    callback: LegacyEventCallback | None,
     *,
     status: str,
     task_id: str,
@@ -1091,12 +1097,12 @@ async def _emit_subagent_event(
 
 
 async def _emit_subagent_event_payload(
-    callback: EventCallback | None,
+    callback: LegacyEventCallback | None,
     payload: dict[str, Any],
 ) -> None:
     if callback is None:
         return
-    await callback("subagent_event", payload)
+    await callback(RuntimeEventType.SUBAGENT_EVENT.value, payload)
 
 
 def _agent_timeout_seconds(agent: Any) -> float:

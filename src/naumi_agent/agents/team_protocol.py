@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from naumi_agent.agents.message_bus import AgentMessage, MessagePriority
-
-EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
+from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
 
 
 class TeamEventType(StrEnum):
@@ -57,7 +55,7 @@ async def execute_team_signal(
     task_id: str = "",
     blackboard_key: str = "",
     record_to_blackboard: bool = True,
-    event_callback: EventCallback | None = None,
+    event_callback: LegacyEventCallback | None = None,
 ) -> TeamSignalResult:
     """Publish one structured team event through bus + blackboard + UI callback."""
     normalized_event = _parse_event_type(event_type)
@@ -195,12 +193,12 @@ def format_team_signal_result(result: TeamSignalResult) -> str:
 
 
 async def _emit_team_event(
-    callback: EventCallback | None,
+    callback: LegacyEventCallback | None,
     result: TeamSignalResult,
 ) -> None:
     if callback is None:
         return
-    await callback("team_event", {
+    await callback(RuntimeEventType.TEAM_EVENT.value, {
         "event_type": result.event_type.value,
         "sender": result.sender,
         "recipient": result.recipient or "",
