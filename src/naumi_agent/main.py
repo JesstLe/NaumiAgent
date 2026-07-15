@@ -2017,7 +2017,7 @@ async def _run_tool_slash_command(
         name=tool_name,
         arguments=json.dumps(kwargs, ensure_ascii=False),
     )
-    result = await engine._execute_tool(tool_call, agent_name="cli")
+    result = await engine.execute_tool(tool_call, agent_name="cli")
     if result.status != "success":
         console.print(f"[yellow]{result.content}[/yellow]")
         return
@@ -3130,22 +3130,18 @@ async def _run_analysis(engine: Any, mode: str, target: str, *, qps: int | None 
             target,
             effective_qps=effective_qps,
         )
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-analysis-{mode}-{uuid.uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-analysis-{mode}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
 
     console.print()
     console.print(
@@ -3191,22 +3187,18 @@ async def _run_pursue(engine: Any, goal: str) -> None:
         progress.add_task("追踪中...", total=None)
 
         try:
-            execute_tool = getattr(engine, "_execute_tool", None)
-            if callable(execute_tool):
-                from naumi_agent.tools.base import ToolCall
+            from naumi_agent.tools.base import ToolCall
 
-                tool_call = ToolCall(
-                    id=f"slash-pursue-{uuid.uuid4()}",
-                    name="pursue_goal",
-                    arguments=json.dumps({"goal": goal}, ensure_ascii=False),
-                )
-                tool_result = await execute_tool(tool_call, agent_name="cli")
-                if tool_result.status != "success":
-                    console.print(f"[yellow]{tool_result.content}[/yellow]")
-                    return
-                result = tool_result.content
-            else:
-                result = await tool.execute(goal=goal)
+            tool_call = ToolCall(
+                id=f"slash-pursue-{uuid.uuid4()}",
+                name="pursue_goal",
+                arguments=json.dumps({"goal": goal}, ensure_ascii=False),
+            )
+            tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[yellow]{tool_result.content}[/yellow]")
+                return
+            result = tool_result.content
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️ 目标追踪被中断[/yellow]")
             return
@@ -3240,22 +3232,18 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
     else:
         kwargs = {"run_id": arg.strip()}
 
-    execute_tool = getattr(engine, "_execute_tool", None)
-    if callable(execute_tool):
-        from naumi_agent.tools.base import ToolCall
+    from naumi_agent.tools.base import ToolCall
 
-        tool_call = ToolCall(
-            id=f"slash-pursue-{subcommand}-{uuid.uuid4()}",
-            name=tool_name,
-            arguments=json.dumps(kwargs, ensure_ascii=False),
-        )
-        tool_result = await execute_tool(tool_call, agent_name="cli")
-        if tool_result.status != "success":
-            console.print(f"[yellow]{tool_result.content}[/yellow]")
-            return
-        result = tool_result.content
-    else:
-        result = await tool.execute(**kwargs)
+    tool_call = ToolCall(
+        id=f"slash-pursue-{subcommand}-{uuid.uuid4()}",
+        name=tool_name,
+        arguments=json.dumps(kwargs, ensure_ascii=False),
+    )
+    tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+    if tool_result.status != "success":
+        console.print(f"[yellow]{tool_result.content}[/yellow]")
+        return
+    result = tool_result.content
     console.print(
         Panel(
             Markdown(result),
@@ -3276,22 +3264,18 @@ async def _run_worktree(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-worktree-{tool_name}-{uuid.uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-worktree-{tool_name}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
         console.print(
             Panel(
                 Markdown(result),
@@ -3345,22 +3329,18 @@ async def _run_background(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-background-{tool_name}-{uuid.uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-background-{tool_name}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
         console.print(
             Panel(
                 Markdown(result),
@@ -3417,22 +3397,18 @@ async def _run_schedule(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-schedule-{tool_name}-{uuid.uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-schedule-{tool_name}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
         console.print(
             Panel(
                 Markdown(result),
@@ -3558,22 +3534,18 @@ async def _run_self_review(engine: Any, arg: str) -> None:
     console.print("[bold yellow]🔍 自我审查启动...[/bold yellow]")
     with console.status("[bold green]扫描自身源码中...[/bold green]"):
         kwargs = {"focus": focus, "module": module}
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-self-review-{uuid.uuid4()}",
-                name="self_review",
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-self-review-{uuid.uuid4()}",
+            name="self_review",
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
 
     console.print()
     console.print(
@@ -3644,22 +3616,18 @@ async def _run_goal(engine: Any, arg: str) -> None:
         console.print(f"[red]工具未注册: {tool_name}[/red]")
         return
 
-    execute_tool = getattr(engine, "_execute_tool", None)
-    if callable(execute_tool):
-        from naumi_agent.tools.base import ToolCall
+    from naumi_agent.tools.base import ToolCall
 
-        tool_call = ToolCall(
-            id=f"slash-goal-{uuid.uuid4()}",
-            name=tool_name,
-            arguments=json.dumps(kwargs, ensure_ascii=False),
-        )
-        tool_result = await execute_tool(tool_call, agent_name="cli")
-        if tool_result.status != "success":
-            console.print(f"[yellow]{tool_result.content}[/yellow]")
-            return
-        result = tool_result.content
-    else:
-        result = await tool.execute(**kwargs)
+    tool_call = ToolCall(
+        id=f"slash-goal-{uuid.uuid4()}",
+        name=tool_name,
+        arguments=json.dumps(kwargs, ensure_ascii=False),
+    )
+    tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+    if tool_result.status != "success":
+        console.print(f"[yellow]{tool_result.content}[/yellow]")
+        return
+    result = tool_result.content
 
     console.print(
         Panel(
@@ -3962,22 +3930,18 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             "apply_to_workspace": True,
             "return_json": True,
         }
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-evolve-self-modify-{uuid.uuid4()}",
-                name="self_modify",
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[red]自我修改执行失败: {tool_result.content}[/red]")
-                return
-            modify_result_str = tool_result.content
-        else:
-            modify_result_str = await self_modify.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-evolve-self-modify-{uuid.uuid4()}",
+            name="self_modify",
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[red]自我修改执行失败: {tool_result.content}[/red]")
+            return
+        modify_result_str = tool_result.content
 
     try:
         modify_payload = json.loads(modify_result_str)
@@ -4025,22 +3989,18 @@ async def _run_evolve(engine: Any, arg: str) -> None:
                 "apply_decision": True,
                 "return_json": True,
             }
-            execute_tool = getattr(engine, "_execute_tool", None)
-            if callable(execute_tool):
-                from naumi_agent.tools.base import ToolCall
+            from naumi_agent.tools.base import ToolCall
 
-                tool_call = ToolCall(
-                    id=f"slash-evolve-self-evolve-{uuid.uuid4()}",
-                    name="self_evolve",
-                    arguments=json.dumps(evolution_kwargs, ensure_ascii=False),
-                )
-                tool_result = await execute_tool(tool_call, agent_name="cli")
-                if tool_result.status != "success":
-                    console.print(f"[red]自我进化评估失败: {tool_result.content}[/red]")
-                    return
-                evolution_result_str = tool_result.content
-            else:
-                evolution_result_str = await self_evolve.execute(**evolution_kwargs)
+            tool_call = ToolCall(
+                id=f"slash-evolve-self-evolve-{uuid.uuid4()}",
+                name="self_evolve",
+                arguments=json.dumps(evolution_kwargs, ensure_ascii=False),
+            )
+            tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+            if tool_result.status != "success":
+                console.print(f"[red]自我进化评估失败: {tool_result.content}[/red]")
+                return
+            evolution_result_str = tool_result.content
 
         try:
             evolution_payload = json.loads(evolution_result_str)
@@ -4230,22 +4190,18 @@ async def _run_forge(engine: Any, arg: str) -> None:
         kwargs = {"description": description}
         if llm_output:
             kwargs["llm_output"] = llm_output
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-forge-{uuid.uuid4()}",
-                name="forge_tool",
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result_str = tool_result.content
-        else:
-            result_str = await forge_tool_instance.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-forge-{uuid.uuid4()}",
+            name="forge_tool",
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result_str = tool_result.content
 
     console.print()
     console.print(
@@ -4875,22 +4831,18 @@ async def _run_browser_daemon(engine: Any, arg: str) -> None:
         if not tool:
             console.print(f"[red]工具未注册: {tool_name}[/red]")
             return
-        execute_tool = getattr(engine, "_execute_tool", None)
-        if callable(execute_tool):
-            from naumi_agent.tools.base import ToolCall
+        from naumi_agent.tools.base import ToolCall
 
-            tool_call = ToolCall(
-                id=f"slash-bdaemon-{tool_name}-{uuid.uuid4()}",
-                name=tool_name,
-                arguments=json.dumps(kwargs, ensure_ascii=False),
-            )
-            tool_result = await execute_tool(tool_call, agent_name="cli")
-            if tool_result.status != "success":
-                console.print(f"[yellow]{tool_result.content}[/yellow]")
-                return
-            result = tool_result.content
-        else:
-            result = await tool.execute(**kwargs)
+        tool_call = ToolCall(
+            id=f"slash-bdaemon-{tool_name}-{uuid.uuid4()}",
+            name=tool_name,
+            arguments=json.dumps(kwargs, ensure_ascii=False),
+        )
+        tool_result = await engine.execute_tool(tool_call, agent_name="cli")
+        if tool_result.status != "success":
+            console.print(f"[yellow]{tool_result.content}[/yellow]")
+            return
+        result = tool_result.content
         console.print(
             Panel(
                 Markdown(result),
