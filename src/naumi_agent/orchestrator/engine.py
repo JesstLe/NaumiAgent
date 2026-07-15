@@ -3078,7 +3078,7 @@ class AgentEngine:
                 )
                 executed = await execute_tool_batch(
                     executable_batch,
-                    lambda call: self._execute_tool(call, on_event=on_event),
+                    lambda call: self.execute_tool(call, on_event=on_event),
                 )
                 for item in executed:
                     if item.result is not None:
