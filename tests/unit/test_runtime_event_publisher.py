@@ -41,7 +41,10 @@ async def test_publisher_assigns_run_identity_and_strict_sequence() -> None:
     assert all(event.session_id == "session-1" for event in sink.events)
     assert all(event.run_id == "run-1" for event in sink.events)
     assert len({event.id for event in sink.events}) == 2
-    assert all(datetime.fromisoformat(event.timestamp).utcoffset() is not None for event in sink.events)
+    assert all(
+        datetime.fromisoformat(event.timestamp).utcoffset() is not None
+        for event in sink.events
+    )
 
 
 @pytest.mark.asyncio
