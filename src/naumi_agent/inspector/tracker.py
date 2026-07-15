@@ -9,7 +9,9 @@ from dataclasses import asdict
 from typing import Any
 
 from naumi_agent.inspector.models import InspectorApproval, InspectorTool
+from naumi_agent.runtime.ports.events import RuntimeEvent
 from naumi_agent.safety.guardrails import OutputGuardrail
+from naumi_agent.streaming.sinks import CallbackEventSink
 
 _SECRET_ASSIGNMENT = re.compile(
     r"(?i)(api[_-]?key|token|secret|password|authorization|cookie)"
@@ -201,4 +203,20 @@ def _nonnegative(value: Any) -> int:
         return 0
 
 
-__all__ = ["RuntimeInspectorTracker"]
+class RuntimeInspectorEventSink:
+    """Deliver immutable Runtime events to the bounded Inspector tracker."""
+
+    def __init__(self, tracker: RuntimeInspectorTracker) -> None:
+        if not isinstance(tracker, RuntimeInspectorTracker):
+            raise TypeError("RuntimeInspectorEventSink 需要 RuntimeInspectorTracker")
+        self._tracker = tracker
+        self._sink = CallbackEventSink(self._observe)
+
+    async def _observe(self, event: str, data: dict[str, object]) -> None:
+        self._tracker.observe(event, data)
+
+    async def emit(self, event: RuntimeEvent) -> None:
+        await self._sink.emit(event)
+
+
+__all__ = ["RuntimeInspectorEventSink", "RuntimeInspectorTracker"]
