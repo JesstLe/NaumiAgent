@@ -622,3 +622,42 @@ async def test_run_recorder_finish_is_idempotent(tmp_path):
 
     assert second is first
     assert second.outcome == "completed"
+
+
+@pytest.mark.asyncio
+async def test_run_recorder_event_sink_persists_runtime_event_identity(tmp_path):
+    from datetime import UTC, datetime
+
+    from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
+    from naumi_agent.runs.store import ChatRunStore
+    from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    store = ChatRunStore(tmp_path / "chat-runs.db")
+    recorder = await ChatRunRecorder.start(
+        store=store,
+        workspace_root=repo,
+        session_id="session-1",
+        task="读取 tracked.txt",
+        run_id="run-event-sink",
+    )
+    sink = ChatRunRecorderEventSink(recorder)
+    event = RuntimeEvent(
+        id="event-tool-start",
+        type=RuntimeEventType.TOOL_START,
+        data={"name": "file_read", "call_id": "read-1"},
+        timestamp=datetime.now(UTC).isoformat(),
+        session_id="session-1",
+        run_id="run-event-sink",
+        sequence=1,
+    )
+
+    assert isinstance(sink, EventSink)
+    await sink.emit(event)
+
+    restored = await ChatRunStore(store.db_path).get_run("session-1", "run-event-sink")
+    assert restored is not None
+    assert restored.steps[-1].stage == "tool"
+    assert restored.steps[-1].event_id == "event-tool-start"
+    assert restored.steps[-1].metadata == {}

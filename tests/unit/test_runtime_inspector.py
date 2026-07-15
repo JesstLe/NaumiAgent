@@ -250,6 +250,34 @@ def test_tracker_clears_run_evidence_when_session_changes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tracker_event_sink_consumes_runtime_event_identity_once() -> None:
+    from datetime import UTC, datetime
+
+    from naumi_agent.inspector.tracker import RuntimeInspectorEventSink
+    from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
+
+    tracker = RuntimeInspectorTracker()
+    sink = RuntimeInspectorEventSink(tracker)
+    event = RuntimeEvent(
+        id="event-tool-start",
+        type=RuntimeEventType.TOOL_START,
+        data={"name": "file_read", "call_id": "read-1", "args": {"path": "demo.txt"}},
+        timestamp=datetime.now(UTC).isoformat(),
+        session_id="session-1",
+        run_id="run-1",
+        sequence=1,
+    )
+
+    assert isinstance(sink, EventSink)
+    await sink.emit(event)
+    await sink.emit(event)
+
+    assert tracker.session_id == "session-1"
+    assert [tool.call_id for tool in tracker.tools] == ["read-1"]
+    assert tracker.tools[0].run_id == "run-1"
+
+
+@pytest.mark.asyncio
 async def test_service_builds_five_tabs_from_real_authoritative_sources(
     tmp_path: Path,
 ) -> None:
