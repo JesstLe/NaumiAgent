@@ -257,7 +257,7 @@ async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
     engine.tool_registry.register(
         CoordinatedSafeTool("safe_b", entered, both_entered, release)
     )
-    events: list[tuple[str, dict[str, object]]] = []
+    events: list[RuntimeEvent] = []
     call_count = 0
 
     async def stream_response(**_: object):
@@ -275,8 +275,15 @@ async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
         yield StreamChunk(token="完成")
         yield StreamChunk(finish_reason="stop")
 
-    async def on_event(event: str, data: dict[str, object]) -> None:
-        events.append((event, data))
+    class RecordingSink:
+        async def emit(self, event: RuntimeEvent) -> None:
+            events.append(event)
+
+    publisher = RuntimeEventPublisher(
+        RecordingSink(),
+        session_id="session-parallel",
+        run_id="run-parallel",
+    )
 
     run_task: asyncio.Task[object] | None = None
     try:
@@ -284,7 +291,7 @@ async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
             run_task = asyncio.create_task(
                 engine._react_loop_streaming(
                     engine.tool_registry.get_openai_tools(),
-                    on_event,
+                    publisher,
                 )
             )
             await asyncio.wait_for(both_entered.wait(), timeout=1)
@@ -292,12 +299,20 @@ async def test_streaming_parallel_tools_emit_batch_metadata(tmp_path) -> None:
             await run_task
 
         tool_events = [
-            data for event, data in events if event in {"tool_start", "tool_end"}
+            event
+            for event in events
+            if event.type in {RuntimeEventType.TOOL_START, RuntimeEventType.TOOL_END}
         ]
         assert tool_events
-        assert all(data["batch_size"] == 2 for data in tool_events)
-        assert all(data["parallel"] is True for data in tool_events)
-        assert {data["batch_id"] for data in tool_events} == {"turn-1-batch-1"}
+        assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+        assert {event.run_id for event in events} == {"run-parallel"}
+        assert {event.session_id for event in events} == {"session-parallel"}
+        assert all(event.turn == 1 for event in tool_events)
+        assert all(event.data["batch_size"] == 2 for event in tool_events)
+        assert all(event.data["parallel"] is True for event in tool_events)
+        assert {event.data["batch_id"] for event in tool_events} == {
+            "turn-1-batch-1"
+        }
     finally:
         release.set()
         if run_task is not None and not run_task.done():
@@ -3554,7 +3569,7 @@ class TestErrorRecovery:
             ):
                 result = await engine._react_loop_streaming(
                     tools=None,
-                    on_event=on_event,
+                    event_source=on_event,
                 )
 
             assert result.status == "completed"
@@ -3641,7 +3656,7 @@ class TestErrorRecovery:
             ):
                 result = await engine._react_loop_streaming(
                     tools=[FakeTool().to_openai_tool()],
-                    on_event=on_event,
+                    event_source=on_event,
                 )
 
             assert result.status == "completed"
@@ -3754,7 +3769,7 @@ class TestErrorRecovery:
             ):
                 result = await engine._react_loop_streaming(
                     tools=[FakeTool().to_openai_tool()],
-                    on_event=on_event,
+                    event_source=on_event,
                 )
 
             assert result.status == "completed"
@@ -3805,7 +3820,7 @@ class TestErrorRecovery:
             with patch.object(engine._router, "stream", new=stream_response):
                 result = await engine._react_loop_streaming(
                     tools=[FakeTool().to_openai_tool()],
-                    on_event=on_event,
+                    event_source=on_event,
                 )
 
             assert result.status == "completed"
@@ -3836,10 +3851,17 @@ class TestErrorRecovery:
             memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")),
         )
         engine = AgentEngine(config)
-        events: list[tuple[str, dict[str, object]]] = []
+        events: list[RuntimeEvent] = []
 
-        async def on_event(event: str, data: dict[str, object]) -> None:
-            events.append((event, data))
+        class RecordingSink:
+            async def emit(self, event: RuntimeEvent) -> None:
+                events.append(event)
+
+        publisher = RuntimeEventPublisher(
+            RecordingSink(),
+            session_id="session-recovery",
+            run_id="run-recovery",
+        )
 
         try:
             engine._messages = [
@@ -3880,12 +3902,16 @@ class TestErrorRecovery:
                     messages=engine._messages,
                     tier=ModelTier.CAPABLE,
                     tools=None,
-                    on_event=on_event,
+                    events=publisher,
                 )
 
             assert result.content == "恢复成功"
             assert mock_call.call_count == 2
-            recovery_events = [data for event, data in events if event == "recovery_event"]
+            recovery_events = [
+                event.data
+                for event in events
+                if event.type is RuntimeEventType.RECOVERY_EVENT
+            ]
             assert [event["phase"] for event in recovery_events] == ["started", "completed"]
             assert recovery_events[-1]["action"] == "reactive_compact_retry"
             assert len(engine._messages) < 22

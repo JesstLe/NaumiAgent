@@ -14,6 +14,8 @@ from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 _PROFILE_DIGEST = "a" * 64
@@ -427,7 +429,7 @@ async def test_engine_collects_evidence_without_ui_callback(tmp_path: Path) -> N
             tool_call_history=[],
             session_id=session.id,
             turn=1,
-            on_event=None,
+            events=None,
         )
 
         restored = await HarnessStore(store.db_path).get_run("engine-evidence-run")
@@ -493,7 +495,7 @@ async def test_engine_collects_repetition_guard_skip_as_evidence(tmp_path: Path)
             tool_call_history=[signature, signature],
             session_id=session.id,
             turn=2,
-            on_event=None,
+            events=None,
         )
 
         restored = await HarnessStore(store.db_path).get_run("skipped-evidence-run")
@@ -540,6 +542,17 @@ async def test_engine_forwards_permission_decision_into_evidence(tmp_path: Path)
         "确认后执行探针",
         run_id="permission-evidence-run",
     )
+    events: list[RuntimeEvent] = []
+
+    class RecordingSink:
+        async def emit(self, event: RuntimeEvent) -> None:
+            events.append(event)
+
+    publisher = RuntimeEventPublisher(
+        RecordingSink(),
+        session_id=session.id,
+        run_id="permission-evidence-run",
+    )
 
     try:
         await engine._execute_tool_calls(
@@ -555,7 +568,7 @@ async def test_engine_forwards_permission_decision_into_evidence(tmp_path: Path)
             tool_call_history=[],
             session_id=session.id,
             turn=3,
-            on_event=None,
+            events=publisher,
         )
 
         restored = await HarnessStore(store.db_path).get_run(
@@ -567,5 +580,14 @@ async def test_engine_forwards_permission_decision_into_evidence(tmp_path: Path)
         assert summary["permission_status"] == "confirmed"
         assert summary["permission_required_confirmation"] is True
         assert summary["permission_risk_level"] == "medium"
+        assert [event.sequence for event in events] == list(
+            range(1, len(events) + 1)
+        )
+        assert {event.run_id for event in events} == {"permission-evidence-run"}
+        assert [
+            event.data["status"]
+            for event in events
+            if event.type is RuntimeEventType.PERMISSION_BUBBLE
+        ] == ["needs_confirmation", "confirmed"]
     finally:
         await engine.shutdown()

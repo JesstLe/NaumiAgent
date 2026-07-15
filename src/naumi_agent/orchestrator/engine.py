@@ -8,7 +8,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -61,7 +61,7 @@ from naumi_agent.orchestrator.tool_batches import (
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.store import ChatRunStore
-from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
+from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
@@ -80,6 +80,7 @@ from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.streaming.sinks import (
+    CallbackEventSink,
     CompositeEventSink,
     NullEventSink,
     coerce_event_sink,
@@ -109,6 +110,38 @@ from naumi_agent.worktree import WorktreeManager, create_worktree_tools
 EventCallback = Callable[[str, dict[str, Any]], Awaitable[None]]
 PermissionConfirmationCallback = Callable[[dict[str, Any]], Awaitable[str | bool]]
 UserInteractionCallback = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+class _ObservedRuntimeEventPublisher:
+    """Publish through one run publisher, then update local derived metrics."""
+
+    def __init__(
+        self,
+        publisher: RuntimeEventPublisher,
+        observer: Callable[
+            [RuntimeEventType, Mapping[str, object], int],
+            Awaitable[None],
+        ],
+    ) -> None:
+        self._publisher = publisher
+        self._observer = observer
+
+    async def publish(
+        self,
+        event_type: RuntimeEventType,
+        data: Mapping[str, object],
+        *,
+        turn: int = 0,
+    ) -> RuntimeEvent:
+        event = await self._publisher.publish(event_type, data, turn=turn)
+        await self._observer(event_type, data, turn)
+        return event
+
+    def legacy_callback(self) -> EventCallback:
+        return self._publisher.legacy_callback()
+
+
+type EngineEventPublisher = RuntimeEventPublisher | _ObservedRuntimeEventPublisher
 
 logger = logging.getLogger(__name__)
 
@@ -1314,7 +1347,7 @@ class AgentEngine:
         *,
         tool_call: ToolCall,
         session_id: str,
-        on_event: EventCallback | None,
+        events: EngineEventPublisher | None,
         agent_name: str | None,
     ) -> ToolResult | None:
         """Fail closed before permission handling while a session is changing."""
@@ -1322,7 +1355,7 @@ class AgentEngine:
             return None
         reason = "当前会话正在切换，已停止执行该工具。请等待切换完成后重试。"
         await self._emit_permission_bubble(
-            on_event,
+            events,
             agent_name=agent_name,
             tool_name=tool_call.name,
             call_id=tool_call.id,
@@ -1706,11 +1739,38 @@ class AgentEngine:
         self._messages.append(safe_msg)
         self._full_history.append(safe_msg)
 
+    def _coerce_engine_events(
+        self,
+        candidate: EngineEventPublisher | EventCallback | None,
+    ) -> EngineEventPublisher | None:
+        """Normalize temporary direct callback callers at one Engine boundary."""
+        if candidate is None:
+            return None
+        if isinstance(
+            candidate,
+            (RuntimeEventPublisher, _ObservedRuntimeEventPublisher),
+        ):
+            return candidate
+        if not callable(candidate):
+            raise TypeError("Engine 事件消费者必须是 Publisher 或异步事件回调")
+        session_id = self._session.id if self._session else ""
+        run_id = (
+            self._active_harness_run.contract.run_id
+            if self._active_harness_run is not None
+            else ""
+        )
+        return RuntimeEventPublisher(
+            CallbackEventSink(candidate),
+            session_id=session_id,
+            run_id=run_id,
+        )
+
     async def _inject_background_notifications(
         self,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | EventCallback | None = None,
     ) -> None:
         """Inject newly completed background task notifications into context."""
+        events = self._coerce_engine_events(events)
         notifications = self.background_runner.collect_notifications()
         if not notifications:
             return
@@ -1720,7 +1780,7 @@ class AgentEngine:
             "content": content,
         })
         await self._emit_runtime_notification(
-            on_event,
+            events,
             source="background",
             title="后台任务通知",
             notifications=notifications,
@@ -1729,9 +1789,10 @@ class AgentEngine:
 
     async def _inject_scheduler_notifications(
         self,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | EventCallback | None = None,
     ) -> None:
         """Inject due schedule notifications into context."""
+        events = self._coerce_engine_events(events)
         notifications = self.scheduler_runner.collect_notifications()
         if not notifications:
             return
@@ -1741,7 +1802,7 @@ class AgentEngine:
             "content": content,
         })
         await self._emit_runtime_notification(
-            on_event,
+            events,
             source="schedule",
             title="调度提醒",
             notifications=notifications,
@@ -1750,7 +1811,7 @@ class AgentEngine:
 
     async def _emit_runtime_notification(
         self,
-        on_event: EventCallback | None,
+        events: EngineEventPublisher | None,
         *,
         source: str,
         title: str,
@@ -1758,10 +1819,10 @@ class AgentEngine:
         content: str,
     ) -> None:
         """Make runtime-delivered notifications visible in streaming UIs."""
-        if on_event is None:
+        if events is None:
             return
-        await on_event(
-            "runtime_notification",
+        await events.publish(
+            RuntimeEventType.RUNTIME_NOTIFICATION,
             {
                 "source": source,
                 "title": title,
@@ -1804,8 +1865,12 @@ class AgentEngine:
                 self._full_history[index] = {**message, "content": prompt}
                 return
 
-    async def _maybe_compact(self, on_event: EventCallback | None = None) -> None:
+    async def _maybe_compact(
+        self,
+        events: EngineEventPublisher | EventCallback | None = None,
+    ) -> None:
         """检查并执行上下文压缩."""
+        events = self._coerce_engine_events(events)
         model = self._model_port.resolve_model(ModelTier.CAPABLE)
         context_budget, reserve_tokens = self._compute_context_budget(model)
         if context_budget <= 0:
@@ -1853,9 +1918,9 @@ class AgentEngine:
                 reserve_tokens,
                 len(archived_tool_results),
             )
-            if on_event:
-                await on_event(
-                    "context_compacted",
+            if events is not None:
+                await events.publish(
+                    RuntimeEventType.CONTEXT_COMPACTED,
                     {
                         "before": before,
                         "after": after,
@@ -2063,17 +2128,18 @@ class AgentEngine:
     async def _fire_hook(
         self,
         ctx: HookContext,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | EventCallback | None = None,
     ) -> HookContext:
         """Fire hooks and optionally emit user-visible trace events."""
+        events = self._coerce_engine_events(events)
         trace = self.hooks.get_trace()
         last_sequence = trace[-1].sequence if trace else 0
         result = await self.hooks.fire(ctx)
-        if on_event is not None:
+        if events is not None:
             for entry in self.hooks.get_trace():
                 if entry.sequence <= last_sequence:
                     continue
-                await on_event("hook_trace", {
+                await events.publish(RuntimeEventType.HOOK_TRACE, {
                     "point": entry.point,
                     "callback": entry.callback,
                     "duration_ms": entry.duration_ms,
@@ -2088,7 +2154,7 @@ class AgentEngine:
         messages: list[dict[str, Any]],
         tier: ModelTier,
         tools: list[dict[str, Any]] | None,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
         streaming: bool = False,
         cause: Exception | None = None,
     ) -> Any:
@@ -2105,7 +2171,7 @@ class AgentEngine:
             if not _is_prompt_too_long_error(e):
                 raise
             recovered = await self._reactive_compact_for_prompt_too_long(
-                on_event=on_event,
+                events=events,
                 streaming=streaming,
                 error=e,
             )
@@ -2126,7 +2192,7 @@ class AgentEngine:
         *,
         partial_content: str,
         tier: ModelTier,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
         streaming: bool = False,
     ) -> str:
         """Continue a final answer cut off by the model output limit."""
@@ -2135,8 +2201,8 @@ class AgentEngine:
 
         combined = partial_content
         for attempt in range(1, _MAX_OUTPUT_CONTINUATIONS + 1):
-            if on_event is not None:
-                await on_event("recovery_event", {
+            if events is not None:
+                await events.publish(RuntimeEventType.RECOVERY_EVENT, {
                     "reason": "output_truncated",
                     "action": "continue_output",
                     "phase": "started",
@@ -2155,15 +2221,15 @@ class AgentEngine:
                 messages=continuation_messages,
                 tier=tier,
                 tools=None,
-                on_event=on_event,
+                events=events,
                 streaming=streaming,
             )
             self._track_model_usage(response.usage, response.model)
 
             combined = _join_continued_output(combined, response.content)
             still_truncated = _is_output_truncated(response.finish_reason)
-            if on_event is not None:
-                await on_event("recovery_event", {
+            if events is not None:
+                await events.publish(RuntimeEventType.RECOVERY_EVENT, {
                     "reason": "output_truncated",
                     "action": "continue_output",
                     "phase": "continued" if still_truncated else "completed",
@@ -2182,7 +2248,7 @@ class AgentEngine:
     async def _reactive_compact_for_prompt_too_long(
         self,
         *,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
         streaming: bool = False,
         error: Exception,
     ) -> bool:
@@ -2196,8 +2262,8 @@ class AgentEngine:
         runtime_snapshot, preserved_sections, warnings = (
             await self._build_compaction_runtime_snapshot()
         )
-        if on_event is not None:
-            await on_event("recovery_event", {
+        if events is not None:
+            await events.publish(RuntimeEventType.RECOVERY_EVENT, {
                 "reason": "prompt_too_long",
                 "action": "reactive_compact_retry",
                 "phase": "started",
@@ -2218,11 +2284,11 @@ class AgentEngine:
                 runtime_snapshot=runtime_snapshot,
             )
 
-        await self._inject_harness_context_snapshot(on_event)
+        await self._inject_harness_context_snapshot(events)
         after = len(self._messages)
         recovered = after < before
-        if on_event is not None:
-            await on_event("recovery_event", {
+        if events is not None:
+            await events.publish(RuntimeEventType.RECOVERY_EVENT, {
                 "reason": "prompt_too_long",
                 "action": "reactive_compact_retry",
                 "phase": "completed" if recovered else "failed",
@@ -2242,7 +2308,7 @@ class AgentEngine:
 
     async def _inject_harness_context_snapshot(
         self,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
     ) -> None:
         """Inject one ephemeral system snapshot of current harness state."""
         self._messages = [
@@ -2254,7 +2320,7 @@ class AgentEngine:
             point=HookPoint.CONTEXT_ASSEMBLE_START,
             data={"message_count": len(self._messages)},
             session_id=session_id,
-        ), on_event)
+        ), events)
         if start_ctx.should_abort:
             return
         snapshot = await self._harness_context.assemble(
@@ -2289,8 +2355,8 @@ class AgentEngine:
                     extra_sections.append(knowledge_result.bundle.rendered)
         except Exception as exc:
             logger.warning("Harness knowledge context unavailable: %s", exc)
-        if on_event is not None and knowledge_result is not None:
-            await on_event("harness_knowledge", {
+        if events is not None and knowledge_result is not None:
+            await events.publish(RuntimeEventType.HARNESS_KNOWLEDGE, {
                 "status": knowledge_result.code.value,
                 "cache_hit": knowledge_result.cache_hit,
                 "elapsed_ms": knowledge_result.elapsed_ms,
@@ -2309,7 +2375,7 @@ class AgentEngine:
             point=HookPoint.CONTEXT_ASSEMBLE_END,
             data={"snapshot": snapshot, "extra_sections": extra_sections},
             session_id=session_id,
-        ), on_event)
+        ), events)
         snapshot = str(end_ctx.data.get("snapshot", snapshot))
         extra_sections = end_ctx.data.get("extra_sections", [])
         if isinstance(extra_sections, str):
@@ -2363,7 +2429,7 @@ class AgentEngine:
 
     async def _evaluate_harness_completion(
         self,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
         *,
         force_final: bool = False,
     ) -> CompletionGateResult | None:
@@ -2387,18 +2453,18 @@ class AgentEngine:
             self._append_message(
                 {"role": "system", "content": result.correction_instruction}
             )
-            if on_event is not None:
-                await on_event(
-                    "harness_completion_correction",
+            if events is not None:
+                await events.publish(
+                    RuntimeEventType.HARNESS_COMPLETION_CORRECTION,
                     {
                         "message": result.correction_instruction,
                         "run_id": state.contract.run_id,
                         "attempt": state.correction_attempt,
                     },
                 )
-        elif result.receipt is not None and on_event is not None:
-            await on_event(
-                "harness_completion_receipt",
+        elif result.receipt is not None and events is not None:
+            await events.publish(
+                RuntimeEventType.HARNESS_COMPLETION_RECEIPT,
                 result.receipt.model_dump(mode="json"),
             )
         return result
@@ -2408,7 +2474,7 @@ class AgentEngine:
         task: str,
         *,
         streaming: bool = False,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
     ) -> str | None:
         """Fire user prompt hook and return the possibly rewritten prompt."""
         session_id = self._session.id if self._session else ""
@@ -2416,7 +2482,7 @@ class AgentEngine:
             point=HookPoint.USER_PROMPT_SUBMIT,
             data={"prompt": task, "streaming": streaming},
             session_id=session_id,
-        ), on_event)
+        ), events)
         if ctx.should_abort:
             return None
         return str(ctx.data.get("prompt", task))
@@ -2428,7 +2494,7 @@ class AgentEngine:
         response: str,
         reason: str = "",
         streaming: bool = False,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
     ) -> None:
         """Fire agent stop hook with final status metadata."""
         session_id = self._session.id if self._session else ""
@@ -2441,16 +2507,16 @@ class AgentEngine:
                 "streaming": streaming,
             },
             session_id=session_id,
-        ), on_event)
+        ), events)
 
     async def _emit_task_snapshot(
         self,
-        on_event: EventCallback | None,
+        events: EngineEventPublisher | None,
         *,
         source: str,
     ) -> None:
         """Emit a user-visible task list after task tools mutate state."""
-        if on_event is None or source not in _TASK_EVENT_TOOLS:
+        if events is None or source not in _TASK_EVENT_TOOLS:
             return
         try:
             from naumi_agent.tasks.store import format_task_list
@@ -2458,7 +2524,7 @@ class AgentEngine:
             tasks = await self.task_store.list_tasks()
             open_tasks = [task for task in tasks if task.status != TaskStatus.COMPLETED]
             completed_count = len(tasks) - len(open_tasks)
-            await on_event("task_snapshot", {
+            await events.publish(RuntimeEventType.TASK_SNAPSHOT, {
                 "source": source,
                 "count": len(tasks),
                 "open_count": len(open_tasks),
@@ -2483,19 +2549,19 @@ class AgentEngine:
 
     async def _block_unreconciled_todos(
         self,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
     ) -> None:
         """Prevent terminal engine exits from leaving active Todo state behind."""
         reconciliation = await reconcile_todos(self.task_store, attempted=True)
         if reconciliation.warning:
             logger.warning("%s", reconciliation.warning)
-            if on_event is not None:
-                await on_event(
-                    "task_reconciliation_warning",
+            if events is not None:
+                await events.publish(
+                    RuntimeEventType.TASK_RECONCILIATION_WARNING,
                     {"message": reconciliation.warning},
                 )
         if reconciliation.action == TodoReconciliationAction.BLOCKED:
-            await self._emit_task_snapshot(on_event, source="todo_reconciliation")
+            await self._emit_task_snapshot(events, source="todo_reconciliation")
 
     def _check_budget(self) -> AgentResult | None:
         if not self._budget_tracker.is_exceeded():
@@ -2643,7 +2709,7 @@ class AgentEngine:
         try:
             result = await self._run_streaming_core(
                 task,
-                publisher.legacy_callback(),
+                publisher,
                 turn_context=turn_context,
                 harness_run_id=recorder.run_id,
             )
@@ -2704,11 +2770,11 @@ class AgentEngine:
     async def _run_streaming_core(
         self,
         task: str,
-        on_event: EventCallback,
+        events: RuntimeEventPublisher,
         turn_context: str = "",
         harness_run_id: str | None = None,
     ) -> AgentResult:
-        """执行任务 — 流式 ReAct 主循环，通过回调实时推送事件."""
+        """执行任务 — 流式 ReAct 主循环，通过 Publisher 推送类型化事件."""
         perf_start = time.perf_counter()
         latency_start = perf_start
         first_progress_recorded = False
@@ -2733,34 +2799,38 @@ class AgentEngine:
             *,
             turn: int = 0,
         ) -> None:
-            await on_event(
-                "latency_metric",
+            await events.publish(
+                RuntimeEventType.LATENCY_METRIC,
                 {
                     "metric": metric,
                     "label": label,
                     "duration_ms": int((now - latency_start) * 1000),
                     "turn": turn,
                 },
+                turn=turn,
             )
 
-        async def emit_event(event: str, data: dict[str, Any]) -> None:
+        async def observe_event(
+            event: RuntimeEventType,
+            data: Mapping[str, object],
+            turn: int,
+        ) -> None:
             nonlocal first_progress_recorded
             nonlocal first_model_chunk_recorded
             nonlocal first_token_recorded
 
-            await on_event(event, data)
-            if event == "latency_metric":
+            if event is RuntimeEventType.LATENCY_METRIC:
                 return
 
             now = time.perf_counter()
-            turn = int(data.get("turn", 0) or 0)
-            if not first_progress_recorded and event in progress_events:
+            event_name = event.value
+            if not first_progress_recorded and event_name in progress_events:
                 first_progress_recorded = True
                 await emit_latency_metric("first_progress", "首反馈", now, turn=turn)
 
             if (
                 not first_model_chunk_recorded
-                and event == "perf_phase"
+                and event is RuntimeEventType.PERF_PHASE
                 and data.get("phase") == "llm_first_chunk"
             ):
                 first_model_chunk_recorded = True
@@ -2768,11 +2838,13 @@ class AgentEngine:
 
             if (
                 not first_token_recorded
-                and event == "token"
+                and event is RuntimeEventType.TOKEN
                 and data.get("content")
             ):
                 first_token_recorded = True
                 await emit_latency_metric("first_token", "端到端首字", now, turn=turn)
+
+        observed_events = _ObservedRuntimeEventPublisher(events, observe_event)
 
         async def emit_perf_phase(
             phase: str,
@@ -2780,8 +2852,8 @@ class AgentEngine:
             start: float,
             **extra: Any,
         ) -> None:
-            await emit_event(
-                "perf_phase",
+            await observed_events.publish(
+                RuntimeEventType.PERF_PHASE,
                 {
                     "phase": phase,
                     "label": label,
@@ -2790,7 +2862,7 @@ class AgentEngine:
                 },
             )
 
-        await emit_event("run_started", {"task": task})
+        await observed_events.publish(RuntimeEventType.RUN_STARTED, {"task": task})
         self._ensure_system_prompt()
 
         phase_start = time.perf_counter()
@@ -2802,18 +2874,18 @@ class AgentEngine:
         hooked_task = await self._fire_user_prompt_submit(
             task,
             streaming=True,
-            on_event=emit_event,
+            events=observed_events,
         )
         await emit_perf_phase("prompt_hooks", "输入 Hook", phase_start)
         if hooked_task is None:
             message = "用户输入已被 hook 拦截。"
-            await emit_event("error", {"message": message})
+            await observed_events.publish(RuntimeEventType.ERROR, {"message": message})
             await self._fire_agent_stop(
                 status="error",
                 response=message,
                 reason="user_prompt_submit_aborted",
                 streaming=True,
-                on_event=emit_event,
+                events=observed_events,
             )
             return AgentResult(status="error", error=message)
         task = hooked_task
@@ -2843,7 +2915,7 @@ class AgentEngine:
             point=HookPoint.ENGINE_RUN_START,
             data={"task": task, "streaming": True},
             session_id=session_id,
-        ), emit_event)
+        ), observed_events)
         await emit_perf_phase("engine_start_hooks", "启动 Hook", phase_start)
 
         try:
@@ -2870,11 +2942,18 @@ class AgentEngine:
             ):
                 result = await self._run_orchestrated(plan, tools)
             else:
-                result = await self._react_loop_streaming(tools, emit_event, plan=plan)
+                result = await self._react_loop_streaming(
+                    tools,
+                    observed_events,
+                    plan=plan,
+                )
         except Exception as e:
             logger.exception("Agent streaming loop failed")
             error_msg = self._format_error(e)
-            await emit_event("error", {"message": error_msg})
+            await observed_events.publish(
+                RuntimeEventType.ERROR,
+                {"message": error_msg},
+            )
             result = AgentResult(status="error", error=error_msg)
 
         if (
@@ -2883,7 +2962,7 @@ class AgentEngine:
             and not self._active_harness_run.finalized
         ):
             gate = await self._evaluate_harness_completion(
-                emit_event,
+                observed_events,
                 force_final=True,
             )
             if gate is not None:
@@ -2896,7 +2975,7 @@ class AgentEngine:
             point=HookPoint.ENGINE_RUN_END,
             data={"status": result.status, "task": task, "streaming": True},
             session_id=session_id,
-        ), emit_event)
+        ), observed_events)
         await emit_perf_phase("engine_end_hooks", "结束 Hook", phase_start)
 
         phase_start = time.perf_counter()
@@ -3008,7 +3087,7 @@ class AgentEngine:
         tool_call_history: list[str],
         session_id: str,
         turn: int,
-        on_event: EventCallback | None = None,
+        events: EngineEventPublisher | None = None,
     ) -> list[str]:
         """Execute one model tool-call response with deterministic ordering."""
         scheduled: list[ScheduledToolCall] = []
@@ -3093,8 +3172,12 @@ class AgentEngine:
                     **metadata,
                 }
                 await self._observe_harness_tool_event("tool_start", start_payload)
-                if on_event is not None:
-                    await on_event("tool_start", start_payload)
+                if events is not None:
+                    await events.publish(
+                        RuntimeEventType.TOOL_START,
+                        start_payload,
+                        turn=turn,
+                    )
                 hook_ctx = await self._fire_hook(
                     HookContext(
                         point=HookPoint.TOOL_EXECUTE_START,
@@ -3104,7 +3187,7 @@ class AgentEngine:
                         },
                         session_id=session_id,
                     ),
-                    on_event,
+                    events,
                 )
                 if hook_ctx.should_abort:
                     reason = hook_ctx.data.get("abort_reason", "未提供原因")
@@ -3123,7 +3206,7 @@ class AgentEngine:
                 )
                 executed = await execute_tool_batch(
                     executable_batch,
-                    lambda call: self.execute_tool(call, on_event=on_event),
+                    lambda call: self.execute_tool(call, _events=events),
                 )
                 for item in executed:
                     if item.result is not None:
@@ -3169,8 +3252,12 @@ class AgentEngine:
                     **metadata,
                 }
                 await self._observe_harness_tool_event("tool_end", end_payload)
-                if on_event is not None:
-                    await on_event("tool_end", end_payload)
+                if events is not None:
+                    await events.publish(
+                        RuntimeEventType.TOOL_END,
+                        end_payload,
+                        turn=turn,
+                    )
                 await self._fire_hook(
                     HookContext(
                         point=HookPoint.TOOL_EXECUTE_END,
@@ -3182,7 +3269,7 @@ class AgentEngine:
                         },
                         session_id=session_id,
                     ),
-                    on_event,
+                    events,
                 )
             logger.debug(
                 "Tool batch completed: id=%s elapsed_ms=%d",
@@ -3249,9 +3336,17 @@ class AgentEngine:
             }
             await self._observe_harness_tool_event("tool_start", start_payload)
             await self._observe_harness_tool_event("tool_end", end_payload)
-            if on_event is not None:
-                await on_event("tool_start", start_payload)
-                await on_event("tool_end", end_payload)
+            if events is not None:
+                await events.publish(
+                    RuntimeEventType.TOOL_START,
+                    start_payload,
+                    turn=turn,
+                )
+                await events.publish(
+                    RuntimeEventType.TOOL_END,
+                    end_payload,
+                    turn=turn,
+                )
 
         for index, raw_call in enumerate(raw_calls):
             result = outcomes.get(index)
@@ -3447,10 +3542,13 @@ class AgentEngine:
     async def _react_loop_streaming(
         self,
         tools: list[dict[str, Any]] | None,
-        on_event: EventCallback,
+        event_source: EngineEventPublisher | EventCallback,
         plan: Plan | None = None,
     ) -> AgentResult:
         """流式 ReAct 循环：通过 router.stream() 逐 token 输出."""
+        events = self._coerce_engine_events(event_source)
+        if events is None:
+            raise TypeError("流式 ReAct 循环需要事件 Publisher")
         max_turns = self._config.safety.max_turns
         model_str = self._model_port.resolve_model(ModelTier.CAPABLE)
         session_id = self._session.id if self._session else ""
@@ -3465,34 +3563,39 @@ class AgentEngine:
 
         for turn in range(max_turns):
             self._usage.turns = turn + 1
-            await self._inject_background_notifications(on_event)
-            await self._inject_scheduler_notifications(on_event)
+            await self._inject_background_notifications(events)
+            await self._inject_scheduler_notifications(events)
 
             exceeded = self._check_budget()
             if exceeded:
-                await self._block_unreconciled_todos(on_event)
+                await self._block_unreconciled_todos(events)
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
                     reason="budget_exceeded",
                     streaming=True,
-                    on_event=on_event,
+                    events=events,
                 )
                 return exceeded
 
             phase_start = time.perf_counter()
-            await self._maybe_compact(on_event)
-            await self._inject_harness_context_snapshot(on_event)
-            await on_event(
-                "perf_phase",
+            await self._maybe_compact(events)
+            await self._inject_harness_context_snapshot(events)
+            await events.publish(
+                RuntimeEventType.PERF_PHASE,
                 {
                     "phase": "context_prepare",
                     "label": "上下文准备",
                     "duration_ms": int((time.perf_counter() - phase_start) * 1000),
                     "turn": turn + 1,
                 },
+                turn=turn + 1,
             )
-            await on_event("turn_start", {"turn": turn + 1, "model": model_str})
+            await events.publish(
+                RuntimeEventType.TURN_START,
+                {"turn": turn + 1, "model": model_str},
+                turn=turn + 1,
+            )
 
             text_parts: list[str] = []
             pending_text_parts: list[str] = []
@@ -3526,15 +3629,23 @@ class AgentEngine:
                     return
                 if not got_response:
                     got_response = True
-                    await on_event("response_start", {})
-                await on_event("token", {"content": "".join(pending_text_parts)})
+                    await events.publish(
+                        RuntimeEventType.RESPONSE_START,
+                        {},
+                        turn=turn + 1,
+                    )
+                await events.publish(
+                    RuntimeEventType.TOKEN,
+                    {"content": "".join(pending_text_parts)},
+                    turn=turn + 1,
+                )
                 pending_text_parts.clear()
 
             await self._fire_hook(HookContext(
                 point=HookPoint.LLM_CALL_START,
                 data={"turn": turn + 1, "streaming": True, "message_count": len(self._messages)},
                 session_id=session_id,
-            ), on_event)
+            ), events)
 
             try:
                 llm_start = time.perf_counter()
@@ -3549,8 +3660,8 @@ class AgentEngine:
                 ):
                     if not first_chunk_seen:
                         first_chunk_seen = True
-                        await on_event(
-                            "perf_phase",
+                        await events.publish(
+                            RuntimeEventType.PERF_PHASE,
                             {
                                 "phase": "llm_first_chunk",
                                 "label": "模型首包",
@@ -3559,6 +3670,7 @@ class AgentEngine:
                                 ),
                                 "turn": turn + 1,
                             },
+                            turn=turn + 1,
                         )
                     if chunk.usage:
                         self._track_model_usage(chunk.usage, model_str)
@@ -3570,9 +3682,17 @@ class AgentEngine:
                     if chunk.thinking:
                         if not got_thinking:
                             got_thinking = True
-                            await on_event("thinking_start", {})
+                            await events.publish(
+                                RuntimeEventType.THINKING_START,
+                                {},
+                                turn=turn + 1,
+                            )
                         thinking_parts.append(chunk.thinking)
-                        await on_event("thinking_delta", {"content": chunk.thinking})
+                        await events.publish(
+                            RuntimeEventType.THINKING_DELTA,
+                            {"content": chunk.thinking},
+                            turn=turn + 1,
+                        )
 
                     if chunk.tool_call_started:
                         tool_call_started = True
@@ -3590,7 +3710,11 @@ class AgentEngine:
                                 data.get("argument_chars", 0) or 0
                             )
                             last_tool_prepare_signature = _tool_prepare_signature(data)
-                            await on_event("tool_prepare_start", data)
+                            await events.publish(
+                                RuntimeEventType.TOOL_PREPARE_START,
+                                data,
+                                turn=turn + 1,
+                            )
 
                     if chunk.tool_call_snapshot:
                         if not tool_prepare_started:
@@ -3620,7 +3744,11 @@ class AgentEngine:
                             last_tool_prepare_emit = now
                             last_tool_prepare_arg_chars = arg_chars
                             last_tool_prepare_signature = signature
-                            await on_event("tool_prepare_snapshot", data)
+                            await events.publish(
+                                RuntimeEventType.TOOL_PREPARE_SNAPSHOT,
+                                data,
+                                turn=turn + 1,
+                            )
 
                     if chunk.token:
                         text_parts.append(chunk.token)
@@ -3642,14 +3770,22 @@ class AgentEngine:
                             await flush_pending_text()
                         elif not got_response:
                             got_response = True
-                            await on_event("response_start", {})
-                        await on_event("token", {"content": chunk.token})
+                            await events.publish(
+                                RuntimeEventType.RESPONSE_START,
+                                {},
+                                turn=turn + 1,
+                            )
+                        await events.publish(
+                            RuntimeEventType.TOKEN,
+                            {"content": chunk.token},
+                            turn=turn + 1,
+                        )
 
                     if chunk.tool_call and isinstance(chunk.tool_call, dict):
                         collected_tool_calls.update(chunk.tool_call)
                 if llm_start:
-                    await on_event(
-                        "perf_phase",
+                    await events.publish(
+                        RuntimeEventType.PERF_PHASE,
                         {
                             "phase": "llm_stream",
                             "label": "模型流式",
@@ -3658,6 +3794,7 @@ class AgentEngine:
                             ),
                             "turn": turn + 1,
                         },
+                        turn=turn + 1,
                     )
             except Exception as e:
                 logger.warning("Streaming failed, fallback to non-streaming: %s", e)
@@ -3665,7 +3802,7 @@ class AgentEngine:
                     messages=self._messages,
                     tier=ModelTier.CAPABLE,
                     tools=tools,
-                    on_event=on_event,
+                    events=events,
                     streaming=True,
                     cause=e,
                 )
@@ -3690,24 +3827,32 @@ class AgentEngine:
                     "streaming": True,
                 },
                 session_id=session_id,
-            ), on_event)
+            ), events)
 
             if got_thinking:
-                await on_event("thinking_end", {"content": "".join(thinking_parts)})
+                await events.publish(
+                    RuntimeEventType.THINKING_END,
+                    {"content": "".join(thinking_parts)},
+                    turn=turn + 1,
+                )
 
             text_content = "".join(text_parts)
             thinking_content = "".join(thinking_parts)
 
             exceeded = self._check_budget()
             if exceeded:
-                await on_event("error", {"message": exceeded.response})
-                await self._block_unreconciled_todos(on_event)
+                await events.publish(
+                    RuntimeEventType.ERROR,
+                    {"message": exceeded.response},
+                    turn=turn + 1,
+                )
+                await self._block_unreconciled_todos(events)
                 await self._fire_agent_stop(
                     status=exceeded.status,
                     response=exceeded.response,
                     reason="budget_exceeded",
                     streaming=True,
-                    on_event=on_event,
+                    events=events,
                 )
                 return exceeded
 
@@ -3720,7 +3865,11 @@ class AgentEngine:
                         started_at=tool_prepare_start or time.perf_counter(),
                         now=time.perf_counter(),
                     )
-                    await on_event("tool_prepare_end", first_snapshot)
+                    await events.publish(
+                        RuntimeEventType.TOOL_PREPARE_END,
+                        first_snapshot,
+                        turn=turn + 1,
+                    )
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": None,
@@ -3735,19 +3884,19 @@ class AgentEngine:
                     tool_call_history=tool_call_history,
                     session_id=session_id,
                     turn=turn + 1,
-                    on_event=on_event,
+                    events=events,
                 )
                 tool_call_history.extend(cur_calls)
 
                 exceeded = self._check_budget()
                 if exceeded:
-                    await self._block_unreconciled_todos(on_event)
+                    await self._block_unreconciled_todos(events)
                     return exceeded
                 continue
 
             if tool_prepare_started:
-                await on_event(
-                    "tool_prepare_end",
+                await events.publish(
+                    RuntimeEventType.TOOL_PREPARE_END,
                     {
                         "name": "tool",
                         "argument_chars": 0,
@@ -3764,8 +3913,8 @@ class AgentEngine:
                 attempted=todo_reconciliation_attempted,
             )
             if reconciliation.warning:
-                await on_event(
-                    "task_reconciliation_warning",
+                await events.publish(
+                    RuntimeEventType.TASK_RECONCILIATION_WARNING,
                     {"message": reconciliation.warning},
                 )
             if reconciliation.action == TodoReconciliationAction.RETRY:
@@ -3777,10 +3926,10 @@ class AgentEngine:
                 continue
             if reconciliation.action == TodoReconciliationAction.BLOCKED:
                 await self._emit_task_snapshot(
-                    on_event,
+                    events,
                     source="todo_reconciliation",
                 )
-            harness_gate = await self._evaluate_harness_completion(on_event)
+            harness_gate = await self._evaluate_harness_completion(events)
             if harness_gate is not None and harness_gate.status == "needs_correction":
                 pending_text_parts.clear()
                 continue
@@ -3788,26 +3937,46 @@ class AgentEngine:
                 await flush_pending_text()
             elif text_content and not got_response:
                 got_response = True
-                await on_event("response_start", {})
-                await on_event("token", {"content": text_content})
+                await events.publish(
+                    RuntimeEventType.RESPONSE_START,
+                    {},
+                    turn=turn + 1,
+                )
+                await events.publish(
+                    RuntimeEventType.TOKEN,
+                    {"content": text_content},
+                    turn=turn + 1,
+                )
 
             if _is_output_truncated(finish_reason):
                 continued_content = await self._continue_truncated_final_response(
                     partial_content=text_content,
                     tier=ModelTier.CAPABLE,
-                    on_event=on_event,
+                    events=events,
                     streaming=True,
                 )
                 continuation_suffix = continued_content[len(text_content):]
                 if continuation_suffix:
                     if not got_response:
                         got_response = True
-                        await on_event("response_start", {})
-                    await on_event("token", {"content": continuation_suffix})
+                        await events.publish(
+                            RuntimeEventType.RESPONSE_START,
+                            {},
+                            turn=turn + 1,
+                        )
+                    await events.publish(
+                        RuntimeEventType.TOKEN,
+                        {"content": continuation_suffix},
+                        turn=turn + 1,
+                    )
                 text_content = continued_content
 
             if got_response:
-                await on_event("response_end", {})
+                await events.publish(
+                    RuntimeEventType.RESPONSE_END,
+                    {},
+                    turn=turn + 1,
+                )
             self._append_message({"role": "assistant", "content": text_content})
             safe_content = self._output_guardrail.redact(text_content)
             final_status = (
@@ -3821,7 +3990,7 @@ class AgentEngine:
                 response=safe_content,
                 reason="final_response",
                 streaming=True,
-                on_event=on_event,
+                events=events,
             )
             return AgentResult(
                 status=final_status,
@@ -3832,13 +4001,13 @@ class AgentEngine:
                 ),
             )
 
-        await self._block_unreconciled_todos(on_event)
+        await self._block_unreconciled_todos(events)
         await self._fire_agent_stop(
             status="max_turns",
             response="已达到最大轮次限制，任务未完成。",
             reason="max_turns",
             streaming=True,
-            on_event=on_event,
+            events=events,
         )
         return AgentResult(
             status="max_turns",
@@ -3852,12 +4021,14 @@ class AgentEngine:
         *,
         on_event: EventCallback | None = None,
         agent_name: str | None = None,
+        _events: EngineEventPublisher | None = None,
     ) -> ToolResult:
         """Execute one tool call through the authoritative runtime pipeline."""
         return await self._execute_tool(
             tool_call,
             on_event=on_event,
             agent_name=agent_name,
+            events=_events,
         )
 
     async def _execute_tool(
@@ -3865,8 +4036,14 @@ class AgentEngine:
         tc: ToolCall,
         on_event: EventCallback | None = None,
         agent_name: str | None = None,
+        *,
+        events: EngineEventPublisher | None = None,
     ) -> ToolResult:
         """执行单个工具调用（含权限检查）."""
+        if events is not None and on_event is not None:
+            raise TypeError("不能同时传入 events 和旧 on_event 回调")
+        if events is None:
+            events = self._coerce_engine_events(on_event)
         tool = self._tool_registry.get(tc.name)
         if tool is None:
             return ToolResult(
@@ -3885,7 +4062,7 @@ class AgentEngine:
         transition_block = await self._block_transitioning_tool_call(
             tool_call=tc,
             session_id=session_id,
-            on_event=on_event,
+            events=events,
             agent_name=agent_name,
         )
         if transition_block is not None:
@@ -3898,7 +4075,7 @@ class AgentEngine:
                 "Plan 模式只允许只读工具。按 Shift+Tab 可切换到 default 或 bypass 后重试。"
             )
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tc.name,
                 status="blocked_by_plan_mode",
@@ -3923,11 +4100,11 @@ class AgentEngine:
             },
             agent_name=agent_name,
             session_id=session_id,
-        ), on_event)
+        ), events)
         if before_ctx.should_abort:
             reason = before_ctx.data.get("abort_reason", "hook policy")
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tc.name,
                 status="blocked_by_hook",
@@ -3944,7 +4121,7 @@ class AgentEngine:
         transition_block = await self._block_transitioning_tool_call(
             tool_call=tc,
             session_id=session_id,
-            on_event=on_event,
+            events=events,
             agent_name=agent_name,
         )
         if transition_block is not None:
@@ -3964,11 +4141,11 @@ class AgentEngine:
             },
             agent_name=agent_name,
             session_id=session_id,
-        ), on_event)
+        ), events)
         if after_ctx.should_abort:
             reason = after_ctx.data.get("abort_reason", "hook policy")
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tc.name,
                 status="blocked_by_hook",
@@ -3984,7 +4161,7 @@ class AgentEngine:
         transition_block = await self._block_transitioning_tool_call(
             tool_call=tc,
             session_id=session_id,
-            on_event=on_event,
+            events=events,
             agent_name=agent_name,
         )
         if transition_block is not None:
@@ -3992,7 +4169,7 @@ class AgentEngine:
         if decision.outcome is PermissionOutcome.BLOCK:
             logger.warning("Tool %s blocked: %s", tc.name, decision.reason)
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tc.name,
                 status="blocked",
@@ -4021,7 +4198,7 @@ class AgentEngine:
         if decision.outcome is PermissionOutcome.CONFIRM and not session_grant_applies:
             logger.info("Tool %s requires confirmation", tc.name)
             confirmation = await self._confirm_tool_execution(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_call=tc,
                 arguments=args,
@@ -4053,7 +4230,7 @@ class AgentEngine:
                 authorization_generation,
             ):
                 await self._emit_permission_bubble(
-                    on_event,
+                    events,
                     agent_name=agent_name,
                     tool_name=tc.name,
                     call_id=tc.id,
@@ -4076,7 +4253,7 @@ class AgentEngine:
         transition_block = await self._block_transitioning_tool_call(
             tool_call=tc,
             session_id=session_id,
-            on_event=on_event,
+            events=events,
             agent_name=agent_name,
         )
         if transition_block is not None:
@@ -4086,7 +4263,7 @@ class AgentEngine:
             authorization_generation,
         ):
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tc.name,
                 call_id=tc.id,
@@ -4110,7 +4287,9 @@ class AgentEngine:
             outcome = await self._tool_execution_port.invoke(
                 tool,
                 args,
-                event_callback=on_event,
+                event_callback=(
+                    events.legacy_callback() if events is not None else None
+                ),
             )
             output = outcome.content
             duration = outcome.duration_ms
@@ -4124,18 +4303,21 @@ class AgentEngine:
                     self._active_harness_run.mutating_tool_used = True
                 try:
                     await self.harness_service.invalidate_knowledge_cache()
-                    if on_event is not None:
-                        await on_event("harness_knowledge_invalidated", {
-                            "source": tc.name,
-                            "reason": "mutating_tool_succeeded",
-                        })
+                    if events is not None:
+                        await events.publish(
+                            RuntimeEventType.HARNESS_KNOWLEDGE_INVALIDATED,
+                            {
+                                "source": tc.name,
+                                "reason": "mutating_tool_succeeded",
+                            },
+                        )
                 except Exception as exc:
                     logger.warning(
                         "Harness knowledge invalidation failed after %s: %s",
                         tc.name,
                         exc,
                     )
-            await self._emit_task_snapshot(on_event, source=tc.name)
+            await self._emit_task_snapshot(events, source=tc.name)
             return ToolResult(
                 call_id=tc.id,
                 status="success",
@@ -4152,7 +4334,7 @@ class AgentEngine:
 
     async def _confirm_tool_execution(
         self,
-        on_event: EventCallback | None,
+        events: EngineEventPublisher | None,
         *,
         agent_name: str | None,
         tool_call: ToolCall,
@@ -4165,7 +4347,7 @@ class AgentEngine:
         reason = decision.reason or "该工具需要用户确认。"
         risk_level = getattr(decision.risk_level, "value", str(decision.risk_level))
         await self._emit_permission_bubble(
-            on_event,
+            events,
             agent_name=agent_name,
             tool_name=tool_call.name,
             call_id=tool_call.id,
@@ -4203,7 +4385,7 @@ class AgentEngine:
         except Exception as e:
             logger.warning("Permission confirmation callback failed: %s", e)
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
                 call_id=tool_call.id,
@@ -4219,7 +4401,7 @@ class AgentEngine:
         if choice == "bypass":
             self.set_runtime_mode(AgentRuntimeMode.BYPASS)
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
                 call_id=tool_call.id,
@@ -4233,7 +4415,7 @@ class AgentEngine:
         if choice == "grant_session":
             if not decision.allow_session_grant:
                 await self._emit_permission_bubble(
-                    on_event,
+                    events,
                     agent_name=agent_name,
                     tool_name=tool_call.name,
                     call_id=tool_call.id,
@@ -4246,7 +4428,7 @@ class AgentEngine:
                 return "grant_rejected"
             if not session_id.strip():
                 await self._emit_permission_bubble(
-                    on_event,
+                    events,
                     agent_name=agent_name,
                     tool_name=tool_call.name,
                     call_id=tool_call.id,
@@ -4262,7 +4444,7 @@ class AgentEngine:
                 authorization_generation,
             ):
                 await self._emit_permission_bubble(
-                    on_event,
+                    events,
                     agent_name=agent_name,
                     tool_name=tool_call.name,
                     call_id=tool_call.id,
@@ -4281,7 +4463,7 @@ class AgentEngine:
                 )
             except ValueError:
                 await self._emit_permission_bubble(
-                    on_event,
+                    events,
                     agent_name=agent_name,
                     tool_name=tool_call.name,
                     call_id=tool_call.id,
@@ -4293,7 +4475,7 @@ class AgentEngine:
                 )
                 return "grant_rejected_no_session"
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
                 call_id=tool_call.id,
@@ -4306,7 +4488,7 @@ class AgentEngine:
             return "allow_once"
         if choice == "allow_once":
             await self._emit_permission_bubble(
-                on_event,
+                events,
                 agent_name=agent_name,
                 tool_name=tool_call.name,
                 call_id=tool_call.id,
@@ -4319,7 +4501,7 @@ class AgentEngine:
             return "allow_once"
 
         await self._emit_permission_bubble(
-            on_event,
+            events,
             agent_name=agent_name,
             tool_name=tool_call.name,
             call_id=tool_call.id,
@@ -4370,7 +4552,7 @@ class AgentEngine:
 
     async def _emit_permission_bubble(
         self,
-        on_event: EventCallback | None,
+        events: EngineEventPublisher | None,
         *,
         agent_name: str | None,
         tool_name: str,
@@ -4397,8 +4579,8 @@ class AgentEngine:
         }
         self._append_permission_bubble(payload)
         await self._observe_harness_tool_event("permission_bubble", payload)
-        if on_event is not None:
-            await on_event("permission_bubble", payload)
+        if events is not None:
+            await events.publish(RuntimeEventType.PERMISSION_BUBBLE, payload)
 
     def _append_permission_bubble(self, payload: dict[str, Any]) -> None:
         """Append one permission audit record while retaining the latest 100."""
