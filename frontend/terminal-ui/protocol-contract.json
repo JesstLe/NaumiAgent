@@ -34,6 +34,7 @@
     "ui/message",
     "engine/event",
     "completion/receipt",
+    "harness/receipt",
     "inspector/snapshot",
     "inspector/update",
     "agents/snapshot",
@@ -61,6 +62,29 @@
       "fields": ["model", "effective", "source", "supported", "default", "warning"],
       "efforts": ["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"],
       "sources": ["runtime", "model", "global", "auto"]
+    }
+  },
+  "harness_receipt": {
+    "schema_version": 1,
+    "fields": [
+      "revision",
+      "run_id",
+      "status",
+      "task_kind",
+      "changed_files",
+      "checks",
+      "criteria",
+      "warnings",
+      "tree_fingerprint"
+    ],
+    "statuses": ["completed_verified", "completed_unverified", "blocked"],
+    "limits": {
+      "changed_files": 100,
+      "checks": 50,
+      "criteria": 100,
+      "warnings": 50,
+      "text_chars": 500,
+      "stored_runs": 100
     }
   },
   "ui_messages": {

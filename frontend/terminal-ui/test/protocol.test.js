@@ -130,6 +130,12 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("runtime/status"));
   assert(PROTOCOL_CONTRACT.server_events.includes("run/cancelled"));
   assert(PROTOCOL_CONTRACT.server_events.includes("completion/receipt"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/receipt"));
+  assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
+    "completed_verified",
+    "completed_unverified",
+    "blocked",
+  ]);
   assert(PROTOCOL_CONTRACT.server_events.includes("inspector/snapshot"));
   assert(PROTOCOL_CONTRACT.server_events.includes("inspector/update"));
   assert(PROTOCOL_CONTRACT.server_events.includes("agents/snapshot"));
@@ -151,6 +157,48 @@ test("protocol contract drives client and server event validation", () => {
     /未知客户端事件/,
   );
   assert.equal(chunks.length, 0);
+});
+
+test("typed harness receipt is strict and bounded", () => {
+  const normalized = normalizeServerRecord({
+    type: "harness/receipt",
+    payload: {
+      schema_version: 1,
+      revision: 3,
+      run_id: "harness-run-1",
+      status: "completed_unverified",
+      task_kind: "change",
+      changed_files: Array.from({ length: 120 }, (_, index) => `src/${index}.py`),
+      checks: [{ id: "unit", status: "failed", private_payload: "must-drop" }],
+      criteria: [],
+      warnings: ["定向检查失败"],
+      tree_fingerprint: "a".repeat(64),
+    },
+  });
+
+  assert.equal(normalized.payload.run_id, "harness-run-1");
+  assert.equal(normalized.payload.status, "completed_unverified");
+  assert.equal(normalized.payload.revision, 3);
+  assert.equal(normalized.payload.changed_files.length, 100);
+  assert.deepEqual(normalized.payload.checks[0], {
+    id: "unit",
+    status: "failed",
+    tree_fingerprint: "",
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/receipt",
+      payload: { schema_version: 1, run_id: "", status: "completed_verified" },
+    }),
+    /run_id/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/receipt",
+      payload: { schema_version: 1, run_id: "run", status: "guessed" },
+    }),
+    /status/,
+  );
 });
 
 test("normalizes strict runtime inspector snapshots and updates", () => {

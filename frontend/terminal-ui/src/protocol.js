@@ -150,6 +150,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "completion/receipt") {
     return normalizeCompletionReceipt(payload);
   }
+  if (type === "harness/receipt") {
+    return normalizeHarnessReceipt(payload);
+  }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
   }
@@ -518,7 +521,7 @@ function normalizeCompletionReceipt(payload) {
     throw new Error(`completion/receipt schema_version 不兼容: ${payload.schema_version}`);
   }
   const receiptId = String(payload.receipt_id ?? "").trim();
-  const runId = String(payload.run_id ?? "").trim();
+  const runId = publicText(payload.run_id);
   const outcome = String(payload.outcome ?? "").trim().toLowerCase();
   if (!receiptId || !runId) {
     throw new Error("completion/receipt 缺少 receipt_id 或 run_id");
@@ -554,6 +557,42 @@ function normalizeCompletionReceipt(payload) {
     started_at: String(payload.started_at ?? ""),
     completed_at: String(payload.completed_at ?? ""),
     duration_ms: nonnegativeNumber(payload.duration_ms),
+  };
+}
+
+function normalizeHarnessReceipt(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`harness/receipt schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const runId = String(payload.run_id ?? "").trim();
+  if (!runId) throw new Error("harness/receipt 缺少 run_id");
+  const status = String(payload.status ?? "").trim().toLowerCase();
+  if (!["completed_verified", "completed_unverified", "blocked"].includes(status)) {
+    throw new Error(`harness/receipt status 无效: ${status}`);
+  }
+  const revision = Number(payload.revision);
+  if (!Number.isSafeInteger(revision) || revision < 1) {
+    throw new Error("harness/receipt revision 必须是正整数");
+  }
+  return {
+    schema_version: 1,
+    revision,
+    run_id: runId,
+    status,
+    task_kind: publicText(payload.task_kind),
+    changed_files: normalizeTextArray(payload.changed_files, 100).map(publicText),
+    checks: normalizeObjectArray(payload.checks, 50).map((item) => ({
+      id: publicText(item.id),
+      status: publicText(item.status),
+      tree_fingerprint: publicText(item.tree_fingerprint),
+    })),
+    criteria: normalizeObjectArray(payload.criteria, 100).map((item) => ({
+      id: publicText(item.id),
+      status: publicText(item.status),
+      evidence_ids: normalizeTextArray(item.evidence_ids, 100).map(publicText),
+    })),
+    warnings: normalizeTextArray(payload.warnings, 50).map(publicText),
+    tree_fingerprint: publicText(payload.tree_fingerprint),
   };
 }
 
