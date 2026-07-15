@@ -65,6 +65,7 @@ class ServerEventType(StrEnum):
     UI_MESSAGE = "ui/message"
     ENGINE_EVENT = "engine/event"
     COMPLETION_RECEIPT = "completion/receipt"
+    HARNESS_RECEIPT = "harness/receipt"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"

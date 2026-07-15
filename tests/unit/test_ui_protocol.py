@@ -75,6 +75,10 @@ def test_protocol_exposes_permission_grant_events() -> None:
     assert ServerEventType.PERMISSION_GRANTS_CHANGED == "permission/grants_changed"
 
 
+def test_protocol_exposes_typed_harness_receipt_event() -> None:
+    assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
+
+
 def test_argument_summary_redacts_and_bounds_output() -> None:
     summary = summarize_arguments(
         {

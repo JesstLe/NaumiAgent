@@ -726,6 +726,40 @@ def test_protocol_contract_matches_python_enums() -> None:
     assert contract["server_events"] == [str(event) for event in ServerEventType]
 
 
+@pytest.mark.asyncio
+async def test_bridge_emits_typed_harness_receipt_before_compatibility_message() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+    payload = {
+        "run_id": "harness-run-1",
+        "status": "completed_unverified",
+        "task_kind": "change",
+        "changed_files": ["src/app.py"],
+        "checks": [{"id": "unit", "status": "failed"}],
+        "criteria": [],
+        "warnings": ["定向检查失败"],
+        "tree_fingerprint": "a" * 64,
+    }
+
+    await bridge.handle_engine_event("harness_completion_receipt", payload)
+
+    records = _records(writer)
+    typed = next(record for record in records if record["type"] == "harness/receipt")
+    compatibility = next(
+        record
+        for record in records
+        if record["type"] == "ui/message"
+        and record["payload"].get("title") == "Harness 完成回执"
+    )
+    assert records.index(typed) < records.index(compatibility)
+    assert typed["payload"] == {
+        **payload,
+        "schema_version": 1,
+        "revision": 1,
+    }
+
+
 def test_protocol_contract_ui_message_fields_match_python_messages() -> None:
     contract_path = (
         Path(__file__).resolve().parents[2]

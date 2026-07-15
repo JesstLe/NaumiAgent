@@ -1872,6 +1872,16 @@ class JsonlEngineBridge:
             self.debug_trace.event("engine.stream_event", {"event": event, "data": data})
 
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
+        if event == "harness_completion_receipt":
+            await self.emit(
+                ServerEventType.HARNESS_RECEIPT,
+                {
+                    **data,
+                    "schema_version": 1,
+                    "revision": 1,
+                },
+                request_id=self._active_run_context.get("request_id") or None,
+            )
         if event == "completion_receipt":
             receipt = CompletionReceipt.from_dict(data)
             self._active_completion_receipt = receipt

@@ -2635,6 +2635,46 @@ test("completion receipt is deduplicated and finalized after run activity", () =
   assert.equal(state.activeRunActivity, null);
 });
 
+test("typed harness receipt keeps only the newest revision per run", () => {
+  const state = createInitialState();
+  const receipt = {
+    schema_version: 1,
+    revision: 2,
+    run_id: "harness-state-run",
+    status: "completed_unverified",
+    task_kind: "change",
+    changed_files: ["src/app.py"],
+    checks: [],
+    criteria: [],
+    warnings: ["尚未验证"],
+    tree_fingerprint: "b".repeat(64),
+  };
+
+  reduceServerEvent(state, { type: "harness/receipt", payload: receipt });
+  reduceServerEvent(state, {
+    type: "harness/receipt",
+    payload: { ...receipt, revision: 1, status: "blocked" },
+  });
+  reduceServerEvent(state, {
+    type: "harness/receipt",
+    payload: { ...receipt, revision: 3, status: "completed_verified", warnings: [] },
+  });
+
+  assert.deepEqual(Object.keys(state.harnessReceipts), ["harness-state-run"]);
+  assert.equal(state.harnessReceipts["harness-state-run"].revision, 3);
+  assert.equal(state.harnessReceipts["harness-state-run"].status, "completed_verified");
+  assert.equal(state.messages.filter((item) => item.kind === "harness_receipt").length, 0);
+
+  for (let index = 0; index < 105; index += 1) {
+    reduceServerEvent(state, {
+      type: "harness/receipt",
+      payload: { ...receipt, run_id: `bounded-${index}`, revision: 1 },
+    });
+  }
+  assert.equal(Object.keys(state.harnessReceipts).length, 100);
+  assert.equal(Object.hasOwn(state.harnessReceipts, "bounded-104"), true);
+});
+
 test("run completion requests a missing authoritative receipt", () => {
   const state = createInitialState();
   reduceServerEvent(state, {

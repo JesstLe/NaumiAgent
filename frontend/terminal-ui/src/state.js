@@ -20,6 +20,7 @@ const MAX_RUN_ACTIVITY_TOOLS = 100;
 const MAX_RUN_ACTIVITY_PERMISSION_IDS = 100;
 const MAX_RUN_ACTIVITY_PHASE_LABEL_CHARS = 160;
 const MAX_SUBAGENT_ACTIVITY_EVENTS = 20;
+const MAX_HARNESS_RECEIPTS = 100;
 const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
 const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "team"]);
 
@@ -219,6 +220,7 @@ export function createInitialState() {
     lastFirstTokenLatencyMs: null,
     workingAnimationFrame: 0,
     messages: [],
+    harnessReceipts: Object.create(null),
     tools: [],
     activeAssistant: null,
     activeThinking: null,
@@ -431,6 +433,9 @@ export function reduceServerEvent(state, record) {
       break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
+      break;
+    case "harness/receipt":
+      addHarnessReceipt(state, payload);
       break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
@@ -1116,6 +1121,21 @@ function addCompletionReceipt(state, receipt, requestId) {
   state.messages.push(message);
   clearRenderCache(state.renderCache);
   return message;
+}
+
+function addHarnessReceipt(state, receipt) {
+  const runId = String(receipt.run_id ?? "").trim();
+  const revision = Number(receipt.revision) || 0;
+  if (!runId || revision < 1) return null;
+  const existing = state.harnessReceipts[runId];
+  if (existing && Number(existing.revision) >= revision) return existing;
+  const normalized = { ...receipt, run_id: runId, revision };
+  state.harnessReceipts[runId] = normalized;
+  const runIds = Object.keys(state.harnessReceipts);
+  while (runIds.length > MAX_HARNESS_RECEIPTS) {
+    delete state.harnessReceipts[runIds.shift()];
+  }
+  return normalized;
 }
 
 function moveCompletionReceiptToEnd(state, receiptId, runId) {
