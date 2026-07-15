@@ -30,17 +30,29 @@ def test_configure_windows_utf8_reconfigures_console_streams() -> None:
     assert stderr.calls == [{"encoding": "utf-8", "errors": "replace"}]
 
 
-def _install_engine(monkeypatch: pytest.MonkeyPatch, engine: object) -> None:
-    module = ModuleType("naumi_agent.orchestrator.engine")
-    module.AgentEngine = lambda _config: engine  # type: ignore[attr-defined]
+def _install_engine(
+    monkeypatch: pytest.MonkeyPatch,
+    engine: object,
+) -> dict[str, object]:
+    captured: dict[str, object] = {}
+    module = ModuleType("naumi_agent.runtime.composition")
+
+    def create_agent_engine(config: object) -> object:
+        captured["config"] = config
+        return engine
+
+    module.create_agent_engine = create_agent_engine  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setattr(main_module, "_resolve_config_path", lambda path: path)
+    parsed = SimpleNamespace(log_level="INFO")
     monkeypatch.setattr(
         main_module.AppConfig,
         "from_yaml",
-        lambda _path: SimpleNamespace(log_level="INFO"),
+        lambda _path: parsed,
     )
     monkeypatch.setattr(main_module, "_check_api_key", lambda _config: None)
+    captured["parsed"] = parsed
+    return captured
 
 
 @pytest.mark.asyncio
@@ -62,10 +74,11 @@ async def test_run_task_shuts_down_engine_after_success(monkeypatch) -> None:
         shutdown=AsyncMock(),
         router=SimpleNamespace(resolve_model=lambda _tier: "test-model"),
     )
-    _install_engine(monkeypatch, engine)
+    captured = _install_engine(monkeypatch, engine)
 
     await main_module._run_task("hello", "config.yaml")
 
+    assert captured["config"] is captured["parsed"]
     engine.shutdown.assert_awaited_once()
 
 
@@ -75,8 +88,9 @@ async def test_run_task_shuts_down_engine_after_failure(monkeypatch) -> None:
         run=AsyncMock(side_effect=RuntimeError("boom")),
         shutdown=AsyncMock(),
     )
-    _install_engine(monkeypatch, engine)
+    captured = _install_engine(monkeypatch, engine)
 
     await main_module._run_task("hello", "config.yaml")
 
+    assert captured["config"] is captured["parsed"]
     engine.shutdown.assert_awaited_once()

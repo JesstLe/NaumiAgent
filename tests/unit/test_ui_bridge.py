@@ -88,6 +88,8 @@ async def test_create_bridge_binds_engine_to_process_launch_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from naumi_agent.runtime import composition
+
     legacy = tmp_path / "legacy"
     launch = tmp_path / "launch"
     legacy.mkdir()
@@ -110,6 +112,15 @@ async def test_create_bridge_binds_engine_to_process_launch_directory(
     )
     captured: dict[str, AppConfig] = {}
 
+    def forbidden_default_root(_config: AppConfig) -> _FakeEngine:
+        raise AssertionError("显式 factory 不得调用默认 root")
+
+    monkeypatch.setattr(
+        composition,
+        "create_agent_engine",
+        forbidden_default_root,
+    )
+
     def engine_factory(config: AppConfig) -> _FakeEngine:
         captured["config"] = config
         engine = _FakeEngine()
@@ -128,6 +139,38 @@ async def test_create_bridge_binds_engine_to_process_launch_directory(
         assert captured["config"].workspace_root == str(launch.resolve())
         assert bridge.engine.workspace_root == launch.resolve()
         assert bridge.status_payload()["workspace_root"] == str(launch.resolve())
+    finally:
+        await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_create_bridge_uses_composition_root_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from naumi_agent.runtime import composition
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "models:\n  default_model: test-model\n",
+        encoding="utf-8",
+    )
+    engine = _FakeEngine()
+    captured: list[AppConfig] = []
+
+    def create(config: AppConfig) -> _FakeEngine:
+        captured.append(config)
+        engine.workspace_root = config.resolve_workspace_root()
+        return engine
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(composition, "create_agent_engine", create)
+    monkeypatch.setenv("NAUMI_MODELS__API_KEY", "test-secret")
+    bridge = await ui_bridge.create_bridge(config_path=str(config_path))
+    bridge.bind_writer(io.StringIO())
+    try:
+        assert len(captured) == 1
+        assert bridge.engine is engine
     finally:
         await bridge.shutdown()
 
