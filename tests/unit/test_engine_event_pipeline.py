@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 
 
 class _RecordingSink:
@@ -43,13 +43,13 @@ async def test_run_streaming_delivers_one_identity_to_base_and_caller_sinks(
 
     async def fake_core(
         task: str,
-        on_event: Any,
+        events: RuntimeEventPublisher,
         **_: object,
     ) -> AgentResult:
         assert task == "执行读取"
-        await on_event("run_started", {"task": task})
-        await on_event(
-            "tool_start",
+        await events.publish(RuntimeEventType.RUN_STARTED, {"task": task})
+        await events.publish(
+            RuntimeEventType.TOOL_START,
             {"name": "file_read", "call_id": "read-1", "args": {"path": "a.txt"}},
         )
         return AgentResult(status="completed", response="读取完成")

@@ -415,12 +415,14 @@ async def test_engine_tool_batches_dispatch_through_public_facade(
         *,
         on_event: ToolEventCallback | None = None,
         agent_name: str | None = None,
+        _events: Any | None = None,
     ) -> Any:
         public_calls.append((tool_call.id, agent_name))
         return await original_execute_tool(
             tool_call,
             on_event=on_event,
             agent_name=agent_name,
+            _events=_events,
         )
 
     engine.execute_tool = observed_execute_tool  # type: ignore[method-assign]
@@ -438,7 +440,7 @@ async def test_engine_tool_batches_dispatch_through_public_facade(
             tool_call_history=[],
             session_id=session.id,
             turn=1,
-            on_event=None,
+            events=None,
         )
 
         assert public_calls == [("batch-public-facade", None)]
@@ -478,7 +480,7 @@ async def test_engine_parallel_read_batch_enters_same_port_concurrently(
             tool_call_history=[],
             session_id=session.id,
             turn=1,
-            on_event=None,
+            events=None,
         )
     )
     try:
@@ -533,7 +535,7 @@ async def test_engine_port_failure_does_not_cancel_parallel_sibling(
             tool_call_history=[],
             session_id=session.id,
             turn=1,
-            on_event=None,
+            events=None,
         )
 
         tool_messages = {
@@ -624,7 +626,7 @@ async def test_engine_parallel_batch_propagates_outer_cancellation(
             tool_call_history=[],
             session_id=session.id,
             turn=1,
-            on_event=None,
+            events=None,
         )
     )
     try:

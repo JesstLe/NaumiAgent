@@ -12,6 +12,8 @@ from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.context_assembly import is_harness_context_message
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tools.base import Tool, ToolCall, ToolMetadata
 
 PROFILE = """\
@@ -99,8 +101,19 @@ async def test_engine_injects_trusted_knowledge_without_persisting(
         {"role": "user", "content": "修改 AgentEngineKnowledge"},
     ]
     trusted_engine._full_history = list(trusted_engine._messages)
+    events: list[RuntimeEvent] = []
 
-    await trusted_engine._inject_harness_context_snapshot()
+    class RecordingSink:
+        async def emit(self, event: RuntimeEvent) -> None:
+            events.append(event)
+
+    publisher = RuntimeEventPublisher(
+        RecordingSink(),
+        session_id="knowledge-session",
+        run_id="knowledge-run",
+    )
+
+    await trusted_engine._inject_harness_context_snapshot(publisher)
 
     active = [
         message for message in trusted_engine._messages
@@ -110,6 +123,9 @@ async def test_engine_injects_trusted_knowledge_without_persisting(
     assert "Repository Knowledge" in active[0]["content"]
     assert "ROOT_TRUSTED_RULE" in active[0]["content"]
     assert "src/engine.py" in active[0]["content"]
+    assert [event.type for event in events] == [RuntimeEventType.HARNESS_KNOWLEDGE]
+    assert events[0].data["status"] == "ready"
+    assert events[0].run_id == "knowledge-run"
     assert not any(
         "Repository Knowledge" in str(message.get("content", ""))
         for message in trusted_engine._full_history
@@ -189,17 +205,33 @@ async def test_successful_mutating_tool_invalidates_knowledge_for_new_files(
         _CreateKnowledgeFileTool(trusted_engine.workspace_root)
     )
     trusted_engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+    events: list[RuntimeEvent] = []
+
+    class RecordingSink:
+        async def emit(self, event: RuntimeEvent) -> None:
+            events.append(event)
+
+    publisher = RuntimeEventPublisher(
+        RecordingSink(),
+        session_id="knowledge-session",
+        run_id="knowledge-run",
+    )
 
     result = await trusted_engine._execute_tool(ToolCall(
         id="create_knowledge",
         name="create_knowledge_fixture",
         arguments="{}",
-    ))
+    ), events=publisher)
     refreshed = await trusted_engine.harness_service.knowledge_context(
         "修改 NewKnowledgeSymbol",
         model_window=124_000,
     )
 
     assert result.status == "success"
+    assert [event.type for event in events] == [
+        RuntimeEventType.HARNESS_KNOWLEDGE_INVALIDATED,
+    ]
+    assert events[0].run_id == "knowledge-run"
+    assert events[0].data["source"] == "create_knowledge_fixture"
     assert refreshed.bundle is not None
     assert "src/new_knowledge.py" in refreshed.bundle.source_paths
