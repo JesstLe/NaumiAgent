@@ -81,6 +81,7 @@ import { createTrackpadScrollFilter } from "./scroll-input.js";
 import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
 import { createWorkingAnimationController } from "./working-animation.js";
 import { createScreenPainter } from "./screen-painter.js";
+import { createRedrawScheduler } from "./redraw-scheduler.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 import { createTerminalSession } from "./terminal-session.js";
 import {
@@ -108,7 +109,6 @@ let debugLog = null;
 let bridge = null;
 let send = null;
 let heartbeat = null;
-let redrawTimer = null;
 let uiSnapshotTimer = null;
 let inputEscapeTimer = null;
 let quitting = false;
@@ -124,6 +124,7 @@ const terminalSession = createTerminalSession({
 const screenPainter = createScreenPainter({
   write: (value) => process.stdout.write(value),
 });
+const redrawScheduler = createRedrawScheduler({ onRedraw: redraw });
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
@@ -227,7 +228,7 @@ function main() {
 
   setupTerminal();
   send("hello", { client: "naumi-terminal-ui" });
-  redraw();
+  redrawScheduler.settleInitial();
 }
 
 function startBridge() {
@@ -257,6 +258,7 @@ function setupTerminal() {
 function restoreTerminal() {
   heartbeat?.stop();
   workingAnimation.stop();
+  redrawScheduler.cancel();
   terminalSession.restore();
 }
 
@@ -869,20 +871,16 @@ function scheduleUiSnapshotPersist() {
 }
 
 function scheduleRedraw() {
-  if (redrawTimer) return;
-  redrawTimer = setTimeout(() => {
-    redrawTimer = null;
-    redraw();
-  }, 16);
+  redrawScheduler.schedule();
 }
 
 function handleTerminalResize() {
   const width = Math.max(60, process.stdout.columns ?? 100);
   const height = Math.max(12, process.stdout.rows ?? 30);
-  if (viewportWidth === null || viewportHeight === null) {
+  if (!redrawScheduler.painted) {
     viewportWidth = width;
     viewportHeight = height;
-    scheduleRedraw();
+    redrawScheduler.settleInitial();
     return;
   }
   if (width === viewportWidth && height === viewportHeight) return;
@@ -928,6 +926,7 @@ function redraw() {
     viewportWidth = width;
     viewportHeight = height;
     const paint = screenPainter.paint(lines, width, height);
+    redrawScheduler.markPainted();
     debugLog?.log("render.screen", {
       width,
       height,
