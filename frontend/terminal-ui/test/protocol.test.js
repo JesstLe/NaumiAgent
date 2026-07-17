@@ -183,6 +183,27 @@ function harnessEvalPromotionPayload(stage = "promoted") {
   };
 }
 
+function doctorHealthPayload() {
+  return {
+    schema_version: 1,
+    status: "degraded",
+    generated_at: "2026-07-18T10:00:00+00:00",
+    live_probe: false,
+    snapshot_sha256: "a".repeat(64),
+    items: [{
+      id: "provider-1",
+      domain: "provider",
+      label: "API key",
+      severity: "error",
+      responsibility: "user_config",
+      detail: "未检测到凭据",
+      suggestion: "运行 naumi configure。",
+      private_payload: "must-drop",
+    }],
+    private_payload: "must-drop",
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -317,6 +338,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-baseline"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-batch"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-promotion"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("doctor/health"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -548,6 +570,32 @@ test("harness eval promotion response validates guided and authoritative state",
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-promotion", payload: missingReason }),
     /缺少晋升理由/,
+  );
+});
+
+test("doctor health response is strict bounded and drops private fields", () => {
+  const normalized = normalizeServerRecord({
+    type: "doctor/health",
+    payload: doctorHealthPayload(),
+  }).payload;
+
+  assert.equal(normalized.status, "degraded");
+  assert.equal(normalized.items[0].domain, "provider");
+  assert.equal(normalized.items[0].responsibility, "user_config");
+  assert.equal(Object.hasOwn(normalized, "private_payload"), false);
+  assert.equal(Object.hasOwn(normalized.items[0], "private_payload"), false);
+
+  const invalid = doctorHealthPayload();
+  invalid.items[0].severity = "warning";
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/health", payload: invalid }),
+    /severity/,
+  );
+  const duplicate = doctorHealthPayload();
+  duplicate.items.push({ ...duplicate.items[0] });
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/health", payload: duplicate }),
+    /必须唯一/,
   );
 });
 

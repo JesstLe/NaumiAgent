@@ -2289,14 +2289,45 @@ class JsonlEngineBridge:
 
     async def show_doctor_report(self, *, request_id: str) -> None:
         """Render deterministic local diagnostics through the UI protocol."""
-        from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+        from naumi_agent.ui.doctor import (
+            DoctorCheck,
+            DoctorReport,
+            render_doctor_report,
+            run_doctor,
+        )
+        from naumi_agent.ui.doctor_health import (
+            build_doctor_health_snapshot,
+            doctor_health_payload,
+        )
 
         config = getattr(self.engine, "_config", AppConfig())
-        report = await run_doctor(
-            config,
-            workspace_root=self.engine.workspace_root,
-            mcp_manager=getattr(self.engine, "mcp_manager", None),
-            model_router=self.engine.router,
+        try:
+            report = await run_doctor(
+                config,
+                workspace_root=self.engine.workspace_root,
+                mcp_manager=getattr(self.engine, "mcp_manager", None),
+                model_router=self.engine.router,
+            )
+            health_snapshot = build_doctor_health_snapshot(report)
+        except Exception as exc:
+            logger.warning("Local doctor failed (%s)", type(exc).__name__)
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.doctor", exc)
+            report = DoctorReport(
+                checks=(
+                    DoctorCheck(
+                        "Doctor 运行时",
+                        "error",
+                        "诊断流程自身失败；其余环境状态未知。",
+                        "运行 `/debug` 查看脱敏日志路径，然后重启 NaumiAgent 重试。",
+                    ),
+                )
+            )
+            health_snapshot = build_doctor_health_snapshot(report)
+        await self.emit(
+            ServerEventType.DOCTOR_HEALTH,
+            doctor_health_payload(health_snapshot),
+            request_id=request_id,
         )
         await self.emit(
             ServerEventType.UI_MESSAGE,

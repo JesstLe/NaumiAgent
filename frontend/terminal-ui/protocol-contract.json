@@ -58,6 +58,7 @@
     "harness/eval-baseline",
     "harness/eval-batch",
     "harness/eval-promotion",
+    "doctor/health",
     "inspector/snapshot",
     "inspector/update",
     "agents/snapshot",

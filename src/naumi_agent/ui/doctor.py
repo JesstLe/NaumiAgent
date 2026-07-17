@@ -96,6 +96,7 @@ async def run_doctor(
         _check_workspace(root),
         _check_state_store_catalog(config),
         _check_git(root),
+        _check_command("Node.js", "node", ["node", "--version"]),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
         _check_command("Docker", "docker", ["docker", "--version"]),
         await _check_browser_daemon(config),

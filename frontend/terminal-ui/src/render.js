@@ -16,6 +16,7 @@ import { renderHarnessDetailPage } from "./components/harness-detail-page.js";
 import { renderHarnessEvalBaselinePage } from "./components/harness-eval-baseline-page.js";
 import { renderHarnessEvalBatchPage } from "./components/harness-eval-batch-page.js";
 import { renderHarnessEvalPromotionPage } from "./components/harness-eval-promotion-page.js";
+import { renderDoctorHealthPage } from "./components/doctor-health-page.js";
 import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
@@ -58,6 +59,11 @@ export function renderScreen(state, width, height, env = {}) {
     ? renderHarnessEvalPromotionPage({
       ...state.harnessEvalPromotion,
       snapshot: state.harnessEvalPromotions[state.harnessEvalPromotion.requestId],
+    }, width, bodyHeight)
+    : state.route?.name === "doctor_health"
+    ? renderDoctorHealthPage({
+      ...state.doctorHealth,
+      heartbeat: state.bridgeHeartbeat,
     }, width, bodyHeight)
     : state.route?.name === "workbench"
     ? renderWorkbenchOverview(state.workbench, width, bodyHeight)

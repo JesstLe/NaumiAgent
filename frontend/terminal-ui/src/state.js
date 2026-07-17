@@ -279,6 +279,12 @@ export function createInitialState() {
       batchId: "",
       scrollOffset: 0,
     },
+    doctorHealth: {
+      loading: false,
+      snapshot: null,
+      error: "",
+      scrollOffset: 0,
+    },
     permissionCenter: {
       loading: false,
       snapshot: null,
@@ -580,6 +586,11 @@ export function reduceServerEvent(state, record) {
       }
       break;
     }
+    case "doctor/health":
+      state.doctorHealth.loading = false;
+      state.doctorHealth.error = "";
+      state.doctorHealth.snapshot = payload;
+      break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
       if (
@@ -763,6 +774,7 @@ export function reduceServerEvent(state, record) {
       const wasHarnessEvalBaselineRoute = state.route?.name === "harness_eval_baseline";
       const wasHarnessEvalBatchRoute = state.route?.name === "harness_eval_batch";
       const wasHarnessEvalPromotionRoute = state.route?.name === "harness_eval_promotion";
+      const wasDoctorHealthRoute = state.route?.name === "doctor_health";
       const wasPermissionRoute = state.route?.name === "permissions";
       state.harnessDetail = {
         runId: "",
@@ -787,11 +799,18 @@ export function reduceServerEvent(state, record) {
         batchId: "",
         scrollOffset: 0,
       };
+      state.doctorHealth = {
+        loading: false,
+        snapshot: null,
+        error: "",
+        scrollOffset: 0,
+      };
       if (
         wasHarnessDetailRoute
         || wasHarnessEvalBaselineRoute
         || wasHarnessEvalBatchRoute
         || wasHarnessEvalPromotionRoute
+        || wasDoctorHealthRoute
       ) {
         state.route = { name: "conversation", originAnchor: null };
       }
@@ -2498,6 +2517,14 @@ export function handleSubmitText(state, text, send) {
     return;
   }
   if (text === "/doctor") {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "doctor_health", originAnchor };
+    state.doctorHealth.loading = true;
+    state.doctorHealth.error = "";
+    state.doctorHealth.scrollOffset = 0;
     send("doctor", {});
     return;
   }
@@ -2729,6 +2756,31 @@ export function handleHarnessEvalPromotionKey(state, key) {
   else if (key === INPUT_KEYS.pageDown) state.harnessEvalPromotion.scrollOffset = current + 10;
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessEvalPromotion.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessEvalPromotion.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+export function handleDoctorHealthKey(state, key, send) {
+  if (state.route?.name !== "doctor_health") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (key === "r" || key === "R") {
+    state.doctorHealth.loading = true;
+    state.doctorHealth.error = "";
+    send("doctor", {});
+    return true;
+  }
+  const current = Math.max(0, Number(state.doctorHealth.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.doctorHealth.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.doctorHealth.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.doctorHealth.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.doctorHealth.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.doctorHealth.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.doctorHealth.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
 }
 

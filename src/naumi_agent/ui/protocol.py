@@ -96,6 +96,7 @@ class ServerEventType(StrEnum):
     HARNESS_EVAL_BASELINE = "harness/eval-baseline"
     HARNESS_EVAL_BATCH = "harness/eval-batch"
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
+    DOCTOR_HEALTH = "doctor/health"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"

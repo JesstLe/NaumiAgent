@@ -54,6 +54,7 @@ import {
   handleHarnessEvalBaselineKey,
   handleHarnessEvalBatchKey,
   handleHarnessEvalPromotionKey,
+  handleDoctorHealthKey,
   handlePermissionCenterKey,
   handleInteractionKey,
   handleSubmitText,
@@ -581,6 +582,10 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (state.route?.name === "harness_eval_promotion" && handleHarnessEvalPromotionKey(state, chunk)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "doctor_health" && handleDoctorHealthKey(state, chunk, send)) {
     scheduleRedraw();
     return;
   }

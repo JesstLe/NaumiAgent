@@ -210,7 +210,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 
 | 类别 | 命令 | 用途 |
 | --- | --- | --- |
-| 基础 | `/help` `/keybindings` `/style` `/doctor` `/model` | 查看帮助、快捷键、主题、诊断与模型配置 |
+| 基础 | `/help` `/keybindings` `/style` `/doctor` `/model` | 查看帮助、快捷键、主题、typed 本地健康诊断与模型配置 |
 | 模型 | `/models` `/effort` `/reasoning` | 发现模型、切换模型思考强度、显示或隐藏思考文本 |
 | 文件 | `/glob` `/grep` `/read` `/write` `/edit` | 通过 Agent 工具路径搜索、读取和修改文件 |
 | 会话 | `/history` `/resume` `/load <id>` `/new` `/clear` | 查看、恢复、加载、保存新开或清空当前会话 |
