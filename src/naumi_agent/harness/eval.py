@@ -20,9 +20,11 @@ from naumi_agent.harness.eval_identity import (
 )
 from naumi_agent.harness.eval_models import (
     EvalCaseStatus,
+    EvalGuardrailStatus,
     EvalRunStatus,
     HarnessEvalCase,
     HarnessEvalCaseResult,
+    HarnessEvalGuardrailResult,
     HarnessEvalReport,
     HarnessEvalSuite,
     HarnessEvalSuiteResult,
@@ -263,6 +265,7 @@ def _evaluate_loaded_suite(
             if budget_exhausted
             else ""
         ),
+        comparison_policy=suite.comparison_policy,
         duration_ms=_elapsed_ms(started),
     )
 
@@ -281,6 +284,8 @@ def _evaluate_protocol_case(
             runner=case.runner,
             status=EvalCaseStatus.EVALUATION_ERROR,
             expected=case.expected,
+            primary_metric=case.metrics.primary,
+            guardrails=_initial_guardrails(case),
             code=exc.code,
             message=str(exc),
             duration_ms=_elapsed_ms(started),
@@ -296,6 +301,8 @@ def _evaluate_protocol_case(
             status=EvalCaseStatus.IMPLEMENTATION_FAILURE,
             expected=case.expected,
             actual=actual,
+            primary_metric=case.metrics.primary,
+            guardrails=_initial_guardrails(case),
             code="case_budget_exceeded",
             message=(
                 f"协议实现耗时 {duration_ms:.2f}ms，超过 case 预算 "
@@ -310,6 +317,8 @@ def _evaluate_protocol_case(
             status=EvalCaseStatus.PASSED,
             expected=case.expected,
             actual=actual,
+            primary_metric=case.metrics.primary,
+            guardrails=_initial_guardrails(case),
             message="协议行为符合预期。",
             duration_ms=duration_ms,
         )
@@ -319,6 +328,8 @@ def _evaluate_protocol_case(
         status=EvalCaseStatus.IMPLEMENTATION_FAILURE,
         expected=case.expected,
         actual=actual,
+        primary_metric=case.metrics.primary,
+        guardrails=_initial_guardrails(case),
         code="protocol_outcome_mismatch",
         message=(
             f"预期 {case.expected.outcome}/"
@@ -425,6 +436,8 @@ def _skipped_case(case: HarnessEvalCase, code: str) -> HarnessEvalCaseResult:
         runner=case.runner,
         status=EvalCaseStatus.SKIPPED,
         expected=case.expected,
+        primary_metric=case.metrics.primary,
+        guardrails=_initial_guardrails(case),
         code=code,
         message="Suite 时间预算已耗尽，本 case 未执行。",
     )
@@ -565,11 +578,13 @@ def _attach_baseline_identity(
         return result.model_copy(
             update={"baseline_identity_code": "baseline_suite_unavailable"}
         )
+    result = _verify_static_side_effect_guardrails(result)
     try:
         configuration = HarnessEvalConfigurationIdentity.create(
             suite_id=result.suite_id,
             suite_sha256=result.suite_sha256,
             profile_sha256=profile_digest,
+            policy_sha256=result.policy_sha256,
             runner_version=PROTOCOL_HELLO_RUNNER_VERSION,
             repetitions=1,
             live=False,
@@ -585,6 +600,41 @@ def _attach_baseline_identity(
             update={"baseline_identity_code": "baseline_configuration_invalid"}
         )
     return result.model_copy(update={"baseline_identity": identity})
+
+
+def _initial_guardrails(
+    case: HarnessEvalCase,
+) -> tuple[HarnessEvalGuardrailResult, ...]:
+    return tuple(
+        HarnessEvalGuardrailResult(
+            guardrail=guardrail,
+            status=(
+                EvalGuardrailStatus.PASSED
+                if guardrail == "no_model"
+                else EvalGuardrailStatus.UNVERIFIED
+            ),
+        )
+        for guardrail in case.metrics.guardrails
+    )
+
+
+def _verify_static_side_effect_guardrails(
+    result: HarnessEvalSuiteResult,
+) -> HarnessEvalSuiteResult:
+    cases = tuple(
+        case.model_copy(
+            update={
+                "guardrails": tuple(
+                    item.model_copy(update={"status": EvalGuardrailStatus.PASSED})
+                    if item.guardrail == "no_side_effect"
+                    else item
+                    for item in case.guardrails
+                )
+            }
+        )
+        for case in result.cases
+    )
+    return result.model_copy(update={"cases": cases})
 
 
 def _baseline_identity_message(code: str) -> str:

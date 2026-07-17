@@ -19,6 +19,7 @@ from naumi_agent.harness.eval_identity import (
     HarnessEvalSourceIdentity,
     build_eval_baseline_identity,
 )
+from naumi_agent.harness.eval_models import HarnessEvalComparisonPolicy
 from naumi_agent.model.reasoning import (
     ReasoningEffort,
     ReasoningEffortSetting,
@@ -40,6 +41,7 @@ def _configuration(
         suite_id=suite_id,
         suite_sha256=suite_sha256,
         profile_sha256=profile_sha256,
+        policy_sha256=HarnessEvalComparisonPolicy().sha256,
         runner_version=runner_version,
         repetitions=repetitions,
         live=live,

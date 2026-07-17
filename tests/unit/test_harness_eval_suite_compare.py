@@ -15,6 +15,7 @@ from naumi_agent.harness.eval_models import (
     EvalCaseStatus,
     EvalRunStatus,
     HarnessEvalCaseResult,
+    HarnessEvalComparisonPolicy,
     HarnessEvalSuiteResult,
 )
 from naumi_agent.harness.eval_suite_compare import (
@@ -36,6 +37,7 @@ def _identity(
             suite_id="protocol-regression",
             suite_sha256=suite_sha256,
             profile_sha256="b" * 64,
+            policy_sha256=HarnessEvalComparisonPolicy().sha256,
             runner_version="protocol_hello@1",
             repetitions=1,
             live=False,

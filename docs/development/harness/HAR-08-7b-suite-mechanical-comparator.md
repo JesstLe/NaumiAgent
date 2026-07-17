@@ -82,7 +82,8 @@ Identity 缺失、不兼容或 Result/Identity 绑定矛盾返回 `incompatible`
 
 ## 8. 后续模块
 
-- HAR-08.7c：从 Suite schema 的 primary metric、绝对门槛和 guardrail 生成 policy verdict；
+- HAR-08.7c：已实现；从 Suite schema 的 primary metric、绝对/相对门槛和 guardrail evidence
+  生成 policy verdict，详见 `HAR-08-7c-threshold-guardrail-policy.md`；
 - HAR-08.7d：重复样本、均值、离散度、置信区间与 flaky 标记；
 - HAR-08 H5：存储 Result、Identity、机械比较与不可覆盖 Baseline；
 - HAR-08.8：Baseline 选择、`/harness baseline`、Tool/API 与 New UI 详情页。
