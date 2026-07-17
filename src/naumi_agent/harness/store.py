@@ -10,7 +10,7 @@ import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -32,11 +32,18 @@ from naumi_agent.harness.reconciliation import (
     validate_reconciliation_transition,
 )
 from naumi_agent.harness.replay_models import HarnessReplayBaselinePayload
-from naumi_agent.harness.retention import LifecycleActor
+from naumi_agent.harness.retention import LifecycleActor, LifecyclePolicy
+from naumi_agent.harness.tombstone import (
+    ReconciliationFailureCode,
+    ReconciliationFailureStage,
+    ReconciliationTombstone,
+    ReconciliationTombstoneStatus,
+    compute_retry_delay_seconds,
+)
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 3
+HARNESS_STORE_SCHEMA_VERSION = 4
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -1285,6 +1292,405 @@ class HarnessStore:
             updated_at=str(row["updated_at"]),
         )
 
+    async def record_reconciliation_failure(
+        self,
+        *,
+        request_id: str,
+        failure_id: str,
+        stage: ReconciliationFailureStage | str,
+        error_code: ReconciliationFailureCode | str,
+        occurred_at: str,
+        max_attempts: int = 8,
+        worker_id: str = "",
+    ) -> ReconciliationTombstone:
+        """Record one idempotent sanitized failure and schedule bounded retry."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        normalized_failure_id = _normalize_text(
+            failure_id,
+            field="failure_id",
+            max_length=128,
+        )
+        normalized_stage = _coerce_failure_stage(stage)
+        normalized_error_code = _coerce_failure_code(error_code)
+        timestamp = _normalize_utc_timestamp(occurred_at, field="occurred_at")
+        if not 1 <= max_attempts <= 100:
+            raise ValueError("max_attempts 必须在 1 到 100 之间。")
+        normalized_worker = (
+            _normalize_text(worker_id, field="worker_id", max_length=128)
+            if worker_id
+            else ""
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await self._require_reconciliation(db, normalized_request_id)
+                event_cursor = await db.execute(
+                    """
+                    SELECT request_id, stage, error_code, occurred_at
+                    FROM harness_session_reconciliation_failure_events
+                    WHERE failure_id = ?
+                    """,
+                    (normalized_failure_id,),
+                )
+                event = await event_cursor.fetchone()
+                if event is not None:
+                    if (
+                        str(event["request_id"]) != normalized_request_id
+                        or str(event["stage"]) != normalized_stage.value
+                        or str(event["error_code"]) != normalized_error_code.value
+                        or str(event["occurred_at"]) != timestamp
+                    ):
+                        raise HarnessStoreConflictError(
+                            f"失败事件 {normalized_failure_id} 的幂等键已用于其他事实。"
+                        )
+                    existing = await self._require_tombstone(db, normalized_request_id)
+                    if existing.max_attempts != max_attempts:
+                        raise HarnessStoreConflictError(
+                            "同一协调请求不能改变 max_attempts。"
+                        )
+                    await db.commit()
+                    return existing
+
+                current = await self._tombstone_from_id(db, normalized_request_id)
+                if current is not None:
+                    if current.max_attempts != max_attempts:
+                        raise HarnessStoreConflictError(
+                            "同一协调请求不能改变 max_attempts。"
+                        )
+                    if current.status in {
+                        ReconciliationTombstoneStatus.EXHAUSTED,
+                        ReconciliationTombstoneStatus.RESOLVED,
+                    }:
+                        raise HarnessStoreConflictError(
+                            "已耗尽或已解决的 tombstone 不能记录新失败。"
+                        )
+                    if timestamp < current.updated_at:
+                        raise HarnessStoreConflictError(
+                            "失败时间不能早于 tombstone 当前状态时间。"
+                        )
+                    if current.status is ReconciliationTombstoneStatus.LEASED:
+                        if not normalized_worker or current.lease_owner != normalized_worker:
+                            raise HarnessStoreConflictError(
+                                "只有当前租约持有者能报告重试失败。"
+                            )
+                        if timestamp >= current.lease_expires_at:
+                            raise HarnessStoreConflictError(
+                                "租约已过期，旧 worker 不能提交失败结果。"
+                            )
+                    elif normalized_worker:
+                        raise HarnessStoreConflictError(
+                            "未领取的 tombstone 不能附带 worker_id。"
+                        )
+                    attempt_count = current.attempt_count + 1
+                    created = current.created_at
+                else:
+                    if normalized_worker:
+                        raise HarnessStoreConflictError(
+                            "首次失败尚无可供 worker 持有的租约。"
+                        )
+                    attempt_count = 1
+                    created = timestamp
+
+                exhausted = attempt_count >= max_attempts
+                status = (
+                    ReconciliationTombstoneStatus.EXHAUSTED
+                    if exhausted
+                    else ReconciliationTombstoneStatus.PENDING
+                )
+                next_retry_at = (
+                    timestamp
+                    if exhausted
+                    else _timestamp_plus_seconds(
+                        timestamp,
+                        compute_retry_delay_seconds(
+                            normalized_request_id,
+                            attempt_count,
+                        ),
+                    )
+                )
+                if current is None:
+                    await db.execute(
+                        """
+                        INSERT INTO harness_session_reconciliation_tombstones (
+                            request_id, policy, stage, error_code, status,
+                            attempt_count, max_attempts, next_retry_at,
+                            lease_owner, lease_expires_at, last_failure_id,
+                            created_at, updated_at
+                        ) VALUES (?, 'delete', ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?)
+                        """,
+                        (
+                            normalized_request_id,
+                            normalized_stage.value,
+                            normalized_error_code.value,
+                            status.value,
+                            attempt_count,
+                            max_attempts,
+                            next_retry_at,
+                            normalized_failure_id,
+                            created,
+                            timestamp,
+                        ),
+                    )
+                else:
+                    await db.execute(
+                        """
+                        UPDATE harness_session_reconciliation_tombstones
+                        SET stage = ?, error_code = ?, status = ?, attempt_count = ?,
+                            next_retry_at = ?, lease_owner = '', lease_expires_at = '',
+                            last_failure_id = ?, updated_at = ?
+                        WHERE request_id = ?
+                        """,
+                        (
+                            normalized_stage.value,
+                            normalized_error_code.value,
+                            status.value,
+                            attempt_count,
+                            next_retry_at,
+                            normalized_failure_id,
+                            timestamp,
+                            normalized_request_id,
+                        ),
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO harness_session_reconciliation_failure_events (
+                        failure_id, request_id, stage, error_code, occurred_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        normalized_failure_id,
+                        normalized_request_id,
+                        normalized_stage.value,
+                        normalized_error_code.value,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return ReconciliationTombstone(
+                    request_id=normalized_request_id,
+                    policy=LifecyclePolicy.DELETE,
+                    stage=normalized_stage,
+                    error_code=normalized_error_code,
+                    status=status,
+                    attempt_count=attempt_count,
+                    max_attempts=max_attempts,
+                    next_retry_at=next_retry_at,
+                    lease_owner="",
+                    lease_expires_at="",
+                    last_failure_id=normalized_failure_id,
+                    created_at=created,
+                    updated_at=timestamp,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法记录 Session 协调失败 tombstone。") from exc
+
+    async def get_reconciliation_tombstone(
+        self,
+        request_id: str,
+    ) -> ReconciliationTombstone | None:
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                return await self._tombstone_from_id(db, normalized_request_id)
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取协调 tombstone。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("协调 tombstone 损坏或无法读取。") from exc
+
+    async def claim_due_reconciliation_tombstones(
+        self,
+        *,
+        worker_id: str,
+        now: str,
+        lease_seconds: int,
+        limit: int = 20,
+    ) -> tuple[ReconciliationTombstone, ...]:
+        """Atomically lease due or expired tombstones to one worker."""
+        normalized_worker = _normalize_text(
+            worker_id,
+            field="worker_id",
+            max_length=128,
+        )
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        if not 1 <= lease_seconds <= 3_600:
+            raise ValueError("lease_seconds 必须在 1 到 3600 之间。")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit 必须在 1 到 100 之间。")
+        lease_expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    SELECT request_id
+                    FROM harness_session_reconciliation_tombstones
+                    WHERE (
+                        status = 'pending' AND next_retry_at <= ?
+                    ) OR (
+                        status = 'leased' AND lease_expires_at <= ?
+                    )
+                    ORDER BY next_retry_at, request_id
+                    LIMIT ?
+                    """,
+                    (timestamp, timestamp, limit),
+                )
+                request_ids = [str(row["request_id"]) for row in await cursor.fetchall()]
+                claimed: list[ReconciliationTombstone] = []
+                for claimed_request_id in request_ids:
+                    await db.execute(
+                        """
+                        UPDATE harness_session_reconciliation_tombstones
+                        SET status = 'leased', lease_owner = ?, lease_expires_at = ?,
+                            updated_at = ?
+                        WHERE request_id = ?
+                        """,
+                        (
+                            normalized_worker,
+                            lease_expires_at,
+                            timestamp,
+                            claimed_request_id,
+                        ),
+                    )
+                    record = await self._require_tombstone(db, claimed_request_id)
+                    claimed.append(record)
+                await db.commit()
+                return tuple(claimed)
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法领取到期的协调 tombstone。") from exc
+
+    async def resolve_reconciliation_tombstone(
+        self,
+        request_id: str,
+        *,
+        worker_id: str,
+        resolved_at: str,
+    ) -> ReconciliationTombstone:
+        """Resolve one leased tombstone while rejecting stale workers."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        normalized_worker = _normalize_text(
+            worker_id,
+            field="worker_id",
+            max_length=128,
+        )
+        timestamp = _normalize_utc_timestamp(resolved_at, field="resolved_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._require_tombstone(db, normalized_request_id)
+                if current.status is ReconciliationTombstoneStatus.RESOLVED:
+                    if current.lease_owner != normalized_worker:
+                        raise HarnessStoreConflictError(
+                            "只有原租约持有者能幂等重放 resolved。"
+                        )
+                    await db.commit()
+                    return current
+                if (
+                    current.status is not ReconciliationTombstoneStatus.LEASED
+                    or current.lease_owner != normalized_worker
+                ):
+                    raise HarnessStoreConflictError(
+                        "只有当前租约持有者能解决 tombstone。"
+                    )
+                if timestamp < current.updated_at:
+                    raise HarnessStoreConflictError(
+                        "解决时间不能早于租约领取时间。"
+                    )
+                if timestamp >= current.lease_expires_at:
+                    raise HarnessStoreConflictError(
+                        "租约已过期，旧 worker 不能提交成功结果。"
+                    )
+                await db.execute(
+                    """
+                    UPDATE harness_session_reconciliation_tombstones
+                    SET status = 'resolved', updated_at = ? WHERE request_id = ?
+                    """,
+                    (timestamp, normalized_request_id),
+                )
+                await db.commit()
+                return ReconciliationTombstone(
+                    request_id=current.request_id,
+                    policy=current.policy,
+                    stage=current.stage,
+                    error_code=current.error_code,
+                    status=ReconciliationTombstoneStatus.RESOLVED,
+                    attempt_count=current.attempt_count,
+                    max_attempts=current.max_attempts,
+                    next_retry_at=current.next_retry_at,
+                    lease_owner=current.lease_owner,
+                    lease_expires_at=current.lease_expires_at,
+                    last_failure_id=current.last_failure_id,
+                    created_at=current.created_at,
+                    updated_at=timestamp,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法解决协调 tombstone。") from exc
+
+    async def _require_tombstone(
+        self,
+        db: aiosqlite.Connection,
+        request_id: str,
+    ) -> ReconciliationTombstone:
+        tombstone = await self._tombstone_from_id(db, request_id)
+        if tombstone is None:
+            raise HarnessStoreConflictError(f"协调 tombstone {request_id} 不存在。")
+        return tombstone
+
+    async def _tombstone_from_id(
+        self,
+        db: aiosqlite.Connection,
+        request_id: str,
+    ) -> ReconciliationTombstone | None:
+        cursor = await db.execute(
+            """
+            SELECT * FROM harness_session_reconciliation_tombstones
+            WHERE request_id = ?
+            """,
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return ReconciliationTombstone(
+            request_id=str(row["request_id"]),
+            policy=LifecyclePolicy(str(row["policy"])),
+            stage=ReconciliationFailureStage(str(row["stage"])),
+            error_code=ReconciliationFailureCode(str(row["error_code"])),
+            status=ReconciliationTombstoneStatus(str(row["status"])),
+            attempt_count=int(row["attempt_count"]),
+            max_attempts=int(row["max_attempts"]),
+            next_retry_at=str(row["next_retry_at"]),
+            lease_owner=str(row["lease_owner"]),
+            lease_expires_at=str(row["lease_expires_at"]),
+            last_failure_id=str(row["last_failure_id"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
     async def delete_session_records(
         self,
         workspace_root: str | Path,
@@ -1334,6 +1740,7 @@ class HarnessStore:
                     await db.executescript(_SCHEMA_V1)
                     await db.executescript(_SCHEMA_V2)
                     await db.executescript(_SCHEMA_V3)
+                    await db.executescript(_SCHEMA_V4)
                     await db.execute(
                         f"PRAGMA user_version = {HARNESS_STORE_SCHEMA_VERSION}"
                     )
@@ -1660,6 +2067,37 @@ def _ensure_reconciliation_time_forward(current: str, requested: str) -> None:
         )
 
 
+def _normalize_utc_timestamp(value: str, *, field: str) -> str:
+    normalized = _normalize_timestamp(value, field=field)
+    return datetime.fromisoformat(normalized).astimezone(UTC).isoformat()
+
+
+def _timestamp_plus_seconds(value: str, seconds: int) -> str:
+    return (datetime.fromisoformat(value) + timedelta(seconds=seconds)).isoformat()
+
+
+def _coerce_failure_stage(
+    value: ReconciliationFailureStage | str,
+) -> ReconciliationFailureStage:
+    if isinstance(value, ReconciliationFailureStage):
+        return value
+    try:
+        return ReconciliationFailureStage(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("stage 包含未知协调失败阶段。") from exc
+
+
+def _coerce_failure_code(
+    value: ReconciliationFailureCode | str,
+) -> ReconciliationFailureCode:
+    if isinstance(value, ReconciliationFailureCode):
+        return value
+    try:
+        return ReconciliationFailureCode(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("error_code 包含未知协调错误码。") from exc
+
+
 def _normalize_timestamp(value: str, *, field: str) -> str:
     normalized = _normalize_text(value, field=field, max_length=64)
     try:
@@ -1949,4 +2387,52 @@ CREATE TABLE IF NOT EXISTS harness_session_reconciliations (
 
 CREATE INDEX IF NOT EXISTS idx_harness_session_reconciliations_state_updated
 ON harness_session_reconciliations (state, updated_at, request_id);
+"""
+
+_SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS harness_session_reconciliation_tombstones (
+    request_id TEXT PRIMARY KEY
+        REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
+    policy TEXT NOT NULL CHECK (policy = 'delete'),
+    stage TEXT NOT NULL CHECK (stage IN ('session_delete', 'harness_records')),
+    error_code TEXT NOT NULL CHECK (
+        error_code IN (
+            'session_store_error', 'harness_store_error',
+            'cancelled', 'infrastructure_error'
+        )
+    ),
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'leased', 'exhausted', 'resolved')
+    ),
+    attempt_count INTEGER NOT NULL CHECK (attempt_count >= 1),
+    max_attempts INTEGER NOT NULL CHECK (max_attempts BETWEEN 1 AND 100),
+    next_retry_at TEXT NOT NULL,
+    lease_owner TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    last_failure_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_reconciliation_tombstones_due
+ON harness_session_reconciliation_tombstones (
+    status, next_retry_at, lease_expires_at, request_id
+);
+
+CREATE TABLE IF NOT EXISTS harness_session_reconciliation_failure_events (
+    failure_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL
+        REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
+    stage TEXT NOT NULL CHECK (stage IN ('session_delete', 'harness_records')),
+    error_code TEXT NOT NULL CHECK (
+        error_code IN (
+            'session_store_error', 'harness_store_error',
+            'cancelled', 'infrastructure_error'
+        )
+    ),
+    occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_reconciliation_failure_events_request
+ON harness_session_reconciliation_failure_events (request_id, occurred_at, failure_id);
 """

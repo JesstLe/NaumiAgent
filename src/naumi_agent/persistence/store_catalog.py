@@ -206,7 +206,7 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             HARNESS_STORE_SCHEMA_VERSION,
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
-            "Harness Profile、Run、Check、Evidence、Replay Baseline 与 Session 协调记录",
+            "Harness Run、Evidence、Replay、Session 协调记录与重试 tombstone",
         ),
         _definition(
             "harness.trust",
