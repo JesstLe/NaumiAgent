@@ -173,6 +173,7 @@ def _result_matches_identity(result: HarnessEvalSuiteResult) -> bool:
     return (
         result.suite_id == configuration.suite_id
         and result.suite_sha256 == configuration.suite_sha256
+        and result.policy_sha256 == configuration.policy_sha256
     )
 
 

@@ -4,7 +4,8 @@
 > `docs/development/self-evolution/README.md`。
 
 本文是仓库 Harness 的权威入口。它描述已经存在的知识、检查、Completion Gate、安全 Replay，
-以及 HAR-08.1a 已落地的离线协议 Eval；未来阶段记录在
+以及 HAR-08.1a、HAR-08.6a/8.6b、HAR-08.7a-8.7c 已落地的离线协议 Eval、
+Baseline Identity 与比较策略；未来阶段记录在
 [debt.md](debt.md)，不会伪装成已实现功能。
 
 ## 快速导航
@@ -14,7 +15,7 @@
 | 理解 Profile、信任与诊断 | [architecture.md](architecture.md) | `src/naumi_agent/harness/profile.py`、`trust.py`、`service.py` |
 | 理解仓库知识选择 | [architecture.md](architecture.md) | `src/naumi_agent/harness/knowledge.py`、`context.py` |
 | 运行受信任检查 | [architecture.md](architecture.md) | `src/naumi_agent/harness/checks.py`、`fingerprint.py`、`validation/` |
-| 运行离线协议评测 | `evals/protocol-hello-core.yaml` | `src/naumi_agent/harness/eval.py`、`eval_models.py` |
+| 运行与比较离线协议评测 | `evals/protocol-hello-core.yaml` | `src/naumi_agent/harness/eval.py`、`eval_models.py`、`eval_identity.py`、`eval_compare.py`、`eval_suite_compare.py`、`eval_policy.py` |
 | 修改 Agent 临时上下文 | [golden-principles.md](golden-principles.md) | `src/naumi_agent/orchestrator/context_assembly.py`、`engine.py` |
 | 修改 Terminal UI | `docs/product/terminal-ui/` | `frontend/terminal-ui/src/`、`frontend/terminal-ui/test/` |
 | 修改 Mac Workbench | `apps/macos/NaumiAgentWorkbench/README.md` | `apps/macos/NaumiAgentWorkbench/Sources/` |
@@ -33,6 +34,10 @@
 - Profile 声明的离线 Suite 可由 `/harness eval [suite]` 或 `harness_eval` 运行；静态 runner
   不要求信任，不执行模型、命令、网络或写操作，fixture 使用 SHA-256 锁定。
 - 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。
+- 可比较结果绑定 Git source identity、Profile/Suite/fixture/runner/policy digest；工作树不干净、
+  source 变化或证据不完整时不会伪装成可比较 baseline。
+- 比较分三层：身份兼容性、逐 Case 机械差异、门槛与 guardrail 策略；Suite 错误或跳过始终是
+  `inconclusive`，不能被宽松阈值掩盖。
 - 检查结果绑定 run id、Profile digest 与 Git tree fingerprint；并发相同检查 single-flight，
   Profile/工作树变化会阻止缓存复用或使运行结果失效。
 - Completion Contract/Gate 已接入同步与流式 Engine final，机械区分 verified、unverified、

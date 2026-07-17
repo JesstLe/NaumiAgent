@@ -18,8 +18,12 @@ Profile/Trust/Knowledge 提供确定性证据，CheckRunner 与 Completion Contr
 | `fingerprint.py` | HEAD、index、dirty/untracked bytes 的 Git tree fingerprint |
 | `checks.py` | required check 选择、受信任执行、success cache 与 single-flight |
 | `completion.py` | task kind 升级、scope/Todo/check/evidence Gate 与结构化 Receipt |
-| `eval_models.py` | 严格、冻结的离线 Suite/Case/Result 契约 |
-| `eval.py` | 有界 Suite/fixture 读取、integrity 校验与生产协议静态 runner |
+| `eval_models.py` | 严格、冻结的离线 Suite/Case/Result/Policy 契约 |
+| `eval.py` | 有界 Suite/fixture 读取、integrity 校验、guardrail 证据与生产协议静态 runner |
+| `eval_identity.py` | 绑定 source/Profile/Suite/fixture/runner/policy 的 Baseline Identity |
+| `eval_compare.py` | 身份兼容性检查；拒绝跨配置、跨 runner 或跨 policy 误比较 |
+| `eval_suite_compare.py` | 逐 Case 机械差异与 Suite 不稳定性判定 |
+| `eval_policy.py` | pass rate、回归数、实现失败与 guardrail 门槛判定 |
 | `validation/` | Workbench/Harness 共用 argv policy、cwd containment 与进程组执行器 |
 | `service.py` | 信任门、知识/检查并发缓存、统一用户/Agent facade |
 | `tools.py` | 状态、诊断、解释、Replay、Eval、知识只读 Tool 与一个检查 Tool；不包含 trust/untrust |
@@ -47,9 +51,11 @@ latest user task
 L2 不会自动塞进上下文。Agent 调用 `harness_read_knowledge`，或用户执行 `/harness knowledge` 后，Service 会复用同一索引与安全读取逻辑。
 
 离线 Eval 路径是：Profile `evals.suites` allowlist → 有界 YAML schema → fixture 路径与 SHA-256
-校验 → 调用生产 `ui.protocol` hello 标准化/协商 → expected/actual 机械比较。用户命令和
-`harness_eval` Tool 共用 `HarnessService.eval_suites()`；整个路径不经过 ModelRouter、
-ValidationExecutor 或 Store。
+校验 → 调用生产 `ui.protocol` hello 标准化/协商 → expected/actual 机械比较 → Git source
+稳定性与 no-side-effect guardrail 验证 → 生成绑定 policy digest 的 Baseline Identity。比较时先做
+身份兼容性，再做逐 Case 机械差异，最后执行 threshold/guardrail policy；Suite error/skip 或证据缺失
+只会得到 `inconclusive`。用户命令和 `harness_eval` Tool 共用 `HarnessService.eval_suites()`；整个路径
+不经过 ModelRouter、ValidationExecutor 或 Store。
 
 完成路径是：run 开始绑定 Profile digest 与初始 tree fingerprint → Todo 对账 → Gate 机械选择
 当前 task kind/changed paths 的 required checks → 缺证据时隐藏模型的提前完成文本并要求一次纠正 →

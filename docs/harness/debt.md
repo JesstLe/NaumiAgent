@@ -6,7 +6,7 @@
 
 | 阶段 | 缺口 | 完成证据要求 |
 |---|---|---|
-| H5 | hello Static Eval 已实现；通用 Static、Replay/Sandbox/Live runner、baseline/comparator/store 未实现 | 多领域离线确定性重跑一致；live 显式预算和 Worktree |
+| H5 | hello Static Eval、Baseline Identity、身份/机械/策略比较器已实现；通用 Static、Replay/Sandbox/Live runner、统计比较、baseline promotion/store/UI 未实现 | 多领域离线确定性重跑一致；live 显式预算和 Worktree |
 
 ## 尚未实现
 
@@ -26,7 +26,8 @@
 - Windows 的路径归一化和 argv 行为有单元边界，仍需要 Windows CI 的真实 Git/NTFS 验证。
 - CheckRunner 的 success cache 仍只在当前进程复用；持久 Store 用于证据、Explain 和 Replay，
   尚不把历史检查当作跨重启可复用缓存。
-- HAR-08.1a 的 Eval 结果只在内存中返回；尚未建立 baseline identity、跨 commit comparator 或
+- Eval 结果仍只在内存中返回；当前已建立可审计的 Baseline Identity 与跨 commit
+  compatibility/mechanical/policy comparator，但尚未建立统计比较、人工 promotion 或
   `harness_eval_results` 持久表。
 - 离线 Suite/expected 随 Profile 一起由仓库维护，当前只有 digest integrity，没有 baseline
   promotion 审批；修改预期仍需代码审查，不能据此宣称模型或 Harness 已提升。

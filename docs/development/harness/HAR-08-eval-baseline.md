@@ -54,5 +54,8 @@
 - HAR-08.7b Suite Mechanical Comparator：已实现。Identity gate 通过后计算 case transition、
   pass/failure 分类与机械 delta；fixture error、skip 和结构漂移返回 inconclusive，不伪装产品回归。
   详见 `HAR-08-7b-suite-mechanical-comparator.md`。
-- Replay/Sandbox/Live、门槛/统计 Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
+- HAR-08.7c Threshold/Guardrail Policy：已实现。严格 Suite policy 的 canonical digest 进入
+  Identity；绝对/相对门槛与逐 case guardrail evidence 生成独立 Policy verdict，Eval error/skip
+  永远 inconclusive。详见 `HAR-08-7c-threshold-guardrail-policy.md`。
+- Replay/Sandbox/Live、统计 Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

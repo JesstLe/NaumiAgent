@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -30,6 +32,12 @@ class EvalRunStatus(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
     EVALUATION_ERROR = "evaluation_error"
+
+
+class EvalGuardrailStatus(StrEnum):
+    PASSED = "passed"
+    FAILED = "failed"
+    UNVERIFIED = "unverified"
 
 
 class HarnessEvalInput(_StrictModel):
@@ -107,6 +115,22 @@ class HarnessEvalSuiteBudget(_StrictModel):
     max_duration_ms: int = Field(default=30_000, ge=1, le=60_000)
 
 
+class HarnessEvalComparisonPolicy(_StrictModel):
+    """Mechanical absolute and relative gates bound into the Suite identity."""
+
+    min_pass_rate: float = Field(default=1.0, ge=0, le=1, allow_inf_nan=False)
+    max_regressions: int = Field(default=0, ge=0, le=500)
+    max_implementation_failures: int = Field(default=0, ge=0, le=500)
+    max_pass_rate_drop: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
+
+    def canonical_payload(self) -> dict[str, int | float]:
+        return self.model_dump(mode="json")
+
+    @property
+    def sha256(self) -> str:
+        return _canonical_sha256(self.canonical_payload())
+
+
 class HarnessEvalCase(_StrictModel):
     id: str
     runner: Literal["protocol_hello"]
@@ -124,6 +148,17 @@ class HarnessEvalCase(_StrictModel):
             raise ValueError("case id 格式无效")
         return normalized
 
+    @model_validator(mode="after")
+    def _runner_guardrails_are_complete(self) -> HarnessEvalCase:
+        if self.runner == "protocol_hello" and set(self.metrics.guardrails) != {
+            "no_model",
+            "no_side_effect",
+        }:
+            raise ValueError(
+                "protocol_hello 必须声明 no_model 与 no_side_effect guardrail"
+            )
+        return self
+
 
 class HarnessEvalSuite(_StrictModel):
     schema_version: Literal[1]
@@ -131,6 +166,9 @@ class HarnessEvalSuite(_StrictModel):
     title: str = Field(min_length=1, max_length=200)
     cases: tuple[HarnessEvalCase, ...] = Field(min_length=1, max_length=500)
     budget: HarnessEvalSuiteBudget = Field(default_factory=HarnessEvalSuiteBudget)
+    comparison_policy: HarnessEvalComparisonPolicy = Field(
+        default_factory=HarnessEvalComparisonPolicy
+    )
 
     @field_validator("id")
     @classmethod
@@ -163,15 +201,37 @@ class HarnessProtocolActual(_StrictModel):
     capabilities: tuple[str, ...] = ()
 
 
+class HarnessEvalGuardrailResult(_StrictModel):
+    guardrail: Literal["no_model", "no_side_effect"]
+    status: EvalGuardrailStatus
+    code: str = Field(default="", max_length=128)
+
+
 class HarnessEvalCaseResult(_StrictModel):
     case_id: str
     runner: str
     status: EvalCaseStatus
     expected: HarnessProtocolExpected | None = None
     actual: HarnessProtocolActual | None = None
+    primary_metric: Literal["", "protocol_outcome_match"] = ""
+    guardrails: tuple[HarnessEvalGuardrailResult, ...] = Field(
+        default=(),
+        max_length=16,
+    )
     code: str = ""
     message: str = ""
     duration_ms: float = Field(default=0, ge=0)
+
+    @field_validator("guardrails")
+    @classmethod
+    def _unique_guardrail_results(
+        cls,
+        values: tuple[HarnessEvalGuardrailResult, ...],
+    ) -> tuple[HarnessEvalGuardrailResult, ...]:
+        names = [item.guardrail for item in values]
+        if len(names) != len(set(names)):
+            raise ValueError("guardrail result 不能重复。")
+        return tuple(sorted(values, key=lambda item: item.guardrail))
 
 
 class HarnessEvalSuiteResult(_StrictModel):
@@ -183,9 +243,22 @@ class HarnessEvalSuiteResult(_StrictModel):
     cases: tuple[HarnessEvalCaseResult, ...] = ()
     code: str = ""
     message: str = ""
+    comparison_policy: HarnessEvalComparisonPolicy = Field(
+        default_factory=HarnessEvalComparisonPolicy
+    )
+    policy_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
     baseline_identity: HarnessEvalBaselineIdentity | None = None
     baseline_identity_code: str = Field(default="", max_length=128)
     duration_ms: float = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _policy_digest_matches(self) -> HarnessEvalSuiteResult:
+        expected = self.comparison_policy.sha256
+        if not self.policy_sha256:
+            object.__setattr__(self, "policy_sha256", expected)
+        elif self.policy_sha256 != expected:
+            raise ValueError("policy_sha256 与 comparison_policy 不匹配。")
+        return self
 
     @property
     def passed(self) -> int:
@@ -215,6 +288,8 @@ class HarnessEvalSuiteResult(_StrictModel):
             "status": str(self.status),
             "code": self.code,
             "message": self.message,
+            "comparison_policy": self.comparison_policy.model_dump(mode="json"),
+            "policy_sha256": self.policy_sha256,
             "baseline_identity": (
                 self.baseline_identity.model_dump(mode="json")
                 if self.baseline_identity is not None
@@ -248,3 +323,14 @@ class HarnessEvalReport(_StrictModel):
             "message": self.message,
             "suites": [suite.canonical_payload() for suite in self.suites],
         }
+
+
+def _canonical_sha256(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

@@ -158,6 +158,12 @@ def compare_eval_identities(
             current_config.profile_sha256,
         ),
         (
+            "configuration.policy_sha256",
+            "policy_digest_mismatch",
+            baseline_config.policy_sha256,
+            current_config.policy_sha256,
+        ),
+        (
             "configuration.runner_version",
             "runner_version_mismatch",
             baseline_config.runner_version,
@@ -376,6 +382,7 @@ _CODE_MESSAGES = {
     "suite_id_mismatch": "Suite ID 不同。",
     "suite_digest_mismatch": "Suite 内容摘要不同。",
     "profile_digest_mismatch": "Harness Profile 摘要不同。",
+    "policy_digest_mismatch": "Threshold/Guardrail Policy 摘要不同。",
     "runner_version_mismatch": "Runner 版本不同。",
     "repetitions_mismatch": "重复次数不同。",
     "live_mode_mismatch": "Live/离线模式不同。",

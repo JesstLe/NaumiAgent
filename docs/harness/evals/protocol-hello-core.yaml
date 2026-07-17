@@ -81,3 +81,9 @@ cases:
 
 budget:
   max_duration_ms: 5000
+
+comparison_policy:
+  min_pass_rate: 1.0
+  max_regressions: 0
+  max_implementation_failures: 0
+  max_pass_rate_drop: 0.0

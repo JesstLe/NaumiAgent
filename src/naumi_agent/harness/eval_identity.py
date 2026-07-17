@@ -34,6 +34,7 @@ class HarnessEvalConfigurationIdentity(_StrictModel):
     suite_id: str
     suite_sha256: str = Field(pattern=_SHA256_RE)
     profile_sha256: str = Field(pattern=_SHA256_RE)
+    policy_sha256: str = Field(pattern=_SHA256_RE)
     runner_version: str
     repetitions: int = Field(ge=1, le=10_000)
     live: bool
@@ -71,6 +72,7 @@ class HarnessEvalConfigurationIdentity(_StrictModel):
         suite_id: str,
         suite_sha256: str,
         profile_sha256: str,
+        policy_sha256: str,
         runner_version: str,
         repetitions: int,
         live: bool,
@@ -80,6 +82,7 @@ class HarnessEvalConfigurationIdentity(_StrictModel):
             "suite_id": suite_id,
             "suite_sha256": suite_sha256,
             "profile_sha256": profile_sha256,
+            "policy_sha256": policy_sha256,
             "runner_version": runner_version,
             "repetitions": repetitions,
             "live": live,
@@ -93,6 +96,7 @@ class _ConfigurationWithoutDigest(_StrictModel):
     suite_id: str
     suite_sha256: str = Field(pattern=_SHA256_RE)
     profile_sha256: str = Field(pattern=_SHA256_RE)
+    policy_sha256: str = Field(pattern=_SHA256_RE)
     runner_version: str
     repetitions: int = Field(ge=1, le=10_000)
     live: bool

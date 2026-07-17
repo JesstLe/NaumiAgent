@@ -25,6 +25,7 @@
 
 - Suite ID 与 Suite 文件 SHA-256；
 - 当前受信 Harness Profile SHA-256；
+- Threshold/Guardrail Policy canonical SHA-256；
 - 带正整数版本的 runner identity，例如 `protocol_hello@1`；
 - 重复次数与 `live` 开关。
 
@@ -93,7 +94,7 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 ## 6. 后续依赖
 
 - HAR-08.2-08.5 runner 将各自声明带版本的 runner identity，并生成对应 Suite digest；
-- HAR-08.7 Comparator 必须先比较 identity dimensions，再进行指标差异计算；
+- HAR-08.7a-7c 已实现 Identity、Mechanical 与 Policy 三层比较；7d 继续负责统计比较；
 - HAR-08 H5 存储以 `identity_sha256` 作为不可覆盖身份的一部分，并复用 ARC-05.2a 迁移内核；
 - HAR-08.8 UI/Tool 显示资格、警告和短 digest，不显示能力合同或配置正文。
 
