@@ -2332,6 +2332,10 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["model_contract"]["status"] == "verified"
     assert payload["model_contract"]["max_context"] == 128000
     assert payload["model_contract"]["supports_parallel_tools"] is True
+    assert payload["protocol_registry"]["contract_version"] == 1
+    assert payload["protocol_registry"]["client_event_count"] == len(ClientEventType)
+    assert payload["protocol_registry"]["server_event_count"] == len(ServerEventType)
+    assert len(payload["protocol_registry"]["registry_sha256"]) == 64
 
 
 @pytest.mark.asyncio

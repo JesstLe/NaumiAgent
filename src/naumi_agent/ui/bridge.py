@@ -55,6 +55,7 @@ from naumi_agent.ui.protocol import (
     normalize_client_record,
     ui_message_payload,
 )
+from naumi_agent.ui.protocol_registry import load_protocol_event_registry
 from naumi_agent.user_interaction import (
     UserInteractionRequest,
     UserInteractionUnavailableError,
@@ -452,6 +453,7 @@ class JsonlEngineBridge:
         self._sequence = 0
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
+        self._protocol_event_registry = load_protocol_event_registry()
         self._run_task: asyncio.Task[Any] | None = None
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
@@ -568,6 +570,12 @@ class JsonlEngineBridge:
         workspace_root = Path(getattr(self.engine, "workspace_root", Path.cwd()))
         payload = {
             "version": __version__,
+            "protocol_registry": {
+                "contract_version": self._protocol_event_registry.contract_version,
+                "registry_sha256": self._protocol_event_registry.registry_sha256,
+                "client_event_count": len(self._protocol_event_registry.client),
+                "server_event_count": len(self._protocol_event_registry.server),
+            },
             "mode": str(getattr(self.engine.runtime_mode, "value", self.engine.runtime_mode)),
             "permission_mode": str(
                 getattr(self.engine.permission_mode, "value", self.engine.permission_mode)

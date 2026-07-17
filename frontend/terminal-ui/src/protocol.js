@@ -1,9 +1,11 @@
 import { StringDecoder } from "node:string_decoder";
+import { createHash } from "node:crypto";
 import EMBEDDED_PROTOCOL_CONTRACT from "../protocol-contract.json" with { type: "json" };
 
 
 export const PROTOCOL_CONTRACT = loadProtocolContract();
 export const PROTOCOL_VERSION = Number(PROTOCOL_CONTRACT.version);
+export const PROTOCOL_REGISTRY_SHA256 = protocolRegistryDigest(PROTOCOL_CONTRACT);
 
 const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
@@ -186,7 +188,86 @@ function loadProtocolContract() {
   if (negotiation.required_capabilities.some((item) => !negotiation.capabilities.includes(item))) {
     throw new Error("protocol-contract.json required_capabilities 必须是 capabilities 的子集");
   }
+  validateEventRegistry(contract);
   return contract;
+}
+
+export function validateEventRegistry(contract) {
+  const registry = contract?.event_registry;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    throw new Error("protocol-contract.json 缺少 event_registry 对象");
+  }
+  if (JSON.stringify(Object.keys(registry).sort()) !== JSON.stringify(["client", "server"])) {
+    throw new Error("protocol-contract.json event_registry 只能包含 client/server");
+  }
+  const allowed = {
+    owner: new Set(["protocol", "runtime", "harness", "inspector", "agents", "safety", "workbench", "diagnostics", "sessions", "tasks", "ui"]),
+    stability: new Set(["stable", "experimental", "deprecated"]),
+    criticality: new Set(["informational", "control", "terminal"]),
+    persistence: new Set(["never", "timeline", "snapshot", "audit"]),
+    redaction: new Set(["none", "required"]),
+  };
+  const requiredFields = ["owner", "stability", "criticality", "persistence", "sensitive_fields", "redaction"];
+  for (const [direction, eventKey] of [["client", "client_events"], ["server", "server_events"]]) {
+    const policies = registry[direction];
+    if (!policies || typeof policies !== "object" || Array.isArray(policies)) {
+      throw new Error(`event_registry.${direction} 必须是对象`);
+    }
+    const expected = [...contract[eventKey]].sort();
+    const actual = Object.keys(policies).sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error(`event_registry.${direction} 必须精确覆盖 ${eventKey}`);
+    }
+    for (const [eventType, policy] of Object.entries(policies)) {
+      if (!policy || typeof policy !== "object" || Array.isArray(policy)) {
+        throw new Error(`event_registry ${direction}:${eventType} policy 必须是对象`);
+      }
+      if (JSON.stringify(Object.keys(policy).sort()) !== JSON.stringify([...requiredFields].sort())) {
+        throw new Error(`event_registry ${direction}:${eventType} policy 字段不完整`);
+      }
+      for (const field of ["owner", "stability", "criticality", "persistence", "redaction"]) {
+        if (!allowed[field].has(policy[field])) {
+          throw new Error(`event_registry ${direction}:${eventType} ${field} 无效`);
+        }
+      }
+      if (!Array.isArray(policy.sensitive_fields)
+        || policy.sensitive_fields.some((field) => typeof field !== "string" || !/^payload(?:\.[a-z][a-z0-9_]*)+$/.test(field))
+        || new Set(policy.sensitive_fields).size !== policy.sensitive_fields.length) {
+        throw new Error(`event_registry ${direction}:${eventType} sensitive_fields 无效`);
+      }
+      if ((policy.sensitive_fields.length > 0) !== (policy.redaction === "required")) {
+        throw new Error(`event_registry ${direction}:${eventType} redaction 与敏感字段不一致`);
+      }
+    }
+  }
+  return true;
+}
+
+export function eventPolicy(direction, eventType) {
+  if (!new Set(["client", "server"]).has(direction)) {
+    throw new Error(`未知事件方向: ${direction}`);
+  }
+  const policy = PROTOCOL_CONTRACT.event_registry[direction]?.[String(eventType ?? "")];
+  if (!policy) throw new Error(`未注册 ${direction} 事件: ${eventType}`);
+  return structuredClone(policy);
+}
+
+function protocolRegistryDigest(contract) {
+  const canonical = canonicalJson({
+    client: contract.event_registry.client,
+    server: contract.event_registry.server,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(
+      (key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`,
+    ).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export function createHelloPayload(client = "naumi-terminal-ui") {
@@ -572,6 +653,40 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       status.retention_worker,
       `${source}.retention_worker`,
     );
+  }
+  if (Object.hasOwn(status, "protocol_registry")) {
+    const registry = requireObject(status.protocol_registry, `${source}.protocol_registry`);
+    const digest = strictStatusText(
+      registry.registry_sha256,
+      `${source}.protocol_registry.registry_sha256`,
+    );
+    if (!/^[0-9a-f]{64}$/.test(digest)) {
+      throw new Error(`${source}.protocol_registry.registry_sha256 必须是 SHA-256`);
+    }
+    const contractVersion = strictPositiveInteger(
+      registry.contract_version,
+      `${source}.protocol_registry.contract_version`,
+    );
+    const clientEventCount = strictPositiveInteger(
+      registry.client_event_count,
+      `${source}.protocol_registry.client_event_count`,
+    );
+    const serverEventCount = strictPositiveInteger(
+      registry.server_event_count,
+      `${source}.protocol_registry.server_event_count`,
+    );
+    if (contractVersion !== PROTOCOL_VERSION
+      || digest !== PROTOCOL_REGISTRY_SHA256
+      || clientEventCount !== PROTOCOL_CONTRACT.client_events.length
+      || serverEventCount !== PROTOCOL_CONTRACT.server_events.length) {
+      throw new Error(`${source}.protocol_registry 与内置协议不一致`);
+    }
+    normalized.protocol_registry = {
+      contract_version: contractVersion,
+      registry_sha256: digest,
+      client_event_count: clientEventCount,
+      server_event_count: serverEventCount,
+    };
   }
   return normalized;
 }

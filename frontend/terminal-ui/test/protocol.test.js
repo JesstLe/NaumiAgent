@@ -5,13 +5,16 @@ import {
   attachJsonlLineReader,
   createHelloPayload,
   createEventSender,
+  eventPolicy,
   normalizeBudgetStatus,
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
   PROTOCOL_CONTRACT,
+  PROTOCOL_REGISTRY_SHA256,
   PROTOCOL_VERSION,
   splitShellLike,
+  validateEventRegistry,
 } from "../src/protocol.js";
 
 function harnessExplainPayload(revision = 1) {
@@ -365,6 +368,40 @@ test("protocol contract drives client and server event validation", () => {
     /未知客户端事件/,
   );
   assert.equal(chunks.length, 0);
+});
+
+test("event governance registry exactly covers all published events", () => {
+  assert.equal(validateEventRegistry(structuredClone(PROTOCOL_CONTRACT)), true);
+  assert.deepEqual(
+    Object.keys(PROTOCOL_CONTRACT.event_registry.client).sort(),
+    [...PROTOCOL_CONTRACT.client_events].sort(),
+  );
+  assert.deepEqual(
+    Object.keys(PROTOCOL_CONTRACT.event_registry.server).sort(),
+    [...PROTOCOL_CONTRACT.server_events].sort(),
+  );
+  assert.equal(eventPolicy("server", "permission/request").owner, "safety");
+  assert.equal(eventPolicy("server", "run/completed").criticality, "terminal");
+  assert.equal(eventPolicy("client", "ping").persistence, "never");
+});
+
+test("event governance registry rejects gaps and unredacted sensitive fields", () => {
+  const missing = structuredClone(PROTOCOL_CONTRACT);
+  delete missing.event_registry.client.ping;
+  assert.throws(() => validateEventRegistry(missing), /精确覆盖/);
+
+  const unsafe = structuredClone(PROTOCOL_CONTRACT);
+  unsafe.event_registry.server["ui/message"].redaction = "none";
+  assert.throws(() => validateEventRegistry(unsafe), /redaction/);
+
+  const extraField = structuredClone(PROTOCOL_CONTRACT);
+  extraField.event_registry.server.ready.undocumented = true;
+  assert.throws(() => validateEventRegistry(extraField), /字段不完整/);
+
+  const extraGroup = structuredClone(PROTOCOL_CONTRACT);
+  extraGroup.event_registry.future = {};
+  assert.throws(() => validateEventRegistry(extraGroup), /只能包含 client\/server/);
+  assert.throws(() => eventPolicy("server", "future/unknown"), /未注册/);
 });
 
 test("hello payload is generated from the embedded negotiation contract", () => {
@@ -1129,6 +1166,12 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         warnings: [],
         errors: [],
       },
+      protocol_registry: {
+        contract_version: 1,
+        registry_sha256: PROTOCOL_REGISTRY_SHA256,
+        client_event_count: 27,
+        server_event_count: 38,
+      },
     },
   });
   const changed = normalizeServerRecord({
@@ -1163,6 +1206,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       permission_mode: ready.payload.permission_mode,
       reasoning_effort: ready.payload.reasoning_effort,
       model_contract: ready.payload.model_contract,
+      protocol_registry: ready.payload.protocol_registry,
     },
     {
       version: "0.1.214",
@@ -1205,10 +1249,47 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         warnings: [],
         errors: [],
       },
+      protocol_registry: {
+        contract_version: 1,
+        registry_sha256: PROTOCOL_REGISTRY_SHA256,
+        client_event_count: 27,
+        server_event_count: 38,
+      },
     },
   );
   assert.equal(changed.payload.status.model, "anthropic/claude-opus-4-6");
   assert.deepEqual(partial.payload, { model: "openai/gpt-5.4-mini" });
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "runtime/status",
+      version: 1,
+      payload: {
+        protocol_registry: {
+          contract_version: 1,
+          registry_sha256: "not-a-digest",
+          client_event_count: 27,
+          server_event_count: 38,
+        },
+      },
+    }),
+    /必须是 SHA-256/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "runtime/status",
+      version: 1,
+      payload: {
+        protocol_registry: {
+          contract_version: 1,
+          registry_sha256: "0".repeat(64),
+          client_event_count: 27,
+          server_event_count: 38,
+        },
+      },
+    }),
+    /与内置协议不一致/,
+  );
 });
 
 test("normalizes bounded retention worker runtime status", () => {
