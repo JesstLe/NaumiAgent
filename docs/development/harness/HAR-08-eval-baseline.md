@@ -33,3 +33,11 @@
 ## 存储
 
 在 H5 才新增 `harness_eval_results` 与 baseline 表，迁移幂等；大 artifact 只保存 URI/digest。
+
+## 分阶段实现
+
+- HAR-08.1a 离线协议 Eval：设计完成，实施见
+  `HAR-08-1a-offline-protocol-eval-design.md` 与
+  `HAR-08-1a-offline-protocol-eval-implementation-plan.md`。
+- Replay/Sandbox/Live/Baseline/Comparator 与完整存储仍为 planned；1a 完成后也不得把 HAR-08
+  整体标记为 implemented。

@@ -1,6 +1,6 @@
 # 后续开发模块注册表
 
-状态仅允许：`implemented`、`planned`、`blocked`、`superseded`。本文登记的是 2026-07-15
+状态仅允许：`implemented`、`partial`、`planned`、`blocked`、`superseded`。本文登记的是 2026-07-15
 之后仍需推进的模块；已完成模块只在依赖说明中出现。
 
 ## Harness
