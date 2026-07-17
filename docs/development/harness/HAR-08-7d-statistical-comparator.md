@@ -73,7 +73,7 @@ guardrail。
 
 ## 6. 后续依赖
 
-- HAR-08 H5：原样保存每次 typed Result、样本组 identity 和统计 Comparison；
+- HAR-08 H5a 已完成：保存每次 typed Result 与样本组 identity；H5b/H5c 继续 Baseline 与 Comparison；
 - HAR-08.8：向 Slash/Tool/API/New UI 暴露比较详情与 Baseline promote gate；
 - HAR-09.6：Proposal 实施后引用 before/after 统计比较；
 - EVO-03.4：自进化补丁只有在主指标改善、guardrail 无退化且无 flaky 时才能进入反思决策。
