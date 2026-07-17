@@ -40,5 +40,9 @@
   协议 runner、错误分类、`/harness eval` 与 `harness_eval` Tool 共用同一 Service；实施见
   `HAR-08-1a-offline-protocol-eval-design.md` 与
   `HAR-08-1a-offline-protocol-eval-implementation-plan.md`。
-- Replay/Sandbox/Live/Baseline/Comparator 与完整存储仍为 planned；1a 完成后也不得把 HAR-08
-  整体标记为 implemented。
+- HAR-08.6a Baseline Identity 契约：已实现。真实 Git HEAD/脏树 fingerprint、Suite/Profile/
+  Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
+  identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
+  `HAR-08-6a-baseline-identity-design.md`。
+- Replay/Sandbox/Live、Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
+  HAR-08 整体标记为 implemented。
