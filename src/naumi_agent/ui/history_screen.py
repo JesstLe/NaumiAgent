@@ -190,8 +190,8 @@ def render_session_delete_preview(preview: SessionDeletePreview) -> str:
             "不是可安全删除文件数。"
         ),
         (
-            "当前仅完成只读预览；跨 Store 清理、tombstone 与 Artifact GC "
-            "尚未接入删除执行。"
+            "Session 与 Harness 数据库行已接入持久协调；Artifact 文件仍仅保留"
+            "引用快照，HAR-06.4 完成前不会自动删除。"
         ),
         f"现有 Session 删除命令：`/delete {preview.session_id}`。",
     ]

@@ -36,6 +36,7 @@ from textual.widgets import (
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.streaming.sinks import CallbackEventSink
@@ -1600,6 +1601,23 @@ class NaumiApp(App):
             self.debug_trace.event("tui.mount", {"title": self.TITLE})
         self._update_git_title()
         self._show_startup_status()
+        self._recover_session_reconciliations()
+
+    @work(exclusive=False, exit_on_error=False)
+    async def _recover_session_reconciliations(self) -> None:
+        status = self.query_one(StatusBar)
+        try:
+            results = await self.engine.recover_session_reconciliations()
+        except Exception as exc:
+            status.status_text = f"会话协调恢复失败: {exc}"
+            return
+        if not results:
+            return
+        completed = sum(
+            result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
+            for result in results
+        )
+        status.status_text = f"会话协调恢复: {completed}/{len(results)} 完成"
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         """Show a modal confirmation dialog for sensitive tools."""
@@ -2647,19 +2665,30 @@ class NaumiApp(App):
     @work(exclusive=True, exit_on_error=False)
     async def _delete_session(self, session_id: str, title: str) -> None:
         status = self.query_one(StatusBar)
+        was_active = bool(
+            self.engine._session and self.engine._session.id == session_id
+        )
         try:
-            ok = await self.engine.delete_session(session_id)
-            if ok:
+            result = await self.engine.delete_session_detailed(session_id)
+            if was_active and self.engine._session is None:
+                self.query_one(ChatPanel).clear()
+            if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
                 status.status_text = f"已删除: {title}"
-                if self.engine._session and self.engine._session.id == session_id:
-                    chat = self.query_one(ChatPanel)
-                    chat.clear()
-                    self.engine.reset()
+            elif result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
+                status.status_text = f"会话不存在: {session_id}"
+            elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
+                status.status_text = f"删除协调等待安全重试: {result.request_id}"
+            elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED:
+                status.status_text = f"删除协调重试已耗尽: {result.request_id}"
+            else:
+                status.status_text = f"生命周期策略阻止删除: {session_id}"
+            if result.outcome not in {
+                ReconciliationCoordinatorOutcome.NOT_FOUND,
+                ReconciliationCoordinatorOutcome.POLICY_BLOCKED,
+            }:
                 history = self.query_one(HistoryPanel)
                 if history.show_panel:
                     history.refresh_sessions()
-            else:
-                status.status_text = f"会话不存在: {session_id}"
         except Exception as e:
             status.status_text = f"删除失败: {e}"
 

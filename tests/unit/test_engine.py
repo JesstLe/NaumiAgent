@@ -1462,9 +1462,12 @@ class TestSessionLoading:
                 return deleted
 
             async def paused_reconciliation_load(session_id: str) -> Session | None:
+                session = await original_load(session_id)
+                if session is not None:
+                    return session
                 reconciliation_started.set()
                 await release_reconciliation.wait()
-                return await original_load(session_id)
+                return None
 
             async def confirm(payload: dict[str, object]) -> str:
                 assert payload["session_id"] == active.id

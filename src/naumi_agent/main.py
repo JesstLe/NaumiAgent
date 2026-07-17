@@ -1494,6 +1494,7 @@ async def _chat(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = create_agent_engine(config)
+    reconciliation_recovery = await engine.recover_session_reconciliations()
     keybindings = build_keybindings(config.keybindings)
     style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(
@@ -1515,6 +1516,14 @@ async def _chat(config_path: str) -> None:
     _active_cli = cli
 
     cli.append_output(_render_startup_banner(engine))
+    if reconciliation_recovery:
+        completed = sum(
+            result.outcome.value == "completed" for result in reconciliation_recovery
+        )
+        cli.append_output(
+            f"启动恢复：处理 {len(reconciliation_recovery)} 个会话协调任务，"
+            f"完成 {completed} 个。"
+        )
 
     # Inject git info into prompt prefix
     git = _get_git_info()
@@ -1617,6 +1626,7 @@ async def _run_task(task: str, config_path: str) -> None:
     engine = create_agent_engine(config)
 
     try:
+        await engine.recover_session_reconciliations()
         with console.status("[bold green]执行中...[/bold green]"):
             result = await engine.run(task)
     except Exception as e:
@@ -4563,11 +4573,25 @@ async def _interactive_load(engine: Any, arg: str) -> None:
 
 async def _delete_session(engine: Any, session_id: str) -> None:
     """删除指定会话."""
-    ok = await engine.delete_session(session_id)
-    if ok:
+    from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+
+    result = await engine.delete_session_detailed(session_id)
+    if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
         console.print(f"[green]已删除会话:[/green] {session_id}")
-    else:
+    elif result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
+    elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
+        console.print(
+            "[yellow]会话删除已进入安全重试队列:[/yellow] "
+            f"{session_id} · request {result.request_id}"
+        )
+    elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED:
+        console.print(
+            "[red]会话删除协调重试已耗尽，请人工检查:[/red] "
+            f"{session_id} · request {result.request_id}"
+        )
+    else:
+        console.print(f"[red]会话 {session_id} 的生命周期策略阻止删除[/red]")
 
 
 async def _new_conversation(engine: Any) -> None:

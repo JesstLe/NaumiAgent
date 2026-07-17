@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 from io import StringIO
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from rich.console import Console
 
 from naumi_agent.cli import commands_meta
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 from naumi_agent.tools.base import ToolCall, ToolResult
 
@@ -85,6 +87,25 @@ async def test_shared_meta_command_stops_after_engine_tool_failure(
     assert "权限策略拒绝了本次操作" in rendered
     assert "Worktree 隔离区" not in rendered
     assert engine.tool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_delete_session_command_reports_durable_retry_request(
+    rendered_console: StringIO,
+) -> None:
+    class Engine:
+        async def delete_session_detailed(self, session_id: str):
+            assert session_id == "session-1"
+            return SimpleNamespace(
+                outcome=ReconciliationCoordinatorOutcome.RETRY_SCHEDULED,
+                request_id="request-1",
+            )
+
+    await commands_meta.delete_session(Engine(), "session-1")
+
+    rendered = rendered_console.getvalue()
+    assert "删除协调等待安全重试" in rendered
+    assert "request-1" in rendered
 
 
 @pytest.mark.asyncio

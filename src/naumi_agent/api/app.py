@@ -25,6 +25,9 @@ def resolve_config_path() -> str:
 async def lifespan(app: FastAPI):
     config = AppConfig.from_yaml(resolve_config_path())
     engine = create_agent_engine(config)
+    app.state.session_reconciliation_recovery = (
+        await engine.recover_session_reconciliations()
+    )
     permission_broker = PermissionApprovalBroker()
     engine.set_permission_confirmer(permission_broker.confirm)
     app.state.engine = engine

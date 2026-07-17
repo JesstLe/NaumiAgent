@@ -8,6 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.coordinator import (
+    ReconciliationCoordinatorOutcome,
+    ReconciliationCoordinatorResult,
+)
+from naumi_agent.harness.reconciliation import SessionReconciliationState
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -27,6 +32,28 @@ def _session(session_id: str = "s1", title: str = "Demo") -> Session:
         workspace_root="/tmp/naumi",
         git_branch="main",
         summary="测试摘要",
+    )
+
+
+def _delete_result(
+    outcome: ReconciliationCoordinatorOutcome,
+    session_id: str,
+) -> ReconciliationCoordinatorResult:
+    return ReconciliationCoordinatorResult(
+        session_id=session_id,
+        request_id=(
+            f"request-{session_id}"
+            if outcome is not ReconciliationCoordinatorOutcome.NOT_FOUND
+            else ""
+        ),
+        outcome=outcome,
+        reconciliation_state=(
+            SessionReconciliationState.RECORDS_COMMITTED
+            if outcome is ReconciliationCoordinatorOutcome.COMPLETED
+            else None
+        ),
+        tombstone_status=None,
+        message="测试结果",
     )
 
 
@@ -144,37 +171,58 @@ def test_engine_registers_session_load_tool(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_session_delete_tool_deletes_by_session_id() -> None:
     engine = MagicMock()
-    engine.delete_session = AsyncMock(return_value=True)
+    engine.delete_session_detailed = AsyncMock(
+        return_value=_delete_result(ReconciliationCoordinatorOutcome.COMPLETED, "s2")
+    )
     tool = SessionDeleteTool(engine)
 
     output = await tool.execute(session_id="s2")
 
-    assert "已删除会话：s2" in output
-    engine.delete_session.assert_awaited_once_with("s2")
+    assert "已删除会话并完成派生记录协调：s2" in output
+    engine.delete_session_detailed.assert_awaited_once_with("s2")
 
 
 @pytest.mark.asyncio
 async def test_session_delete_tool_reports_missing_session() -> None:
     engine = MagicMock()
-    engine.delete_session = AsyncMock(return_value=False)
+    engine.delete_session_detailed = AsyncMock(
+        return_value=_delete_result(ReconciliationCoordinatorOutcome.NOT_FOUND, "missing")
+    )
     tool = SessionDeleteTool(engine)
 
     output = await tool.execute(session_id="missing")
 
     assert "会话 missing 不存在" in output
-    engine.delete_session.assert_awaited_once_with("missing")
+    engine.delete_session_detailed.assert_awaited_once_with("missing")
+
+
+@pytest.mark.asyncio
+async def test_session_delete_tool_reports_durable_retry_request() -> None:
+    engine = MagicMock()
+    engine.delete_session_detailed = AsyncMock(
+        return_value=_delete_result(
+            ReconciliationCoordinatorOutcome.RETRY_SCHEDULED,
+            "s2",
+        )
+    )
+    tool = SessionDeleteTool(engine)
+
+    output = await tool.execute(session_id="s2")
+
+    assert "已安排安全重试" in output
+    assert "request-s2" in output
 
 
 @pytest.mark.asyncio
 async def test_session_delete_tool_rejects_numeric_index() -> None:
     engine = MagicMock()
-    engine.delete_session = AsyncMock(return_value=True)
+    engine.delete_session_detailed = AsyncMock()
     tool = SessionDeleteTool(engine)
 
     output = await tool.execute(session_id="1")
 
     assert "只接受明确会话 ID" in output
-    engine.delete_session.assert_not_awaited()
+    engine.delete_session_detailed.assert_not_awaited()
 
 
 def test_engine_registers_session_delete_tool_as_destructive(tmp_path) -> None:
