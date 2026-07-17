@@ -7,7 +7,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import ValidationError
@@ -48,6 +48,16 @@ class _LoadedSuite:
     sha256: str
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessEvalRepetitionBatch:
+    requested: int
+    completed: int
+    status: Literal["completed", "partial"]
+    code: str
+    results: tuple[HarnessEvalSuiteResult, ...]
+    duration_ms: float
+
+
 class HarnessEvalAssetError(ValueError):
     """A stable, user-safe error in evaluation assets rather than product behavior."""
 
@@ -86,9 +96,70 @@ def evaluate_suite_file(
     )
 
 
+def evaluate_suite_repetitions(
+    workspace_root: str | Path,
+    suite_path: str | Path,
+    *,
+    repetitions: int = 5,
+    profile_digest: str,
+    profile_trusted: bool = False,
+    max_total_duration_ms: int = 60_000,
+) -> HarnessEvalRepetitionBatch:
+    """Run one static suite repeatedly under one source identity boundary."""
+    if not 5 <= repetitions <= 100:
+        raise ValueError("repetitions 必须在 5..100 之间")
+    if not 1_000 <= max_total_duration_ms <= 600_000:
+        raise ValueError("max_total_duration_ms 必须在 1000..600000 之间")
+    started = time.perf_counter()
+    deadline = started + max_total_duration_ms / 1_000
+    workspace = Path(workspace_root).expanduser().resolve()
+    source_before, source_code = _capture_baseline_source(workspace, enabled=True)
+    raw_results: list[HarnessEvalSuiteResult] = []
+    for _ in range(repetitions):
+        if raw_results and time.perf_counter() >= deadline:
+            break
+        raw_results.append(
+            _evaluate_suite_file_raw(
+                workspace,
+                suite_path,
+                group_deadline=deadline,
+            )
+        )
+    source_after, source_code = _capture_baseline_source_after(
+        workspace,
+        source_before,
+        source_code,
+    )
+    results = tuple(
+        _attach_baseline_identity(
+            result,
+            workspace=workspace,
+            profile_digest=profile_digest,
+            profile_trusted=profile_trusted,
+            source_before=source_before,
+            source_after=source_after,
+            source_code=source_code,
+            repetitions=repetitions,
+        )
+        for result in raw_results
+    )
+    completed = len(results)
+    partial = completed < repetitions
+    return HarnessEvalRepetitionBatch(
+        requested=repetitions,
+        completed=completed,
+        status="partial" if partial else "completed",
+        code="repetition_budget_exhausted" if partial else "",
+        results=results,
+        duration_ms=_elapsed_ms(started),
+    )
+
+
 def _evaluate_suite_file_raw(
     workspace_root: str | Path,
     suite_path: str | Path,
+    *,
+    group_deadline: float | None = None,
 ) -> HarnessEvalSuiteResult:
     """Evaluate one suite without baseline identity orchestration."""
     started = time.perf_counter()
@@ -110,7 +181,13 @@ def _evaluate_suite_file_raw(
             message=str(exc),
             duration_ms=_elapsed_ms(started),
         )
-    return _evaluate_loaded_suite(workspace, resolved, loaded, started=started)
+    return _evaluate_loaded_suite(
+        workspace,
+        resolved,
+        loaded,
+        started=started,
+        group_deadline=group_deadline,
+    )
 
 
 def evaluate_declared_suites(
@@ -228,10 +305,13 @@ def _evaluate_loaded_suite(
     loaded: _LoadedSuite,
     *,
     started: float,
+    group_deadline: float | None = None,
 ) -> HarnessEvalSuiteResult:
     suite = loaded.suite
     results: list[HarnessEvalCaseResult] = []
     deadline = started + (suite.budget.max_duration_ms / 1_000)
+    if group_deadline is not None:
+        deadline = min(deadline, group_deadline)
     budget_exhausted = False
     for case in suite.cases:
         if time.perf_counter() >= deadline:
@@ -561,6 +641,7 @@ def _attach_baseline_identity(
     source_before: HarnessEvalSourceIdentity | None,
     source_after: HarnessEvalSourceIdentity | None,
     source_code: str,
+    repetitions: int = 1,
 ) -> HarnessEvalSuiteResult:
     if profile_digest is None:
         return result
@@ -586,7 +667,7 @@ def _attach_baseline_identity(
             profile_sha256=profile_digest,
             policy_sha256=result.policy_sha256,
             runner_version=PROTOCOL_HELLO_RUNNER_VERSION,
-            repetitions=1,
+            repetitions=repetitions,
             live=False,
         )
         identity = build_eval_baseline_identity(
