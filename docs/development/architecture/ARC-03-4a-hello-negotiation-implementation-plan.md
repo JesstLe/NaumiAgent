@@ -58,3 +58,9 @@
 - 不改变事件 sequence、snapshot gap recovery 或持久化格式；
 - 不运行全量测试。
 
+## 完成状态
+
+- Task 1：完成；RED 以 Python 缺少 `ProtocolNegotiationError` 的导入失败固定。
+- Task 2：完成；Python hello 标准化、纯协商函数和 typed Bridge error 已实现。
+- Task 3：完成；Node contract hello、ACK 校验、输入门控和 ACK 后 heartbeat 已实现。
+- Task 4：完成；真实 Python Bridge 与不兼容 fixture 均完成进程级验证，自审记录在设计文档。

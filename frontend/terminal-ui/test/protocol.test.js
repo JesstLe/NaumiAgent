@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
   attachJsonlLineReader,
+  createHelloPayload,
   createEventSender,
   normalizeBudgetStatus,
   normalizeServerRecord,
@@ -202,6 +203,12 @@ test("event sender accepts a caller supplied request id", () => {
 
 test("protocol contract drives client and server event validation", () => {
   assert.equal(PROTOCOL_VERSION, PROTOCOL_CONTRACT.version);
+  assert.deepEqual(PROTOCOL_CONTRACT.negotiation, {
+    minimum_version: 1,
+    maximum_version: 1,
+    capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+    required_capabilities: ["typed_ui_messages"],
+  });
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
   assert(PROTOCOL_CONTRACT.client_events.includes("task_panel"));
   assert(PROTOCOL_CONTRACT.client_events.includes("run_cancel"));
@@ -244,6 +251,54 @@ test("protocol contract drives client and server event validation", () => {
     /未知客户端事件/,
   );
   assert.equal(chunks.length, 0);
+});
+
+test("hello payload is generated from the embedded negotiation contract", () => {
+  assert.deepEqual(createHelloPayload(" naumi-terminal-ui "), {
+    client: "naumi-terminal-ui",
+    minimum_version: 1,
+    maximum_version: 1,
+    capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+  });
+});
+
+test("hello ack requires a valid negotiated version and capability subset", () => {
+  const record = normalizeServerRecord({
+    type: "ack",
+    version: 1,
+    payload: {
+      event: "hello",
+      negotiation: {
+        selected_version: 1,
+        server_minimum_version: 1,
+        server_maximum_version: 1,
+        capabilities: ["workbench_snapshot", "typed_ui_messages", "heartbeat"],
+      },
+    },
+  });
+  assert.deepEqual(record.payload.negotiation, {
+    selected_version: 1,
+    server_minimum_version: 1,
+    server_maximum_version: 1,
+    capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+  });
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ack",
+      version: 1,
+      payload: {
+        event: "hello",
+        negotiation: {
+          selected_version: 2,
+          server_minimum_version: 2,
+          server_maximum_version: 2,
+          capabilities: ["typed_ui_messages"],
+        },
+      },
+    }),
+    /协商版本不兼容/,
+  );
 });
 
 test("typed harness receipt is strict and bounded", () => {

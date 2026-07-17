@@ -64,6 +64,10 @@
       "status": "product_spec"
     },
     {
+      "pattern": "docs/development/*.md",
+      "status": "product_spec"
+    },
+    {
       "pattern": "docs/quality/*.md",
       "status": "quality"
     },

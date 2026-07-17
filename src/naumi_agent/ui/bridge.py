@@ -36,10 +36,12 @@ from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNotic
 from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
     ClientEventType,
+    ProtocolNegotiationError,
     ServerEventType,
     decode_jsonl_line,
     encode_jsonl,
     make_envelope,
+    negotiate_hello,
     normalize_client_record,
     ui_message_payload,
 )
@@ -648,7 +650,20 @@ class JsonlEngineBridge:
             self.debug_trace.input("ui_bridge.stdin", encode_jsonl(record))
 
         if event_type == ClientEventType.HELLO:
-            await self.emit(ServerEventType.ACK, {"event": event_type}, request_id=request_id)
+            try:
+                negotiation = negotiate_hello(payload)
+            except ProtocolNegotiationError as exc:
+                await self.emit_error(
+                    str(exc),
+                    code=exc.code,
+                    request_id=request_id,
+                )
+                return
+            await self.emit(
+                ServerEventType.ACK,
+                {"event": event_type, "negotiation": negotiation},
+                request_id=request_id,
+            )
             await self.emit(
                 ServerEventType.STATUS,
                 self.status_payload(include_slash_commands=False),

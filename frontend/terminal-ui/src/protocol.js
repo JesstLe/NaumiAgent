@@ -116,7 +116,40 @@ function loadProtocolContract() {
       throw new Error(`protocol-contract.json ${key} 必须是非空字符串数组`);
     }
   }
+  const negotiation = contract.negotiation;
+  if (!negotiation || typeof negotiation !== "object" || Array.isArray(negotiation)) {
+    throw new Error("protocol-contract.json 缺少 negotiation 对象");
+  }
+  for (const key of ["minimum_version", "maximum_version"]) {
+    if (!Number.isInteger(negotiation[key]) || negotiation[key] <= 0) {
+      throw new Error(`protocol-contract.json negotiation.${key} 必须是正整数`);
+    }
+  }
+  if (negotiation.minimum_version > negotiation.maximum_version) {
+    throw new Error("protocol-contract.json negotiation 版本区间无效");
+  }
+  for (const key of ["capabilities", "required_capabilities"]) {
+    if (!Array.isArray(negotiation[key])
+      || negotiation[key].some((item) => typeof item !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(item))) {
+      throw new Error(`protocol-contract.json negotiation.${key} 必须是合法能力数组`);
+    }
+    negotiation[key] = [...new Set(negotiation[key])].sort();
+  }
+  if (negotiation.required_capabilities.some((item) => !negotiation.capabilities.includes(item))) {
+    throw new Error("protocol-contract.json required_capabilities 必须是 capabilities 的子集");
+  }
   return contract;
+}
+
+export function createHelloPayload(client = "naumi-terminal-ui") {
+  const name = String(client ?? "").trim() || "naumi-terminal-ui";
+  if (name.length > 100) throw new Error("hello client 不能超过 100 个字符");
+  return {
+    client: name,
+    minimum_version: PROTOCOL_CONTRACT.negotiation.minimum_version,
+    maximum_version: PROTOCOL_CONTRACT.negotiation.maximum_version,
+    capabilities: [...PROTOCOL_CONTRACT.negotiation.capabilities],
+  };
 }
 
 export function normalizeServerRecord(record) {
@@ -150,6 +183,9 @@ export function normalizeServerRecord(record) {
 }
 
 function normalizeServerPayload(type, payload) {
+  if (type === "ack" && payload.event === "hello") {
+    return { ...payload, negotiation: normalizeHelloNegotiation(payload.negotiation) };
+  }
   if (type === "ready" || type === "runtime/status") {
     return normalizeRuntimeStatus(payload, type);
   }
@@ -349,6 +385,37 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeHelloNegotiation(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Bridge hello ACK 缺少 negotiation");
+  }
+  const selected = Number(raw.selected_version);
+  const serverMinimum = Number(raw.server_minimum_version);
+  const serverMaximum = Number(raw.server_maximum_version);
+  if (![selected, serverMinimum, serverMaximum].every(Number.isInteger)
+    || serverMinimum <= 0 || serverMaximum < serverMinimum
+    || selected < serverMinimum || selected > serverMaximum
+    || selected < PROTOCOL_CONTRACT.negotiation.minimum_version
+    || selected > PROTOCOL_CONTRACT.negotiation.maximum_version) {
+    throw new Error("Bridge hello 协商版本不兼容");
+  }
+  if (!Array.isArray(raw.capabilities)
+    || raw.capabilities.some((item) => typeof item !== "string"
+      || !PROTOCOL_CONTRACT.negotiation.capabilities.includes(item))) {
+    throw new Error("Bridge hello 协商能力无效");
+  }
+  const capabilities = [...new Set(raw.capabilities)].sort();
+  const missing = PROTOCOL_CONTRACT.negotiation.required_capabilities
+    .filter((item) => !capabilities.includes(item));
+  if (missing.length > 0) throw new Error(`Bridge hello 缺少必需能力: ${missing.join(", ")}`);
+  return {
+    selected_version: selected,
+    server_minimum_version: serverMinimum,
+    server_maximum_version: serverMaximum,
+    capabilities,
+  };
 }
 
 function normalizeRuntimeStatus(payload, source = "runtime/status") {

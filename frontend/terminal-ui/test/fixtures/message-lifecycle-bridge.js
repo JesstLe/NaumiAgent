@@ -12,6 +12,15 @@ attachJsonlLineReader(process.stdin, (line) => {
   const payload = record.payload ?? {};
 
   if (record.type === "hello") {
+    emit("ack", {
+      event: "hello",
+      negotiation: {
+        selected_version: 1,
+        server_minimum_version: 1,
+        server_maximum_version: 1,
+        capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+      },
+    }, record.id);
     emit("ready", statusPayload(), record.id);
     return;
   }

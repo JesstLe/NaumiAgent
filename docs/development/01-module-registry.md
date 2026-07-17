@@ -43,7 +43,7 @@
 | --- | --- | --- | --- | --- |
 | ARC-01 | Domain Boundary 与依赖防火墙 | planned | 当前 Python 单体 | `architecture/ARC-01-domain-boundaries.md` |
 | ARC-02 | Runtime Service 化 | planned | ARC-01 | `architecture/ARC-02-runtime-service.md` |
-| ARC-03 | 协议版本与兼容治理 | planned | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
+| ARC-03 | 协议版本与兼容治理 | partial (3.4a) | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
 | ARC-04 | Tool/Browser/Agent Daemon | planned | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
 | ARC-05 | 状态 Schema 与迁移平台 | planned | ARC-01 | `architecture/ARC-05-state-migrations.md` |
 | ARC-06 | 高并发、背压与集群调度 | planned | ARC-02, ARC-04 | `architecture/ARC-06-concurrency-cluster.md` |

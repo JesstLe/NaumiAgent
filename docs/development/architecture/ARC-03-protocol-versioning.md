@@ -26,7 +26,9 @@ Artifact、Harness 和 interaction，防止 Python/Node/TUI 各自漂移。
 
 ## 分阶段实现
 
-- ARC-03.4a 启动协议协商：已完成设计，实施见
+- ARC-03.4a 启动协议协商：已实现。Python/Node 使用同一发布 contract 校验版本区间与能力，
+  hello ACK 返回确定性协商结果，失败使用 typed error；新 UI 在成功 ACK 前排队输入且不启动心跳。
+  设计与证据见
   `ARC-03-4a-hello-negotiation-design.md` 与
   `ARC-03-4a-hello-negotiation-implementation-plan.md`。
 - 其余 Envelope、Schema registry、Compatibility、Ordering、Code generation 与 Conformance suite

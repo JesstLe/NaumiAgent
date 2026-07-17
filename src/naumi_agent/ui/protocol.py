@@ -9,6 +9,7 @@ safety, and debug tracing.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -19,6 +20,23 @@ from naumi_agent.harness.checks import validate_run_id
 from naumi_agent.ui.messages.base import UIMessage
 
 PROTOCOL_VERSION = 1
+PROTOCOL_MINIMUM_VERSION = 1
+PROTOCOL_MAXIMUM_VERSION = 1
+PROTOCOL_CAPABILITIES = (
+    "heartbeat",
+    "typed_ui_messages",
+    "workbench_snapshot",
+)
+PROTOCOL_REQUIRED_CAPABILITIES = ("typed_ui_messages",)
+_CAPABILITY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+class ProtocolNegotiationError(ValueError):
+    """A typed hello negotiation failure safe to expose to terminal clients."""
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class ClientEventType(StrEnum):
@@ -188,6 +206,9 @@ def _normalize_client_payload(
     event_type: ClientEventType,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    if event_type == ClientEventType.HELLO:
+        return _normalize_hello_payload(payload)
+
     if event_type == ClientEventType.SUBMIT:
         return {"text": str(payload.get("text") or "")}
 
@@ -411,6 +432,86 @@ def _normalize_client_payload(
         }
 
     return dict(payload)
+
+
+def _normalize_hello_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    negotiation_fields = {"minimum_version", "maximum_version", "capabilities"}
+    legacy = not any(field in payload for field in negotiation_fields)
+    client = str(payload.get("client") or "unknown-client").strip()
+    if not client:
+        client = "unknown-client"
+    if len(client) > 100:
+        raise ValueError("hello client 不能超过 100 个字符。")
+
+    if legacy:
+        minimum_version = PROTOCOL_VERSION
+        maximum_version = PROTOCOL_VERSION
+        capabilities = list(PROTOCOL_CAPABILITIES)
+    else:
+        minimum_version = _hello_version(payload.get("minimum_version"), "minimum_version")
+        maximum_version = _hello_version(payload.get("maximum_version"), "maximum_version")
+        if minimum_version > maximum_version:
+            raise ValueError("hello minimum_version 不能大于 maximum_version。")
+        capabilities = _hello_capabilities(payload.get("capabilities", []))
+
+    return {
+        "client": client,
+        "minimum_version": minimum_version,
+        "maximum_version": maximum_version,
+        "capabilities": capabilities,
+        "legacy": legacy,
+    }
+
+
+def _hello_version(raw: Any, field: str) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        raise ValueError(f"hello {field} 必须是正整数。")
+    return raw
+
+
+def _hello_capabilities(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        raise ValueError("hello capabilities 必须是数组。")
+    if len(raw) > 100:
+        raise ValueError("hello capabilities 最多包含 100 项。")
+    values: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not _CAPABILITY_NAME.fullmatch(item):
+            raise ValueError("hello 能力名称必须是 snake_case，且不超过 64 个字符。")
+        values.add(item)
+    return sorted(values)
+
+
+def negotiate_hello(payload: dict[str, Any]) -> dict[str, Any]:
+    """Select the highest shared protocol version and public capability intersection."""
+    client_minimum = int(payload["minimum_version"])
+    client_maximum = int(payload["maximum_version"])
+    selected_minimum = max(client_minimum, PROTOCOL_MINIMUM_VERSION)
+    selected_maximum = min(client_maximum, PROTOCOL_MAXIMUM_VERSION)
+    if selected_minimum > selected_maximum:
+        raise ProtocolNegotiationError(
+            "协议版本不兼容："
+            f"客户端支持 {client_minimum}-{client_maximum}，"
+            f"当前 Naumi 支持 {PROTOCOL_MINIMUM_VERSION}-{PROTOCOL_MAXIMUM_VERSION}。"
+            "请升级 Naumi 或终端 UI 后重试。",
+            code="protocol_version_unsupported",
+        )
+
+    client_capabilities = set(payload.get("capabilities") or [])
+    missing = sorted(set(PROTOCOL_REQUIRED_CAPABILITIES) - client_capabilities)
+    if missing:
+        raise ProtocolNegotiationError(
+            "终端 UI 缺少运行所需协议能力："
+            f"{', '.join(missing)}。请升级终端 UI 后重试。",
+            code="protocol_capability_missing",
+        )
+
+    return {
+        "selected_version": selected_maximum,
+        "server_minimum_version": PROTOCOL_MINIMUM_VERSION,
+        "server_maximum_version": PROTOCOL_MAXIMUM_VERSION,
+        "capabilities": sorted(set(PROTOCOL_CAPABILITIES) & client_capabilities),
+    }
 
 
 def _normalize_harness_detail_request(payload: dict[str, Any]) -> dict[str, Any]:

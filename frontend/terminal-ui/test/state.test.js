@@ -51,6 +51,35 @@ function interactionRecord(requestId, question = "请选择方案") {
   };
 }
 
+test("hello ack marks protocol negotiation separately from bridge readiness", () => {
+  const state = createInitialState();
+  assert.equal(state.bridgeReady, false);
+  assert.equal(state.protocolNegotiated, false);
+
+  reduceServerEvent(state, {
+    type: "ready",
+    payload: { version: "0.1.214" },
+  });
+  assert.equal(state.bridgeReady, true);
+  assert.equal(state.protocolNegotiated, false);
+
+  reduceServerEvent(state, {
+    type: "ack",
+    request_id: "hello-1",
+    payload: {
+      event: "hello",
+      negotiation: {
+        selected_version: 1,
+        server_minimum_version: 1,
+        server_maximum_version: 1,
+        capabilities: ["typed_ui_messages"],
+      },
+    },
+  });
+  assert.equal(state.protocolNegotiated, true);
+  assert.equal(state.protocolNegotiation.selected_version, 1);
+});
+
 function subagentRecord({
   taskId = "task-explore",
   status = "started",
