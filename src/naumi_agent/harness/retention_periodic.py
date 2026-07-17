@@ -82,6 +82,30 @@ class RetentionWorkerSnapshot:
     last_pass_at: str
 
 
+def retention_worker_status_payload(
+    snapshot: RetentionWorkerSnapshot,
+    *,
+    configured_enabled: bool,
+) -> dict[str, object]:
+    """Return the bounded, JSON-safe worker status shared by all surfaces."""
+    return {
+        "configured_enabled": configured_enabled,
+        "owner_id": snapshot.owner_id,
+        "state": snapshot.state.value,
+        "lease_held": snapshot.lease_held,
+        "pass_count": snapshot.pass_count,
+        "completed_session_count": snapshot.completed_session_count,
+        "retry_scheduled_count": snapshot.retry_scheduled_count,
+        "failure_count": snapshot.failure_count,
+        "consecutive_empty_passes": snapshot.consecutive_empty_passes,
+        "next_delay_seconds": snapshot.next_delay_seconds,
+        "last_pass_status": snapshot.last_pass_status,
+        "last_error_code": snapshot.last_error_code,
+        "started_at": snapshot.started_at,
+        "last_pass_at": snapshot.last_pass_at,
+    }
+
+
 RunRetentionPass = Callable[
     [asyncio.Event],
     Awaitable[SessionRetentionPassResult],

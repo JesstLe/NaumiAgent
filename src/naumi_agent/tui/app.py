@@ -1610,9 +1610,11 @@ class NaumiApp(App):
     async def _recover_session_reconciliations(self) -> None:
         status = self.query_one(StatusBar)
         try:
-            results = await self.engine.recover_session_reconciliations()
-        except Exception as exc:
-            status.status_text = f"会话协调恢复失败: {exc}"
+            results = await self.engine.start_long_running_services()
+        except Exception:
+            status.status_text = (
+                "会话协调恢复失败，周期清理未启动；请运行 /doctor 查看诊断"
+            )
             return
         if not results:
             return

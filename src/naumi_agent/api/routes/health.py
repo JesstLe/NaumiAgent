@@ -15,4 +15,5 @@ async def health_check(request: Request):
         version=__version__,
         uptime_seconds=0.0,
         active_sessions=0,
+        retention_worker=request.app.state.engine.session_retention_worker_status(),
     )

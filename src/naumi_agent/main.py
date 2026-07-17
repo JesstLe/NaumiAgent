@@ -1483,6 +1483,15 @@ def _cli_event_factory(cli: Any):
     return handler
 
 
+async def _start_long_running_engine(engine: Any) -> tuple[Any, ...]:
+    """Start durable background services or close the partially started Engine."""
+    try:
+        return await engine.start_long_running_services()
+    except Exception:
+        await engine.shutdown()
+        raise
+
+
 async def _chat(config_path: str) -> None:
     from naumi_agent.cli.layout import CLIApp
     from naumi_agent.debug_trace import DebugTrace
@@ -1494,7 +1503,7 @@ async def _chat(config_path: str) -> None:
     setup_logging(config.log_level)
     _check_api_key(config)
     engine = create_agent_engine(config)
-    reconciliation_recovery = await engine.recover_session_reconciliations()
+    reconciliation_recovery = await _start_long_running_engine(engine)
     keybindings = build_keybindings(config.keybindings)
     style_config = _build_ui_style_from_config(config)
     debug_trace = DebugTrace.create(

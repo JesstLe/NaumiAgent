@@ -229,11 +229,36 @@ class ConfigResponse(BaseModel):
     max_turns: int
 
 
+class RetentionWorkerStatusResponse(BaseModel):
+    configured_enabled: bool
+    owner_id: str
+    state: Literal[
+        "stopped",
+        "starting",
+        "standby",
+        "running",
+        "waiting",
+        "stopping",
+    ]
+    lease_held: bool
+    pass_count: int = Field(ge=0)
+    completed_session_count: int = Field(ge=0)
+    retry_scheduled_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    consecutive_empty_passes: int = Field(ge=0)
+    next_delay_seconds: float = Field(ge=0)
+    last_pass_status: str
+    last_error_code: str
+    started_at: str
+    last_pass_at: str
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
     uptime_seconds: float
     active_sessions: int
+    retention_worker: RetentionWorkerStatusResponse
 
 
 class ErrorResponse(BaseModel):

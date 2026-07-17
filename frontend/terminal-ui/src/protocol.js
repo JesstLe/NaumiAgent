@@ -452,7 +452,62 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       `${source}.model_contract`,
     );
   }
+  if (Object.hasOwn(status, "retention_worker")) {
+    normalized.retention_worker = normalizeRetentionWorkerStatus(
+      status.retention_worker,
+      `${source}.retention_worker`,
+    );
+  }
   return normalized;
+}
+
+function normalizeRetentionWorkerStatus(value, source) {
+  const worker = requireObject(value, source);
+  const state = strictStatusText(worker.state, `${source}.state`).toLowerCase();
+  const allowedStates = new Set([
+    "stopped", "starting", "standby", "running", "waiting", "stopping",
+  ]);
+  if (!allowedStates.has(state)) throw new Error(`${source}.state 无效: ${state}`);
+  const booleanField = (name) => {
+    if (typeof worker[name] !== "boolean") {
+      throw new Error(`${source}.${name} 必须是 boolean`);
+    }
+    return worker[name];
+  };
+  const textField = (name) => {
+    if (typeof worker[name] !== "string" || worker[name].length > 256) {
+      throw new Error(`${source}.${name} 必须是最多 256 字符的字符串`);
+    }
+    return worker[name];
+  };
+  return {
+    configured_enabled: booleanField("configured_enabled"),
+    owner_id: textField("owner_id"),
+    state,
+    lease_held: booleanField("lease_held"),
+    pass_count: strictNonnegativeInteger(worker.pass_count, `${source}.pass_count`),
+    completed_session_count: strictNonnegativeInteger(
+      worker.completed_session_count,
+      `${source}.completed_session_count`,
+    ),
+    retry_scheduled_count: strictNonnegativeInteger(
+      worker.retry_scheduled_count,
+      `${source}.retry_scheduled_count`,
+    ),
+    failure_count: strictNonnegativeInteger(worker.failure_count, `${source}.failure_count`),
+    consecutive_empty_passes: strictNonnegativeInteger(
+      worker.consecutive_empty_passes,
+      `${source}.consecutive_empty_passes`,
+    ),
+    next_delay_seconds: strictNonnegativeNumber(
+      worker.next_delay_seconds,
+      `${source}.next_delay_seconds`,
+    ),
+    last_pass_status: textField("last_pass_status"),
+    last_error_code: textField("last_error_code"),
+    started_at: textField("started_at"),
+    last_pass_at: textField("last_pass_at"),
+  };
 }
 
 function normalizeModelContract(value, source) {

@@ -37,6 +37,7 @@ from naumi_agent.harness.retention_periodic import (
     RetentionPeriodicPolicy,
     RetentionWorkerSnapshot,
     SessionRetentionPeriodicService,
+    retention_worker_status_payload,
 )
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
@@ -1697,6 +1698,14 @@ class AgentEngine:
     ) -> SessionRetentionPassResult:
         return await self.run_session_retention_once(cancel_event=cancel_event)
 
+    async def start_long_running_services(
+        self,
+    ) -> tuple[ReconciliationCoordinatorResult, ...]:
+        """Recover durable Session work before enabling background services."""
+        recovered = await self.recover_session_reconciliations()
+        self.start_session_retention_worker()
+        return recovered
+
     def start_session_retention_worker(self) -> bool:
         """Start only when periodic retention is explicitly enabled in config."""
         if not self._config.memory.session_retention.periodic_enabled:
@@ -1711,6 +1720,14 @@ class AgentEngine:
 
     def session_retention_worker_snapshot(self) -> RetentionWorkerSnapshot:
         return self._retention_periodic_service.snapshot()
+
+    def session_retention_worker_status(self) -> dict[str, object]:
+        return retention_worker_status_payload(
+            self.session_retention_worker_snapshot(),
+            configured_enabled=(
+                self._config.memory.session_retention.periodic_enabled
+            ),
+        )
 
     async def _await_delete_completion(
         self,
