@@ -32,6 +32,7 @@ from naumi_agent.harness.eval_models import (
     EvalRunStatus,
     HarnessEvalSuiteResult,
 )
+from naumi_agent.harness.eval_receipt import HarnessEvalComparisonReceipt
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactGcStatus,
@@ -55,7 +56,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 9
+HARNESS_STORE_SCHEMA_VERSION = 10
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -214,6 +215,19 @@ class HarnessStoredEvalBaselineEvent:
     reason: str
     created_at: str
     event_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredEvalComparisonReceipt:
+    id: str
+    workspace_root: str
+    suite_id: str
+    baseline_id: str
+    current_batch_id: str
+    decision: str
+    receipt_sha256: str
+    receipt: HarnessEvalComparisonReceipt
+    created_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -1288,6 +1302,212 @@ class HarnessStore:
             raise HarnessStoreError("无法列出 Eval Baseline 审计事件。") from exc
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("Eval Baseline 审计事件损坏或无法读取。") from exc
+
+    async def record_eval_comparison_receipt(
+        self,
+        receipt: HarnessEvalComparisonReceipt,
+    ) -> HarnessStoredEvalComparisonReceipt:
+        """Insert one immutable comparison authority, or return an identical retry."""
+        if not isinstance(receipt, HarnessEvalComparisonReceipt):
+            raise ValueError("receipt 必须是 HarnessEvalComparisonReceipt。")
+        workspace = _canonical_workspace(receipt.workspace_root)
+        if workspace != receipt.workspace_root:
+            raise ValueError("Comparison receipt workspace_root 必须是规范绝对路径。")
+        suite = _normalize_text(receipt.suite_id, field="suite_id", max_length=64)
+        current_batch = _normalize_eval_batch_id(receipt.current_batch_id)
+        receipt_json = _json_dumps(receipt.model_dump(mode="json"))
+        created = _normalize_timestamp(receipt.created_at, field="created_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                baseline_cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE id = ? AND workspace_root = ? AND suite_id = ?
+                    """,
+                    (receipt.baseline_id, workspace, suite),
+                )
+                baseline_row = await baseline_cursor.fetchone()
+                if baseline_row is None:
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "Comparison receipt 引用了缺失或越界的 Baseline。"
+                    )
+                baseline = _eval_baseline_from_row(baseline_row)
+                if (
+                    baseline.batch_id != receipt.baseline_batch_id
+                    or baseline.identity_sha256
+                    != receipt.baseline_identity_sha256
+                    or baseline.sample_count != receipt.baseline_samples
+                    or baseline.samples_sha256
+                    != receipt.baseline_samples_sha256
+                ):
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "Comparison receipt 的 Baseline 摘要与已晋升版本不一致。"
+                    )
+                baseline_samples_cursor = await db.execute(
+                    """
+                    SELECT *
+                    FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ? AND suite_id = ?
+                    ORDER BY sample_index ASC
+                    """,
+                    (workspace, baseline.batch_id, suite),
+                )
+                baseline_samples = tuple(
+                    _eval_result_from_row(row)
+                    for row in await baseline_samples_cursor.fetchall()
+                )
+                _validate_receipt_stored_cohort(
+                    samples=baseline_samples,
+                    expected_count=receipt.baseline_samples,
+                    expected_identity_sha256=receipt.baseline_identity_sha256,
+                    expected_samples_sha256=receipt.baseline_samples_sha256,
+                    cohort_name="Baseline",
+                )
+                current_cursor = await db.execute(
+                    """
+                    SELECT *
+                    FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ? AND suite_id = ?
+                    ORDER BY sample_index ASC
+                    """,
+                    (workspace, current_batch, suite),
+                )
+                current_samples = tuple(
+                    _eval_result_from_row(row)
+                    for row in await current_cursor.fetchall()
+                )
+                _validate_receipt_stored_cohort(
+                    samples=current_samples,
+                    expected_count=receipt.current_samples,
+                    expected_identity_sha256=receipt.current_identity_sha256,
+                    expected_samples_sha256=receipt.current_samples_sha256,
+                    cohort_name="Candidate",
+                    evidence_sha256=tuple(
+                        item.result_sha256 for item in receipt.sample_evidence
+                    ),
+                )
+                cursor = await db.execute(
+                    "SELECT * FROM harness_eval_comparison_receipts WHERE id = ?",
+                    (receipt.id,),
+                )
+                existing = await cursor.fetchone()
+                if existing is not None:
+                    restored = _eval_comparison_receipt_from_row(existing)
+                    if restored.receipt_sha256 != receipt.receipt_sha256:
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "同一 Baseline/Candidate 比较不可覆盖为不同回执。"
+                        )
+                    await db.rollback()
+                    return restored
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_comparison_receipts (
+                        id, workspace_root, suite_id, baseline_id,
+                        current_batch_id, decision, receipt_sha256,
+                        receipt_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.id,
+                        workspace,
+                        suite,
+                        receipt.baseline_id,
+                        current_batch,
+                        receipt.decision.value,
+                        receipt.receipt_sha256,
+                        receipt_json,
+                        created,
+                    ),
+                )
+                await db.commit()
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法保存 Harness Eval Comparison receipt。") from exc
+        restored = await self.get_eval_comparison_receipt(
+            workspace,
+            suite,
+            receipt.baseline_id,
+            current_batch,
+        )
+        assert restored is not None
+        return restored
+
+    async def get_eval_comparison_receipt(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        baseline_id: str,
+        current_batch_id: str,
+    ) -> HarnessStoredEvalComparisonReceipt | None:
+        """Read one exact workspace-scoped comparison receipt without mutation."""
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        baseline = _validate_sha256(baseline_id, field="baseline_id")
+        batch = _normalize_eval_batch_id(current_batch_id)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_comparison_receipts
+                    WHERE workspace_root = ? AND suite_id = ?
+                      AND baseline_id = ? AND current_batch_id = ?
+                    """,
+                    (workspace, suite, baseline, batch),
+                )
+                row = await cursor.fetchone()
+                return (
+                    _eval_comparison_receipt_from_row(row)
+                    if row is not None
+                    else None
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Eval Comparison receipt。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Comparison receipt 损坏或无法读取。") from exc
+
+    async def list_eval_comparison_receipts(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[HarnessStoredEvalComparisonReceipt, ...]:
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if not 1 <= limit <= 1_000:
+            raise ValueError("limit 必须在 1..1000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_comparison_receipts
+                    WHERE workspace_root = ? AND suite_id = ?
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """,
+                    (workspace, suite, limit),
+                )
+                return tuple(
+                    _eval_comparison_receipt_from_row(row)
+                    for row in await cursor.fetchall()
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出 Eval Comparison receipt。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Comparison receipt 列表损坏或无法读取。") from exc
 
     async def get_run(self, run_id: str) -> HarnessStoredRun | None:
         normalized_run_id = _normalize_text(run_id, field="run_id", max_length=128)
@@ -2615,6 +2835,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V7)
                             await db.executescript(_SCHEMA_V8)
                             await db.executescript(_SCHEMA_V9)
+                            await db.executescript(_SCHEMA_V10)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -3119,6 +3340,90 @@ def _eval_baseline_selector_digest(
                 "updated_at": updated_at,
             }
         )
+    )
+
+
+def _validate_receipt_stored_cohort(
+    *,
+    samples: tuple[HarnessStoredEvalResult, ...],
+    expected_count: int,
+    expected_identity_sha256: str,
+    expected_samples_sha256: str,
+    cohort_name: str,
+    evidence_sha256: tuple[str, ...] | None = None,
+) -> None:
+    if len(samples) != expected_count:
+        raise HarnessStoreConflictError(
+            f"Comparison receipt 的 {cohort_name} 样本数与存储 cohort 不一致。"
+        )
+    indexes = [sample.sample_index for sample in samples]
+    if indexes != list(range(len(samples))):
+        raise HarnessStoreConflictError(
+            f"Comparison receipt 的 {cohort_name} sample_index 不连续。"
+        )
+    identities = {sample.identity_sha256 for sample in samples}
+    if identities != {expected_identity_sha256}:
+        raise HarnessStoreConflictError(
+            f"Comparison receipt 的 {cohort_name} Identity 与存储 cohort 不一致。"
+        )
+    samples_sha256 = _stable_digest(
+        _json_dumps(
+            [
+                {
+                    "sample_index": sample.sample_index,
+                    "result_sha256": sample.result_sha256,
+                }
+                for sample in samples
+            ]
+        )
+    )
+    if samples_sha256 != expected_samples_sha256:
+        raise HarnessStoreConflictError(
+            f"Comparison receipt 的 {cohort_name} 摘要与存储 cohort 不一致。"
+        )
+    if evidence_sha256 is not None and evidence_sha256 != tuple(
+        sample.result_sha256 for sample in samples
+    ):
+        raise HarnessStoreConflictError(
+            "Comparison receipt 的逐样本证据与存储 cohort 不一致。"
+        )
+
+
+def _eval_comparison_receipt_from_row(
+    row: aiosqlite.Row,
+) -> HarnessStoredEvalComparisonReceipt:
+    receipt_json = str(row["receipt_json"])
+    receipt = HarnessEvalComparisonReceipt.model_validate_json(receipt_json)
+    workspace = _canonical_workspace(str(row["workspace_root"]))
+    suite = _normalize_text(str(row["suite_id"]), field="suite_id", max_length=64)
+    baseline_id = _validate_sha256(str(row["baseline_id"]), field="baseline_id")
+    current_batch = _normalize_eval_batch_id(str(row["current_batch_id"]))
+    receipt_sha256 = _validate_sha256(
+        str(row["receipt_sha256"]),
+        field="receipt_sha256",
+    )
+    created_at = _normalize_timestamp(str(row["created_at"]), field="created_at")
+    if (
+        str(row["id"]) != receipt.id
+        or workspace != receipt.workspace_root
+        or suite != receipt.suite_id
+        or baseline_id != receipt.baseline_id
+        or current_batch != receipt.current_batch_id
+        or str(row["decision"]) != receipt.decision.value
+        or receipt_sha256 != receipt.receipt_sha256
+        or created_at != receipt.created_at
+    ):
+        raise ValueError("Eval Comparison receipt 行摘要与内容不一致。")
+    return HarnessStoredEvalComparisonReceipt(
+        id=receipt.id,
+        workspace_root=workspace,
+        suite_id=suite,
+        baseline_id=baseline_id,
+        current_batch_id=current_batch,
+        decision=receipt.decision.value,
+        receipt_sha256=receipt_sha256,
+        receipt=receipt,
+        created_at=created_at,
     )
 
 
@@ -3786,4 +4091,27 @@ ON harness_eval_baselines (workspace_root, suite_id, version DESC);
 
 CREATE INDEX IF NOT EXISTS idx_harness_eval_baseline_events_suite
 ON harness_eval_baseline_events (workspace_root, suite_id, created_at, id);
+"""
+
+_SCHEMA_V10 = """
+CREATE TABLE IF NOT EXISTS harness_eval_comparison_receipts (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    baseline_id TEXT NOT NULL
+        REFERENCES harness_eval_baselines(id) ON DELETE RESTRICT,
+    current_batch_id TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (
+        decision IN ('passed', 'failed', 'flaky', 'inconclusive', 'incompatible')
+    ),
+    receipt_sha256 TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (workspace_root, suite_id, baseline_id, current_batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_eval_comparison_receipts_suite
+ON harness_eval_comparison_receipts (
+    workspace_root, suite_id, created_at DESC, id DESC
+);
 """

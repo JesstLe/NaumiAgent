@@ -66,5 +66,8 @@
 - HAR-08 H5b Baseline Version/Selector：已实现。schema v9 对合格 cohort 建立不可变单调版本，
   原子切换 workspace/suite active selector，并追加带摘要的 previous/current 审计事件；无 Identity、
   样本缺口、非全绿或未验证 guardrail 均不能晋升。详见 `HAR-08-H5b-baseline-version-selector.md`。
-- Replay/Sandbox/Live、Comparison receipt 与其余 surface 仍为 planned；当前不得把
+- HAR-08 H5c Comparison Receipt：已实现。schema v10 将 Baseline/Candidate 两组不可变样本、逐样本
+  机械/Policy 证据和重复样本统计合成为防篡改权威 decision；Store 写入时复核 Baseline 与 Candidate
+  的完整引用链。详见 `HAR-08-H5c-comparison-receipt.md`。
+- Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。
