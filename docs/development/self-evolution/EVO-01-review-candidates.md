@@ -33,5 +33,8 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.1a Harness 失败证据适配器：已实现。耐久 Harness run 经确定性 Explainer 分类后，
   转成只含内部 URI、完整摘要、失败分类和 root fingerprint 的 frozen Evidence；不复制用户目标、
   会话或源码。实现边界与证据见 `EVO-01-1a-harness-failure-evidence.md`。
-- self_review/runtime metric adapters、Candidate schema、Dedup、Eligibility、Prioritization 与
+- EVO-01.1b Self-Review 静态证据适配器：已实现。现有 `self_review` 改用有界 AST 事实扫描，
+  secret 值不会进入展示、模型输入或 Evidence；每个 finding 只引用相对 scope 与完整文件摘要。
+  实现边界与证据见 `EVO-01-1b-self-review-static-evidence.md`。
+- runtime metric/Eval/feedback adapters、Candidate schema、Dedup、Eligibility、Prioritization 与
   Review surface 仍为 planned；不得把 EVO-01 整体标记为完成。

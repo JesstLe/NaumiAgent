@@ -11,7 +11,12 @@ from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from naumi_agent.harness.explain import HarnessExplainer, HarnessFailureClass
+from naumi_agent.evolution.self_review import SelfReviewStaticScan
+from naumi_agent.harness.explain import (
+    HarnessExplainer,
+    HarnessExplainFinding,
+    HarnessFailureClass,
+)
 from naumi_agent.harness.store import HarnessStoredCheck, HarnessStoredEvidence, HarnessStoredRun
 
 _ID_RE = re.compile(r"^eve_[0-9a-f]{24}$")
@@ -46,10 +51,12 @@ class EvolutionEvidenceRef(_StrictModel):
 class EvolutionEvidence(_StrictModel):
     schema_version: Literal[1] = 1
     evidence_id: str
-    source_kind: Literal["harness_failure"] = "harness_failure"
+    source_kind: Literal["harness_failure", "self_review_static"] = "harness_failure"
     source_uri: str
     observed_at: str = Field(min_length=1, max_length=128)
-    failure_class: HarnessFailureClass
+    finding_code: str = ""
+    failure_class: HarnessFailureClass | None = None
+    scope: str = Field(default="harness:run", min_length=1, max_length=1_024)
     hard_evidence: Literal[True] = True
     root_fingerprint: str
     refs: tuple[EvolutionEvidenceRef, ...] = Field(min_length=1, max_length=128)
@@ -67,6 +74,10 @@ class EvolutionEvidence(_StrictModel):
 
     @model_validator(mode="after")
     def _identity_is_valid(self) -> EvolutionEvidence:
+        if not self.finding_code and self.failure_class is not None:
+            object.__setattr__(self, "finding_code", self.failure_class.value)
+        if not re.fullmatch(r"^[a-z][a-z0-9_]{0,63}$", self.finding_code):
+            raise ValueError("finding_code 格式无效。")
         if not _ID_RE.fullmatch(self.evidence_id):
             raise ValueError("evidence_id 格式无效。")
         if not _SHA256_RE.fullmatch(self.root_fingerprint):
@@ -75,6 +86,13 @@ class EvolutionEvidence(_StrictModel):
             raise ValueError("source_uri 必须指向首个机械证据。")
         if len({ref.uri for ref in self.refs}) != len(self.refs):
             raise ValueError("evidence refs 不得重复。")
+        if self.source_kind == "harness_failure":
+            if self.failure_class is None or self.finding_code != self.failure_class.value:
+                raise ValueError("Harness evidence 的 finding_code 必须匹配 failure_class。")
+        elif self.failure_class is not None:
+            raise ValueError("静态自审证据不得伪造 Harness failure_class。")
+        if any(character in self.scope for character in ("\n", "\r", "\x00")):
+            raise ValueError("evidence scope 含非法控制字符。")
         return self
 
 
@@ -91,22 +109,46 @@ def adapt_harness_failure_evidence(
     observed_at = run.completed_at or run.started_at
     adapted: list[EvolutionEvidence] = []
     for finding in explanation.findings:
-        refs = [
-            _check_ref(run.id, check_by_id[check_id])
-            for check_id in finding.check_ids
-            if check_id in check_by_id
-        ]
-        refs.extend(
-            EvolutionEvidenceRef(uri=item.uri, sha256=item.sha256)
-            for evidence_id in finding.evidence_ids
-            if (item := evidence_by_id.get(evidence_id)) is not None
+        adapted.append(
+            _adapt_harness_finding(
+                run,
+                finding,
+                check_by_id=check_by_id,
+                evidence_by_id=evidence_by_id,
+                receipt_ref=receipt_ref,
+                observed_at=observed_at,
+            )
         )
-        if "receipt" in finding.source.split(",") and receipt_ref is not None:
-            refs.append(receipt_ref)
-        if not refs:
-            refs.append(_run_ref(run))
-        refs = _dedupe_refs(refs)
-        root_material = {
+    return tuple(adapted)
+
+
+def _adapt_harness_finding(
+    run: HarnessStoredRun,
+    finding: HarnessExplainFinding,
+    *,
+    check_by_id: dict[str, HarnessStoredCheck],
+    evidence_by_id: dict[str, HarnessStoredEvidence],
+    receipt_ref: EvolutionEvidenceRef | None,
+    observed_at: str,
+) -> EvolutionEvidence:
+    refs = [
+        _check_ref(run.id, check_by_id[check_id])
+        for check_id in finding.check_ids
+        if check_id in check_by_id
+    ]
+    refs.extend(
+        EvolutionEvidenceRef(uri=item.uri, sha256=item.sha256)
+        for evidence_id in finding.evidence_ids
+        if (item := evidence_by_id.get(evidence_id)) is not None
+    )
+    has_receipt = "receipt" in finding.source.split(",")
+    if has_receipt and receipt_ref is not None:
+        refs.append(receipt_ref)
+    if not refs:
+        refs.append(_run_ref(run))
+    refs = _dedupe_refs(refs)
+    root_fingerprint = _digest(
+        {
             "failure_class": finding.failure_class.value,
             "checks": sorted(
                 _check_root(check_by_id[check_id])
@@ -118,25 +160,64 @@ def adapt_harness_failure_evidence(
                 for evidence_id in finding.evidence_ids
                 if evidence_id in evidence_by_id
             ),
-            "receipt": "receipt" in finding.source.split(","),
+            "receipt": has_receipt,
         }
-        root_fingerprint = _digest(root_material)
+    )
+    observation = _digest(
+        {
+            "run_id": run.id,
+            "observed_at": observed_at,
+            "root_fingerprint": root_fingerprint,
+            "refs": [ref.model_dump(mode="json") for ref in refs],
+        }
+    )
+    return EvolutionEvidence(
+        evidence_id=f"eve_{observation[:24]}",
+        source_kind="harness_failure",
+        source_uri=refs[0].uri,
+        observed_at=observed_at,
+        finding_code=finding.failure_class.value,
+        failure_class=finding.failure_class,
+        scope=_harness_scope(finding.check_ids, finding.evidence_ids),
+        root_fingerprint=root_fingerprint,
+        refs=tuple(refs),
+    )
+
+
+def adapt_self_review_static_evidence(
+    scan: SelfReviewStaticScan,
+) -> tuple[EvolutionEvidence, ...]:
+    """Convert structured AST findings without retaining matched source text."""
+    adapted: list[EvolutionEvidence] = []
+    for finding in scan.findings:
+        uri = f"artifact://workspace/{quote(finding.path, safe='/')}"
+        ref = EvolutionEvidenceRef(uri=uri, sha256=finding.file_sha256)
+        scope = f"{finding.path}:{finding.symbol}"
+        root_fingerprint = _digest(
+            {
+                "code": finding.code.value,
+                "path": finding.path,
+                "symbol": finding.symbol,
+            }
+        )
         observation = _digest(
             {
-                "run_id": run.id,
-                "observed_at": observed_at,
+                "line": finding.line,
+                "observed_at": finding.observed_at,
+                "ref": ref.model_dump(mode="json"),
                 "root_fingerprint": root_fingerprint,
-                "refs": [ref.model_dump(mode="json") for ref in refs],
             }
         )
         adapted.append(
             EvolutionEvidence(
                 evidence_id=f"eve_{observation[:24]}",
-                source_uri=refs[0].uri,
-                observed_at=observed_at,
-                failure_class=finding.failure_class,
+                source_kind="self_review_static",
+                source_uri=uri,
+                observed_at=finding.observed_at,
+                finding_code=finding.code.value,
+                scope=scope,
                 root_fingerprint=root_fingerprint,
-                refs=tuple(refs),
+                refs=(ref,),
             )
         )
     return tuple(adapted)
@@ -207,6 +288,14 @@ def _check_root(check: HarnessStoredCheck) -> str:
     return _digest({"argv": check.argv, "check_key": check.check_key})
 
 
+def _harness_scope(check_ids: tuple[str, ...], evidence_ids: tuple[str, ...]) -> str:
+    if check_ids:
+        return "checks:" + ",".join(sorted(check_ids))
+    if evidence_ids:
+        return "evidence:" + ",".join(sorted(evidence_ids))
+    return "harness:run"
+
+
 def _digest(value: object) -> str:
     canonical = json.dumps(
         value,
@@ -217,4 +306,9 @@ def _digest(value: object) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-__all__ = ["EvolutionEvidence", "EvolutionEvidenceRef", "adapt_harness_failure_evidence"]
+__all__ = [
+    "EvolutionEvidence",
+    "EvolutionEvidenceRef",
+    "adapt_harness_failure_evidence",
+    "adapt_self_review_static_evidence",
+]
