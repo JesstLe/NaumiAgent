@@ -37,6 +37,8 @@ Baseline Identity 与比较策略；未来阶段记录在
   Suite，并只向用户状态库追加 immutable Candidate samples；不会修改工作区或晋升 Baseline。
 - `/harness baseline <suite>` 与 `harness_eval_baseline` 只读展示 active Baseline 和最近权威
   Comparison receipts；它们不会运行 Eval、晋升版本或改变 selector。
+- `/harness baseline promote <suite> <batch> --reason <原因>` 与
+  `harness_eval_baseline_promote` 显式调用同一 H5b gate；actor 由入口固定，旧版本重试不会回拨。
 - 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。
 - 可比较结果绑定 Git source identity、Profile/Suite/fixture/runner/policy digest；工作树不干净、
   source 变化或证据不完整时不会伪装成可比较 baseline。

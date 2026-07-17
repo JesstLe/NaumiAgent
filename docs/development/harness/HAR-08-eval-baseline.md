@@ -75,5 +75,8 @@
 - HAR-08.8b Repeated Eval Batch：已实现。显式 `--repeat 5..100` 或 `harness_eval_batch` 在单一
   source identity 边界运行一个声明 Suite，并把每个 sample 追加到 H5a immutable Store；普通单次 Eval
   保持只读。详见 `HAR-08-8b-repeated-eval-batch.md`。
+- HAR-08.8c Explicit Promotion：已实现。Slash 与非只读 Agent Tool 共享 Service，以固定入口 actor、
+  必填 reason 调用 H5b eligibility/版本/selector/审计事务；幂等重试不覆盖首次事实，旧版本重试不回拨。
+  详见 `HAR-08-8c-explicit-baseline-promotion.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。
