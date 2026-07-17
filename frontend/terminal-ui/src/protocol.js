@@ -50,6 +50,14 @@ const HARNESS_ARTIFACT_STATUSES = new Set([
   "malformed",
   "unreadable",
 ]);
+const HARNESS_EVAL_BASELINE_STATUSES = new Set(["ok", "empty", "unavailable"]);
+const HARNESS_EVAL_DECISIONS = new Set([
+  "passed",
+  "failed",
+  "flaky",
+  "inconclusive",
+  "incompatible",
+]);
 const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
 const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
@@ -241,6 +249,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/replay") {
     return normalizeHarnessReplay(payload);
+  }
+  if (type === "harness/eval-baseline") {
+    return normalizeHarnessEvalBaseline(payload);
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
@@ -847,6 +858,109 @@ function normalizeHarnessReceipt(payload) {
     warnings: normalizeTextArray(payload.warnings, 50).map(publicText),
     tree_fingerprint: publicText(payload.tree_fingerprint),
   };
+}
+
+function normalizeHarnessEvalBaseline(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`harness/eval-baseline schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "harness/eval-baseline status",
+    HARNESS_EVAL_BASELINE_STATUSES,
+  );
+  const suiteId = harnessText(payload.suite_id, "harness/eval-baseline suite_id");
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(suiteId)) {
+    throw new Error("harness/eval-baseline suite_id 无效");
+  }
+  const snapshotSha256 = harnessSha256(
+    payload.snapshot_sha256,
+    "harness/eval-baseline snapshot_sha256",
+  );
+  let active = null;
+  if (status === "ok") {
+    const value = harnessObject(payload.active, "harness/eval-baseline active");
+    const version = harnessNonnegativeInteger(value.version, "harness/eval-baseline active.version");
+    const sampleCount = harnessNonnegativeInteger(
+      value.sample_count,
+      "harness/eval-baseline active.sample_count",
+    );
+    if (version < 1 || sampleCount < 1) {
+      throw new Error("harness/eval-baseline active 版本或样本数无效");
+    }
+    active = {
+      id: harnessSha256(value.id, "harness/eval-baseline active.id"),
+      version,
+      batch_id: harnessText(value.batch_id, "harness/eval-baseline active.batch_id"),
+      sample_count: sampleCount,
+      identity_sha256: harnessSha256(
+        value.identity_sha256,
+        "harness/eval-baseline active.identity_sha256",
+      ),
+      samples_sha256: harnessSha256(
+        value.samples_sha256,
+        "harness/eval-baseline active.samples_sha256",
+      ),
+      promoted_by: harnessText(value.promoted_by, "harness/eval-baseline active.promoted_by"),
+      promotion_reason: harnessText(
+        value.promotion_reason,
+        "harness/eval-baseline active.promotion_reason",
+      ),
+      created_at: harnessText(value.created_at, "harness/eval-baseline active.created_at"),
+    };
+  } else if (payload.active !== null && payload.active !== undefined) {
+    throw new Error("harness/eval-baseline 非 ok 状态不能包含 active");
+  }
+  const comparisons = harnessObjectArray(
+    payload.comparisons ?? [],
+    "harness/eval-baseline comparisons",
+    20,
+  ).map((item) => ({
+    id: harnessSha256(item.id, "harness/eval-baseline comparison.id"),
+    baseline_id: harnessSha256(
+      item.baseline_id,
+      "harness/eval-baseline comparison.baseline_id",
+    ),
+    current_batch_id: harnessText(
+      item.current_batch_id,
+      "harness/eval-baseline comparison.current_batch_id",
+    ),
+    decision: harnessChoice(
+      item.decision,
+      "harness/eval-baseline comparison.decision",
+      HARNESS_EVAL_DECISIONS,
+    ),
+    statistical_verdict: harnessText(
+      item.statistical_verdict,
+      "harness/eval-baseline comparison.statistical_verdict",
+    ),
+    current_samples: harnessNonnegativeInteger(
+      item.current_samples,
+      "harness/eval-baseline comparison.current_samples",
+    ),
+    created_at: harnessText(item.created_at, "harness/eval-baseline comparison.created_at"),
+  }));
+  if (status !== "ok" && comparisons.length) {
+    throw new Error("harness/eval-baseline 非 ok 状态不能包含 comparisons");
+  }
+  if (active && comparisons.some((item) => item.baseline_id !== active.id || item.current_samples < 1)) {
+    throw new Error("harness/eval-baseline comparison 与 active 不一致");
+  }
+  return {
+    schema_version: 1,
+    snapshot_sha256: snapshotSha256,
+    status,
+    suite_id: suiteId,
+    message: harnessText(payload.message, "harness/eval-baseline message"),
+    active,
+    comparisons,
+  };
+}
+
+function harnessSha256(value, field) {
+  const normalized = harnessText(value, field);
+  if (!/^[0-9a-f]{64}$/.test(normalized)) throw new Error(`${field} 必须是 SHA-256`);
+  return normalized;
 }
 
 function normalizeHarnessExplain(payload) {

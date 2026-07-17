@@ -253,10 +253,16 @@ export function createInitialState() {
     harnessReceipts: Object.create(null),
     harnessExplanations: Object.create(null),
     harnessReplays: Object.create(null),
+    harnessEvalBaselines: Object.create(null),
     harnessDetail: {
       runId: "",
       explainLoading: false,
       replayLoading: false,
+      scrollOffset: 0,
+    },
+    harnessEvalBaseline: {
+      suiteId: "",
+      loading: false,
       scrollOffset: 0,
     },
     permissionCenter: {
@@ -533,6 +539,12 @@ export function reduceServerEvent(state, record) {
       addHarnessDetail(state.harnessReplays, payload);
       if (state.harnessDetail.runId === payload.run_id) state.harnessDetail.replayLoading = false;
       break;
+    case "harness/eval-baseline":
+      addHarnessEvalBaseline(state.harnessEvalBaselines, payload);
+      if (state.harnessEvalBaseline.suiteId === payload.suite_id) {
+        state.harnessEvalBaseline.loading = false;
+      }
+      break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
       if (
@@ -713,6 +725,7 @@ export function reduceServerEvent(state, record) {
       resetAgentControlSnapshot(state.agents);
       state.workbench = createEmptyWorkbenchState();
       const wasHarnessDetailRoute = state.route?.name === "harness_detail";
+      const wasHarnessEvalBaselineRoute = state.route?.name === "harness_eval_baseline";
       const wasPermissionRoute = state.route?.name === "permissions";
       state.harnessDetail = {
         runId: "",
@@ -720,7 +733,12 @@ export function reduceServerEvent(state, record) {
         replayLoading: false,
         scrollOffset: 0,
       };
-      if (wasHarnessDetailRoute) {
+      state.harnessEvalBaseline = {
+        suiteId: "",
+        loading: false,
+        scrollOffset: 0,
+      };
+      if (wasHarnessDetailRoute || wasHarnessEvalBaselineRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
       state.permissionCenter = {
@@ -739,6 +757,7 @@ export function reduceServerEvent(state, record) {
         state.harnessReceipts = Object.create(null);
         state.harnessExplanations = Object.create(null);
         state.harnessReplays = Object.create(null);
+        state.harnessEvalBaselines = Object.create(null);
         state.activeAssistant = null;
         state.activeThinking = null;
         state.folds = {};
@@ -1356,6 +1375,17 @@ function addHarnessDetail(cache, payload) {
     delete cache[runIds.shift()];
   }
   return normalized;
+}
+
+function addHarnessEvalBaseline(cache, payload) {
+  const suiteId = String(payload.suite_id ?? "").trim();
+  if (!suiteId) return null;
+  const existing = cache[suiteId];
+  if (existing?.snapshot_sha256 === payload.snapshot_sha256) return existing;
+  cache[suiteId] = { ...payload, suite_id: suiteId };
+  const suiteIds = Object.keys(cache);
+  while (suiteIds.length > MAX_HARNESS_DETAILS) delete cache[suiteIds.shift()];
+  return cache[suiteId];
 }
 
 function moveCompletionReceiptToEnd(state, receiptId, runId) {
@@ -2195,6 +2225,18 @@ export function handleSubmitText(state, text, send) {
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
   }
+  const harnessBaselineMatch = commandText.match(/^\/harness\s+baseline\s+([a-z][a-z0-9_-]{0,63})$/);
+  if (harnessBaselineMatch) {
+    const suiteId = harnessBaselineMatch[1];
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "harness_eval_baseline", originAnchor };
+    state.harnessEvalBaseline = { suiteId, loading: true, scrollOffset: 0 };
+    send("harness/eval-baseline/request", { suite_id: suiteId });
+    return;
+  }
   const harnessDetailMatch = commandText.match(/^\/harness\s+detail(?:\s+(\S+))?$/i);
   if (harnessDetailMatch) {
     const requested = String(harnessDetailMatch[1] || "latest");
@@ -2531,6 +2573,25 @@ export function handleHarnessDetailKey(state, key) {
   else if (key === INPUT_KEYS.pageDown) state.harnessDetail.scrollOffset = current + 10;
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessDetail.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessDetail.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+export function handleHarnessEvalBaselineKey(state, key) {
+  if (state.route?.name !== "harness_eval_baseline") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  const current = Math.max(0, Number(state.harnessEvalBaseline.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.harnessEvalBaseline.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.harnessEvalBaseline.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.harnessEvalBaseline.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.harnessEvalBaseline.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessEvalBaseline.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessEvalBaseline.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
 }
 

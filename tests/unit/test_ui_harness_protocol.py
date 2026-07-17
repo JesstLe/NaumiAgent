@@ -4,6 +4,11 @@ from dataclasses import replace
 
 import pytest
 
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalBaselineStatus,
+    HarnessEvalBaselineView,
+    HarnessEvalComparisonView,
+)
 from naumi_agent.harness.explain import (
     HarnessExplainCheck,
     HarnessExplainCriterion,
@@ -21,9 +26,83 @@ from naumi_agent.harness.replay_models import (
     HarnessReplayTimelineEvent,
 )
 from naumi_agent.ui.harness_protocol import (
+    harness_eval_baseline_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
+
+
+def test_harness_eval_baseline_payload_is_typed_bounded_and_deterministic() -> None:
+    baseline_id = "a" * 64
+    status = HarnessEvalBaselineStatus(
+        status="ok",
+        suite_id="surface-protocol",
+        active=HarnessEvalBaselineView(
+            id=baseline_id,
+            version=2,
+            batch_id="candidate-2",
+            sample_count=5,
+            identity_sha256="b" * 64,
+            samples_sha256="c" * 64,
+            promoted_by="user",
+            promotion_reason="验证新协议" + "x" * 600,
+            created_at="2026-07-18T10:00:00+00:00",
+        ),
+        comparisons=tuple(
+            HarnessEvalComparisonView(
+                id=f"{index:064x}",
+                baseline_id=baseline_id,
+                current_batch_id=f"candidate-{index}",
+                decision="passed",
+                statistical_verdict="unchanged",
+                current_samples=5,
+                created_at="2026-07-18T10:01:00+00:00",
+            )
+            for index in range(25)
+        ),
+    )
+
+    first = harness_eval_baseline_payload(status)
+    second = harness_eval_baseline_payload(status)
+
+    assert first == second
+    assert set(first) == {
+        "schema_version",
+        "snapshot_sha256",
+        "status",
+        "suite_id",
+        "message",
+        "active",
+        "comparisons",
+    }
+    assert len(first["snapshot_sha256"]) == 64
+    assert len(first["active"]["promotion_reason"]) == 500
+    assert len(first["comparisons"]) == 20
+
+
+def test_harness_eval_baseline_payload_rejects_incoherent_status() -> None:
+    with pytest.raises(ValueError, match="active"):
+        harness_eval_baseline_payload(
+            HarnessEvalBaselineStatus(status="ok", suite_id="surface-protocol")
+        )
+    with pytest.raises(ValueError, match="comparisons"):
+        harness_eval_baseline_payload(
+            HarnessEvalBaselineStatus(
+                status="empty",
+                suite_id="surface-protocol",
+                comparisons=(
+                    HarnessEvalComparisonView(
+                        id="d" * 64,
+                        baseline_id="a" * 64,
+                        current_batch_id="candidate",
+                        decision="passed",
+                        statistical_verdict="unchanged",
+                        current_samples=5,
+                        created_at="2026-07-18T10:01:00+00:00",
+                    ),
+                ),
+            )
+        )
 
 
 def _explanation() -> HarnessRunExplanation:

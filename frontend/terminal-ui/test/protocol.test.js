@@ -104,6 +104,38 @@ function harnessReplayPayload(revision = 1) {
   };
 }
 
+function harnessEvalBaselinePayload() {
+  return {
+    schema_version: 1,
+    snapshot_sha256: "f".repeat(64),
+    status: "ok",
+    suite_id: "surface-protocol",
+    message: "",
+    active: {
+      id: "a".repeat(64),
+      version: 2,
+      batch_id: "baseline-2",
+      sample_count: 5,
+      identity_sha256: "b".repeat(64),
+      samples_sha256: "c".repeat(64),
+      promoted_by: "user",
+      promotion_reason: "真实验证完成",
+      created_at: "2026-07-18T10:00:00+00:00",
+      private_payload: "must-drop",
+    },
+    comparisons: [{
+      id: "d".repeat(64),
+      baseline_id: "a".repeat(64),
+      current_batch_id: "candidate-2",
+      decision: "passed",
+      statistical_verdict: "unchanged",
+      current_samples: 5,
+      created_at: "2026-07-18T10:01:00+00:00",
+      private_payload: "must-drop",
+    }],
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -222,6 +254,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("receipt/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/explain/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/replay/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-baseline/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -232,6 +265,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/receipt"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/explain"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/replay"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-baseline"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -391,6 +425,26 @@ test("harness replay response is strict and bounded", () => {
   assert.equal(normalized.result.anomalies.length, 50);
   assert.equal(normalized.result.differences.length, 50);
   assert.equal(Object.hasOwn(normalized.result.artifacts[0], "private_payload"), false);
+});
+
+test("harness eval baseline response is strict and drops private fields", () => {
+  const normalized = normalizeServerRecord({
+    type: "harness/eval-baseline",
+    payload: harnessEvalBaselinePayload(),
+  }).payload;
+
+  assert.equal(normalized.status, "ok");
+  assert.equal(normalized.active.version, 2);
+  assert.equal(normalized.comparisons[0].decision, "passed");
+  assert.equal(Object.hasOwn(normalized.active, "private_payload"), false);
+  assert.equal(Object.hasOwn(normalized.comparisons[0], "private_payload"), false);
+
+  const mismatched = harnessEvalBaselinePayload();
+  mismatched.comparisons[0].baseline_id = "e".repeat(64);
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-baseline", payload: mismatched }),
+    /active/,
+  );
 });
 
 test("harness detail responses reject malformed authoritative state", () => {

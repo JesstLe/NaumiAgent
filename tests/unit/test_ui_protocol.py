@@ -127,6 +127,28 @@ def test_protocol_normalizes_harness_detail_requests() -> None:
         }
 
 
+def test_protocol_normalizes_harness_eval_baseline_request() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.HARNESS_EVAL_BASELINE_REQUEST,
+            "payload": {"suite_id": "surface-protocol"},
+        }
+    )
+
+    assert record["payload"] == {"suite_id": "surface-protocol"}
+
+
+@pytest.mark.parametrize("suite_id", ["", "Upper", "../other", "x" * 65])
+def test_protocol_rejects_invalid_harness_eval_suite_id(suite_id: str) -> None:
+    with pytest.raises(ValueError, match="suite_id"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_EVAL_BASELINE_REQUEST,
+                "payload": {"suite_id": suite_id},
+            }
+        )
+
+
 @pytest.mark.parametrize("run_id", ["", " ", "../other", "x" * 129])
 def test_protocol_rejects_invalid_harness_detail_run_ids(run_id: str) -> None:
     with pytest.raises(ValueError, match="run_id"):

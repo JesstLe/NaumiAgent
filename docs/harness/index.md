@@ -36,7 +36,8 @@ Baseline Identity 与比较策略；未来阶段记录在
 - 显式 `/harness eval <suite> --repeat 5 [--batch <id>]` 或 `harness_eval_batch` 重复运行一个
   Suite，并只向用户状态库追加 immutable Candidate samples；不会修改工作区或晋升 Baseline。
 - `/harness baseline <suite>` 与 `harness_eval_baseline` 只读展示 active Baseline 和最近权威
-  Comparison receipts；它们不会运行 Eval、晋升版本或改变 selector。
+  Comparison receipts；新 UI 使用 typed、可滚动的彩色状态页，Textual TUI/兼容终端复用同一
+  Service 状态模型。它们不会运行 Eval、晋升版本或改变 selector。
 - `/harness baseline promote <suite> <batch> --reason <原因>` 与
   `harness_eval_baseline_promote` 显式调用同一 H5b gate；actor 由入口固定，旧版本重试不会回拨。
 - `/harness baseline compare <suite> <candidate-batch>` 与 `harness_eval_compare` 使用 active Baseline

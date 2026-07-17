@@ -13,6 +13,7 @@ import {
   getFoldEntries,
   handleAgentControlKey,
   handleHarnessDetailKey,
+  handleHarnessEvalBaselineKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -3318,6 +3319,53 @@ test("Harness detail command rejects missing latest run without backend traffic"
   assert.equal(state.route.name, "conversation");
   assert.equal(sent.length, 0);
   assert(state.messages.at(-1).content.includes("没有可查看的 Harness 完成回执"));
+});
+
+test("Harness baseline command opens typed snapshot route and restores origin", () => {
+  const state = createInitialState();
+  state.scrollOffset = 4;
+  state.followTail = false;
+  const sent = [];
+
+  handleSubmitText(state, "/harness baseline surface-protocol", (type, payload) => {
+    sent.push({ type, payload });
+  });
+
+  assert.equal(state.route.name, "harness_eval_baseline");
+  assert.equal(state.harnessEvalBaseline.loading, true);
+  assert.deepEqual(sent, [{
+    type: "harness/eval-baseline/request",
+    payload: { suite_id: "surface-protocol" },
+  }]);
+
+  reduceServerEvent(state, {
+    type: "harness/eval-baseline",
+    payload: {
+      schema_version: 1,
+      snapshot_sha256: "f".repeat(64),
+      status: "empty",
+      suite_id: "surface-protocol",
+      message: "尚无 Baseline",
+      active: null,
+      comparisons: [],
+    },
+  });
+  assert.equal(state.harnessEvalBaseline.loading, false);
+  assert.equal(state.harnessEvalBaselines["surface-protocol"].status, "empty");
+  assert.equal(handleHarnessEvalBaselineKey(state, INPUT_KEYS.escape), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 4);
+  assert.equal(state.followTail, false);
+
+  state.route = { name: "harness_eval_baseline", originAnchor: null };
+  state.harnessEvalBaseline = { suiteId: "surface-protocol", loading: false, scrollOffset: 2 };
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "replacement", title: "新会话", clear: true },
+  });
+  assert.equal(state.route.name, "conversation");
+  assert.equal(Object.keys(state.harnessEvalBaselines).length, 0);
+  assert.equal(state.harnessEvalBaseline.suiteId, "");
 });
 
 test("Harness detail command rejects an invalid explicit run id locally", () => {

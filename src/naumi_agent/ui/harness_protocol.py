@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Iterable
 from typing import Any
 
 from naumi_agent.harness.checks import validate_run_id
+from naumi_agent.harness.eval_surface import HarnessEvalBaselineStatus
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 
@@ -14,6 +18,67 @@ HARNESS_DETAIL_REVISION = 1
 HARNESS_DETAIL_TEXT_LIMIT = 500
 
 _LOOKUP_STATUSES = {"ok", "not_found", "unavailable"}
+
+
+def harness_eval_baseline_payload(
+    status: HarnessEvalBaselineStatus,
+) -> dict[str, Any]:
+    """Serialize one authoritative Eval Baseline snapshot for terminal clients."""
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", status.suite_id):
+        raise ValueError("Harness Eval Baseline suite_id 格式无效。")
+    if status.status == "ok" and status.active is None:
+        raise ValueError("Harness Eval Baseline ok 状态缺少 active。")
+    if status.status != "ok" and status.active is not None:
+        raise ValueError("Harness Eval Baseline 非 ok 状态不能包含 active。")
+    if status.status != "ok" and status.comparisons:
+        raise ValueError("Harness Eval Baseline 非 ok 状态不能包含 comparisons。")
+    if status.active is not None and any(
+        item.baseline_id != status.active.id for item in status.comparisons
+    ):
+        raise ValueError("Harness Eval Comparison 未引用当前 active Baseline。")
+    snapshot = {
+        "status": status.status,
+        "suite_id": _text(status.suite_id),
+        "message": _text(status.message),
+        "active": (
+            {
+                "id": status.active.id,
+                "version": status.active.version,
+                "batch_id": _text(status.active.batch_id),
+                "sample_count": status.active.sample_count,
+                "identity_sha256": status.active.identity_sha256,
+                "samples_sha256": status.active.samples_sha256,
+                "promoted_by": _text(status.active.promoted_by),
+                "promotion_reason": _text(status.active.promotion_reason),
+                "created_at": _text(status.active.created_at),
+            }
+            if status.active is not None
+            else None
+        ),
+        "comparisons": [
+            {
+                "id": item.id,
+                "baseline_id": item.baseline_id,
+                "current_batch_id": _text(item.current_batch_id),
+                "decision": item.decision,
+                "statistical_verdict": _text(item.statistical_verdict),
+                "current_samples": item.current_samples,
+                "created_at": _text(item.created_at),
+            }
+            for item in status.comparisons[:20]
+        ],
+    }
+    canonical = json.dumps(
+        snapshot,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "schema_version": HARNESS_DETAIL_SCHEMA_VERSION,
+        "snapshot_sha256": hashlib.sha256(canonical).hexdigest(),
+        **snapshot,
+    }
 
 
 def harness_explain_payload(
@@ -193,6 +258,7 @@ def _nonnegative_int(value: object) -> int:
 __all__ = [
     "HARNESS_DETAIL_REVISION",
     "HARNESS_DETAIL_SCHEMA_VERSION",
+    "harness_eval_baseline_payload",
     "harness_explain_payload",
     "harness_replay_payload",
 ]

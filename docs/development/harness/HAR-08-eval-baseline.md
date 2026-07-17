@@ -81,5 +81,8 @@
 - HAR-08.8d Active Baseline Comparison：已实现。Slash 与非只读 Agent Tool 编排 H5a/H5b/H5c，
   对完整 Candidate 生成幂等 receipt；selector 并发切换时保留真实引用并明确标记 stale。
   详见 `HAR-08-8d-active-baseline-comparison.md`。
+- HAR-08.8e1 Typed Baseline 状态页：已实现。新 UI 通过 typed Bridge 请求并验证 active Baseline 与
+  active-only Comparison snapshot；Textual TUI/兼容终端继续复用同一 Service 状态模型。
+  详见 `HAR-08-8e1-typed-baseline-status-page.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。
