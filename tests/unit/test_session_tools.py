@@ -53,7 +53,7 @@ def _delete_result(
             else None
         ),
         tombstone_status=None,
-        message="测试结果",
+        message="Session、Harness 记录与 Artifact 协调完成。",
     )
 
 
@@ -178,7 +178,8 @@ async def test_session_delete_tool_deletes_by_session_id() -> None:
 
     output = await tool.execute(session_id="s2")
 
-    assert "已删除会话并完成派生记录协调：s2" in output
+    assert "Session、Harness 记录与 Artifact 协调完成" in output
+    assert "Session：`s2`" in output
     engine.delete_session_detailed.assert_awaited_once_with("s2")
 
 

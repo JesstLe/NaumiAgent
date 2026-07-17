@@ -109,6 +109,27 @@ async def test_delete_session_command_reports_durable_retry_request(
 
 
 @pytest.mark.asyncio
+async def test_delete_session_command_reports_artifact_gc_counts(
+    rendered_console: StringIO,
+) -> None:
+    class Engine:
+        async def delete_session_detailed(self, session_id: str):
+            return SimpleNamespace(
+                outcome=ReconciliationCoordinatorOutcome.COMPLETED,
+                message=(
+                    "Session、Harness 记录与 Artifact 协调完成；"
+                    "Artifact 删除 1、已缺失 0、保留共享 2、跳过风险 1。"
+                ),
+            )
+
+    await commands_meta.delete_session(Engine(), "session-1")
+
+    rendered = rendered_console.getvalue()
+    assert "Artifact 删除 1" in rendered
+    assert "保留共享 2" in rendered
+
+
+@pytest.mark.asyncio
 async def test_skill_run_passes_explicit_event_sink_to_engine(
     rendered_console: StringIO,
 ) -> None:

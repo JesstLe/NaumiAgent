@@ -17,6 +17,10 @@ from urllib.parse import urlsplit
 
 import aiosqlite
 
+from naumi_agent.harness.artifact_gc import (
+    ArtifactGarbageCollectionError,
+    ArtifactGarbageCollector,
+)
 from naumi_agent.harness.checks import HarnessCheckResult
 from naumi_agent.harness.completion import (
     HarnessCompletionReceipt,
@@ -24,6 +28,7 @@ from naumi_agent.harness.completion import (
 )
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
+    ReconciliationArtifactGcStatus,
     ReconciliationArtifactKind,
     ReconciliationArtifactReference,
     SessionDeleteReconciliation,
@@ -43,7 +48,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 4
+HARNESS_STORE_SCHEMA_VERSION = 5
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -1045,6 +1050,16 @@ class HarnessStore:
                         timestamp,
                     ),
                 )
+                await db.execute(
+                    """
+                    INSERT INTO harness_session_artifact_gc (
+                        request_id, status, deleted_count, missing_count,
+                        shared_count, unsafe_count, non_file_count, candidate_count,
+                        blocked_by_unresolved_live_reference, completed_at, updated_at
+                    ) VALUES (?, 'pending', 0, 0, 0, 0, 0, 0, 0, '', ?)
+                    """,
+                    (normalized_request_id, timestamp),
+                )
                 await db.commit()
                 return SessionDeleteReconciliation(
                     request_id=normalized_request_id,
@@ -1055,6 +1070,14 @@ class HarnessStore:
                     run_count=run_count,
                     deleted_run_count=0,
                     artifact_references=references,
+                    artifact_gc_status=ReconciliationArtifactGcStatus.PENDING,
+                    artifact_candidate_count=0,
+                    artifact_deleted_count=0,
+                    artifact_missing_count=0,
+                    artifact_shared_count=0,
+                    artifact_unsafe_count=0,
+                    artifact_non_file_count=0,
+                    artifact_gc_blocked_by_unresolved_live_reference=False,
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
@@ -1074,6 +1097,7 @@ class HarnessStore:
         )
         if not self._db_path.is_file():
             return None
+        await self._ensure_schema()
         try:
             async with self._connection() as db:
                 return await self._reconciliation_from_id(db, normalized_request_id)
@@ -1094,12 +1118,16 @@ class HarnessStore:
             raise ValueError("limit 必须在 1 到 1000 之间。")
         if not self._db_path.is_file():
             return ()
+        await self._ensure_schema()
         try:
             async with self._connection() as db:
                 cursor = await db.execute(
                     """
                     SELECT request_id FROM harness_session_reconciliations
-                    WHERE state <> ?
+                    WHERE state <> ? OR request_id IN (
+                        SELECT request_id FROM harness_session_artifact_gc
+                        WHERE status <> 'completed'
+                    )
                     ORDER BY updated_at, request_id
                     LIMIT ?
                     """,
@@ -1189,6 +1217,109 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HarnessStoreError("无法协调 Session 关联的 Harness 记录。") from exc
 
+    async def reconcile_session_artifacts(
+        self,
+        request_id: str,
+        *,
+        updated_at: str,
+        collector: ArtifactGarbageCollector | None = None,
+    ) -> SessionDeleteReconciliation:
+        """Delete unshared safe Artifact files and durably commit the GC result."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        timestamp = _normalize_timestamp(updated_at, field="updated_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._require_reconciliation(db, normalized_request_id)
+                if current.state is not SessionReconciliationState.RECORDS_COMMITTED:
+                    raise SessionReconciliationTransitionError(
+                        "Harness 记录尚未协调完成，不能清理 Artifact。"
+                    )
+                if current.artifact_gc_status is ReconciliationArtifactGcStatus.COMPLETED:
+                    await db.commit()
+                    return current
+                _ensure_reconciliation_time_forward(current.updated_at, timestamp)
+                active_collector = collector or ArtifactGarbageCollector(
+                    current.workspace_root
+                )
+                plan = active_collector.build_plan(current.artifact_references)
+                cursor = await db.execute(
+                    """
+                    SELECT 'check_path' AS kind, c.artifact_path AS value
+                    FROM harness_checks AS c
+                    JOIN harness_runs AS r ON r.id = c.run_id
+                    WHERE r.workspace_root = ? AND r.session_id <> ?
+                        AND TRIM(c.artifact_path) <> ''
+                    UNION ALL
+                    SELECT 'evidence_uri' AS kind, e.uri AS value
+                    FROM harness_evidence AS e
+                    JOIN harness_runs AS r ON r.id = e.run_id
+                    WHERE r.workspace_root = ? AND r.session_id <> ?
+                        AND e.uri LIKE 'artifact://%'
+                    ORDER BY kind, value
+                    """,
+                    (
+                        current.workspace_root,
+                        current.session_id,
+                        current.workspace_root,
+                        current.session_id,
+                    ),
+                )
+                while True:
+                    rows = await cursor.fetchmany(256)
+                    if not rows:
+                        break
+                    active_collector.observe_surviving_references(
+                        plan,
+                        tuple(
+                            ReconciliationArtifactReference(
+                                kind=ReconciliationArtifactKind(str(row["kind"])),
+                                value=str(row["value"]),
+                            )
+                            for row in rows
+                        ),
+                    )
+                result = await asyncio.to_thread(active_collector.execute, plan)
+                await db.execute(
+                    """
+                    UPDATE harness_session_artifact_gc
+                    SET status = 'completed', deleted_count = ?, missing_count = ?,
+                        shared_count = ?, unsafe_count = ?, non_file_count = ?,
+                        candidate_count = ?, blocked_by_unresolved_live_reference = ?,
+                        completed_at = ?, updated_at = ?
+                    WHERE request_id = ? AND status = 'pending'
+                    """,
+                    (
+                        result.deleted_count,
+                        result.missing_count,
+                        result.shared_count,
+                        result.unsafe_reference_count,
+                        result.non_file_count,
+                        result.candidate_count,
+                        int(result.blocked_by_unresolved_live_reference),
+                        timestamp,
+                        timestamp,
+                        normalized_request_id,
+                    ),
+                )
+                await db.commit()
+                updated = await self.get_session_delete_reconciliation(
+                    normalized_request_id
+                )
+                assert updated is not None
+                return updated
+        except (ArtifactGarbageCollectionError, SessionReconciliationTransitionError):
+            raise
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("无法协调 Session 关联的 Artifact 文件。") from exc
+
     async def _advance_session_reconciliation(
         self,
         request_id: str,
@@ -1232,6 +1363,16 @@ class HarnessStore:
                     run_count=current.run_count,
                     deleted_run_count=current.deleted_run_count,
                     artifact_references=current.artifact_references,
+                    artifact_gc_status=current.artifact_gc_status,
+                    artifact_candidate_count=current.artifact_candidate_count,
+                    artifact_deleted_count=current.artifact_deleted_count,
+                    artifact_missing_count=current.artifact_missing_count,
+                    artifact_shared_count=current.artifact_shared_count,
+                    artifact_unsafe_count=current.artifact_unsafe_count,
+                    artifact_non_file_count=current.artifact_non_file_count,
+                    artifact_gc_blocked_by_unresolved_live_reference=(
+                        current.artifact_gc_blocked_by_unresolved_live_reference
+                    ),
                     created_at=current.created_at,
                     updated_at=timestamp,
                 )
@@ -1262,6 +1403,13 @@ class HarnessStore:
         row = await cursor.fetchone()
         if row is None:
             return None
+        gc_cursor = await db.execute(
+            "SELECT * FROM harness_session_artifact_gc WHERE request_id = ?",
+            (request_id,),
+        )
+        gc_row = await gc_cursor.fetchone()
+        if gc_row is None:
+            raise ValueError("Session 删除协调记录缺少 Artifact GC 状态。")
         raw_references = json.loads(str(row["artifact_references_json"]))
         if not isinstance(raw_references, list):
             raise ValueError("artifact_references_json 必须是数组。")
@@ -1288,6 +1436,16 @@ class HarnessStore:
             run_count=int(row["run_count"]),
             deleted_run_count=int(row["deleted_run_count"]),
             artifact_references=references,
+            artifact_gc_status=ReconciliationArtifactGcStatus(str(gc_row["status"])),
+            artifact_candidate_count=int(gc_row["candidate_count"]),
+            artifact_deleted_count=int(gc_row["deleted_count"]),
+            artifact_missing_count=int(gc_row["missing_count"]),
+            artifact_shared_count=int(gc_row["shared_count"]),
+            artifact_unsafe_count=int(gc_row["unsafe_count"]),
+            artifact_non_file_count=int(gc_row["non_file_count"]),
+            artifact_gc_blocked_by_unresolved_live_reference=bool(
+                int(gc_row["blocked_by_unresolved_live_reference"])
+            ),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
@@ -1752,6 +1910,8 @@ class HarnessStore:
                     await db.executescript(_SCHEMA_V2)
                     await db.executescript(_SCHEMA_V3)
                     await db.executescript(_SCHEMA_V4)
+                    await _migrate_tombstone_stage_v5(db)
+                    await db.executescript(_SCHEMA_V5)
                     await db.execute(
                         f"PRAGMA user_version = {HARNESS_STORE_SCHEMA_VERSION}"
                     )
@@ -2282,6 +2442,89 @@ def _restrict_permissions(path: Path, mode: int) -> None:
         pass
 
 
+async def _migrate_tombstone_stage_v5(db: aiosqlite.Connection) -> None:
+    """Rebuild v4 CHECK constraints to admit the Artifact GC failure stage."""
+    cursor = await db.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN ("
+        "'harness_session_reconciliation_tombstones', "
+        "'harness_session_reconciliation_failure_events')"
+    )
+    rows = await cursor.fetchall()
+    if len(rows) == 2 and all("artifact_gc" in str(row["sql"]) for row in rows):
+        return
+    await db.executescript(
+        """
+        BEGIN IMMEDIATE;
+        DROP INDEX IF EXISTS idx_harness_reconciliation_tombstones_due;
+        DROP INDEX IF EXISTS idx_harness_reconciliation_failure_events_request;
+        ALTER TABLE harness_session_reconciliation_tombstones
+            RENAME TO harness_session_reconciliation_tombstones_v4;
+        ALTER TABLE harness_session_reconciliation_failure_events
+            RENAME TO harness_session_reconciliation_failure_events_v4;
+
+        CREATE TABLE harness_session_reconciliation_tombstones (
+            request_id TEXT PRIMARY KEY
+                REFERENCES harness_session_reconciliations(request_id)
+                ON DELETE RESTRICT,
+            policy TEXT NOT NULL CHECK (policy = 'delete'),
+            stage TEXT NOT NULL CHECK (
+                stage IN ('session_delete', 'harness_records', 'artifact_gc')
+            ),
+            error_code TEXT NOT NULL CHECK (
+                error_code IN (
+                    'session_store_error', 'harness_store_error',
+                    'cancelled', 'infrastructure_error'
+                )
+            ),
+            status TEXT NOT NULL CHECK (
+                status IN ('pending', 'leased', 'exhausted', 'resolved')
+            ),
+            attempt_count INTEGER NOT NULL CHECK (attempt_count >= 1),
+            max_attempts INTEGER NOT NULL CHECK (max_attempts BETWEEN 1 AND 100),
+            next_retry_at TEXT NOT NULL,
+            lease_owner TEXT NOT NULL,
+            lease_expires_at TEXT NOT NULL,
+            last_failure_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO harness_session_reconciliation_tombstones
+        SELECT * FROM harness_session_reconciliation_tombstones_v4;
+
+        CREATE TABLE harness_session_reconciliation_failure_events (
+            failure_id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL
+                REFERENCES harness_session_reconciliations(request_id)
+                ON DELETE RESTRICT,
+            stage TEXT NOT NULL CHECK (
+                stage IN ('session_delete', 'harness_records', 'artifact_gc')
+            ),
+            error_code TEXT NOT NULL CHECK (
+                error_code IN (
+                    'session_store_error', 'harness_store_error',
+                    'cancelled', 'infrastructure_error'
+                )
+            ),
+            occurred_at TEXT NOT NULL
+        );
+        INSERT INTO harness_session_reconciliation_failure_events
+        SELECT * FROM harness_session_reconciliation_failure_events_v4;
+
+        DROP TABLE harness_session_reconciliation_failure_events_v4;
+        DROP TABLE harness_session_reconciliation_tombstones_v4;
+        CREATE INDEX idx_harness_reconciliation_tombstones_due
+        ON harness_session_reconciliation_tombstones (
+            status, next_retry_at, lease_expires_at, request_id
+        );
+        CREATE INDEX idx_harness_reconciliation_failure_events_request
+        ON harness_session_reconciliation_failure_events (
+            request_id, occurred_at, failure_id
+        );
+        COMMIT;
+        """
+    )
+
+
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS harness_profiles (
     workspace_root TEXT NOT NULL,
@@ -2405,7 +2648,9 @@ CREATE TABLE IF NOT EXISTS harness_session_reconciliation_tombstones (
     request_id TEXT PRIMARY KEY
         REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
     policy TEXT NOT NULL CHECK (policy = 'delete'),
-    stage TEXT NOT NULL CHECK (stage IN ('session_delete', 'harness_records')),
+    stage TEXT NOT NULL CHECK (
+        stage IN ('session_delete', 'harness_records', 'artifact_gc')
+    ),
     error_code TEXT NOT NULL CHECK (
         error_code IN (
             'session_store_error', 'harness_store_error',
@@ -2434,7 +2679,9 @@ CREATE TABLE IF NOT EXISTS harness_session_reconciliation_failure_events (
     failure_id TEXT PRIMARY KEY,
     request_id TEXT NOT NULL
         REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
-    stage TEXT NOT NULL CHECK (stage IN ('session_delete', 'harness_records')),
+    stage TEXT NOT NULL CHECK (
+        stage IN ('session_delete', 'harness_records', 'artifact_gc')
+    ),
     error_code TEXT NOT NULL CHECK (
         error_code IN (
             'session_store_error', 'harness_store_error',
@@ -2446,4 +2693,34 @@ CREATE TABLE IF NOT EXISTS harness_session_reconciliation_failure_events (
 
 CREATE INDEX IF NOT EXISTS idx_harness_reconciliation_failure_events_request
 ON harness_session_reconciliation_failure_events (request_id, occurred_at, failure_id);
+"""
+
+_SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS harness_session_artifact_gc (
+    request_id TEXT PRIMARY KEY
+        REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'completed')),
+    deleted_count INTEGER NOT NULL CHECK (deleted_count >= 0),
+    missing_count INTEGER NOT NULL CHECK (missing_count >= 0),
+    shared_count INTEGER NOT NULL CHECK (shared_count >= 0),
+    unsafe_count INTEGER NOT NULL CHECK (unsafe_count >= 0),
+    non_file_count INTEGER NOT NULL CHECK (non_file_count >= 0),
+    candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
+    blocked_by_unresolved_live_reference INTEGER NOT NULL CHECK (
+        blocked_by_unresolved_live_reference IN (0, 1)
+    ),
+    completed_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO harness_session_artifact_gc (
+    request_id, status, deleted_count, missing_count, shared_count,
+    unsafe_count, non_file_count, candidate_count,
+    blocked_by_unresolved_live_reference, completed_at, updated_at
+)
+SELECT request_id, 'pending', 0, 0, 0, 0, 0, 0, 0, '', updated_at
+FROM harness_session_reconciliations;
+
+CREATE INDEX IF NOT EXISTS idx_harness_session_artifact_gc_status_updated
+ON harness_session_artifact_gc (status, updated_at, request_id);
 """

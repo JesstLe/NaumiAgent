@@ -190,8 +190,8 @@ def render_session_delete_preview(preview: SessionDeletePreview) -> str:
             "不是可安全删除文件数。"
         ),
         (
-            "Session 与 Harness 数据库行已接入持久协调；Artifact 文件仍仅保留"
-            "引用快照，HAR-06.4 完成前不会自动删除。"
+            "删除执行会重新校验共享引用与路径，只清理 `artifacts/` 或"
+            "`.naumi/artifacts/` 中无共享的普通文件；其他文件会保留。"
         ),
         f"现有 Session 删除命令：`/delete {preview.session_id}`。",
     ]

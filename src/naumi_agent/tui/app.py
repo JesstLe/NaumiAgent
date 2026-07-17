@@ -2673,7 +2673,7 @@ class NaumiApp(App):
             if was_active and self.engine._session is None:
                 self.query_one(ChatPanel).clear()
             if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
-                status.status_text = f"已删除: {title}"
+                status.status_text = f"已删除: {title} · {result.message}"
             elif result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
                 status.status_text = f"会话不存在: {session_id}"
             elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:

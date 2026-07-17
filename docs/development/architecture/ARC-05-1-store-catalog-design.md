@@ -3,7 +3,7 @@
 ## 问题与边界
 
 NaumiAgent 的持久状态目前分散在共享 SQLite、独立 SQLite、JSON 文件和目录型存储中。
-Session、Task、Workbench 共用 `sessions.db`，Harness 已有 `user_version=2`，其他多处 Store
+Session、Task、Workbench 共用 `sessions.db`，Harness 当前为 `user_version=5`，其他多处 Store
 仍各自建表或完全没有 schema version。如果直接开始写 Migration Runner，会出现重复迁移同一
 物理库、漏掉外部用户状态、或把尚未创建的惰性 Store 当成损坏等问题。
 

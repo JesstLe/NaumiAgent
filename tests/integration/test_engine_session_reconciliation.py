@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
+from naumi_agent.harness.completion import HarnessEvidenceRef
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
 from naumi_agent.harness.store import HarnessStoreError
@@ -46,12 +48,55 @@ async def test_engine_delete_reconciles_harness_and_runtime_authority(
             tree_fingerprint_before="a" * 64,
             started_at="2026-07-17T20:00:00+08:00",
         )
+        artifact = workspace / "artifacts" / "engine-delete-run" / "unit.txt"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("verified", encoding="utf-8")
+        await engine._harness_store.record_check(
+            result=HarnessCheckResult(
+                run_id="engine-delete-run",
+                check_id="unit",
+                status=HarnessCheckStatus.PASSED,
+                tree_fingerprint="b" * 64,
+                profile_digest="c" * 64,
+                message="检查通过",
+                output="ok",
+                exit_code=0,
+                duration_ms=1,
+            ),
+            argv=("python", "-V"),
+            cwd=workspace,
+            started_at="2026-07-17T20:00:01+08:00",
+            completed_at="2026-07-17T20:00:02+08:00",
+            artifact_path="artifacts/engine-delete-run/unit.txt",
+        )
+        await engine._harness_store.record_evidence(
+            run_id="engine-delete-run",
+            evidence=HarnessEvidenceRef(
+                id="engine-delete-evidence",
+                kind="test_report",
+                summary="真实 Artifact",
+            ),
+            uri="artifact://artifacts/engine-delete-run/unit.txt",
+            sha256="d" * 64,
+            summary={"status": "passed"},
+            producer="integration_test",
+            created_at="2026-07-17T20:00:03+08:00",
+        )
 
         result = await engine.delete_session_detailed(session.id)
 
         assert result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
+        assert "Artifact 删除 1" in result.message
         assert await engine.session_store.load(session.id) is None
         assert await engine._harness_store.get_run("engine-delete-run") is None
+        assert artifact.exists() is False
+        reconciliation = (
+            await engine._harness_store.get_session_delete_reconciliation(
+                result.request_id
+            )
+        )
+        assert reconciliation is not None
+        assert reconciliation.artifact_deleted_count == 1
         assert engine._session is None
         assert engine._permission_grant_store.list_session(session.id) == ()
         revocations = [

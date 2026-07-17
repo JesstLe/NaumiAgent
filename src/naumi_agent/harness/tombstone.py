@@ -12,6 +12,7 @@ from naumi_agent.harness.retention import LifecyclePolicy
 class ReconciliationFailureStage(StrEnum):
     SESSION_DELETE = "session_delete"
     HARNESS_RECORDS = "harness_records"
+    ARTIFACT_GC = "artifact_gc"
 
 
 class ReconciliationFailureCode(StrEnum):
