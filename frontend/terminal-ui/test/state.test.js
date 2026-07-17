@@ -955,6 +955,34 @@ test("session replay clears stale run, permission, todo, and perf footer state",
   assert(!plain.includes("运行中"));
 });
 
+test("session replay clears Harness caches only for a replacement timeline", () => {
+  const state = createInitialState();
+  state.harnessReceipts["run-old"] = { run_id: "run-old", revision: 2 };
+  state.harnessExplanations["run-old"] = { run_id: "run-old", revision: 3 };
+  state.harnessReplays["run-old"] = { run_id: "run-old", revision: 4 };
+
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "s-replace", title: "替换会话", clear: true },
+  });
+
+  assert.deepEqual(Object.keys(state.harnessReceipts), []);
+  assert.deepEqual(Object.keys(state.harnessExplanations), []);
+  assert.deepEqual(Object.keys(state.harnessReplays), []);
+
+  state.harnessReceipts["run-current"] = { run_id: "run-current", revision: 1 };
+  state.harnessExplanations["run-current"] = { run_id: "run-current", revision: 1 };
+  state.harnessReplays["run-current"] = { run_id: "run-current", revision: 1 };
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "s-append", title: "追加恢复", clear: false },
+  });
+
+  assert.deepEqual(Object.keys(state.harnessReceipts), ["run-current"]);
+  assert.deepEqual(Object.keys(state.harnessExplanations), ["run-current"]);
+  assert.deepEqual(Object.keys(state.harnessReplays), ["run-current"]);
+});
+
 test("generic errors do not override the active run lifecycle", () => {
   const state = createInitialState();
 

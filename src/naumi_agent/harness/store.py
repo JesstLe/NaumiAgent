@@ -784,6 +784,46 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HarnessStoreError("Harness 运行列表损坏或无法读取。") from exc
 
+    async def list_session_runs(
+        self,
+        workspace_root: str | Path,
+        session_id: str,
+        *,
+        limit: int = 20,
+    ) -> tuple[HarnessStoredRun, ...]:
+        """List runs owned by one exact workspace/session boundary."""
+        workspace = _canonical_workspace(workspace_root)
+        normalized_session_id = _normalize_text(
+            session_id,
+            field="session_id",
+            max_length=256,
+        )
+        if not 1 <= limit <= 1_000:
+            raise ValueError("limit 必须在 1 到 1000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_runs
+                    WHERE workspace_root = ? AND session_id = ?
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (workspace, normalized_session_id, limit),
+                )
+                rows = await cursor.fetchall()
+                return tuple([await self._run_from_row(db, row) for row in rows])
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出会话关联的 Harness 运行记录。") from exc
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError(
+                "会话关联的 Harness 运行列表损坏或无法读取。"
+            ) from exc
+
     async def delete_session_records(self, session_id: str) -> int:
         normalized_session_id = _normalize_text(
             session_id,
@@ -1354,6 +1394,9 @@ ON harness_runs (workspace_root, started_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_harness_runs_session
 ON harness_runs (session_id);
+
+CREATE INDEX IF NOT EXISTS idx_harness_runs_workspace_session_started
+ON harness_runs (workspace_root, session_id, started_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS harness_contract_criteria (
     run_id TEXT NOT NULL REFERENCES harness_runs(id) ON DELETE CASCADE,

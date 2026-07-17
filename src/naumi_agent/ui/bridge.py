@@ -1639,6 +1639,7 @@ class JsonlEngineBridge:
         )
         for message in replay_messages(raw_messages):
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
+        await self._resume_harness_receipts(session_id, request_id=request_id)
         run_store = getattr(self.engine, "chat_run_store", None)
         if run_store is not None:
             runs = await run_store.list_runs(session_id, limit=200)
@@ -1650,6 +1651,47 @@ class JsonlEngineBridge:
                         request_id=request_id,
                     )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def _resume_harness_receipts(
+        self,
+        session_id: str,
+        *,
+        request_id: str,
+    ) -> None:
+        """Replay durable Harness receipts before their generic completion cards."""
+        service = getattr(self.engine, "harness_service", None)
+        store = getattr(service, "store", None)
+        if store is None:
+            return
+        try:
+            runs = await store.list_session_runs(
+                self.engine.workspace_root,
+                session_id,
+                limit=200,
+            )
+        except Exception as exc:
+            self._trace_harness_lookup_failure("receipt_recovery", exc)
+            await self.emit_error(
+                "Harness 回执恢复失败；会话与通用完成回执仍会继续恢复。"
+                "请运行 `/harness doctor` 检查状态库后重试。",
+                code="harness_receipt_recovery_failed",
+                request_id=request_id,
+            )
+            return
+
+        for run in reversed(runs):
+            receipt = getattr(run, "receipt", None)
+            if receipt is None:
+                continue
+            await self.emit(
+                ServerEventType.HARNESS_RECEIPT,
+                {
+                    **receipt.model_dump(mode="json"),
+                    "schema_version": 1,
+                    "revision": 1,
+                },
+                request_id=request_id,
+            )
 
     async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
         """Execute a slash command through the legacy CLI command handlers."""
