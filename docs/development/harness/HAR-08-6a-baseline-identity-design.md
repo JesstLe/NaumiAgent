@@ -64,6 +64,8 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 
 `partial` 合同允许晋升，但生成明确警告，且后续比较必须匹配完全相同的 capability digest。
 最终 `identity_sha256` 覆盖全部嵌套身份、资格和结构化警告，并在反序列化时重新校验。
+反序列化还会校验晋升资格与 dirty/profile/model/reasoning 治理事实的一致性；仅重新计算 digest
+不能伪造一个可晋升身份。
 
 ## 4. API
 

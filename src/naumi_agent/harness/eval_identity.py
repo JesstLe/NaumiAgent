@@ -205,6 +205,18 @@ class HarnessEvalBaselineIdentity(_StrictModel):
             raise ValueError("identity_sha256 与 Baseline identity 字段不匹配。")
         return self
 
+    @model_validator(mode="after")
+    def _eligibility_matches_governance_facts(self) -> Self:
+        model_disqualified = self.model is not None and (
+            self.model.capability_status in {"unverified", "incompatible"}
+            or self.model.reasoning_warning
+        )
+        if self.baseline_eligible and (
+            self.source.dirty or not self.profile_trusted or model_disqualified
+        ):
+            raise ValueError("baseline_eligible 与源码、Profile 或模型治理事实矛盾。")
+        return self
+
 
 def capture_eval_platform_identity() -> HarnessEvalPlatformIdentity:
     """Capture bounded, display-safe host facts without environment variables."""
