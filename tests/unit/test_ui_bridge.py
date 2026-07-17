@@ -56,10 +56,12 @@ from naumi_agent.ui.messages.events import (
 )
 from naumi_agent.ui.protocol import (
     ClientEventType,
+    ProtocolNegotiationError,
     ServerEventType,
     decode_jsonl_line,
     encode_jsonl,
     make_envelope,
+    negotiate_hello,
     normalize_client_record,
 )
 from naumi_agent.user_interaction import UserInteractionUnavailableError
@@ -740,6 +742,166 @@ def test_protocol_contract_matches_python_enums() -> None:
     assert contract["transport"] == "jsonl"
     assert contract["client_events"] == [str(event) for event in ClientEventType]
     assert contract["server_events"] == [str(event) for event in ServerEventType]
+    assert contract["negotiation"] == {
+        "minimum_version": 1,
+        "maximum_version": 1,
+        "capabilities": [
+            "heartbeat",
+            "typed_ui_messages",
+            "workbench_snapshot",
+        ],
+        "required_capabilities": ["typed_ui_messages"],
+    }
+
+
+def test_protocol_negotiates_highest_shared_version_and_capability_intersection() -> None:
+    hello = normalize_client_record({
+        "id": "hello-1",
+        "type": "hello",
+        "version": 1,
+        "payload": {
+            "client": " naumi-terminal-ui ",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": [
+                "workbench_snapshot",
+                "unknown_client_feature",
+                "typed_ui_messages",
+                "heartbeat",
+                "heartbeat",
+            ],
+        },
+    })
+
+    assert hello["payload"] == {
+        "client": "naumi-terminal-ui",
+        "minimum_version": 1,
+        "maximum_version": 1,
+        "capabilities": [
+            "heartbeat",
+            "typed_ui_messages",
+            "unknown_client_feature",
+            "workbench_snapshot",
+        ],
+        "legacy": False,
+    }
+    assert negotiate_hello(hello["payload"]) == {
+        "selected_version": 1,
+        "server_minimum_version": 1,
+        "server_maximum_version": 1,
+        "capabilities": [
+            "heartbeat",
+            "typed_ui_messages",
+            "workbench_snapshot",
+        ],
+    }
+
+
+def test_protocol_keeps_one_release_legacy_hello_compatibility() -> None:
+    hello = normalize_client_record({
+        "type": "hello",
+        "version": 1,
+        "payload": {"client": "legacy-ui"},
+    })
+
+    assert hello["payload"]["legacy"] is True
+    assert negotiate_hello(hello["payload"])["selected_version"] == 1
+
+
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"minimum_version": True, "maximum_version": 1}, "minimum_version"),
+        ({"minimum_version": 2, "maximum_version": 1}, "不能大于"),
+        ({"minimum_version": 1, "maximum_version": 1, "capabilities": "all"}, "数组"),
+        ({"minimum_version": 1, "maximum_version": 1, "capabilities": ["Bad Flag"]}, "能力名称"),
+    ],
+)
+def test_protocol_rejects_malformed_hello_negotiation(payload, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        normalize_client_record({"type": "hello", "version": 1, "payload": payload})
+
+
+def test_protocol_reports_version_and_required_capability_failures() -> None:
+    with pytest.raises(ProtocolNegotiationError) as version_error:
+        negotiate_hello({
+            "client": "future-ui",
+            "minimum_version": 2,
+            "maximum_version": 3,
+            "capabilities": ["typed_ui_messages"],
+            "legacy": False,
+        })
+    assert version_error.value.code == "protocol_version_unsupported"
+    assert "客户端支持 2-3" in str(version_error.value)
+
+    with pytest.raises(ProtocolNegotiationError) as capability_error:
+        negotiate_hello({
+            "client": "limited-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["heartbeat"],
+            "legacy": False,
+        })
+    assert capability_error.value.code == "protocol_capability_missing"
+    assert "typed_ui_messages" in str(capability_error.value)
+
+
+@pytest.mark.asyncio
+async def test_bridge_hello_ack_contains_negotiation_before_runtime_status() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "hello-modern",
+        "type": "hello",
+        "version": 1,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["typed_ui_messages", "heartbeat"],
+        },
+    })
+
+    records = _records(writer)
+    assert [record["type"] for record in records] == ["ack", "runtime/status"]
+    assert records[0]["request_id"] == "hello-modern"
+    assert records[0]["payload"] == {
+        "event": "hello",
+        "negotiation": {
+            "selected_version": 1,
+            "server_minimum_version": 1,
+            "server_maximum_version": 1,
+            "capabilities": ["heartbeat", "typed_ui_messages"],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_incompatible_hello_without_status_or_runtime_mutation() -> None:
+    writer = io.StringIO()
+    engine = _FakeEngine()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "hello-future",
+        "type": "hello",
+        "version": 1,
+        "payload": {
+            "client": "future-ui",
+            "minimum_version": 2,
+            "maximum_version": 3,
+            "capabilities": ["typed_ui_messages"],
+        },
+    })
+
+    records = _records(writer)
+    assert [record["type"] for record in records] == ["error"]
+    assert records[0]["request_id"] == "hello-future"
+    assert records[0]["payload"]["code"] == "protocol_version_unsupported"
+    assert "请升级" in records[0]["payload"]["message"]
 
 
 @pytest.mark.asyncio

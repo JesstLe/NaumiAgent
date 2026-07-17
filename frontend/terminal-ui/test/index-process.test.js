@@ -108,6 +108,71 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
     await waitForLatestScreen(output, "思考强度 medium", 7000);
     await waitForLatestScreen(output, "模式 default · 权限 moderate", 7000);
     await waitForLatestScreen(output, "预算: 不限", 7000);
+    const negotiated = await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "ack"
+        && record.payload.payload?.event === "hello",
+      7000,
+    );
+    assert.deepEqual(negotiated.payload.payload.negotiation, {
+      selected_version: 1,
+      server_minimum_version: 1,
+      server_maximum_version: 1,
+      capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+    });
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI keeps early input local when protocol negotiation fails", async () => {
+  const app = launchTerminalUi("incompatible-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    app.stdin.write("不应发送到不兼容后端\n");
+    await waitForOutput(output, "请升级 Naumi 或终端 UI 后重试", 7000);
+    await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "protocol.send.deferred"
+        && record.payload.type === "submit",
+      7000,
+    );
+    const events = readDebugEvents(app.debugLogPath);
+    assert(!events.some(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    ));
+    assert(!events.some((record) => record.event.startsWith("heartbeat.")));
+    await waitForOutput(output, "发送失败", 7000);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI rejects a malformed hello ack without releasing early input", async () => {
+  const app = launchTerminalUi("incompatible-bridge.js", {
+    env: { NAUMI_TEST_MALFORMED_ACK: "1" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    app.stdin.write("仍不应发送\n");
+    await waitForOutput(output, "Bridge hello 协商版本不兼容", 7000);
+    await waitForDebugEvent(
+      app.debugLogPath,
+      (record) => record.event === "protocol.send.deferred"
+        && record.payload.type === "submit",
+      7000,
+    );
+    const events = readDebugEvents(app.debugLogPath);
+    assert(!events.some(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    ));
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);

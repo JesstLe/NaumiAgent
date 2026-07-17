@@ -18,6 +18,15 @@ attachJsonlLineReader(process.stdin, (line) => {
   const payload = record.payload ?? {};
 
   if (record.type === "hello") {
+    emit("ack", {
+      event: "hello",
+      negotiation: {
+        selected_version: 1,
+        server_minimum_version: 1,
+        server_maximum_version: 1,
+        capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+      },
+    }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
     setTimeout(() => emit("ready", statusPayload()), delayMs);
     emit("debug/trace", { events_path: "/tmp/naumi-terminal-ui-test/events.jsonl" });

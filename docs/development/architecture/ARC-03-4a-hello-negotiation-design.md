@@ -95,3 +95,25 @@
 4. 不兼容 fixture 不发送 runtime status，用户看到明确中文错误，进程可安全退出。
 5. 定向 Ruff、Python 编译、Python/Node 小模块测试通过；不运行全量测试。
 
+## 实施证据（2026-07-17）
+
+- Python：10 个协议/Bridge 定向用例通过，覆盖现代/旧 hello、非法输入、版本不兼容、必需能力缺失、
+  成功 ACK 顺序以及失败时不发送 runtime status。
+- Node protocol：27 个协议小模块用例通过，contract 驱动 hello payload，并拒绝不兼容 ACK。
+- Node state：独立用例证明 `bridgeReady` 与 `protocolNegotiated` 是两个状态。
+- 文档治理：开发计划目录已纳入 product_spec 分类，280 份文档治理检查通过。
+- 真实进程：Node 新 UI 与 Python Bridge fixture 完成协商，debug evidence 中双方一致选择 version 1
+  和三项能力。
+- 失败进程：typed incompatibility error 与畸形 ACK 两条路径都保持早到输入在本地；没有 submit、
+  heartbeat 或 runtime status 泄漏，并转为可重试的失败消息。
+
+## 自我审视与未完成项
+
+- 做到了代码层协商而非 Prompt 套壳；协商函数是确定性的，Bridge 失败路径不会触碰 Engine 状态。
+- 旧 hello 暂时被视为具备当前全部能力，这是有意的一发布周期兼容窗口；ARC-03.3 收口时必须删除，
+  并先补使用量审计，不能永久保留隐式能力。
+- Python 常量与 JSON contract 目前由双端一致性测试防漂移，尚未由 schema/codegen 单源生成；这属于
+  ARC-03.2/3.6，不能把 4a 的测试约束误称为完整 registry。
+- 当前仍是整数版本区间，没有 major/minor/patch 兼容分类；本切片没有放宽非 hello envelope 的严格
+  version 校验。
+- capability 只覆盖当前启动链真正依赖的三项，不宣称已枚举全部 UI、Harness、Tool 或 Artifact 能力。

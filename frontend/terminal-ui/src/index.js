@@ -41,6 +41,7 @@ import {
 import {
   attachJsonlLineReader,
   createEventSender,
+  createHelloPayload,
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
@@ -108,8 +109,12 @@ state.inputHistory = getProjectInputHistory(uiStateStore);
 let debugLog = null;
 
 let bridge = null;
+let rawSend = null;
 let send = null;
 let heartbeat = null;
+let helloRequestId = "";
+let nextDeferredProtocolId = 1;
+const deferredProtocolSends = [];
 let uiSnapshotTimer = null;
 let inputEscapeTimer = null;
 let quitting = false;
@@ -158,7 +163,8 @@ function main() {
   debugLog?.log("terminal_ui.state", { frontend_debug_log_path: state.frontendDebugLogPath });
   bridge = startBridge();
   bridge.on("error", handleFatalError);
-  send = createEventSender(bridge.stdin, { debugLog });
+  rawSend = createEventSender(bridge.stdin, { debugLog });
+  send = sendWithProtocolGate;
   heartbeat = createHeartbeatController({
     sendPing: (id) => send("ping", {}, { id }),
     onHealth(value) {
@@ -228,7 +234,7 @@ function main() {
   });
 
   setupTerminal();
-  send("hello", { client: "naumi-terminal-ui" });
+  helloRequestId = rawSend("hello", createHelloPayload());
   redrawScheduler.settleInitial();
 }
 
@@ -337,16 +343,25 @@ function handleBridgeLine(line) {
   if (!line.trim()) return;
   debugLog?.log("protocol.receive.line", { line });
   let record;
+  let rawRecord;
   try {
-    record = normalizeServerRecord(JSON.parse(line));
+    rawRecord = JSON.parse(line);
+    record = normalizeServerRecord(rawRecord);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     debugLog?.log("protocol.receive.error", { line, error: message });
+    if (rawRecord?.type === "ack" && rawRecord?.payload?.event === "hello") {
+      deferredProtocolSends.length = 0;
+      failQueuedUserMessages(state, {
+        code: "protocol_negotiation_invalid",
+        message: `终端协议协商响应无效：${message}`,
+      });
+    }
     pushSystemMessage(state, "bridge protocol", message, "error", { dismissWelcome: true });
+    scheduleRedraw();
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
-  if (record.type === "ready") heartbeat?.start();
   if (record.type === "pong") {
     heartbeat?.receivePong(record.request_id);
     return;
@@ -354,6 +369,16 @@ function handleBridgeLine(line) {
   const previousSessionId = state.currentSessionId;
   const previousSnapshot = createUiSnapshot(state);
   const actions = reduceServerEvent(state, record);
+  if (record.type === "ack" && record.payload?.event === "hello") {
+    heartbeat?.start();
+    flushDeferredProtocolSends();
+  } else if (record.type === "error" && record.request_id === helloRequestId) {
+    deferredProtocolSends.length = 0;
+    failQueuedUserMessages(state, {
+      code: record.payload?.code ?? "protocol_negotiation_failed",
+      message: record.payload?.message ?? "终端协议协商失败，请升级后重试。",
+    });
+  }
   syncWorkingAnimation();
   if (state.currentSessionId !== previousSessionId) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
@@ -415,6 +440,21 @@ function handleBridgeLine(line) {
   }
   scheduleUiSnapshotPersist();
   scheduleRedraw();
+}
+
+function sendWithProtocolGate(type, payload, options = {}) {
+  if (state.protocolNegotiated) return rawSend(type, payload, options);
+  const id = options.id ? String(options.id) : `ui-deferred-${nextDeferredProtocolId++}`;
+  deferredProtocolSends.push({ type, payload, options: { ...options, id } });
+  debugLog?.log("protocol.send.deferred", { type, id });
+  return id;
+}
+
+function flushDeferredProtocolSends() {
+  while (deferredProtocolSends.length > 0) {
+    const pending = deferredProtocolSends.shift();
+    rawSend(pending.type, pending.payload, pending.options);
+  }
 }
 
 function handleKeyInput(chunk) {

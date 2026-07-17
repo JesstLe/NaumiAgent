@@ -20,7 +20,15 @@ attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
   const record = JSON.parse(line);
   if (record.type === "hello") {
-    emit("ack", { event: "hello" }, record.id);
+    emit("ack", {
+      event: "hello",
+      negotiation: {
+        selected_version: 1,
+        server_minimum_version: 1,
+        server_maximum_version: 1,
+        capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+      },
+    }, record.id);
     return;
   }
   if (record.type === "ping") {

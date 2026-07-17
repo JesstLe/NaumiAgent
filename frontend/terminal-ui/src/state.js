@@ -304,6 +304,8 @@ export function createInitialState() {
     unreadOutputCount: 0,
     unreadOutputKeys: {},
     bridgeReady: false,
+    protocolNegotiated: false,
+    protocolNegotiation: null,
     bridgeHeartbeat: { status: "starting", rttMs: null, ageMs: 0 },
     debugTrace: null,
     frontendDebugLogPath: "",
@@ -386,6 +388,10 @@ export function reduceServerEvent(state, record) {
   const payload = record.payload ?? {};
   switch (record.type) {
     case "ack":
+      if (payload.event === "hello") {
+        state.protocolNegotiated = true;
+        state.protocolNegotiation = payload.negotiation;
+      }
       if (payload.event === "submit") {
         acceptUserMessage(state, record.request_id);
       }

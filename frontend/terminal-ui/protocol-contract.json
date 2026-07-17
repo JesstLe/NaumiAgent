@@ -1,6 +1,18 @@
 {
   "version": 1,
   "transport": "jsonl",
+  "negotiation": {
+    "minimum_version": 1,
+    "maximum_version": 1,
+    "capabilities": [
+      "heartbeat",
+      "typed_ui_messages",
+      "workbench_snapshot"
+    ],
+    "required_capabilities": [
+      "typed_ui_messages"
+    ]
+  },
   "client_events": [
     "hello",
     "submit",
