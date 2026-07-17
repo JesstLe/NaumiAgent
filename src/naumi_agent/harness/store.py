@@ -33,6 +33,7 @@ from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactReference,
     SessionDeleteReconciliation,
     SessionReconciliationState,
+    SessionReconciliationTerminalOutcome,
     SessionReconciliationTransitionError,
     validate_reconciliation_transition,
 )
@@ -48,7 +49,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 5
+HARNESS_STORE_SCHEMA_VERSION = 6
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -1108,6 +1109,100 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
             raise HarnessStoreError("Session 删除协调记录损坏或无法读取。") from exc
 
+    async def get_session_reconciliation_terminal_outcome(
+        self,
+        request_id: str,
+    ) -> SessionReconciliationTerminalOutcome | None:
+        """Return an explicit non-delete terminal outcome, if one exists."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT outcome FROM harness_session_reconciliation_terminals
+                    WHERE request_id = ?
+                    """,
+                    (normalized_request_id,),
+                )
+                row = await cursor.fetchone()
+                return (
+                    SessionReconciliationTerminalOutcome(str(row["outcome"]))
+                    if row is not None
+                    else None
+                )
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取 Session 协调终态。") from exc
+
+    async def abort_retention_reconciliation(
+        self,
+        request_id: str,
+        *,
+        aborted_at: str,
+    ) -> SessionReconciliationTerminalOutcome:
+        """Stop a prepared retention delete after its policy becomes invalid."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        timestamp = _normalize_timestamp(aborted_at, field="aborted_at")
+        outcome = SessionReconciliationTerminalOutcome.RETENTION_POLICY_BLOCKED
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._require_reconciliation(db, normalized_request_id)
+                if (
+                    current.actor is not LifecycleActor.RETENTION_WORKER
+                    or current.state is not SessionReconciliationState.PREPARED
+                ):
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "只有 prepared 状态的 retention 协调可以因策略变化终止。"
+                    )
+                existing_cursor = await db.execute(
+                    """
+                    SELECT outcome FROM harness_session_reconciliation_terminals
+                    WHERE request_id = ?
+                    """,
+                    (normalized_request_id,),
+                )
+                existing = await existing_cursor.fetchone()
+                if existing is not None:
+                    await db.commit()
+                    return SessionReconciliationTerminalOutcome(
+                        str(existing["outcome"])
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO harness_session_reconciliation_terminals (
+                        request_id, outcome, completed_at
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (normalized_request_id, outcome.value, timestamp),
+                )
+                await db.execute(
+                    """
+                    UPDATE harness_session_artifact_gc
+                    SET status = 'completed', completed_at = ?, updated_at = ?
+                    WHERE request_id = ?
+                    """,
+                    (timestamp, timestamp, normalized_request_id),
+                )
+                await db.commit()
+                return outcome
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法终止失效的 retention 协调请求。") from exc
+
     async def list_pending_session_reconciliations(
         self,
         *,
@@ -1124,9 +1219,12 @@ class HarnessStore:
                 cursor = await db.execute(
                     """
                     SELECT request_id FROM harness_session_reconciliations
-                    WHERE state <> ? OR request_id IN (
+                    WHERE (state <> ? OR request_id IN (
                         SELECT request_id FROM harness_session_artifact_gc
                         WHERE status <> 'completed'
+                    )) AND request_id NOT IN (
+                        SELECT request_id
+                        FROM harness_session_reconciliation_terminals
                     )
                     ORDER BY updated_at, request_id
                     LIMIT ?
@@ -1898,24 +1996,35 @@ class HarnessStore:
             try:
                 self._db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 _restrict_permissions(self._db_path.parent, 0o700)
-                async with self._connection() as db:
-                    cursor = await db.execute("PRAGMA user_version")
-                    version = int((await cursor.fetchone())[0])
-                    if version > HARNESS_STORE_SCHEMA_VERSION:
-                        raise HarnessStoreError(
-                            "Harness 数据库版本高于当前程序支持范围，请升级 NaumiAgent。"
-                        )
-                    await db.execute("PRAGMA journal_mode = WAL")
-                    await db.executescript(_SCHEMA_V1)
-                    await db.executescript(_SCHEMA_V2)
-                    await db.executescript(_SCHEMA_V3)
-                    await db.executescript(_SCHEMA_V4)
-                    await _migrate_tombstone_stage_v5(db)
-                    await db.executescript(_SCHEMA_V5)
-                    await db.execute(
-                        f"PRAGMA user_version = {HARNESS_STORE_SCHEMA_VERSION}"
-                    )
-                    await db.commit()
+                for attempt in range(5):
+                    try:
+                        async with self._connection() as db:
+                            cursor = await db.execute("PRAGMA user_version")
+                            version = int((await cursor.fetchone())[0])
+                            if version > HARNESS_STORE_SCHEMA_VERSION:
+                                raise HarnessStoreError(
+                                    "Harness 数据库版本高于当前程序支持范围，"
+                                    "请升级 NaumiAgent。"
+                                )
+                            await db.execute("PRAGMA journal_mode = WAL")
+                            await db.executescript(_SCHEMA_V1)
+                            await db.executescript(_SCHEMA_V2)
+                            await db.executescript(_SCHEMA_V3)
+                            await db.executescript(_SCHEMA_V4)
+                            await _migrate_tombstone_stage_v5(db)
+                            await db.executescript(_SCHEMA_V5)
+                            await db.executescript(_SCHEMA_V6)
+                            await db.execute(
+                                "PRAGMA user_version = "
+                                f"{HARNESS_STORE_SCHEMA_VERSION}"
+                            )
+                            await db.commit()
+                        break
+                    except aiosqlite.OperationalError as exc:
+                        locked = "locked" in str(exc).lower()
+                        if not locked or attempt == 4:
+                            raise
+                        await asyncio.sleep(0.025 * (2**attempt))
             except HarnessStoreError:
                 raise
             except (aiosqlite.Error, OSError) as exc:
@@ -2723,4 +2832,16 @@ FROM harness_session_reconciliations;
 
 CREATE INDEX IF NOT EXISTS idx_harness_session_artifact_gc_status_updated
 ON harness_session_artifact_gc (status, updated_at, request_id);
+"""
+
+_SCHEMA_V6 = """
+CREATE TABLE IF NOT EXISTS harness_session_reconciliation_terminals (
+    request_id TEXT PRIMARY KEY
+        REFERENCES harness_session_reconciliations(request_id) ON DELETE RESTRICT,
+    outcome TEXT NOT NULL CHECK (outcome IN ('retention_policy_blocked')),
+    completed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_session_reconciliation_terminals_outcome
+ON harness_session_reconciliation_terminals (outcome, completed_at, request_id);
 """

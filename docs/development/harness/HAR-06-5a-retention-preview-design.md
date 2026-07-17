@@ -42,6 +42,7 @@ memory:
     max_sessions_per_pass: 20
     max_bytes_per_pass: 268435456
     scan_limit: 10000
+    max_runtime_seconds: 10
 ```
 
 `max_archived_session_bytes: 0` 表示不以空间压力选取候选；过期规则仍可预览。6.5a 不接受也不

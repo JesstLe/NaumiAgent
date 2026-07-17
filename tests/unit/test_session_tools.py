@@ -13,6 +13,10 @@ from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorResult,
 )
 from naumi_agent.harness.reconciliation import SessionReconciliationState
+from naumi_agent.harness.retention_executor import (
+    RetentionPassStatus,
+    SessionRetentionPassResult,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -22,7 +26,12 @@ from naumi_agent.harness.retention_planner import (
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.tools.session import SessionDeleteTool, SessionHistoryTool, SessionLoadTool
+from naumi_agent.tools.session import (
+    SessionDeleteTool,
+    SessionHistoryTool,
+    SessionLoadTool,
+    SessionRetentionTool,
+)
 
 
 def _session(session_id: str = "s1", title: str = "Demo") -> Session:
@@ -208,6 +217,48 @@ def test_engine_registers_session_load_tool(tmp_path) -> None:
 
     assert tool is not None
     assert tool.metadata.read_only is False
+
+
+@pytest.mark.asyncio
+async def test_session_retention_tool_runs_one_destructive_bounded_pass() -> None:
+    engine = MagicMock()
+    engine.run_session_retention_once = AsyncMock(
+        return_value=SessionRetentionPassResult(
+            status=RetentionPassStatus.COMPLETED,
+            planned_count=1,
+            attempted_count=1,
+            completed_count=1,
+            retry_scheduled_count=0,
+            retry_exhausted_count=0,
+            policy_blocked_count=0,
+            not_found_count=0,
+            error_count=0,
+            remaining_count=0,
+            planned_bytes=100,
+            duration_seconds=0.1,
+            results=(),
+            message="完成",
+        )
+    )
+    tool = SessionRetentionTool(engine)
+
+    output = await tool.execute()
+
+    assert tool.metadata.destructive is True
+    assert tool.metadata.requires_confirmation is True
+    assert "Session 保留清理回执" in output
+    engine.run_session_retention_once.assert_awaited_once_with()
+
+
+def test_engine_registers_session_retention_tool(tmp_path) -> None:
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+
+    tool = engine.tool_registry.get("session_retention_run")
+
+    assert tool is not None
+    assert tool.metadata.destructive is True
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,19 @@ class TestSessionStore:
         loaded = await store.load(session.id)
         assert loaded is None
 
+    async def test_retention_delete_is_atomic_and_rejects_active_session(
+        self, store: SessionStore
+    ) -> None:
+        active = Session(id="active")
+        archived = Session(id="archived", status="archived")
+        await store.save(active)
+        await store.save(archived)
+
+        assert await store.delete_if_archived(active.id) is False
+        assert await store.delete_if_archived(archived.id) is True
+        assert await store.load(active.id) is not None
+        assert await store.load(archived.id) is None
+
     async def test_update_session(self, store: SessionStore) -> None:
         session = Session(title="原始")
         await store.save(session)

@@ -60,6 +60,7 @@ from naumi_agent.ui.history_screen import (
     render_history_preview,
     render_session_delete_preview,
     render_session_retention_preview,
+    render_session_retention_result,
 )
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
@@ -2381,6 +2382,9 @@ class NaumiApp(App):
         if subcommand in {"retention-preview", "retention_preview"}:
             self._show_session_retention_preview()
             return
+        if subcommand in {"retention-run", "retention_run"}:
+            self._run_session_retention()
+            return
         if subcommand == "archive":
             if not sub_arg:
                 status.status_text = "用法: /history archive <session_id>"
@@ -2646,6 +2650,27 @@ class NaumiApp(App):
             Markdown(render_session_retention_preview(preview), classes="agent-msg")
         )
         status.status_text = f"已预览保留策略: {len(preview.selected)} 个候选"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _run_session_retention(self) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        status.status_text = "正在执行有界 Session 保留清理"
+        try:
+            result = await self.engine.run_session_retention_once()
+        except asyncio.CancelledError:
+            status.status_text = "Session 保留清理已取消"
+            raise
+        except Exception:
+            status.status_text = "Session 保留清理失败关闭"
+            return
+        chat.mount(
+            Markdown(render_session_retention_result(result), classes="agent-msg")
+        )
+        status.status_text = (
+            f"Session 保留清理 {result.status.value}: "
+            f"完整删除 {result.completed_count}"
+        )
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_doctor(self) -> None:

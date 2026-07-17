@@ -143,6 +143,7 @@ class SessionRetentionConfig(BaseSettings):
     max_sessions_per_pass: int = Field(default=20, ge=1, le=10_000)
     max_bytes_per_pass: int = Field(default=256 * 1024 * 1024, ge=1)
     scan_limit: int = Field(default=10_000, ge=1, le=10_000)
+    max_runtime_seconds: float = Field(default=10.0, gt=0, le=300)
 
 
 class MemoryConfig(BaseSettings):

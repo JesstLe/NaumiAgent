@@ -12,6 +12,7 @@ from naumi_agent.ui.history_screen import (
     render_history_screen,
     render_session_delete_preview,
     render_session_retention_preview,
+    render_session_retention_result,
 )
 
 
@@ -294,6 +295,50 @@ class SessionDeleteTool(Tool):
         return f"会话 {target} 的生命周期策略阻止删除。"
 
 
+class SessionRetentionTool(Tool):
+    """Execute one explicit, bounded archived Session retention pass."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "session_retention_run"
+
+    @property
+    def description(self) -> str:
+        return (
+            "按已配置的归档保留期和会话载荷上限执行一轮有界清理，"
+            "对应 /history retention-run。只处理执行时仍为 archived 的会话。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "additionalProperties": False}
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            concurrency_safe=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="执行会话保留清理",
+            search_hint="session retention run archive 清理 归档 保留策略",
+        )
+
+    async def execute(self) -> str:
+        return render_session_retention_result(
+            await self._engine.run_session_retention_once()
+        )
+
+
 def create_session_tools(engine: Any) -> list[Tool]:
     """Create session-related tools."""
-    return [SessionHistoryTool(engine), SessionLoadTool(engine), SessionDeleteTool(engine)]
+    return [
+        SessionHistoryTool(engine),
+        SessionLoadTool(engine),
+        SessionDeleteTool(engine),
+        SessionRetentionTool(engine),
+    ]
