@@ -84,6 +84,15 @@ def _serialize_explanation(value: HarnessRunExplanation) -> dict[str, Any]:
         "verified": bool(value.verified),
         "running": bool(value.running),
         "summary": _text(value.summary),
+        "criteria": [
+            {
+                "id": _text(item.id),
+                "description": _text(item.description),
+                "status": _text(item.status),
+                "evidence_ids": _texts(item.evidence_ids, limit=100),
+            }
+            for item in value.criteria[:100]
+        ],
         "failure_classes": _texts(value.failure_classes, limit=20),
         "findings": [
             {

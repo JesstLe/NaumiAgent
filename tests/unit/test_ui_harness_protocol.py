@@ -6,6 +6,7 @@ import pytest
 
 from naumi_agent.harness.explain import (
     HarnessExplainCheck,
+    HarnessExplainCriterion,
     HarnessExplainEvidence,
     HarnessExplainFinding,
     HarnessExplainLookup,
@@ -43,6 +44,15 @@ def _explanation() -> HarnessRunExplanation:
         verified=False,
         running=False,
         summary="发现验证问题",
+        criteria=tuple(
+            HarnessExplainCriterion(
+                id=f"criterion-{index}",
+                status="unsatisfied",
+                description="必须通过验证" + "d" * 600,
+                evidence_ids=tuple(f"evidence-{item}" for item in range(110)),
+            )
+            for index in range(105)
+        ),
         failure_classes=tuple(
             HarnessFailureClass.VERIFICATION_FAILURE for _ in range(25)
         ),
@@ -126,6 +136,9 @@ def test_harness_explain_payload_is_strict_and_bounded() -> None:
     assert len(explanation["objective"]) == 500
     assert len(explanation["failure_classes"]) == 20
     assert len(explanation["findings"]) == 20
+    assert len(explanation["criteria"]) == 100
+    assert len(explanation["criteria"][0]["description"]) == 500
+    assert len(explanation["criteria"][0]["evidence_ids"]) == 100
     assert len(explanation["findings"][0]["check_ids"]) == 50
     assert len(explanation["findings"][0]["evidence_ids"]) == 100
     assert len(explanation["checks"]) == 50

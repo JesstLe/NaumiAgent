@@ -30,6 +30,13 @@ function harnessExplainPayload(revision = 1) {
       verified: false,
       running: false,
       summary: "发现验证问题",
+      criteria: Array.from({ length: 105 }, (_, index) => ({
+        id: `criterion-${index}`,
+        description: "定向验证通过",
+        status: "unsatisfied",
+        evidence_ids: Array.from({ length: 105 }, (__, id) => `evidence-${id}`),
+        private_payload: "must-drop",
+      })),
       failure_classes: Array.from({ length: 25 }, () => "verification_failure"),
       findings: Array.from({ length: 25 }, (_, index) => ({
         failure_class: "verification_failure",
@@ -358,6 +365,9 @@ test("harness explain response is strict and bounded", () => {
     "explanation",
   ]);
   assert.equal(normalized.revision, 3);
+  assert.equal(normalized.explanation.criteria.length, 100);
+  assert.equal(normalized.explanation.criteria[0].evidence_ids.length, 100);
+  assert.equal(Object.hasOwn(normalized.explanation.criteria[0], "private_payload"), false);
   assert.equal(normalized.explanation.failure_classes.length, 20);
   assert.equal(normalized.explanation.findings.length, 20);
   assert.equal(normalized.explanation.findings[0].check_ids.length, 50);

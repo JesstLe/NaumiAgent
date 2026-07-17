@@ -324,6 +324,9 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         replayed = _plain(
             await execute_slash_command(engine, "/harness replay latest")
         )
+        detailed = _plain(
+            await execute_slash_command(engine, "/harness detail latest")
+        )
         explain_tool = engine.tool_registry.get("harness_explain")
         assert explain_tool is not None
         tool_explained = await explain_tool.execute(run_id=contract.run_id)
@@ -335,6 +338,9 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         )
         invalid_replay = _plain(
             await execute_slash_command(engine, "/harness replay one two")
+        )
+        invalid_detail = _plain(
+            await execute_slash_command(engine, "/harness detail one two")
         )
 
         assert "slash-failed-run" in explained
@@ -348,7 +354,14 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         assert "已复现" in replayed
         assert "Harness 安全回放" in tool_replayed
         assert "raw output must not be rendered" not in tool_replayed
+        assert "Harness 运行详情" in detailed
+        assert "slash-failed-run" in detailed
+        assert "失败分类" in detailed
+        assert "验证失败" in detailed
+        assert "Replay" in detailed
+        assert "raw output must not be rendered" not in detailed
         assert "用法" in invalid
         assert "用法" in invalid_replay
+        assert "用法" in invalid_detail
     finally:
         await engine.shutdown()

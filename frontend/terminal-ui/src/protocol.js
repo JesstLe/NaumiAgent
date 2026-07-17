@@ -39,6 +39,7 @@ const HARNESS_FAILURE_CLASSES = new Set([
   "agent_repetition",
   "human_judgment_required",
 ]);
+const HARNESS_CRITERION_STATUSES = new Set(["satisfied", "unsatisfied"]);
 const HARNESS_REPLAY_STATUSES = new Set(["reproduced", "changed", "partial", "corrupt"]);
 const HARNESS_ARTIFACT_STATUSES = new Set([
   "verified",
@@ -801,6 +802,24 @@ function normalizeHarnessExplain(payload) {
       verified: harnessBoolean(explanation.verified, "harness/explain verified"),
       running,
       summary: harnessText(explanation.summary, "harness/explain summary"),
+      criteria: harnessObjectArray(explanation.criteria ?? [], "harness/explain criteria", 100)
+        .map((item) => ({
+          id: harnessText(item.id, "harness/explain criterion.id"),
+          description: harnessText(
+            item.description,
+            "harness/explain criterion.description",
+          ),
+          status: harnessChoice(
+            item.status,
+            "harness/explain criterion.status",
+            HARNESS_CRITERION_STATUSES,
+          ),
+          evidence_ids: harnessTextArray(
+            item.evidence_ids,
+            "harness/explain criterion.evidence_ids",
+            100,
+          ),
+        })),
       failure_classes: harnessTextArray(
         explanation.failure_classes,
         "harness/explain failure_classes",

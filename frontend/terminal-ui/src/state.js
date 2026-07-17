@@ -245,6 +245,12 @@ export function createInitialState() {
     harnessReceipts: Object.create(null),
     harnessExplanations: Object.create(null),
     harnessReplays: Object.create(null),
+    harnessDetail: {
+      runId: "",
+      explainLoading: false,
+      replayLoading: false,
+      scrollOffset: 0,
+    },
     tools: [],
     activeAssistant: null,
     activeThinking: null,
@@ -488,9 +494,11 @@ export function reduceServerEvent(state, record) {
       break;
     case "harness/explain":
       addHarnessDetail(state.harnessExplanations, payload);
+      if (state.harnessDetail.runId === payload.run_id) state.harnessDetail.explainLoading = false;
       break;
     case "harness/replay":
       addHarnessDetail(state.harnessReplays, payload);
+      if (state.harnessDetail.runId === payload.run_id) state.harnessDetail.replayLoading = false;
       break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
@@ -671,6 +679,16 @@ export function reduceServerEvent(state, record) {
       resetInspectorSnapshot(state.inspector);
       resetAgentControlSnapshot(state.agents);
       state.workbench = createEmptyWorkbenchState();
+      const wasHarnessDetailRoute = state.route?.name === "harness_detail";
+      state.harnessDetail = {
+        runId: "",
+        explainLoading: false,
+        replayLoading: false,
+        scrollOffset: 0,
+      };
+      if (wasHarnessDetailRoute) {
+        state.route = { name: "conversation", originAnchor: null };
+      }
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
@@ -2133,6 +2151,46 @@ export function handleSubmitText(state, text, send) {
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
   }
+  const harnessDetailMatch = commandText.match(/^\/harness\s+detail(?:\s+(\S+))?$/i);
+  if (harnessDetailMatch) {
+    const requested = String(harnessDetailMatch[1] || "latest");
+    const runId = requested.toLowerCase() === "latest"
+      ? latestHarnessRunId(state)
+      : requested;
+    if (!runId) {
+      pushSystemMessage(state, "Harness 详情", "没有可查看的 Harness 完成回执。", "warning");
+      return;
+    }
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(runId)) {
+      pushSystemMessage(
+        state,
+        "Harness 详情",
+        "run id 无效：仅支持 1-128 位字母、数字、点、下划线、冒号或连字符。",
+        "warning",
+      );
+      return;
+    }
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "harness_detail", originAnchor };
+    state.harnessDetail = {
+      runId,
+      explainLoading: true,
+      replayLoading: true,
+      scrollOffset: 0,
+    };
+    send("harness/explain/request", {
+      run_id: runId,
+      known_revision: Number(state.harnessExplanations[runId]?.revision) || 0,
+    });
+    send("harness/replay/request", {
+      run_id: runId,
+      known_revision: Number(state.harnessReplays[runId]?.revision) || 0,
+    });
+    return;
+  }
   if (commandText === "/workbench") {
     if (state.route?.name !== "workbench") {
       const originAnchor = {
@@ -2303,6 +2361,35 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     return true;
   }
   return true;
+}
+
+export function handleHarnessDetailKey(state, key) {
+  if (state.route?.name !== "harness_detail") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  const current = Math.max(0, Number(state.harnessDetail.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.harnessDetail.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.harnessDetail.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.harnessDetail.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.harnessDetail.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessDetail.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessDetail.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+function latestHarnessRunId(state) {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (message?.kind !== "completion_receipt") continue;
+    const runId = String(message.runId || message.receipt?.run_id || "").trim();
+    if (runId) return runId;
+  }
+  return "";
 }
 
 export function toggleComposerIntent(state) {

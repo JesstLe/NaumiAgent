@@ -12,6 +12,7 @@ import {
   failQueuedUserMessages,
   getFoldEntries,
   handleAgentControlKey,
+  handleHarnessDetailKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
   handleInteractionKey,
@@ -3164,6 +3165,70 @@ test("typed harness details keep newest bounded revisions without rendering", ()
   assert.equal(Object.keys(state.harnessReplays).length, 100);
   assert.equal(Object.hasOwn(state.harnessExplanations, "explain-104"), true);
   assert.equal(Object.hasOwn(state.harnessReplays, "replay-104"), true);
+});
+
+test("Harness detail command opens one route and requests exact typed details", () => {
+  const state = createInitialState();
+  state.scrollOffset = 7;
+  state.followTail = false;
+  state.messages.push({
+    kind: "completion_receipt",
+    id: "receipt-message",
+    receiptId: "receipt-1",
+    runId: "detail-run",
+    receipt: { run_id: "detail-run" },
+  });
+  const sent = [];
+
+  handleSubmitText(state, "/harness detail", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.route.name, "harness_detail");
+  assert.equal(state.harnessDetail.runId, "detail-run");
+  assert.equal(state.harnessDetail.explainLoading, true);
+  assert.equal(state.harnessDetail.replayLoading, true);
+  assert.deepEqual(sent.map((item) => item.type), [
+    "harness/explain/request",
+    "harness/replay/request",
+  ]);
+  assert(sent.every((item) => item.payload.run_id === "detail-run"));
+
+  reduceServerEvent(state, {
+    type: "harness/explain",
+    payload: { schema_version: 1, revision: 1, run_id: "detail-run", lookup_status: "not_found", message: "未找到" },
+  });
+  reduceServerEvent(state, {
+    type: "harness/replay",
+    payload: { schema_version: 1, revision: 1, run_id: "detail-run", lookup_status: "unavailable", message: "暂不可用" },
+  });
+  assert.equal(state.harnessDetail.explainLoading, false);
+  assert.equal(state.harnessDetail.replayLoading, false);
+
+  assert.equal(handleHarnessDetailKey(state, INPUT_KEYS.escape), true);
+  assert.deepEqual(state.route, { name: "conversation", originAnchor: null });
+  assert.equal(state.scrollOffset, 7);
+  assert.equal(state.followTail, false);
+});
+
+test("Harness detail command rejects missing latest run without backend traffic", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(state, "/harness detail latest", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(sent.length, 0);
+  assert(state.messages.at(-1).content.includes("没有可查看的 Harness 完成回执"));
+});
+
+test("Harness detail command rejects an invalid explicit run id locally", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(state, "/harness detail ../../private", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(sent.length, 0);
+  assert(state.messages.at(-1).content.includes("run id 无效"));
 });
 
 test("run completion requests a missing authoritative receipt", () => {
