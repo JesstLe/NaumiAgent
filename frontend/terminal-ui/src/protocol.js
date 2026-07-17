@@ -75,6 +75,13 @@ const HARNESS_EVAL_PROMOTION_STAGES = new Set([
   "cancelled",
   "error",
 ]);
+const DOCTOR_HEALTH_SEVERITIES = new Set(["ok", "degraded", "error", "unknown"]);
+const DOCTOR_HEALTH_DOMAINS = new Set([
+  "runtime", "model", "provider", "store", "git", "node", "browser", "mcp", "terminal",
+]);
+const DOCTOR_HEALTH_RESPONSIBILITIES = new Set([
+  "user_config", "local_environment", "external_service", "product_runtime", "unknown",
+]);
 const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
 const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
@@ -275,6 +282,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/eval-promotion") {
     return normalizeHarnessEvalPromotion(payload);
+  }
+  if (type === "doctor/health") {
+    return normalizeDoctorHealth(payload);
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
@@ -1128,6 +1138,52 @@ function normalizeHarnessEvalPromotion(payload) {
     promoted_by: promotedBy,
     promotion_reason: promotionReason,
     created_at: createdAt,
+  };
+}
+
+function normalizeDoctorHealth(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`doctor/health schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const items = harnessObjectArray(payload.items, "doctor/health items", 65);
+  if (items.length > 64) throw new Error("doctor/health items 超过 64 项");
+  const snapshotSha256 = harnessText(payload.snapshot_sha256, "doctor/health snapshot_sha256");
+  if (!/^[0-9a-f]{64}$/.test(snapshotSha256)) {
+    throw new Error("doctor/health snapshot_sha256 必须是 SHA-256");
+  }
+  const generatedAt = harnessText(payload.generated_at, "doctor/health generated_at");
+  if (!generatedAt) throw new Error("doctor/health generated_at 不能为空");
+  const normalizedItems = items.map((item) => {
+    const id = harnessText(item.id, "doctor/health item.id");
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) throw new Error("doctor/health item.id 无效");
+    return {
+      id,
+      domain: harnessChoice(item.domain, "doctor/health item.domain", DOCTOR_HEALTH_DOMAINS),
+      label: harnessText(item.label, "doctor/health item.label"),
+      severity: harnessChoice(
+        item.severity,
+        "doctor/health item.severity",
+        DOCTOR_HEALTH_SEVERITIES,
+      ),
+      responsibility: harnessChoice(
+        item.responsibility,
+        "doctor/health item.responsibility",
+        DOCTOR_HEALTH_RESPONSIBILITIES,
+      ),
+      detail: harnessText(item.detail, "doctor/health item.detail"),
+      suggestion: harnessText(item.suggestion, "doctor/health item.suggestion"),
+    };
+  });
+  if (new Set(normalizedItems.map((item) => item.id)).size !== normalizedItems.length) {
+    throw new Error("doctor/health item.id 必须唯一");
+  }
+  return {
+    schema_version: 1,
+    status: harnessChoice(payload.status, "doctor/health status", DOCTOR_HEALTH_SEVERITIES),
+    generated_at: generatedAt,
+    live_probe: harnessBoolean(payload.live_probe, "doctor/health live_probe"),
+    snapshot_sha256: snapshotSha256,
+    items: normalizedItems,
   };
 }
 

@@ -16,6 +16,7 @@ import {
   handleHarnessEvalBaselineKey,
   handleHarnessEvalBatchKey,
   handleHarnessEvalPromotionKey,
+  handleDoctorHealthKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -1633,6 +1634,38 @@ test("permissions command opens transient policy route and restores conversation
   assert.equal(handlePermissionCenterKey(state, INPUT_KEYS.escape, () => {}), true);
   assert.equal(state.route.name, "conversation");
   assert.equal(state.scrollOffset, 9);
+  assert.equal(state.followTail, false);
+});
+
+test("doctor command opens typed health route refreshes and restores origin", () => {
+  const state = createInitialState();
+  state.scrollOffset = 5;
+  state.followTail = false;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, "/doctor", send);
+  assert.equal(state.route.name, "doctor_health");
+  assert.equal(state.doctorHealth.loading, true);
+  reduceServerEvent(state, {
+    type: "doctor/health",
+    payload: {
+      schema_version: 1,
+      status: "ok",
+      generated_at: "2026-07-18T10:00:00+00:00",
+      live_probe: false,
+      snapshot_sha256: "a".repeat(64),
+      items: [],
+    },
+  });
+  assert.equal(state.doctorHealth.loading, false);
+  assert.equal(state.doctorHealth.snapshot.status, "ok");
+  assert.equal(handleDoctorHealthKey(state, "r", send), true);
+  assert.equal(state.doctorHealth.loading, true);
+  assert.deepEqual(sent, [{ type: "doctor", payload: {} }, { type: "doctor", payload: {} }]);
+  assert.equal(handleDoctorHealthKey(state, INPUT_KEYS.escape, send), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 5);
   assert.equal(state.followTail, false);
 });
 

@@ -52,6 +52,7 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.ui import bridge as ui_bridge
 from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
+from naumi_agent.ui.doctor import DoctorCheck
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
     PermissionBubbleMessage,
@@ -4764,6 +4765,7 @@ async def test_bridge_renders_doctor_report_as_system_notice(
 
     class FakeReport:
         status = "warn"
+        checks = (DoctorCheck("browser daemon", "warn", "未启动"),)
 
     async def fake_run_doctor(
         config: Any,
@@ -4801,7 +4803,38 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     assert message["title"] == "doctor"
     assert message["level"] == "warn"
     assert "browser daemon" in message["content"]
+    health = next(record for record in records if record["type"] == "doctor/health")
+    assert health["request_id"] == "doctor-1"
+    assert health["payload"]["status"] == "degraded"
+    assert health["payload"]["items"][0]["domain"] == "browser"
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_failure_returns_typed_product_runtime_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    async def fail_doctor(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("private doctor failure")
+
+    monkeypatch.setattr("naumi_agent.ui.doctor.run_doctor", fail_doctor)
+    await bridge.handle_client_record(
+        {"id": "doctor-failure", "type": ClientEventType.DOCTOR, "payload": {}}
+    )
+
+    health = next(
+        record for record in _records(writer) if record["type"] == "doctor/health"
+    )
+    item = health["payload"]["items"][0]
+    assert health["payload"]["status"] == "error"
+    assert item["responsibility"] == "product_runtime"
+    assert "诊断流程自身失败" in item["detail"]
+    assert "private doctor failure" not in json.dumps(health, ensure_ascii=False)
 
 
 def _interaction_payload() -> dict[str, Any]:

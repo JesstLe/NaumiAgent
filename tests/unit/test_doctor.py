@@ -48,6 +48,7 @@ async def test_run_doctor_checks_local_environment(
 
     names = {check.name: check for check in report.checks}
     assert names["Python 环境"].status == "pass"
+    assert names["Node.js"].status in {"pass", "warn"}
     assert names["API key"].status == "pass"
     assert names["网络搜索"].status == "pass"
     assert "零配置" in names["网络搜索"].detail
