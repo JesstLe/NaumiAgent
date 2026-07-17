@@ -932,11 +932,16 @@ codex/terminal-completion-receipt
 - ✅ Theme and output style system：`ui.theme` 提供 dark/minimal/high_contrast 主题、compact/detailed/debug/silent_tools 输出策略和语义色彩 token；CLI 状态/权限、TUI CSS、结构化 diff 和 `/style` 入口共用同一套配置。
 - ✅ Resume history screen：`ui.history_screen` 统一历史会话列表/预览渲染，Session 持久化 workspace/git/summary 元数据，`/history <关键词>` 支持搜索，`/history preview|archive|delete <id>` 支持预览、归档和删除；TUI 历史侧栏展示模型、token、cost、workspace、git、摘要并支持归档/删除。
 - ✅ Doctor diagnostics screen：`ui.doctor` 提供 Python/config/API key/model/workspace/git/rg/browser daemon/docker/MCP/debug log/terminal 与 ARC-05.1 物理 Store Catalog 的确定性只读检查，CLI/TUI `/doctor` 与 Agent 工具 `doctor_diagnostics` 共用同一套诊断与 Markdown 报告。
+- ✅ Workbench TUI fallback：Textual TUI 的 `/workbench` 直接消费当前会话的权威 Workbench snapshot，
+  以只读全屏页展示目标、任务、变更载体、验证、风险与待审；支持刷新失败保留旧快照、跨会话拒绝和
+  80/120/200 列降级，不复制 Store 查询。
 - ✅ Cache message rendering：`ui.render_cache` 提供 bounded LRU 与统计；CLI renderer 按 `message_id` 缓存 ANSI 输出，TUI renderer 对重复 message id 做幂等跳过，renderer override 会清空缓存避免旧结果污染。
 - ✅ Terminal UI E2E scenarios：`tests/e2e/ui_scenarios/*.yaml` 覆盖大文件写入、权限确认、历史恢复、大 diff、subagent/team/recovery、终端 resize；`tests/e2e/test_ui_scenarios.py` 用真实 `EngineEventAdapter`、CLI/TUI renderer、virtualized history、structured diff viewer 和宽字符裁剪逻辑回放并断言关键文本/viewport 边界。
 
 下一步：
 
 ```text
-M6 `/agents` Agent Control Center 已完成。下一切片独立实现 `/workbench` 命令页；Agent 创建/重配、跨进程持久化与 Workbench 映射另行设计，跨终端兼容实测、性能基准和真实终端截图回归仍需继续。
+M6 `/agents` Agent Control Center 已完成；`/workbench` 的 New UI Overview 与 Textual TUI fallback
+已完成。下一切片继续 UI-10.3 Worktrees tab；Agent 创建/重配、跨进程持久化与 Workbench 映射另行
+设计，跨终端兼容实测、性能基准和真实终端截图回归仍需继续。
 ```

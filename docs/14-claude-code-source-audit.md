@@ -91,6 +91,8 @@ NaumiAgent 当前第一阶段选择的是“协议分离 + 小型 Node 终端前
 - terminal-ui 进程级测试会启动真实 Python `JsonlEngineBridge` fixture，通过 stdio JSONL 覆盖 submit、权限确认、tool card、task panel 和 resume replay。
 - 新 terminal UI 启动命令、Node 入口、packaged runtime asset。
 - legacy fallback 命令路径：`naumi ui --legacy` 进入旧 Textual TUI；新 UI 启动失败会提示 `naumi ui --legacy` / `naumi chat --tui`。
+- `/workbench` 在新 UI 与 Textual fallback 共用当前会话的 Python Workbench snapshot；fallback 提供
+  只读全屏 Overview、刷新/返回、跨会话拒绝和失败保留旧快照，不复制前端权威状态。
 - `/tasks` 通过 JSONL 协议打开任务面板，覆盖 todo/subagent/background/browser 任务来源，并展示 owner、依赖阻塞、后台 cwd/pid/port/output、浏览器 step/current/error 等真实运行细节。
 - `/tasks` 支持只读过滤：`/tasks todo open 8`、`/tasks background running`、`/tasks source=browser status=needs_input`，过滤条件会随 pinned panel 自动刷新保持。
 - `/tasks detail <id>` 支持只读详情视图，按 todo、subagent、subagent_event、permission、background、browser 类型展示真实上下文字段；detail 条件会随 pinned panel 自动刷新保持。
