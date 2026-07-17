@@ -13,6 +13,7 @@ from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ClientEventType
+from naumi_agent.workbench.models import RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -41,12 +42,24 @@ def _reduce_with_real_node(repo_root: Path, records: list[dict[str, Any]]) -> di
     source = r"""
 import { normalizeServerRecord } from "./frontend/terminal-ui/src/protocol.js";
 import { createInitialState, reduceServerEvent } from "./frontend/terminal-ui/src/state.js";
+import { stripAnsi, visibleWidth } from "./frontend/terminal-ui/src/ansi.js";
+import {
+  renderWorkbenchOverview,
+} from "./frontend/terminal-ui/src/components/workbench-overview.js";
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
 const state = createInitialState();
 state.currentSessionId = "session-workbench-real";
 for (const line of input.trim().split("\n").filter(Boolean)) {
   reduceServerEvent(state, normalizeServerRecord(JSON.parse(line)));
+}
+const widths = {};
+for (const width of [80, 120, 200]) {
+  const lines = renderWorkbenchOverview(state.workbench, width, 24);
+  widths[width] = {
+    bounded: lines.every((line) => visibleWidth(line) <= width),
+    text: lines.map(stripAnsi).join("\n"),
+  };
 }
 process.stdout.write(JSON.stringify({
   streamId: state.workbench.stream_id,
@@ -55,6 +68,7 @@ process.stdout.write(JSON.stringify({
   activeSelection: state.workbench.active_selection,
   taskStatus: state.workbench.tasks[0]?.status ?? "",
   loading: state.workbench.loading,
+  widths,
 }));
 """
     completed = subprocess.run(
@@ -88,7 +102,7 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
         title="终端 Workbench",
         goal="验证真实快照链路",
     )
-    task = await task_store.create_task("实现 UI-10.1")
+    task = await task_store.create_task("实现 UI-10.2 Overview")
     await task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
     await writer_service.attach_issue(
         session_id=session_id,
@@ -100,6 +114,28 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
         session_id=session_id,
         task_id=task.id,
         worktree_name="ui-10-real",
+    )
+    await workbench_store.upsert_issue(
+        session_id=session_id,
+        task_id=task.id,
+        mission_id=mission.id,
+        risk_level=RiskLevel.HIGH,
+        acceptance_criteria=["80/120/200 列无溢出"],
+        related_branch="codex/ui-10-overview",
+        related_worktree="ui-10-real",
+        related_pr="#128",
+    )
+    await workbench_store.record_validation_run(
+        session_id=session_id,
+        task_id=task.id,
+        actor="Validation-Agent",
+        command=["node", "--test", "render.test.js"],
+        cwd=str(tmp_path),
+        status="passed",
+        exit_code=0,
+        output="1 passed",
+        started_at="2026-07-17T14:00:00+08:00",
+        completed_at="2026-07-17T14:00:01+08:00",
     )
     approval = await workbench_store.add_approval(
         session_id=session_id,
@@ -160,3 +196,11 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
     assert reduced["activeSelection"]["review_id"] == approval.id
     assert reduced["taskStatus"] == "completed"
     assert reduced["loading"] is False
+    for width in ("80", "120", "200"):
+        rendered = reduced["widths"][width]
+        assert rendered["bounded"] is True
+        assert "终端 Workbench" in rendered["text"]
+        assert "实现 UI-10.2 Overview" in rendered["text"]
+        assert "codex/ui-10-overview" in rendered["text"]
+        assert "验证通过" in rendered["text"]
+        assert "高风险" in rendered["text"]

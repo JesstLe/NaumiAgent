@@ -293,6 +293,44 @@ test("terminal UI process creates one workbench task from the composer", async (
   }
 });
 
+test("terminal UI process opens refreshes and leaves the Workbench overview", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/workbench\n");
+    await waitForLatestScreen(output, "Workbench Overview", 7000);
+    await waitForLatestScreen(output, "终端 Workbench 真实概览", 7000);
+    await waitForLatestScreen(output, "codex/ui-10-overview", 7000);
+    await waitForLatestScreen(output, "验证失败", 7000);
+    await waitForLatestScreen(output, "高风险", 7000);
+    app.stdin.write("r");
+    await delay(100);
+    app.stdin.write("\u001b");
+    await waitForLatestScreenWithout(output, "Workbench Overview", 7000);
+    await waitForLatestScreen(output, "chat >", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const requests = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "workbench/request",
+    );
+    assert.equal(requests.length, 2);
+    assert.equal(
+      events.some(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "submit"
+          && record.payload.record.payload.text === "/workbench",
+      ),
+      false,
+    );
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process cancels one run without exiting the session", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

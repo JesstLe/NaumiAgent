@@ -52,6 +52,7 @@ import {
   handleInteractionKey,
   handleSubmitText,
   handleRuntimeInspectorKey,
+  handleWorkbenchOverviewKey,
   hasTaskPanelFocus,
   cancelTaskPanelItem,
   jumpToTaskPanelRecord,
@@ -517,6 +518,11 @@ function handleSingleKeyInput(chunk) {
     ) return;
   }
   if (state.interaction && handleInteractionKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "workbench" && handleWorkbenchOverviewKey(state, chunk, send)) {
+    persistUiSnapshot();
     scheduleRedraw();
     return;
   }

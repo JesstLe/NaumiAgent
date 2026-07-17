@@ -15,6 +15,7 @@ import {
 import { detachTimeline } from "../src/timeline-follow.js";
 import { renderRuntimeInspector } from "../src/components/runtime-inspector.js";
 import { renderAgentControlPage } from "../src/components/agent-control-page.js";
+import { renderWorkbenchOverview } from "../src/components/workbench-overview.js";
 
 test("conversation viewport renders welcome before the timeline and keeps footer usable", () => {
   const state = createInitialState();
@@ -218,6 +219,94 @@ test("agent control page distinguishes loading empty stale and error states", ()
 
   state.agents.snapshot = null;
   assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("加载失败"));
+});
+
+function workbenchOverviewFixture() {
+  return {
+    schema_version: 1,
+    stream_id: "stream-overview",
+    revision: 7,
+    generated_at: "2026-07-17T14:20:00+08:00",
+    full: true,
+    session_id: "session-workbench",
+    counts: { missions: 1, tasks: 1, worktrees: 1, reviews: 1, failures: 1 },
+    active_selection: {
+      mission_id: "mission-1",
+      task_id: "task-1",
+      worktree: "ui-10-overview",
+      review_id: "approval-1",
+    },
+    summary: { active_agents: 1, open_issues: 1, blocked_issues: 0, pending_approvals: 1, failed_validations: 1 },
+    missions: [{ id: "mission-1", title: "完善终端 Workbench", goal: "让用户直接掌握工程进展", status: "active" }],
+    tasks: [{ id: "task-1", subject: "实现 Overview", description: "展示目标、验证与风险", status: "in_progress", owner: "" }],
+    issues: [{ task_id: "task-1", mission_id: "mission-1", risk_level: "high", related_branch: "codex/ui-10-overview", related_worktree: "ui-10-overview", related_pr: "#128", expected_artifacts: ["snapshot.png"], acceptance_criteria: ["80/120/200 列无溢出"] }],
+    leases: [{ task_id: "task-1", agent_id: "Frontend-Agent", state: "active", worktree_name: "ui-10-overview" }],
+    validation_runs: [{ id: "validation-1", task_id: "task-1", command: ["node", "--test", "render.test.js"], status: "failed", exit_code: 1, output: "PRIVATE_VALIDATION_OUTPUT", started_at: "2026-07-17T14:00:00+08:00", completed_at: "2026-07-17T14:00:02+08:00" }],
+    failures: [{ id: "failure-1", task_id: "task-1", kind: "test_failed", title: "窄屏快照失败", detail: "中文行宽超出", status: "open" }],
+    approvals: [{ id: "approval-1", task_id: "task-1", state: "waiting", title: "等待 UI 审查", requester: "Frontend-Agent" }],
+    events: [],
+    loading: false,
+    error: "",
+  };
+}
+
+test("workbench overview renders authoritative wide and narrow fields", () => {
+  const view = workbenchOverviewFixture();
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert.equal(rendered.length, 24);
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Workbench"));
+    assert(plain.includes("完善终端 Workbench"));
+    assert(plain.includes("实现 Overview"));
+    assert(plain.includes("Frontend-Agent"));
+    assert(plain.includes("codex/ui-10-overview"));
+    assert(plain.includes("ui-10-overview"));
+    assert(plain.includes("验证失败"));
+    assert(plain.includes("高风险"));
+    assert(plain.includes("窄屏快照失败"));
+    assert(!plain.includes("PRIVATE_VALIDATION_OUTPUT"));
+  }
+  const wide = renderWorkbenchOverview(view, 120, 24).join("\n");
+  assert(wide.includes(`${ANSI.red}`));
+  assert(renderWorkbenchOverview(view, 120, 24).map(stripAnsi).some((line) => line.includes("│")));
+});
+
+test("workbench overview distinguishes loading empty and error without list explosions", () => {
+  const loading = renderWorkbenchOverview({ loading: true, revision: 0 }, 80, 12).map(stripAnsi).join("\n");
+  assert(loading.includes("正在加载 Workbench"));
+
+  const empty = renderWorkbenchOverview({ ...workbenchOverviewFixture(), missions: [], tasks: [], issues: [], counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 } }, 80, 12).map(stripAnsi).join("\n");
+  assert(empty.includes("暂无 Workbench 任务"));
+
+  const error = renderWorkbenchOverview({ loading: false, error: "状态库暂不可用", revision: 0 }, 80, 12).map(stripAnsi).join("\n");
+  assert(error.includes("加载失败"));
+  assert(error.includes("状态库暂不可用"));
+
+  const crowded = workbenchOverviewFixture();
+  crowded.counts = { missions: 1, tasks: 100, worktrees: 100, reviews: 100, failures: 100 };
+  crowded.leases = Array.from({ length: 100 }, (_, index) => ({ task_id: `task-${index}`, agent_id: `agent-${index}`, worktree_name: `worktree-${index}` }));
+  crowded.approvals = Array.from({ length: 100 }, (_, index) => ({ id: `approval-${index}`, task_id: `task-${index}`, state: "waiting", title: `审查 ${index}` }));
+  const rendered = renderWorkbenchOverview(crowded, 80, 16);
+  assert.equal(rendered.length, 16);
+  assert(rendered.every((line) => visibleWidth(line) <= 80));
+  assert(rendered.map(stripAnsi).join("\n").includes("worktree 100"));
+  assert(rendered.map(stripAnsi).join("\n").includes("待审 100"));
+});
+
+test("workbench route takes full-screen priority and keeps the footer usable", () => {
+  const state = createInitialState();
+  state.route = { name: "workbench", originAnchor: { scrollOffset: 0, followTail: true } };
+  state.workbench = workbenchOverviewFixture();
+
+  const rendered = renderScreen(state, 120, 24).map(stripAnsi);
+  const plain = rendered.join("\n");
+  assert(plain.includes("Workbench Overview"));
+  assert(plain.includes("workbench: r 刷新 · Esc 返回"));
+  assert(!plain.includes("chat >"));
+  assert(!plain.includes("NAUMI"));
+  assert.equal(rendered.length, 24);
 });
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {

@@ -11,6 +11,7 @@ import { renderFooter, renderFooterSections } from "./components/footer.js";
 import { Message } from "./components/message.js";
 import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
+import { renderWorkbenchOverview } from "./components/workbench-overview.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
   renderWelcomeScreen,
@@ -30,7 +31,9 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
-  const visible = state.route?.name === "agents"
+  const visible = state.route?.name === "workbench"
+    ? renderWorkbenchOverview(state.workbench, width, bodyHeight)
+    : state.route?.name === "agents"
     ? renderAgentControlPage(state.agents, width, bodyHeight)
     : state.inspector?.open
       ? renderInspectorLayout(state, width, bodyHeight, env)
