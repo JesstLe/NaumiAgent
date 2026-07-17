@@ -36,5 +36,8 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.1b Self-Review 静态证据适配器：已实现。现有 `self_review` 改用有界 AST 事实扫描，
   secret 值不会进入展示、模型输入或 Evidence；每个 finding 只引用相对 scope 与完整文件摘要。
   实现边界与证据见 `EVO-01-1b-self-review-static-evidence.md`。
-- runtime metric/Eval/feedback adapters、Candidate schema、Dedup、Eligibility、Prioritization 与
+- EVO-01.2a Candidate Draft 契约：已实现。同根 Evidence 可幂等构建稳定、脱敏、带风险和
+  机械指标的候选草案；所有 Draft 固定不可执行，不能绕过后续 eligibility。设计与证据见
+  `EVO-01-2a-candidate-draft-contract.md`。
+- runtime metric/Eval/feedback adapters、Candidate Store/Dedup、Eligibility、Prioritization 与
   Review surface 仍为 planned；不得把 EVO-01 整体标记为完成。

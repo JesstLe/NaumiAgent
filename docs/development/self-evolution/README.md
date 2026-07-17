@@ -7,7 +7,7 @@
 - `self_evolve` 已有变更评估与 apply/reject/rollback 决策路径。
 - Pursuit 已有持久目标、criteria、checkpoint、worktree、等待和停止决定。
 
-这些能力仍不足以自动提升生产版本：当前缺统一候选 Store、标准 Eval before/after、隔离变异
+Candidate Draft 契约已经存在，但这些能力仍不足以自动提升生产版本：当前缺统一候选 Store、标准 Eval before/after、隔离变异
 治理、防奖励投机、推广审批、分阶段发布和长期效果跟踪。
 
 ## 闭环

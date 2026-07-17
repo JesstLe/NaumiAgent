@@ -27,3 +27,9 @@
 - reject 后冷却期内不重复骚扰；新证据显著变化可重新开启。
 - Proposal 实施后必须关联 Eval before/after；无改善则不能标为 promoted。
 - A3：注入重复失败、用户纠正和噪声，最终队列数量与规则一致。
+
+## 已具备的跨模块前置
+
+- EVO-01.2a 已提供稳定、脱敏且固定不可执行的 Candidate Draft 契约，可作为未来 HAR-09
+  Proposal/Review Queue 的输入边界；HAR-09 仍未实现 feedback adapter、聚合策略、Store、
+  review action 或 outcome tracking，因此整体继续保持 planned。

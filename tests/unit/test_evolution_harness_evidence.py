@@ -5,7 +5,11 @@ from dataclasses import replace
 from naumi_agent.evolution.evidence import adapt_harness_failure_evidence
 from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
-from naumi_agent.harness.store import HarnessStoredCheck, HarnessStoredRun
+from naumi_agent.harness.store import (
+    HarnessStoredCheck,
+    HarnessStoredEvidence,
+    HarnessStoredRun,
+)
 
 
 def _failed_run(run_id: str = "evolution-run") -> HarnessStoredRun:
@@ -110,3 +114,39 @@ def test_verified_and_running_runs_do_not_create_failure_evidence() -> None:
 
     assert adapt_harness_failure_evidence(verified) == ()
     assert adapt_harness_failure_evidence(running) == ()
+
+
+def test_tool_failure_scope_is_stable_and_does_not_embed_observation_id() -> None:
+    def tool_run(run_id: str, evidence_id: str) -> HarnessStoredRun:
+        base = _failed_run(run_id)
+        receipt = base.receipt.model_copy(update={"status": "blocked", "warnings": ()})
+        tool_evidence = HarnessStoredEvidence(
+            id=evidence_id,
+            kind="tool_execution",
+            uri=f"chat-run://{run_id}/tool/{evidence_id}",
+            sha256="c" * 64,
+            description="工具执行事实",
+            summary={
+                "tool_name": "read",
+                "status": "aborted",
+                "permission_status": "denied",
+            },
+            producer="harness_evidence_collector",
+            created_at="2026-07-18T10:00:20+00:00",
+            criterion_ids=(),
+        )
+        return replace(
+            base,
+            status="blocked",
+            receipt=receipt,
+            checks=(),
+            evidence=(tool_evidence,),
+        )
+
+    first = adapt_harness_failure_evidence(tool_run("tool-one", "call-one"))[0]
+    second = adapt_harness_failure_evidence(tool_run("tool-two", "call-two"))[0]
+
+    assert first.scope == "evidence:tool_execution:harness_evidence_collector:read"
+    assert first.scope == second.scope
+    assert first.root_fingerprint == second.root_fingerprint
+    assert "call-one" not in first.scope
