@@ -59,6 +59,7 @@ from naumi_agent.ui.history_screen import (
     build_history_snapshot,
     render_history_preview,
     render_session_delete_preview,
+    render_session_retention_preview,
 )
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
@@ -2377,6 +2378,9 @@ class NaumiApp(App):
                 return
             self._show_session_delete_preview(sub_arg)
             return
+        if subcommand in {"retention-preview", "retention_preview"}:
+            self._show_session_retention_preview()
+            return
         if subcommand == "archive":
             if not sub_arg:
                 status.status_text = "用法: /history archive <session_id>"
@@ -2628,6 +2632,20 @@ class NaumiApp(App):
             Markdown(render_session_delete_preview(preview), classes="agent-msg")
         )
         status.status_text = f"已预览删除影响: {preview.title}"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _show_session_retention_preview(self) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            preview = await self.engine.preview_session_retention()
+        except Exception as exc:
+            status.status_text = f"保留策略预览失败: {exc}"
+            return
+        chat.mount(
+            Markdown(render_session_retention_preview(preview), classes="agent-msg")
+        )
+        status.status_text = f"已预览保留策略: {len(preview.selected)} 个候选"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_doctor(self) -> None:

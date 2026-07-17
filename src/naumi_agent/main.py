@@ -4320,6 +4320,7 @@ async def _show_history(engine: Any, arg: str = "") -> None:
         render_history_preview,
         render_history_screen,
         render_session_delete_preview,
+        render_session_retention_preview,
     )
 
     parts = arg.strip().split(maxsplit=1)
@@ -4348,6 +4349,11 @@ async def _show_history(engine: Any, arg: str = "") -> None:
             console.print(f"[red]会话 {sub_arg} 不存在[/red]")
             return
         console.print(Markdown(render_session_delete_preview(preview)))
+        return
+
+    if subcommand in {"retention-preview", "retention_preview"}:
+        preview = await engine.preview_session_retention()
+        console.print(Markdown(render_session_retention_preview(preview)))
         return
 
     if subcommand == "archive":

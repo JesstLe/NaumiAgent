@@ -11,6 +11,7 @@ from naumi_agent.ui.history_screen import (
     render_history_preview,
     render_history_screen,
     render_session_delete_preview,
+    render_session_retention_preview,
 )
 
 
@@ -39,11 +40,12 @@ class SessionHistoryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "preview", "delete_preview"],
+                    "enum": ["list", "preview", "delete_preview", "retention_preview"],
                     "default": "list",
                     "description": (
                         "操作类型：list 列出历史会话，preview 预览指定会话，"
-                        "delete_preview 只读预览删除影响。"
+                        "delete_preview 只读预览删除影响，retention_preview "
+                        "只读预览归档保留策略。"
                     ),
                 },
                 "query": {
@@ -93,8 +95,15 @@ class SessionHistoryTool(Tool):
             return await self._preview(session_id)
         if normalized_action == "delete_preview":
             return await self._delete_preview(session_id)
+        if normalized_action == "retention_preview":
+            return render_session_retention_preview(
+                await self._engine.preview_session_retention()
+            )
         if normalized_action != "list":
-            return "不支持的历史会话操作。可用操作：list、preview、delete_preview。"
+            return (
+                "不支持的历史会话操作。可用操作：list、preview、"
+                "delete_preview、retention_preview。"
+            )
         return await self._list(query=query, page=page, page_size=page_size)
 
     async def _list(self, *, query: str, page: int, page_size: int) -> str:
