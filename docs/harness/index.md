@@ -33,6 +33,8 @@ Baseline Identity 与比较策略；未来阶段记录在
 - 受信任 Profile 中的精确检查可由 `/harness check <id>` 或 `harness_run_check` 按需执行。
 - Profile 声明的离线 Suite 可由 `/harness eval [suite]` 或 `harness_eval` 运行；静态 runner
   不要求信任，不执行模型、命令、网络或写操作，fixture 使用 SHA-256 锁定。
+- 显式 `/harness eval <suite> --repeat 5 [--batch <id>]` 或 `harness_eval_batch` 重复运行一个
+  Suite，并只向用户状态库追加 immutable Candidate samples；不会修改工作区或晋升 Baseline。
 - `/harness baseline <suite>` 与 `harness_eval_baseline` 只读展示 active Baseline 和最近权威
   Comparison receipts；它们不会运行 Eval、晋升版本或改变 selector。
 - 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。

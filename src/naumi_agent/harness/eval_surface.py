@@ -52,6 +52,24 @@ class HarnessEvalBaselineStatus(_StrictModel):
     message: str = ""
 
 
+class HarnessEvalBatchStatus(_StrictModel):
+    status: Literal["completed", "partial", "error"]
+    code: str = ""
+    message: str = ""
+    batch_id: str
+    suite_id: str
+    requested: int = Field(ge=5, le=100)
+    completed: int = Field(ge=0, le=100)
+    persisted: int = Field(ge=0, le=100)
+    passed_cases: int = Field(default=0, ge=0)
+    implementation_failures: int = Field(default=0, ge=0)
+    evaluation_errors: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    duration_ms: float = Field(ge=0)
+    baseline_eligible: bool = False
+    identity_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+
+
 def build_eval_baseline_status(
     suite_id: str,
     active: HarnessStoredEvalBaseline | None,
@@ -142,4 +160,47 @@ def render_eval_baseline_status(result: HarnessEvalBaselineStatus) -> str:
             f"统计 `{item.statistical_verdict}` · 样本 {item.current_samples} · "
             f"Receipt `{item.id[:12]}`"
         )
+    return "\n".join(lines)
+
+
+def render_eval_batch_status(result: HarnessEvalBatchStatus) -> str:
+    lines = [
+        "## Harness 重复 Eval Batch",
+        "",
+        f"- Batch：`{result.batch_id}`",
+        f"- Suite：`{result.suite_id}`",
+        f"- 进度：完成 {result.completed}/{result.requested} · 已保存 {result.persisted}",
+        (
+            f"- Case 汇总：通过 {result.passed_cases} · 实现回归 "
+            f"{result.implementation_failures} · 评测错误 {result.evaluation_errors} · "
+            f"跳过 {result.skipped}"
+        ),
+    ]
+    if result.status == "error":
+        lines.extend(
+            [
+                "- 状态：未完成",
+                f"- 原因 `{result.code}`：{result.message}",
+                "- 下一步：修复参数、Suite 或状态库后使用新的 batch id 重试。",
+            ]
+        )
+        return "\n".join(lines)
+    if result.status == "partial":
+        lines.extend(
+            [
+                "- 状态：部分完成（预算耗尽）",
+                "- 说明：已完成样本保留，但不能晋升或形成统计结论。",
+            ]
+        )
+    else:
+        lines.append("- 状态：重复评测完成")
+    promotion = "可晋升" if result.baseline_eligible else "不可晋升"
+    identity = result.identity_sha256[:12] if result.identity_sha256 else "不可用"
+    lines.extend(
+        [
+            f"- Identity：`{identity}` · {promotion}",
+            f"- 耗时：{result.duration_ms:.1f}ms",
+            f"- 下一步：运行 `/harness baseline {result.suite_id}` 查看当前 Baseline。",
+        ]
+    )
     return "\n".join(lines)

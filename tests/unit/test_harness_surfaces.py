@@ -139,6 +139,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         replay = engine.tool_registry.get("harness_replay")
         eval_tool = engine.tool_registry.get("harness_eval")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
+        batch_tool = engine.tool_registry.get("harness_eval_batch")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
@@ -151,6 +152,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert eval_tool.metadata.concurrency_safe
         assert baseline_tool is not None and baseline_tool.metadata.read_only
         assert baseline_tool.metadata.concurrency_safe
+        assert batch_tool is not None and not batch_tool.metadata.read_only
+        assert batch_tool.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -252,6 +255,73 @@ async def test_harness_baseline_slash_and_agent_tool_share_empty_state(
         assert await tool.execute() == (
             "Harness Baseline 参数无效：suite 必须是字符串。"
         )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_repeated_eval_persists_real_candidate_batch(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        slash = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness eval surface-protocol --repeat 5 --batch surface-batch-1",
+            )
+        )
+        stored = await engine.harness_service.store.list_eval_results(
+            engine.workspace_root,
+            "surface-batch-1",
+            "surface-protocol",
+        )
+        tool = engine.tool_registry.get("harness_eval_batch")
+        assert tool is not None
+        agent = await tool.execute(
+            suite="surface-protocol",
+            repetitions=5,
+            batch_id="surface-batch-2",
+        )
+        tool_stored = await engine.harness_service.store.list_eval_results(
+            engine.workspace_root,
+            "surface-batch-2",
+            "surface-protocol",
+        )
+
+        assert "完成 5/5 · 已保存 5" in slash
+        assert "重复评测完成" in slash
+        assert "surface-batch-1" in slash
+        assert "完成 5/5 · 已保存 5" in agent
+        assert len(stored) == len(tool_stored) == 5
+        assert [item.sample_index for item in stored] == list(range(5))
+        assert len({item.identity_sha256 for item in stored}) == 1
+        assert all(item.result.baseline_identity is not None for item in stored)
+        assert "5..100" in await tool.execute(
+            suite="surface-protocol",
+            repetitions=4,
+        )
+        assert "5..100" in await tool.execute(
+            suite="surface-protocol",
+            repetitions=101,
+        )
+        assert "batch_id 不能为空" in await tool.execute(
+            suite="surface-protocol",
+            batch_id="",
+        )
+        assert "batch_id 格式无效" in await tool.execute(
+            suite="surface-protocol",
+            batch_id="bad/id",
+        )
+        assert "未找到唯一匹配" in await tool.execute(
+            suite="not-declared",
+            batch_id="missing-suite",
+        )
+        assert await engine.harness_service.store.list_eval_results(
+            engine.workspace_root,
+            "missing-suite",
+            "not-declared",
+        ) == ()
     finally:
         await engine.shutdown()
 

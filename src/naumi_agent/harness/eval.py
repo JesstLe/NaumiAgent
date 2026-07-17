@@ -66,6 +66,39 @@ class HarnessEvalAssetError(ValueError):
         self.code = code
 
 
+def resolve_declared_eval_suite(
+    workspace_root: str | Path,
+    declared_suites: tuple[str, ...] | list[str],
+    target: str,
+) -> Path:
+    """Resolve one exact Profile-declared Suite path without running it."""
+    workspace = Path(workspace_root).expanduser().resolve()
+    declared = tuple(str(value).strip().replace("\\", "/") for value in declared_suites)
+    requested = str(target).strip().replace("\\", "/")
+    if not requested or requested == "all":
+        raise HarnessEvalAssetError(
+            "single_suite_required",
+            "重复 Eval batch 必须指定一个 Suite id 或声明路径。",
+        )
+    if requested in declared:
+        return (workspace / requested).resolve(strict=False)
+    matches: list[Path] = []
+    for path_text in declared:
+        candidate = (workspace / path_text).resolve(strict=False)
+        try:
+            suite = _load_suite(workspace, candidate).suite
+        except HarnessEvalAssetError:
+            continue
+        if suite.id == requested:
+            matches.append(candidate)
+    if len(matches) != 1:
+        raise HarnessEvalAssetError(
+            "suite_not_declared",
+            "未找到唯一匹配的 Eval Suite；只能使用当前 Profile 声明的 id 或路径。",
+        )
+    return matches[0]
+
+
 def evaluate_suite_file(
     workspace_root: str | Path,
     suite_path: str | Path,

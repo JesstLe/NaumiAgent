@@ -281,7 +281,7 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/doctor", "description": "运行环境诊断"},
         {
             "command": "/harness",
-            "description": "Harness 状态、离线评测、Baseline、运行解释、知识、检查与信任",
+            "description": "Harness 状态、重复评测、Baseline、运行解释、知识、检查与信任",
         },
         {
             "command": "/mode",

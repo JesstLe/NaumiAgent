@@ -72,5 +72,8 @@
 - HAR-08.8a Baseline Read Surface：已实现。`/harness baseline <suite-id>` 与 read-only
   `harness_eval_baseline` Tool 共享 Service，显示 active 版本和最近 Comparison receipt；新 UI、TUI
   与兼容终端复用同一 Slash 路由。详见 `HAR-08-8a-baseline-read-surface.md`。
+- HAR-08.8b Repeated Eval Batch：已实现。显式 `--repeat 5..100` 或 `harness_eval_batch` 在单一
+  source identity 边界运行一个声明 Suite，并把每个 sample 追加到 H5a immutable Store；普通单次 Eval
+  保持只读。详见 `HAR-08-8b-repeated-eval-batch.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

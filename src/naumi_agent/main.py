@@ -2841,7 +2841,10 @@ def _print_help() -> None:
 async def _run_harness(engine: Any, arg: str) -> None:
     """Run user-only Harness commands through the shared service facade."""
     from naumi_agent.harness.eval import render_harness_eval
-    from naumi_agent.harness.eval_surface import render_eval_baseline_status
+    from naumi_agent.harness.eval_surface import (
+        render_eval_baseline_status,
+        render_eval_batch_status,
+    )
     from naumi_agent.harness.explain import render_harness_explanation
     from naumi_agent.harness.service import (
         HarnessStatusCode,
@@ -2865,6 +2868,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness replay [run-id|latest]\n"
         "      /harness detail [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
+        "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness check <check-id>\n"
@@ -2923,6 +2927,42 @@ async def _run_harness(engine: Any, arg: str) -> None:
         console.print(
             Markdown(render_harness_detail_markdown(explain_payload, replay_payload))
         )
+        return
+    if subcommand == "eval" and len(parts) > 2:
+        target = parts[1]
+        options = parts[2:]
+        parsed: dict[str, str] = {}
+        index = 0
+        valid = True
+        while index < len(options):
+            option = options[index]
+            if (
+                option not in {"--repeat", "--batch"}
+                or option in parsed
+                or index + 1 >= len(options)
+            ):
+                valid = False
+                break
+            parsed[option] = options[index + 1]
+            index += 2
+        try:
+            repetitions = int(parsed.get("--repeat", "5"))
+        except ValueError:
+            valid = False
+            repetitions = 5
+        if not valid or any(value.startswith("--") for value in parsed.values()):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        try:
+            result = await service.eval_repetition_batch(
+                target,
+                repetitions=repetitions,
+                batch_id=parsed.get("--batch"),
+            )
+        except ValueError as exc:
+            console.print(f"[yellow]Harness Eval Batch 参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_eval_batch_status(result)))
         return
     if subcommand == "eval" and len(parts) <= 2:
         target = parts[1] if len(parts) == 2 else None
