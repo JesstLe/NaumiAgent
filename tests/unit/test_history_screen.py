@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from naumi_agent.harness.retention_planner import (
+    SessionRetentionPolicy,
+    SessionRetentionPreview,
+    SessionRetentionReason,
+    SessionRetentionSelection,
+)
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.ui.history_screen import (
@@ -12,6 +18,7 @@ from naumi_agent.ui.history_screen import (
     render_history_preview,
     render_history_screen,
     render_session_delete_preview,
+    render_session_retention_preview,
     summarize_session_messages,
 )
 
@@ -108,3 +115,36 @@ def test_render_session_delete_preview_distinguishes_records_from_artifact_refs(
     assert "其他文件会保留" in rendered
     assert "当前会话" in rendered
     assert "/delete abc123" in rendered
+
+
+def test_render_session_retention_preview_explains_units_reasons_and_safety() -> None:
+    preview = SessionRetentionPreview(
+        selected=(
+            SessionRetentionSelection(
+                session_id="old",
+                title="旧会话",
+                effective_last_accessed_at=datetime(2026, 5, 1, 8, 0),
+                payload_bytes=2048,
+                reason=SessionRetentionReason.AGE_AND_STORAGE,
+            ),
+        ),
+        total_archived_count=3,
+        total_archived_bytes=8192,
+        scanned_count=3,
+        eligible_count=1,
+        deferred_eligible_count=0,
+        selected_bytes=2048,
+        storage_excess_bytes=4096,
+        scan_truncated=False,
+        budget_exhausted=False,
+        policy=SessionRetentionPolicy(max_archived_session_bytes=4096),
+    )
+
+    rendered = render_session_retention_preview(preview)
+
+    assert "Session 保留策略预览" in rendered
+    assert "旧会话" in rendered
+    assert "过期 + 空间压力" in rendered
+    assert "会话持久化载荷" in rendered
+    assert "不包含 Harness 数据库和 Artifact 文件" in rendered
+    assert "不会删除任何内容" in rendered

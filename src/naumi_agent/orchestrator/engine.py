@@ -28,6 +28,11 @@ from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorResult,
     SessionReconciliationCoordinator,
 )
+from naumi_agent.harness.retention_planner import (
+    SessionRetentionPolicy,
+    SessionRetentionPreview,
+    plan_session_retention,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
 from naumi_agent.harness.tools import create_harness_tools
@@ -1398,7 +1403,12 @@ class AgentEngine:
                     self._finish_session_transition("", transition_epoch)
                     transition_epoch = None
 
-                session = await self._session_port.load(session_id)
+                resume = getattr(self._session_port, "resume", None)
+                session = (
+                    await resume(session_id)
+                    if callable(resume)
+                    else await self._session_port.load(session_id)
+                )
                 if session is None:
                     return False
                 if previous_session_id != session.id:
@@ -1601,6 +1611,33 @@ class AgentEngine:
             ),
         )
 
+    async def preview_session_retention(self) -> SessionRetentionPreview:
+        """Build a bounded, read-only retention plan for archived Sessions."""
+        scan_candidates = getattr(
+            self._session_port,
+            "scan_retention_candidates",
+            None,
+        )
+        if not callable(scan_candidates):
+            raise RuntimeError("当前 Session 存储不支持保留策略预览。")
+        configured = self._config.memory.session_retention
+        policy = SessionRetentionPolicy(
+            delete_archived_after_days=configured.delete_archived_after_days,
+            max_archived_session_bytes=configured.max_archived_session_bytes,
+            max_sessions_per_pass=configured.max_sessions_per_pass,
+            max_bytes_per_pass=configured.max_bytes_per_pass,
+            scan_limit=configured.scan_limit,
+        )
+        scan = await scan_candidates(limit=policy.scan_limit)
+        return plan_session_retention(
+            scan.candidates,
+            total_archived_count=scan.total_archived_count,
+            total_archived_bytes=scan.total_archived_bytes,
+            policy=policy,
+            now=datetime.now(),
+            current_session_id=(self._session.id if self._session is not None else ""),
+        )
+
     async def _await_delete_completion(
         self,
         completion_task: asyncio.Task[Any],
@@ -1647,7 +1684,13 @@ class AgentEngine:
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""
-        return await self._session_port.archive(session_id)
+        archived = await self._session_port.archive(session_id)
+        if archived and self._session is not None and self._session.id == session_id:
+            # Keep the live conversation usable, but mirror persistence authority so
+            # a later save cannot silently reactivate the archived row.
+            self._session.status = "archived"
+            self._session.archived_at = datetime.now()
+        return archived
 
     async def _save_session(self) -> None:
         """将完整历史写入持久化存储（不丢失压缩前的消息）."""

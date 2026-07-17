@@ -135,6 +135,16 @@ class ModelConfig(BaseSettings):
     model_info: dict[str, ModelMeta] = Field(default_factory=dict)
 
 
+class SessionRetentionConfig(BaseSettings):
+    """Archived Session retention preview limits."""
+
+    delete_archived_after_days: int = Field(default=30, ge=1)
+    max_archived_session_bytes: int = Field(default=0, ge=0)
+    max_sessions_per_pass: int = Field(default=20, ge=1, le=10_000)
+    max_bytes_per_pass: int = Field(default=256 * 1024 * 1024, ge=1)
+    scan_limit: int = Field(default=10_000, ge=1, le=10_000)
+
+
 class MemoryConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NAUMI_MEMORY__")
 
@@ -143,6 +153,9 @@ class MemoryConfig(BaseSettings):
     compaction_threshold: float = 0.75
     compaction_reserved_tokens: int = 20_000
     long_term_enabled: bool = True
+    session_retention: SessionRetentionConfig = Field(
+        default_factory=SessionRetentionConfig
+    )
 
 
 class SafetyConfig(BaseSettings):

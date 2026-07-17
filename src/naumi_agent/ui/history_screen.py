@@ -7,6 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.harness.retention_planner import (
+    SessionRetentionPreview,
+    SessionRetentionReason,
+)
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 
 
@@ -133,7 +137,7 @@ def render_history_screen(snapshot: HistorySnapshot, *, max_summary: int = 96) -
     lines.append(
         "操作：/load <编号或ID> 恢复；/history <关键词> 搜索；"
         "/history preview <ID> 预览；/history delete-preview <ID> 删除影响；"
-        "/history archive <ID> 归档。"
+        "/history retention-preview 保留策略；/history archive <ID> 归档。"
     )
     return "\n".join(lines) + "\n"
 
@@ -196,6 +200,73 @@ def render_session_delete_preview(preview: SessionDeletePreview) -> str:
         f"现有 Session 删除命令：`/delete {preview.session_id}`。",
     ]
     return "\n".join(lines) + "\n"
+
+
+def render_session_retention_preview(preview: SessionRetentionPreview) -> str:
+    """Render the bounded dry-run without implying automatic deletion is enabled."""
+    policy = preview.policy
+    limit_text = (
+        _format_bytes(policy.max_archived_session_bytes)
+        if policy.max_archived_session_bytes
+        else "未启用"
+    )
+    lines = [
+        "## Session 保留策略预览",
+        "",
+        "本结果仅为只读预览，不会删除任何内容，也不会启动后台清理。",
+        "",
+        f"- 已归档会话：{preview.total_archived_count}",
+        f"- 本轮扫描：{preview.scanned_count} / 上限 {policy.scan_limit}",
+        f"- 满足条件：{preview.eligible_count}",
+        f"- 本轮拟处理：{len(preview.selected)}",
+        f"- 因预算延后：{preview.deferred_eligible_count}",
+        f"- 归档保留期：{policy.delete_archived_after_days} 天",
+        f"- 会话持久化载荷：{_format_bytes(preview.total_archived_bytes)}",
+        f"- 会话载荷空间上限：{limit_text}",
+        f"- 本轮拟释放载荷：{_format_bytes(preview.selected_bytes)}",
+        "",
+    ]
+    if preview.scan_truncated:
+        lines.append("⚠ 候选超过扫描上限；本预览只覆盖最久未访问的一批。")
+    if preview.budget_exhausted:
+        lines.append("⚠ 单轮数量或字节预算已用尽，其余候选会延后。")
+    if preview.selected:
+        lines.extend(["### 本轮候选", ""])
+        reason_labels = {
+            SessionRetentionReason.AGE_EXPIRED: "超过保留期",
+            SessionRetentionReason.STORAGE_PRESSURE: "空间压力",
+            SessionRetentionReason.AGE_AND_STORAGE: "过期 + 空间压力",
+        }
+        for item in preview.selected:
+            lines.append(
+                f"- {item.title} (`{item.session_id}`) · "
+                f"{reason_labels[item.reason]} · "
+                f"最近访问 {item.effective_last_accessed_at:%Y-%m-%d %H:%M} · "
+                f"{_format_bytes(item.payload_bytes)}"
+            )
+    else:
+        lines.append("当前没有会在本轮进入清理的归档会话。")
+    lines.extend(
+        [
+            "",
+            (
+                "这里的字节数仅指 Session 表中的会话持久化载荷，"
+                "不包含 Harness 数据库和 Artifact 文件。"
+            ),
+            "恢复会话会更新最近访问时间，并使其退出归档清理候选。",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _format_bytes(value: int) -> str:
+    size = float(max(0, value))
+    units = ("B", "KiB", "MiB", "GiB")
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{value} B"
 
 
 def _display_workspace(workspace: str) -> str:

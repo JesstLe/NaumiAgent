@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -210,12 +211,101 @@ async def test_all_engine_session_operations_route_through_injected_port(
             "load",
             "list_sessions",
             "archive",
+            "load",
             "delete",
+            "load",
         ]
     finally:
         await engine.shutdown()
 
     assert port.calls[-1] == "close"
+
+
+@pytest.mark.asyncio
+async def test_default_store_load_reactivates_archived_session_and_marks_access(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    old = datetime.now() - timedelta(days=90)
+    session = Session(
+        title="待恢复",
+        status="archived",
+        updated_at=old,
+        last_accessed_at=old,
+        archived_at=old,
+    )
+    await engine.session_store.save(session)
+
+    try:
+        assert await engine.load_session(session.id) is True
+        persisted = await engine.session_store.load(session.id)
+        assert persisted is not None
+        assert persisted.status == "active"
+        assert persisted.last_accessed_at > old
+        assert persisted.archived_at is None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_archiving_current_session_cannot_be_undone_by_later_save(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    session = await engine.get_or_create_session(title="当前会话")
+
+    try:
+        assert await engine.archive_session(session.id) is True
+        assert engine._session is session
+        assert session.status == "archived"
+        await engine._save_session()
+        persisted = await engine.session_store.load(session.id)
+        assert persisted is not None
+        assert persisted.status == "archived"
+        assert persisted.archived_at is not None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_builds_retention_preview_from_default_store_config(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    config.memory.session_retention.delete_archived_after_days = 30
+    engine = AgentEngine(config)
+    old = datetime.now() - timedelta(days=45)
+    await engine.session_store.save(
+        Session(
+            id="expired",
+            title="已过期",
+            status="archived",
+            updated_at=old,
+            last_accessed_at=old,
+            archived_at=old,
+        )
+    )
+
+    try:
+        preview = await engine.preview_session_retention()
+        assert [item.session_id for item in preview.selected] == ["expired"]
+        assert preview.total_archived_count == 1
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_retention_preview_fails_closed_for_port_without_scan_capability(
+    tmp_path: Path,
+) -> None:
+    port = _recording_port(tmp_path)
+    engine = AgentEngine(_config(tmp_path), session_port=port)
+
+    try:
+        with pytest.raises(RuntimeError, match="不支持保留策略预览"):
+            await engine.preview_session_retention()
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio

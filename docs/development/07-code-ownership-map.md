@@ -8,7 +8,7 @@
 | ID | 建议生产落点 | 定向测试 |
 | --- | --- | --- |
 | HAR-05 | `harness/replay*.py`, `service.py`, `tools.py`, slash router | `test_harness_replay*.py`, surfaces |
-| HAR-06 | `harness/retention.py`, `artifact_gc.py`, Session reconciliation | retention、artifact safety、session deletion integration |
+| HAR-06 | `harness/retention.py`, `retention_planner.py`, `artifact_gc.py`, Session reconciliation | retention、artifact safety、session deletion integration |
 | HAR-07 | `ui/messages`, `ui/bridge.py`, terminal/TUI receipt components | bridge、receipt、resume process tests |
 | HAR-08 | `harness/eval*.py`, Store migration, eval tools | eval schema/runner/baseline/integration |
 | HAR-09 | `harness/feedback*.py`, Workbench proposal adapter | fingerprint/policy/review/outcome |

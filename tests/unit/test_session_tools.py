@@ -13,6 +13,12 @@ from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorResult,
 )
 from naumi_agent.harness.reconciliation import SessionReconciliationState
+from naumi_agent.harness.retention_planner import (
+    SessionRetentionPolicy,
+    SessionRetentionPreview,
+    SessionRetentionReason,
+    SessionRetentionSelection,
+)
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -115,6 +121,42 @@ async def test_session_history_tool_previews_delete_impact_read_only() -> None:
     assert "Session 删除影响预览" in output
     assert "Harness Run：1" in output
     engine.preview_session_delete.assert_awaited_once_with("s2")
+
+
+@pytest.mark.asyncio
+async def test_session_history_tool_previews_retention_plan_read_only() -> None:
+    engine = MagicMock()
+    engine.preview_session_retention = AsyncMock(
+        return_value=SessionRetentionPreview(
+            selected=(
+                SessionRetentionSelection(
+                    session_id="old",
+                    title="旧会话",
+                    effective_last_accessed_at=datetime(2026, 5, 1),
+                    payload_bytes=2048,
+                    reason=SessionRetentionReason.AGE_EXPIRED,
+                ),
+            ),
+            total_archived_count=2,
+            total_archived_bytes=4096,
+            scanned_count=2,
+            eligible_count=1,
+            deferred_eligible_count=0,
+            selected_bytes=2048,
+            storage_excess_bytes=0,
+            scan_truncated=False,
+            budget_exhausted=False,
+            policy=SessionRetentionPolicy(),
+        )
+    )
+    tool = SessionHistoryTool(engine)
+
+    output = await tool.execute(action="retention_preview")
+
+    assert "Session 保留策略预览" in output
+    assert "旧会话" in output
+    assert "仅为只读预览" in output
+    engine.preview_session_retention.assert_awaited_once_with()
 
 
 def test_engine_registers_session_history_tool(tmp_path) -> None:
