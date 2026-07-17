@@ -78,5 +78,8 @@
 - HAR-08.8c Explicit Promotion：已实现。Slash 与非只读 Agent Tool 共享 Service，以固定入口 actor、
   必填 reason 调用 H5b eligibility/版本/selector/审计事务；幂等重试不覆盖首次事实，旧版本重试不回拨。
   详见 `HAR-08-8c-explicit-baseline-promotion.md`。
+- HAR-08.8d Active Baseline Comparison：已实现。Slash 与非只读 Agent Tool 编排 H5a/H5b/H5c，
+  对完整 Candidate 生成幂等 receipt；selector 并发切换时保留真实引用并明确标记 stale。
+  详见 `HAR-08-8d-active-baseline-comparison.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

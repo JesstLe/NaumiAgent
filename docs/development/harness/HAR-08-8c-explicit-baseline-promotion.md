@@ -56,7 +56,7 @@ code、中文原因与“Selector 未改变”。
 
 ## 6. 后续
 
-- HAR-08.8d：将 Candidate 与 active Baseline 组合成 H5c Comparison receipt；
+- HAR-08.8d 已完成：将 Candidate 与 active Baseline 组合成 H5c Comparison receipt；
 - HAR-08.8e：typed New UI/TUI promotion preview、结果卡与 receipt drill-down；
 - HAR-09/EVO-03：只能引用 Baseline ID 和 Comparison receipt，不得直接操作 selector；
 - ARC-05/HAR-06：把 Baseline selector、事件与 receipt 纳入备份、迁移和 retention 协调。

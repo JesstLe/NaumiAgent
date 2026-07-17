@@ -75,7 +75,7 @@ typed JSON 和创建时间；Baseline 使用受限外键，不能引用不存在
 
 ## 6. 后续依赖
 
-- HAR-08.8：先做只读 comparison list/detail surface，再开放显式 compare/promote 操作；
+- HAR-08.8a-8.8d 已完成：只读状态、重复 batch、显式 promote 和 active Baseline compare；
 - HAR-09：反馈候选必须引用 receipt ID，不能只提交自然语言“变好了”；
 - EVO-03：验证阶段引用 Baseline ID + receipt ID，禁止 LLM 改写机械/Policy/统计 verdict；
 - HAR-06：补 Eval sample、Baseline、event、receipt 的 workspace/session retention 与删除协调；

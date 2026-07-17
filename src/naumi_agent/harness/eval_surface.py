@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.harness.store import (
     HarnessStoredEvalBaseline,
@@ -84,6 +84,50 @@ class HarnessEvalPromotionStatus(_StrictModel):
     promoted_by: str = ""
     promotion_reason: str = ""
     created_at: str = ""
+
+
+class HarnessEvalComparisonRunStatus(_StrictModel):
+    status: Literal["created", "existing", "stale_baseline", "error"]
+    code: str = ""
+    message: str = ""
+    suite_id: str
+    baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    baseline_version: int = Field(default=0, ge=0)
+    baseline_batch_id: str = ""
+    candidate_batch_id: str
+    baseline_samples: int = Field(default=0, ge=0, le=10_000)
+    candidate_samples: int = Field(default=0, ge=0, le=10_000)
+    receipt_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    decision: Literal[
+        "",
+        "passed",
+        "failed",
+        "flaky",
+        "inconclusive",
+        "incompatible",
+    ] = ""
+    statistical_verdict: str = ""
+    policy_failed_samples: int = Field(default=0, ge=0, le=10_000)
+    policy_inconclusive_samples: int = Field(default=0, ge=0, le=10_000)
+    created_at: str = ""
+
+    @model_validator(mode="after")
+    def _authoritative_fields_match_status(self) -> HarnessEvalComparisonRunStatus:
+        if self.status == "error":
+            return self
+        if (
+            not self.baseline_id
+            or self.baseline_version < 1
+            or not self.baseline_batch_id
+            or self.baseline_samples < 1
+            or self.candidate_samples < 1
+            or not self.receipt_id
+            or not self.decision
+            or not self.statistical_verdict
+            or not self.created_at
+        ):
+            raise ValueError("非错误 Comparison 状态缺少权威 receipt 字段。")
+        return self
 
 
 def build_eval_baseline_status(
@@ -262,4 +306,60 @@ def render_eval_promotion_status(result: HarnessEvalPromotionStatus) -> str:
     lines.append(
         f"- 下一步：运行 `/harness baseline {result.suite_id}` 查看权威状态。"
     )
+    return "\n".join(lines)
+
+
+def render_eval_comparison_run_status(
+    result: HarnessEvalComparisonRunStatus,
+) -> str:
+    lines = [
+        "## Harness Eval Comparison",
+        "",
+        f"- Suite：`{result.suite_id}`",
+        f"- Candidate：`{result.candidate_batch_id}`",
+    ]
+    if result.status == "error":
+        lines.extend(
+            [
+                "- 状态：比较未创建",
+                f"- 原因 `{result.code}`：{result.message}",
+                "- Receipt：未写入",
+            ]
+        )
+        return "\n".join(lines)
+    labels = {
+        "passed": "通过",
+        "failed": "未通过",
+        "flaky": "波动",
+        "inconclusive": "无法判断",
+        "incompatible": "不可比较",
+    }
+    state = {
+        "created": "已创建权威回执",
+        "existing": "已有相同权威回执",
+        "stale_baseline": "回执已保存，但 active Baseline 已变化",
+    }[result.status]
+    lines.extend(
+        [
+            f"- 状态：{state}",
+            f"- 结论：{labels[result.decision]}",
+            (
+                f"- Baseline：v{result.baseline_version} `{result.baseline_batch_id}` · "
+                f"样本 {result.baseline_samples}"
+            ),
+            f"- Candidate 样本：{result.candidate_samples}",
+            f"- 统计：`{result.statistical_verdict}`",
+            (
+                f"- Policy：失败样本 {result.policy_failed_samples} · "
+                f"证据不足样本 {result.policy_inconclusive_samples}"
+            ),
+            f"- Receipt：`{result.receipt_id[:12]}` · {result.created_at}",
+        ]
+    )
+    if result.status == "stale_baseline":
+        lines.append("- 下一步：重新读取 active Baseline，再决定是否重新比较。")
+    else:
+        lines.append(
+            f"- 下一步：运行 `/harness baseline {result.suite_id}` 查看权威状态。"
+        )
     return "\n".join(lines)
