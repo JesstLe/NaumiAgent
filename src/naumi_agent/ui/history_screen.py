@@ -7,6 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.harness.retention_executor import (
+    RetentionPassStatus,
+    SessionRetentionPassResult,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPreview,
     SessionRetentionReason,
@@ -137,7 +141,8 @@ def render_history_screen(snapshot: HistorySnapshot, *, max_summary: int = 96) -
     lines.append(
         "操作：/load <编号或ID> 恢复；/history <关键词> 搜索；"
         "/history preview <ID> 预览；/history delete-preview <ID> 删除影响；"
-        "/history retention-preview 保留策略；/history archive <ID> 归档。"
+        "/history retention-preview 保留策略；/history retention-run 执行一轮；"
+        "/history archive <ID> 归档。"
     )
     return "\n".join(lines) + "\n"
 
@@ -257,6 +262,42 @@ def render_session_retention_preview(preview: SessionRetentionPreview) -> str:
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def render_session_retention_result(result: SessionRetentionPassResult) -> str:
+    """Render one explicit pass without conflating retries with completion."""
+    lines = [
+        "## Session 保留清理回执",
+        "",
+        f"- 状态：{_retention_status_label(result.status)}",
+        f"- 计划 / 尝试：{result.planned_count} / {result.attempted_count}",
+        f"- 完整删除：{result.completed_count}",
+        f"- 安全重试：{result.retry_scheduled_count}",
+        f"- 重试耗尽：{result.retry_exhausted_count}",
+        f"- 策略阻止：{result.policy_blocked_count}",
+        f"- 已不存在：{result.not_found_count}",
+        f"- 未预期错误：{result.error_count}",
+        f"- 剩余候选：{result.remaining_count}",
+        f"- 计划会话载荷：{_format_bytes(result.planned_bytes)}",
+        f"- 耗时：{result.duration_seconds:.2f}s",
+        "",
+        result.message,
+    ]
+    if result.retry_scheduled_count:
+        lines.append("未完成协调已写入持久重试队列，不能视为完整删除。")
+    if result.policy_blocked_count:
+        lines.append("策略阻止通常表示会话已恢复或不再处于 archived 状态。")
+    return "\n".join(lines) + "\n"
+
+
+def _retention_status_label(status: RetentionPassStatus) -> str:
+    return {
+        RetentionPassStatus.COMPLETED: "已完成",
+        RetentionPassStatus.PARTIAL: "部分完成",
+        RetentionPassStatus.DEADLINE_REACHED: "达到时间预算",
+        RetentionPassStatus.CANCELLED: "已取消",
+        RetentionPassStatus.FAILED: "失败关闭",
+    }[status]
 
 
 def _format_bytes(value: int) -> str:

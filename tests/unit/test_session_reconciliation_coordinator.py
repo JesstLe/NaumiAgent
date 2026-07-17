@@ -16,6 +16,7 @@ from naumi_agent.harness.coordinator import (
     build_session_delete_request_id,
 )
 from naumi_agent.harness.reconciliation import SessionReconciliationState
+from naumi_agent.harness.retention import LifecycleActor
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
@@ -73,6 +74,32 @@ def test_request_id_is_stable_and_session_instance_scoped(tmp_path: Path) -> Non
     assert recreated != first
 
 
+def test_retention_request_id_is_scoped_to_one_archive_epoch(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    first_archive = replace(
+        _session(workspace),
+        status="archived",
+        archived_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    second_archive = replace(
+        first_archive,
+        archived_at=datetime(2026, 7, 2, tzinfo=UTC),
+    )
+
+    first = build_session_delete_request_id(
+        first_archive,
+        fallback_workspace=workspace,
+        actor=LifecycleActor.RETENTION_WORKER,
+    )
+    second = build_session_delete_request_id(
+        second_archive,
+        fallback_workspace=workspace,
+        actor=LifecycleActor.RETENTION_WORKER,
+    )
+
+    assert first != second
+
+
 @pytest.mark.asyncio
 async def test_unknown_session_policy_fails_closed_without_preparing(
     tmp_path: Path,
@@ -93,6 +120,36 @@ async def test_unknown_session_policy_fails_closed_without_preparing(
     assert result.outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED
     assert port.delete_calls == 0
     assert await store.list_pending_session_reconciliations() == ()
+
+
+@pytest.mark.asyncio
+async def test_retention_fails_closed_without_atomic_archived_delete_capability(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    session = replace(
+        _session(workspace),
+        status="archived",
+        archived_at=datetime(2026, 7, 1, tzinfo=UTC),
+    )
+    port = _SessionPort([session])
+    store = HarnessStore(tmp_path / "harness.db")
+    coordinator = SessionReconciliationCoordinator(
+        session_port=port,
+        harness_store=store,
+        fallback_workspace=workspace,
+    )
+
+    result = await coordinator.delete_session(
+        session.id,
+        now=NOW,
+        actor=LifecycleActor.RETENTION_WORKER,
+    )
+
+    assert result.outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED
+    assert port.delete_calls == 0
+    assert port.sessions[session.id] is session
 
 
 @pytest.mark.asyncio

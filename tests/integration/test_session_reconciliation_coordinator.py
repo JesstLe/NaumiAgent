@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -13,7 +14,11 @@ from naumi_agent.harness.coordinator import (
     SessionReconciliationCoordinator,
 )
 from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
-from naumi_agent.harness.reconciliation import SessionReconciliationState
+from naumi_agent.harness.reconciliation import (
+    SessionReconciliationState,
+    SessionReconciliationTerminalOutcome,
+)
+from naumi_agent.harness.retention import LifecycleActor
 from naumi_agent.harness.store import HarnessStore, HarnessStoreError
 from naumi_agent.memory.session import SessionStore
 
@@ -122,4 +127,95 @@ async def test_harness_stage_failure_recovers_without_redeleting_session(
         assert recovered[0].outcome is ReconciliationCoordinatorOutcome.COMPLETED
         assert await HarnessStore(harness_path).get_run("coordinator-run") is None
     finally:
+        await sessions.close()
+
+
+@pytest.mark.asyncio
+async def test_retention_actor_revalidates_archived_status_before_delete(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sessions = SessionStore(
+        MemoryConfig(session_db_path=str(tmp_path / "runtime" / "sessions.db"))
+    )
+    harness = HarnessStore(tmp_path / "state" / "harness.db")
+    coordinator = SessionReconciliationCoordinator(
+        session_port=sessions,
+        harness_store=harness,
+        fallback_workspace=workspace,
+    )
+    try:
+        active = await sessions.create_session(title="已恢复")
+        blocked = await coordinator.delete_session(
+            active.id,
+            now=NOW,
+            actor=LifecycleActor.RETENTION_WORKER,
+        )
+        assert blocked.outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED
+        assert await sessions.load(active.id) is not None
+
+        archived = await sessions.create_session(title="仍归档")
+        assert await sessions.archive(archived.id)
+        deleted = await coordinator.delete_session(
+            archived.id,
+            now=NOW,
+            actor=LifecycleActor.RETENTION_WORKER,
+        )
+        assert deleted.outcome is ReconciliationCoordinatorOutcome.COMPLETED
+        assert await sessions.load(archived.id) is None
+    finally:
+        await sessions.close()
+
+
+@pytest.mark.asyncio
+async def test_retention_recovery_aborts_if_session_was_resumed_after_prepare(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sessions = SessionStore(
+        MemoryConfig(session_db_path=str(tmp_path / "runtime" / "sessions.db"))
+    )
+    harness = HarnessStore(tmp_path / "state" / "harness.db")
+    coordinator = SessionReconciliationCoordinator(
+        session_port=sessions,
+        harness_store=harness,
+        fallback_workspace=workspace,
+    )
+    session = await sessions.create_session(title="恢复竞态")
+    session.workspace_root = str(workspace)
+    await sessions.save(session)
+    assert await sessions.archive(session.id)
+    original_delete = sessions.delete_if_archived
+    sessions.delete_if_archived = AsyncMock(  # type: ignore[method-assign]
+        side_effect=asyncio.CancelledError()
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await coordinator.delete_session(
+                session.id,
+                now=NOW,
+                actor=LifecycleActor.RETENTION_WORKER,
+            )
+        sessions.delete_if_archived = original_delete  # type: ignore[method-assign]
+        assert await sessions.resume(session.id) is not None
+
+        recovered = await coordinator.recover_due(
+            worker_id="retention-recovery",
+            now=DUE,
+            lease_seconds=60,
+        )
+
+        assert recovered[0].outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED
+        assert await sessions.load(session.id) is not None
+        assert (
+            await harness.get_session_reconciliation_terminal_outcome(
+                recovered[0].request_id
+            )
+            is SessionReconciliationTerminalOutcome.RETENTION_POLICY_BLOCKED
+        )
+        assert await harness.list_pending_session_reconciliations() == ()
+    finally:
+        sessions.delete_if_archived = original_delete  # type: ignore[method-assign]
         await sessions.close()

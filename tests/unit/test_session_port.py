@@ -5,11 +5,22 @@ from __future__ import annotations
 import inspect
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.coordinator import (
+    ReconciliationCoordinatorOutcome,
+    ReconciliationCoordinatorResult,
+)
+from naumi_agent.harness.retention import LifecycleActor
+from naumi_agent.harness.retention_planner import (
+    SessionRetentionPolicy,
+    SessionRetentionPreview,
+    SessionRetentionReason,
+    SessionRetentionSelection,
+)
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import StreamChunk, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -304,6 +315,55 @@ async def test_retention_preview_fails_closed_for_port_without_scan_capability(
     try:
         with pytest.raises(RuntimeError, match="不支持保留策略预览"):
             await engine.preview_session_retention()
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_engine_retention_pass_uses_retention_actor_and_bounded_preview(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    preview = SessionRetentionPreview(
+        selected=(
+            SessionRetentionSelection(
+                session_id="archived",
+                title="归档会话",
+                effective_last_accessed_at=datetime.now() - timedelta(days=90),
+                payload_bytes=100,
+                reason=SessionRetentionReason.AGE_EXPIRED,
+            ),
+        ),
+        total_archived_count=1,
+        total_archived_bytes=100,
+        scanned_count=1,
+        eligible_count=1,
+        deferred_eligible_count=0,
+        selected_bytes=100,
+        storage_excess_bytes=0,
+        scan_truncated=False,
+        budget_exhausted=False,
+        policy=SessionRetentionPolicy(),
+    )
+    engine.preview_session_retention = AsyncMock(return_value=preview)
+    engine._session_reconciliation_coordinator.delete_session = AsyncMock(
+        return_value=ReconciliationCoordinatorResult(
+            session_id="archived",
+            request_id="request-archived",
+            outcome=ReconciliationCoordinatorOutcome.COMPLETED,
+            reconciliation_state=None,
+            tombstone_status=None,
+            message="完成",
+        )
+    )
+
+    try:
+        result = await engine.run_session_retention_once()
+        assert result.completed_count == 1
+        engine._session_reconciliation_coordinator.delete_session.assert_awaited_once_with(
+            "archived",
+            actor=LifecycleActor.RETENTION_WORKER,
+        )
     finally:
         await engine.shutdown()
 

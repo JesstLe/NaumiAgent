@@ -70,6 +70,7 @@ class _HistoryDispatchApp:
         self.status = type("Status", (), {"status_text": ""})()
         self._show_session_delete_preview = MagicMock()
         self._show_session_retention_preview = MagicMock()
+        self._run_session_retention = MagicMock()
 
     def query_one(self, widget_type: type[object]) -> object:
         if widget_type is StatusBar:
@@ -133,6 +134,13 @@ class TestNaumiApp:
         NaumiApp._run_history_command(app, "retention-preview")
 
         app._show_session_retention_preview.assert_called_once_with()
+
+    def test_history_retention_run_dispatches_to_destructive_worker(self) -> None:
+        app = _HistoryDispatchApp()
+
+        NaumiApp._run_history_command(app, "retention-run")
+
+        app._run_session_retention.assert_called_once_with()
 
     def test_semantic_markdown_parser_preserves_math_as_visible_content(self) -> None:
         tokens = semantic_markdown_parser().parse(

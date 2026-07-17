@@ -16,6 +16,12 @@ class SessionReconciliationState(StrEnum):
     RECORDS_COMMITTED = "records_committed"
 
 
+class SessionReconciliationTerminalOutcome(StrEnum):
+    """Terminal outcomes that stop recovery without claiming deletion."""
+
+    RETENTION_POLICY_BLOCKED = "retention_policy_blocked"
+
+
 class ReconciliationArtifactKind(StrEnum):
     """Typed artifact references retained after Harness rows are deleted."""
 

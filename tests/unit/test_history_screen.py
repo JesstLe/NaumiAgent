@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from naumi_agent.harness.retention_executor import (
+    RetentionPassStatus,
+    SessionRetentionPassResult,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -19,6 +23,7 @@ from naumi_agent.ui.history_screen import (
     render_history_screen,
     render_session_delete_preview,
     render_session_retention_preview,
+    render_session_retention_result,
     summarize_session_messages,
 )
 
@@ -148,3 +153,31 @@ def test_render_session_retention_preview_explains_units_reasons_and_safety() ->
     assert "会话持久化载荷" in rendered
     assert "不包含 Harness 数据库和 Artifact 文件" in rendered
     assert "不会删除任何内容" in rendered
+
+
+def test_render_session_retention_result_distinguishes_completed_and_retry() -> None:
+    result = SessionRetentionPassResult(
+        status=RetentionPassStatus.PARTIAL,
+        planned_count=3,
+        attempted_count=3,
+        completed_count=1,
+        retry_scheduled_count=1,
+        retry_exhausted_count=0,
+        policy_blocked_count=1,
+        not_found_count=0,
+        error_count=0,
+        remaining_count=0,
+        planned_bytes=4096,
+        duration_seconds=1.25,
+        results=(),
+        message="部分完成",
+    )
+
+    rendered = render_session_retention_result(result)
+
+    assert "Session 保留清理回执" in rendered
+    assert "完整删除：1" in rendered
+    assert "安全重试：1" in rendered
+    assert "策略阻止：1" in rendered
+    assert "4.0 KiB" in rendered
+    assert "部分完成" in rendered

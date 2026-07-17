@@ -28,6 +28,11 @@ from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorResult,
     SessionReconciliationCoordinator,
 )
+from naumi_agent.harness.retention import LifecycleActor
+from naumi_agent.harness.retention_executor import (
+    SessionRetentionExecutor,
+    SessionRetentionPassResult,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -1636,6 +1641,31 @@ class AgentEngine:
             policy=policy,
             now=datetime.now(),
             current_session_id=(self._session.id if self._session is not None else ""),
+        )
+
+    async def run_session_retention_once(
+        self,
+        *,
+        cancel_event: asyncio.Event | None = None,
+    ) -> SessionRetentionPassResult:
+        """Execute one explicit bounded pass through retention-worker authority."""
+        preview = await self.preview_session_retention()
+
+        async def delete_archived(
+            session_id: str,
+        ) -> ReconciliationCoordinatorResult:
+            return await self._session_reconciliation_coordinator.delete_session(
+                session_id,
+                actor=LifecycleActor.RETENTION_WORKER,
+            )
+
+        executor = SessionRetentionExecutor(delete_archived)
+        return await executor.execute(
+            preview,
+            max_runtime_seconds=(
+                self._config.memory.session_retention.max_runtime_seconds
+            ),
+            cancel_event=cancel_event,
         )
 
     async def _await_delete_completion(

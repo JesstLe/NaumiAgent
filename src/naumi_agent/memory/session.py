@@ -395,6 +395,16 @@ class SessionStore:
         await db.commit()
         return cursor.rowcount > 0
 
+    async def delete_if_archived(self, session_id: str) -> bool:
+        """Atomically delete only while retention authority is still valid."""
+        db = await self._get_db()
+        cursor = await db.execute(
+            "DELETE FROM sessions WHERE id = ? AND status = 'archived'",
+            (session_id,),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
     async def archive(self, session_id: str) -> bool:
         db = await self._get_db()
         timestamp = datetime.now().isoformat()

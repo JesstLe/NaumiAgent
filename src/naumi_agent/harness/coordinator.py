@@ -15,6 +15,7 @@ from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactGcStatus,
     SessionDeleteReconciliation,
     SessionReconciliationState,
+    SessionReconciliationTerminalOutcome,
 )
 from naumi_agent.harness.retention import (
     LifecycleActor,
@@ -77,6 +78,7 @@ class SessionReconciliationCoordinator:
         session_id: str,
         *,
         now: str | None = None,
+        actor: LifecycleActor | str = LifecycleActor.USER,
     ) -> ReconciliationCoordinatorResult:
         """Prepare and execute one user-authorized Session delete request."""
         normalized_session_id = session_id.strip() if isinstance(session_id, str) else ""
@@ -111,7 +113,7 @@ class SessionReconciliationCoordinator:
         decision = decide_lifecycle_transition(
             current_policy,
             LifecyclePolicy.DELETE,
-            actor=LifecycleActor.USER,
+            actor=actor,
         )
         if not decision.allowed:
             return ReconciliationCoordinatorResult(
@@ -127,14 +129,22 @@ class SessionReconciliationCoordinator:
         request_id = build_session_delete_request_id(
             session,
             fallback_workspace=self._fallback_workspace,
+            actor=decision.actor,
         )
         record = await self._harness_store.prepare_session_delete_reconciliation(
             request_id=request_id,
             workspace_root=workspace,
             session_id=normalized_session_id,
-            actor=LifecycleActor.USER,
+            actor=decision.actor,
             created_at=timestamp,
         )
+        terminal = (
+            await self._harness_store.get_session_reconciliation_terminal_outcome(
+                request_id
+            )
+        )
+        if terminal is SessionReconciliationTerminalOutcome.RETENTION_POLICY_BLOCKED:
+            return _retention_policy_blocked(record)
         existing_tombstone = await self._harness_store.get_reconciliation_tombstone(
             request_id
         )
@@ -231,11 +241,39 @@ class SessionReconciliationCoordinator:
     ) -> ReconciliationCoordinatorResult:
         current = record
         if current.state is SessionReconciliationState.PREPARED:
+            if current.actor is LifecycleActor.RETENTION_WORKER:
+                still_allowed = await self._retention_delete_still_allowed(current)
+                if not still_allowed:
+                    return await self._abort_retention(
+                        current,
+                        now=now,
+                        worker_id=worker_id,
+                    )
             try:
-                deleted = await self._session_port.delete(current.session_id)
+                if current.actor is LifecycleActor.RETENTION_WORKER:
+                    delete_if_archived = getattr(
+                        self._session_port,
+                        "delete_if_archived",
+                        None,
+                    )
+                    if not callable(delete_if_archived):
+                        return await self._abort_retention(
+                            current,
+                            now=now,
+                            worker_id=worker_id,
+                        )
+                    deleted = await delete_if_archived(current.session_id)
+                else:
+                    deleted = await self._session_port.delete(current.session_id)
                 if not deleted:
                     remaining = await self._session_port.load(current.session_id)
                     if remaining is not None:
+                        if current.actor is LifecycleActor.RETENTION_WORKER:
+                            return await self._abort_retention(
+                                current,
+                                now=now,
+                                worker_id=worker_id,
+                            )
                         return await self._failure(
                             current,
                             stage=ReconciliationFailureStage.SESSION_DELETE,
@@ -345,6 +383,48 @@ class SessionReconciliationCoordinator:
             message=_completion_message(current),
         )
 
+    async def _retention_delete_still_allowed(
+        self,
+        record: SessionDeleteReconciliation,
+    ) -> bool:
+        """Revalidate retention authority immediately before Session deletion."""
+        session = await self._session_port.load(record.session_id)
+        if session is None:
+            return True
+        try:
+            current_policy = policy_from_session_status(str(session.status))
+        except ValueError:
+            return False
+        return decide_lifecycle_transition(
+            current_policy,
+            LifecyclePolicy.DELETE,
+            actor=LifecycleActor.RETENTION_WORKER,
+        ).allowed
+
+    async def _abort_retention(
+        self,
+        record: SessionDeleteReconciliation,
+        *,
+        now: str,
+        worker_id: str,
+    ) -> ReconciliationCoordinatorResult:
+        await self._harness_store.abort_retention_reconciliation(
+            record.request_id,
+            aborted_at=now,
+        )
+        tombstone_status = None
+        if worker_id:
+            tombstone = await self._harness_store.resolve_reconciliation_tombstone(
+                record.request_id,
+                worker_id=worker_id,
+                resolved_at=now,
+            )
+            tombstone_status = tombstone.status
+        return _retention_policy_blocked(
+            record,
+            tombstone_status=tombstone_status,
+        )
+
     async def _failure(
         self,
         record: SessionDeleteReconciliation,
@@ -397,6 +477,7 @@ def build_session_delete_request_id(
     session: Any,
     *,
     fallback_workspace: str | Path,
+    actor: LifecycleActor | str = LifecycleActor.USER,
 ) -> str:
     """Build a deterministic id scoped to one persisted Session instance."""
     session_id = str(getattr(session, "id", "") or "").strip()
@@ -410,8 +491,20 @@ def build_session_delete_request_id(
         created = str(created_at or "").strip()
     if not created:
         raise ValueError("Session created_at 不能为空。")
+    normalized_actor = actor if isinstance(actor, LifecycleActor) else LifecycleActor(actor)
+    identity = [str(workspace), session_id, created]
+    if normalized_actor is LifecycleActor.RETENTION_WORKER:
+        archived_at = getattr(session, "archived_at", None)
+        archive_epoch = (
+            archived_at.isoformat()
+            if isinstance(archived_at, datetime)
+            else str(archived_at or getattr(session, "updated_at", "")).strip()
+        )
+        if not archive_epoch:
+            raise ValueError("Retention Session archived_at 不能为空。")
+        identity.extend([normalized_actor.value, archive_epoch])
     payload = json.dumps(
-        [str(workspace), session_id, created],
+        identity,
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -457,6 +550,21 @@ def _completion_message(record: SessionDeleteReconciliation) -> str:
         f"保留共享 {record.artifact_shared_count}、"
         "跳过风险 "
         f"{record.artifact_unsafe_count + record.artifact_non_file_count}。"
+    )
+
+
+def _retention_policy_blocked(
+    record: SessionDeleteReconciliation,
+    *,
+    tombstone_status: ReconciliationTombstoneStatus | None = None,
+) -> ReconciliationCoordinatorResult:
+    return ReconciliationCoordinatorResult(
+        session_id=record.session_id,
+        request_id=record.request_id,
+        outcome=ReconciliationCoordinatorOutcome.POLICY_BLOCKED,
+        reconciliation_state=record.state,
+        tombstone_status=tombstone_status,
+        message="Session 已恢复或不再归档，本轮 retention 请求已永久终止。",
     )
 
 
