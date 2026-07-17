@@ -627,6 +627,9 @@ export function reduceServerEvent(state, record) {
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
+        state.harnessReceipts = Object.create(null);
+        state.harnessExplanations = Object.create(null);
+        state.harnessReplays = Object.create(null);
         state.activeAssistant = null;
         state.activeThinking = null;
         state.folds = {};

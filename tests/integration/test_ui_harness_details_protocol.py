@@ -8,18 +8,28 @@ from types import SimpleNamespace
 
 import pytest
 
+from naumi_agent.config.settings import MemoryConfig
 from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
+from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ClientEventType
 
 
 class _BridgeEngine:
-    def __init__(self, service: HarnessService) -> None:
+    def __init__(
+        self,
+        service: HarnessService,
+        *,
+        workspace_root: Path | None = None,
+        session_store: SessionStore | None = None,
+        chat_run_store: ChatRunStore | None = None,
+    ) -> None:
         self.harness_service = service
         self.usage = SimpleNamespace(
             total_input_tokens=0,
@@ -29,7 +39,10 @@ class _BridgeEngine:
         self.router = object()
         self.runtime_mode = "default"
         self.permission_mode = "moderate"
-        self.workspace_root = Path.cwd()
+        self.workspace_root = workspace_root or Path.cwd()
+        self.session_store = session_store
+        self.chat_run_store = chat_run_store
+        self._session = None
 
     def set_permission_confirmer(self, _confirmer: object) -> None:
         return None
@@ -37,16 +50,23 @@ class _BridgeEngine:
     def set_user_interaction_handler(self, _handler: object) -> None:
         return None
 
+    async def load_session(self, session_id: str) -> bool:
+        if self.session_store is None:
+            return False
+        self._session = await self.session_store.load(session_id)
+        return self._session is not None
+
 
 async def _persist_completed_run(
     store: HarnessStore,
     *,
     workspace: Path,
     run_id: str,
+    session_id: str | None = None,
 ) -> None:
     contract = HarnessCompletionContract(
         run_id=run_id,
-        session_id=f"session:{run_id}",
+        session_id=session_id or f"session:{run_id}",
         task_kind=HarnessTaskKind.CHANGE,
         objective="验证 Harness 类型化详情协议",
     )
@@ -290,3 +310,112 @@ async def test_real_bridge_node_reducer_renders_one_combined_completion_card() -
         assert "Harness 未验证" in snapshot["text"]
         assert "检查失败 · unit" in snapshot["text"]
         assert "基础设施异常 · integration" in snapshot["text"]
+
+
+@pytest.mark.asyncio
+async def test_new_bridge_recovers_one_combined_receipt_from_real_stores(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    workspace = tmp_path / "workspace"
+    other_workspace = tmp_path / "other-workspace"
+    workspace.mkdir()
+    other_workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+
+    state_dir = tmp_path / "state"
+    session_db = state_dir / "sessions.db"
+    chat_db = state_dir / "chat-runs.db"
+    harness_db = state_dir / "harness.db"
+    session_id = "session-real-resume"
+    run_id = "run-real-resume"
+
+    session_writer = SessionStore(MemoryConfig(session_db_path=str(session_db)))
+    session = Session(
+        id=session_id,
+        title="真实恢复会话",
+        workspace_root=str(workspace),
+    )
+    session.add_message("user", "恢复上一轮结果")
+    session.add_message("assistant", "上一轮已完成并验证。")
+    await session_writer.save(session)
+    await session_writer.close()
+
+    chat_writer = ChatRunStore(chat_db)
+    await chat_writer.start_run(
+        session_id=session_id,
+        user_message_id="message-real-resume",
+        run_id=run_id,
+    )
+    generic_receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-real-resume",
+            "run_id": run_id,
+            "outcome": "completed",
+            "summary": "历史运行已通过 Harness 验证。",
+            "git_state": {"available": True, "branch": "main", "dirty": False},
+        }
+    )
+    await chat_writer.finish_run(
+        run_id,
+        status="completed",
+        receipt=generic_receipt,
+    )
+
+    harness_writer = HarnessStore(harness_db)
+    await _persist_completed_run(
+        harness_writer,
+        workspace=workspace,
+        run_id=run_id,
+        session_id=session_id,
+    )
+    await _persist_completed_run(
+        harness_writer,
+        workspace=other_workspace,
+        run_id="cross-workspace-resume",
+        session_id=session_id,
+    )
+
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(state_dir / "trust-reader.db"),
+        store=HarnessStore(harness_db),
+    )
+    engine = _BridgeEngine(
+        service,
+        workspace_root=workspace,
+        session_store=SessionStore(MemoryConfig(session_db_path=str(session_db))),
+        chat_run_store=ChatRunStore(chat_db),
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")  # type: ignore[arg-type]
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session(
+        {"session_id": session_id, "clear": True},
+        request_id="resume-real-stores",
+    )
+
+    records = _records(writer)
+    receipts = [
+        record
+        for record in records
+        if record["type"] in {"harness/receipt", "completion/receipt"}
+    ]
+    assert [record["type"] for record in receipts] == [
+        "harness/receipt",
+        "completion/receipt",
+    ]
+    assert receipts[0]["payload"]["run_id"] == run_id  # type: ignore[index]
+    assert all(record["request_id"] == "resume-real-stores" for record in receipts)
+
+    rendered = _render_compact_card_with_real_node(repo_root, records)
+    assert rendered["receiptCount"] == 1
+    assert rendered["harnessStatus"] == "completed_verified"
+    for width in ("80", "120", "200"):
+        snapshot = rendered["widths"][width]  # type: ignore[index]
+        assert snapshot["bounded"] is True
+        assert "Harness 已验证" in snapshot["text"]
+
+    await engine.session_store.close()  # type: ignore[union-attr]

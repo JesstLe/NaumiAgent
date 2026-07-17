@@ -22,6 +22,7 @@ from naumi_agent.harness.models import (
 from naumi_agent.harness.store import (
     HarnessStore,
     HarnessStoreConflictError,
+    HarnessStoreError,
     resolve_harness_db_path,
 )
 
@@ -304,6 +305,74 @@ async def test_workspace_queries_are_isolated_and_bounded(tmp_path: Path) -> Non
     assert [run.id for run in first_runs] == ["run-first"]
     with pytest.raises(ValueError, match="limit"):
         await store.list_runs(first_workspace, limit=0)
+
+
+@pytest.mark.asyncio
+async def test_session_run_queries_require_workspace_and_session_and_keep_order(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "harness.db"
+    first_workspace = tmp_path / "first"
+    second_workspace = tmp_path / "second"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+    store = HarnessStore(db_path)
+
+    for run_id, workspace, session_id, started_at in (
+        ("run-old", first_workspace, "shared-session", _NOW),
+        ("run-new", first_workspace, "shared-session", _LATER),
+        ("run-other-session", first_workspace, "other-session", _LATER),
+        ("run-other-workspace", second_workspace, "shared-session", _LATER),
+    ):
+        await store.start_run(
+            workspace_root=workspace,
+            contract=_contract(run_id=run_id, session_id=session_id),
+            tree_fingerprint_before=_TREE_BEFORE,
+            started_at=started_at,
+        )
+
+    matching = await HarnessStore(db_path).list_session_runs(
+        first_workspace,
+        "shared-session",
+        limit=10,
+    )
+    bounded = await store.list_session_runs(
+        first_workspace,
+        "shared-session",
+        limit=1,
+    )
+
+    assert [run.id for run in matching] == ["run-new", "run-old"]
+    assert [run.id for run in bounded] == ["run-new"]
+    assert await HarnessStore(tmp_path / "missing.db").list_session_runs(
+        first_workspace,
+        "shared-session",
+    ) == ()
+    with pytest.raises(ValueError, match="limit"):
+        await store.list_session_runs(first_workspace, "shared-session", limit=0)
+
+
+@pytest.mark.asyncio
+async def test_session_run_query_rejects_corrupt_persisted_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(db_path)
+    await store.start_run(
+        workspace_root=workspace,
+        contract=_contract(),
+        tree_fingerprint_before=_TREE_BEFORE,
+        started_at=_NOW,
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE harness_runs SET contract_json = ? WHERE id = ?",
+            ("{", "run-store"),
+        )
+        db.commit()
+
+    with pytest.raises(HarnessStoreError, match="损坏"):
+        await store.list_session_runs(workspace, "session-1")
 
 
 @pytest.mark.asyncio

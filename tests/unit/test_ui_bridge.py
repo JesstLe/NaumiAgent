@@ -20,7 +20,9 @@ from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
+from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.reasoning import (
@@ -3349,6 +3351,134 @@ async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path)
         json.loads(json.dumps(receipt.to_dict()))
     ]
     assert replayed[0]["request_id"] == "resume-receipt"
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_replays_harness_receipt_before_generic_receipt(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-harness-resume",
+        run_id="run-harness-resume",
+    )
+    generic_receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-harness-resume",
+            "run_id": run.id,
+            "outcome": "partial",
+            "summary": "历史运行完成但未完全验证。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed_unverified",
+        receipt=generic_receipt,
+    )
+    harness_receipt = HarnessCompletionReceipt(
+        run_id=run.id,
+        status="completed_unverified",
+        task_kind=HarnessTaskKind.CHANGE,
+        changed_files=("src/app.py",),
+        checks=(),
+        criteria=(),
+        warnings=("尚未运行受信检查",),
+        tree_fingerprint="a" * 64,
+    )
+
+    class ResumeHarnessStore:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, str, int]] = []
+
+        async def list_session_runs(
+            self,
+            workspace_root: Path,
+            session_id: str,
+            *,
+            limit: int,
+        ) -> tuple[SimpleNamespace, ...]:
+            self.calls.append((workspace_root, session_id, limit))
+            return (
+                SimpleNamespace(id="run-incomplete", receipt=None),
+                SimpleNamespace(id=run.id, receipt=harness_receipt),
+            )
+
+    harness_store = ResumeHarnessStore()
+    engine.harness_service = SimpleNamespace(store=harness_store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session({}, request_id="resume-harness")
+
+    records = _records(writer)
+    receipt_records = [
+        record
+        for record in records
+        if record["type"] in {"harness/receipt", "completion/receipt"}
+    ]
+    assert [record["type"] for record in receipt_records] == [
+        "harness/receipt",
+        "completion/receipt",
+    ]
+    assert receipt_records[0]["request_id"] == "resume-harness"
+    assert receipt_records[0]["payload"] == {
+        **harness_receipt.model_dump(mode="json"),
+        "schema_version": 1,
+        "revision": 1,
+    }
+    assert harness_store.calls == [(engine.workspace_root, "session-1", 200)]
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_preserves_generic_receipts_when_harness_recovery_fails(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-harness-failure",
+        run_id="run-harness-failure",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-harness-failure",
+            "run_id": run.id,
+            "outcome": "completed",
+            "summary": "通用回执仍应恢复。",
+            "git_state": {"available": False, "dirty": False},
+        }
+    )
+    await engine.chat_run_store.finish_run(run.id, status="completed", receipt=receipt)
+
+    class BrokenHarnessStore:
+        async def list_session_runs(self, *_: Any, **__: Any) -> tuple[Any, ...]:
+            raise RuntimeError("PRIVATE_DATABASE_DETAIL")
+
+    engine.harness_service = SimpleNamespace(store=BrokenHarnessStore())
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session({}, request_id="resume-harness-failure")
+
+    records = _records(writer)
+    assert any(record["type"] == "completion/receipt" for record in records)
+    failure = next(
+        record
+        for record in records
+        if record["type"] == "error"
+        and record["payload"].get("code") == "harness_receipt_recovery_failed"
+    )
+    assert failure["request_id"] == "resume-harness-failure"
+    assert "Harness 回执恢复失败" in failure["payload"]["message"]
+    assert "PRIVATE_DATABASE_DETAIL" not in json.dumps(failure, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
