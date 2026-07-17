@@ -1328,7 +1328,18 @@ class HarnessStore:
         try:
             async with self._write_lock, self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
-                await self._require_reconciliation(db, normalized_request_id)
+                reconciliation = await self._require_reconciliation(
+                    db,
+                    normalized_request_id,
+                )
+                reconciliation_updated = _normalize_utc_timestamp(
+                    reconciliation.updated_at,
+                    field="reconciliation.updated_at",
+                )
+                if timestamp < reconciliation_updated:
+                    raise HarnessStoreConflictError(
+                        "失败时间不能早于 reconciliation 当前状态时间。"
+                    )
                 event_cursor = await db.execute(
                     """
                     SELECT request_id, stage, error_code, occurred_at
