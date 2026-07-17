@@ -3,6 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,6 +64,22 @@ class TestSchemas:
             version=__version__,
             uptime_seconds=0.0,
             active_sessions=0,
+            retention_worker={
+                "configured_enabled": False,
+                "owner_id": "worker-test",
+                "state": "stopped",
+                "lease_held": False,
+                "pass_count": 0,
+                "completed_session_count": 0,
+                "retry_scheduled_count": 0,
+                "failure_count": 0,
+                "consecutive_empty_passes": 0,
+                "next_delay_seconds": 300,
+                "last_pass_status": "",
+                "last_error_code": "",
+                "started_at": "",
+                "last_pass_at": "",
+            },
         )
         assert h.status == "healthy"
 
@@ -72,12 +89,82 @@ class TestHealthEndpoint:
         from naumi_agent.api.app import create_app
 
         app = create_app()
-        client = TestClient(app)
-        resp = client.get("/api/v1/health")
+        with TestClient(app) as client:
+            resp = client.get("/api/v1/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "healthy"
         assert data["version"] == __version__
+        assert data["retention_worker"]["configured_enabled"] is False
+        assert data["retention_worker"]["state"] == "stopped"
+
+    def test_api_lifespan_starts_long_running_services_after_recovery(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import naumi_agent.api.app as api_app
+
+        engine = SimpleNamespace(
+            start_long_running_services=AsyncMock(return_value=()),
+            set_permission_confirmer=lambda _callback: None,
+            chat_run_store=SimpleNamespace(),
+            session_retention_worker_status=lambda: {
+                "configured_enabled": True,
+                "owner_id": "worker-api",
+                "state": "waiting",
+                "lease_held": True,
+                "pass_count": 1,
+                "completed_session_count": 0,
+                "retry_scheduled_count": 0,
+                "failure_count": 0,
+                "consecutive_empty_passes": 0,
+                "next_delay_seconds": 300,
+                "last_pass_status": "completed",
+                "last_error_code": "",
+                "started_at": "2026-07-18T00:00:00+00:00",
+                "last_pass_at": "2026-07-18T00:00:00+00:00",
+            },
+            shutdown=AsyncMock(),
+        )
+        monkeypatch.setattr(api_app, "create_agent_engine", lambda _config: engine)
+        monkeypatch.setattr(
+            api_app.AppConfig,
+            "from_yaml",
+            lambda _path: SimpleNamespace(api=SimpleNamespace()),
+        )
+
+        with TestClient(api_app.create_app()) as client:
+            response = client.get("/api/v1/health")
+
+        assert response.status_code == 200
+        assert response.json()["retention_worker"]["state"] == "waiting"
+        engine.start_long_running_services.assert_awaited_once_with()
+        engine.shutdown.assert_awaited_once_with()
+
+    def test_api_lifespan_closes_engine_when_startup_recovery_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import naumi_agent.api.app as api_app
+
+        engine = SimpleNamespace(
+            start_long_running_services=AsyncMock(
+                side_effect=RuntimeError("recovery failed")
+            ),
+            shutdown=AsyncMock(),
+        )
+        monkeypatch.setattr(api_app, "create_agent_engine", lambda _config: engine)
+        monkeypatch.setattr(
+            api_app.AppConfig,
+            "from_yaml",
+            lambda _path: SimpleNamespace(),
+        )
+
+        with pytest.raises(RuntimeError, match="recovery failed"):
+            with TestClient(api_app.create_app()):
+                pass
+
+        engine.shutdown.assert_awaited_once_with()
 
 
 class _FakeSessionStore:

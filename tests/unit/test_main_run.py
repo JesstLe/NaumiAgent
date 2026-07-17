@@ -56,6 +56,21 @@ def _install_engine(
 
 
 @pytest.mark.asyncio
+async def test_long_running_engine_start_failure_closes_engine() -> None:
+    engine = SimpleNamespace(
+        start_long_running_services=AsyncMock(
+            side_effect=RuntimeError("recovery failed")
+        ),
+        shutdown=AsyncMock(),
+    )
+
+    with pytest.raises(RuntimeError, match="recovery failed"):
+        await main_module._start_long_running_engine(engine)
+
+    engine.shutdown.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_run_task_shuts_down_engine_after_success(monkeypatch) -> None:
     usage = SimpleNamespace(
         total_input_tokens=1,
@@ -64,6 +79,8 @@ async def test_run_task_shuts_down_engine_after_success(monkeypatch) -> None:
         turns=1,
     )
     engine = SimpleNamespace(
+        recover_session_reconciliations=AsyncMock(return_value=()),
+        start_long_running_services=AsyncMock(return_value=()),
         run=AsyncMock(
             return_value=SimpleNamespace(
                 response="ok",
@@ -79,12 +96,17 @@ async def test_run_task_shuts_down_engine_after_success(monkeypatch) -> None:
     await main_module._run_task("hello", "config.yaml")
 
     assert captured["config"] is captured["parsed"]
+    engine.recover_session_reconciliations.assert_awaited_once_with()
+    engine.start_long_running_services.assert_not_awaited()
+    engine.run.assert_awaited_once_with("hello")
     engine.shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_run_task_shuts_down_engine_after_failure(monkeypatch) -> None:
     engine = SimpleNamespace(
+        recover_session_reconciliations=AsyncMock(return_value=()),
+        start_long_running_services=AsyncMock(return_value=()),
         run=AsyncMock(side_effect=RuntimeError("boom")),
         shutdown=AsyncMock(),
     )
@@ -93,4 +115,5 @@ async def test_run_task_shuts_down_engine_after_failure(monkeypatch) -> None:
     await main_module._run_task("hello", "config.yaml")
 
     assert captured["config"] is captured["parsed"]
+    engine.start_long_running_services.assert_not_awaited()
     engine.shutdown.assert_awaited_once()

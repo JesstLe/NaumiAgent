@@ -177,8 +177,30 @@ async def test_create_bridge_uses_composition_root_by_default(
     try:
         assert len(captured) == 1
         assert bridge.engine is engine
+        engine.start_long_running_services.assert_awaited_once_with()
     finally:
         await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_create_bridge_closes_engine_when_startup_recovery_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("models:\n  default_model: test-model\n", encoding="utf-8")
+    engine = _FakeEngine()
+    engine.start_long_running_services = AsyncMock(
+        side_effect=RuntimeError("recovery failed")
+    )
+
+    with pytest.raises(RuntimeError, match="recovery failed"):
+        await ui_bridge.create_bridge(
+            config_path=str(config_path),
+            engine_factory=lambda _config: engine,
+        )
+
+    assert engine.shutdown_called is True
 
 
 @pytest.mark.parametrize(
@@ -332,6 +354,15 @@ class _FakeEngine:
         self._session = None
         self._config = SimpleNamespace(ui=SimpleNamespace(show_reasoning=False))
         self.permission_grants: list[PermissionGrant] = []
+        self.start_long_running_services = AsyncMock(return_value=())
+
+    def session_retention_worker_status(self) -> dict[str, Any]:
+        return {
+            "configured_enabled": False,
+            "state": "stopped",
+            "lease_held": False,
+            "pass_count": 0,
+        }
 
     def set_permission_confirmer(self, confirmer: Any) -> None:
         self.permission_confirmer = confirmer
@@ -675,6 +706,44 @@ def _records(writer: io.StringIO) -> list[dict[str, Any]]:
         for line in writer.getvalue().splitlines()
         if line.strip()
     ]
+
+
+@pytest.mark.asyncio
+async def test_bridge_ping_emits_current_retention_worker_status() -> None:
+    writer = io.StringIO()
+    engine = _FakeEngine()
+    engine.session_retention_worker_status = lambda: {  # type: ignore[method-assign]
+        "configured_enabled": True,
+        "state": "waiting",
+        "lease_held": True,
+        "pass_count": 2,
+    }
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {"id": "ping-1", "type": ClientEventType.PING, "payload": {}}
+    )
+
+    records = _records(writer)
+    assert [record["type"] for record in records] == ["pong", "runtime/status"]
+    assert records[1]["payload"]["retention_worker"]["state"] == "waiting"
+
+
+@pytest.mark.asyncio
+async def test_bridge_ping_suppresses_unchanged_retention_worker_status() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.emit_ready()
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record(
+        {"id": "ping-stable", "type": ClientEventType.PING, "payload": {}}
+    )
+
+    assert [record["type"] for record in _records(writer)] == ["pong"]
 
 
 def test_bridge_resolve_config_path_uses_existing_relative_path(
@@ -2097,6 +2166,8 @@ async def test_bridge_status_payload_includes_compact_task_activity() -> None:
         "subagents_active": 1,
         "browser_active": 1,
         "permissions_pending": 1,
+        "interactions_pending": 0,
+        "queued_conversations": 0,
     }
     await bridge.resolve_permission(
         {"request_id": "perm-1", "choice": "deny"}, request_id="response-1"

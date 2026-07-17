@@ -8,7 +8,7 @@
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
 | HAR-05 | 安全 Replay 与可重复解释 | implemented | H4.1-H4.4 | `harness/HAR-05-safe-replay.md` |
-| HAR-06 | Session 生命周期与派生数据清理 | partial (6.1, 6.2a-6.2c, 6.3a-6.4, 6.6a) | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
+| HAR-06 | Session 生命周期与派生数据清理 | implemented | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a-7.4a) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a) | HAR-05, ARC-03 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | planned | HAR-08 | `harness/HAR-09-feedback-promotion.md` |

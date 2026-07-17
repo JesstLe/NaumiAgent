@@ -68,8 +68,8 @@ owner 可以接管；旧进程恢复后的重复操作仍由协调 request id、
 - Engine 默认关闭、配置门、控制委派和 shutdown stop 均有聚焦测试；
 - v1-v6 Harness 数据库升级至 v7 后原数据不丢失。
 
-## HAR-06.5b2b 后续
+## HAR-06.5b2b 已完成
 
-下一切片把 `periodic_enabled=true` 的 worker 接入所有长期运行入口，并保证每个入口在完成启动恢复
-后才启动周期服务、退出时统一 drain。一次性 `naumi --task` 不启动周期 worker。随后增加 API 状态
-端点与运行时事件，完成 HAR-06.5。
+长期运行入口现已在完成启动恢复后启动明确启用的 worker，退出时统一 drain；一次性
+`naumi run <task>` 不启动周期 worker。New UI 心跳 `runtime/status` 与 API health 暴露同一类型化
+快照，详见 `HAR-06-5b2b-long-running-lifecycle-design.md`。

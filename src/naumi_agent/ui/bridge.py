@@ -456,6 +456,7 @@ class JsonlEngineBridge:
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
+        self._last_retention_worker_status: dict[str, object] | None = None
         self._closed = False
 
         self.engine.set_permission_confirmer(self.confirm_permission)
@@ -489,7 +490,11 @@ class JsonlEngineBridge:
             self.debug_trace.output("ui_bridge.stdout", text)
 
     async def emit_ready(self) -> None:
-        await self.emit(ServerEventType.READY, self.status_payload())
+        payload = self.status_payload()
+        retention_status = payload.get("retention_worker")
+        if isinstance(retention_status, dict):
+            self._last_retention_worker_status = dict(retention_status)
+        await self.emit(ServerEventType.READY, payload)
         if self.debug_trace is not None:
             await self.emit(
                 ServerEventType.DEBUG_TRACE,
@@ -571,6 +576,7 @@ class JsonlEngineBridge:
             },
             "context": context,
             "budget": budget,
+            "retention_worker": self._retention_worker_status_payload(),
             "tasks": self._task_activity_payload(),
             "ui": {
                 "show_reasoning": self._show_reasoning,
@@ -581,6 +587,27 @@ class JsonlEngineBridge:
         if include_slash_commands:
             payload["slash_commands"] = _slash_command_payload()
         return payload
+
+    def _retention_worker_status_payload(self) -> dict[str, object]:
+        try:
+            return self.engine.session_retention_worker_status()
+        except Exception:
+            return {
+                "configured_enabled": False,
+                "owner_id": "",
+                "state": "stopped",
+                "lease_held": False,
+                "pass_count": 0,
+                "completed_session_count": 0,
+                "retry_scheduled_count": 0,
+                "failure_count": 1,
+                "consecutive_empty_passes": 0,
+                "next_delay_seconds": 0.0,
+                "last_pass_status": "",
+                "last_error_code": "status_unavailable",
+                "started_at": "",
+                "last_pass_at": "",
+            }
 
     def _task_activity_payload(self) -> dict[str, int]:
         """Return compact task/activity counts for persistent footer rendering."""
@@ -682,6 +709,13 @@ class JsonlEngineBridge:
                 },
                 request_id=request_id,
             )
+            retention_status = self._retention_worker_status_payload()
+            if retention_status != self._last_retention_worker_status:
+                self._last_retention_worker_status = dict(retention_status)
+                await self.emit(
+                    ServerEventType.STATUS,
+                    {"retention_worker": retention_status},
+                )
             return
 
         if event_type == ClientEventType.SET_MODE:
@@ -2496,6 +2530,11 @@ async def create_bridge(
 
         engine_factory = create_agent_engine
     engine = engine_factory(config)
+    try:
+        await engine.start_long_running_services()
+    except Exception:
+        await engine.shutdown()
+        raise
     debug_trace = DebugTrace.create(
         interface="terminal-ui-bridge",
         base_dir=Path(config.memory.session_db_path).parent / "debug-runs",

@@ -25,21 +25,25 @@ def resolve_config_path() -> str:
 async def lifespan(app: FastAPI):
     config = AppConfig.from_yaml(resolve_config_path())
     engine = create_agent_engine(config)
-    app.state.session_reconciliation_recovery = (
-        await engine.recover_session_reconciliations()
-    )
-    permission_broker = PermissionApprovalBroker()
-    engine.set_permission_confirmer(permission_broker.confirm)
-    app.state.engine = engine
-    app.state.chat_run_store = engine.chat_run_store
-    app.state.active_chat_run_tasks = {}
-    app.state.permission_broker = permission_broker
-    app.state.config = config
-    app.state.engine_lock = asyncio.Lock()
-    app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
-    yield
-    await permission_broker.close()
-    await engine.shutdown()
+    permission_broker: PermissionApprovalBroker | None = None
+    try:
+        app.state.session_reconciliation_recovery = (
+            await engine.start_long_running_services()
+        )
+        permission_broker = PermissionApprovalBroker()
+        engine.set_permission_confirmer(permission_broker.confirm)
+        app.state.engine = engine
+        app.state.chat_run_store = engine.chat_run_store
+        app.state.active_chat_run_tasks = {}
+        app.state.permission_broker = permission_broker
+        app.state.config = config
+        app.state.engine_lock = asyncio.Lock()
+        app.state.started_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+        yield
+    finally:
+        if permission_broker is not None:
+            await permission_broker.close()
+        await engine.shutdown()
 
 
 def create_app() -> FastAPI:

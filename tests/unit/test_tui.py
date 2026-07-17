@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from textual.widgets import Input
@@ -80,6 +80,55 @@ class _HistoryDispatchApp:
 
 
 class TestNaumiApp:
+    @pytest.mark.asyncio
+    async def test_startup_recovery_starts_long_running_services_before_ready(
+        self,
+    ) -> None:
+        recovery = SimpleNamespace(
+            outcome=ReconciliationCoordinatorOutcome.COMPLETED
+        )
+        engine = SimpleNamespace(
+            start_long_running_services=AsyncMock(return_value=(recovery,))
+        )
+        status = SimpleNamespace(status_text="")
+
+        class _App:
+            def __init__(self) -> None:
+                self.engine = engine
+
+            def query_one(self, widget_type: type[object]) -> object:
+                assert widget_type is StatusBar
+                return status
+
+        await NaumiApp._recover_session_reconciliations.__wrapped__(_App())
+
+        engine.start_long_running_services.assert_awaited_once_with()
+        assert status.status_text == "会话协调恢复: 1/1 完成"
+
+    @pytest.mark.asyncio
+    async def test_startup_recovery_failure_is_sanitized_and_actionable(self) -> None:
+        engine = SimpleNamespace(
+            start_long_running_services=AsyncMock(
+                side_effect=RuntimeError("secret database path")
+            )
+        )
+        status = SimpleNamespace(status_text="")
+
+        class _App:
+            def __init__(self) -> None:
+                self.engine = engine
+
+            def query_one(self, widget_type: type[object]) -> object:
+                assert widget_type is StatusBar
+                return status
+
+        await NaumiApp._recover_session_reconciliations.__wrapped__(_App())
+
+        assert "secret database path" not in status.status_text
+        assert status.status_text == (
+            "会话协调恢复失败，周期清理未启动；请运行 /doctor 查看诊断"
+        )
+
     @pytest.mark.asyncio
     async def test_delete_session_surfaces_durable_retry_and_clears_active_chat(
         self,

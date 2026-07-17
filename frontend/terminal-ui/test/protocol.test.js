@@ -945,6 +945,47 @@ test("normalizes authoritative terminal welcome identity fields", () => {
   assert.deepEqual(partial.payload, { model: "openai/gpt-5.4-mini" });
 });
 
+test("normalizes bounded retention worker runtime status", () => {
+  const record = normalizeServerRecord({
+    type: "runtime/status",
+    version: 1,
+    payload: {
+      retention_worker: {
+        configured_enabled: true,
+        owner_id: "worker-1",
+        state: "WAITING",
+        lease_held: true,
+        pass_count: 2,
+        completed_session_count: 1,
+        retry_scheduled_count: 0,
+        failure_count: 0,
+        consecutive_empty_passes: 0,
+        next_delay_seconds: 12.5,
+        last_pass_status: "completed",
+        last_error_code: "",
+        started_at: "2026-07-18T00:00:00+00:00",
+        last_pass_at: "2026-07-18T00:00:01+00:00",
+      },
+    },
+  });
+
+  assert.equal(record.payload.retention_worker.state, "waiting");
+  assert.equal(record.payload.retention_worker.pass_count, 2);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "runtime/status",
+      version: 1,
+      payload: {
+        retention_worker: {
+          ...record.payload.retention_worker,
+          state: "unknown",
+        },
+      },
+    }),
+    /retention_worker.state 无效/,
+  );
+});
+
 test("rejects non-string terminal welcome identity fields", () => {
   assert.throws(
     () => normalizeServerRecord({
