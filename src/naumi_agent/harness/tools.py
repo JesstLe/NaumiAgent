@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from naumi_agent.harness.eval import render_harness_eval
-from naumi_agent.harness.eval_surface import render_eval_baseline_status
+from naumi_agent.harness.eval_surface import (
+    render_eval_baseline_status,
+    render_eval_batch_status,
+)
 from naumi_agent.harness.explain import render_harness_explanation
 from naumi_agent.harness.service import (
     HarnessService,
@@ -26,6 +29,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessReplayTool(service),
         HarnessEvalTool(service),
         HarnessEvalBaselineTool(service),
+        HarnessEvalBatchTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -260,6 +264,68 @@ class HarnessEvalBaselineTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness Baseline 参数无效：{exc}"
         return render_eval_baseline_status(result)
+
+
+class HarnessEvalBatchTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_batch"
+
+    @property
+    def description(self) -> str:
+        return "重复运行一个离线 Eval Suite，并把全部样本保存为不可变 Candidate batch"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint="harness repeated eval candidate batch persist samples",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {"type": "string", "minLength": 1, "maxLength": 1_024},
+                "repetitions": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 100,
+                    "default": 5,
+                },
+                "batch_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                },
+            },
+            "required": ["suite"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        suite = kwargs.get("suite")
+        repetitions = kwargs.get("repetitions", 5)
+        batch_id = kwargs.get("batch_id")
+        if not isinstance(suite, str):
+            return "Harness Eval Batch 参数无效：suite 必须是字符串。"
+        if batch_id is not None and not isinstance(batch_id, str):
+            return "Harness Eval Batch 参数无效：batch_id 必须是字符串。"
+        try:
+            result = await self._service.eval_repetition_batch(
+                suite,
+                repetitions=repetitions,
+                batch_id=batch_id,
+            )
+        except ValueError as exc:
+            return f"Harness Eval Batch 参数无效：{exc}"
+        return render_eval_batch_status(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):

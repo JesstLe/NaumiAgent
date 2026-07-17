@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import shlex
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,10 +37,16 @@ from naumi_agent.harness.context import (
     KnowledgeContextBundle,
     safe_markdown_fence,
 )
-from naumi_agent.harness.eval import evaluate_declared_suites
+from naumi_agent.harness.eval import (
+    HarnessEvalAssetError,
+    evaluate_declared_suites,
+    evaluate_suite_repetitions,
+    resolve_declared_eval_suite,
+)
 from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
+    HarnessEvalBatchStatus,
     build_eval_baseline_status,
 )
 from naumi_agent.harness.evidence import EvidenceCollector
@@ -278,6 +286,127 @@ class HarnessService:
                 message="Harness Eval 状态库损坏、不可读或正忙。",
             )
         return build_eval_baseline_status(suite, active, comparisons)
+
+    async def eval_repetition_batch(
+        self,
+        suite: str,
+        *,
+        repetitions: int = 5,
+        batch_id: str | None = None,
+    ) -> HarnessEvalBatchStatus:
+        """Run and durably append one repeated static Eval candidate cohort."""
+        if not isinstance(suite, str) or not suite.strip() or len(suite.strip()) > 1_024:
+            raise ValueError("suite 必须是 1..1024 个字符。")
+        if not isinstance(repetitions, int) or isinstance(repetitions, bool):
+            raise ValueError("repetitions 必须是整数。")
+        if not 5 <= repetitions <= 100:
+            raise ValueError("repetitions 必须在 5..100 之间。")
+        normalized_batch = batch_id.strip() if isinstance(batch_id, str) else ""
+        if batch_id is not None and not normalized_batch:
+            raise ValueError("batch_id 不能为空。")
+        if normalized_batch and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            normalized_batch,
+        ):
+            raise ValueError("batch_id 格式无效。")
+        if not normalized_batch:
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            normalized_batch = f"eval-{timestamp}-{uuid.uuid4().hex[:8]}"
+        if self._store is None:
+            return _eval_batch_error(
+                normalized_batch,
+                suite.strip(),
+                repetitions,
+                "store_unavailable",
+                "Harness 状态库尚未初始化，未运行重复 Eval。",
+            )
+        status = await self.status()
+        if status.code is HarnessStatusCode.MISSING:
+            return _eval_batch_error(
+                normalized_batch,
+                suite.strip(),
+                repetitions,
+                "profile_missing",
+                "当前工作区尚未配置 Harness Profile。",
+            )
+        if status.code is HarnessStatusCode.INVALID:
+            return _eval_batch_error(
+                normalized_batch,
+                suite.strip(),
+                repetitions,
+                "profile_invalid",
+                "Harness Profile 无效；请先运行 /harness doctor。",
+            )
+        profile = status.snapshot.profile
+        assert profile is not None and status.profile_digest is not None
+        try:
+            suite_path = resolve_declared_eval_suite(
+                self.workspace_root,
+                profile.evals.suites,
+                suite.strip(),
+            )
+        except HarnessEvalAssetError as exc:
+            return _eval_batch_error(
+                normalized_batch,
+                suite.strip(),
+                repetitions,
+                exc.code,
+                str(exc),
+            )
+        batch = await asyncio.to_thread(
+            evaluate_suite_repetitions,
+            self.workspace_root,
+            suite_path,
+            repetitions=repetitions,
+            profile_digest=status.profile_digest,
+            profile_trusted=status.trusted,
+        )
+        persisted = 0
+        created_at = datetime.now(UTC).isoformat()
+        try:
+            for index, result in enumerate(batch.results):
+                await self._store.record_eval_result(
+                    workspace_root=self.workspace_root,
+                    batch_id=normalized_batch,
+                    sample_index=index,
+                    result=result,
+                    created_at=created_at,
+                )
+                persisted += 1
+        except (HarnessStoreError, ValueError) as exc:
+            return _eval_batch_error(
+                normalized_batch,
+                batch.results[0].suite_id if batch.results else suite.strip(),
+                repetitions,
+                "batch_persistence_failed",
+                str(exc),
+                completed=batch.completed,
+                persisted=persisted,
+                duration_ms=batch.duration_ms,
+            )
+        identity = (
+            batch.results[0].baseline_identity if batch.results else None
+        )
+        return HarnessEvalBatchStatus(
+            status=batch.status,
+            code=batch.code,
+            batch_id=normalized_batch,
+            suite_id=batch.results[0].suite_id if batch.results else suite.strip(),
+            requested=batch.requested,
+            completed=batch.completed,
+            persisted=persisted,
+            passed_cases=sum(result.passed for result in batch.results),
+            implementation_failures=sum(
+                result.implementation_failures for result in batch.results
+            ),
+            evaluation_errors=sum(
+                result.evaluation_errors for result in batch.results
+            ),
+            skipped=sum(result.skipped for result in batch.results),
+            duration_ms=batch.duration_ms,
+            baseline_eligible=bool(identity and identity.baseline_eligible),
+            identity_sha256=identity.identity_sha256 if identity is not None else "",
+        )
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
         """Run one exact check from the currently trusted Profile."""
@@ -1421,6 +1550,30 @@ def _unavailable_check_result(
         tree_fingerprint="-",
         profile_digest=profile_digest,
         message=message,
+    )
+
+
+def _eval_batch_error(
+    batch_id: str,
+    suite_id: str,
+    requested: int,
+    code: str,
+    message: str,
+    *,
+    completed: int = 0,
+    persisted: int = 0,
+    duration_ms: float = 0,
+) -> HarnessEvalBatchStatus:
+    return HarnessEvalBatchStatus(
+        status="error",
+        code=code,
+        message=message,
+        batch_id=batch_id,
+        suite_id=suite_id,
+        requested=requested,
+        completed=completed,
+        persisted=persisted,
+        duration_ms=duration_ms,
     )
 
 
