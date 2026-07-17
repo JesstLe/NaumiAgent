@@ -23,3 +23,22 @@
 - dry-run 列出预计行数、空间、不可逆步骤，不改变任何字节。
 - 跨库操作中断后可重启 reconcile，不重复删除或遗留永久孤儿。
 - 发布包包含 schema compatibility matrix 和 downgrade 说明。
+
+## 实现进度
+
+### ARC-05.1 Store Catalog（已实现，2026-07-17）
+
+- `src/naumi_agent/persistence/store_catalog.py` 登记 11 个物理 Store，覆盖共享
+  Runtime Core、Run、Goal、Pursuit、Scheduler、Harness、Harness Trust、Background、
+  Browser Runtime、Browser Daemon 和 Vector Memory。
+- 每项包含稳定 ID、绝对路径、一个或多个 owner、存储类型、version strategy、支持的
+  schema version、敏感级别、retention policy 和惰性创建语义。
+- SQLite 使用只读 URI 读取 `PRAGMA user_version`；JSON 有 8 MiB 有界解析；目录只读探测。
+  缺失 Store 不创建，高版本/损坏/类型错误明确报错，未版本化和 POSIX 权限过宽明确提醒。
+- `/doctor`、TUI Doctor 与 Agent `doctor_diagnostics` 通过共享 `run_doctor()` 自动显示
+  “状态存储目录”，不建立第二套 UI 或路径推导。
+- 本机真实配置验证了 11 项中 7 项已存在、4 项未创建、0 项错误；检查前后已存在文件的
+  size、mtime、mode、SHA-256 完全相同。
+
+尚未完成 ARC-05.2-05.7；Catalog 只报告权限问题，不自动修改用户文件。ARC-05 保持
+`partial (5.1)`。

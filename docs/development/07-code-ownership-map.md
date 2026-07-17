@@ -45,7 +45,7 @@
 | ARC-02 | `runtime/service`, transport/client/supervisor | socket/pipe/reconnect/multi-client |
 | ARC-03 | `protocol/schemas`, Python/TS validators | conformance/version/gap fixtures |
 | ARC-04 | `daemons/` 与 Runtime worker adapters | grant/idempotency/cancel/crash |
-| ARC-05 | `state/catalog`, migration/recovery/retention | historical fixtures/rollback/saga |
+| ARC-05 | `persistence/store_catalog.py`, 后续 migration/recovery/retention | historical fixtures/rollback/saga |
 | ARC-06 | `runtime/scheduler`, admission/backpressure | load/fairness/429/isolation/soak |
 | ARC-07 | build/release/update scripts 与 manifests | unpack/sign/install/upgrade/rollback |
 | ARC-08 | observability/SLO/fault injection/runbooks | redaction/metrics/backup/disaster |

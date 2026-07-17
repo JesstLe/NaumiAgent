@@ -26,7 +26,7 @@ modules:
   - {id: ARC-02, status: planned, path: architecture/ARC-02-runtime-service.md, depends_on: [ARC-01, ARC-03]}
   - {id: ARC-03, status: partial, path: architecture/ARC-03-protocol-versioning.md, depends_on: []}
   - {id: ARC-04, status: planned, path: architecture/ARC-04-execution-daemons.md, depends_on: [ARC-02, ARC-03]}
-  - {id: ARC-05, status: planned, path: architecture/ARC-05-state-migrations.md, depends_on: [ARC-01]}
+  - {id: ARC-05, status: partial, path: architecture/ARC-05-state-migrations.md, depends_on: [ARC-01]}
   - {id: ARC-06, status: planned, path: architecture/ARC-06-concurrency-cluster.md, depends_on: [ARC-02, ARC-04]}
   - {id: ARC-07, status: planned, path: architecture/ARC-07-packaging-update.md, depends_on: [ARC-02, UI-17]}
   - {id: ARC-08, status: planned, path: architecture/ARC-08-reliability.md, depends_on: [ARC-02, ARC-05]}
