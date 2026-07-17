@@ -948,7 +948,14 @@ test("normalizes workbench snapshot events", () => {
     type: "workbench/snapshot",
     version: 1,
     payload: {
+      schema_version: 1,
+      stream_id: "stream-a",
+      revision: 3,
+      generated_at: "2026-07-17T12:00:00+08:00",
+      full: true,
       session_id: "s",
+      counts: { tasks: "2", worktrees: 1, reviews: 1 },
+      active_selection: { task_id: 7, mission_id: "m1" },
       missions: [{ id: "m1", title: "Mac 工作台" }],
       issues: [],
       tasks: [],
@@ -958,6 +965,16 @@ test("normalizes workbench snapshot events", () => {
   });
 
   assert.equal(record.payload.session_id, "s");
+  assert.equal(record.payload.stream_id, "stream-a");
+  assert.equal(record.payload.revision, 3);
+  assert.deepEqual(record.payload.counts, {
+    missions: 0,
+    tasks: 2,
+    worktrees: 1,
+    reviews: 1,
+    failures: 0,
+  });
+  assert.equal(record.payload.active_selection.task_id, "7");
   assert.equal(record.payload.missions[0].title, "Mac 工作台");
 });
 
@@ -972,12 +989,16 @@ test("normalizes workbench event payloads", () => {
       subject_id: "1",
       payload: { lease_id: "lease-1" },
       timestamp: "2026-06-27T10:00:00",
+      stream_id: "stream-a",
+      revision: 4,
     },
   });
 
   assert.equal(record.payload.id, "evt-1");
   assert.equal(record.payload.type, "issue.claimed");
   assert.equal(record.payload.actor, "Backend-Agent");
+  assert.equal(record.payload.stream_id, "stream-a");
+  assert.equal(record.payload.revision, 4);
   assert.equal(record.payload.subject_id, "1");
   assert.equal(record.payload.payload.lease_id, "lease-1");
   assert.equal(record.payload.timestamp, "2026-06-27T10:00:00");

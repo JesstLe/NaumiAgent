@@ -44,6 +44,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/resume", aliases: ["/r"], description: "继续最近一次对话" },
   { command: "/task", description: "创建任务、切换任务输入，或按 ID 打开任务" },
   { command: "/tasks", description: "显示/更新任务面板（支持 list/open/cancel/refresh）" },
+  { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
   { command: "/agents", description: "打开 Agent 控制中心" },
@@ -71,6 +72,26 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/usage", aliases: ["/u"], description: "查看 Token 与费用" },
   { command: "/version", aliases: ["/v"], description: "查看当前版本" },
 ];
+
+function createEmptyWorkbenchState() {
+  return {
+    schema_version: 1,
+    stream_id: "",
+    revision: 0,
+    generated_at: "",
+    full: true,
+    session_id: "",
+    counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
+    active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+    missions: [],
+    tasks: [],
+    issues: [],
+    failures: [],
+    events: [],
+    loading: false,
+    error: "",
+  };
+}
 
 const SLASH_COMMAND_ALIAS_HINTS = Object.freeze({
   "/help": ["/h"],
@@ -289,14 +310,7 @@ export function createInitialState() {
     folds: {},
     foldCursor: 0,
     renderCache: createRenderCache(),
-    workbench: {
-      session_id: "",
-      missions: [],
-      tasks: [],
-      issues: [],
-      failures: [],
-      events: [],
-    },
+    workbench: createEmptyWorkbenchState(),
   };
 }
 
@@ -341,6 +355,31 @@ export function updateBridgeHeartbeat(state, value = {}) {
     clearRenderCache(state.renderCache);
   }
   return notificationAdded;
+}
+
+function workbenchMatchesCurrentSession(state, payload) {
+  const sessionId = String(payload.session_id || "");
+  return Boolean(sessionId)
+    && (!state.currentSessionId || sessionId === String(state.currentSessionId));
+}
+
+function applyWorkbenchSnapshot(state, payload) {
+  if (!workbenchMatchesCurrentSession(state, payload)) return false;
+  const streamId = String(payload.stream_id || "");
+  const revision = Number(payload.revision) || 0;
+  const currentStreamId = String(state.workbench.stream_id || "");
+  const currentRevision = Number(state.workbench.revision) || 0;
+  if (streamId && revision > 0) {
+    if (streamId === currentStreamId && revision <= currentRevision) return false;
+    if (streamId !== currentStreamId && payload.full === false) return false;
+  }
+  state.workbench = {
+    ...createEmptyWorkbenchState(),
+    ...payload,
+    loading: false,
+    error: "",
+  };
+  return true;
 }
 
 export function reduceServerEvent(state, record) {
@@ -407,7 +446,7 @@ export function reduceServerEvent(state, record) {
         };
         state.composerIntent = "chat";
         if (payload.workbench_snapshot && typeof payload.workbench_snapshot === "object") {
-          state.workbench = payload.workbench_snapshot;
+          applyWorkbenchSnapshot(state, payload.workbench_snapshot);
         }
       }
       break;
@@ -624,6 +663,7 @@ export function reduceServerEvent(state, record) {
       state.activeRuntimePhase = "";
       resetInspectorSnapshot(state.inspector);
       resetAgentControlSnapshot(state.agents);
+      state.workbench = createEmptyWorkbenchState();
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
@@ -650,6 +690,16 @@ export function reduceServerEvent(state, record) {
         state.agents.loading = false;
         state.agents.error = payload.message ?? "Agent 页面刷新失败，已保留上一次快照。";
         state.agents.stale = Boolean(state.agents.snapshot);
+        break;
+      }
+      if ([
+        "workbench_snapshot_failed",
+        "workbench_unavailable",
+        "workbench_session_mismatch",
+      ].includes(payload.code)) {
+        state.workbench.loading = false;
+        state.workbench.error = payload.message ?? "Workbench 快照加载失败。";
+        pushSystemMessage(state, "Workbench", state.workbench.error, "error");
         break;
       }
       if (String(payload.code || "").startsWith("agents_")) {
@@ -704,12 +754,62 @@ export function reduceServerEvent(state, record) {
     }
     case "shutdown":
       return [{ type: "exit" }];
-    case "workbench/snapshot":
-      state.workbench = record.payload;
+    case "workbench/snapshot": {
+      const requested = Boolean(state.workbench.loading);
+      const confirmsCurrent = requested
+        && String(record.payload.stream_id || "") === String(state.workbench.stream_id || "")
+        && Number(record.payload.revision) === Number(state.workbench.revision);
+      const applied = applyWorkbenchSnapshot(state, record.payload);
+      if (confirmsCurrent) {
+        state.workbench.loading = false;
+        state.workbench.error = "";
+      }
+      if ((applied || confirmsCurrent) && requested) {
+        const counts = state.workbench.counts;
+        pushSystemMessage(
+          state,
+          "Workbench",
+          `已同步：任务 ${counts.tasks} · worktree ${counts.worktrees} · 待审 ${counts.reviews}`,
+          "info",
+        );
+      }
       break;
-    case "workbench/event":
+    }
+    case "workbench/event": {
+      const eventSessionId = String(record.payload.session_id || "");
+      const eventStreamId = String(record.payload.stream_id || "");
+      const nextRevision = Number(record.payload.revision) || 0;
+      if (eventSessionId && !workbenchMatchesCurrentSession(state, record.payload)) break;
+      if (eventStreamId && nextRevision > 0) {
+        const currentStreamId = String(state.workbench.stream_id || "");
+        const currentRevision = Number(state.workbench.revision) || 0;
+        if (eventStreamId === currentStreamId && nextRevision <= currentRevision) break;
+        if (
+          !currentStreamId
+          || eventStreamId !== currentStreamId
+          || nextRevision !== currentRevision + 1
+        ) {
+          if (state.workbench.loading) break;
+          state.workbench.loading = true;
+          return [{
+            type: "refresh_workbench",
+            knownRevision: currentRevision,
+            knownStreamId: currentStreamId,
+            sessionId: String(eventSessionId || state.currentSessionId || ""),
+          }];
+        }
+        state.workbench.events = [...state.workbench.events, record.payload].slice(-100);
+        state.workbench.loading = true;
+        return [{
+          type: "refresh_workbench",
+          knownRevision: currentRevision,
+          knownStreamId: currentStreamId,
+          sessionId: String(eventSessionId || state.currentSessionId || ""),
+        }];
+      }
       state.workbench.events = [...state.workbench.events, record.payload].slice(-100);
       break;
+    }
     default:
       break;
   }
@@ -2009,6 +2109,16 @@ export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
+  }
+  if (commandText === "/workbench") {
+    state.workbench.loading = true;
+    state.workbench.error = "";
+    send("workbench/request", {
+      session_id: String(state.currentSessionId || ""),
+      known_stream_id: String(state.workbench.stream_id || ""),
+      known_revision: Number(state.workbench.revision) || 0,
+    });
+    return;
   }
   if (commandText === "/agents") {
     toggleAgentControlCenter(state, send, true);

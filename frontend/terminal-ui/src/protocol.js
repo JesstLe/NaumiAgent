@@ -304,9 +304,29 @@ function normalizeServerPayload(type, payload) {
     };
   }
   if (type === "workbench/snapshot") {
+    const counts = normalizeObject(payload.counts);
+    const selection = normalizeObject(payload.active_selection);
     return {
       ...payload,
+      schema_version: Number(payload.schema_version) || 1,
+      stream_id: String(payload.stream_id ?? ""),
+      revision: Math.max(0, Number(payload.revision) || 0),
+      generated_at: String(payload.generated_at ?? ""),
+      full: payload.full !== false,
       session_id: String(payload.session_id ?? ""),
+      counts: {
+        missions: Math.max(0, Number(counts.missions) || 0),
+        tasks: Math.max(0, Number(counts.tasks) || 0),
+        worktrees: Math.max(0, Number(counts.worktrees) || 0),
+        reviews: Math.max(0, Number(counts.reviews) || 0),
+        failures: Math.max(0, Number(counts.failures) || 0),
+      },
+      active_selection: {
+        mission_id: String(selection.mission_id ?? ""),
+        task_id: String(selection.task_id ?? ""),
+        worktree: String(selection.worktree ?? ""),
+        review_id: String(selection.review_id ?? ""),
+      },
       missions: Array.isArray(payload.missions) ? payload.missions : [],
       tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
       issues: Array.isArray(payload.issues) ? payload.issues : [],
@@ -317,6 +337,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/event") {
     return {
       ...payload,
+      session_id: String(payload.session_id ?? ""),
+      stream_id: String(payload.stream_id ?? ""),
+      revision: Math.max(0, Number(payload.revision) || 0),
       id: String(payload.id ?? ""),
       type: String(payload.type ?? ""),
       actor: String(payload.actor ?? ""),

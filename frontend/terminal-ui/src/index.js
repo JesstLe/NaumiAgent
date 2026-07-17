@@ -400,6 +400,13 @@ function handleBridgeLine(line) {
         session_id: action.sessionId ?? state.currentSessionId,
       });
     }
+    if (action.type === "refresh_workbench") {
+      send("workbench/request", {
+        session_id: action.sessionId ?? state.currentSessionId,
+        known_stream_id: action.knownStreamId ?? state.workbench.stream_id,
+        known_revision: action.knownRevision ?? state.workbench.revision,
+      });
+    }
   }
   if (actions.some((action) => action.type === "exit")) {
     exit();
