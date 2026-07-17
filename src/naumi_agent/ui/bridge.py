@@ -728,6 +728,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.AGENTS_STOP:
             await self.stop_agent_execution(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.WORKBENCH_REQUEST:
+            await self.show_workbench(payload, request_id=request_id)
+            return
 
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
@@ -1373,6 +1376,63 @@ class JsonlEngineBridge:
                 "Inspector 刷新失败，已保留上一次快照。",
                 code="inspector_refresh_failed",
             )
+
+    async def show_workbench(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Return one read-only, authoritative Workbench snapshot."""
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Workbench 只能读取当前会话。",
+                code="workbench_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        if service is None:
+            await self.emit_error(
+                "Workbench 服务暂不可用。",
+                code="workbench_unavailable",
+                request_id=request_id,
+            )
+            return
+        try:
+            snapshot = await service.dashboard_snapshot(session_id)
+            if (
+                str(snapshot.get("session_id") or "") != session_id
+                or int(snapshot.get("schema_version") or 0) != 1
+                or int(snapshot.get("revision") or 0) < 1
+                or not str(snapshot.get("stream_id") or "")
+                or snapshot.get("full") is not True
+            ):
+                raise ValueError("invalid Workbench snapshot contract")
+        except Exception as exc:
+            error_type = type(exc).__name__
+            logger.warning("Workbench snapshot failed (%s)", error_type)
+            if self.debug_trace is not None:
+                self.debug_trace.event(
+                    "workbench.snapshot_failed",
+                    {"error_type": error_type},
+                )
+            await self.emit_error(
+                "Workbench 快照加载失败；请稍后重试或运行 `/doctor`。",
+                code="workbench_snapshot_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.WORKBENCH_SNAPSHOT,
+            snapshot,
+            request_id=request_id,
+        )
 
     async def show_agents(
         self,

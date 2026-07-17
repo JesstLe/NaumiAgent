@@ -79,6 +79,36 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_workbench_snapshot_requests() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_REQUEST,
+            "payload": {
+                "session_id": 42,
+                "known_stream_id": " stream-a ",
+                "known_revision": "7",
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "session_id": "42",
+        "known_stream_id": "stream-a",
+        "known_revision": 7,
+    }
+
+
+@pytest.mark.parametrize("revision", [True, -1, 2_147_483_648, "unknown"])
+def test_protocol_rejects_invalid_workbench_revisions(revision: object) -> None:
+    with pytest.raises(ValueError, match="known_revision"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.WORKBENCH_REQUEST,
+                "payload": {"known_revision": revision},
+            }
+        )
+
+
 def test_protocol_normalizes_harness_detail_requests() -> None:
     for event_type in (
         ClientEventType.HARNESS_EXPLAIN_REQUEST,

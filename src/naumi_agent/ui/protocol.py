@@ -34,6 +34,7 @@ class ClientEventType(StrEnum):
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
+    WORKBENCH_REQUEST = "workbench/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -287,6 +288,28 @@ def _normalize_client_payload(
             "open": _to_bool(payload.get("open", True)),
             "known_revision": known_revision,
             "session_id": session_id,
+        }
+
+    if event_type == ClientEventType.WORKBENCH_REQUEST:
+        raw_revision = payload.get("known_revision", 0)
+        if isinstance(raw_revision, bool):
+            raise ValueError("Workbench known_revision 必须是非负整数。")
+        try:
+            known_revision = int(raw_revision)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Workbench known_revision 必须是非负整数。") from exc
+        if known_revision < 0 or known_revision > 2_147_483_647:
+            raise ValueError("Workbench known_revision 必须是非负整数。")
+        session_id = str(payload.get("session_id") or "").strip()
+        stream_id = str(payload.get("known_stream_id") or "").strip()
+        if len(session_id) > 500:
+            raise ValueError("Workbench session_id 不能超过 500 个字符。")
+        if len(stream_id) > 128:
+            raise ValueError("Workbench known_stream_id 不能超过 128 个字符。")
+        return {
+            "session_id": session_id,
+            "known_stream_id": stream_id,
+            "known_revision": known_revision,
         }
 
     if event_type == ClientEventType.AGENTS_STOP:

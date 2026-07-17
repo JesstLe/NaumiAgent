@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
+import uuid
+from collections import OrderedDict
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -37,6 +42,83 @@ from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
 
 
+def _status_text(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Derive deterministic counts and an initial selection from authoritative data."""
+    missions = list(snapshot.get("missions") or [])
+    tasks = list(snapshot.get("tasks") or [])
+    issues = list(snapshot.get("issues") or [])
+    leases = list(snapshot.get("leases") or [])
+    approvals = list(snapshot.get("approvals") or [])
+    failures = list(snapshot.get("failures") or [])
+
+    active_task = next(
+        (task for task in tasks if _status_text(task.get("status")) == "in_progress"),
+        None,
+    )
+    active_task_id = str((active_task or {}).get("id") or "")
+    active_issue = next(
+        (issue for issue in issues if str(issue.get("task_id") or "") == active_task_id),
+        None,
+    )
+    active_mission = next(
+        (
+            mission
+            for mission in missions
+            if _status_text(mission.get("status")) in {"active", "planning"}
+        ),
+        None,
+    )
+    mission_id = str(
+        (active_issue or {}).get("mission_id")
+        or (active_mission or {}).get("id")
+        or ""
+    )
+    active_lease = next(
+        (lease for lease in leases if str(lease.get("task_id") or "") == active_task_id),
+        None,
+    )
+    worktree = str(
+        (active_issue or {}).get("related_worktree")
+        or (active_lease or {}).get("worktree_name")
+        or ""
+    )
+    active_review = next(
+        (
+            review
+            for review in approvals
+            if str(review.get("task_id") or "") == active_task_id
+        ),
+        approvals[0] if approvals else None,
+    )
+    worktrees = {
+        str(value)
+        for value in [
+            *(issue.get("related_worktree") for issue in issues),
+            *(lease.get("worktree_name") for lease in leases),
+        ]
+        if str(value or "").strip()
+    }
+    return {
+        "counts": {
+            "missions": len(missions),
+            "tasks": len(tasks),
+            "worktrees": len(worktrees),
+            "reviews": len(approvals),
+            "failures": len(failures),
+        },
+        "active_selection": {
+            "mission_id": mission_id,
+            "task_id": active_task_id,
+            "worktree": worktree,
+            "review_id": str((active_review or {}).get("id") or ""),
+        },
+    }
+
+
 class WorkbenchService:
     """High-level facade for dashboard operations."""
 
@@ -54,6 +136,8 @@ class WorkbenchService:
         self._validation_runner = validation_runner
         self._workspace_root = workspace_root
         self._review_evidence_collector = review_evidence_collector
+        self._snapshot_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
+        self._snapshot_states: OrderedDict[str, tuple[str, str, int]] = OrderedDict()
 
     def _tasks_for_session(self, session_id: str) -> TaskStore:
         return self._task_store.scoped(session_id)
@@ -646,6 +730,23 @@ class WorkbenchService:
         return asdict(profile)
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
+        async with self._snapshot_lock_for(session_id):
+            return await self._build_dashboard_snapshot(session_id)
+
+    def _snapshot_lock_for(self, session_id: str) -> asyncio.Lock:
+        lock = self._snapshot_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._snapshot_locks[session_id] = lock
+        self._snapshot_locks.move_to_end(session_id)
+        while len(self._snapshot_locks) > 100:
+            oldest_session, oldest_lock = next(iter(self._snapshot_locks.items()))
+            if oldest_lock.locked():
+                break
+            del self._snapshot_locks[oldest_session]
+        return lock
+
+    async def _build_dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         tasks = await self._tasks_for_session(session_id).list_tasks()
         raw_agent_profiles = await self._workbench_store.list_agent_profiles(
             session_id, limit=50
@@ -702,7 +803,7 @@ class WorkbenchService:
             session_id, [task.id for task in tasks]
         )
         proposals = await self._workbench_store.list_proposals_for_snapshot(session_id)
-        return {
+        snapshot = {
             "version": 1,
             "session_id": session_id,
             "summary": self._snapshot_summary(
@@ -727,6 +828,53 @@ class WorkbenchService:
             "validation_runs": validation_runs,
             "context_snapshots": context_snapshots,
             "approvals": [self._approval_to_dict(approval) for approval in approvals],
+        }
+        return self._version_dashboard_snapshot(snapshot)
+
+    def _version_dashboard_snapshot(
+        self,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Attach bounded, session-scoped consistency metadata to a full snapshot."""
+        session_id = str(snapshot.get("session_id") or "")
+        summary = _workbench_navigation_summary(snapshot)
+        comparable = {
+            **snapshot,
+            "counts": summary["counts"],
+            "active_selection": summary["active_selection"],
+        }
+        encoded = json.dumps(
+            comparable,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+        fingerprint = hashlib.sha256(encoded).hexdigest()
+        previous_state = self._snapshot_states.get(session_id)
+        if previous_state is None:
+            previous_state = (uuid.uuid4().hex[:16], "", 0)
+        previous_stream_id, previous_fingerprint, previous_revision = previous_state
+        revision = (
+            previous_revision
+            if fingerprint == previous_fingerprint
+            else previous_revision + 1
+        )
+        self._snapshot_states[session_id] = (
+            previous_stream_id,
+            fingerprint,
+            revision,
+        )
+        self._snapshot_states.move_to_end(session_id)
+        while len(self._snapshot_states) > 100:
+            self._snapshot_states.popitem(last=False)
+        return {
+            **comparable,
+            "schema_version": 1,
+            "stream_id": previous_stream_id,
+            "revision": revision,
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "full": True,
         }
 
     @staticmethod

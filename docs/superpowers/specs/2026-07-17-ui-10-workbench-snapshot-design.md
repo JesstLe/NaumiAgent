@@ -16,12 +16,13 @@
 ## 权威与版本语义
 
 - producer：现有 `WorkbenchService`；不创建第二个 Store 或前端推导层。
-- `stream_id`：每个 Service 实例生成一次；后端重启后变化。
+- `stream_id`：每个 Service/session 代际生成一次；后端重启或有界状态淘汰后变化。
 - `revision`：按 session 独立计数。快照规范内容指纹变化时加一；相同内容重复查询保持 revision。
 - `schema_version=1`、`full=true`；完整快照可在 stream 变化时替换旧状态。
 - 前端只接受当前 session。相同 stream 下 revision 小于等于当前值时幂等忽略。
-- revisioned `workbench/event` 必须是当前 revision + 1；断序、缺少基线或 stream 改变时不追加，返回
-  `refresh_workbench` action 请求完整快照。
+- revisioned `workbench/event` 必须是当前 revision + 1；连续事件可先进入时间线，但 UI-10.1 尚无
+  domain patch，因此仍请求完整快照且不提前推进 snapshot revision。断序、缺少基线或 stream 改变时
+  不追加，直接返回 `refresh_workbench` action。
 - 旧的无 revision 事件只保留兼容追加行为，后续 UI-10.5 移除兼容窗口。
 
 ## 快照摘要

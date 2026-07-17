@@ -2152,12 +2152,21 @@ test("initial state includes empty workbench bucket", () => {
   const state = createInitialState();
 
   assert.deepEqual(state.workbench, {
+    schema_version: 1,
+    stream_id: "",
+    revision: 0,
+    generated_at: "",
+    full: true,
     session_id: "",
+    counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
+    active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
     missions: [],
     tasks: [],
     issues: [],
     failures: [],
     events: [],
+    loading: false,
+    error: "",
   });
 });
 
@@ -2182,6 +2191,133 @@ test("workbench snapshot replaces dashboard state", () => {
   assert.equal(state.workbench.issues[0].risk_level, "high");
   assert.equal(state.workbench.failures[0].kind, "test_failed");
   assert.equal(state.workbench.events[0].type, "issue.created");
+});
+
+test("workbench snapshots reject session leaks and stale same-stream revisions", () => {
+  const state = createInitialState();
+  state.currentSessionId = "s";
+  const snapshot = (streamId, revision, tasks, sessionId = "s") => ({
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1,
+      stream_id: streamId,
+      revision,
+      generated_at: "2026-07-17T12:00:00+08:00",
+      full: true,
+      session_id: sessionId,
+      counts: { missions: 0, tasks, worktrees: 0, reviews: 0, failures: 0 },
+      active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+    },
+  });
+
+  reduceServerEvent(state, snapshot("stream-a", 2, 2));
+  reduceServerEvent(state, snapshot("stream-a", 2, 99));
+  reduceServerEvent(state, snapshot("stream-a", 1, 98));
+  reduceServerEvent(state, snapshot("stream-a", 3, 97, "other"));
+  assert.equal(state.workbench.revision, 2);
+  assert.equal(state.workbench.counts.tasks, 2);
+
+  reduceServerEvent(state, snapshot("stream-b", 1, 3));
+  assert.equal(state.workbench.stream_id, "stream-b");
+  assert.equal(state.workbench.revision, 1);
+  assert.equal(state.workbench.counts.tasks, 3);
+});
+
+test("workbench event gaps request one full snapshot without polluting timeline", () => {
+  const state = createInitialState();
+  state.currentSessionId = "s";
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 1,
+      generated_at: "", full: true, session_id: "s",
+      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [], events: [],
+    },
+  });
+  const event = (revision) => ({
+    type: "workbench/event",
+    payload: {
+      id: `e${revision}`, type: "issue.updated", actor: "Agent", subject_id: "1",
+      payload: {}, timestamp: "", session_id: "s", stream_id: "stream-a", revision,
+    },
+  });
+
+  assert.deepEqual(reduceServerEvent(state, event(2)), [{
+    type: "refresh_workbench",
+    knownRevision: 1,
+    knownStreamId: "stream-a",
+    sessionId: "s",
+  }]);
+  assert.equal(state.workbench.revision, 1);
+  assert.equal(state.workbench.events.length, 1);
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 2,
+      generated_at: "", full: true, session_id: "s",
+      counts: {}, active_selection: {}, missions: [], tasks: [], issues: [], failures: [],
+      events: [{ id: "e2" }],
+    },
+  });
+  const actions = reduceServerEvent(state, event(4));
+  assert.deepEqual(actions, [{
+    type: "refresh_workbench",
+    knownRevision: 2,
+    knownStreamId: "stream-a",
+    sessionId: "s",
+  }]);
+  assert.equal(state.workbench.events.length, 1);
+  assert.equal(state.workbench.loading, true);
+  assert.deepEqual(reduceServerEvent(state, event(5)), []);
+  assert.equal(state.workbench.events.length, 1);
+});
+
+test("workbench slash command requests a read-only current-session snapshot", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.workbench.stream_id = "stream-a";
+  state.workbench.revision = 5;
+  const sent = [];
+
+  handleSubmitText(state, "/workbench", (type, payload) => sent.push({ type, payload }));
+
+  assert.deepEqual(sent, [{
+    type: "workbench/request",
+    payload: {
+      session_id: "session-workbench",
+      known_stream_id: "stream-a",
+      known_revision: 5,
+    },
+  }]);
+  assert.equal(state.workbench.loading, true);
+
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 6,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 3, worktrees: 1, reviews: 2 }, active_selection: {},
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+    },
+  });
+  assert.equal(state.workbench.loading, false);
+  assert.equal(
+    state.messages.some((message) => message.content?.includes("任务 3 · worktree 1 · 待审 2")),
+    true,
+  );
+
+  handleSubmitText(state, "/workbench", () => {});
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 6,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 3, worktrees: 1, reviews: 2 }, active_selection: {},
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+    },
+  });
+  assert.equal(state.workbench.loading, false);
 });
 
 test("task submit reuses optimistic delivery and task created accepts it in place", () => {

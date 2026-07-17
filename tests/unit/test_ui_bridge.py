@@ -563,6 +563,18 @@ class _FakeWorkbenchService:
         return {"version": 1, "session_id": session_id, "issues": [{"task_id": "1"}]}
 
 
+class _RevisionedWorkbenchService:
+    def __init__(self, snapshots: list[dict[str, Any]] | None = None) -> None:
+        self.snapshots = list(snapshots or [])
+        self.calls: list[str] = []
+
+    async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
+        self.calls.append(session_id)
+        if not self.snapshots:
+            raise RuntimeError("PRIVATE_WORKBENCH_FAILURE")
+        return self.snapshots.pop(0)
+
+
 class _TaskSubmitFakeEngine(_FakeEngine):
     def __init__(self, missions: list[dict[str, Any]] | None = None) -> None:
         super().__init__()
@@ -2365,6 +2377,87 @@ async def test_bridge_task_submit_creates_issue_and_executes_with_task_context()
     assert len([
         record for record in records if record["type"] == "workbench/snapshot"
     ]) == 2
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_request_returns_current_read_only_snapshot() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    service = _RevisionedWorkbenchService([
+        {
+            "schema_version": 1,
+            "stream_id": "stream-a",
+            "revision": 4,
+            "generated_at": "2026-07-17T12:00:00+08:00",
+            "full": True,
+            "session_id": "session-task",
+            "counts": {"tasks": 2, "worktrees": 1, "reviews": 1},
+            "active_selection": {"task_id": "2"},
+            "missions": [],
+            "tasks": [],
+            "issues": [],
+            "failures": [],
+            "events": [],
+        }
+    ])
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "workbench-read",
+            "type": ClientEventType.WORKBENCH_REQUEST,
+            "payload": {
+                "session_id": "session-task",
+                "known_stream_id": "stream-a",
+                "known_revision": 3,
+            },
+        }
+    )
+
+    records = _records(writer)
+    snapshot = next(record for record in records if record["type"] == "workbench/snapshot")
+    assert snapshot["request_id"] == "workbench-read"
+    assert snapshot["payload"]["revision"] == 4
+    assert snapshot["payload"]["counts"]["worktrees"] == 1
+    assert service.calls == ["session-task"]
+    assert bridge._run_task is None
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_request_rejects_cross_session_and_redacts_failures() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    service = _RevisionedWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "workbench-cross-session",
+            "type": ClientEventType.WORKBENCH_REQUEST,
+            "payload": {"session_id": "other-session"},
+        }
+    )
+    await bridge.handle_client_record(
+        {
+            "id": "workbench-failure",
+            "type": ClientEventType.WORKBENCH_REQUEST,
+            "payload": {"session_id": "session-task"},
+        }
+    )
+
+    errors = [record for record in _records(writer) if record["type"] == "error"]
+    assert [record["payload"]["code"] for record in errors] == [
+        "workbench_session_mismatch",
+        "workbench_snapshot_failed",
+    ]
+    assert service.calls == ["session-task"]
+    assert "PRIVATE_WORKBENCH_FAILURE" not in json.dumps(errors, ensure_ascii=False)
 
 
 @pytest.mark.asyncio

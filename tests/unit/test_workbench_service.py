@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timedelta
 
@@ -48,6 +49,117 @@ async def test_dashboard_snapshot_contains_core_cards(tmp_path) -> None:
     assert snapshot["missions"][0]["title"] == "Mac 工作台"
     assert snapshot["issues"][0]["task_id"] == task.id
     assert snapshot["tasks"][0]["subject"] == "实现任务市场"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_versions_content_and_exposes_navigation_summary(
+    tmp_path,
+) -> None:
+    database = str(tmp_path / "workbench.db")
+    task_store = TaskStore(database)
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(database)
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=workbench_store,
+    )
+    mission = await service.create_mission(
+        session_id="s",
+        title="终端 Workbench",
+        goal="验证只读快照",
+    )
+    task = await task_store.create_task("实现 revision 协议")
+    await task_store.update_task(task.id, status=TaskStatus.IN_PROGRESS)
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=["断序自动恢复"],
+    )
+    await workbench_store.set_issue_worktree(
+        session_id="s",
+        task_id=task.id,
+        worktree_name="ui-10",
+    )
+    approval = await workbench_store.add_approval(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        title="审查 UI-10.1",
+        detail="确认快照边界",
+        requester="Backend-Agent",
+    )
+
+    first = await service.dashboard_snapshot("s")
+    duplicate = await service.dashboard_snapshot("s")
+    await task_store.update_task(task.id, status=TaskStatus.COMPLETED)
+    changed = await service.dashboard_snapshot("s")
+    restarted = await WorkbenchService(
+        task_store=TaskStore(database),
+        workbench_store=WorkbenchStore(database),
+    ).dashboard_snapshot("s")
+
+    assert first["schema_version"] == 1
+    assert first["full"] is True
+    assert first["revision"] == 1
+    assert duplicate["revision"] == 1
+    assert changed["revision"] == 2
+    assert first["stream_id"] == changed["stream_id"]
+    assert restarted["stream_id"] != first["stream_id"]
+    assert first["counts"] == {
+        "missions": 1,
+        "tasks": 1,
+        "worktrees": 1,
+        "reviews": 1,
+        "failures": 0,
+    }
+    assert first["active_selection"] == {
+        "mission_id": mission.id,
+        "task_id": task.id,
+        "worktree": "ui-10",
+        "review_id": approval.id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_snapshot_serializes_concurrent_assembly(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "workbench.db"))
+    task_store.set_session("s")
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=WorkbenchStore(str(tmp_path / "workbench.db")),
+    )
+    original = service._build_dashboard_snapshot
+    active = 0
+    max_active = 0
+
+    async def controlled(session_id: str) -> dict[str, object]:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        try:
+            return await original(session_id)
+        finally:
+            active -= 1
+
+    service._build_dashboard_snapshot = controlled  # type: ignore[method-assign]
+
+    snapshots = await asyncio.gather(
+        service.dashboard_snapshot("s"),
+        service.dashboard_snapshot("s"),
+    )
+
+    assert max_active == 1
+    assert [snapshot["revision"] for snapshot in snapshots] == [1, 1]
+
+    active = 0
+    max_active = 0
+    await asyncio.gather(
+        service.dashboard_snapshot("s"),
+        service.dashboard_snapshot("other-session"),
+    )
+    assert max_active == 2
 
 
 @pytest.mark.asyncio

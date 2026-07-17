@@ -12,6 +12,7 @@
     "inspector/request",
     "agents/request",
     "agents/stop",
+    "workbench/request",
     "set_mode",
     "cycle_mode",
     "set_reasoning",
@@ -177,7 +178,15 @@
     }
   },
   "workbench": {
-    "snapshot_fields": ["session_id", "missions", "tasks", "issues", "failures", "events"],
-    "event_fields": ["id", "type", "actor", "subject_id", "payload", "timestamp"]
+    "schema_version": 1,
+    "request_fields": ["session_id", "known_stream_id", "known_revision"],
+    "snapshot_fields": [
+      "stream_id", "revision", "generated_at", "full", "session_id", "counts",
+      "active_selection", "missions", "tasks", "issues", "failures", "events"
+    ],
+    "event_fields": [
+      "session_id", "stream_id", "revision", "id", "type", "actor", "subject_id",
+      "payload", "timestamp"
+    ]
   }
 }
