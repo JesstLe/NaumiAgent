@@ -189,7 +189,7 @@ class SessionReconciliationCoordinator:
                 failure_id=failure_id,
                 stage=stage,
                 error_code=ReconciliationFailureCode.INFRASTRUCTURE_ERROR,
-                occurred_at=now,
+                occurred_at=record.updated_at,
                 max_attempts=self._max_attempts,
             )
             seeded += 1

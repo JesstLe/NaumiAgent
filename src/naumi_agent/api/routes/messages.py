@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from naumi_agent.api.chat_environment import ChatEnvironmentCollector
 from naumi_agent.api.deps import AuthDep
@@ -37,6 +37,7 @@ from naumi_agent.api.schemas import (
     SessionResponse,
     SessionUpdate,
 )
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore, SourceReferenceRecord
 from naumi_agent.streaming.events import EventType, StreamEvent, StreamEventSink
 
@@ -116,9 +117,30 @@ async def get_session(session_id: str, request: Request, auth: str = AuthDep):
 @router.delete("/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str, request: Request, auth: str = AuthDep):
     engine = request.app.state.engine
-    deleted = await engine.delete_session(session_id)
-    if not deleted:
+    result = await engine.delete_session_detailed(session_id)
+    if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Session not found")
+    if result.outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED:
+        raise HTTPException(status_code=409, detail="Session lifecycle policy blocked deletion")
+    if result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": result.outcome.value,
+                "request_id": result.request_id,
+                "session_id": result.session_id,
+            },
+        )
+    if result.outcome is ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": result.outcome.value,
+                "request_id": result.request_id,
+                "session_id": result.session_id,
+            },
+        )
+    return Response(status_code=204)
 
 
 # --- Messages ---

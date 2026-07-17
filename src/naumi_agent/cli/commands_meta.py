@@ -861,11 +861,21 @@ async def load_session(engine: Any, session_id: str) -> None:
 
 async def delete_session(engine: Any, session_id: str) -> None:
     """删除指定会话."""
-    ok = await engine.delete_session(session_id)
-    if ok:
+    from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+
+    result = await engine.delete_session_detailed(session_id)
+    if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
         console.print(f"[green]已删除会话:[/green] {session_id}")
-    else:
+    elif result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
+    elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
+        console.print(
+            f"[yellow]删除协调等待安全重试:[/yellow] {result.request_id}"
+        )
+    elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED:
+        console.print(f"[red]删除协调重试已耗尽:[/red] {result.request_id}")
+    else:
+        console.print(f"[red]会话 {session_id} 的生命周期策略阻止删除[/red]")
 
 
 async def new_conversation(engine: Any) -> None:

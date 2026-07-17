@@ -24,6 +24,7 @@ from naumi_agent.api.routes.messages import (
 from naumi_agent.api.routes.ws import _run_streaming_to_websocket
 from naumi_agent.api.schemas import HealthResponse, MessageCreate, SessionCreate
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEvent, RuntimeEventType
 
@@ -125,6 +126,19 @@ class _FakeEngine:
         self.deleted.append(session_id)
         return self.delete_result
 
+    async def delete_session_detailed(self, session_id: str):
+        self.deleted.append(session_id)
+        outcome = (
+            ReconciliationCoordinatorOutcome.COMPLETED
+            if self.delete_result
+            else ReconciliationCoordinatorOutcome.NOT_FOUND
+        )
+        return SimpleNamespace(
+            outcome=outcome,
+            request_id="request-1" if self.delete_result else "",
+            session_id=session_id,
+        )
+
     async def run(self, content: str, turn_context: str = ""):
         self.ran.append(content)
         self.turn_contexts.append(turn_context)
@@ -203,7 +217,7 @@ class TestMessageRoutes:
 
         response = await delete_session("sess_1", _fake_request(engine), auth="test")
 
-        assert response is None
+        assert response.status_code == 204
         assert engine.deleted == ["sess_1"]
         route = next(
             route
@@ -225,6 +239,62 @@ class TestMessageRoutes:
         assert exc.value.detail == "Session not found"
 
     @pytest.mark.asyncio
+    async def test_delete_session_route_returns_202_for_durable_retry(self) -> None:
+        engine = _FakeEngine()
+
+        async def pending_result(session_id: str):
+            engine.deleted.append(session_id)
+            return SimpleNamespace(
+                outcome=ReconciliationCoordinatorOutcome.RETRY_SCHEDULED,
+                request_id="request-pending",
+                session_id=session_id,
+            )
+
+        engine.delete_session_detailed = pending_result
+
+        response = await delete_session("sess_1", _fake_request(engine), auth="test")
+
+        assert response.status_code == 202
+        assert b"request-pending" in response.body
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("outcome", "expected_status"),
+        [
+            (ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED, 503),
+            (ReconciliationCoordinatorOutcome.POLICY_BLOCKED, 409),
+        ],
+    )
+    async def test_delete_session_route_preserves_terminal_failure_outcomes(
+        self,
+        outcome: ReconciliationCoordinatorOutcome,
+        expected_status: int,
+    ) -> None:
+        engine = _FakeEngine()
+
+        async def terminal_result(session_id: str):
+            return SimpleNamespace(
+                outcome=outcome,
+                request_id="request-terminal",
+                session_id=session_id,
+            )
+
+        engine.delete_session_detailed = terminal_result
+
+        if outcome is ReconciliationCoordinatorOutcome.POLICY_BLOCKED:
+            with pytest.raises(Exception) as exc:
+                await delete_session("sess_1", _fake_request(engine), auth="test")
+            assert exc.value.status_code == expected_status
+        else:
+            response = await delete_session(
+                "sess_1",
+                _fake_request(engine),
+                auth="test",
+            )
+            assert response.status_code == expected_status
+            assert b"request-terminal" in response.body
+
+    @pytest.mark.asyncio
     async def test_delete_session_route_cleans_active_engine_grants(self, tmp_path) -> None:
         engine = AgentEngine(
             AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
@@ -235,7 +305,7 @@ class TestMessageRoutes:
 
             response = await delete_session(session.id, _fake_request(engine), auth="test")
 
-            assert response is None
+            assert response.status_code == 204
             assert engine._session is None
             assert engine._permission_grant_store.list_session(session.id) == ()
             assert await engine.session_store.load(session.id) is None

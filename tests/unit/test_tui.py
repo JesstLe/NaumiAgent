@@ -3,16 +3,19 @@
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from textual.widgets import Input
 
 from naumi_agent.config.settings import AppConfig, ModelConfig, ModelMeta
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
     ActivityPanel,
     ChatPanel,
+    HistoryPanel,
     InputBar,
     NaumiApp,
     PermissionConfirmScreen,
@@ -74,6 +77,48 @@ class _HistoryDispatchApp:
 
 
 class TestNaumiApp:
+    @pytest.mark.asyncio
+    async def test_delete_session_surfaces_durable_retry_and_clears_active_chat(
+        self,
+    ) -> None:
+        session = SimpleNamespace(id="session-1")
+
+        class _Engine:
+            def __init__(self) -> None:
+                self._session = session
+
+            async def delete_session_detailed(self, session_id: str):
+                assert session_id == "session-1"
+                self._session = None
+                return SimpleNamespace(
+                    outcome=ReconciliationCoordinatorOutcome.RETRY_SCHEDULED,
+                    request_id="delete-request-1",
+                )
+
+        status = SimpleNamespace(status_text="")
+        chat = SimpleNamespace(clear=MagicMock())
+        history = SimpleNamespace(show_panel=True, refresh_sessions=MagicMock())
+
+        class _App:
+            engine = _Engine()
+
+            def query_one(self, widget_type: type[object]) -> object:
+                return {
+                    StatusBar: status,
+                    ChatPanel: chat,
+                    HistoryPanel: history,
+                }[widget_type]
+
+        await NaumiApp._delete_session.__wrapped__(
+            _App(),
+            "session-1",
+            "重要会话",
+        )
+
+        assert status.status_text == "删除协调等待安全重试: delete-request-1"
+        chat.clear.assert_called_once_with()
+        history.refresh_sessions.assert_called_once_with()
+
     def test_history_delete_preview_dispatches_to_read_only_worker(self) -> None:
         app = _HistoryDispatchApp()
 

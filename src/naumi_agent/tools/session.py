@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.history_screen import (
     build_history_snapshot,
@@ -266,10 +267,22 @@ class SessionDeleteTool(Tool):
         if target.isdigit():
             return "为避免误删，session_delete 只接受明确会话 ID，不接受数字编号。"
 
-        deleted = await self._engine.delete_session(target)
-        if not deleted:
+        result = await self._engine.delete_session_detailed(target)
+        if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
             return f"会话 {target} 不存在。"
-        return f"已删除会话：{target}"
+        if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
+            return f"已删除会话并完成派生记录协调：{target}"
+        if result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
+            return (
+                f"会话删除协调尚未完成，已安排安全重试：{target}\n"
+                f"- Request ID：`{result.request_id}`"
+            )
+        if result.outcome is ReconciliationCoordinatorOutcome.RETRY_EXHAUSTED:
+            return (
+                f"会话删除协调重试已耗尽，需要人工检查：{target}\n"
+                f"- Request ID：`{result.request_id}`"
+            )
+        return f"会话 {target} 的生命周期策略阻止删除。"
 
 
 def create_session_tools(engine: Any) -> list[Tool]:

@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,11 @@ from naumi_agent.harness.completion import (
     CompletionGateResult,
     HarnessCompletionReceipt,
     HarnessRunState,
+)
+from naumi_agent.harness.coordinator import (
+    ReconciliationCoordinatorOutcome,
+    ReconciliationCoordinatorResult,
+    SessionReconciliationCoordinator,
 )
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
@@ -510,13 +516,20 @@ class AgentEngine:
         self.workspace_root = config.resolve_workspace_root()
         self._runtime_data_dir = Path(config.memory.session_db_path).parent
         self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
+        self._harness_store = HarnessStore(resolve_harness_db_path())
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=HarnessTrustStore(
                 resolve_harness_trust_db_path()
             ),
-            store=HarnessStore(resolve_harness_db_path()),
+            store=self._harness_store,
         )
+        self._session_reconciliation_coordinator = SessionReconciliationCoordinator(
+            session_port=self._session_port,
+            harness_store=self._harness_store,
+            fallback_workspace=self.workspace_root,
+        )
+        self._session_reconciliation_worker_id = f"engine-{uuid.uuid4().hex}"
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
@@ -1476,7 +1489,15 @@ class AgentEngine:
         )
 
     async def delete_session(self, session_id: str) -> bool:
-        """Delete one session and invalidate its scoped runtime state."""
+        """Delete one session, returning true only after full reconciliation."""
+        result = await self.delete_session_detailed(session_id)
+        return result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
+
+    async def delete_session_detailed(
+        self,
+        session_id: str,
+    ) -> ReconciliationCoordinatorResult:
+        """Delete through the durable coordinator and preserve partial outcomes."""
         transition_epoch = self._begin_active_session_transition(session_id)
         try:
             async with self._session_transition_lock:
@@ -1493,11 +1514,58 @@ class AgentEngine:
                     transition_epoch = None
 
                 completion_task = asyncio.create_task(
-                    self._delete_session_and_reconcile(session_id)
+                    self._session_reconciliation_coordinator.delete_session(session_id)
                 )
-                return await self._await_delete_completion(completion_task)
+                try:
+                    result = await self._await_delete_completion(completion_task)
+                except asyncio.CancelledError:
+                    if await self._session_absent_after_cancellation(session_id):
+                        self._reconcile_deleted_session_runtime(session_id)
+                    raise
+                if (
+                    result.outcome is not ReconciliationCoordinatorOutcome.NOT_FOUND
+                    and await self._session_port.load(session_id) is None
+                ):
+                    self._reconcile_deleted_session_runtime(session_id)
+                return result
         finally:
             self._finish_session_transition("", transition_epoch)
+
+    async def _session_absent_after_cancellation(self, session_id: str) -> bool:
+        """Finish authoritative persistence check despite repeated caller cancellation."""
+        load_task = asyncio.create_task(self._session_port.load(session_id))
+        while not load_task.done():
+            try:
+                session = await asyncio.shield(load_task)
+            except asyncio.CancelledError:
+                continue
+            else:
+                return session is None
+        if load_task.cancelled():
+            return False
+        return load_task.result() is None
+
+    async def recover_session_reconciliations(
+        self,
+        *,
+        now: str | None = None,
+        lease_seconds: int = 60,
+        limit: int = 20,
+    ) -> tuple[ReconciliationCoordinatorResult, ...]:
+        """Run one bounded startup/background reconciliation recovery pass."""
+        results = await self._session_reconciliation_coordinator.recover_due(
+            worker_id=self._session_reconciliation_worker_id,
+            now=now or datetime.now(UTC).isoformat(),
+            lease_seconds=lease_seconds,
+            limit=limit,
+        )
+        for result in results:
+            if (
+                result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
+                and await self._session_port.load(result.session_id) is None
+            ):
+                self._reconcile_deleted_session_runtime(result.session_id)
+        return results
 
     async def preview_session_delete(
         self,
@@ -1535,14 +1603,14 @@ class AgentEngine:
 
     async def _await_delete_completion(
         self,
-        completion_task: asyncio.Task[bool],
-    ) -> bool:
+        completion_task: asyncio.Task[Any],
+    ) -> Any:
         """Wait for Engine-owned reconciliation despite repeated caller cancellation."""
         caller_cancelled = False
         cancellation_forwarded = False
         while not completion_task.done():
             try:
-                deleted = await asyncio.shield(completion_task)
+                result = await asyncio.shield(completion_task)
             except asyncio.CancelledError:
                 caller_cancelled = True
                 if not completion_task.done() and not cancellation_forwarded:
@@ -1551,57 +1619,31 @@ class AgentEngine:
             else:
                 if caller_cancelled:
                     raise asyncio.CancelledError
-                return deleted
+                return result
 
         if completion_task.cancelled():
             raise asyncio.CancelledError
-        deleted = completion_task.result()
+        result = completion_task.result()
         if caller_cancelled:
             raise asyncio.CancelledError
-        return deleted
+        return result
 
-    async def _delete_session_and_reconcile(self, session_id: str) -> bool:
-        """Own persistence result determination and deleted-session reconciliation."""
-        delete_task = asyncio.create_task(self._session_port.delete(session_id))
-        cancellation_forwarded = False
-        try:
-            deleted = await asyncio.shield(delete_task)
-        except asyncio.CancelledError:
-            cancellation_forwarded = True
-            delete_task.cancel()
-            try:
-                await delete_task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.debug(
-                    "Session delete failed while cancellation was being reconciled",
-                    exc_info=True,
-                )
-
-            # A store wrapper can be cancelled after SQLite commits but before
-            # delivering its result. Persistence is authoritative at this boundary.
-            deleted = await self._session_port.load(session_id) is None
-
-        if deleted:
-            self._revoke_permission_grants_for_session(
-                session_id,
-                reason="删除会话时撤销了权限授权。",
-                source="session_deletion",
-            )
-            if self._session is not None and self._session.id == session_id:
-                self._advance_session_authorization_generation()
-                self._messages.clear()
-                self._full_history.clear()
-                self._usage = AgentUsage()
-                self._budget_tracker.reset()
-                self._session = None
-                self.task_store.set_session("")
-                self._permission_port.reset_counts()
-
-        if cancellation_forwarded:
-            raise asyncio.CancelledError
-        return deleted
+    def _reconcile_deleted_session_runtime(self, session_id: str) -> None:
+        """Invalidate in-memory authority after Session deletion is authoritative."""
+        self._revoke_permission_grants_for_session(
+            session_id,
+            reason="删除会话时撤销了权限授权。",
+            source="session_deletion",
+        )
+        if self._session is not None and self._session.id == session_id:
+            self._advance_session_authorization_generation()
+            self._messages.clear()
+            self._full_history.clear()
+            self._usage = AgentUsage()
+            self._budget_tracker.reset()
+            self._session = None
+            self.task_store.set_session("")
+            self._permission_port.reset_counts()
 
     async def archive_session(self, session_id: str) -> bool:
         """归档指定会话."""
