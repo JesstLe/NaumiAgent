@@ -28,11 +28,12 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_explain",
         "harness_replay",
         "harness_eval",
+        "harness_eval_baseline",
         "harness_read_knowledge",
         "harness_run_check",
     ]
-    assert all(tool.metadata.read_only for tool in tools[:6])
-    assert not tools[6].metadata.read_only
+    assert all(tool.metadata.read_only for tool in tools[:7])
+    assert not tools[7].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -42,6 +43,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     assert "诊断" in await tools[1].execute()
     assert "没有找到" in await tools[2].execute()
     assert "尚未配置" in await tools[4].execute()
+    assert "尚无 Baseline" in await tools[5].execute(suite="protocol")
     assert all(tool.name not in {"harness_trust", "harness_untrust"} for tool in tools)
 
 

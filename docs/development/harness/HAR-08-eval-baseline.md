@@ -69,5 +69,8 @@
 - HAR-08 H5c Comparison Receipt：已实现。schema v10 将 Baseline/Candidate 两组不可变样本、逐样本
   机械/Policy 证据和重复样本统计合成为防篡改权威 decision；Store 写入时复核 Baseline 与 Candidate
   的完整引用链。详见 `HAR-08-H5c-comparison-receipt.md`。
+- HAR-08.8a Baseline Read Surface：已实现。`/harness baseline <suite-id>` 与 read-only
+  `harness_eval_baseline` Tool 共享 Service，显示 active 版本和最近 Comparison receipt；新 UI、TUI
+  与兼容终端复用同一 Slash 路由。详见 `HAR-08-8a-baseline-read-surface.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。
