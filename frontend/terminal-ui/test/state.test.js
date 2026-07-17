@@ -2675,6 +2675,100 @@ test("typed harness receipt keeps only the newest revision per run", () => {
   assert.equal(Object.hasOwn(state.harnessReceipts, "bounded-104"), true);
 });
 
+test("Harness-first delivery joins the existing completion receipt by exact run id", () => {
+  const state = createInitialState();
+  const harnessReceipt = {
+    schema_version: 1,
+    revision: 1,
+    run_id: "joined-run",
+    status: "completed_unverified",
+    task_kind: "change",
+    changed_files: ["src/app.py"],
+    checks: [{ id: "unit", status: "failed" }],
+    criteria: [{ id: "tests", status: "unsatisfied", evidence_ids: [] }],
+    warnings: ["定向检查失败"],
+    tree_fingerprint: "c".repeat(64),
+  };
+
+  reduceServerEvent(state, { type: "harness/receipt", payload: harnessReceipt });
+  assert.equal(state.messages.length, 0);
+
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    request_id: "joined-request",
+    payload: {
+      schema_version: 1,
+      receipt_id: "joined-receipt",
+      run_id: "joined-run",
+      outcome: "partial",
+      summary: "完成但验证失败。",
+    },
+  });
+
+  const receipts = state.messages.filter((message) => message.kind === "completion_receipt");
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].harnessReceipt, state.harnessReceipts["joined-run"]);
+  assert.equal(receipts[0].harnessReceipt.status, "completed_unverified");
+});
+
+test("completion-first delivery updates one receipt only for newer matching Harness revisions", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, {
+    type: "completion/receipt",
+    payload: {
+      schema_version: 1,
+      receipt_id: "late-receipt",
+      run_id: "late-run",
+      outcome: "completed",
+      summary: "等待 Harness。",
+    },
+  });
+  const message = state.messages.at(-1);
+  assert.equal(message.harnessReceipt, null);
+
+  state.renderCache.entries.set("stale", ["stale"]);
+  reduceServerEvent(state, {
+    type: "harness/receipt",
+    payload: {
+      schema_version: 1,
+      revision: 1,
+      run_id: "other-run",
+      status: "blocked",
+      task_kind: "change",
+      changed_files: [],
+      checks: [],
+      criteria: [],
+      warnings: [],
+      tree_fingerprint: "d".repeat(64),
+    },
+  });
+  assert.equal(message.harnessReceipt, null);
+  assert.equal(state.renderCache.entries.size, 1);
+
+  const matching = {
+    ...state.harnessReceipts["other-run"],
+    run_id: "late-run",
+    status: "completed_unverified",
+  };
+  reduceServerEvent(state, { type: "harness/receipt", payload: matching });
+  assert.equal(message.harnessReceipt.status, "completed_unverified");
+  assert.equal(state.renderCache.entries.size, 0);
+
+  reduceServerEvent(state, {
+    type: "harness/receipt",
+    payload: { ...matching, revision: 2, status: "completed_verified" },
+  });
+  assert.equal(message.harnessReceipt.status, "completed_verified");
+  assert.equal(state.messages.filter((item) => item.kind === "completion_receipt").length, 1);
+
+  reduceServerEvent(state, {
+    type: "harness/receipt",
+    payload: { ...matching, revision: 1, status: "blocked" },
+  });
+  assert.equal(message.harnessReceipt.status, "completed_verified");
+  assert.equal(state.messages.length, 1);
+});
+
 test("typed harness details keep newest bounded revisions without rendering", () => {
   const state = createInitialState();
   const explain = {
