@@ -40,8 +40,22 @@
 - 本机真实配置验证了 11 项中 7 项已存在、4 项未创建、0 项错误；检查前后已存在文件的
   size、mtime、mode、SHA-256 完全相同。
 
-尚未完成 ARC-05.2-05.7；Catalog 只报告权限问题，不自动修改用户文件。ARC-05 保持
-`partial (5.1)`。
+### ARC-05.2a SQLite Migration Runner 内核（已实现，2026-07-18）
+
+- `src/naumi_agent/persistence/migrations.py` 提供相邻版本步骤、连续 Registry、只读 Plan、
+  typed progress/result/error 和单 Store Runner。
+- dry-run 使用 SQLite 只读 URI，不创建缺失文件；报告文件大小、预计处理行数和不可逆步骤。
+- apply 使用 `BEGIN EXCLUSIVE`，锁内复核版本，并将全部 DDL/DML 与 `user_version` 更新放入
+  单一事务；步骤边界支持取消，重复执行当前版本不产生写入。
+- SQLite authorizer 禁止迁移步骤自行 commit、隐式 transaction control 或 attach 其他库，
+  防止步骤逃逸全事务回滚保证；进度回调故障不影响迁移结果。
+- 真实 SQLite 测试覆盖成功、幂等、失败回滚、取消回滚、锁冲突、事务逃逸、高版本、损坏库、
+  缺失文件和 Registry 断层。详细契约见 `ARC-05-2a-sqlite-migration-runner-design.md`。
+
+尚未完成 ARC-05.2b 与 ARC-05.3-05.7；当前内核未自动接管生产 Store，也不替代升级前备份、
+恢复和跨 Store 编排。Catalog 仍只报告权限问题，不自动修改用户文件。ARC-05 保持
+`partial (5.1, 5.2a)`。
 
 HAR-06.4 已在 Harness 领域内实现 Session 删除专用的 Artifact 引用安全 GC 和 v4→v5 状态迁移，
-但它不替代 ARC-05.7 的跨 Store 通用 retention/GC 平台；ARC-05 状态因此仍保持 `partial (5.1)`。
+但它不替代 ARC-05.7 的跨 Store 通用 retention/GC 平台；ARC-05 状态因此仍保持
+`partial (5.1, 5.2a)`。
