@@ -27,3 +27,11 @@ Evolution Candidate，而不是直接触发 self_modify。
 - 排序每个因子可解释；改变权重有版本和 audit。
 - reject/defer 冷却规则有效，不重复打扰用户。
 - A3：真实 self_review + Harness failure + runtime metric 形成候选详情。
+
+## 分阶段实现
+
+- EVO-01.1a Harness 失败证据适配器：已实现。耐久 Harness run 经确定性 Explainer 分类后，
+  转成只含内部 URI、完整摘要、失败分类和 root fingerprint 的 frozen Evidence；不复制用户目标、
+  会话或源码。实现边界与证据见 `EVO-01-1a-harness-failure-evidence.md`。
+- self_review/runtime metric adapters、Candidate schema、Dedup、Eligibility、Prioritization 与
+  Review surface 仍为 planned；不得把 EVO-01 整体标记为完成。

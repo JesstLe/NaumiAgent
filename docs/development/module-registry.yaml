@@ -1,7 +1,7 @@
 schema_version: 1
 updated_at: "2026-07-18"
 statuses: [implemented, partial, planned, blocked, superseded]
-implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, UI-13.1a, ARC-03.2a]
+implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, UI-13.1a, ARC-03.2a, EVO-01.1a]
 modules:
   - {id: HAR-05, status: implemented, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
   - {id: HAR-06, status: implemented, path: harness/HAR-06-session-lifecycle.md, depends_on: [HAR-05]}
@@ -30,7 +30,7 @@ modules:
   - {id: ARC-06, status: planned, path: architecture/ARC-06-concurrency-cluster.md, depends_on: [ARC-02, ARC-04]}
   - {id: ARC-07, status: planned, path: architecture/ARC-07-packaging-update.md, depends_on: [ARC-02, UI-17]}
   - {id: ARC-08, status: planned, path: architecture/ARC-08-reliability.md, depends_on: [ARC-02, ARC-05]}
-  - {id: EVO-01, status: planned, path: self-evolution/EVO-01-review-candidates.md, depends_on: [HAR-05]}
+  - {id: EVO-01, status: partial, path: self-evolution/EVO-01-review-candidates.md, depends_on: [HAR-05]}
   - {id: EVO-02, status: planned, path: self-evolution/EVO-02-isolated-mutation.md, depends_on: [EVO-01]}
   - {id: EVO-03, status: planned, path: self-evolution/EVO-03-validation-evaluation.md, depends_on: [EVO-02, HAR-08]}
   - {id: EVO-04, status: planned, path: self-evolution/EVO-04-reflection-decision.md, depends_on: [EVO-03]}
