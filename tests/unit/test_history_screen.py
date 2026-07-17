@@ -104,7 +104,7 @@ def test_render_session_delete_preview_distinguishes_records_from_artifact_refs(
     assert "Evidence：5" in rendered
     assert "Artifact 引用：5" in rendered
     assert "不是可安全删除文件数" in rendered
-    assert "Session 与 Harness 数据库行已接入持久协调" in rendered
-    assert "Artifact 文件" in rendered
+    assert "重新校验共享引用与路径" in rendered
+    assert "其他文件会保留" in rendered
     assert "当前会话" in rendered
     assert "/delete abc123" in rendered

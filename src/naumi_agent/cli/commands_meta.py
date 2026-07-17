@@ -865,7 +865,7 @@ async def delete_session(engine: Any, session_id: str) -> None:
 
     result = await engine.delete_session_detailed(session_id)
     if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
-        console.print(f"[green]已删除会话:[/green] {session_id}")
+        console.print(f"[green]{result.message}[/green] {session_id}")
     elif result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
         console.print(f"[red]会话 {session_id} 不存在[/red]")
     elif result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:

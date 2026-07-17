@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from naumi_agent.harness.reconciliation import (
+    ReconciliationArtifactGcStatus,
     SessionDeleteReconciliation,
     SessionReconciliationState,
 )
@@ -301,6 +302,32 @@ class SessionReconciliationCoordinator:
                     worker_id=worker_id,
                 )
 
+        if current.artifact_gc_status is ReconciliationArtifactGcStatus.PENDING:
+            try:
+                current = await self._harness_store.reconcile_session_artifacts(
+                    current.request_id,
+                    updated_at=now,
+                )
+            except asyncio.CancelledError:
+                await asyncio.shield(
+                    self._failure(
+                        current,
+                        stage=ReconciliationFailureStage.ARTIFACT_GC,
+                        error_code=ReconciliationFailureCode.CANCELLED,
+                        now=now,
+                        worker_id=worker_id,
+                    )
+                )
+                raise
+            except Exception:
+                return await self._failure(
+                    current,
+                    stage=ReconciliationFailureStage.ARTIFACT_GC,
+                    error_code=ReconciliationFailureCode.INFRASTRUCTURE_ERROR,
+                    now=now,
+                    worker_id=worker_id,
+                )
+
         tombstone_status: ReconciliationTombstoneStatus | None = None
         if worker_id:
             tombstone = await self._harness_store.resolve_reconciliation_tombstone(
@@ -315,7 +342,7 @@ class SessionReconciliationCoordinator:
             outcome=ReconciliationCoordinatorOutcome.COMPLETED,
             reconciliation_state=current.state,
             tombstone_status=tombstone_status,
-            message="Session 与 Harness 记录协调完成。",
+            message=_completion_message(current),
         )
 
     async def _failure(
@@ -399,15 +426,38 @@ def _session_workspace(session: Any, fallback: str | Path) -> Path:
 
 def _stage_for_state(
     state: SessionReconciliationState,
+    *,
+    artifact_gc_pending: bool = True,
 ) -> ReconciliationFailureStage:
     if state is SessionReconciliationState.PREPARED:
         return ReconciliationFailureStage.SESSION_DELETE
+    if state is SessionReconciliationState.SESSION_COMMITTED:
+        return ReconciliationFailureStage.HARNESS_RECORDS
+    if artifact_gc_pending:
+        return ReconciliationFailureStage.ARTIFACT_GC
     return ReconciliationFailureStage.HARNESS_RECORDS
 
 
 def _stable_id(*parts: str) -> str:
     digest = hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:32]
     return f"reconciliation-{digest}"
+
+
+def _completion_message(record: SessionDeleteReconciliation) -> str:
+    if not (
+        record.artifact_candidate_count
+        or record.artifact_unsafe_count
+        or record.artifact_non_file_count
+    ):
+        return "Session、Harness 记录与 Artifact 协调完成。"
+    return (
+        "Session、Harness 记录与 Artifact 协调完成；"
+        f"Artifact 删除 {record.artifact_deleted_count}、"
+        f"已缺失 {record.artifact_missing_count}、"
+        f"保留共享 {record.artifact_shared_count}、"
+        "跳过风险 "
+        f"{record.artifact_unsafe_count + record.artifact_non_file_count}。"
+    )
 
 
 def _utc_now() -> str:

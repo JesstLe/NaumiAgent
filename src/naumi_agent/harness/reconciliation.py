@@ -23,6 +23,13 @@ class ReconciliationArtifactKind(StrEnum):
     EVIDENCE_URI = "evidence_uri"
 
 
+class ReconciliationArtifactGcStatus(StrEnum):
+    """Durable Artifact cleanup state for one Session delete request."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+
+
 class SessionReconciliationTransitionError(RuntimeError):
     """Raised when a reconciliation attempts to skip or reverse a state."""
 
@@ -45,6 +52,14 @@ class SessionDeleteReconciliation:
     run_count: int
     deleted_run_count: int
     artifact_references: tuple[ReconciliationArtifactReference, ...]
+    artifact_gc_status: ReconciliationArtifactGcStatus
+    artifact_candidate_count: int
+    artifact_deleted_count: int
+    artifact_missing_count: int
+    artifact_shared_count: int
+    artifact_unsafe_count: int
+    artifact_non_file_count: int
+    artifact_gc_blocked_by_unresolved_live_reference: bool
     created_at: str
     updated_at: str
 

@@ -42,3 +42,6 @@
 
 尚未完成 ARC-05.2-05.7；Catalog 只报告权限问题，不自动修改用户文件。ARC-05 保持
 `partial (5.1)`。
+
+HAR-06.4 已在 Harness 领域内实现 Session 删除专用的 Artifact 引用安全 GC 和 v4→v5 状态迁移，
+但它不替代 ARC-05.7 的跨 Store 通用 retention/GC 平台；ARC-05 状态因此仍保持 `partial (5.1)`。

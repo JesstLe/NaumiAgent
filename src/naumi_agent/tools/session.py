@@ -271,7 +271,7 @@ class SessionDeleteTool(Tool):
         if result.outcome is ReconciliationCoordinatorOutcome.NOT_FOUND:
             return f"会话 {target} 不存在。"
         if result.outcome is ReconciliationCoordinatorOutcome.COMPLETED:
-            return f"已删除会话并完成派生记录协调：{target}"
+            return f"{result.message}\n- Session：`{target}`"
         if result.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED:
             return (
                 f"会话删除协调尚未完成，已安排安全重试：{target}\n"

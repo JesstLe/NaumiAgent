@@ -156,10 +156,11 @@ async def test_schema_migration_is_idempotent_and_adds_current_tables(
         "harness_evidence",
         "harness_replay_baselines",
         "harness_session_reconciliations",
+        "harness_session_artifact_gc",
         "harness_session_reconciliation_tombstones",
         "harness_session_reconciliation_failure_events",
     }
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 4
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 5
     assert rows == 1
 
 

@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,6 +15,7 @@ from naumi_agent.harness.coordinator import (
     SessionReconciliationCoordinator,
     build_session_delete_request_id,
 )
+from naumi_agent.harness.reconciliation import SessionReconciliationState
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
@@ -138,6 +140,46 @@ async def test_session_failure_schedules_sanitized_retry_then_recovers(
     )
     assert restored is not None
     assert restored.status is ReconciliationTombstoneStatus.RESOLVED
+
+
+@pytest.mark.asyncio
+async def test_artifact_gc_failure_uses_durable_artifact_stage_and_recovers(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    session = _session(workspace)
+    port = _SessionPort([session])
+    store = HarnessStore(tmp_path / "harness.db")
+    original = store.reconcile_session_artifacts
+    store.reconcile_session_artifacts = AsyncMock(
+        side_effect=OSError("injected artifact failure")
+    )
+    coordinator = SessionReconciliationCoordinator(
+        session_port=port,
+        harness_store=store,
+        fallback_workspace=workspace,
+    )
+
+    failed = await coordinator.delete_session(session.id, now=NOW)
+
+    assert failed.outcome is ReconciliationCoordinatorOutcome.RETRY_SCHEDULED
+    tombstone = await store.get_reconciliation_tombstone(failed.request_id)
+    assert tombstone is not None
+    assert tombstone.stage.value == "artifact_gc"
+
+    store.reconcile_session_artifacts = original
+    recovered = await coordinator.recover_due(
+        worker_id="worker-gc",
+        now="2099-01-01T00:00:00+00:00",
+        lease_seconds=60,
+    )
+
+    assert recovered[0].outcome is ReconciliationCoordinatorOutcome.COMPLETED
+    assert (
+        recovered[0].reconciliation_state
+        is SessionReconciliationState.RECORDS_COMMITTED
+    )
 
 
 @pytest.mark.asyncio
