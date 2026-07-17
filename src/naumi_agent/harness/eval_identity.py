@@ -182,8 +182,9 @@ class HarnessEvalBaselineIdentity(_StrictModel):
     schema_version: Literal[1] = 1
     source: HarnessEvalSourceIdentity
     configuration: HarnessEvalConfigurationIdentity
-    model: HarnessEvalModelIdentity
+    model: HarnessEvalModelIdentity | None
     platform: HarnessEvalPlatformIdentity
+    profile_trusted: bool
     baseline_eligible: bool
     warnings: tuple[str, ...] = Field(default=(), max_length=8)
     identity_sha256: str = Field(pattern=_SHA256_RE)
@@ -231,9 +232,10 @@ def build_eval_baseline_identity(
     workspace_root: str | Path,
     *,
     configuration: HarnessEvalConfigurationIdentity,
-    capability: ModelCapabilityContract,
-    reasoning: ReasoningEffortStatus,
+    capability: ModelCapabilityContract | None = None,
+    reasoning: ReasoningEffortStatus | None = None,
     platform_identity: HarnessEvalPlatformIdentity | None = None,
+    profile_trusted: bool = True,
 ) -> HarnessEvalBaselineIdentity:
     """Build one exact identity from authoritative source/model/runtime facts."""
     fingerprint = compute_tree_fingerprint(workspace_root)
@@ -242,23 +244,32 @@ def build_eval_baseline_identity(
         tree_sha256=fingerprint.digest,
         dirty=bool(fingerprint.dirty_paths),
     )
-    model = _model_identity(capability, reasoning)
+    if (capability is None) != (reasoning is None):
+        raise ValueError("模型能力合同与思考强度必须同时提供或同时省略。")
+    model = (
+        _model_identity(capability, reasoning)
+        if capability is not None and reasoning is not None
+        else None
+    )
     runtime_platform = platform_identity or capture_eval_platform_identity()
 
     warnings: list[str] = []
     eligible = True
+    if not profile_trusted:
+        warnings.append("Harness Profile 尚未受信任；本次结果不可晋升为 Baseline。")
+        eligible = False
     if source.dirty:
         warnings.append("工作区存在未提交改动；本次结果不可晋升为 Baseline。")
         eligible = False
-    if capability.status is ModelContractStatus.PARTIAL:
+    if capability is not None and capability.status is ModelContractStatus.PARTIAL:
         warnings.append("模型能力合同仅部分验证；Baseline 比较需保持完全相同的能力摘要。")
-    elif capability.status is ModelContractStatus.UNVERIFIED:
+    elif capability is not None and capability.status is ModelContractStatus.UNVERIFIED:
         warnings.append("模型关键能力尚未验证；本次结果不可晋升为 Baseline。")
         eligible = False
-    elif capability.status is ModelContractStatus.INCOMPATIBLE:
+    elif capability is not None and capability.status is ModelContractStatus.INCOMPATIBLE:
         warnings.append("模型能力与 Agent Harness 不兼容；本次结果不可晋升为 Baseline。")
         eligible = False
-    if reasoning.warning is not None:
+    if reasoning is not None and reasoning.warning is not None:
         warnings.append("当前思考强度与模型能力声明不一致；本次结果不可晋升为 Baseline。")
         eligible = False
 
@@ -266,8 +277,9 @@ def build_eval_baseline_identity(
         "schema_version": 1,
         "source": source.model_dump(mode="json"),
         "configuration": configuration.model_dump(mode="json"),
-        "model": model.model_dump(mode="json"),
+        "model": model.model_dump(mode="json") if model is not None else None,
         "platform": runtime_platform.model_dump(mode="json"),
+        "profile_trusted": profile_trusted,
         "baseline_eligible": eligible,
         "warnings": warnings,
     }

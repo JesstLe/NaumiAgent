@@ -352,3 +352,47 @@ def test_capture_current_platform_returns_bounded_runtime_facts() -> None:
     assert identity.python_version
     assert identity.naumi_version
     assert "=" not in identity.model_dump_json()
+
+
+def test_no_model_runner_has_stable_null_model_identity(tmp_path: Path) -> None:
+    identity = build_eval_baseline_identity(
+        _workspace(tmp_path),
+        configuration=_configuration(),
+        platform_identity=_platform(),
+    )
+
+    assert identity.model is None
+    assert identity.baseline_eligible is True
+    assert identity.warnings == ()
+
+
+@pytest.mark.parametrize(
+    ("capability", "reasoning"),
+    [(_capability(), None), (None, _reasoning())],
+)
+def test_model_capability_and_reasoning_must_be_provided_together(
+    tmp_path: Path,
+    capability: ModelCapabilityContract | None,
+    reasoning: ReasoningEffortStatus | None,
+) -> None:
+    with pytest.raises(ValueError, match="同时提供或同时省略"):
+        build_eval_baseline_identity(
+            _workspace(tmp_path),
+            configuration=_configuration(),
+            capability=capability,
+            reasoning=reasoning,
+            platform_identity=_platform(),
+        )
+
+
+def test_untrusted_profile_cannot_be_promoted_to_baseline(tmp_path: Path) -> None:
+    identity = build_eval_baseline_identity(
+        _workspace(tmp_path),
+        configuration=_configuration(),
+        platform_identity=_platform(),
+        profile_trusted=False,
+    )
+
+    assert identity.profile_trusted is False
+    assert identity.baseline_eligible is False
+    assert any("Profile" in warning for warning in identity.warnings)

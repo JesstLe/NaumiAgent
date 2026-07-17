@@ -33,6 +33,8 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 
 ### 2.3 Model Identity
 
+- Static 与纯 Replay 等 `no_model` Runner 使用明确的 `model: null`，不受用户当前配置模型影响；
+- 实际调用模型的 Sandbox/Live/Agent Runner 必须同时提供 capability 与 reasoning，禁止只提供一半；
 - requested/canonical/upstream model、provider 与 API format；
 - `ModelCapabilityContract` 的事实摘要，包括上下文、输出上限、请求上限、价格、Tool/streaming/
   parallel/structured/reasoning/vision、modalities、字段 provenance 与 contract status；
@@ -55,9 +57,10 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 以下情况仍允许记录普通 Eval 结果，但 `baseline_eligible=false`：
 
 1. Git 工作区存在未提交变更；
-2. 模型能力合同为 `unverified`；
-3. 模型能力合同为 `incompatible`；
-4. 当前思考强度与模型能力声明存在告警。
+2. Harness Profile 尚未由用户信任；
+3. 模型能力合同为 `unverified`；
+4. 模型能力合同为 `incompatible`；
+5. 当前思考强度与模型能力声明存在告警。
 
 `partial` 合同允许晋升，但生成明确警告，且后续比较必须匹配完全相同的 capability digest。
 最终 `identity_sha256` 覆盖全部嵌套身份、资格和结构化警告，并在反序列化时重新校验。
@@ -80,6 +83,8 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 - `unverified` 能力与不兼容思考强度不能晋升；
 - 配置 digest 和最终 identity digest 篡改均被 Pydantic 拒绝；
 - 模型能力与思考状态错配被拒绝；
+- `no_model` Runner 生成稳定的 null model identity，单边提供 capability/reasoning 被拒绝；
+- 未受信任 Profile 可运行离线 Eval，但身份明确阻止晋升；
 - 真实 `ModelRouter` 生成的 verified capability/reasoning 可以端到端构建身份；
 - 当前主机平台采集只返回有界运行时事实。
 
