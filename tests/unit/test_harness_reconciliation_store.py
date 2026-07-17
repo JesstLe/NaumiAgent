@@ -369,7 +369,7 @@ async def test_v2_database_migrates_additively_without_losing_runs(
     assert prepared.run_count == 1
     assert await migrated.get_run("legacy-run") is not None
     with sqlite3.connect(db_path) as db:
-        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 8
+        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 9
 
 
 @pytest.mark.asyncio
@@ -451,7 +451,7 @@ async def test_v4_database_backfills_pending_gc_and_migrates_failure_stage(
     assert tombstone.stage.value == "artifact_gc"
     assert tombstone.attempt_count == 2
     with sqlite3.connect(db_path) as db:
-        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 8
+        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 9
         assert db.execute(
             "SELECT COUNT(*) FROM harness_session_reconciliation_failure_events"
         ).fetchone()[0] == 2

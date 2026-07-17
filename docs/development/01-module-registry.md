@@ -10,7 +10,7 @@
 | HAR-05 | 安全 Replay 与可重复解释 | implemented | H4.1-H4.4 | `harness/HAR-05-safe-replay.md` |
 | HAR-06 | Session 生命周期与派生数据清理 | implemented | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a) | HAR-05 | `harness/HAR-07-completion-ui.md` |
-| HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.6a, 8.6b, 8.7a-8.7d, H5a) | HAR-05, ARC-03 | `harness/HAR-08-eval-baseline.md` |
+| HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.6a, 8.6b, 8.7a-8.7d, H5a-H5b) | HAR-05, ARC-03 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | planned | HAR-08 | `harness/HAR-09-feedback-promotion.md` |
 | HAR-10 | 长周期 Harness Orchestration | planned | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 

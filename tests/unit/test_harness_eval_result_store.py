@@ -195,7 +195,7 @@ async def test_schema_v8_migration_is_idempotent_and_tamper_evident(
         )
         db.commit()
 
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 8
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 9
     assert table == 1
     with pytest.raises(HarnessStoreError, match="损坏"):
         await HarnessStore(db_path).get_eval_result(
@@ -204,6 +204,49 @@ async def test_schema_v8_migration_is_idempotent_and_tamper_evident(
             "protocol-store",
             0,
         )
+
+
+@pytest.mark.asyncio
+async def test_v8_eval_results_survive_additive_v9_migration(tmp_path: Path) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(db_path)
+    await store.record_eval_result(
+        workspace_root=workspace,
+        batch_id="migration-v8",
+        sample_index=0,
+        result=_result(),
+        created_at=_NOW,
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute("DROP TABLE harness_eval_baseline_events")
+        db.execute("DROP TABLE harness_eval_baseline_selectors")
+        db.execute("DROP TABLE harness_eval_baselines")
+        db.execute("PRAGMA user_version = 8")
+        db.commit()
+
+    migrated = HarnessStore(db_path)
+    await migrated.record_eval_result(
+        workspace_root=workspace,
+        batch_id="migration-v8",
+        sample_index=1,
+        result=_result(duration_ms=11),
+        created_at=_LATER,
+    )
+    with sqlite3.connect(db_path) as db:
+        version = int(db.execute("PRAGMA user_version").fetchone()[0])
+        rows = int(db.execute("SELECT COUNT(*) FROM harness_eval_results").fetchone()[0])
+        baseline_tables = int(
+            db.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+                "AND name LIKE 'harness_eval_baseline%'"
+            ).fetchone()[0]
+        )
+
+    assert version == 9
+    assert rows == 2
+    assert baseline_tables == 3
 
 
 @pytest.mark.asyncio
@@ -244,3 +287,47 @@ async def test_eval_result_rejects_unsafe_keys_and_limits(tmp_path: Path) -> Non
     )
     assert "super-secret-value" not in redacted.result.cases[0].message
     assert "<redacted>" in redacted.result.cases[0].message
+
+
+@pytest.mark.asyncio
+async def test_baseline_promotion_rejects_missing_identity_and_sample_gaps(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(5):
+        await store.record_eval_result(
+            workspace_root=workspace,
+            batch_id="no-identity",
+            sample_index=index,
+            result=_result(),
+            created_at=_NOW,
+        )
+    with pytest.raises(ValueError, match="Identity"):
+        await store.promote_eval_baseline(
+            workspace_root=workspace,
+            batch_id="no-identity",
+            suite_id="protocol-store",
+            promoted_by="Harness-Test",
+            promotion_reason="必须拒绝无身份 cohort",
+            created_at=_LATER,
+        )
+
+    for index in (0, 2):
+        await store.record_eval_result(
+            workspace_root=workspace,
+            batch_id="sample-gap",
+            sample_index=index,
+            result=_result(),
+            created_at=_NOW,
+        )
+    with pytest.raises(ValueError, match="连续递增"):
+        await store.promote_eval_baseline(
+            workspace_root=workspace,
+            batch_id="sample-gap",
+            suite_id="protocol-store",
+            promoted_by="Harness-Test",
+            promotion_reason="必须拒绝缺失 sample",
+            created_at=_LATER,
+        )

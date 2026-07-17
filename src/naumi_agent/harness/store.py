@@ -26,7 +26,12 @@ from naumi_agent.harness.completion import (
     HarnessCompletionReceipt,
     HarnessEvidenceRef,
 )
-from naumi_agent.harness.eval_models import HarnessEvalSuiteResult
+from naumi_agent.harness.eval_models import (
+    EvalCaseStatus,
+    EvalGuardrailStatus,
+    EvalRunStatus,
+    HarnessEvalSuiteResult,
+)
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactGcStatus,
@@ -50,7 +55,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 8
+HARNESS_STORE_SCHEMA_VERSION = 9
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -180,6 +185,35 @@ class HarnessStoredEvalResult:
     result_sha256: str
     result: HarnessEvalSuiteResult
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredEvalBaseline:
+    id: str
+    workspace_root: str
+    suite_id: str
+    version: int
+    batch_id: str
+    identity_sha256: str
+    sample_count: int
+    samples_sha256: str
+    baseline_sha256: str
+    promoted_by: str
+    promotion_reason: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredEvalBaselineEvent:
+    id: str
+    workspace_root: str
+    suite_id: str
+    baseline_id: str
+    previous_baseline_id: str
+    actor: str
+    reason: str
+    created_at: str
+    event_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -959,6 +993,301 @@ class HarnessStore:
             raise HarnessStoreError("无法列出 Harness Eval Result。") from exc
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("Harness Eval Result 列表损坏或无法读取。") from exc
+
+    async def promote_eval_baseline(
+        self,
+        *,
+        workspace_root: str | Path,
+        batch_id: str,
+        suite_id: str,
+        promoted_by: str,
+        promotion_reason: str,
+        created_at: str,
+    ) -> HarnessStoredEvalBaseline:
+        """Promote one eligible immutable cohort and atomically select it."""
+        workspace = _canonical_workspace(workspace_root)
+        batch = _normalize_eval_batch_id(batch_id)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        actor = _normalize_text(promoted_by, field="promoted_by", max_length=128)
+        reason = _normalize_text(
+            promotion_reason,
+            field="promotion_reason",
+            max_length=2_000,
+        )
+        created = _normalize_timestamp(created_at, field="created_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ? AND suite_id = ?
+                    ORDER BY sample_index ASC
+                    """,
+                    (workspace, batch, suite),
+                )
+                samples = tuple(
+                    _eval_result_from_row(row) for row in await cursor.fetchall()
+                )
+                identity_sha256, samples_sha256 = _validate_baseline_cohort(samples)
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ? AND batch_id = ?
+                    """,
+                    (workspace, suite, batch),
+                )
+                existing = await cursor.fetchone()
+                if existing is not None:
+                    baseline = _eval_baseline_from_row(existing)
+                    if (
+                        baseline.identity_sha256 != identity_sha256
+                        or baseline.samples_sha256 != samples_sha256
+                    ):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "已晋升的 Eval batch 不可覆盖为不同 cohort。"
+                        )
+                    await db.rollback()
+                    return baseline
+                cursor = await db.execute(
+                    """
+                    SELECT COALESCE(MAX(version), 0) + 1
+                    FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ?
+                    """,
+                    (workspace, suite),
+                )
+                version = int((await cursor.fetchone())[0])
+                baseline_id = _stable_id(workspace, suite, batch)
+                baseline_sha256 = _eval_baseline_digest(
+                    baseline_id=baseline_id,
+                    workspace_root=workspace,
+                    suite_id=suite,
+                    version=version,
+                    batch_id=batch,
+                    identity_sha256=identity_sha256,
+                    sample_count=len(samples),
+                    samples_sha256=samples_sha256,
+                    promoted_by=actor,
+                    promotion_reason=reason,
+                    created_at=created,
+                )
+                cursor = await db.execute(
+                    """
+                    SELECT baseline_id FROM harness_eval_baseline_selectors
+                    WHERE workspace_root = ? AND suite_id = ?
+                    """,
+                    (workspace, suite),
+                )
+                selector = await cursor.fetchone()
+                previous_id = str(selector["baseline_id"]) if selector else ""
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_baselines (
+                        id, workspace_root, suite_id, version, batch_id,
+                        identity_sha256, sample_count, samples_sha256,
+                        baseline_sha256, promoted_by, promotion_reason, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        baseline_id,
+                        workspace,
+                        suite,
+                        version,
+                        batch,
+                        identity_sha256,
+                        len(samples),
+                        samples_sha256,
+                        baseline_sha256,
+                        actor,
+                        reason,
+                        created,
+                    ),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_baseline_selectors (
+                        workspace_root, suite_id, baseline_id, updated_at,
+                        selector_sha256
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(workspace_root, suite_id) DO UPDATE SET
+                        baseline_id = excluded.baseline_id,
+                        updated_at = excluded.updated_at,
+                        selector_sha256 = excluded.selector_sha256
+                    """,
+                    (
+                        workspace,
+                        suite,
+                        baseline_id,
+                        created,
+                        _eval_baseline_selector_digest(
+                            workspace,
+                            suite,
+                            baseline_id,
+                            created,
+                        ),
+                    ),
+                )
+                event_id = _stable_id("baseline_promoted", baseline_id)
+                event_sha256 = _eval_baseline_event_digest(
+                    event_id=event_id,
+                    workspace_root=workspace,
+                    suite_id=suite,
+                    baseline_id=baseline_id,
+                    previous_baseline_id=previous_id,
+                    actor=actor,
+                    reason=reason,
+                    created_at=created,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_baseline_events (
+                        id, workspace_root, suite_id, baseline_id,
+                        previous_baseline_id, actor, reason, created_at,
+                        event_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        workspace,
+                        suite,
+                        baseline_id,
+                        previous_id,
+                        actor,
+                        reason,
+                        created,
+                        event_sha256,
+                    ),
+                )
+                await db.commit()
+        except HarnessStoreConflictError:
+            raise
+        except ValueError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法晋升 Harness Eval Baseline。") from exc
+        restored = await self.get_active_eval_baseline(workspace, suite)
+        assert restored is not None
+        return restored
+
+    async def get_active_eval_baseline(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+    ) -> HarnessStoredEvalBaseline | None:
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baseline_selectors
+                    WHERE workspace_root = ? AND suite_id = ?
+                    """,
+                    (workspace, suite),
+                )
+                selector = await cursor.fetchone()
+                if selector is None:
+                    return None
+                expected_selector_sha256 = _eval_baseline_selector_digest(
+                    workspace,
+                    suite,
+                    str(selector["baseline_id"]),
+                    str(selector["updated_at"]),
+                )
+                if str(selector["selector_sha256"]) != expected_selector_sha256:
+                    raise ValueError("active Eval Baseline selector 摘要与内容不一致。")
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE id = ? AND workspace_root = ? AND suite_id = ?
+                    """,
+                    (str(selector["baseline_id"]), workspace, suite),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    raise ValueError("active Eval Baseline selector 引用了越界或缺失版本。")
+                baseline = _eval_baseline_from_row(row)
+                if baseline.workspace_root != workspace or baseline.suite_id != suite:
+                    raise ValueError("active Eval Baseline selector 越过工作区边界。")
+                return baseline
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 active Eval Baseline。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("active Eval Baseline 损坏或无法读取。") from exc
+
+    async def list_eval_baselines(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[HarnessStoredEvalBaseline, ...]:
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if not 1 <= limit <= 1_000:
+            raise ValueError("limit 必须在 1..1000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ?
+                    ORDER BY version DESC LIMIT ?
+                    """,
+                    (workspace, suite, limit),
+                )
+                return tuple(
+                    _eval_baseline_from_row(row) for row in await cursor.fetchall()
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出 Eval Baseline。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Baseline 列表损坏或无法读取。") from exc
+
+    async def list_eval_baseline_events(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[HarnessStoredEvalBaselineEvent, ...]:
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if not 1 <= limit <= 1_000:
+            raise ValueError("limit 必须在 1..1000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baseline_events
+                    WHERE workspace_root = ? AND suite_id = ?
+                    ORDER BY created_at ASC, id ASC LIMIT ?
+                    """,
+                    (workspace, suite, limit),
+                )
+                return tuple(
+                    _eval_baseline_event_from_row(row)
+                    for row in await cursor.fetchall()
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出 Eval Baseline 审计事件。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Baseline 审计事件损坏或无法读取。") from exc
 
     async def get_run(self, run_id: str) -> HarnessStoredRun | None:
         normalized_run_id = _normalize_text(run_id, field="run_id", max_length=128)
@@ -2285,6 +2614,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V6)
                             await db.executescript(_SCHEMA_V7)
                             await db.executescript(_SCHEMA_V8)
+                            await db.executescript(_SCHEMA_V9)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -2569,6 +2899,226 @@ def _eval_result_from_row(row: aiosqlite.Row) -> HarnessStoredEvalResult:
         result_sha256=result_sha256,
         result=result,
         created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
+    )
+
+
+def _validate_baseline_cohort(
+    samples: tuple[HarnessStoredEvalResult, ...],
+) -> tuple[str, str]:
+    if not samples:
+        raise ValueError("Eval cohort 为空，不能晋升 Baseline。")
+    if [item.sample_index for item in samples] != list(range(len(samples))):
+        raise ValueError("Eval cohort sample_index 必须从 0 连续递增。")
+    identity_values = {item.identity_sha256 for item in samples}
+    if "" in identity_values or len(identity_values) != 1:
+        raise ValueError("Eval cohort 缺少统一、可验证的 Identity。")
+    for sample in samples:
+        result = sample.result
+        identity = result.baseline_identity
+        if identity is None or result.baseline_identity_code:
+            raise ValueError("Eval sample Identity 不可用于 Baseline。")
+        if not identity.baseline_eligible:
+            raise ValueError("Eval sample 未通过 Baseline eligibility gate。")
+        if identity.configuration.repetitions != len(samples):
+            raise ValueError("Identity repetitions 与 cohort 样本数不一致。")
+        if result.status is not EvalRunStatus.PASSED or not result.cases:
+            raise ValueError("Baseline cohort 必须包含非空的全绿 Suite Result。")
+        if any(case.status is not EvalCaseStatus.PASSED for case in result.cases):
+            raise ValueError("Baseline cohort 含未通过 case。")
+        if any(
+            guardrail.status is not EvalGuardrailStatus.PASSED
+            for case in result.cases
+            for guardrail in case.guardrails
+        ):
+            raise ValueError("Baseline cohort 含未通过或未验证 guardrail。")
+    samples_sha256 = _stable_digest(
+        _json_dumps(
+            [
+                {
+                    "sample_index": item.sample_index,
+                    "result_sha256": item.result_sha256,
+                }
+                for item in samples
+            ]
+        )
+    )
+    return next(iter(identity_values)), samples_sha256
+
+
+def _eval_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredEvalBaseline:
+    workspace = _canonical_workspace(str(row["workspace_root"]))
+    suite_id = _normalize_text(str(row["suite_id"]), field="suite_id", max_length=64)
+    batch_id = _normalize_eval_batch_id(str(row["batch_id"]))
+    expected_id = _stable_id(workspace, suite_id, batch_id)
+    version = int(row["version"])
+    sample_count = int(row["sample_count"])
+    if str(row["id"]) != expected_id or version < 1 or not 1 <= sample_count <= 10_000:
+        raise ValueError("Eval Baseline immutable key 或计数无效。")
+    identity_sha256 = _validate_sha256(
+        str(row["identity_sha256"]),
+        field="identity_sha256",
+    )
+    samples_sha256 = _validate_sha256(
+        str(row["samples_sha256"]),
+        field="samples_sha256",
+    )
+    baseline_sha256 = _validate_sha256(
+        str(row["baseline_sha256"]),
+        field="baseline_sha256",
+    )
+    promoted_by = _normalize_text(
+        str(row["promoted_by"]),
+        field="promoted_by",
+        max_length=128,
+    )
+    promotion_reason = _normalize_text(
+        str(row["promotion_reason"]),
+        field="promotion_reason",
+        max_length=2_000,
+    )
+    created_at = _normalize_timestamp(str(row["created_at"]), field="created_at")
+    expected_digest = _eval_baseline_digest(
+        baseline_id=expected_id,
+        workspace_root=workspace,
+        suite_id=suite_id,
+        version=version,
+        batch_id=batch_id,
+        identity_sha256=identity_sha256,
+        sample_count=sample_count,
+        samples_sha256=samples_sha256,
+        promoted_by=promoted_by,
+        promotion_reason=promotion_reason,
+        created_at=created_at,
+    )
+    if baseline_sha256 != expected_digest:
+        raise ValueError("Eval Baseline digest 与内容不一致。")
+    return HarnessStoredEvalBaseline(
+        id=expected_id,
+        workspace_root=workspace,
+        suite_id=suite_id,
+        version=version,
+        batch_id=batch_id,
+        identity_sha256=identity_sha256,
+        sample_count=sample_count,
+        samples_sha256=samples_sha256,
+        baseline_sha256=baseline_sha256,
+        promoted_by=promoted_by,
+        promotion_reason=promotion_reason,
+        created_at=created_at,
+    )
+
+
+def _eval_baseline_digest(
+    *,
+    baseline_id: str,
+    workspace_root: str,
+    suite_id: str,
+    version: int,
+    batch_id: str,
+    identity_sha256: str,
+    sample_count: int,
+    samples_sha256: str,
+    promoted_by: str,
+    promotion_reason: str,
+    created_at: str,
+) -> str:
+    return _stable_digest(
+        _json_dumps(
+            {
+                "id": baseline_id,
+                "workspace_root": workspace_root,
+                "suite_id": suite_id,
+                "version": version,
+                "batch_id": batch_id,
+                "identity_sha256": identity_sha256,
+                "sample_count": sample_count,
+                "samples_sha256": samples_sha256,
+                "promoted_by": promoted_by,
+                "promotion_reason": promotion_reason,
+                "created_at": created_at,
+            }
+        )
+    )
+
+
+def _eval_baseline_event_from_row(
+    row: aiosqlite.Row,
+) -> HarnessStoredEvalBaselineEvent:
+    event = HarnessStoredEvalBaselineEvent(
+        id=_normalize_text(str(row["id"]), field="event_id", max_length=64),
+        workspace_root=_canonical_workspace(str(row["workspace_root"])),
+        suite_id=_normalize_text(
+            str(row["suite_id"]), field="suite_id", max_length=64
+        ),
+        baseline_id=_normalize_text(
+            str(row["baseline_id"]), field="baseline_id", max_length=64
+        ),
+        previous_baseline_id=str(row["previous_baseline_id"]),
+        actor=_normalize_text(str(row["actor"]), field="actor", max_length=128),
+        reason=_normalize_text(str(row["reason"]), field="reason", max_length=2_000),
+        created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
+        event_sha256=_validate_sha256(
+            str(row["event_sha256"]), field="event_sha256"
+        ),
+    )
+    expected_id = _stable_id("baseline_promoted", event.baseline_id)
+    expected_digest = _eval_baseline_event_digest(
+        event_id=event.id,
+        workspace_root=event.workspace_root,
+        suite_id=event.suite_id,
+        baseline_id=event.baseline_id,
+        previous_baseline_id=event.previous_baseline_id,
+        actor=event.actor,
+        reason=event.reason,
+        created_at=event.created_at,
+    )
+    if event.id != expected_id or event.event_sha256 != expected_digest:
+        raise ValueError("Eval Baseline 审计事件摘要与内容不一致。")
+    return event
+
+
+def _eval_baseline_event_digest(
+    *,
+    event_id: str,
+    workspace_root: str,
+    suite_id: str,
+    baseline_id: str,
+    previous_baseline_id: str,
+    actor: str,
+    reason: str,
+    created_at: str,
+) -> str:
+    return _stable_digest(
+        _json_dumps(
+            {
+                "id": event_id,
+                "workspace_root": workspace_root,
+                "suite_id": suite_id,
+                "baseline_id": baseline_id,
+                "previous_baseline_id": previous_baseline_id,
+                "actor": actor,
+                "reason": reason,
+                "created_at": created_at,
+            }
+        )
+    )
+
+
+def _eval_baseline_selector_digest(
+    workspace_root: str,
+    suite_id: str,
+    baseline_id: str,
+    updated_at: str,
+) -> str:
+    return _stable_digest(
+        _json_dumps(
+            {
+                "workspace_root": workspace_root,
+                "suite_id": suite_id,
+                "baseline_id": baseline_id,
+                "updated_at": updated_at,
+            }
+        )
     )
 
 
@@ -3188,4 +3738,52 @@ CREATE INDEX IF NOT EXISTS idx_harness_eval_results_cohort
 ON harness_eval_results (
     workspace_root, batch_id, suite_id, sample_index
 );
+"""
+
+_SCHEMA_V9 = """
+CREATE TABLE IF NOT EXISTS harness_eval_baselines (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    batch_id TEXT NOT NULL,
+    identity_sha256 TEXT NOT NULL,
+    sample_count INTEGER NOT NULL CHECK (sample_count BETWEEN 1 AND 10000),
+    samples_sha256 TEXT NOT NULL,
+    baseline_sha256 TEXT NOT NULL,
+    promoted_by TEXT NOT NULL,
+    promotion_reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (workspace_root, suite_id, version),
+    UNIQUE (workspace_root, suite_id, batch_id)
+);
+
+CREATE TABLE IF NOT EXISTS harness_eval_baseline_selectors (
+    workspace_root TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    baseline_id TEXT NOT NULL
+        REFERENCES harness_eval_baselines(id) ON DELETE RESTRICT,
+    updated_at TEXT NOT NULL,
+    selector_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, suite_id)
+);
+
+CREATE TABLE IF NOT EXISTS harness_eval_baseline_events (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    baseline_id TEXT NOT NULL
+        REFERENCES harness_eval_baselines(id) ON DELETE RESTRICT,
+    previous_baseline_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    event_sha256 TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_eval_baselines_versions
+ON harness_eval_baselines (workspace_root, suite_id, version DESC);
+
+CREATE INDEX IF NOT EXISTS idx_harness_eval_baseline_events_suite
+ON harness_eval_baseline_events (workspace_root, suite_id, created_at, id);
 """
