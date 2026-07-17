@@ -21,6 +21,10 @@ from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.completion import HarnessCompletionReceipt
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalBaselineStatus,
+    HarnessEvalBaselineView,
+)
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
@@ -1061,6 +1065,49 @@ async def test_bridge_resends_harness_explain_request_at_same_revision() -> None
     assert responses[0]["payload"] == responses[1]["payload"]
     assert responses[0]["payload"]["revision"] == 1
     assert responses[0]["payload"]["explanation"]["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_returns_typed_harness_eval_baseline_snapshot() -> None:
+    class BaselineService:
+        async def eval_baseline_status(self, suite_id: str) -> HarnessEvalBaselineStatus:
+            return HarnessEvalBaselineStatus(
+                status="ok",
+                suite_id=suite_id,
+                active=HarnessEvalBaselineView(
+                    id="a" * 64,
+                    version=1,
+                    batch_id="baseline-1",
+                    sample_count=5,
+                    identity_sha256="b" * 64,
+                    samples_sha256="c" * 64,
+                    promoted_by="user",
+                    promotion_reason="真实场景验证完成",
+                    created_at="2026-07-18T10:00:00+00:00",
+                ),
+            )
+
+    engine = _FakeEngine()
+    engine.harness_service = BaselineService()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "baseline-status",
+            "type": ClientEventType.HARNESS_EVAL_BASELINE_REQUEST,
+            "payload": {"suite_id": "surface-protocol"},
+        }
+    )
+
+    response = next(
+        record for record in _records(writer) if record["type"] == "harness/eval-baseline"
+    )
+    assert response["request_id"] == "baseline-status"
+    assert response["payload"]["active"]["version"] == 1
+    assert response["payload"]["suite_id"] == "surface-protocol"
+    assert len(response["payload"]["snapshot_sha256"]) == 64
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
 import { renderWorkbenchOverview } from "./components/workbench-overview.js";
 import { renderHarnessDetailPage } from "./components/harness-detail-page.js";
+import { renderHarnessEvalBaselinePage } from "./components/harness-eval-baseline-page.js";
 import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
@@ -40,6 +41,11 @@ export function renderScreen(state, width, height, env = {}) {
       ...state.harnessDetail,
       explain: state.harnessExplanations[state.harnessDetail.runId],
       replay: state.harnessReplays[state.harnessDetail.runId],
+    }, width, bodyHeight)
+    : state.route?.name === "harness_eval_baseline"
+    ? renderHarnessEvalBaselinePage({
+      ...state.harnessEvalBaseline,
+      snapshot: state.harnessEvalBaselines[state.harnessEvalBaseline.suiteId],
     }, width, bodyHeight)
     : state.route?.name === "workbench"
     ? renderWorkbenchOverview(state.workbench, width, bodyHeight)

@@ -49,6 +49,7 @@ class ClientEventType(StrEnum):
     RECEIPT_REQUEST = "receipt/request"
     HARNESS_EXPLAIN_REQUEST = "harness/explain/request"
     HARNESS_REPLAY_REQUEST = "harness/replay/request"
+    HARNESS_EVAL_BASELINE_REQUEST = "harness/eval-baseline/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
@@ -90,6 +91,7 @@ class ServerEventType(StrEnum):
     HARNESS_RECEIPT = "harness/receipt"
     HARNESS_EXPLAIN = "harness/explain"
     HARNESS_REPLAY = "harness/replay"
+    HARNESS_EVAL_BASELINE = "harness/eval-baseline"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -273,6 +275,14 @@ def _normalize_client_payload(
         ClientEventType.HARNESS_REPLAY_REQUEST,
     }:
         return _normalize_harness_detail_request(payload)
+
+    if event_type == ClientEventType.HARNESS_EVAL_BASELINE_REQUEST:
+        suite_id = str(payload.get("suite_id") or "").strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", suite_id):
+            raise ValueError(
+                "Harness Eval suite_id 必须以小写字母开头，且只含小写字母、数字、_ 或 -。"
+            )
+        return {"suite_id": suite_id}
 
     if event_type == ClientEventType.INSPECTOR_REQUEST:
         raw_revision = payload.get("known_revision", 0)

@@ -58,7 +58,7 @@ receipt。
 
 ## 6. 后续
 
-- HAR-08.8e：typed Bridge/New UI/TUI batch、promotion、comparison detail 与筛选；
+- HAR-08.8e1 已完成 typed Baseline 状态页；8e2-8e4 继续完成 batch、promotion、comparison detail 与筛选；
 - HAR-08.3/8.4/8.5：Replay、Sandbox、Live runner 复用同一 batch/receipt 协议；
 - HAR-09：Proposal outcome 必须引用 receipt ID；
 - EVO-03：验证阶段消费 receipt，不重新计算或让 LLM 覆盖 verdict。

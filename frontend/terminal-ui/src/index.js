@@ -51,6 +51,7 @@ import {
 import {
   handleAgentControlKey,
   handleHarnessDetailKey,
+  handleHarnessEvalBaselineKey,
   handlePermissionCenterKey,
   handleInteractionKey,
   handleSubmitText,
@@ -566,6 +567,10 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (state.route?.name === "harness_detail" && handleHarnessDetailKey(state, chunk)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "harness_eval_baseline" && handleHarnessEvalBaselineKey(state, chunk)) {
     scheduleRedraw();
     return;
   }

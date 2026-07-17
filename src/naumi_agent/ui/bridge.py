@@ -21,6 +21,7 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.harness.eval_surface import HarnessEvalBaselineStatus
 from naumi_agent.harness.explain import HarnessExplainLookup
 from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.inspector import RuntimeInspectorSnapshot
@@ -29,6 +30,7 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.harness_protocol import (
+    harness_eval_baseline_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
@@ -768,6 +770,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.HARNESS_REPLAY_REQUEST:
             await self.query_harness_replay(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.HARNESS_EVAL_BASELINE_REQUEST:
+            await self.query_harness_eval_baseline(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.INSPECTOR_REQUEST:
             await self.show_inspector(payload, request_id=request_id)
             return
@@ -1312,6 +1317,48 @@ class JsonlEngineBridge:
             )
         await self.emit(
             ServerEventType.HARNESS_REPLAY,
+            response,
+            request_id=request_id,
+        )
+
+    async def query_harness_eval_baseline(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Return one authoritative, workspace-scoped Eval Baseline snapshot."""
+        suite_id = str(payload["suite_id"])
+        service = getattr(self.engine, "harness_service", None)
+        if service is None:
+            status = HarnessEvalBaselineStatus(
+                status="unavailable",
+                suite_id=suite_id,
+                message="Harness 状态库尚未初始化。",
+            )
+        else:
+            try:
+                status = await service.eval_baseline_status(suite_id)
+            except Exception as exc:
+                self._trace_harness_lookup_failure("eval_baseline", exc)
+                status = HarnessEvalBaselineStatus(
+                    status="unavailable",
+                    suite_id=suite_id,
+                    message="Harness Eval 状态库损坏、不可读或正忙。",
+                )
+        try:
+            response = harness_eval_baseline_payload(status)
+        except Exception as exc:
+            self._trace_harness_lookup_failure("eval_baseline_payload", exc)
+            response = harness_eval_baseline_payload(
+                HarnessEvalBaselineStatus(
+                    status="unavailable",
+                    suite_id=suite_id,
+                    message="Harness Eval 状态暂不可用。",
+                )
+            )
+        await self.emit(
+            ServerEventType.HARNESS_EVAL_BASELINE,
             response,
             request_id=request_id,
         )
