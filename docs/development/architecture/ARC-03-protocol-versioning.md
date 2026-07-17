@@ -23,3 +23,11 @@ Artifact、Harness 和 interaction，防止 Python/Node/TUI 各自漂移。
 - sequence gap 触发 snapshot，不静默遗漏权限/终态。
 - schema 中标记 secret/raw/reasoning 的字段禁止进入持久 UI/Harness channel。
 - protocol contract 随打包产物发布并可查询版本。
+
+## 分阶段实现
+
+- ARC-03.4a 启动协议协商：已完成设计，实施见
+  `ARC-03-4a-hello-negotiation-design.md` 与
+  `ARC-03-4a-hello-negotiation-implementation-plan.md`。
+- 其余 Envelope、Schema registry、Compatibility、Ordering、Code generation 与 Conformance suite
+  仍保持 planned；不得因 4a 完成而把 ARC-03 整体标记为完成。
