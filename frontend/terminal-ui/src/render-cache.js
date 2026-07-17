@@ -78,6 +78,7 @@ export function messageRenderKey(message, ctx) {
       focused: ctx.state?.taskPanel?.focused ?? false,
       expandedIds: ctx.state?.taskPanel?.expandedIds ?? {},
       collapsedTimelineSources: ctx.state?.taskPanel?.collapsedTimelineSources ?? {},
+      searchQuery: ctx.state?.taskPanel?.searchQuery ?? "",
     },
   });
 }

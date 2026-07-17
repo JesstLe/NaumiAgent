@@ -840,6 +840,55 @@ test("terminal UI process uses focused task action keys", async () => {
   }
 });
 
+test("terminal UI process navigates focused tasks with arrows and boundaries", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "task: 1/3 1");
+    app.stdin.write("\x1b[B");
+    await waitForOutput(output, "task: 2/3 bg_0001");
+    app.stdin.write("\x1b[F");
+    await waitForOutput(output, "task: 3/3 run_7");
+    app.stdin.write("\x1b[H");
+    await waitForOutput(output, "task: 1/3 1");
+
+    const code = await stopTerminalUi(app);
+    assert.equal(code, 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process searches the current task view without a bridge request", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/tasks\n");
+    await waitForOutput(output, "task: 1/3 1");
+    const sendsBeforeSearch = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "task_panel",
+    ).length;
+
+    app.stdin.write("/tasks search browser\n");
+    await waitForOutput(output, "task: 1/1 run_7");
+
+    const sendsAfterSearch = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send" && record.payload.record.type === "task_panel",
+    ).length;
+    assert.equal(sendsAfterSearch, sendsBeforeSearch);
+
+    const code = await stopTerminalUi(app);
+    assert.equal(code, 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process folds timeline sources locally", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

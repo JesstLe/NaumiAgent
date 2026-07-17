@@ -270,7 +270,7 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/resume", "aliases": ["/r"], "description": "继续最近一次对话"},
         {
             "command": "/tasks",
-            "description": "显示/更新任务面板（支持 list/open/cancel/refresh）",
+            "description": "任务面板（筛选、搜索、键盘导航、详情与取消）",
         },
         {"command": "/task", "description": "查看任务运行详情"},
         {

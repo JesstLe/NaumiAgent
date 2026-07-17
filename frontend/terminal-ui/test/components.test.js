@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import { ANSI, stripAnsi, visibleWidth } from "../src/ansi.js";
 import { boxComponent, createRenderContext, line, renderComponent, stack } from "../src/components/core.js";
 import {
@@ -754,6 +755,53 @@ test("task panel component structures task sections like a dedicated UI surface"
   assert(plain.includes("ports=5173"));
   assert(plain.includes("current=等待用户选择页面元素"));
   assert(rendered.every((item) => visibleWidth(item) <= 84));
+});
+
+test("task panel component renders only rows matching the local search query", () => {
+  const content = [
+    "任务面板",
+    "Todo",
+    "  - #1 [running] 编写页面 | owner=main",
+    "  - #2 [blocked] 审查接口 | owner=reviewer",
+    "Background",
+    "  - bg_0001 [running] npm run dev | cwd=/tmp/project",
+  ].join("\n");
+  const rendered = renderComponent(
+    TaskPanel({ content, taskPanel: { searchQuery: "reviewer", selectedId: "2" } }),
+    { width: 84 },
+  );
+  const plain = stripAnsi(rendered.join("\n"));
+
+  assert(plain.includes("search reviewer"));
+  assert(plain.includes("审查接口"));
+  assert(!plain.includes("编写页面"));
+  assert(!plain.includes("npm run dev"));
+});
+
+test("task panel keeps 10k-event rendering viewport-bounded under the P95 budget", () => {
+  const rows = Array.from(
+    { length: 10_000 },
+    (_, index) => `  - bg_${index} [running] task ${index} | cwd=/tmp/${index}`,
+  );
+  const content = ["任务面板", "Background", ...rows].join("\n");
+  const samples = [];
+  let rendered = [];
+
+  renderTaskPanel(content, 100, { width: 100, bodyHeight: 40, taskPanel: {} });
+  for (let index = 0; index < 12; index += 1) {
+    const startedAt = performance.now();
+    rendered = renderTaskPanel(content, 100, {
+      width: 100,
+      bodyHeight: 40,
+      taskPanel: { selectedId: "bg_9999" },
+    });
+    samples.push(performance.now() - startedAt);
+  }
+
+  samples.sort((left, right) => left - right);
+  const p95 = samples[Math.ceil(samples.length * 0.95) - 1];
+  assert(rendered.length <= 40);
+  assert(p95 < 100, `10k task panel render P95 ${p95.toFixed(1)}ms exceeded 100ms`);
 });
 
 test("system task notices use the dedicated task panel renderer", () => {
