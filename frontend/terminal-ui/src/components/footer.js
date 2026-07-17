@@ -99,7 +99,7 @@ export function TaskSelectionFooter({ taskPanel }) {
         );
       }
       return wrapAnsiLine(
-        color(ANSI.magenta, `task: ${index + 1}/${items.length} ${item.id} · Tab/n 选择 · Enter/o 详情 · e/c 展开 · j 记录 · x 取消 · /tasks timeline 折叠来源 · Esc 退出`),
+        color(ANSI.magenta, `task: ${index + 1}/${items.length} ${item.id} · ↑/↓ 逐项 · PgUp/PgDn 翻页 · Home/End 首尾 · Enter 详情 · e 展开 · j 记录 · x 取消 · /tasks search · Esc 退出`),
         ctx.width,
       );
     },

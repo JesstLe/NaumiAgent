@@ -15,10 +15,11 @@ export function TaskPanel({ content, taskPanel = null }) {
 export function renderTaskPanel(content, width, ctx = { width }) {
   const model = parseTaskPanel(content);
   const taskPanel = ctx.taskPanel ?? ctx.state?.taskPanel ?? {};
+  const searchQuery = String(taskPanel.searchQuery ?? "").trim();
   const workbenchIssues = ctx.state?.workbench?.issues ?? [];
   const issuesByTaskId = issueByTaskId(workbenchIssues);
   const children = [
-    line(`${color(ANSI.cyan, "tasks")} ${model.summary}`),
+    line(`${color(ANSI.cyan, "tasks")} ${searchQuery ? `search ${searchQuery} | ` : ""}${model.summary}`),
     ...renderSection("Timeline", model.sections.Timeline, ANSI.green, taskPanel),
     ...renderSection("Detail", model.sections.Detail, ANSI.green, taskPanel),
     ...renderSection("Todo", model.sections.Todo, ANSI.cyan, taskPanel, issuesByTaskId),
@@ -79,17 +80,24 @@ function issueByTaskId(issues = []) {
 }
 
 function renderSection(title, rows = [], style = ANSI.dim, taskPanel = {}, issuesByTaskId = new Map()) {
-  if (!rows.length) return [];
+  const matchingRows = filterTaskRows(rows, taskPanel.searchQuery);
+  if (!matchingRows.length) return [];
   if (title === "Timeline") {
-    return renderTimelineSection(rows, style, taskPanel);
+    return renderTimelineSection(matchingRows, style, taskPanel);
   }
-  const visible = rows.slice(0, 6);
-  const hidden = rows.length - visible.length;
+  const visible = matchingRows.slice(0, 6);
+  const hidden = matchingRows.length - visible.length;
   return [
     line(color(style, title)),
     ...visible.flatMap((item) => renderTaskRow(title, item, taskPanel, issuesByTaskId)),
     hidden > 0 ? line(color(ANSI.dim, `  ... 还有 ${hidden} 项`)) : null,
   ].filter(Boolean);
+}
+
+function filterTaskRows(rows, searchQuery) {
+  const query = String(searchQuery ?? "").trim().toLocaleLowerCase();
+  if (!query) return rows;
+  return rows.filter((row) => String(row ?? "").toLocaleLowerCase().includes(query));
 }
 
 function renderTimelineSection(rows = [], style = ANSI.dim, taskPanel = {}) {

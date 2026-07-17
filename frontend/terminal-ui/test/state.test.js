@@ -21,7 +21,9 @@ import {
   pushSystemMessage,
   reduceServerEvent,
   requestRunCancel,
+  selectTaskPanelBoundary,
   selectTaskPanelOffset,
+  selectTaskPanelPage,
   setTaskPanelFocus,
   retryUserMessage,
   submitTaskMessage,
@@ -1818,6 +1820,93 @@ test("task panel extracts selectable items and opens selected detail locally", (
 
   handleSubmitText(state, "/tasks focus", send);
   assert.equal(hasTaskPanelFocus(state), true);
+});
+
+test("task panel supports bounded page and boundary navigation", () => {
+  const state = createInitialState();
+  state.taskPanel.items = Array.from({ length: 23 }, (_, index) => ({
+    id: `task-${index + 1}`,
+    source: "todo",
+    status: "open",
+    label: `todo task-${index + 1}`,
+  }));
+  state.taskPanel.selectedId = "task-1";
+
+  selectTaskPanelPage(state, 1, 8);
+  assert.equal(state.taskPanel.selectedId, "task-9");
+  selectTaskPanelPage(state, 1, 8);
+  assert.equal(state.taskPanel.selectedId, "task-17");
+  selectTaskPanelPage(state, 1, 8);
+  assert.equal(state.taskPanel.selectedId, "task-23");
+
+  selectTaskPanelBoundary(state, "first");
+  assert.equal(state.taskPanel.selectedId, "task-1");
+  selectTaskPanelBoundary(state, "last");
+  assert.equal(state.taskPanel.selectedId, "task-23");
+});
+
+test("task panel search filters rendered navigation locally and preserves selection by id", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  const content = [
+    "任务面板",
+    "Todo",
+    "  - #1 [running] 编写页面 | owner=main",
+    "  - #2 [blocked] 审查接口 | owner=reviewer",
+    "Background",
+    "  - bg_0001 [running] npm run dev | cwd=/tmp/project",
+  ].join("\n");
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "system_notice", title: "tasks", content },
+  });
+  handleSubmitText(state, "/tasks select 2", send);
+  assert.equal(state.taskPanel.selectedId, "2");
+
+  handleSubmitText(state, "/tasks search reviewer", send);
+  assert.equal(state.taskPanel.searchQuery, "reviewer");
+  assert.deepEqual(state.taskPanel.items.map((item) => item.id), ["2"]);
+  assert.equal(state.taskPanel.selectedId, "2");
+  assert.equal(sent.length, 0);
+
+  handleSubmitText(state, "/tasks search clear", send);
+  assert.equal(state.taskPanel.searchQuery, "");
+  assert.deepEqual(state.taskPanel.items.map((item) => item.id), ["1", "2", "bg_0001"]);
+  assert.equal(state.taskPanel.selectedId, "2");
+});
+
+test("task panel refresh chooses the nearest item and explains a vanished selection", () => {
+  const state = createInitialState();
+  const first = [
+    "任务面板",
+    "Todo",
+    "  - #1 [open] one",
+    "  - #2 [running] two",
+    "  - #3 [open] three",
+  ].join("\n");
+  const refreshed = [
+    "任务面板",
+    "Todo",
+    "  - #1 [open] one",
+    "  - #3 [open] three",
+  ].join("\n");
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "system_notice", title: "tasks", content: first },
+  });
+  selectTaskPanelOffset(state, 1);
+  assert.equal(state.taskPanel.selectedId, "2");
+
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "system_notice", title: "tasks", content: refreshed },
+  });
+  assert.equal(state.taskPanel.selectedId, "3");
+  assert.equal(state.messages.at(-1).title, "任务面板");
+  assert(state.messages.at(-1).content.includes("已结束或不再匹配筛选"));
 });
 
 test("task panel timeline rows preserve concrete source and record paths", () => {

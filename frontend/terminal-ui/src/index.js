@@ -60,7 +60,9 @@ import {
   openSelectedTaskPanelItem,
   pushSystemMessage,
   reduceServerEvent,
+  selectTaskPanelBoundary,
   selectTaskPanelOffset,
+  selectTaskPanelPage,
   setTaskPanelFocus,
   setTaskPanelItemExpanded,
   toggleTaskPanelItemExpanded,
@@ -823,12 +825,28 @@ function handleTaskPanelFocusedKey(chunk) {
     setTaskPanelFocus(state, false);
     return true;
   }
-  if (chunk === "\t" || key === "n") {
+  if (chunk === "\t" || key === "n" || chunk === INPUT_KEYS.down) {
     selectTaskPanelOffset(state, 1);
     return true;
   }
-  if (key === "p") {
+  if (key === "p" || chunk === INPUT_KEYS.up) {
     selectTaskPanelOffset(state, -1);
+    return true;
+  }
+  if (chunk === INPUT_KEYS.pageUp) {
+    selectTaskPanelPage(state, -1);
+    return true;
+  }
+  if (chunk === INPUT_KEYS.pageDown) {
+    selectTaskPanelPage(state, 1);
+    return true;
+  }
+  if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(chunk)) {
+    selectTaskPanelBoundary(state, "first");
+    return true;
+  }
+  if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(chunk)) {
+    selectTaskPanelBoundary(state, "last");
     return true;
   }
   if (chunk === "\r" || chunk === "\n" || key === "o") {

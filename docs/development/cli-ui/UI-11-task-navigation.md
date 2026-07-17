@@ -21,3 +21,17 @@
 - background/browser/subagent/todo 的不可用动作不展示或明确禁用原因。
 - 触摸板滚动有平滑限速，键盘导航逐项精确。
 - 真实多来源任务运行时完成 resize、filter、detail、cancel、resume E2E。
+
+## 实现进度
+
+- `UI-11.2a`（2026-07-17）已完成：现有嵌入式任务面板支持方向键逐项导航、
+  `PageUp/PageDown` 有界翻页、`Home/End` 首尾定位和 `/tasks search <关键词>` 本地搜索。
+- 搜索覆盖任务行的 ID、标题和 owner/cwd 等详情字段，不修改 Bridge 协议或后端权威数据；
+  `/tasks search clear` 恢复完整列表。
+- 后端刷新或本地筛选后优先按稳定任务 ID 保持选择；原任务消失时选择原位置最近邻，
+  并明确提示用户，不伪造任务终态。
+- 10,000 条任务事件的组件真实渲染只输出 viewport 行数，12 次采样 P95 受 100ms
+  回归门约束；真实终端进程已验证方向键和首尾键序列。
+
+仍未完成：`UI-11.1` 完整统一字段、全屏双栏/窄屏降级、详情依赖图、retry/artifact/
+takeover 能力矩阵，以及屏幕阅读器语义。`UI-11` 因此保持 `partial`。

@@ -43,7 +43,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/load", aliases: ["/l"], description: "加载会话并继续对话" },
   { command: "/resume", aliases: ["/r"], description: "继续最近一次对话" },
   { command: "/task", description: "创建任务、切换任务输入，或按 ID 打开任务" },
-  { command: "/tasks", description: "显示/更新任务面板（支持 list/open/cancel/refresh）" },
+  { command: "/tasks", description: "任务面板（筛选、搜索、键盘导航、详情与取消）" },
   { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
@@ -257,6 +257,7 @@ export function createInitialState() {
       source: "all",
       status: "all",
       history: false,
+      searchQuery: "",
       detailId: "",
       selectedId: "",
       selectedIndex: 0,
@@ -2925,6 +2926,11 @@ function handleTasksCommand(state, text, send) {
     handleTaskTimelineCommand(state, raw);
     return;
   }
+  if (/^search(?:\s|$)/.test(raw)) {
+    const query = raw.slice("search".length).trim();
+    setTaskPanelSearch(state, ["clear", "off"].includes(query.toLowerCase()) ? "" : query);
+    return;
+  }
   const { command, commandArg, limit, source, status, detailId, history } = parseTaskCommand(raw, state.taskPanel.limit);
   if (command === "off") {
     closeTaskPanel(state);
@@ -2941,6 +2947,14 @@ function handleTasksCommand(state, text, send) {
   }
   if (command === "next" || command === "prev") {
     selectTaskPanelOffset(state, command === "next" ? 1 : -1);
+    return;
+  }
+  if (command === "first" || command === "last") {
+    selectTaskPanelBoundary(state, command);
+    return;
+  }
+  if (command === "pageup" || command === "pagedown") {
+    selectTaskPanelPage(state, command === "pagedown" ? 1 : -1);
     return;
   }
   if (command === "select") {
@@ -3058,7 +3072,7 @@ function parseTaskCommand(raw, fallbackLimit = 12) {
     history = true;
     source = "background";
   }
-  if (["pin", "refresh", "off", "detail", "next", "prev", "select", "open", "jump", "expand", "collapse", "clear", "cancel", "focus", "blur"].includes(tokens[0])) {
+  if (["pin", "refresh", "off", "detail", "next", "prev", "first", "last", "pageup", "pagedown", "select", "open", "jump", "expand", "collapse", "clear", "cancel", "focus", "blur"].includes(tokens[0])) {
     command = tokens.shift();
     if (["select", "cancel", "jump", "expand", "collapse"].includes(command) && tokens[0]) {
       commandArg = tokens.shift();
@@ -3098,6 +3112,7 @@ function closeTaskPanel(state) {
   state.taskPanel.lastStatusSignature = "";
   state.taskPanel.detailId = "";
   state.taskPanel.history = false;
+  state.taskPanel.searchQuery = "";
   state.taskPanel.selectedId = "";
   state.taskPanel.selectedIndex = 0;
   state.taskPanel.items = [];
@@ -3168,6 +3183,29 @@ export function selectTaskPanelOffset(state, delta) {
   const currentIndex = normalizeTaskPanelIndex(state.taskPanel.selectedIndex, items.length);
   const nextIndex = (currentIndex + delta + items.length) % items.length;
   setTaskPanelSelection(state, nextIndex, { notify: true });
+  return true;
+}
+
+export function selectTaskPanelPage(state, direction, pageSize = 8) {
+  const items = state.taskPanel?.items ?? [];
+  if (!items.length) {
+    pushSystemMessage(state, "任务面板", "当前任务面板没有可选择项。", "info");
+    return false;
+  }
+  const currentIndex = normalizeTaskPanelIndex(state.taskPanel.selectedIndex, items.length);
+  const distance = Math.max(1, Number.parseInt(pageSize, 10) || 8);
+  const nextIndex = currentIndex + (direction < 0 ? -distance : distance);
+  setTaskPanelSelection(state, nextIndex, { notify: true });
+  return true;
+}
+
+export function selectTaskPanelBoundary(state, boundary) {
+  const items = state.taskPanel?.items ?? [];
+  if (!items.length) {
+    pushSystemMessage(state, "任务面板", "当前任务面板没有可选择项。", "info");
+    return false;
+  }
+  setTaskPanelSelection(state, boundary === "last" ? items.length - 1 : 0, { notify: true });
   return true;
 }
 
@@ -3294,8 +3332,27 @@ function sendCurrentTaskPanelRequest(state, send, overrides = {}) {
   send("task_panel", payload);
 }
 
+function setTaskPanelSearch(state, query) {
+  const normalized = String(query ?? "").trim();
+  state.taskPanel.searchQuery = normalized;
+  const message = state.messages.find((item) => item.id === state.taskPanel.messageId);
+  if (message) syncTaskPanelItems(state, message.content);
+  clearRenderCache(state.renderCache);
+  const resultCount = state.taskPanel.items.length;
+  pushSystemMessage(
+    state,
+    "任务面板",
+    normalized
+      ? `已在本地筛选“${normalized}”，匹配 ${resultCount} 项。使用 /tasks search clear 清除。`
+      : `已清除本地搜索，当前显示 ${resultCount} 项。`,
+    "info",
+  );
+}
+
 function syncTaskPanelItems(state, content) {
-  const items = extractTaskPanelItems(content);
+  const previousId = state.taskPanel.selectedId;
+  const previousIndex = normalizeTaskPanelIndex(state.taskPanel.selectedIndex, state.taskPanel.items.length);
+  const items = extractTaskPanelItems(content, state.taskPanel.searchQuery);
   state.taskPanel.items = items;
   if (!items.length) {
     state.taskPanel.selectedId = "";
@@ -3307,11 +3364,20 @@ function syncTaskPanelItems(state, content) {
   state.taskPanel.expandedIds = Object.fromEntries(
     Object.entries(state.taskPanel.expandedIds ?? {}).filter(([id, expanded]) => validIds.has(id) && expanded),
   );
-  const existingIndex = items.findIndex((item) => item.id === state.taskPanel.selectedId);
-  setTaskPanelSelection(state, existingIndex >= 0 ? existingIndex : 0, { notify: false });
+  const existingIndex = items.findIndex((item) => item.id === previousId);
+  const nextIndex = existingIndex >= 0 ? existingIndex : Math.min(previousIndex, items.length - 1);
+  setTaskPanelSelection(state, nextIndex, { notify: false });
+  if (previousId && existingIndex < 0) {
+    pushSystemMessage(
+      state,
+      "任务面板",
+      `原任务 ${previousId} 已结束或不再匹配筛选，已选择最近邻 ${items[nextIndex].id}。`,
+      "info",
+    );
+  }
 }
 
-export function extractTaskPanelItems(content) {
+export function extractTaskPanelItems(content, searchQuery = "") {
   const items = [];
   const timelineItems = [];
   let section = "";
@@ -3323,7 +3389,7 @@ export function extractTaskPanelItems(content) {
       continue;
     }
     const item = parseTaskPanelSelectableLine(section, line);
-    if (!item) continue;
+    if (!item || !matchesTaskPanelSearch(line, searchQuery)) continue;
     if (section === "Timeline") {
       timelineItems.push(item);
       continue;
@@ -3338,6 +3404,11 @@ export function extractTaskPanelItems(content) {
     items.push({ ...item, index: items.length });
   }
   return items;
+}
+
+function matchesTaskPanelSearch(value, query) {
+  const needle = String(query ?? "").trim().toLocaleLowerCase();
+  return !needle || String(value ?? "").toLocaleLowerCase().includes(needle);
 }
 
 function parseTaskPanelSelectableLine(section, line) {
