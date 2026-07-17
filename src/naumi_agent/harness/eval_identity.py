@@ -228,6 +228,18 @@ def capture_eval_platform_identity() -> HarnessEvalPlatformIdentity:
     )
 
 
+def capture_eval_source_identity(
+    workspace_root: str | Path,
+) -> HarnessEvalSourceIdentity:
+    """Capture the authoritative Git source state without retaining path names."""
+    fingerprint = compute_tree_fingerprint(workspace_root)
+    return HarnessEvalSourceIdentity(
+        commit=fingerprint.head.lower(),
+        tree_sha256=fingerprint.digest,
+        dirty=bool(fingerprint.dirty_paths),
+    )
+
+
 def build_eval_baseline_identity(
     workspace_root: str | Path,
     *,
@@ -236,14 +248,10 @@ def build_eval_baseline_identity(
     reasoning: ReasoningEffortStatus | None = None,
     platform_identity: HarnessEvalPlatformIdentity | None = None,
     profile_trusted: bool = True,
+    source_identity: HarnessEvalSourceIdentity | None = None,
 ) -> HarnessEvalBaselineIdentity:
     """Build one exact identity from authoritative source/model/runtime facts."""
-    fingerprint = compute_tree_fingerprint(workspace_root)
-    source = HarnessEvalSourceIdentity(
-        commit=fingerprint.head.lower(),
-        tree_sha256=fingerprint.digest,
-        dirty=bool(fingerprint.dirty_paths),
-    )
+    source = source_identity or capture_eval_source_identity(workspace_root)
     if (capability is None) != (reasoning is None):
         raise ValueError("模型能力合同与思考强度必须同时提供或同时省略。")
     model = (
@@ -334,4 +342,5 @@ __all__ = [
     "HarnessEvalSourceIdentity",
     "build_eval_baseline_identity",
     "capture_eval_platform_identity",
+    "capture_eval_source_identity",
 ]

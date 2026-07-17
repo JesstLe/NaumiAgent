@@ -44,5 +44,9 @@
   Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
   identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
   `HAR-08-6a-baseline-identity-design.md`。
+- HAR-08.6b Static Eval 身份闭环：已实现。Service 将真实 Profile digest/trust 注入离线 Eval，
+  多 Suite 运行前后复核 Git fingerprint，Suite 原始摘要与 `model=null` identity 进入 typed result；
+  Slash 与 Agent Tool 共享显示可晋升状态或稳定不可用原因。实施见
+  `HAR-08-6b-static-eval-identity-surface.md`。
 - Replay/Sandbox/Live、Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

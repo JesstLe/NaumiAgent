@@ -216,6 +216,13 @@ async def test_harness_eval_slash_and_agent_tool_share_service_result(
         assert "实现回归 0" in slash
         assert "评测错误 0" in agent
         assert first.canonical_payload() == second.canonical_payload()
+        identity = first.suites[0].baseline_identity
+        assert identity is not None
+        assert identity.model is None
+        assert identity.baseline_eligible is False
+        assert first.suites[0].baseline_identity_code == ""
+        assert "Baseline" in slash
+        assert "不可晋升" in slash
     finally:
         await engine.shutdown()
 

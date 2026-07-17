@@ -232,6 +232,8 @@ class HarnessService:
             self.workspace_root,
             profile.evals.suites,
             normalized_target,
+            profile_digest=status.profile_digest,
+            profile_trusted=status.trusted,
         )
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
