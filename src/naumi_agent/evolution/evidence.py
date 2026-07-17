@@ -131,37 +131,18 @@ def _adapt_harness_finding(
     receipt_ref: EvolutionEvidenceRef | None,
     observed_at: str,
 ) -> EvolutionEvidence:
-    refs = [
-        _check_ref(run.id, check_by_id[check_id])
-        for check_id in finding.check_ids
-        if check_id in check_by_id
-    ]
-    refs.extend(
-        EvolutionEvidenceRef(uri=item.uri, sha256=item.sha256)
-        for evidence_id in finding.evidence_ids
-        if (item := evidence_by_id.get(evidence_id)) is not None
+    refs, has_receipt = _harness_finding_refs(
+        run,
+        finding,
+        check_by_id=check_by_id,
+        evidence_by_id=evidence_by_id,
+        receipt_ref=receipt_ref,
     )
-    has_receipt = "receipt" in finding.source.split(",")
-    if has_receipt and receipt_ref is not None:
-        refs.append(receipt_ref)
-    if not refs:
-        refs.append(_run_ref(run))
-    refs = _dedupe_refs(refs)
-    root_fingerprint = _digest(
-        {
-            "failure_class": finding.failure_class.value,
-            "checks": sorted(
-                _check_root(check_by_id[check_id])
-                for check_id in finding.check_ids
-                if check_id in check_by_id
-            ),
-            "evidence_roots": sorted(
-                _evidence_root(evidence_by_id[evidence_id])
-                for evidence_id in finding.evidence_ids
-                if evidence_id in evidence_by_id
-            ),
-            "receipt": has_receipt,
-        }
+    root_fingerprint = _harness_finding_root(
+        finding,
+        check_by_id=check_by_id,
+        evidence_by_id=evidence_by_id,
+        has_receipt=has_receipt,
     )
     observation = _digest(
         {
@@ -178,9 +159,67 @@ def _adapt_harness_finding(
         observed_at=observed_at,
         finding_code=finding.failure_class.value,
         failure_class=finding.failure_class,
-        scope=_harness_scope(finding.check_ids, finding.evidence_ids),
+        scope=_harness_scope(
+            finding.check_ids,
+            tuple(
+                evidence_by_id[evidence_id]
+                for evidence_id in finding.evidence_ids
+                if evidence_id in evidence_by_id
+            ),
+        ),
         root_fingerprint=root_fingerprint,
         refs=tuple(refs),
+    )
+
+
+def _harness_finding_refs(
+    run: HarnessStoredRun,
+    finding: HarnessExplainFinding,
+    *,
+    check_by_id: dict[str, HarnessStoredCheck],
+    evidence_by_id: dict[str, HarnessStoredEvidence],
+    receipt_ref: EvolutionEvidenceRef | None,
+) -> tuple[list[EvolutionEvidenceRef], bool]:
+    refs = [
+        _check_ref(run.id, check_by_id[check_id])
+        for check_id in finding.check_ids
+        if check_id in check_by_id
+    ]
+    refs.extend(
+        EvolutionEvidenceRef(uri=item.uri, sha256=item.sha256)
+        for evidence_id in finding.evidence_ids
+        if (item := evidence_by_id.get(evidence_id)) is not None
+    )
+    has_receipt = "receipt" in finding.source.split(",")
+    if has_receipt and receipt_ref is not None:
+        refs.append(receipt_ref)
+    if not refs:
+        refs.append(_run_ref(run))
+    return _dedupe_refs(refs), has_receipt
+
+
+def _harness_finding_root(
+    finding: HarnessExplainFinding,
+    *,
+    check_by_id: dict[str, HarnessStoredCheck],
+    evidence_by_id: dict[str, HarnessStoredEvidence],
+    has_receipt: bool,
+) -> str:
+    return _digest(
+        {
+            "failure_class": finding.failure_class.value,
+            "checks": sorted(
+                _check_root(check_by_id[check_id])
+                for check_id in finding.check_ids
+                if check_id in check_by_id
+            ),
+            "evidence_roots": sorted(
+                _evidence_root(evidence_by_id[evidence_id])
+                for evidence_id in finding.evidence_ids
+                if evidence_id in evidence_by_id
+            ),
+            "receipt": has_receipt,
+        }
     )
 
 
@@ -288,12 +327,23 @@ def _check_root(check: HarnessStoredCheck) -> str:
     return _digest({"argv": check.argv, "check_key": check.check_key})
 
 
-def _harness_scope(check_ids: tuple[str, ...], evidence_ids: tuple[str, ...]) -> str:
+def _harness_scope(
+    check_ids: tuple[str, ...],
+    evidence: tuple[HarnessStoredEvidence, ...],
+) -> str:
     if check_ids:
-        return "checks:" + ",".join(sorted(check_ids))
-    if evidence_ids:
-        return "evidence:" + ",".join(sorted(evidence_ids))
+        return _bounded_scope("checks", check_ids)
+    if evidence:
+        roots = tuple(sorted({_evidence_root(item) for item in evidence}))
+        return _bounded_scope("evidence", roots)
     return "harness:run"
+
+
+def _bounded_scope(prefix: str, values: tuple[str, ...]) -> str:
+    scope = f"{prefix}:" + ",".join(sorted(values))
+    if len(scope) <= 1_024:
+        return scope
+    return f"{prefix}:sha256:{_digest(sorted(values))}"
 
 
 def _digest(value: object) -> str:
