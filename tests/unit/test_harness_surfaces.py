@@ -141,6 +141,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
+        compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
@@ -157,6 +158,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert batch_tool.metadata.concurrency_safe
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
+        assert compare_tool is not None and not compare_tool.metadata.read_only
+        assert compare_tool.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -281,7 +284,8 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
         )
         tool = engine.tool_registry.get("harness_eval_batch")
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
-        assert tool is not None and promote_tool is not None
+        compare_tool = engine.tool_registry.get("harness_eval_compare")
+        assert tool is not None and promote_tool is not None and compare_tool is not None
         agent = await tool.execute(
             suite="surface-protocol",
             repetitions=5,
@@ -337,6 +341,12 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             engine.workspace_root,
             "surface-protocol",
         ) is None
+        no_baseline = await compare_tool.execute(
+            suite="surface-protocol",
+            candidate_batch_id="surface-batch-2",
+        )
+        assert "baseline_missing" in no_baseline
+        assert "Receipt：未写入" in no_baseline
     finally:
         await engine.shutdown()
 
@@ -344,6 +354,7 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
 @pytest.mark.asyncio
 async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _engine(tmp_path)
     try:
@@ -367,9 +378,14 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
                 "/harness baseline surface-protocol",
             )
         )
+        baseline_v1_status = await engine.harness_service.eval_baseline_status(
+            "surface-protocol"
+        )
+        assert baseline_v1_status.active is not None
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
-        assert promote_tool is not None and batch_tool is not None
+        compare_tool = engine.tool_registry.get("harness_eval_compare")
+        assert promote_tool is not None and batch_tool is not None and compare_tool is not None
         retry = await promote_tool.execute(
             suite="surface-protocol",
             batch_id="promote-1",
@@ -379,6 +395,41 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
             suite="surface-protocol",
             repetitions=5,
             batch_id="promote-2",
+        )
+        compared = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline compare surface-protocol promote-2",
+            )
+        )
+        existing_comparison = await compare_tool.execute(
+            suite="surface-protocol",
+            candidate_batch_id="promote-2",
+        )
+        comparison_receipts = (
+            await engine.harness_service.store.list_eval_comparison_receipts(
+                engine.workspace_root,
+                "surface-protocol",
+                baseline_id=baseline_v1_status.active.id,
+            )
+        )
+        first_candidate = await engine.harness_service.store.get_eval_result(
+            engine.workspace_root,
+            "promote-2",
+            "surface-protocol",
+            0,
+        )
+        assert first_candidate is not None
+        await engine.harness_service.store.record_eval_result(
+            workspace_root=engine.workspace_root,
+            batch_id="incomplete-candidate",
+            sample_index=0,
+            result=first_candidate.result,
+            created_at="2026-07-18T12:00:00+08:00",
+        )
+        incomplete = await compare_tool.execute(
+            suite="surface-protocol",
+            candidate_batch_id="incomplete-candidate",
         )
         promoted_v2 = await promote_tool.execute(
             suite="surface-protocol",
@@ -390,12 +441,42 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
             batch_id="promote-1",
             reason="旧版本重试不得回拨",
         )
+        same_as_active = await compare_tool.execute(
+            suite="surface-protocol",
+            candidate_batch_id="promote-2",
+        )
         status_v2 = await engine.harness_service.eval_baseline_status(
             "surface-protocol"
         )
         events = await engine.harness_service.store.list_eval_baseline_events(
             engine.workspace_root,
             "surface-protocol",
+        )
+        baseline_v1 = await engine.harness_service.store.get_eval_baseline_by_batch(
+            engine.workspace_root,
+            "surface-protocol",
+            "promote-1",
+        )
+        original_get_active = (
+            engine.harness_service.store.get_active_eval_baseline
+        )
+        active_reads = 0
+
+        async def selector_changes_during_compare(*args, **kwargs):
+            nonlocal active_reads
+            active_reads += 1
+            if active_reads == 2:
+                return baseline_v1
+            return await original_get_active(*args, **kwargs)
+
+        monkeypatch.setattr(
+            engine.harness_service.store,
+            "get_active_eval_baseline",
+            selector_changes_during_compare,
+        )
+        stale_comparison = await compare_tool.execute(
+            suite="surface-protocol",
+            candidate_batch_id="promote-1",
         )
         rejected = await promote_tool.execute(
             suite="surface-protocol",
@@ -415,12 +496,21 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
         assert "已选择 v1" in status_v1
         assert "已是 Active" in retry
         assert "完成 5/5 · 已保存 5" in second_batch
+        assert "已创建权威回执" in compared
+        assert "结论：通过" in compared
+        assert "已有相同权威回执" in existing_comparison
+        assert len(comparison_receipts) == 1
+        assert comparison_receipts[0].receipt.decision.value == "passed"
+        assert "candidate_incomplete" in incomplete
         assert "晋升完成" in promoted_v2
         assert "操作者：agent" in promoted_v2
         assert "未回拨 active selector" in old_retry
+        assert "candidate_is_baseline" in same_as_active
         assert status_v2.active is not None and status_v2.active.version == 2
+        assert status_v2.comparisons == ()
         assert [event.actor for event in events] == ["user", "agent"]
         assert events[1].previous_baseline_id == events[0].baseline_id
+        assert "active Baseline 已变化" in stale_comparison
         assert "cohort_missing" in rejected
         assert "Selector：未改变" in rejected
         assert "--reason <原因>" in malformed

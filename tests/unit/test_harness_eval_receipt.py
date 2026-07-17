@@ -28,7 +28,10 @@ from naumi_agent.harness.eval_receipt import (
     eval_result_sha256,
     eval_sample_set_sha256,
 )
-from naumi_agent.harness.eval_surface import render_eval_baseline_status
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalComparisonRunStatus,
+    render_eval_baseline_status,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import (
     HARNESS_STORE_SCHEMA_VERSION,
@@ -238,6 +241,13 @@ def test_receipt_rejects_tampered_digest_gaps_and_incompatible_identity(
     receipt = _build(tmp_path, baseline, incompatible)
     assert receipt.decision is EvalComparisonDecision.INCOMPATIBLE
     assert receipt.statistical_verdict == "incompatible"
+
+    with pytest.raises(ValueError, match="权威 receipt"):
+        HarnessEvalComparisonRunStatus(
+            status="created",
+            suite_id="receipt-protocol",
+            candidate_batch_id="candidate-001",
+        )
 
 
 @pytest.mark.asyncio

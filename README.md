@@ -215,7 +215,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | 文件 | `/glob` `/grep` `/read` `/write` `/edit` | 通过 Agent 工具路径搜索、读取和修改文件 |
 | 会话 | `/history` `/resume` `/load <id>` `/new` `/clear` | 查看、恢复、加载、保存新开或清空当前会话 |
 | 调试 | `/copy <all|last|error>` `/debug` `/debug-replay` `/diff` | 导出 transcript、查看结构化调试日志与 git diff |
-| Harness | `/harness status` `/harness eval` `/harness eval <suite> --repeat 5` `/harness baseline <suite>` `/harness baseline promote …` `/harness explain` `/harness replay` | 查看工程契约、生成 Candidate、显式晋升/读取权威 Baseline、解释并安全回放运行 |
+| Harness | `/harness status` `/harness eval … --repeat 5` `/harness baseline <suite>` `/harness baseline promote …` `/harness baseline compare …` `/harness explain` `/harness replay` | 生成 Candidate、晋升/比较权威 Baseline、解释并安全回放运行 |
 | 任务 | `/todo` `/tasks` `/task` `/task-reply` `/task-abort` | 管理 todo、subagent、后台/browser 任务和人工接管 |
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |

@@ -44,9 +44,14 @@ from naumi_agent.harness.eval import (
     resolve_declared_eval_suite,
 )
 from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
+from naumi_agent.harness.eval_receipt import (
+    EvalReceiptSample,
+    build_eval_comparison_receipt,
+)
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchStatus,
+    HarnessEvalComparisonRunStatus,
     HarnessEvalPromotionStatus,
     build_eval_baseline_status,
 )
@@ -78,6 +83,8 @@ from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.harness.store import (
     HarnessSessionDeleteImpact,
     HarnessStore,
+    HarnessStoredEvalComparisonReceipt,
+    HarnessStoredEvalResult,
     HarnessStoreError,
 )
 from naumi_agent.harness.trust import (
@@ -515,6 +522,151 @@ class HarnessService:
             promoted_by=baseline.promoted_by,
             promotion_reason=baseline.promotion_reason,
             created_at=baseline.created_at,
+        )
+
+    async def compare_eval_candidate(
+        self,
+        suite_id: str,
+        candidate_batch_id: str,
+    ) -> HarnessEvalComparisonRunStatus:
+        """Compare one complete candidate against the active immutable Baseline."""
+        if not isinstance(suite_id, str) or not suite_id.strip():
+            raise ValueError("suite_id 不能为空。")
+        suite = suite_id.strip()
+        if len(suite) > 64:
+            raise ValueError("suite_id 不能超过 64 个字符。")
+        if not isinstance(candidate_batch_id, str) or not candidate_batch_id.strip():
+            raise ValueError("candidate_batch_id 不能为空。")
+        candidate_batch = candidate_batch_id.strip()
+        if not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            candidate_batch,
+        ):
+            raise ValueError("candidate_batch_id 格式无效。")
+        if self._store is None:
+            return _eval_comparison_error(
+                suite,
+                candidate_batch,
+                "store_unavailable",
+                "Harness 状态库尚未初始化。",
+            )
+        try:
+            baseline = await self._store.get_active_eval_baseline(
+                self.workspace_root,
+                suite,
+            )
+            if baseline is None:
+                return _eval_comparison_error(
+                    suite,
+                    candidate_batch,
+                    "baseline_missing",
+                    "当前 Suite 尚无 active Baseline。",
+                )
+            if candidate_batch == baseline.batch_id:
+                return _eval_comparison_error(
+                    suite,
+                    candidate_batch,
+                    "candidate_is_baseline",
+                    "Candidate batch 不能与 active Baseline batch 相同。",
+                )
+            existing = await self._store.get_eval_comparison_receipt(
+                self.workspace_root,
+                suite,
+                baseline.id,
+                candidate_batch,
+            )
+            if existing is not None:
+                active = await self._store.get_active_eval_baseline(
+                    self.workspace_root,
+                    suite,
+                )
+                return _eval_comparison_status(
+                    existing,
+                    baseline.version,
+                    status=(
+                        "existing"
+                        if active is not None and active.id == baseline.id
+                        else "stale_baseline"
+                    ),
+                )
+            baseline_records = await self._store.list_eval_results(
+                self.workspace_root,
+                baseline.batch_id,
+                suite,
+                limit=10_000,
+            )
+            candidate_records = await self._store.list_eval_results(
+                self.workspace_root,
+                candidate_batch,
+                suite,
+                limit=10_000,
+            )
+            if not candidate_records:
+                return _eval_comparison_error(
+                    suite,
+                    candidate_batch,
+                    "candidate_missing",
+                    "未找到该 workspace/suite/batch 的 Candidate samples。",
+                )
+            if not _eval_candidate_complete(candidate_records):
+                return _eval_comparison_error(
+                    suite,
+                    candidate_batch,
+                    "candidate_incomplete",
+                    "Candidate sample 不连续、Identity 不统一或 repetitions 未完成。",
+                )
+            receipt = build_eval_comparison_receipt(
+                workspace_root=self.workspace_root,
+                suite_id=suite,
+                baseline_id=baseline.id,
+                baseline_batch_id=baseline.batch_id,
+                baseline_samples_sha256=baseline.samples_sha256,
+                baseline_samples=tuple(
+                    EvalReceiptSample(
+                        sample_index=item.sample_index,
+                        result_sha256=item.result_sha256,
+                        result=item.result,
+                    )
+                    for item in baseline_records
+                ),
+                current_batch_id=candidate_batch,
+                current_samples=tuple(
+                    EvalReceiptSample(
+                        sample_index=item.sample_index,
+                        result_sha256=item.result_sha256,
+                        result=item.result,
+                    )
+                    for item in candidate_records
+                ),
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            stored = await self._store.record_eval_comparison_receipt(receipt)
+            active = await self._store.get_active_eval_baseline(
+                self.workspace_root,
+                suite,
+            )
+        except ValueError as exc:
+            return _eval_comparison_error(
+                suite,
+                candidate_batch,
+                "comparison_rejected",
+                str(exc),
+            )
+        except HarnessStoreError:
+            return _eval_comparison_error(
+                suite,
+                candidate_batch,
+                "store_error",
+                "Harness Eval 状态库损坏、不可读或正忙。",
+            )
+        return _eval_comparison_status(
+            stored,
+            baseline.version,
+            status=(
+                "created"
+                if active is not None and active.id == baseline.id
+                else "stale_baseline"
+            ),
         )
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
@@ -1698,6 +1850,69 @@ def _eval_promotion_error(
         message=message,
         suite_id=suite_id,
         batch_id=batch_id,
+    )
+
+
+def _eval_candidate_complete(
+    records: tuple[HarnessStoredEvalResult, ...],
+) -> bool:
+    if [item.sample_index for item in records] != list(range(len(records))):
+        return False
+    identities = {item.identity_sha256 for item in records}
+    if "" in identities or len(identities) != 1:
+        return False
+    return all(
+        item.result.baseline_identity is not None
+        and not item.result.baseline_identity_code
+        and item.result.baseline_identity.configuration.repetitions == len(records)
+        for item in records
+    )
+
+
+def _eval_comparison_error(
+    suite_id: str,
+    candidate_batch_id: str,
+    code: str,
+    message: str,
+) -> HarnessEvalComparisonRunStatus:
+    return HarnessEvalComparisonRunStatus(
+        status="error",
+        code=code,
+        message=message,
+        suite_id=suite_id,
+        candidate_batch_id=candidate_batch_id,
+    )
+
+
+def _eval_comparison_status(
+    stored: HarnessStoredEvalComparisonReceipt,
+    baseline_version: int,
+    *,
+    status: Literal["created", "existing", "stale_baseline"],
+) -> HarnessEvalComparisonRunStatus:
+    receipt = stored.receipt
+    policy_failed = sum(
+        item.policy_verdict.value == "failed" for item in receipt.sample_evidence
+    )
+    policy_inconclusive = sum(
+        item.policy_verdict.value in {"inconclusive", "incompatible"}
+        for item in receipt.sample_evidence
+    )
+    return HarnessEvalComparisonRunStatus(
+        status=status,
+        suite_id=receipt.suite_id,
+        baseline_id=receipt.baseline_id,
+        baseline_version=baseline_version,
+        baseline_batch_id=receipt.baseline_batch_id,
+        candidate_batch_id=receipt.current_batch_id,
+        baseline_samples=receipt.baseline_samples,
+        candidate_samples=receipt.current_samples,
+        receipt_id=receipt.id,
+        decision=receipt.decision.value,
+        statistical_verdict=receipt.statistical_verdict.value,
+        policy_failed_samples=policy_failed,
+        policy_inconclusive_samples=policy_inconclusive,
+        created_at=receipt.created_at,
     )
 
 

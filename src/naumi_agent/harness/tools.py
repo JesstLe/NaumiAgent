@@ -8,6 +8,7 @@ from naumi_agent.harness.eval import render_harness_eval
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
     render_eval_batch_status,
+    render_eval_comparison_run_status,
     render_eval_promotion_status,
 )
 from naumi_agent.harness.explain import render_harness_explanation
@@ -32,6 +33,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
         HarnessEvalBaselinePromoteTool(service),
+        HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -388,6 +390,55 @@ class HarnessEvalBaselinePromoteTool(Tool):
         except ValueError as exc:
             return f"Harness Baseline 晋升参数无效：{exc}"
         return render_eval_promotion_status(result)
+
+
+class HarnessEvalCompareTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_compare"
+
+    @property
+    def description(self) -> str:
+        return "将一个完整 Candidate batch 与 active Baseline 比较并保存权威回执"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint="harness eval compare candidate active baseline receipt",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {"type": "string", "minLength": 1, "maxLength": 64},
+                "candidate_batch_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                },
+            },
+            "required": ["suite", "candidate_batch_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        suite = kwargs.get("suite")
+        candidate = kwargs.get("candidate_batch_id")
+        if not isinstance(suite, str) or not isinstance(candidate, str):
+            return "Harness Eval 比较参数无效：suite 和 candidate_batch_id 必须是字符串。"
+        try:
+            result = await self._service.compare_eval_candidate(suite, candidate)
+        except ValueError as exc:
+            return f"Harness Eval 比较参数无效：{exc}"
+        return render_eval_comparison_run_status(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):

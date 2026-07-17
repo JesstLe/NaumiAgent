@@ -39,6 +39,8 @@ Baseline Identity 与比较策略；未来阶段记录在
   Comparison receipts；它们不会运行 Eval、晋升版本或改变 selector。
 - `/harness baseline promote <suite> <batch> --reason <原因>` 与
   `harness_eval_baseline_promote` 显式调用同一 H5b gate；actor 由入口固定，旧版本重试不会回拨。
+- `/harness baseline compare <suite> <candidate-batch>` 与 `harness_eval_compare` 使用 active Baseline
+  生成 H5c 权威 receipt；相同比较幂等，selector 竞态会显式标记。
 - 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。
 - 可比较结果绑定 Git source identity、Profile/Suite/fixture/runner/policy digest；工作树不干净、
   source 变化或证据不完整时不会伪装成可比较 baseline。
