@@ -251,6 +251,13 @@ export function createInitialState() {
       replayLoading: false,
       scrollOffset: 0,
     },
+    permissionCenter: {
+      loading: false,
+      snapshot: null,
+      error: "",
+      limit: 12,
+      scrollOffset: 0,
+    },
     tools: [],
     activeAssistant: null,
     activeThinking: null,
@@ -486,6 +493,11 @@ export function reduceServerEvent(state, record) {
         "info",
       );
       break;
+    case "permissions/snapshot":
+      state.permissionCenter.snapshot = payload;
+      state.permissionCenter.loading = false;
+      state.permissionCenter.error = "";
+      break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
       break;
@@ -680,6 +692,7 @@ export function reduceServerEvent(state, record) {
       resetAgentControlSnapshot(state.agents);
       state.workbench = createEmptyWorkbenchState();
       const wasHarnessDetailRoute = state.route?.name === "harness_detail";
+      const wasPermissionRoute = state.route?.name === "permissions";
       state.harnessDetail = {
         runId: "",
         explainLoading: false,
@@ -687,6 +700,16 @@ export function reduceServerEvent(state, record) {
         scrollOffset: 0,
       };
       if (wasHarnessDetailRoute) {
+        state.route = { name: "conversation", originAnchor: null };
+      }
+      state.permissionCenter = {
+        loading: false,
+        snapshot: null,
+        error: "",
+        limit: 12,
+        scrollOffset: 0,
+      };
+      if (wasPermissionRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
       if (payload.clear !== false) {
@@ -2291,8 +2314,18 @@ export function handleSubmitText(state, text, send) {
       }
     }
     const limit = Number.parseInt(raw, 10);
+    const safeLimit = raw && Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50) : 12;
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "permissions", originAnchor };
+    state.permissionCenter.loading = true;
+    state.permissionCenter.error = "";
+    state.permissionCenter.limit = safeLimit;
+    state.permissionCenter.scrollOffset = 0;
     if (raw && Number.isFinite(limit) && limit > 0) {
-      send("permissions_panel", { limit });
+      send("permissions_panel", { limit: safeLimit });
     } else {
       send("permissions_panel", {});
     }
@@ -2379,6 +2412,31 @@ export function handleHarnessDetailKey(state, key) {
   else if (key === INPUT_KEYS.pageDown) state.harnessDetail.scrollOffset = current + 10;
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessDetail.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessDetail.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+export function handlePermissionCenterKey(state, key, send) {
+  if (state.route?.name !== "permissions") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (String(key || "").toLowerCase() === "r") {
+    state.permissionCenter.loading = true;
+    state.permissionCenter.error = "";
+    send("permissions_panel", { limit: state.permissionCenter.limit });
+    return true;
+  }
+  const current = Math.max(0, Number(state.permissionCenter.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.permissionCenter.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.permissionCenter.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.permissionCenter.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.permissionCenter.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.permissionCenter.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.permissionCenter.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
 }
 

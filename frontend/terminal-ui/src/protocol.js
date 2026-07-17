@@ -50,6 +50,21 @@ const HARNESS_ARTIFACT_STATUSES = new Set([
   "malformed",
   "unreadable",
 ]);
+const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
+const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
+const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
+const PERMISSION_STATUSES = new Set([
+  "needs_confirmation",
+  "allowed",
+  "confirmed",
+  "denied",
+  "blocked",
+  "bypass_enabled",
+  "granted",
+  "cancelled",
+  "expired",
+]);
+const PERMISSION_CHOICES = new Set(["allow_once", "deny", "grant_session", "bypass"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -226,6 +241,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/replay") {
     return normalizeHarnessReplay(payload);
+  }
+  if (type === "permissions/snapshot") {
+    return normalizePermissionSnapshot(payload);
   }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
@@ -950,6 +968,72 @@ function normalizeHarnessReplay(payload) {
         "harness/replay legacy_baseline_created",
       ),
     },
+  };
+}
+
+function normalizePermissionSnapshot(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`permissions/snapshot schema_version 不兼容: ${payload.schema_version}`);
+  }
+  return {
+    schema_version: 1,
+    runtime_mode: harnessChoice(
+      payload.runtime_mode,
+      "permissions/snapshot runtime_mode",
+      PERMISSION_RUNTIME_MODES,
+    ),
+    permission_mode: harnessChoice(
+      payload.permission_mode,
+      "permissions/snapshot permission_mode",
+      PERMISSION_MODES,
+    ),
+    pending: normalizePermissionItems(payload.pending, "pending", 50),
+    grants: harnessObjectArray(payload.grants, "permissions/snapshot grants", 50)
+      .map((item) => ({
+        grant_id: harnessText(item.grant_id, "permissions/snapshot grant.grant_id"),
+        tool_family: harnessText(item.tool_family, "permissions/snapshot grant.tool_family"),
+        created_at: harnessText(item.created_at, "permissions/snapshot grant.created_at"),
+        expires_at: harnessText(item.expires_at, "permissions/snapshot grant.expires_at"),
+        source_request_id: harnessText(
+          item.source_request_id,
+          "permissions/snapshot grant.source_request_id",
+        ),
+      })),
+    history: normalizePermissionItems(payload.history, "history", 50),
+    warnings: harnessTextArray(payload.warnings, "permissions/snapshot warnings", 20),
+  };
+}
+
+function normalizePermissionItems(value, section, limit) {
+  const prefix = `permissions/snapshot ${section}`;
+  return harnessObjectArray(value, prefix, limit).map((item) => ({
+    request_id: harnessText(item.request_id, `${prefix}.request_id`),
+    call_id: harnessText(item.call_id, `${prefix}.call_id`),
+    session_id: harnessText(item.session_id, `${prefix}.session_id`),
+    run_id: harnessText(item.run_id, `${prefix}.run_id`),
+    agent_name: harnessText(item.agent_name, `${prefix}.agent_name`),
+    tool_name: harnessText(item.tool_name, `${prefix}.tool_name`),
+    tool_family: harnessText(item.tool_family, `${prefix}.tool_family`),
+    arguments_summary: harnessText(item.arguments_summary, `${prefix}.arguments_summary`),
+    status: harnessChoice(item.status, `${prefix}.status`, PERMISSION_STATUSES),
+    reason: harnessText(item.reason, `${prefix}.reason`),
+    risk_level: harnessChoice(item.risk_level, `${prefix}.risk_level`, PERMISSION_RISKS),
+    choices: harnessTextArray(item.choices, `${prefix}.choices`, 10)
+      .map((choice) => harnessChoice(choice, `${prefix}.choice`, PERMISSION_CHOICES)),
+    scope: harnessText(item.scope, `${prefix}.scope`),
+    expires_at: harnessText(item.expires_at, `${prefix}.expires_at`),
+    policy: normalizePermissionPolicy(item.policy, prefix),
+  }));
+}
+
+function normalizePermissionPolicy(value, prefix) {
+  const policy = harnessObject(value, `${prefix}.policy`);
+  return {
+    source: harnessText(policy.source, `${prefix}.policy.source`),
+    risk: harnessChoice(policy.risk, `${prefix}.policy.risk`, PERMISSION_RISKS),
+    modes: harnessText(policy.modes, `${prefix}.policy.modes`),
+    confirmation: harnessText(policy.confirmation, `${prefix}.policy.confirmation`),
+    bypass: harnessText(policy.bypass, `${prefix}.policy.bypass`),
   };
 }
 

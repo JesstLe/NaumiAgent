@@ -445,6 +445,56 @@ test("harness detail responses reject malformed authoritative state", () => {
   );
 });
 
+test("permission snapshot is strict bounded and drops private fields", () => {
+  const pending = Array.from({ length: 55 }, (_, index) => ({
+    request_id: `perm-${index}`,
+    call_id: `call-${index}`,
+    session_id: "session-1",
+    run_id: "run-1",
+    agent_name: "main",
+    tool_name: "bash_run",
+    tool_family: "shell",
+    arguments_summary: "command=echo safe",
+    reason: "需要执行定向检查。",
+    risk_level: "medium",
+    choices: ["allow_once", "deny", "grant_session"],
+    scope: "session",
+    expires_at: "",
+    status: "needs_confirmation",
+    policy: {
+      source: "TOOL_PERMISSIONS:bash_run",
+      risk: "medium",
+      modes: "bypass/permissive/moderate",
+      confirmation: "需要确认",
+      bypass: "bypass 全权限放行",
+    },
+    private_payload: "must-drop",
+  }));
+  const normalized = normalizeServerRecord({
+    type: "permissions/snapshot",
+    payload: {
+      schema_version: 1,
+      runtime_mode: "default",
+      permission_mode: "moderate",
+      pending,
+      grants: [],
+      history: [],
+      warnings: [],
+    },
+  }).payload;
+
+  assert.equal(normalized.pending.length, 50);
+  assert.equal(normalized.pending[0].policy.source, "TOOL_PERMISSIONS:bash_run");
+  assert.equal(Object.hasOwn(normalized.pending[0], "private_payload"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "permissions/snapshot",
+      payload: { ...normalized, permission_mode: "invented" },
+    }),
+    /permission_mode/,
+  );
+});
+
 test("normalizes strict runtime inspector snapshots and updates", () => {
   const snapshot = inspectorSnapshotFixture(4);
   const normalized = normalizeServerRecord({

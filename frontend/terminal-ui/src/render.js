@@ -13,6 +13,7 @@ import { renderAgentControlPage } from "./components/agent-control-page.js";
 import { renderRuntimeInspector } from "./components/runtime-inspector.js";
 import { renderWorkbenchOverview } from "./components/workbench-overview.js";
 import { renderHarnessDetailPage } from "./components/harness-detail-page.js";
+import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
   renderWelcomeScreen,
@@ -32,7 +33,9 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
-  const visible = state.route?.name === "harness_detail"
+  const visible = state.route?.name === "permissions"
+    ? renderPermissionCenterPage(state.permissionCenter, width, bodyHeight)
+    : state.route?.name === "harness_detail"
     ? renderHarnessDetailPage({
       ...state.harnessDetail,
       explain: state.harnessExplanations[state.harnessDetail.runId],

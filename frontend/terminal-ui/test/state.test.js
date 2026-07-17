@@ -13,6 +13,7 @@ import {
   getFoldEntries,
   handleAgentControlKey,
   handleHarnessDetailKey,
+  handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
   handleInteractionKey,
@@ -1599,6 +1600,37 @@ test("slash commands route through protocol without adding chat noise", () => {
   assert.equal(state.messages[0].kind, "user");
   assert.equal(state.messages[0].deliveryStatus, "queued");
   assert.deepEqual(state.folds, {});
+});
+
+test("permissions command opens transient policy route and restores conversation anchor", () => {
+  const state = createInitialState();
+  state.scrollOffset = 9;
+  state.followTail = false;
+  const sent = [];
+
+  handleSubmitText(state, "/permissions", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.route.name, "permissions");
+  assert.equal(state.permissionCenter.loading, true);
+  assert.deepEqual(sent, [{ type: "permissions_panel", payload: {} }]);
+  reduceServerEvent(state, {
+    type: "permissions/snapshot",
+    payload: {
+      schema_version: 1,
+      runtime_mode: "default",
+      permission_mode: "moderate",
+      pending: [],
+      grants: [],
+      history: [],
+      warnings: [],
+    },
+  });
+  assert.equal(state.permissionCenter.loading, false);
+  assert.equal(state.permissionCenter.snapshot.permission_mode, "moderate");
+  assert.equal(handlePermissionCenterKey(state, INPUT_KEYS.escape, () => {}), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 9);
+  assert.equal(state.followTail, false);
 });
 
 test("local exit commands never enter transport or the outbox", () => {

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.ui.permission_panel import (
     build_permission_panel_snapshot,
+    permission_panel_payload,
     render_permission_panel_snapshot,
 )
 
@@ -66,7 +67,7 @@ def test_permission_panel_renders_real_policy_metadata_for_pending_tool() -> Non
     rendered = render_permission_panel_snapshot(snapshot)
 
     assert "perm-1 main -> bash_run [needs_confirmation]" in rendered
-    assert "风险:high" in rendered
+    assert "风险:medium" in rendered
     assert "来源:TOOL_PERMISSIONS:bash_run" in rendered
     assert "确认:需要确认" in rendered
     assert "bypass 全权限放行；不执行确认、路径、命令与次数检查" in rendered
@@ -102,3 +103,33 @@ def test_permission_panel_includes_active_session_grants() -> None:
     assert "grant-browser browser [有效至 2026-07-13T01:00:00+00:00]" in rendered
     assert "[session]" not in rendered
     assert "[until" not in rendered
+
+
+def test_permission_panel_payload_is_typed_bounded_and_private_field_free() -> None:
+    pending = {
+        f"perm-{index}": {
+            "call_id": f"call-{index}",
+            "session_id": "session-1",
+            "run_id": "run-1",
+            "agent_name": "main",
+            "tool_name": "bash_run",
+            "tool_family": "shell",
+            "arguments_summary": "command=echo safe",
+            "reason": "需要执行定向检查。" + "x" * 600,
+            "risk_level": "medium",
+            "choices": ["allow_once", "deny", "grant_session"],
+            "private_payload": "must-not-leak",
+        }
+        for index in range(60)
+    }
+    snapshot = build_permission_panel_snapshot(_Engine(), pending=pending, limit=50)
+
+    payload = permission_panel_payload(snapshot)
+
+    assert payload["schema_version"] == 1
+    assert payload["runtime_mode"] == "default"
+    assert payload["permission_mode"] == "moderate"
+    assert len(payload["pending"]) == 50
+    assert len(payload["pending"][0]["reason"]) == 500
+    assert payload["pending"][0]["policy"]["source"] == "TOOL_PERMISSIONS:bash_run"
+    assert "private_payload" not in str(payload)

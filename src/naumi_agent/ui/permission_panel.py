@@ -8,7 +8,6 @@ from typing import Any
 from naumi_agent.safety.permissions import (
     PREFIX_PERMISSIONS,
     TOOL_PERMISSIONS,
-    PermissionMode,
     PermissionRiskLevel,
     PermissionRule,
 )
@@ -24,6 +23,9 @@ class PermissionPanelSnapshot:
     grants: tuple[dict[str, Any], ...] = ()
     history: tuple[dict[str, Any], ...] = ()
     warnings: tuple[str, ...] = ()
+
+
+PERMISSION_PANEL_SCHEMA_VERSION = 1
 
 
 def build_permission_panel_snapshot(
@@ -49,8 +51,8 @@ def build_permission_panel_snapshot(
                 for item in getter(limit=safe_limit)
                 if isinstance(item, dict)
             )
-    except Exception as exc:
-        warnings.append(f"权限历史读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("权限历史暂时无法读取，请稍后刷新。")
 
     grants: tuple[dict[str, Any], ...] = ()
     try:
@@ -60,8 +62,8 @@ def build_permission_panel_snapshot(
                 _grant_item(item)
                 for item in getter()
             )
-    except Exception as exc:
-        warnings.append(f"有效授权读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("有效授权暂时无法读取，请稍后刷新。")
 
     runtime_mode = getattr(engine, "runtime_mode", "")
     permission_mode = getattr(engine, "permission_mode", "")
@@ -73,6 +75,19 @@ def build_permission_panel_snapshot(
         history=history[-safe_limit:],
         warnings=tuple(warnings),
     )
+
+
+def permission_panel_payload(snapshot: PermissionPanelSnapshot) -> dict[str, Any]:
+    """Serialize one bounded permission snapshot without private request fields."""
+    return {
+        "schema_version": PERMISSION_PANEL_SCHEMA_VERSION,
+        "runtime_mode": _text(snapshot.runtime_mode),
+        "permission_mode": _text(snapshot.permission_mode),
+        "pending": [_permission_payload(item) for item in snapshot.pending[:50]],
+        "grants": [_grant_payload(item) for item in snapshot.grants[:50]],
+        "history": [_permission_payload(item) for item in snapshot.history[:50]],
+        "warnings": [_text(item) for item in snapshot.warnings[:20]],
+    }
 
 
 def render_permission_panel_snapshot(snapshot: PermissionPanelSnapshot) -> str:
@@ -126,10 +141,19 @@ def render_permission_panel(
 def _pending_item(request_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "request_id": request_id,
+        "call_id": payload.get("call_id") or "",
+        "session_id": payload.get("session_id") or "",
+        "run_id": payload.get("run_id") or "",
         "agent_name": payload.get("agent_name") or payload.get("agent") or "main",
         "tool_name": payload.get("tool_name") or payload.get("tool") or "tool",
+        "tool_family": payload.get("tool_family") or "",
+        "arguments_summary": payload.get("arguments_summary") or "",
         "status": payload.get("status") or "needs_confirmation",
         "reason": payload.get("reason") or payload.get("message") or "等待用户确认。",
+        "risk_level": payload.get("risk_level") or "high",
+        "choices": payload.get("choices") if isinstance(payload.get("choices"), list) else [],
+        "scope": payload.get("scope") or "call",
+        "expires_at": payload.get("expires_at") or "",
     }
 
 
@@ -137,8 +161,52 @@ def _grant_item(grant: Any) -> dict[str, Any]:
     return {
         "grant_id": str(getattr(grant, "grant_id", "")),
         "tool_family": str(getattr(grant, "tool_family", "")),
+        "created_at": getattr(grant, "created_at", ""),
         "expires_at": getattr(grant, "expires_at", None),
+        "source_request_id": str(getattr(grant, "source_request_id", "")),
     }
+
+
+def _permission_payload(item: dict[str, Any]) -> dict[str, Any]:
+    policy = item.get("policy") if isinstance(item.get("policy"), dict) else {}
+    choices = item.get("choices") if isinstance(item.get("choices"), list) else []
+    return {
+        "request_id": _text(item.get("request_id") or item.get("call_id")),
+        "call_id": _text(item.get("call_id")),
+        "session_id": _text(item.get("session_id")),
+        "run_id": _text(item.get("run_id")),
+        "agent_name": _text(item.get("agent_name") or "main"),
+        "tool_name": _text(item.get("tool_name") or "tool"),
+        "tool_family": _text(item.get("tool_family")),
+        "arguments_summary": _text(item.get("arguments_summary")),
+        "status": _text(item.get("status")),
+        "reason": _text(item.get("reason")),
+        "risk_level": _text(item.get("risk_level") or policy.get("risk")),
+        "choices": [_text(choice) for choice in choices[:10]],
+        "scope": _text(item.get("scope")),
+        "expires_at": _text(item.get("expires_at")),
+        "policy": {
+            "source": _text(policy.get("source")),
+            "risk": _text(policy.get("risk")),
+            "modes": _text(policy.get("modes")),
+            "confirmation": _text(policy.get("confirmation")),
+            "bypass": _text(policy.get("bypass")),
+        },
+    }
+
+
+def _grant_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "grant_id": _text(item.get("grant_id")),
+        "tool_family": _text(item.get("tool_family")),
+        "created_at": _text(item.get("created_at")),
+        "expires_at": _text(item.get("expires_at")),
+        "source_request_id": _text(item.get("source_request_id")),
+    }
+
+
+def _text(value: Any) -> str:
+    return " ".join(str(value or "").split())[:500]
 
 
 def _with_policy(item: dict[str, Any]) -> dict[str, Any]:
@@ -194,13 +262,7 @@ def _resolve_permission_rule(tool_name: str) -> tuple[str, PermissionRule | None
 
 
 def _risk_for_rule(rule: PermissionRule) -> PermissionRiskLevel:
-    if rule.requires_confirmation or rule.blocked_commands:
-        return PermissionRiskLevel.HIGH
-    if PermissionMode.STRICT not in rule.allowed_modes:
-        return PermissionRiskLevel.HIGH
-    if PermissionMode.LOCKDOWN not in rule.allowed_modes:
-        return PermissionRiskLevel.MEDIUM
-    return PermissionRiskLevel.LOW
+    return rule.risk_level
 
 
 def _bypass_scope(_rule: PermissionRule) -> str:

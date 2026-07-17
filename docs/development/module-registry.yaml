@@ -11,7 +11,7 @@ modules:
   - {id: HAR-10, status: planned, path: harness/HAR-10-long-running.md, depends_on: [HAR-06, HAR-08, ARC-06]}
   - {id: UI-10, status: partial, path: cli-ui/UI-10-workbench-page.md, depends_on: []}
   - {id: UI-11, status: partial, path: cli-ui/UI-11-task-navigation.md, depends_on: []}
-  - {id: UI-12, status: planned, path: cli-ui/UI-12-permission-center.md, depends_on: []}
+  - {id: UI-12, status: partial, path: cli-ui/UI-12-permission-center.md, depends_on: []}
   - {id: UI-13, status: planned, path: cli-ui/UI-13-diagnostics.md, depends_on: []}
   - {id: UI-14, status: planned, path: cli-ui/UI-14-navigation-input.md, depends_on: []}
   - {id: UI-15, status: planned, path: cli-ui/UI-15-performance.md, depends_on: []}

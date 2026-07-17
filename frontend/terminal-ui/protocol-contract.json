@@ -69,6 +69,7 @@
     "interaction/request",
     "interaction/resolved",
     "permission/grants_changed",
+    "permissions/snapshot",
     "debug/trace",
     "workbench/snapshot",
     "workbench/event",

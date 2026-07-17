@@ -2394,7 +2394,7 @@ async def test_bridge_slash_reasoning_command_toggles_visibility() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bridge_renders_permission_panel_as_system_notice() -> None:
+async def test_bridge_emits_typed_permission_snapshot() -> None:
     engine = _FakeEngine()
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
@@ -2419,15 +2419,13 @@ async def test_bridge_renders_permission_panel_as_system_notice() -> None:
     message = next(
         record["payload"]
         for record in records
-        if record["type"] == "ui/message"
-        and record["payload"].get("type") == "system_notice"
+        if record["type"] == "permissions/snapshot"
     )
-    assert message["title"] == "permissions"
-    assert "权限面板" in message["content"]
-    assert "perm-1 main -> bash_run [needs_confirmation]" in message["content"]
-    assert "来源:TOOL_PERMISSIONS:bash_run" in message["content"]
-    assert "确认:需要确认" in message["content"]
-    assert "hist-1 coder -> file_write [confirmed]" in message["content"]
+    assert message["schema_version"] == 1
+    assert message["pending"][0]["request_id"] == "perm-1"
+    assert message["pending"][0]["tool_name"] == "bash_run"
+    assert message["pending"][0]["policy"]["source"] == "TOOL_PERMISSIONS:bash_run"
+    assert message["history"][0]["request_id"] == "hist-1"
     await bridge.resolve_permission(
         {"request_id": "perm-1", "choice": "deny"}, request_id="response-1"
     )

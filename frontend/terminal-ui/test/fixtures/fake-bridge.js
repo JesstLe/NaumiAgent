@@ -427,18 +427,25 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "permissions_panel") {
-    emitUi({
-      type: "system_notice",
-      title: "permissions",
-      content: [
-        "权限面板",
-        `mode: ${mode} | permission: ${permissionModeFor(mode)}`,
-        "Pending",
-        "  - perm-1 main -> bash_run [needs_confirmation] 需要启动本地预览服务。",
-        "History",
-        "  - call-1 coder -> file_write [confirmed] 用户已允许。",
-      ].join("\n"),
-      level: "info",
+    emit("permissions/snapshot", {
+      schema_version: 1,
+      runtime_mode: mode,
+      permission_mode: permissionModeFor(mode),
+      pending: [permissionItem({
+        request_id: "perm-1",
+        tool_name: "bash_run",
+        status: "needs_confirmation",
+        reason: "需要启动本地预览服务。",
+      })],
+      grants: [],
+      history: [permissionItem({
+        request_id: "call-1",
+        agent_name: "coder",
+        tool_name: "file_write",
+        status: "confirmed",
+        reason: "用户已允许。",
+      })],
+      warnings: [],
     });
     emit("runtime/status", statusPayload({
       tasks: { background_running: 0, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 1 },
@@ -476,6 +483,32 @@ process.stdin.on("end", () => {
 
 function emitUi(payload) {
   emit("ui/message", payload);
+}
+
+function permissionItem(value) {
+  return {
+    request_id: value.request_id,
+    call_id: value.request_id,
+    session_id: sessionId,
+    run_id: "",
+    agent_name: value.agent_name || "main",
+    tool_name: value.tool_name,
+    tool_family: value.tool_name === "bash_run" ? "shell" : "",
+    arguments_summary: "",
+    status: value.status,
+    reason: value.reason,
+    risk_level: value.tool_name === "bash_run" ? "medium" : "low",
+    choices: value.status === "needs_confirmation" ? ["allow_once", "deny"] : [],
+    scope: "call",
+    expires_at: "",
+    policy: {
+      source: `TOOL_PERMISSIONS:${value.tool_name}`,
+      risk: value.tool_name === "bash_run" ? "medium" : "low",
+      modes: "bypass/permissive/moderate",
+      confirmation: value.tool_name === "bash_run" ? "需要确认" : "无需确认",
+      bypass: "bypass 全权限放行",
+    },
+  };
 }
 
 function emit(type, payload, requestId = undefined) {

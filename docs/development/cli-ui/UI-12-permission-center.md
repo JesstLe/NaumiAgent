@@ -21,3 +21,25 @@
 - plan/default/bypass 状态在 Footer、中心页和 Python 权限层一致。
 - 新 UI、TUI、无交互模式分别有明确确认或拒绝策略。
 - 权限拒绝能被 Harness Explain 分类，用户有下一步。
+
+## 实现进展（2026-07-18）
+
+### UI-12.1a 已实现：类型化策略快照与只读中心页
+
+- Bridge 的 `/permissions` 不再把 ANSI/Markdown 字符串塞入通用消息，而是发送严格白名单的
+  `permissions/snapshot` schema v1；pending、grant、history 和 warning 均有数量与文本上限。
+- 新 UI 使用瞬态全屏路由展示运行/权限模式、待确认、有效授权、最近决定和规则来源；支持刷新、
+  键盘滚动与 Esc 恢复对话锚点，显式 resume 不保留旧会话页面状态。
+- bypass 明确显示为常规工具全权限放行；规则风险与 default/plan 下的确认要求仍可解释。
+- TUI fallback 继续使用同一 Python snapshot builder 的共享文本 renderer，没有复制策略查询逻辑。
+- 历史/授权读取异常只输出固定脱敏警告，不再把异常类型或正文暴露给 UI。
+- 真实 AgentEngine、会话 grant、pending Future、Bridge 和 Node 页面在 80/120/200 列通过验证。
+- 详细协议与非目标见 `UI-12-1a-policy-snapshot-design.md`。
+
+### 尚未完成
+
+- UI-12.2：可操作的 pending queue 与等待顺序。
+- UI-12.3：持久化 decision history 与 actor/call/run 审计。
+- UI-12.4：针对单次检查结果的完整规则解释链。
+- UI-12.5：workspace scope 持久授权。
+- UI-12.6：断线后的 pending 恢复和已决定 request 幂等。
