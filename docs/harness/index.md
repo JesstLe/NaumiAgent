@@ -39,8 +39,9 @@ Baseline Identity 与比较策略；未来阶段记录在
 - `/harness baseline <suite>` 与 `harness_eval_baseline` 只读展示 active Baseline 和最近权威
   Comparison receipts；新 UI 使用 typed、可滚动的彩色状态页，Textual TUI/兼容终端复用同一
   Service 状态模型。它们不会运行 Eval、晋升版本或改变 selector。
-- `/harness baseline promote <suite> <batch> --reason <原因>` 与
-  `harness_eval_baseline_promote` 显式调用同一 H5b gate；actor 由入口固定，旧版本重试不会回拨。
+- `/harness baseline promote <suite> <batch>` 在新 UI/Textual TUI 中引导选择理由并最终确认；显式
+  `--reason <原因>` 和 `harness_eval_baseline_promote` 直接调用同一 H5b gate。actor 由入口固定，
+  取消或旧版本重试不会改变 active selector。
 - `/harness baseline compare <suite> <candidate-batch>` 与 `harness_eval_compare` 使用 active Baseline
   生成 H5c 权威 receipt；相同比较幂等，selector 竞态会显式标记。
 - 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。

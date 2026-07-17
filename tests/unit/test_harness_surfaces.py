@@ -545,6 +545,54 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
 
 
 @pytest.mark.asyncio
+async def test_harness_guided_promotion_updates_real_selector_through_shared_frontend(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+
+    class GuidedFrontend:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        async def request_user_interaction(
+            self,
+            payload: dict[str, object],
+        ) -> dict[str, str]:
+            self.requests.append(payload)
+            return {
+                "kind": "option",
+                "value": "recommended" if len(self.requests) == 1 else "confirm",
+            }
+
+    frontend = GuidedFrontend()
+    try:
+        await execute_slash_command(engine, "/harness trust --confirm")
+        await execute_slash_command(
+            engine,
+            "/harness eval surface-protocol --repeat 5 --batch guided-1",
+        )
+        promoted = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline promote surface-protocol guided-1",
+                frontend=frontend,
+            )
+        )
+        status = await engine.harness_service.eval_baseline_status("surface-protocol")
+
+        assert [request["allow_custom"] for request in frontend.requests] == [True, False]
+        assert "晋升完成" in promoted
+        assert "操作者：user" in promoted
+        assert status.active is not None
+        assert status.active.batch_id == "guided-1"
+        assert status.active.promotion_reason == (
+            "用户审阅完整 Eval Batch 后确认晋升为 Active Baseline"
+        )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_harness_slash_doctor_and_invalid_usage_are_actionable(
     tmp_path: Path,
 ) -> None:

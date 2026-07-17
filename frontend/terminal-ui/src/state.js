@@ -255,6 +255,7 @@ export function createInitialState() {
     harnessReplays: Object.create(null),
     harnessEvalBaselines: Object.create(null),
     harnessEvalBatches: Object.create(null),
+    harnessEvalPromotions: Object.create(null),
     harnessDetail: {
       runId: "",
       explainLoading: false,
@@ -270,6 +271,12 @@ export function createInitialState() {
       requestId: "",
       batchId: "",
       suiteId: "",
+      scrollOffset: 0,
+    },
+    harnessEvalPromotion: {
+      requestId: "",
+      suiteId: "",
+      batchId: "",
       scrollOffset: 0,
     },
     permissionCenter: {
@@ -562,6 +569,17 @@ export function reduceServerEvent(state, record) {
         state.harnessEvalBatch.suiteId = payload.suite_id;
       }
       break;
+    case "harness/eval-promotion": {
+      const promotionRequestId = String(record.request_id || "");
+      if (promotionRequestId) {
+        state.harnessEvalPromotions[promotionRequestId] = payload;
+        const requestIds = Object.keys(state.harnessEvalPromotions);
+        while (requestIds.length > MAX_HARNESS_DETAILS) {
+          delete state.harnessEvalPromotions[requestIds.shift()];
+        }
+      }
+      break;
+    }
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
       if (
@@ -744,6 +762,7 @@ export function reduceServerEvent(state, record) {
       const wasHarnessDetailRoute = state.route?.name === "harness_detail";
       const wasHarnessEvalBaselineRoute = state.route?.name === "harness_eval_baseline";
       const wasHarnessEvalBatchRoute = state.route?.name === "harness_eval_batch";
+      const wasHarnessEvalPromotionRoute = state.route?.name === "harness_eval_promotion";
       const wasPermissionRoute = state.route?.name === "permissions";
       state.harnessDetail = {
         runId: "",
@@ -762,7 +781,18 @@ export function reduceServerEvent(state, record) {
         suiteId: "",
         scrollOffset: 0,
       };
-      if (wasHarnessDetailRoute || wasHarnessEvalBaselineRoute || wasHarnessEvalBatchRoute) {
+      state.harnessEvalPromotion = {
+        requestId: "",
+        suiteId: "",
+        batchId: "",
+        scrollOffset: 0,
+      };
+      if (
+        wasHarnessDetailRoute
+        || wasHarnessEvalBaselineRoute
+        || wasHarnessEvalBatchRoute
+        || wasHarnessEvalPromotionRoute
+      ) {
         state.route = { name: "conversation", originAnchor: null };
       }
       state.permissionCenter = {
@@ -783,6 +813,7 @@ export function reduceServerEvent(state, record) {
         state.harnessReplays = Object.create(null);
         state.harnessEvalBaselines = Object.create(null);
         state.harnessEvalBatches = Object.create(null);
+        state.harnessEvalPromotions = Object.create(null);
         state.activeAssistant = null;
         state.activeThinking = null;
         state.folds = {};
@@ -2275,6 +2306,24 @@ export function handleSubmitText(state, text, send) {
     state.harnessEvalBatch.requestId = String(send("harness/eval-batch/request", harnessBatch) || "");
     return;
   }
+  const harnessPromotion = parseHarnessEvalPromotionCommand(commandText);
+  if (harnessPromotion) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "harness_eval_promotion", originAnchor };
+    state.harnessEvalPromotion = {
+      requestId: "",
+      suiteId: harnessPromotion.suite_id,
+      batchId: harnessPromotion.batch_id,
+      scrollOffset: 0,
+    };
+    state.harnessEvalPromotion.requestId = String(
+      send("harness/eval-promotion/request", harnessPromotion) || "",
+    );
+    return;
+  }
   const harnessBaselineMatch = commandText.match(/^\/harness\s+baseline\s+([a-z][a-z0-9_-]{0,63})$/);
   if (harnessBaselineMatch) {
     const suiteId = harnessBaselineMatch[1];
@@ -2664,6 +2713,25 @@ export function handleHarnessEvalBatchKey(state, key) {
   return true;
 }
 
+export function handleHarnessEvalPromotionKey(state, key) {
+  if (state.route?.name !== "harness_eval_promotion") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  const current = Math.max(0, Number(state.harnessEvalPromotion.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.harnessEvalPromotion.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.harnessEvalPromotion.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.harnessEvalPromotion.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.harnessEvalPromotion.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessEvalPromotion.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessEvalPromotion.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
 function parseHarnessEvalBatchCommand(commandText) {
   const match = String(commandText || "").match(
     /^\/harness\s+eval\s+([a-z][a-z0-9_-]{0,63})\s+(.+)$/,
@@ -2690,6 +2758,16 @@ function parseHarnessEvalBatchCommand(commandText) {
     }
   }
   return seen.size ? request : null;
+}
+
+function parseHarnessEvalPromotionCommand(commandText) {
+  const match = String(commandText || "").match(
+    /^\/harness\s+baseline\s+promote\s+([a-z][a-z0-9_-]{0,63})\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,127})(?:\s+--reason\s+(.+))?$/,
+  );
+  if (!match) return null;
+  const reason = String(match[3] || "").trim();
+  if (reason && (reason.length < 3 || reason.length > 2000)) return null;
+  return { suite_id: match[1], batch_id: match[2], reason };
 }
 
 export function handlePermissionCenterKey(state, key, send) {

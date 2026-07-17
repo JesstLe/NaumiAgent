@@ -21,9 +21,11 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.harness.eval_promotion_flow import run_eval_promotion_flow
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchProgress,
+    HarnessEvalPromotionFlowStatus,
     eval_batch_terminal_progress,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup
@@ -36,6 +38,7 @@ from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
     harness_eval_batch_payload,
+    harness_eval_promotion_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
@@ -451,6 +454,7 @@ class JsonlEngineBridge:
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._active_run_context: dict[str, str] = {}
         self._active_completion_receipt: CompletionReceipt | None = None
@@ -781,6 +785,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.HARNESS_EVAL_BATCH_REQUEST:
             await self.start_harness_eval_batch(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST:
+            await self.start_harness_eval_promotion(payload, request_id=request_id)
             return
         if event_type == ClientEventType.INSPECTOR_REQUEST:
             await self.show_inspector(payload, request_id=request_id)
@@ -1443,6 +1450,75 @@ class JsonlEngineBridge:
 
         task = asyncio.create_task(run())
         self._harness_eval_batch_tasks[request_id] = task
+
+    async def start_harness_eval_promotion(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Run one guided promotion without blocking the JSONL control plane."""
+        if request_id in self._harness_eval_promotion_tasks:
+            await self.emit_error(
+                "该 Baseline 晋升请求正在处理中。",
+                code="harness_eval_promotion_duplicate",
+                request_id=request_id,
+            )
+            return
+        if len(self._harness_eval_promotion_tasks) >= 4:
+            await self.emit_error(
+                "待处理 Baseline 晋升交互已达上限（4 个）。",
+                code="harness_eval_promotion_limit",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "harness_service", None)
+
+        async def emit_status(status: HarnessEvalPromotionFlowStatus) -> None:
+            await self.emit(
+                ServerEventType.HARNESS_EVAL_PROMOTION,
+                harness_eval_promotion_payload(status),
+                request_id=request_id,
+            )
+
+        async def run() -> None:
+            try:
+                if service is None:
+                    result = HarnessEvalPromotionFlowStatus(
+                        stage="error",
+                        suite_id=str(payload["suite_id"]),
+                        batch_id=str(payload["batch_id"]),
+                        code="service_unavailable",
+                        message="Harness Service 尚未初始化。",
+                    )
+                else:
+                    result = await run_eval_promotion_flow(
+                        service,
+                        suite_id=str(payload["suite_id"]),
+                        batch_id=str(payload["batch_id"]),
+                        reason=str(payload.get("reason") or ""),
+                        interact=self.request_user_interaction,
+                        on_progress=emit_status,
+                    )
+                await emit_status(result)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._trace_harness_lookup_failure("eval_promotion", exc)
+                await emit_status(
+                    HarnessEvalPromotionFlowStatus(
+                        stage="error",
+                        suite_id=str(payload["suite_id"]),
+                        batch_id=str(payload["batch_id"]),
+                        code="promotion_failed",
+                        message="Baseline 晋升失败；Selector 未改变。",
+                    )
+                )
+            finally:
+                self._harness_eval_promotion_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(run())
+        self._harness_eval_promotion_tasks[request_id] = task
 
     def _trace_harness_lookup_failure(self, operation: str, error: Exception) -> None:
         error_type = type(error).__name__
@@ -2619,6 +2695,12 @@ class JsonlEngineBridge:
         if batch_tasks:
             await asyncio.gather(*batch_tasks, return_exceptions=True)
         self._harness_eval_batch_tasks.clear()
+        promotion_tasks = tuple(self._harness_eval_promotion_tasks.values())
+        for task in promotion_tasks:
+            task.cancel()
+        if promotion_tasks:
+            await asyncio.gather(*promotion_tasks, return_exceptions=True)
+        self._harness_eval_promotion_tasks.clear()
         await self.engine.shutdown()
         await self.emit(ServerEventType.SHUTDOWN, {"ok": True})
         if self.debug_trace is not None:

@@ -160,6 +160,29 @@ function harnessEvalBatchPayload(stage = "evaluating") {
   };
 }
 
+function harnessEvalPromotionPayload(stage = "promoted") {
+  const terminal = !["awaiting_reason", "awaiting_confirmation"].includes(stage);
+  const successful = ["promoted", "already_active"].includes(stage);
+  return {
+    schema_version: 1,
+    stage,
+    terminal,
+    suite_id: "surface-protocol",
+    batch_id: "candidate-1",
+    code: "",
+    message: "",
+    baseline_id: successful ? "a".repeat(64) : "",
+    active_baseline_id: successful ? "a".repeat(64) : "",
+    previous_baseline_id: "",
+    version: successful ? 1 : 0,
+    sample_count: successful ? 5 : 0,
+    promoted_by: successful ? "user" : "",
+    promotion_reason: stage === "awaiting_confirmation" || successful ? "完整回归已通过" : "",
+    created_at: successful ? "2026-07-18T10:00:00+00:00" : "",
+    private_payload: "must-drop",
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -280,6 +303,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/replay/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-baseline/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-batch/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-promotion/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -292,6 +316,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/replay"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-baseline"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-batch"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-promotion"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -494,6 +519,35 @@ test("harness eval batch response validates factual progress and terminal state"
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
     /完整样本/,
+  );
+});
+
+test("harness eval promotion response validates guided and authoritative state", () => {
+  const waiting = normalizeServerRecord({
+    type: "harness/eval-promotion",
+    payload: harnessEvalPromotionPayload("awaiting_confirmation"),
+  }).payload;
+  const promoted = normalizeServerRecord({
+    type: "harness/eval-promotion",
+    payload: harnessEvalPromotionPayload(),
+  }).payload;
+
+  assert.equal(waiting.terminal, false);
+  assert.equal(waiting.promotion_reason, "完整回归已通过");
+  assert.equal(promoted.baseline_id, "a".repeat(64));
+  assert.equal(Object.hasOwn(promoted, "private_payload"), false);
+
+  const incomplete = harnessEvalPromotionPayload();
+  incomplete.promoted_by = "";
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-promotion", payload: incomplete }),
+    /权威字段/,
+  );
+  const missingReason = harnessEvalPromotionPayload("awaiting_confirmation");
+  missingReason.promotion_reason = "";
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-promotion", payload: missingReason }),
+    /缺少晋升理由/,
   );
 });
 

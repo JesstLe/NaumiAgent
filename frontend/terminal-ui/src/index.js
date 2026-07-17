@@ -53,6 +53,7 @@ import {
   handleHarnessDetailKey,
   handleHarnessEvalBaselineKey,
   handleHarnessEvalBatchKey,
+  handleHarnessEvalPromotionKey,
   handlePermissionCenterKey,
   handleInteractionKey,
   handleSubmitText,
@@ -576,6 +577,10 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (state.route?.name === "harness_eval_batch" && handleHarnessEvalBatchKey(state, chunk)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "harness_eval_promotion" && handleHarnessEvalPromotionKey(state, chunk)) {
     scheduleRedraw();
     return;
   }
