@@ -28,12 +28,15 @@ from naumi_agent.harness.eval_receipt import (
     eval_result_sha256,
     eval_sample_set_sha256,
 )
+from naumi_agent.harness.eval_surface import render_eval_baseline_status
+from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import (
     HARNESS_STORE_SCHEMA_VERSION,
     HarnessStore,
     HarnessStoreConflictError,
     HarnessStoreError,
 )
+from naumi_agent.harness.trust import HarnessTrustStore
 
 _NOW = "2026-07-18T11:00:00+08:00"
 _LATER = "2026-07-18T11:01:00+08:00"
@@ -322,16 +325,44 @@ async def test_receipt_store_is_immutable_scoped_and_tamper_evident(
         workspace,
         "receipt-protocol",
     )
+    surface = await HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        store=HarnessStore(store.db_path),
+    ).eval_baseline_status("receipt-protocol")
+    rendered_surface = render_eval_baseline_status(surface)
 
     assert retry == first == restored
     assert listed == (first,)
     assert first.receipt.decision is EvalComparisonDecision.PASSED
+    assert surface.status == "ok"
+    assert surface.active is not None and surface.active.version == 1
+    assert "已选择 v1" in rendered_surface
+    assert "Candidate `candidate-001`" in rendered_surface
+    assert "通过" in rendered_surface
     assert await store.get_eval_comparison_receipt(
         other,
         "receipt-protocol",
         baseline.id,
         "candidate-001",
     ) is None
+    second_baseline = await store.promote_eval_baseline(
+        workspace_root=workspace,
+        batch_id="candidate-001",
+        suite_id="receipt-protocol",
+        promoted_by="Harness-Test",
+        promotion_reason="切换 active 版本验证只读状态过滤",
+        created_at="2026-07-18T11:01:30+08:00",
+    )
+    active_surface = await HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust-2.db"),
+        store=HarnessStore(store.db_path),
+    ).eval_baseline_status("receipt-protocol")
+    assert active_surface.active is not None
+    assert active_surface.active.id == second_baseline.id
+    assert active_surface.active.version == 2
+    assert active_surface.comparisons == ()
     conflicting = build_eval_comparison_receipt(
         workspace_root=workspace,
         suite_id="receipt-protocol",

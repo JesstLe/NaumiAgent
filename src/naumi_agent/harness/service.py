@@ -37,6 +37,10 @@ from naumi_agent.harness.context import (
 )
 from naumi_agent.harness.eval import evaluate_declared_suites
 from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalBaselineStatus,
+    build_eval_baseline_status,
+)
 from naumi_agent.harness.evidence import EvidenceCollector
 from naumi_agent.harness.explain import (
     HarnessExplainer,
@@ -235,6 +239,45 @@ class HarnessService:
             profile_digest=status.profile_digest,
             profile_trusted=status.trusted,
         )
+
+    async def eval_baseline_status(
+        self,
+        suite_id: str,
+    ) -> HarnessEvalBaselineStatus:
+        """Read active Baseline and recent immutable comparisons for one Suite."""
+        if not isinstance(suite_id, str):
+            raise ValueError("suite_id 必须是字符串。")
+        suite = suite_id.strip()
+        if not suite or len(suite) > 64:
+            raise ValueError("suite_id 必须是 1..64 个字符。")
+        if self._store is None:
+            return HarnessEvalBaselineStatus(
+                status="unavailable",
+                suite_id=suite,
+                message="Harness 状态库尚未初始化。",
+            )
+        try:
+            active = await self._store.get_active_eval_baseline(
+                self.workspace_root,
+                suite,
+            )
+            comparisons = (
+                await self._store.list_eval_comparison_receipts(
+                    self.workspace_root,
+                    suite,
+                    baseline_id=active.id,
+                    limit=20,
+                )
+                if active is not None
+                else ()
+            )
+        except HarnessStoreError:
+            return HarnessEvalBaselineStatus(
+                status="unavailable",
+                suite_id=suite,
+                message="Harness Eval 状态库损坏、不可读或正忙。",
+            )
+        return build_eval_baseline_status(suite, active, comparisons)
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
         """Run one exact check from the currently trusted Profile."""

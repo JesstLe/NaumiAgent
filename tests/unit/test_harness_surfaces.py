@@ -138,6 +138,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         explain = engine.tool_registry.get("harness_explain")
         replay = engine.tool_registry.get("harness_replay")
         eval_tool = engine.tool_registry.get("harness_eval")
+        baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
@@ -148,6 +149,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert replay.metadata.concurrency_safe
         assert eval_tool is not None and eval_tool.metadata.read_only
         assert eval_tool.metadata.concurrency_safe
+        assert baseline_tool is not None and baseline_tool.metadata.read_only
+        assert baseline_tool.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -223,6 +226,32 @@ async def test_harness_eval_slash_and_agent_tool_share_service_result(
         assert first.suites[0].baseline_identity_code == ""
         assert "Baseline" in slash
         assert "不可晋升" in slash
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_baseline_slash_and_agent_tool_share_empty_state(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        slash = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline surface-protocol",
+            )
+        )
+        tool = engine.tool_registry.get("harness_eval_baseline")
+        assert tool is not None
+        agent = await tool.execute(suite="surface-protocol")
+
+        assert "尚无 Baseline" in slash
+        assert "尚无 Baseline" in agent
+        assert "稳定的重复 Eval cohort" in slash
+        assert await tool.execute() == (
+            "Harness Baseline 参数无效：suite 必须是字符串。"
+        )
     finally:
         await engine.shutdown()
 

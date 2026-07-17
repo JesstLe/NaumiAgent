@@ -2731,7 +2731,8 @@ def _print_help() -> None:
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         (
-            "/harness [status|doctor|explain|replay|detail|eval|knowledge|check|trust|untrust]",
+            "/harness [status|doctor|explain|replay|detail|eval|baseline|"
+            "knowledge|check|trust|untrust]",
             "管理仓库 Harness Profile、离线评测、运行解释、知识与验证检查",
         ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
@@ -2840,6 +2841,7 @@ def _print_help() -> None:
 async def _run_harness(engine: Any, arg: str) -> None:
     """Run user-only Harness commands through the shared service facade."""
     from naumi_agent.harness.eval import render_harness_eval
+    from naumi_agent.harness.eval_surface import render_eval_baseline_status
     from naumi_agent.harness.explain import render_harness_explanation
     from naumi_agent.harness.service import (
         HarnessStatusCode,
@@ -2857,11 +2859,13 @@ async def _run_harness(engine: Any, arg: str) -> None:
     )
 
     usage = (
-        "用法：/harness [status|doctor|explain|replay|detail|eval|knowledge|check|trust|untrust]\n"
+        "用法：/harness [status|doctor|explain|replay|detail|eval|baseline|"
+        "knowledge|check|trust|untrust]\n"
         "      /harness explain [run-id|latest]\n"
         "      /harness replay [run-id|latest]\n"
         "      /harness detail [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
+        "      /harness baseline <suite-id>\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness check <check-id>\n"
         "      /harness trust --confirm"
@@ -2928,6 +2932,14 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness Eval 参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_eval(result)))
+        return
+    if subcommand == "baseline" and len(parts) == 2:
+        try:
+            result = await service.eval_baseline_status(parts[1])
+        except ValueError as exc:
+            console.print(f"[yellow]Harness Baseline 参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_eval_baseline_status(result)))
         return
     if subcommand == "knowledge":
         knowledge_args = parts[1:]

@@ -15,8 +15,19 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.document import Document
+try:
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.document import Document
+except ModuleNotFoundError:  # Optional for New UI and non-interactive installs.
+    class Completer:  # type: ignore[no-redef]
+        """Import-safe placeholder; interactive entry checks the dependency."""
+
+    class Completion:  # type: ignore[no-redef]
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            raise RuntimeError("prompt_toolkit 未安装，无法创建补全项。")
+
+    class Document:  # type: ignore[no-redef]
+        text_before_cursor = ""
 
 # ---------------------------------------------------------------------------
 #  Command metadata — structured version of the old flat tuples
@@ -45,7 +56,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/reasoning", "显示或隐藏模型思考文本", takes_arg=True, arg_hint="[on|off|toggle]", readonly=False, category="基础"),
         CommandMeta("/effort", "查看或切换模型思考强度", takes_arg=True, arg_hint="[auto|none|minimal|low|medium|high|xhigh|max|reset]", readonly=False, category="基础"),
         CommandMeta("/doctor", "运行环境诊断", category="基础"),
-        CommandMeta("/harness", "Harness Profile 状态、离线评测、运行解释、知识、检查与信任", takes_arg=True, arg_hint="[status|doctor|explain|replay|eval|knowledge|check|trust|untrust]", readonly=False, category="基础"),
+        CommandMeta("/harness", "Harness 状态、离线评测、Baseline、运行解释、知识、检查与信任", takes_arg=True, arg_hint="[status|doctor|explain|replay|eval|baseline|knowledge|check|trust|untrust]", readonly=False, category="基础"),
         CommandMeta("/copy", "复制/导出完整记录、最近一轮或最近错误", takes_arg=True, arg_hint="<all|last|error>", readonly=True, category="基础"),
         CommandMeta("/debug", "显示本次结构化调试日志位置", category="基础"),
         CommandMeta("/debug-replay", "回放 debug-runs 结构化事件", takes_arg=True, arg_hint="<路径>", readonly=True, category="基础"),

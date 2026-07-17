@@ -1480,24 +1480,40 @@ class HarnessStore:
         workspace_root: str | Path,
         suite_id: str,
         *,
+        baseline_id: str | None = None,
         limit: int = 100,
     ) -> tuple[HarnessStoredEvalComparisonReceipt, ...]:
         workspace = _canonical_workspace(workspace_root)
         suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        baseline = (
+            _validate_sha256(baseline_id, field="baseline_id")
+            if baseline_id is not None
+            else None
+        )
         if not 1 <= limit <= 1_000:
             raise ValueError("limit 必须在 1..1000 之间。")
         if not self._db_path.is_file():
             return ()
         try:
             async with self._connection() as db:
-                cursor = await db.execute(
-                    """
-                    SELECT * FROM harness_eval_comparison_receipts
-                    WHERE workspace_root = ? AND suite_id = ?
-                    ORDER BY created_at DESC, id DESC LIMIT ?
-                    """,
-                    (workspace, suite, limit),
-                )
+                if baseline is None:
+                    cursor = await db.execute(
+                        """
+                        SELECT * FROM harness_eval_comparison_receipts
+                        WHERE workspace_root = ? AND suite_id = ?
+                        ORDER BY created_at DESC, id DESC LIMIT ?
+                        """,
+                        (workspace, suite, limit),
+                    )
+                else:
+                    cursor = await db.execute(
+                        """
+                        SELECT * FROM harness_eval_comparison_receipts
+                        WHERE workspace_root = ? AND suite_id = ? AND baseline_id = ?
+                        ORDER BY created_at DESC, id DESC LIMIT ?
+                        """,
+                        (workspace, suite, baseline, limit),
+                    )
                 return tuple(
                     _eval_comparison_receipt_from_row(row)
                     for row in await cursor.fetchall()

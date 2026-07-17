@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from naumi_agent.harness.eval import render_harness_eval
+from naumi_agent.harness.eval_surface import render_eval_baseline_status
 from naumi_agent.harness.explain import render_harness_explanation
 from naumi_agent.harness.service import (
     HarnessService,
@@ -24,6 +25,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessExplainTool(service),
         HarnessReplayTool(service),
         HarnessEvalTool(service),
+        HarnessEvalBaselineTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -211,6 +213,53 @@ class HarnessEvalTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness Eval 参数无效：{exc}"
         return render_harness_eval(result)
+
+
+class HarnessEvalBaselineTool(_HarnessReadOnlyTool):
+    @property
+    def name(self) -> str:
+        return "harness_eval_baseline"
+
+    @property
+    def description(self) -> str:
+        return "查看指定 Eval Suite 的 active Baseline 与最近权威比较回执"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness eval baseline comparison receipt regression status history"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Eval Suite id",
+                }
+            },
+            "required": ["suite"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        suite = kwargs.get("suite")
+        if not isinstance(suite, str):
+            return "Harness Baseline 参数无效：suite 必须是字符串。"
+        try:
+            result = await self._service.eval_baseline_status(suite)
+        except ValueError as exc:
+            return f"Harness Baseline 参数无效：{exc}"
+        return render_eval_baseline_status(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):
