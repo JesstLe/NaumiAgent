@@ -33,6 +33,11 @@ from naumi_agent.harness.retention_executor import (
     SessionRetentionExecutor,
     SessionRetentionPassResult,
 )
+from naumi_agent.harness.retention_periodic import (
+    RetentionPeriodicPolicy,
+    RetentionWorkerSnapshot,
+    SessionRetentionPeriodicService,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -538,6 +543,20 @@ class AgentEngine:
             session_port=self._session_port,
             harness_store=self._harness_store,
             fallback_workspace=self.workspace_root,
+        )
+        retention_config = config.memory.session_retention
+        self._retention_periodic_service = SessionRetentionPeriodicService(
+            lease_port=self._harness_store,
+            run_pass=self._run_periodic_session_retention,
+            policy=RetentionPeriodicPolicy(
+                interval_seconds=retention_config.interval_seconds,
+                max_empty_backoff_seconds=(
+                    retention_config.max_empty_backoff_seconds
+                ),
+                lease_seconds=retention_config.worker_lease_seconds,
+                standby_retry_seconds=retention_config.standby_retry_seconds,
+                jitter_ratio=retention_config.jitter_ratio,
+            ),
         )
         self._session_reconciliation_worker_id = f"engine-{uuid.uuid4().hex}"
         self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
@@ -1158,6 +1177,10 @@ class AgentEngine:
             reason="引擎关闭时撤销了权限授权。",
             source="shutdown",
         )
+        await self._shutdown_component(
+            "session_retention_worker",
+            self._retention_periodic_service.stop,
+        )
         if hasattr(self, "subagent_manager"):
             await self._shutdown_component(
                 "subagent_reaper",
@@ -1667,6 +1690,27 @@ class AgentEngine:
             ),
             cancel_event=cancel_event,
         )
+
+    async def _run_periodic_session_retention(
+        self,
+        cancel_event: asyncio.Event,
+    ) -> SessionRetentionPassResult:
+        return await self.run_session_retention_once(cancel_event=cancel_event)
+
+    def start_session_retention_worker(self) -> bool:
+        """Start only when periodic retention is explicitly enabled in config."""
+        if not self._config.memory.session_retention.periodic_enabled:
+            return False
+        return self._retention_periodic_service.start()
+
+    async def stop_session_retention_worker(self) -> bool:
+        return await self._retention_periodic_service.stop()
+
+    def wake_session_retention_worker(self) -> bool:
+        return self._retention_periodic_service.wake()
+
+    def session_retention_worker_snapshot(self) -> RetentionWorkerSnapshot:
+        return self._retention_periodic_service.snapshot()
 
     async def _await_delete_completion(
         self,

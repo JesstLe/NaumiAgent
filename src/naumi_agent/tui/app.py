@@ -61,6 +61,7 @@ from naumi_agent.ui.history_screen import (
     render_session_delete_preview,
     render_session_retention_preview,
     render_session_retention_result,
+    render_session_retention_worker,
 )
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
@@ -2385,6 +2386,9 @@ class NaumiApp(App):
         if subcommand in {"retention-run", "retention_run"}:
             self._run_session_retention()
             return
+        if subcommand in {"retention-worker", "retention_worker"}:
+            self._control_session_retention_worker(sub_arg.lower() or "status")
+            return
         if subcommand == "archive":
             if not sub_arg:
                 status.status_text = "用法: /history archive <session_id>"
@@ -2671,6 +2675,49 @@ class NaumiApp(App):
             f"Session 保留清理 {result.status.value}: "
             f"完整删除 {result.completed_count}"
         )
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _control_session_retention_worker(self, action: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        if action == "start":
+            started = self.engine.start_session_retention_worker()
+            status.status_text = (
+                "Session retention worker 已启动"
+                if started
+                else "Worker 未启动：配置未启用或已经运行"
+            )
+            return
+        if action == "stop":
+            stopped = await self.engine.stop_session_retention_worker()
+            status.status_text = (
+                "Session retention worker 已停止"
+                if stopped
+                else "Worker 已处于停止状态"
+            )
+            return
+        if action == "wake":
+            status.status_text = (
+                "Session retention worker 已唤醒"
+                if self.engine.wake_session_retention_worker()
+                else "Worker 尚未运行"
+            )
+            return
+        if action == "status":
+            chat.mount(
+                Markdown(
+                    render_session_retention_worker(
+                        self.engine.session_retention_worker_snapshot(),
+                        configured_enabled=(
+                            self.engine.config.memory.session_retention.periodic_enabled
+                        ),
+                    ),
+                    classes="agent-msg",
+                )
+            )
+            status.status_text = "已显示 Session retention worker 状态"
+            return
+        status.status_text = "用法: /history retention-worker [status|start|stop|wake]"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_doctor(self) -> None:

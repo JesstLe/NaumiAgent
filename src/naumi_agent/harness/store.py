@@ -49,7 +49,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 6
+HARNESS_STORE_SCHEMA_VERSION = 7
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -1203,6 +1203,92 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法终止失效的 retention 协调请求。") from exc
 
+    async def acquire_retention_worker_lease(
+        self,
+        *,
+        owner_id: str,
+        now: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Atomically acquire or take over the singleton retention lease."""
+        owner = _normalize_text(owner_id, field="owner_id", max_length=128)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        if not 1 <= lease_seconds <= 86_400:
+            raise ValueError("lease_seconds 必须在 1 到 86400 之间。")
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    INSERT INTO harness_retention_worker_leases (
+                        lease_name, owner_id, lease_expires_at, updated_at
+                    ) VALUES ('session_retention', ?, ?, ?)
+                    ON CONFLICT(lease_name) DO UPDATE SET
+                        owner_id = excluded.owner_id,
+                        lease_expires_at = excluded.lease_expires_at,
+                        updated_at = excluded.updated_at
+                    WHERE harness_retention_worker_leases.owner_id = excluded.owner_id
+                       OR harness_retention_worker_leases.lease_expires_at <= excluded.updated_at
+                    """,
+                    (owner, expires_at, timestamp),
+                )
+                await db.commit()
+                return cursor.rowcount > 0
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法获取 retention worker 租约。") from exc
+
+    async def renew_retention_worker_lease(
+        self,
+        *,
+        owner_id: str,
+        now: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Renew only a non-expired lease still owned by this worker."""
+        owner = _normalize_text(owner_id, field="owner_id", max_length=128)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        if not 1 <= lease_seconds <= 86_400:
+            raise ValueError("lease_seconds 必须在 1 到 86400 之间。")
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    UPDATE harness_retention_worker_leases
+                    SET lease_expires_at = ?, updated_at = ?
+                    WHERE lease_name = 'session_retention'
+                      AND owner_id = ? AND lease_expires_at > ?
+                    """,
+                    (expires_at, timestamp, owner, timestamp),
+                )
+                await db.commit()
+                return cursor.rowcount > 0
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法续租 retention worker。") from exc
+
+    async def release_retention_worker_lease(self, *, owner_id: str) -> bool:
+        """Release only the lease currently owned by this worker."""
+        owner = _normalize_text(owner_id, field="owner_id", max_length=128)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    DELETE FROM harness_retention_worker_leases
+                    WHERE lease_name = 'session_retention' AND owner_id = ?
+                    """,
+                    (owner,),
+                )
+                await db.commit()
+                return cursor.rowcount > 0
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法释放 retention worker 租约。") from exc
+
     async def list_pending_session_reconciliations(
         self,
         *,
@@ -2014,6 +2100,7 @@ class HarnessStore:
                             await _migrate_tombstone_stage_v5(db)
                             await db.executescript(_SCHEMA_V5)
                             await db.executescript(_SCHEMA_V6)
+                            await db.executescript(_SCHEMA_V7)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -2844,4 +2931,13 @@ CREATE TABLE IF NOT EXISTS harness_session_reconciliation_terminals (
 
 CREATE INDEX IF NOT EXISTS idx_harness_session_reconciliation_terminals_outcome
 ON harness_session_reconciliation_terminals (outcome, completed_at, request_id);
+"""
+
+_SCHEMA_V7 = """
+CREATE TABLE IF NOT EXISTS harness_retention_worker_leases (
+    lease_name TEXT PRIMARY KEY CHECK (lease_name = 'session_retention'),
+    owner_id TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """

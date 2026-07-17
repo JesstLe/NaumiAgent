@@ -8,6 +8,10 @@ from naumi_agent.harness.retention_executor import (
     RetentionPassStatus,
     SessionRetentionPassResult,
 )
+from naumi_agent.harness.retention_periodic import (
+    RetentionWorkerSnapshot,
+    RetentionWorkerState,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -24,6 +28,7 @@ from naumi_agent.ui.history_screen import (
     render_session_delete_preview,
     render_session_retention_preview,
     render_session_retention_result,
+    render_session_retention_worker,
     summarize_session_messages,
 )
 
@@ -181,3 +186,30 @@ def test_render_session_retention_result_distinguishes_completed_and_retry() -> 
     assert "策略阻止：1" in rendered
     assert "4.0 KiB" in rendered
     assert "部分完成" in rendered
+
+
+def test_render_retention_worker_status_is_chinese_and_exposes_metrics() -> None:
+    snapshot = RetentionWorkerSnapshot(
+        owner_id="worker-a",
+        state=RetentionWorkerState.WAITING,
+        lease_held=True,
+        pass_count=3,
+        completed_session_count=4,
+        retry_scheduled_count=1,
+        failure_count=0,
+        consecutive_empty_passes=2,
+        next_delay_seconds=120,
+        last_pass_status="completed",
+        last_error_code="",
+        started_at="2026-07-17T12:00:00+00:00",
+        last_pass_at="2026-07-17T12:01:00+00:00",
+    )
+
+    rendered = render_session_retention_worker(snapshot, configured_enabled=True)
+
+    assert "Session Retention Worker" in rendered
+    assert "状态：等待下一轮" in rendered
+    assert "持有租约：是" in rendered
+    assert "执行轮数：3" in rendered
+    assert "完整删除：4" in rendered
+    assert "安全重试：1" in rendered
