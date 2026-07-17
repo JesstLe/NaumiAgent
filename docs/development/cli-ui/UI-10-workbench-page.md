@@ -65,10 +65,20 @@
 - 终端进程真实执行 `/workbench`→渲染→`r`→`Esc`，确认没有 `submit` 聊天事件。SQLite Store→
   Service→Bridge→Node reducer→Overview renderer 的 80/120/200 列链路同时通过。
 
+### UI-10.7 已实现：TUI fallback parity
+
+- Textual TUI 输入 `/workbench` 会打开只读全屏 Overview，直接调用当前 Engine 的
+  `WorkbenchService.dashboard_snapshot(current_session)`；没有第二套 Store 查询或状态推导。
+- 页面展示与新 UI 相同的权威目标、任务、owner、branch/worktree/PR、最近验证、风险、失败和待审；
+  仅提供 `r` 刷新与 `Esc` 返回，不提前实现 UI-10.6 动作。
+- schema/version/stream/revision/full/session 任一不匹配都会拒绝快照；刷新失败保留上一次成功快照，
+  首次失败提供 `/doctor` 下一步，不泄露底层异常。
+- Store 文本先做控制字符清理、长度限制和 Markdown 转义；80/120/200 列均保留核心状态，空任务有
+  明确创建/刷新提示。
+
 ### 尚未完成
 
 - UI-10.3：Worktrees tab。
 - UI-10.4：Reviews tab。
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
 - UI-10.6：受权限控制的动作。
-- UI-10.7：TUI fallback parity。

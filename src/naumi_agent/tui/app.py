@@ -48,6 +48,7 @@ from naumi_agent.tui.completion_receipt import (
 )
 from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
 from naumi_agent.tui.semantic_markdown import SemanticMarkdown as Markdown
+from naumi_agent.tui.workbench_overview import WorkbenchOverviewScreen
 from naumi_agent.tui.working_indicator import (
     WORKING_INDICATOR_FRAME_COUNT,
     render_working_indicator_frame,
@@ -238,7 +239,7 @@ class _TuiSlashCommandFrontend:
         todo = self._app.query_one(TodoBar)
         todo.todo_text = text
 
-_TUI_LOCAL_COMMANDS = ("/agents",)
+_TUI_LOCAL_COMMANDS = ("/agents", "/workbench")
 _SLASH_SUGGESTIONS = SuggestFromList(
     [*_TUI_LOCAL_COMMANDS, *(cmd for cmd, _, _ in COMMANDS)],
     case_sensitive=True,
@@ -1758,6 +1759,9 @@ class NaumiApp(App):
         if command == "/agents":
             self._open_agent_control()
             return
+        if command == "/workbench":
+            self._open_workbench_overview()
+            return
         if command == "/reasoning":
             self._handle_reasoning_command(arg)
             return
@@ -2342,6 +2346,12 @@ class NaumiApp(App):
         if isinstance(current, AgentControlScreen | ModalScreen):
             return
         self.push_screen(AgentControlScreen(self.engine))
+
+    def _open_workbench_overview(self) -> None:
+        current = self.screen
+        if isinstance(current, WorkbenchOverviewScreen | ModalScreen):
+            return
+        self.push_screen(WorkbenchOverviewScreen(self.engine))
 
     def action_toggle_browser(self) -> None:
         browser = self.query_one(BrowserPanel)
