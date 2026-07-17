@@ -48,5 +48,9 @@
   多 Suite 运行前后复核 Git fingerprint，Suite 原始摘要与 `model=null` identity 进入 typed result；
   Slash 与 Agent Tool 共享显示可晋升状态或稳定不可用原因。实施见
   `HAR-08-6b-static-eval-identity-surface.md`。
-- Replay/Sandbox/Live、Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
+- HAR-08.7a Identity Compatibility Comparator：已实现。源码 revision 是 informational 差异；
+  Eval/Profile/Runner/model 差异硬阻断；平台与当前 provisional 状态产生 caveat。详细规则见
+  `HAR-08-7a-identity-compatibility-comparator.md`。
+- Replay/Sandbox/Live、指标 Delta/门槛/统计 Comparator、Baseline promote 与完整存储仍为
+  planned；当前不得把
   HAR-08 整体标记为 implemented。

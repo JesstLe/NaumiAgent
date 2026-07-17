@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -396,3 +398,38 @@ def test_untrusted_profile_cannot_be_promoted_to_baseline(tmp_path: Path) -> Non
     assert identity.profile_trusted is False
     assert identity.baseline_eligible is False
     assert any("Profile" in warning for warning in identity.warnings)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"source": {"commit": "1" * 40, "tree_sha256": "sha256:" + "2" * 64, "dirty": True}},
+        {"profile_trusted": False},
+    ],
+)
+def test_deserialization_rejects_forged_eligible_governance_facts(
+    tmp_path: Path,
+    mutation: dict[str, object],
+) -> None:
+    identity = build_eval_baseline_identity(
+        _workspace(tmp_path),
+        configuration=_configuration(),
+        capability=_capability(),
+        reasoning=_reasoning(),
+        platform_identity=_platform(),
+    )
+    payload = identity.model_dump(mode="json")
+    payload.update(mutation)
+    digest_payload = {key: value for key, value in payload.items() if key != "identity_sha256"}
+    payload["identity_sha256"] = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    with pytest.raises(ValidationError, match="治理事实矛盾"):
+        type(identity).model_validate(payload)
