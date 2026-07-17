@@ -2,12 +2,16 @@
 
 本文件只记录真实缺口，不创建未使用的空壳模块。
 
+## 部分实现
+
+| 阶段 | 缺口 | 完成证据要求 |
+|---|---|---|
+| H5 | hello Static Eval 已实现；通用 Static、Replay/Sandbox/Live runner、baseline/comparator/store 未实现 | 多领域离线确定性重跑一致；live 显式预算和 Worktree |
+
 ## 尚未实现
 
 | 阶段 | 缺口 | 完成证据要求 |
 |---|---|---|
-| H4 | Evidence Store、artifact、replay | SQLite/文件损坏、脱敏、trace 丢失、重放一致性通过 |
-| H5 | Static/Replay/Live Eval 与 baseline | 离线确定性重跑一致；live 显式预算和 Worktree |
 | H6 | Failure fingerprint、Proposal、人工 promotion | 无自动改 Profile；去重和阈值可审计 |
 | H7 | Mission/Issue/Lease 常驻控制面 | H1-H6 baseline 稳定后再接入，恢复/取消/dirty Worktree 完整 |
 
@@ -20,9 +24,12 @@
 - 缓存是进程内缓存，应用重启后重建；这避免了磁盘索引迁移和损坏恢复问题，但首次请求更慢。
 - NaumiAgent 写工具成功后会立即失效缓存；外部编辑器新增未跟踪文件最多等待 30 秒 Git 审计周期才进入候选集。
 - Windows 的路径归一化和 argv 行为有单元边界，仍需要 Windows CI 的真实 Git/NTFS 验证。
-- CheckRunner success cache 只在当前进程内有效；H4 Evidence Store 才会提供跨重启证据。
-- H3 check 结果仅保存在有界进程内 run 缓存；应用重启后的可解释、可回放证据要由 H4
-  Evidence Store 提供。
+- CheckRunner 的 success cache 仍只在当前进程复用；持久 Store 用于证据、Explain 和 Replay，
+  尚不把历史检查当作跨重启可复用缓存。
+- HAR-08.1a 的 Eval 结果只在内存中返回；尚未建立 baseline identity、跨 commit comparator 或
+  `harness_eval_results` 持久表。
+- 离线 Suite/expected 随 Profile 一起由仓库维护，当前只有 digest integrity，没有 baseline
+  promotion 审批；修改预期仍需代码审查，不能据此宣称模型或 Harness 已提升。
 
 ## 当前不应做的事情
 

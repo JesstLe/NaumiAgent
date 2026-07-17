@@ -35,6 +35,8 @@ from naumi_agent.harness.context import (
     KnowledgeContextBundle,
     safe_markdown_fence,
 )
+from naumi_agent.harness.eval import evaluate_declared_suites
+from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
 from naumi_agent.harness.evidence import EvidenceCollector
 from naumi_agent.harness.explain import (
     HarnessExplainer,
@@ -179,6 +181,39 @@ class HarnessService:
     @property
     def store(self) -> HarnessStore | None:
         return self._store
+
+    async def eval_suites(self, target: str | None = None) -> HarnessEvalReport:
+        """Run declared static Eval Suites without trust, commands, models, or writes."""
+        if target is not None and not isinstance(target, str):
+            raise ValueError("suite 必须是字符串。")
+        normalized_target = target.strip() if target is not None else None
+        if normalized_target == "":
+            raise ValueError("suite 不能为空。")
+        if normalized_target is not None and len(normalized_target) > 1_024:
+            raise ValueError("suite 不能超过 1024 个字符。")
+        status = await self.status()
+        if status.code is HarnessStatusCode.MISSING:
+            return HarnessEvalReport(
+                requested=normalized_target or "all",
+                status=EvalRunStatus.EVALUATION_ERROR,
+                code="profile_missing",
+                message="当前工作区尚未配置 Harness Profile，无法运行离线 Eval。",
+            )
+        if status.code is HarnessStatusCode.INVALID:
+            return HarnessEvalReport(
+                requested=normalized_target or "all",
+                status=EvalRunStatus.EVALUATION_ERROR,
+                code="profile_invalid",
+                message="Harness Profile 无效；请先运行 /harness doctor 修复后再运行 Eval。",
+            )
+        profile = status.snapshot.profile
+        assert profile is not None
+        return await asyncio.to_thread(
+            evaluate_declared_suites,
+            self.workspace_root,
+            profile.evals.suites,
+            normalized_target,
+        )
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
         """Run one exact check from the currently trusted Profile."""

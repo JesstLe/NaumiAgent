@@ -2033,6 +2033,7 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     harness = next(item for item in slash_commands if item["command"] == "/harness")
     assert "知识" in harness["description"]
     assert "解释" in harness["description"]
+    assert "评测" in harness["description"]
 
 
 def test_bridge_fallback_slash_registry_keeps_goal_available() -> None:

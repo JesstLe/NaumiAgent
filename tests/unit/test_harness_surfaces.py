@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
@@ -29,6 +32,8 @@ checks:
   - id: unit
     label: 单元测试
     argv: [python3, -c, "print('surface check ok')"]
+evals:
+  suites: [evals/protocol.yaml]
 """
 
 
@@ -43,6 +48,55 @@ def _engine(tmp_path: Path) -> AgentEngine:
     profile.parent.mkdir(parents=True)
     profile.write_text(PROFILE, encoding="utf-8")
     (workspace / "AGENTS.md").write_text("HARNESS_SURFACE_RULE", encoding="utf-8")
+    fixture = workspace / "evals" / "fixtures" / "hello.json"
+    fixture.parent.mkdir(parents=True)
+    raw = json.dumps(
+        {
+            "type": "hello",
+            "version": 1,
+            "payload": {"client": "legacy-surface"},
+        },
+        sort_keys=True,
+    ).encode("utf-8")
+    fixture.write_bytes(raw)
+    (workspace / "evals" / "protocol.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "id": "surface-protocol",
+                "title": "表面协议回归",
+                "cases": [
+                    {
+                        "id": "legacy",
+                        "runner": "protocol_hello",
+                        "input": {"transport": "jsonl"},
+                        "fixture": {
+                            "path": "fixtures/hello.json",
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                        },
+                        "expected": {
+                            "outcome": "accepted",
+                            "selected_version": 1,
+                            "capabilities": [
+                                "heartbeat",
+                                "typed_ui_messages",
+                                "workbench_snapshot",
+                            ],
+                        },
+                        "metrics": {
+                            "primary": "protocol_outcome_match",
+                            "guardrails": ["no_model", "no_side_effect"],
+                        },
+                        "budget": {"max_duration_ms": 100},
+                    }
+                ],
+                "budget": {"max_duration_ms": 5_000},
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
     subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
     subprocess.run(
         ["git", "config", "user.email", "tests@example.com"],
@@ -83,6 +137,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         doctor = engine.tool_registry.get("harness_doctor")
         explain = engine.tool_registry.get("harness_explain")
         replay = engine.tool_registry.get("harness_replay")
+        eval_tool = engine.tool_registry.get("harness_eval")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
@@ -91,6 +146,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert explain.metadata.concurrency_safe
         assert replay is not None and replay.metadata.read_only
         assert replay.metadata.concurrency_safe
+        assert eval_tool is not None and eval_tool.metadata.read_only
+        assert eval_tool.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -119,6 +176,7 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         )
         check = _plain(await execute_slash_command(engine, "/harness check unit"))
         revoked = _plain(await execute_slash_command(engine, "/harness untrust"))
+        eval_output = _plain(await execute_slash_command(engine, "/harness eval"))
 
         assert "配置未受信任" in initial
         assert "仅预览" in preview
@@ -131,7 +189,33 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         assert "Harness 检查通过" in check
         assert "surface check ok" in check
         assert "已撤销" in revoked
+        assert "Harness 离线 Eval" in eval_output
+        assert "通过 1" in eval_output
         assert not (await engine.harness_service.status()).trusted
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_eval_slash_and_agent_tool_share_service_result(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        slash = _plain(
+            await execute_slash_command(engine, "/harness eval surface-protocol")
+        )
+        tool = engine.tool_registry.get("harness_eval")
+        assert tool is not None
+        agent = await tool.execute(suite="surface-protocol")
+        first = await engine.harness_service.eval_suites("surface-protocol")
+        second = await engine.harness_service.eval_suites("surface-protocol")
+
+        assert "表面协议回归" in slash
+        assert "表面协议回归" in agent
+        assert "实现回归 0" in slash
+        assert "评测错误 0" in agent
+        assert first.canonical_payload() == second.canonical_payload()
     finally:
         await engine.shutdown()
 

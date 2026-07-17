@@ -3,8 +3,8 @@
 > H4.5 之后的开发模块、交接和验收见 `docs/development/harness/README.md`；自进化闭环见
 > `docs/development/self-evolution/README.md`。
 
-本文是仓库 Harness 的权威入口。它描述已经存在的 H1/H2 能力，以及 H3 已落地并接入
-Engine final 的安全 CheckRunner 与 Completion Gate；未来阶段记录在
+本文是仓库 Harness 的权威入口。它描述已经存在的知识、检查、Completion Gate、安全 Replay，
+以及 HAR-08.1a 已落地的离线协议 Eval；未来阶段记录在
 [debt.md](debt.md)，不会伪装成已实现功能。
 
 ## 快速导航
@@ -14,6 +14,7 @@ Engine final 的安全 CheckRunner 与 Completion Gate；未来阶段记录在
 | 理解 Profile、信任与诊断 | [architecture.md](architecture.md) | `src/naumi_agent/harness/profile.py`、`trust.py`、`service.py` |
 | 理解仓库知识选择 | [architecture.md](architecture.md) | `src/naumi_agent/harness/knowledge.py`、`context.py` |
 | 运行受信任检查 | [architecture.md](architecture.md) | `src/naumi_agent/harness/checks.py`、`fingerprint.py`、`validation/` |
+| 运行离线协议评测 | `evals/protocol-hello-core.yaml` | `src/naumi_agent/harness/eval.py`、`eval_models.py` |
 | 修改 Agent 临时上下文 | [golden-principles.md](golden-principles.md) | `src/naumi_agent/orchestrator/context_assembly.py`、`engine.py` |
 | 修改 Terminal UI | `docs/product/terminal-ui/` | `frontend/terminal-ui/src/`、`frontend/terminal-ui/test/` |
 | 修改 Mac Workbench | `apps/macos/NaumiAgentWorkbench/README.md` | `apps/macos/NaumiAgentWorkbench/Sources/` |
@@ -29,6 +30,9 @@ Engine final 的安全 CheckRunner 与 Completion Gate；未来阶段记录在
 - 仓库知识只进入带 `<naumi_harness_context>` 标记的当前轮 system snapshot，不进入 `_full_history`。
 - `harness_read_knowledge` 与 `/harness knowledge` 共用 `HarnessService.read_knowledge()`。
 - 受信任 Profile 中的精确检查可由 `/harness check <id>` 或 `harness_run_check` 按需执行。
+- Profile 声明的离线 Suite 可由 `/harness eval [suite]` 或 `harness_eval` 运行；静态 runner
+  不要求信任，不执行模型、命令、网络或写操作，fixture 使用 SHA-256 锁定。
+- 离线 Eval 明确区分生产实现回归与 Suite/fixture 自身错误；当前内置六个 hello 协商 fixture。
 - 检查结果绑定 run id、Profile digest 与 Git tree fingerprint；并发相同检查 single-flight，
   Profile/工作树变化会阻止缓存复用或使运行结果失效。
 - Completion Contract/Gate 已接入同步与流式 Engine final，机械区分 verified、unverified、

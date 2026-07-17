@@ -36,7 +36,8 @@
 
 ## 分阶段实现
 
-- HAR-08.1a 离线协议 Eval：设计完成，实施见
+- HAR-08.1a 离线协议 Eval：已实现。严格 Suite/Case schema、fixture SHA-256、生产 hello
+  协议 runner、错误分类、`/harness eval` 与 `harness_eval` Tool 共用同一 Service；实施见
   `HAR-08-1a-offline-protocol-eval-design.md` 与
   `HAR-08-1a-offline-protocol-eval-implementation-plan.md`。
 - Replay/Sandbox/Live/Baseline/Comparator 与完整存储仍为 planned；1a 完成后也不得把 HAR-08

@@ -198,10 +198,18 @@ class HarnessCheckSpec(_StrictModel):
 
 
 class HarnessEvalSpec(_StrictModel):
-    suites: tuple[str, ...] = ()
-    live_default: bool = False
+    suites: tuple[str, ...] = Field(default=(), max_length=100)
+    live_default: Literal[False] = False
     max_cost_usd: float = Field(default=1.0, ge=0)
     max_duration_seconds: int = Field(default=1_800, ge=1, le=86_400)
+
+    @field_validator("suites")
+    @classmethod
+    def _validate_suites(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        # Workspace containment remains a profile-loader concern so callers keep
+        # the established path_outside_workspace diagnostic instead of a generic
+        # schema error.
+        return _normalize_unique_strings(values, field="evals.suites")
 
 
 class HarnessProfile(_StrictModel):
