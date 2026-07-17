@@ -220,6 +220,7 @@ DEFAULT_OWNERSHIP_RULES: tuple[OwnershipRule, ...] = (
     _package_rule(DomainOwner.TOOLS, "mcp", "MCP 工具接入"),
     _package_rule(DomainOwner.MEMORY, "memory", "会话与长期记忆"),
     _package_rule(DomainOwner.MEMORY, "runs", "运行记录持久化"),
+    _package_rule(DomainOwner.MEMORY, "persistence", "跨 Store schema、迁移与恢复治理"),
     _package_rule(DomainOwner.SAFETY, "safety", "权限与安全策略"),
     _package_rule(DomainOwner.SAFETY, "validation", "验证策略"),
     _package_rule(DomainOwner.SAFETY, "worktree", "Worktree 隔离边界"),

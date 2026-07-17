@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from naumi_agent.config.settings import AppConfig, ModelMeta
@@ -9,6 +11,7 @@ from naumi_agent.model.router import ModelResponse, ModelRouter
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.ui.doctor import (
     _check_search_readiness,
+    _check_state_store_catalog,
     render_doctor_report,
     run_doctor,
 )
@@ -30,7 +33,10 @@ def _config(tmp_path) -> AppConfig:
 
 
 @pytest.mark.asyncio
-async def test_run_doctor_checks_local_environment(tmp_path) -> None:
+async def test_run_doctor_checks_local_environment(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "user-state"))
     config = _config(tmp_path)
 
     report = await run_doctor(
@@ -48,8 +54,33 @@ async def test_run_doctor_checks_local_environment(tmp_path) -> None:
     assert names["workspace 权限"].status == "pass"
     assert names["browser daemon"].status == "warn"
     assert names["debug log 写入权限"].status == "pass"
+    assert names["状态存储目录"].status == "pass"
+    assert "已登记 11 个" in names["状态存储目录"].detail
     assert "环境诊断" in rendered
     assert "可直接复制" in rendered
+
+
+def test_state_store_doctor_names_unversioned_and_corrupt_physical_store(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "user-state"))
+    config = _config(tmp_path)
+    with sqlite3.connect(config.memory.session_db_path) as connection:
+        connection.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY)")
+
+    warning = _check_state_store_catalog(config)
+
+    assert warning.status == "warn"
+    assert "runtime.core" in warning.detail
+    assert "未版本化" in warning.suggestion
+
+    Path(config.memory.session_db_path).write_bytes(b"broken sqlite")
+    error = _check_state_store_catalog(config)
+    assert error.status == "error"
+    assert "runtime.core" in error.detail
+    assert "不要手工覆盖" in error.suggestion
 
 
 @pytest.mark.asyncio

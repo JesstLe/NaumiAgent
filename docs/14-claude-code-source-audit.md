@@ -104,7 +104,8 @@ NaumiAgent 当前第一阶段选择的是“协议分离 + 小型 Node 终端前
 - terminal-ui 对 `tasks` notice 使用专用 task panel renderer，按 Todo/Subagent/Background/Browser 分区展示，避免退回普通文本块。
 - `/tasks pin` 会钉住任务面板，后续 task activity 变化时通过同一条 message 原地刷新；`/tasks off` 取消钉住，避免历史区被重复面板刷屏。
 - `/permissions` 面板通过专用 renderer 展示 pending/history，并基于 `TOOL_PERMISSIONS` / `PREFIX_PERMISSIONS` 推导规则来源、风险等级、确认策略和 bypass 生效范围，便于回看权限策略状态和最近决策。
-- `/doctor` 通过 JSONL 协议调用 Python 诊断后端，返回可复制的环境诊断报告。
+- `/doctor` 通过 JSONL 协议调用 Python 诊断后端，返回可复制的环境诊断报告；ARC-05.1
+  Store Catalog 同步覆盖 New UI、TUI 与 Agent Tool，不由前端重复推导状态路径。
 - 图片 payload 在进入 engine 历史时就被替换为短占位符，避免截图/base64 先撑大上下文。
 - `naumi ui` 启动前会校验 Node.js 20+，旧版本或无法识别的 Node 会给出中文诊断错误，而不是进入前端后失败。
 

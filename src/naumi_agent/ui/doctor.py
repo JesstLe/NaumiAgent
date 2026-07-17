@@ -17,6 +17,11 @@ import httpx
 
 from naumi_agent.config.configurator import validate_provider_configuration
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.persistence.store_catalog import (
+    CatalogStatus,
+    build_store_catalog,
+    inspect_store_catalog,
+)
 from naumi_agent.tools.browser.runtime.chrome_launcher import (
     find_system_browser_executable,
 )
@@ -89,6 +94,7 @@ async def run_doctor(
             browser_fallback_available=browser_fallback_available,
         ),
         _check_workspace(root),
+        _check_state_store_catalog(config),
         _check_git(root),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
         _check_command("Docker", "docker", ["docker", "--version"]),
@@ -202,6 +208,45 @@ def _check_config(config: AppConfig) -> DoctorCheck:
         "pass",
         f"会话库: {session_path}；向量库: {vector_path}",
     )
+
+
+def _check_state_store_catalog(config: AppConfig) -> DoctorCheck:
+    """Summarize the authoritative physical Store Catalog without writes."""
+    try:
+        report = inspect_store_catalog(build_store_catalog(config))
+    except (OSError, ValueError) as exc:
+        return DoctorCheck(
+            "状态存储目录",
+            "error",
+            f"无法构建 Store Catalog：{type(exc).__name__}: {str(exc)[:180]}",
+            "检查持久化路径是否重复、可解析，并修复 Catalog 声明。",
+        )
+
+    status: DoctorStatus = {
+        CatalogStatus.PASS: "pass",
+        CatalogStatus.WARN: "warn",
+        CatalogStatus.ERROR: "error",
+    }[report.status]
+    detail = (
+        f"已登记 {len(report.stores)} 个物理 Store；"
+        f"已存在 {report.existing_count}，未创建 {report.absent_count}，"
+        f"提醒 {report.warning_count}，错误 {report.error_count}。"
+    )
+    concerns = [
+        item.definition.store_id
+        for item in report.stores
+        if item.status is not CatalogStatus.PASS
+    ]
+    if concerns:
+        detail += " 需治理：" + "、".join(concerns[:5])
+        if len(concerns) > 5:
+            detail += f" 等 {len(concerns)} 项"
+    suggestion = ""
+    if report.error_count:
+        suggestion = "先停止写入相关 Store，升级程序或导出诊断；不要手工覆盖高版本或损坏数据库。"
+    elif report.warning_count:
+        suggestion = "未版本化或权限过宽的 Store 将由 ARC-05 迁移与备份流程治理。"
+    return DoctorCheck("状态存储目录", status, detail, suggestion)
 
 
 def _check_api_key(config: AppConfig) -> DoctorCheck:

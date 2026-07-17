@@ -369,7 +369,7 @@ def test_default_policy_owns_every_real_naumi_module_exactly_once() -> None:
 
     report = analyze_domain_ownership(import_report, source_base="test-base")
 
-    assert len(DEFAULT_OWNERSHIP_RULES) == 39
+    assert len(DEFAULT_OWNERSHIP_RULES) == 40
     assert len(report.assignments) == len(import_report.modules)
     assert report.issues == ()
     assert {summary.owner for summary in report.summaries if summary.module_count} == set(
