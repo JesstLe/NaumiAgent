@@ -23,11 +23,20 @@ from naumi_agent.harness.completion import (
     HarnessEvidenceRef,
 )
 from naumi_agent.harness.models import HarnessCompletionContract
+from naumi_agent.harness.reconciliation import (
+    ReconciliationArtifactKind,
+    ReconciliationArtifactReference,
+    SessionDeleteReconciliation,
+    SessionReconciliationState,
+    SessionReconciliationTransitionError,
+    validate_reconciliation_transition,
+)
 from naumi_agent.harness.replay_models import HarnessReplayBaselinePayload
+from naumi_agent.harness.retention import LifecycleActor
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 2
+HARNESS_STORE_SCHEMA_VERSION = 3
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -920,6 +929,362 @@ class HarnessStore:
                 "无法预览会话关联的 Harness 记录；状态库可能损坏或正忙。"
             ) from exc
 
+    async def prepare_session_delete_reconciliation(
+        self,
+        *,
+        request_id: str,
+        workspace_root: str | Path,
+        session_id: str,
+        actor: LifecycleActor | str,
+        created_at: str,
+    ) -> SessionDeleteReconciliation:
+        """Persist immutable scope and artifact references before any deletion."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        workspace = _canonical_workspace(workspace_root)
+        normalized_session_id = _normalize_text(
+            session_id,
+            field="session_id",
+            max_length=256,
+        )
+        try:
+            normalized_actor = actor if isinstance(actor, LifecycleActor) else LifecycleActor(actor)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("actor 包含未知生命周期操作者。") from exc
+        timestamp = _normalize_timestamp(created_at, field="created_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await self._reconciliation_from_id(db, normalized_request_id)
+                if existing is not None:
+                    if (
+                        existing.workspace_root != workspace
+                        or existing.session_id != normalized_session_id
+                        or existing.actor is not normalized_actor
+                    ):
+                        raise HarnessStoreConflictError(
+                            f"协调请求 {normalized_request_id} 的幂等键已用于其他作用域。"
+                        )
+                    await db.commit()
+                    return existing
+
+                run_cursor = await db.execute(
+                    "SELECT COUNT(*) FROM harness_runs "
+                    "WHERE workspace_root = ? AND session_id = ?",
+                    (workspace, normalized_session_id),
+                )
+                run_row = await run_cursor.fetchone()
+                run_count = int(run_row[0]) if run_row is not None else 0
+                reference_cursor = await db.execute(
+                    """
+                    SELECT 'check_path' AS kind, artifact_path AS value
+                    FROM harness_checks
+                    WHERE run_id IN (
+                        SELECT id FROM harness_runs
+                        WHERE workspace_root = ? AND session_id = ?
+                    ) AND TRIM(artifact_path) <> ''
+                    UNION ALL
+                    SELECT 'evidence_uri' AS kind, uri AS value
+                    FROM harness_evidence
+                    WHERE run_id IN (
+                        SELECT id FROM harness_runs
+                        WHERE workspace_root = ? AND session_id = ?
+                    ) AND uri LIKE 'artifact://%'
+                    ORDER BY kind, value
+                    """,
+                    (
+                        workspace,
+                        normalized_session_id,
+                        workspace,
+                        normalized_session_id,
+                    ),
+                )
+                references = tuple(
+                    ReconciliationArtifactReference(
+                        kind=ReconciliationArtifactKind(str(row["kind"])),
+                        value=str(row["value"]),
+                    )
+                    for row in await reference_cursor.fetchall()
+                )
+                references_json = json.dumps(
+                    [
+                        {"kind": reference.kind.value, "value": reference.value}
+                        for reference in references
+                    ],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_session_reconciliations (
+                        request_id, workspace_root, session_id, actor, state,
+                        run_count, deleted_run_count, artifact_references_json,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                    """,
+                    (
+                        normalized_request_id,
+                        workspace,
+                        normalized_session_id,
+                        normalized_actor.value,
+                        SessionReconciliationState.PREPARED.value,
+                        run_count,
+                        references_json,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return SessionDeleteReconciliation(
+                    request_id=normalized_request_id,
+                    workspace_root=workspace,
+                    session_id=normalized_session_id,
+                    actor=normalized_actor,
+                    state=SessionReconciliationState.PREPARED,
+                    run_count=run_count,
+                    deleted_run_count=0,
+                    artifact_references=references,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("无法准备 Session 删除协调记录。") from exc
+
+    async def get_session_delete_reconciliation(
+        self,
+        request_id: str,
+    ) -> SessionDeleteReconciliation | None:
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                return await self._reconciliation_from_id(db, normalized_request_id)
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Session 删除协调记录。") from exc
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("Session 删除协调记录损坏或无法读取。") from exc
+
+    async def list_pending_session_reconciliations(
+        self,
+        *,
+        limit: int = 100,
+    ) -> tuple[SessionDeleteReconciliation, ...]:
+        """List bounded incomplete requests for restart recovery."""
+        if not 1 <= limit <= 1_000:
+            raise ValueError("limit 必须在 1 到 1000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT request_id FROM harness_session_reconciliations
+                    WHERE state <> ?
+                    ORDER BY updated_at, request_id
+                    LIMIT ?
+                    """,
+                    (SessionReconciliationState.RECORDS_COMMITTED.value, limit),
+                )
+                records: list[SessionDeleteReconciliation] = []
+                for row in await cursor.fetchall():
+                    record = await self._reconciliation_from_id(
+                        db,
+                        str(row["request_id"]),
+                    )
+                    if record is not None:
+                        records.append(record)
+                return tuple(records)
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出未完成的 Session 协调记录。") from exc
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("未完成的 Session 协调记录损坏或无法读取。") from exc
+
+    async def mark_session_delete_committed(
+        self,
+        request_id: str,
+        *,
+        updated_at: str,
+    ) -> SessionDeleteReconciliation:
+        """Confirm authoritative Session deletion before Harness cleanup."""
+        return await self._advance_session_reconciliation(
+            request_id,
+            requested=SessionReconciliationState.SESSION_COMMITTED,
+            updated_at=updated_at,
+        )
+
+    async def reconcile_session_delete_records(
+        self,
+        request_id: str,
+        *,
+        updated_at: str,
+    ) -> SessionDeleteReconciliation:
+        """Atomically delete scoped Harness rows and commit reconciliation state."""
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        timestamp = _normalize_timestamp(updated_at, field="updated_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._require_reconciliation(db, normalized_request_id)
+                idempotent = validate_reconciliation_transition(
+                    current.state,
+                    SessionReconciliationState.RECORDS_COMMITTED,
+                )
+                if idempotent:
+                    await db.commit()
+                    return current
+                _ensure_reconciliation_time_forward(current.updated_at, timestamp)
+                cursor = await db.execute(
+                    "DELETE FROM harness_runs WHERE workspace_root = ? AND session_id = ?",
+                    (current.workspace_root, current.session_id),
+                )
+                deleted = max(cursor.rowcount, 0)
+                await db.execute(
+                    """
+                    UPDATE harness_session_reconciliations
+                    SET state = ?, deleted_run_count = ?, updated_at = ?
+                    WHERE request_id = ?
+                    """,
+                    (
+                        SessionReconciliationState.RECORDS_COMMITTED.value,
+                        deleted,
+                        timestamp,
+                        normalized_request_id,
+                    ),
+                )
+                await db.commit()
+                updated = await self.get_session_delete_reconciliation(
+                    normalized_request_id
+                )
+                assert updated is not None
+                return updated
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("无法协调 Session 关联的 Harness 记录。") from exc
+
+    async def _advance_session_reconciliation(
+        self,
+        request_id: str,
+        *,
+        requested: SessionReconciliationState,
+        updated_at: str,
+    ) -> SessionDeleteReconciliation:
+        normalized_request_id = _normalize_text(
+            request_id,
+            field="request_id",
+            max_length=128,
+        )
+        timestamp = _normalize_timestamp(updated_at, field="updated_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._require_reconciliation(db, normalized_request_id)
+                idempotent = validate_reconciliation_transition(
+                    current.state,
+                    requested,
+                )
+                if idempotent:
+                    await db.commit()
+                    return current
+                _ensure_reconciliation_time_forward(current.updated_at, timestamp)
+                await db.execute(
+                    """
+                    UPDATE harness_session_reconciliations
+                    SET state = ?, updated_at = ? WHERE request_id = ?
+                    """,
+                    (requested.value, timestamp, normalized_request_id),
+                )
+                await db.commit()
+                return SessionDeleteReconciliation(
+                    request_id=current.request_id,
+                    workspace_root=current.workspace_root,
+                    session_id=current.session_id,
+                    actor=current.actor,
+                    state=requested,
+                    run_count=current.run_count,
+                    deleted_run_count=current.deleted_run_count,
+                    artifact_references=current.artifact_references,
+                    created_at=current.created_at,
+                    updated_at=timestamp,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, json.JSONDecodeError, ValueError) as exc:
+            raise HarnessStoreError("无法推进 Session 删除协调状态。") from exc
+
+    async def _require_reconciliation(
+        self,
+        db: aiosqlite.Connection,
+        request_id: str,
+    ) -> SessionDeleteReconciliation:
+        record = await self._reconciliation_from_id(db, request_id)
+        if record is None:
+            raise HarnessStoreConflictError(f"协调请求 {request_id} 不存在。")
+        return record
+
+    async def _reconciliation_from_id(
+        self,
+        db: aiosqlite.Connection,
+        request_id: str,
+    ) -> SessionDeleteReconciliation | None:
+        cursor = await db.execute(
+            "SELECT * FROM harness_session_reconciliations WHERE request_id = ?",
+            (request_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        raw_references = json.loads(str(row["artifact_references_json"]))
+        if not isinstance(raw_references, list):
+            raise ValueError("artifact_references_json 必须是数组。")
+        references = tuple(
+            ReconciliationArtifactReference(
+                kind=ReconciliationArtifactKind(str(item["kind"])),
+                value=_normalize_text(
+                    item["value"],
+                    field="artifact_reference",
+                    max_length=4_096,
+                ),
+            )
+            for item in raw_references
+            if isinstance(item, dict)
+        )
+        if len(references) != len(raw_references):
+            raise ValueError("artifact_references_json 包含无效记录。")
+        return SessionDeleteReconciliation(
+            request_id=str(row["request_id"]),
+            workspace_root=str(row["workspace_root"]),
+            session_id=str(row["session_id"]),
+            actor=LifecycleActor(str(row["actor"])),
+            state=SessionReconciliationState(str(row["state"])),
+            run_count=int(row["run_count"]),
+            deleted_run_count=int(row["deleted_run_count"]),
+            artifact_references=references,
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
     async def delete_session_records(
         self,
         workspace_root: str | Path,
@@ -968,6 +1333,7 @@ class HarnessStore:
                     await db.execute("PRAGMA journal_mode = WAL")
                     await db.executescript(_SCHEMA_V1)
                     await db.executescript(_SCHEMA_V2)
+                    await db.executescript(_SCHEMA_V3)
                     await db.execute(
                         f"PRAGMA user_version = {HARNESS_STORE_SCHEMA_VERSION}"
                     )
@@ -1287,6 +1653,13 @@ def _validate_sha256(value: str, *, field: str) -> str:
     return normalized
 
 
+def _ensure_reconciliation_time_forward(current: str, requested: str) -> None:
+    if datetime.fromisoformat(requested) < datetime.fromisoformat(current):
+        raise SessionReconciliationTransitionError(
+            "协调状态 updated_at 不能早于当前记录。"
+        )
+
+
 def _normalize_timestamp(value: str, *, field: str) -> str:
     normalized = _normalize_text(value, field=field, max_length=64)
     try:
@@ -1556,4 +1929,24 @@ CREATE TABLE IF NOT EXISTS harness_replay_baselines (
     explanation_sha256 TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+"""
+
+_SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS harness_session_reconciliations (
+    request_id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    actor TEXT NOT NULL CHECK (actor IN ('user', 'retention_worker', 'system_recovery')),
+    state TEXT NOT NULL CHECK (
+        state IN ('prepared', 'session_committed', 'records_committed')
+    ),
+    run_count INTEGER NOT NULL CHECK (run_count >= 0),
+    deleted_run_count INTEGER NOT NULL CHECK (deleted_run_count >= 0),
+    artifact_references_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_session_reconciliations_state_updated
+ON harness_session_reconciliations (state, updated_at, request_id);
 """

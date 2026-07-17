@@ -111,7 +111,7 @@ async def test_v1_database_migrates_additively_and_cascades_delete(tmp_path: Pat
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             ("harness_replay_baselines",),
         ).fetchone()
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 2
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 3
     assert table is not None
 
     assert await migrated.delete_session_records(workspace, contract.session_id) == 1

@@ -20,6 +20,7 @@ from naumi_agent.harness.models import (
     HarnessTaskKind,
 )
 from naumi_agent.harness.store import (
+    HARNESS_STORE_SCHEMA_VERSION,
     HarnessStore,
     HarnessStoreConflictError,
     HarnessStoreError,
@@ -110,7 +111,7 @@ def test_default_database_uses_user_state_not_workspace(
 
 
 @pytest.mark.asyncio
-async def test_schema_migration_is_idempotent_and_adds_replay_baseline_only(
+async def test_schema_migration_is_idempotent_and_adds_current_tables(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "state" / "harness.db"
@@ -154,8 +155,9 @@ async def test_schema_migration_is_idempotent_and_adds_replay_baseline_only(
         "harness_checks",
         "harness_evidence",
         "harness_replay_baselines",
+        "harness_session_reconciliations",
     }
-    assert version == 2
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 3
     assert rows == 1
 
 
