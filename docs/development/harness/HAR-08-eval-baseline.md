@@ -57,5 +57,8 @@
 - HAR-08.7c Threshold/Guardrail Policy：已实现。严格 Suite policy 的 canonical digest 进入
   Identity；绝对/相对门槛与逐 case guardrail evidence 生成独立 Policy verdict，Eval error/skip
   永远 inconclusive。详见 `HAR-08-7c-threshold-guardrail-policy.md`。
-- Replay/Sandbox/Live、统计 Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
+- HAR-08.7d Statistical Comparator：已实现。每组至少 5 次，复用 Identity/结构 gate，计算均值、
+  样本标准差、Student-t 95% CI 与 Welch 均值差区间；逐 case 组内摇摆优先标记 flaky，样本不足或
+  Eval error 不形成产品结论。详见 `HAR-08-7d-statistical-comparator.md`。
+- Replay/Sandbox/Live、Baseline promote 与完整存储仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。
