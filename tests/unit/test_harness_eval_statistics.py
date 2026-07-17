@@ -24,6 +24,11 @@ from naumi_agent.harness.eval_models import (
     HarnessEvalComparisonPolicy,
     HarnessEvalSuiteResult,
 )
+from naumi_agent.harness.eval_receipt import (
+    EvalComparisonDecision,
+    EvalReceiptSample,
+    build_eval_comparison_receipt,
+)
 from naumi_agent.harness.eval_statistics import (
     EvalStatisticalVerdict,
     compare_eval_repetitions,
@@ -360,6 +365,43 @@ async def test_real_static_suite_runs_persists_and_compares_five_samples(
             result=result,
             created_at="2026-07-18T10:03:00+08:00",
         )
+    current_records = await store.list_eval_results(
+        tmp_path,
+        "real-static-002",
+        "statistical-real",
+    )
+    receipt = build_eval_comparison_receipt(
+        workspace_root=tmp_path,
+        suite_id="statistical-real",
+        baseline_id=first_baseline.id,
+        baseline_batch_id=first_baseline.batch_id,
+        baseline_samples_sha256=first_baseline.samples_sha256,
+        baseline_samples=tuple(
+            EvalReceiptSample(
+                sample_index=item.sample_index,
+                result_sha256=item.result_sha256,
+                result=item.result,
+            )
+            for item in restored
+        ),
+        current_batch_id="real-static-002",
+        current_samples=tuple(
+            EvalReceiptSample(
+                sample_index=item.sample_index,
+                result_sha256=item.result_sha256,
+                result=item.result,
+            )
+            for item in current_records
+        ),
+        created_at="2026-07-18T10:03:30+08:00",
+    )
+    stored_receipt = await store.record_eval_comparison_receipt(receipt)
+    restored_receipt = await HarnessStore(store.db_path).get_eval_comparison_receipt(
+        tmp_path,
+        "statistical-real",
+        first_baseline.id,
+        "real-static-002",
+    )
     second_baseline = await store.promote_eval_baseline(
         workspace_root=tmp_path,
         batch_id="real-static-002",
@@ -420,6 +462,9 @@ async def test_real_static_suite_runs_persists_and_compares_five_samples(
     )
     assert len(restored) == 5
     assert comparison.verdict is EvalStatisticalVerdict.UNCHANGED
+    assert stored_receipt == restored_receipt
+    assert stored_receipt.receipt.decision is EvalComparisonDecision.PASSED
+    assert stored_receipt.receipt.statistical_verdict == "unchanged"
     assert retry == first_baseline
     assert first_baseline.version == 1
     assert second_baseline.version == 2

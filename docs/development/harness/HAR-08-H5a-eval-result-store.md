@@ -65,6 +65,6 @@ Result SHA-256、完整 typed JSON 和带时区创建时间。按 workspace/batc
 ## 6. 后续
 
 - H5b 已完成：不可覆盖 Baseline version、active selector、审计事件与 promote eligibility；
-- H5c：机械/Policy/统计 Comparison receipt，只引用两组 sample 与 digest；
+- H5c 已完成：机械/Policy/统计 Comparison receipt 只引用两组不可变 sample、Baseline 与 digest；
 - HAR-08.8：Slash/Tool/API/New UI 查询、比较和显式 promote；
 - HAR-06：把 Eval sample 纳入 session/workspace 生命周期与 retention 预览。
