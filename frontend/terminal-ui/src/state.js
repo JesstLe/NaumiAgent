@@ -3458,6 +3458,10 @@ function showFoldList(state) {
 
 function showDebugInfo(state) {
   const trace = state.debugTrace ?? {};
+  const registry = state.status?.protocol_registry;
+  const registrySummary = registry
+    ? `v${registry.contract_version} · ${String(registry.registry_sha256).slice(0, 12)} · ${registry.client_event_count}/${registry.server_event_count}`
+    : "-";
   const lines = [
     `前端日志: ${state.frontendDebugLogPath || "未启用"}`,
     `Bridge events: ${trace.events_path || "-"}`,
@@ -3465,6 +3469,7 @@ function showDebugInfo(state) {
     `Bridge run: ${trace.run_id || "-"}`,
     `Bridge ready: ${state.bridgeReady ? "yes" : "no"}`,
     `Bridge heartbeat: ${state.bridgeHeartbeat?.status || "starting"}`,
+    `协议注册表: ${registrySummary}`,
     `当前消息: ${state.messages.length}`,
     `工具卡片: ${state.tools.length}`,
     `模式: ${state.mode}`,

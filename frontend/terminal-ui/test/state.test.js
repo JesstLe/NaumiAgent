@@ -2047,6 +2047,12 @@ test("debug command shows frontend and bridge trace paths without backend calls"
   const sent = [];
   const send = (type, payload) => sent.push({ type, payload });
   state.frontendDebugLogPath = "/tmp/terminal-ui-debug.jsonl";
+  state.status.protocol_registry = {
+    contract_version: 1,
+    registry_sha256: "abcdef1234567890".padEnd(64, "0"),
+    client_event_count: 27,
+    server_event_count: 38,
+  };
   reduceServerEvent(state, {
     type: "debug/trace",
     payload: {
@@ -2065,6 +2071,7 @@ test("debug command shows frontend and bridge trace paths without backend calls"
   assert(String(message.content).includes("前端日志: /tmp/terminal-ui-debug.jsonl"));
   assert(String(message.content).includes("Bridge events: /tmp/bridge-events.jsonl"));
   assert(String(message.content).includes("Bridge run: run-1"));
+  assert(String(message.content).includes("协议注册表: v1 · abcdef123456 · 27/38"));
 });
 
 test("fold commands list and toggle fold entries without backend calls", () => {
