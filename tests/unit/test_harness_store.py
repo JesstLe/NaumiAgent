@@ -410,14 +410,105 @@ async def test_session_reconciliation_cascades_children(tmp_path: Path) -> None:
         created_at=_LATER,
     )
 
-    assert await store.delete_session_records(contract.session_id) == 1
-    assert await store.delete_session_records(contract.session_id) == 0
+    assert await store.delete_session_records(workspace, contract.session_id) == 1
+    assert await store.delete_session_records(workspace, contract.session_id) == 0
     assert await store.get_run(contract.run_id) is None
 
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM harness_contract_criteria").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM harness_checks").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM harness_evidence").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_session_delete_preview_is_workspace_scoped_and_counts_derived_rows(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace_a = tmp_path / "workspace-a"
+    workspace_b = tmp_path / "workspace-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    store = HarnessStore(db_path)
+    target = _contract(run_id="run-a", session_id="shared-session")
+    other = _contract(run_id="run-b", session_id="shared-session")
+    await store.start_run(
+        workspace_root=workspace_a,
+        contract=target,
+        tree_fingerprint_before=_TREE_BEFORE,
+        started_at=_NOW,
+    )
+    await store.start_run(
+        workspace_root=workspace_b,
+        contract=other,
+        tree_fingerprint_before=_TREE_BEFORE,
+        started_at=_NOW,
+    )
+    await store.record_check(
+        result=_check_result(run_id="run-a"),
+        argv=("python3", "-V"),
+        cwd=workspace_a,
+        started_at=_NOW,
+        completed_at=_LATER,
+        artifact_path="artifacts/run-a/unit.txt",
+    )
+    await store.record_evidence(
+        run_id="run-a",
+        evidence=HarnessEvidenceRef(
+            id="evidence-a",
+            kind="check_output",
+            summary="目标工作区证据",
+            criterion_ids=("store_persists",),
+        ),
+        uri="artifact://run-a/unit.txt",
+        sha256="d" * 64,
+        summary={"exit_code": 0},
+        producer="harness_check",
+        created_at=_LATER,
+    )
+
+    preview = await store.preview_session_delete(workspace_a, "shared-session")
+
+    assert preview.workspace_root == str(workspace_a.resolve())
+    assert preview.run_count == 1
+    assert preview.criterion_count == 1
+    assert preview.check_count == 1
+    assert preview.evidence_count == 1
+    assert preview.replay_baseline_count == 0
+    assert preview.check_artifact_reference_count == 1
+    assert preview.evidence_artifact_reference_count == 1
+    assert preview.artifact_reference_count == 2
+
+    assert await store.delete_session_records(workspace_a, "shared-session") == 1
+    remaining = await store.preview_session_delete(workspace_b, "shared-session")
+    assert remaining.run_count == 1
+
+
+@pytest.mark.asyncio
+async def test_session_delete_preview_does_not_create_missing_database(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "missing" / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(db_path)
+
+    preview = await store.preview_session_delete(workspace, "missing-session")
+
+    assert preview.run_count == 0
+    assert not db_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_session_delete_preview_reports_corrupt_database(tmp_path: Path) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    db_path.write_bytes(b"not a sqlite database")
+    store = HarnessStore(db_path)
+
+    with pytest.raises(HarnessStoreError, match="可能损坏或正忙"):
+        await store.preview_session_delete(workspace, "broken-session")
 
 
 @pytest.mark.asyncio

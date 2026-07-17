@@ -34,6 +34,7 @@ from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorSer
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
 from naumi_agent.memory.auto_extract import extract_memory_candidates
 from naumi_agent.memory.compactor import ContextCompactor
+from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier, TokenUsage
@@ -1497,6 +1498,40 @@ class AgentEngine:
                 return await self._await_delete_completion(completion_task)
         finally:
             self._finish_session_transition("", transition_epoch)
+
+    async def preview_session_delete(
+        self,
+        session_id: str,
+    ) -> SessionDeletePreview | None:
+        """Preview workspace-scoped persistence impact without mutating state."""
+        normalized_session_id = (session_id or "").strip()
+        if not normalized_session_id:
+            raise ValueError("session_id 不能为空。")
+        session = await self._session_port.load(normalized_session_id)
+        if session is None:
+            return None
+        saved_workspace = str(getattr(session, "workspace_root", "") or "").strip()
+        workspace = Path(saved_workspace or self.workspace_root).expanduser().resolve()
+        impact = await self.harness_service.preview_session_delete(
+            session.id,
+            workspace_root=workspace,
+        )
+        return SessionDeletePreview(
+            session_id=session.id,
+            title=session.title or "新会话",
+            workspace_root=str(workspace),
+            message_count=len(session.messages),
+            is_active=self._session is not None and self._session.id == session.id,
+            harness_run_count=impact.run_count,
+            criterion_count=impact.criterion_count,
+            check_count=impact.check_count,
+            evidence_count=impact.evidence_count,
+            replay_baseline_count=impact.replay_baseline_count,
+            check_artifact_reference_count=impact.check_artifact_reference_count,
+            evidence_artifact_reference_count=(
+                impact.evidence_artifact_reference_count
+            ),
+        )
 
     async def _await_delete_completion(
         self,

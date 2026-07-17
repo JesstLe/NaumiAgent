@@ -144,6 +144,29 @@ class HarnessStoredReplayBaseline:
     created_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessSessionDeleteImpact:
+    """Workspace-scoped Harness records associated with one session."""
+
+    workspace_root: str
+    session_id: str
+    run_count: int = 0
+    criterion_count: int = 0
+    check_count: int = 0
+    evidence_count: int = 0
+    replay_baseline_count: int = 0
+    check_artifact_reference_count: int = 0
+    evidence_artifact_reference_count: int = 0
+
+    @property
+    def artifact_reference_count(self) -> int:
+        """Return references, not unique or safely deletable artifact files."""
+        return (
+            self.check_artifact_reference_count
+            + self.evidence_artifact_reference_count
+        )
+
+
 def resolve_harness_db_path() -> Path:
     """Return the user-state Harness DB path without consulting the workspace."""
     return resolve_harness_trust_db_path().with_name("harness.db")
@@ -824,7 +847,85 @@ class HarnessStore:
                 "会话关联的 Harness 运行列表损坏或无法读取。"
             ) from exc
 
-    async def delete_session_records(self, session_id: str) -> int:
+    async def preview_session_delete(
+        self,
+        workspace_root: str | Path,
+        session_id: str,
+    ) -> HarnessSessionDeleteImpact:
+        """Count exact rows for a workspace/session without loading row content."""
+        workspace = _canonical_workspace(workspace_root)
+        normalized_session_id = _normalize_text(
+            session_id,
+            field="session_id",
+            max_length=256,
+        )
+        empty = HarnessSessionDeleteImpact(
+            workspace_root=workspace,
+            session_id=normalized_session_id,
+        )
+        if not self._db_path.is_file():
+            return empty
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+                tables = {str(row[0]) for row in await cursor.fetchall()}
+                if "harness_runs" not in tables:
+                    return empty
+
+                run_filter = (
+                    "SELECT id FROM harness_runs "
+                    "WHERE workspace_root = ? AND session_id = ?"
+                )
+
+                async def count(table: str, extra: str = "") -> int:
+                    if table not in tables:
+                        return 0
+                    query = f"SELECT COUNT(*) FROM {table} WHERE run_id IN ({run_filter})"
+                    if extra:
+                        query += f" AND ({extra})"
+                    result = await db.execute(
+                        query,
+                        (workspace, normalized_session_id),
+                    )
+                    row = await result.fetchone()
+                    return int(row[0]) if row is not None else 0
+
+                run_cursor = await db.execute(
+                    "SELECT COUNT(*) FROM harness_runs "
+                    "WHERE workspace_root = ? AND session_id = ?",
+                    (workspace, normalized_session_id),
+                )
+                run_row = await run_cursor.fetchone()
+                return HarnessSessionDeleteImpact(
+                    workspace_root=workspace,
+                    session_id=normalized_session_id,
+                    run_count=int(run_row[0]) if run_row is not None else 0,
+                    criterion_count=await count("harness_contract_criteria"),
+                    check_count=await count("harness_checks"),
+                    evidence_count=await count("harness_evidence"),
+                    replay_baseline_count=await count("harness_replay_baselines"),
+                    check_artifact_reference_count=await count(
+                        "harness_checks",
+                        "TRIM(artifact_path) <> ''",
+                    ),
+                    evidence_artifact_reference_count=await count(
+                        "harness_evidence",
+                        "uri LIKE 'artifact://%'",
+                    ),
+                )
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError(
+                "无法预览会话关联的 Harness 记录；状态库可能损坏或正忙。"
+            ) from exc
+
+    async def delete_session_records(
+        self,
+        workspace_root: str | Path,
+        session_id: str,
+    ) -> int:
+        workspace = _canonical_workspace(workspace_root)
         normalized_session_id = _normalize_text(
             session_id,
             field="session_id",
@@ -836,8 +937,8 @@ class HarnessStore:
             async with self._write_lock, self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
                 cursor = await db.execute(
-                    "DELETE FROM harness_runs WHERE session_id = ?",
-                    (normalized_session_id,),
+                    "DELETE FROM harness_runs WHERE workspace_root = ? AND session_id = ?",
+                    (workspace, normalized_session_id),
                 )
                 await db.commit()
                 return max(cursor.rowcount, 0)

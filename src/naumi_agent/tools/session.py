@@ -9,6 +9,7 @@ from naumi_agent.ui.history_screen import (
     build_history_snapshot,
     render_history_preview,
     render_history_screen,
+    render_session_delete_preview,
 )
 
 
@@ -25,7 +26,8 @@ class SessionHistoryTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "查看历史会话列表或预览单个会话。用于 Agent 自主检索上下文，"
+            "查看历史会话列表、预览单个会话或只读评估删除影响。"
+            "用于 Agent 自主检索上下文和删除前风险判断，"
             "对应用户斜杠命令 /history。"
         )
 
@@ -36,9 +38,12 @@ class SessionHistoryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "preview"],
+                    "enum": ["list", "preview", "delete_preview"],
                     "default": "list",
-                    "description": "操作类型：list 列出历史会话，preview 预览指定会话。",
+                    "description": (
+                        "操作类型：list 列出历史会话，preview 预览指定会话，"
+                        "delete_preview 只读预览删除影响。"
+                    ),
                 },
                 "query": {
                     "type": "string",
@@ -59,7 +64,7 @@ class SessionHistoryTool(Tool):
                 },
                 "session_id": {
                     "type": "string",
-                    "description": "preview 操作要查看的会话 ID。",
+                    "description": "preview 或 delete_preview 操作要查看的会话 ID。",
                 },
             },
         }
@@ -70,7 +75,7 @@ class SessionHistoryTool(Tool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name="历史会话",
-            search_hint="history session /history 会话 历史",
+            search_hint="history session delete preview /history 会话 历史 删除影响",
         )
 
     async def execute(
@@ -85,8 +90,10 @@ class SessionHistoryTool(Tool):
         normalized_action = (action or "list").strip().lower()
         if normalized_action == "preview":
             return await self._preview(session_id)
+        if normalized_action == "delete_preview":
+            return await self._delete_preview(session_id)
         if normalized_action != "list":
-            return "不支持的历史会话操作。可用操作：list、preview。"
+            return "不支持的历史会话操作。可用操作：list、preview、delete_preview。"
         return await self._list(query=query, page=page, page_size=page_size)
 
     async def _list(self, *, query: str, page: int, page_size: int) -> str:
@@ -114,6 +121,18 @@ class SessionHistoryTool(Tool):
         if session is None:
             return f"会话 {clean_id} 不存在。"
         return render_history_preview(session)
+
+    async def _delete_preview(self, session_id: str) -> str:
+        clean_id = (session_id or "").strip()
+        if not clean_id:
+            return (
+                "用法：session_history(action='delete_preview', "
+                "session_id='<会话ID>')"
+            )
+        preview = await self._engine.preview_session_delete(clean_id)
+        if preview is None:
+            return f"会话 {clean_id} 不存在。"
+        return render_session_delete_preview(preview)
 
     def _current_session_id(self) -> str | None:
         session = getattr(self._engine, "_session", None)

@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.memory.lifecycle import SessionDeletePreview
+
 
 @dataclass(frozen=True)
 class HistoryItem:
@@ -130,7 +132,8 @@ def render_history_screen(snapshot: HistorySnapshot, *, max_summary: int = 96) -
     lines.append("")
     lines.append(
         "操作：/load <编号或ID> 恢复；/history <关键词> 搜索；"
-        "/history preview <ID> 预览；/history archive <ID> 归档。"
+        "/history preview <ID> 预览；/history delete-preview <ID> 删除影响；"
+        "/history archive <ID> 归档。"
     )
     return "\n".join(lines) + "\n"
 
@@ -162,6 +165,36 @@ def render_history_preview(session: Any) -> str:
         if len(content) > 180:
             content = content[:179].rstrip() + "…"
         lines.append(f"- **{role}**：{content}")
+    return "\n".join(lines) + "\n"
+
+
+def render_session_delete_preview(preview: SessionDeletePreview) -> str:
+    """Render a read-only, workspace-scoped session deletion impact preview."""
+    active = "（当前会话）" if preview.is_active else ""
+    lines = [
+        "## Session 删除影响预览",
+        "",
+        f"- 会话：{preview.title} {active}".rstrip(),
+        f"- ID：`{preview.session_id}`",
+        f"- Workspace：`{preview.workspace_root}`",
+        f"- Session 消息：{preview.message_count}",
+        f"- Harness Run：{preview.harness_run_count}",
+        f"- Contract Criterion：{preview.criterion_count}",
+        f"- Check：{preview.check_count}",
+        f"- Evidence：{preview.evidence_count}",
+        f"- Replay Baseline：{preview.replay_baseline_count}",
+        f"- Artifact 引用：{preview.artifact_reference_count}",
+        "",
+        (
+            "Artifact 统计是 Check 路径与 `artifact://` URI 的引用数，"
+            "不是可安全删除文件数。"
+        ),
+        (
+            "当前仅完成只读预览；跨 Store 清理、tombstone 与 Artifact GC "
+            "尚未接入删除执行。"
+        ),
+        f"现有 Session 删除命令：`/delete {preview.session_id}`。",
+    ]
     return "\n".join(lines) + "\n"
 
 

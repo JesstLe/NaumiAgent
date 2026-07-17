@@ -62,7 +62,11 @@ from naumi_agent.harness.models import (
 from naumi_agent.harness.profile import load_harness_profile
 from naumi_agent.harness.replay import capture_replay_baseline, replay_stored_run
 from naumi_agent.harness.replay_models import HarnessReplayLookup
-from naumi_agent.harness.store import HarnessStore, HarnessStoreError
+from naumi_agent.harness.store import (
+    HarnessSessionDeleteImpact,
+    HarnessStore,
+    HarnessStoreError,
+)
 from naumi_agent.harness.trust import (
     HarnessTrustRecord,
     HarnessTrustStore,
@@ -181,6 +185,21 @@ class HarnessService:
     @property
     def store(self) -> HarnessStore | None:
         return self._store
+
+    async def preview_session_delete(
+        self,
+        session_id: str,
+        *,
+        workspace_root: str | Path | None = None,
+    ) -> HarnessSessionDeleteImpact:
+        """Preview records associated with one exact workspace/session boundary."""
+        workspace = Path(workspace_root or self.workspace_root).expanduser().resolve()
+        if self._store is None:
+            return HarnessSessionDeleteImpact(
+                workspace_root=str(workspace),
+                session_id=session_id,
+            )
+        return await self._store.preview_session_delete(workspace, session_id)
 
     async def eval_suites(self, target: str | None = None) -> HarnessEvalReport:
         """Run declared static Eval Suites without trust, commands, models, or writes."""
