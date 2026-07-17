@@ -70,6 +70,22 @@ class HarnessEvalBatchStatus(_StrictModel):
     identity_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
 
 
+class HarnessEvalPromotionStatus(_StrictModel):
+    status: Literal["promoted", "already_active", "not_selected", "error"]
+    code: str = ""
+    message: str = ""
+    suite_id: str
+    batch_id: str
+    baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    active_baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    previous_baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    version: int = Field(default=0, ge=0)
+    sample_count: int = Field(default=0, ge=0, le=10_000)
+    promoted_by: str = ""
+    promotion_reason: str = ""
+    created_at: str = ""
+
+
 def build_eval_baseline_status(
     suite_id: str,
     active: HarnessStoredEvalBaseline | None,
@@ -202,5 +218,48 @@ def render_eval_batch_status(result: HarnessEvalBatchStatus) -> str:
             f"- 耗时：{result.duration_ms:.1f}ms",
             f"- 下一步：运行 `/harness baseline {result.suite_id}` 查看当前 Baseline。",
         ]
+    )
+    return "\n".join(lines)
+
+
+def render_eval_promotion_status(result: HarnessEvalPromotionStatus) -> str:
+    lines = [
+        "## Harness Eval Baseline 晋升",
+        "",
+        f"- Suite：`{result.suite_id}`",
+        f"- Batch：`{result.batch_id}`",
+    ]
+    if result.status == "error":
+        lines.extend(
+            [
+                "- 状态：晋升被拒绝",
+                f"- 原因 `{result.code}`：{result.message}",
+                "- Selector：未改变",
+            ]
+        )
+        return "\n".join(lines)
+    if result.status == "not_selected":
+        lines.extend(
+            [
+                "- 状态：该 Batch 已是历史 Baseline，未回拨 active selector",
+                f"- 历史版本：v{result.version} · `{result.baseline_id[:12]}`",
+                f"- 当前 Active：`{result.active_baseline_id[:12]}`",
+            ]
+        )
+        return "\n".join(lines)
+    state = "晋升完成" if result.status == "promoted" else "已是 Active，无需重复晋升"
+    lines.extend(
+        [
+            f"- 状态：{state}",
+            f"- 版本：v{result.version} · 样本 {result.sample_count}",
+            f"- Baseline：`{result.baseline_id[:12]}`",
+            f"- 操作者：{result.promoted_by} · {result.created_at}",
+            f"- 原因：{result.promotion_reason}",
+        ]
+    )
+    if result.previous_baseline_id:
+        lines.append(f"- 上一版本：`{result.previous_baseline_id[:12]}`")
+    lines.append(
+        f"- 下一步：运行 `/harness baseline {result.suite_id}` 查看权威状态。"
     )
     return "\n".join(lines)

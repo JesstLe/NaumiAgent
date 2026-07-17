@@ -140,6 +140,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         eval_tool = engine.tool_registry.get("harness_eval")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
+        promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
         check = engine.tool_registry.get("harness_run_check")
         assert status is not None and status.metadata.read_only
@@ -154,6 +155,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert baseline_tool.metadata.concurrency_safe
         assert batch_tool is not None and not batch_tool.metadata.read_only
         assert batch_tool.metadata.concurrency_safe
+        assert promote_tool is not None and not promote_tool.metadata.read_only
+        assert promote_tool.metadata.concurrency_safe
         assert knowledge is not None and knowledge.metadata.read_only
         assert knowledge.metadata.concurrency_safe
         assert check is not None and not check.metadata.read_only
@@ -277,7 +280,8 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             "surface-protocol",
         )
         tool = engine.tool_registry.get("harness_eval_batch")
-        assert tool is not None
+        promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
+        assert tool is not None and promote_tool is not None
         agent = await tool.execute(
             suite="surface-protocol",
             repetitions=5,
@@ -322,6 +326,109 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             "missing-suite",
             "not-declared",
         ) == ()
+        ineligible = await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="surface-batch-1",
+            reason="未信任 Profile 不得晋升",
+        )
+        assert "eligibility_rejected" in ineligible
+        assert "未通过 Baseline eligibility gate" in ineligible
+        assert await engine.harness_service.store.get_active_eval_baseline(
+            engine.workspace_root,
+            "surface-protocol",
+        ) is None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        await execute_slash_command(engine, "/harness trust --confirm")
+        first_batch = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness eval surface-protocol --repeat 5 --batch promote-1",
+            )
+        )
+        promoted = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline promote surface-protocol promote-1 "
+                "--reason 首个稳定协议基线",
+            )
+        )
+        status_v1 = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline surface-protocol",
+            )
+        )
+        promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
+        batch_tool = engine.tool_registry.get("harness_eval_batch")
+        assert promote_tool is not None and batch_tool is not None
+        retry = await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="promote-1",
+            reason="Agent 幂等复核",
+        )
+        second_batch = await batch_tool.execute(
+            suite="surface-protocol",
+            repetitions=5,
+            batch_id="promote-2",
+        )
+        promoted_v2 = await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="promote-2",
+            reason="第二组稳定协议样本",
+        )
+        old_retry = await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="promote-1",
+            reason="旧版本重试不得回拨",
+        )
+        status_v2 = await engine.harness_service.eval_baseline_status(
+            "surface-protocol"
+        )
+        events = await engine.harness_service.store.list_eval_baseline_events(
+            engine.workspace_root,
+            "surface-protocol",
+        )
+        rejected = await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="missing-batch",
+            reason="缺失 batch 不得晋升",
+        )
+        malformed = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness baseline promote surface-protocol promote-2",
+            )
+        )
+
+        assert "可晋升" in first_batch
+        assert "晋升完成" in promoted
+        assert "操作者：user" in promoted
+        assert "已选择 v1" in status_v1
+        assert "已是 Active" in retry
+        assert "完成 5/5 · 已保存 5" in second_batch
+        assert "晋升完成" in promoted_v2
+        assert "操作者：agent" in promoted_v2
+        assert "未回拨 active selector" in old_retry
+        assert status_v2.active is not None and status_v2.active.version == 2
+        assert [event.actor for event in events] == ["user", "agent"]
+        assert events[1].previous_baseline_id == events[0].baseline_id
+        assert "cohort_missing" in rejected
+        assert "Selector：未改变" in rejected
+        assert "--reason <原因>" in malformed
+        assert "3..2000" in await promote_tool.execute(
+            suite="surface-protocol",
+            batch_id="promote-2",
+            reason="短",
+        )
     finally:
         await engine.shutdown()
 

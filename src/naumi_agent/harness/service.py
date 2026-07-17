@@ -47,6 +47,7 @@ from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchStatus,
+    HarnessEvalPromotionStatus,
     build_eval_baseline_status,
 )
 from naumi_agent.harness.evidence import EvidenceCollector
@@ -406,6 +407,114 @@ class HarnessService:
             duration_ms=batch.duration_ms,
             baseline_eligible=bool(identity and identity.baseline_eligible),
             identity_sha256=identity.identity_sha256 if identity is not None else "",
+        )
+
+    async def promote_eval_baseline(
+        self,
+        suite_id: str,
+        batch_id: str,
+        *,
+        actor: Literal["user", "agent"],
+        reason: str,
+    ) -> HarnessEvalPromotionStatus:
+        """Explicitly promote one eligible stored cohort through the H5b gate."""
+        if not isinstance(suite_id, str) or not suite_id.strip():
+            raise ValueError("suite_id 不能为空。")
+        suite = suite_id.strip()
+        if len(suite) > 64:
+            raise ValueError("suite_id 不能超过 64 个字符。")
+        if not isinstance(batch_id, str) or not batch_id.strip():
+            raise ValueError("batch_id 不能为空。")
+        batch = batch_id.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", batch):
+            raise ValueError("batch_id 格式无效。")
+        if actor not in {"user", "agent"}:
+            raise ValueError("actor 必须是 user 或 agent。")
+        if not isinstance(reason, str) or not 3 <= len(reason.strip()) <= 2_000:
+            raise ValueError("reason 必须是 3..2000 个字符。")
+        normalized_reason = reason.strip()
+        if self._store is None:
+            return _eval_promotion_error(
+                suite,
+                batch,
+                "store_unavailable",
+                "Harness 状态库尚未初始化。",
+            )
+        try:
+            samples = await self._store.list_eval_results(
+                self.workspace_root,
+                batch,
+                suite,
+                limit=10_000,
+            )
+            if not samples:
+                return _eval_promotion_error(
+                    suite,
+                    batch,
+                    "cohort_missing",
+                    "未找到该 workspace/suite/batch 的 Eval samples。",
+                )
+            existing = await self._store.get_eval_baseline_by_batch(
+                self.workspace_root,
+                suite,
+                batch,
+            )
+            baseline = await self._store.promote_eval_baseline(
+                workspace_root=self.workspace_root,
+                batch_id=batch,
+                suite_id=suite,
+                promoted_by=actor,
+                promotion_reason=normalized_reason,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            active = await self._store.get_active_eval_baseline(
+                self.workspace_root,
+                suite,
+            )
+            event = await self._store.get_eval_baseline_event(
+                self.workspace_root,
+                suite,
+                baseline.id,
+            )
+        except ValueError as exc:
+            return _eval_promotion_error(
+                suite,
+                batch,
+                "eligibility_rejected",
+                str(exc),
+            )
+        except HarnessStoreError:
+            return _eval_promotion_error(
+                suite,
+                batch,
+                "store_error",
+                "Harness Eval 状态库损坏、不可读或正忙。",
+            )
+        if active is None or event is None:
+            return _eval_promotion_error(
+                suite,
+                batch,
+                "selector_missing",
+                "晋升后 selector 或审计事件缺失；状态库可能损坏。",
+            )
+        if active.id != baseline.id:
+            promotion_status = "not_selected"
+        elif existing is not None:
+            promotion_status = "already_active"
+        else:
+            promotion_status = "promoted"
+        return HarnessEvalPromotionStatus(
+            status=promotion_status,
+            suite_id=suite,
+            batch_id=batch,
+            baseline_id=baseline.id,
+            active_baseline_id=active.id,
+            previous_baseline_id=event.previous_baseline_id,
+            version=baseline.version,
+            sample_count=baseline.sample_count,
+            promoted_by=baseline.promoted_by,
+            promotion_reason=baseline.promotion_reason,
+            created_at=baseline.created_at,
         )
 
     async def run_check(self, *, check_id: str, run_id: str) -> HarnessCheckResult:
@@ -1574,6 +1683,21 @@ def _eval_batch_error(
         completed=completed,
         persisted=persisted,
         duration_ms=duration_ms,
+    )
+
+
+def _eval_promotion_error(
+    suite_id: str,
+    batch_id: str,
+    code: str,
+    message: str,
+) -> HarnessEvalPromotionStatus:
+    return HarnessEvalPromotionStatus(
+        status="error",
+        code=code,
+        message=message,
+        suite_id=suite_id,
+        batch_id=batch_id,
     )
 
 

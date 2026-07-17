@@ -1269,6 +1269,70 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("Eval Baseline 列表损坏或无法读取。") from exc
 
+    async def get_eval_baseline_by_batch(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        batch_id: str,
+    ) -> HarnessStoredEvalBaseline | None:
+        """Read one exact immutable Baseline version by its source cohort."""
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        batch = _normalize_eval_batch_id(batch_id)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ? AND batch_id = ?
+                    """,
+                    (workspace, suite, batch),
+                )
+                row = await cursor.fetchone()
+                return _eval_baseline_from_row(row) if row is not None else None
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Eval Baseline batch。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Baseline batch 损坏或无法读取。") from exc
+
+    async def get_eval_baseline_event(
+        self,
+        workspace_root: str | Path,
+        suite_id: str,
+        baseline_id: str,
+    ) -> HarnessStoredEvalBaselineEvent | None:
+        """Read the one immutable promotion event for an exact Baseline ID."""
+        workspace = _canonical_workspace(workspace_root)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        baseline = _validate_sha256(baseline_id, field="baseline_id")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baseline_events
+                    WHERE workspace_root = ? AND suite_id = ? AND baseline_id = ?
+                    """,
+                    (workspace, suite, baseline),
+                )
+                row = await cursor.fetchone()
+                return (
+                    _eval_baseline_event_from_row(row)
+                    if row is not None
+                    else None
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Eval Baseline 审计事件。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Eval Baseline 审计事件损坏或无法读取。") from exc
+
     async def list_eval_baseline_events(
         self,
         workspace_root: str | Path,

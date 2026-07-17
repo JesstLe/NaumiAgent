@@ -8,6 +8,7 @@ from naumi_agent.harness.eval import render_harness_eval
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
     render_eval_batch_status,
+    render_eval_promotion_status,
 )
 from naumi_agent.harness.explain import render_harness_explanation
 from naumi_agent.harness.service import (
@@ -30,6 +31,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalTool(service),
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
+        HarnessEvalBaselinePromoteTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -326,6 +328,66 @@ class HarnessEvalBatchTool(Tool):
         except ValueError as exc:
             return f"Harness Eval Batch 参数无效：{exc}"
         return render_eval_batch_status(result)
+
+
+class HarnessEvalBaselinePromoteTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_baseline_promote"
+
+    @property
+    def description(self) -> str:
+        return "显式晋升一个完整且 eligible 的 Eval batch，并原子更新 active Baseline"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint="harness eval baseline promote candidate governance selector",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {"type": "string", "minLength": 1, "maxLength": 64},
+                "batch_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                },
+                "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2_000,
+                },
+            },
+            "required": ["suite", "batch_id", "reason"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        suite = kwargs.get("suite")
+        batch_id = kwargs.get("batch_id")
+        reason = kwargs.get("reason")
+        if not all(isinstance(value, str) for value in (suite, batch_id, reason)):
+            return "Harness Baseline 晋升参数无效：suite、batch_id、reason 必须是字符串。"
+        try:
+            result = await self._service.promote_eval_baseline(
+                suite,
+                batch_id,
+                actor="agent",
+                reason=reason,
+            )
+        except ValueError as exc:
+            return f"Harness Baseline 晋升参数无效：{exc}"
+        return render_eval_promotion_status(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):
