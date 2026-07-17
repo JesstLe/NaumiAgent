@@ -83,6 +83,14 @@ function createEmptyWorkbenchState() {
     session_id: "",
     counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
     active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+    worktrees_status: "unavailable",
+    worktrees_code: "worktree_snapshot_pending",
+    worktrees_total: 0,
+    worktrees_truncated: false,
+    worktrees: [],
+    selected_tab: "overview",
+    selected_worktree_name: "",
+    selected_worktree_index: 0,
     missions: [],
     tasks: [],
     issues: [],
@@ -389,12 +397,25 @@ function applyWorkbenchSnapshot(state, payload) {
     if (streamId === currentStreamId && revision <= currentRevision) return false;
     if (streamId !== currentStreamId && payload.full === false) return false;
   }
+  const previousWorktrees = Array.isArray(state.workbench.worktrees)
+    ? state.workbench.worktrees
+    : [];
+  const previousName = String(state.workbench.selected_worktree_name || "");
+  const previousIndex = Math.max(
+    0,
+    previousWorktrees.findIndex((item) => String(item.name || "") === previousName),
+  );
+  const selectedTab = state.workbench.selected_tab === "worktrees"
+    ? "worktrees"
+    : "overview";
   state.workbench = {
     ...createEmptyWorkbenchState(),
     ...payload,
+    selected_tab: selectedTab,
     loading: false,
     error: "",
   };
+  reconcileWorkbenchSelection(state.workbench, { previousName, previousIndex });
   return true;
 }
 
@@ -2238,6 +2259,10 @@ export function handleSubmitText(state, text, send) {
         });
       }
       state.route = { name: "workbench", originAnchor };
+      state.workbench.selected_tab = "overview";
+      state.workbench.selected_worktree_name = "";
+      state.workbench.selected_worktree_index = 0;
+      reconcileWorkbenchSelection(state.workbench);
     }
     requestWorkbenchSnapshot(state, send);
     return;
@@ -2393,7 +2418,101 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     requestWorkbenchSnapshot(state, send);
     return true;
   }
+  if (normalized === "1" || normalized === "o") {
+    state.workbench.selected_tab = "overview";
+    return true;
+  }
+  if (normalized === "2" || normalized === "w") {
+    state.workbench.selected_tab = "worktrees";
+    reconcileWorkbenchSelection(state.workbench);
+    return true;
+  }
+  if ([INPUT_KEYS.tab, "]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
+    state.workbench.selected_tab = state.workbench.selected_tab === "overview"
+      ? "worktrees"
+      : "overview";
+    reconcileWorkbenchSelection(state.workbench);
+    return true;
+  }
+  if ([INPUT_KEYS.shiftTab, "[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
+    state.workbench.selected_tab = state.workbench.selected_tab === "worktrees"
+      ? "overview"
+      : "worktrees";
+    reconcileWorkbenchSelection(state.workbench);
+    return true;
+  }
+  if (state.workbench.selected_tab !== "worktrees") return true;
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) {
+    moveWorkbenchSelection(state.workbench, -1);
+  } else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) {
+    moveWorkbenchSelection(state.workbench, 1);
+  } else if (key === INPUT_KEYS.pageUp) {
+    moveWorkbenchSelection(state.workbench, -10);
+  } else if (key === INPUT_KEYS.pageDown) {
+    moveWorkbenchSelection(state.workbench, 10);
+  } else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) {
+    setWorkbenchSelectionIndex(state.workbench, 0);
+  } else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) {
+    setWorkbenchSelectionIndex(state.workbench, Number.MAX_SAFE_INTEGER);
+  }
   return true;
+}
+
+function reconcileWorkbenchSelection(workbench, previous = {}) {
+  const worktrees = Array.isArray(workbench.worktrees) ? workbench.worktrees : [];
+  if (!worktrees.length) {
+    workbench.selected_worktree_name = "";
+    workbench.selected_worktree_index = 0;
+    return;
+  }
+  const previousName = String(previous.previousName || "");
+  let index = previousName
+    ? worktrees.findIndex((item) => String(item.name || "") === previousName)
+    : -1;
+  if (previousName && index < 0) {
+    index = Math.min(
+      worktrees.length - 1,
+      Math.max(0, Number(previous.previousIndex) || 0),
+    );
+  }
+  if (index < 0) {
+    const candidates = [
+      String(workbench.selected_worktree_name || ""),
+      String(workbench.active_selection?.worktree || ""),
+    ].filter(Boolean);
+    index = candidates
+      .map((name) => worktrees.findIndex((item) => String(item.name || "") === name))
+      .find((value) => value >= 0);
+  }
+  if (!Number.isInteger(index)) {
+    index = Math.min(
+      worktrees.length - 1,
+      Math.max(0, Number(previous.previousIndex) || 0),
+    );
+  }
+  setWorkbenchSelectionIndex(workbench, index);
+}
+
+function moveWorkbenchSelection(workbench, delta) {
+  setWorkbenchSelectionIndex(
+    workbench,
+    Math.max(0, Number(workbench.selected_worktree_index) || 0) + delta,
+  );
+}
+
+function setWorkbenchSelectionIndex(workbench, value) {
+  const worktrees = Array.isArray(workbench.worktrees) ? workbench.worktrees : [];
+  if (!worktrees.length) {
+    workbench.selected_worktree_index = 0;
+    workbench.selected_worktree_name = "";
+    return;
+  }
+  const index = Math.min(
+    worktrees.length - 1,
+    Math.max(0, Math.trunc(Number(value) || 0)),
+  );
+  workbench.selected_worktree_index = index;
+  workbench.selected_worktree_name = String(worktrees[index]?.name || "");
 }
 
 export function handleHarnessDetailKey(state, key) {

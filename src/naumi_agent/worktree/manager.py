@@ -279,10 +279,16 @@ class WorktreeManager:
     def _refresh_status(self, record: WorktreeRecord) -> WorktreeRecord:
         path = Path(record.path)
         if not path.exists():
+            changed = (
+                record.status != WorktreeStatus.MISSING
+                or record.dirty_files != 0
+                or record.commits_ahead != 0
+            )
             record.status = WorktreeStatus.MISSING
             record.dirty_files = 0
             record.commits_ahead = 0
-            record.updated_at = _now()
+            if changed:
+                record.updated_at = _now()
             return record
 
         dirty_result = self._git(["status", "--porcelain"], cwd=path)
@@ -296,16 +302,25 @@ class WorktreeManager:
         branch_result = self._git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
         branch = branch_result.output.strip() or record.branch
 
-        record.branch = branch
-        record.dirty_files = dirty_files
-        record.commits_ahead = commits_ahead
+        next_status = record.status
         if record.status == WorktreeStatus.KEPT:
             pass
         elif dirty_files or commits_ahead:
-            record.status = WorktreeStatus.DIRTY
+            next_status = WorktreeStatus.DIRTY
         else:
-            record.status = WorktreeStatus.CLEAN
-        record.updated_at = _now()
+            next_status = WorktreeStatus.CLEAN
+        changed = (
+            record.branch != branch
+            or record.dirty_files != dirty_files
+            or record.commits_ahead != commits_ahead
+            or record.status != next_status
+        )
+        record.branch = branch
+        record.dirty_files = dirty_files
+        record.commits_ahead = commits_ahead
+        record.status = next_status
+        if changed:
+            record.updated_at = _now()
         return record
 
     def _load_records(self) -> dict[str, WorktreeRecord]:

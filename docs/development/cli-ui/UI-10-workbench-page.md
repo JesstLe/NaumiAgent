@@ -28,7 +28,7 @@
 
 不在终端复制 Swift Workbench 全部视觉，不让前端直接执行 Git。
 
-## 实现进展（2026-07-17）
+## 实现进展（2026-07-18）
 
 ### UI-10.1 已实现：Bridge Revisioned Snapshot
 
@@ -76,9 +76,23 @@
 - Store 文本先做控制字符清理、长度限制和 Markdown 转义；80/120/200 列均保留核心状态，空任务有
   明确创建/刷新提示。
 
+### UI-10.3 已实现：权威 Worktrees tab
+
+- `WorkbenchService` 直接从 Engine 注入的 `WorktreeManager` 读取 Git 权威状态，并与当前 Task、active
+  lease、占用 Agent 合并；New UI、HTTP API 和 Textual TUI 不再各自猜测或重复查询载体状态。
+- 快照明确区分 `ready`、`unavailable`，提供稳定诊断码、真实总数和 200 条传输上限。Git 状态读取失败时
+  Overview 其他任务/审批/验证数据仍可使用，底层异常内容不会进入用户界面。
+- New UI 提供 Overview/Worktrees 页签，支持 `Tab`/`Shift+Tab`、`1`/`2` 切换，方向键、Home/End、
+  PageUp/PageDown 精确导航。列表只渲染当前视窗，0/1/100 条均不会撑爆终端。
+- 宽屏使用列表/详情双栏，窄屏纵向降级；状态、dirty、ahead、lease、Agent、任务、路径、分支和可安全
+  删除均有文本标签及语义色。选择只存在当前 UI 进程；刷新优先保留同名项，项消失时落到原索引附近。
+- Textual fallback 使用同一份快照增加 Overview/Worktrees 页签与上下选择；不提供直接 Git 动作，不绕过
+  后续 UI-10.6 的权限、预览和审计设计。
+- 真实临时 Git 仓库创建 managed worktree 并写入未提交文件，经 SQLite Store、Service、JSONL Bridge、
+  Node reducer 与 80/120/200 列 renderer 验证；重复只读刷新保持 revision 不变。
+
 ### 尚未完成
 
-- UI-10.3：Worktrees tab。
 - UI-10.4：Reviews tab。
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
 - UI-10.6：受权限控制的动作。

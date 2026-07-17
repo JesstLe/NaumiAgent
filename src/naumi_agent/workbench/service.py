@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import uuid
 from collections import OrderedDict
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
@@ -40,6 +41,18 @@ from naumi_agent.workbench.models import (
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationCommand, ValidationRunner
+from naumi_agent.worktree.models import WorktreeRecord
+
+logger = logging.getLogger(__name__)
+
+_MAX_SNAPSHOT_WORKTREES = 200
+
+
+class WorktreeStatusProvider(Protocol):
+    async def status(
+        self,
+        name: str = "",
+    ) -> WorktreeRecord | list[WorktreeRecord]: ...
 
 
 def _status_text(value: Any) -> str:
@@ -94,7 +107,7 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         approvals[0] if approvals else None,
     )
-    worktrees = {
+    referenced_worktrees = {
         str(value)
         for value in [
             *(issue.get("related_worktree") for issue in issues),
@@ -102,11 +115,19 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         ]
         if str(value or "").strip()
     }
+    projected_worktrees = list(snapshot.get("worktrees") or [])
+    if snapshot.get("worktrees_status") == "ready":
+        worktree_count = max(
+            len(projected_worktrees),
+            int(snapshot.get("worktrees_total") or 0),
+        )
+    else:
+        worktree_count = len(referenced_worktrees)
     return {
         "counts": {
             "missions": len(missions),
             "tasks": len(tasks),
-            "worktrees": len(worktrees),
+            "worktrees": worktree_count,
             "reviews": len(approvals),
             "failures": len(failures),
         },
@@ -130,12 +151,14 @@ class WorkbenchService:
         validation_runner: ValidationRunner | None = None,
         workspace_root: str | None = None,
         review_evidence_collector: ReviewEvidenceCollector | None = None,
+        worktree_manager: WorktreeStatusProvider | None = None,
     ) -> None:
         self._task_store = task_store
         self._workbench_store = workbench_store
         self._validation_runner = validation_runner
         self._workspace_root = workspace_root
         self._review_evidence_collector = review_evidence_collector
+        self._worktree_manager = worktree_manager
         self._snapshot_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._snapshot_states: OrderedDict[str, tuple[str, str, int]] = OrderedDict()
 
@@ -803,6 +826,9 @@ class WorkbenchService:
             session_id, [task.id for task in tasks]
         )
         proposals = await self._workbench_store.list_proposals_for_snapshot(session_id)
+        worktrees, worktrees_status, worktrees_code, worktrees_total = (
+            await self._worktree_snapshot(tasks_by_id=tasks_by_id, leases=leases)
+        )
         snapshot = {
             "version": 1,
             "session_id": session_id,
@@ -828,8 +854,70 @@ class WorkbenchService:
             "validation_runs": validation_runs,
             "context_snapshots": context_snapshots,
             "approvals": [self._approval_to_dict(approval) for approval in approvals],
+            "worktrees": worktrees,
+            "worktrees_status": worktrees_status,
+            "worktrees_code": worktrees_code,
+            "worktrees_total": worktrees_total,
+            "worktrees_truncated": worktrees_total > len(worktrees),
         }
         return self._version_dashboard_snapshot(snapshot)
+
+    async def _worktree_snapshot(
+        self,
+        *,
+        tasks_by_id: dict[str, Any],
+        leases: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], str, str, int]:
+        manager = self._worktree_manager
+        if manager is None:
+            return [], "unavailable", "worktree_manager_unavailable", 0
+        try:
+            raw_records = await manager.status()
+            records = raw_records if isinstance(raw_records, list) else [raw_records]
+            if any(not isinstance(record, WorktreeRecord) for record in records):
+                raise TypeError("worktree manager returned invalid record")
+        except Exception as exc:
+            logger.warning(
+                "Workbench worktree snapshot failed (%s)",
+                type(exc).__name__,
+            )
+            return [], "unavailable", "worktree_snapshot_failed", 0
+
+        active_task_id = next(
+            (
+                task.id
+                for task in tasks_by_id.values()
+                if _status_text(getattr(task, "status", "")) == "in_progress"
+            ),
+            "",
+        )
+        ordered = sorted(
+            records,
+            key=lambda record: (record.task_id != active_task_id, record.name),
+        )
+        lease_by_worktree = {
+            str(lease.get("worktree_name") or ""): lease
+            for lease in leases
+            if str(lease.get("worktree_name") or "")
+        }
+        lease_by_task = {
+            str(lease.get("task_id") or ""): lease
+            for lease in leases
+            if str(lease.get("task_id") or "")
+        }
+        projected = []
+        for record in ordered[:_MAX_SNAPSHOT_WORKTREES]:
+            lease = lease_by_worktree.get(record.name) or lease_by_task.get(
+                record.task_id
+            )
+            data = asdict(record)
+            data["status"] = record.status.value
+            data["removable"] = record.removable
+            data["task"] = self._task_to_summary(tasks_by_id.get(record.task_id))
+            data["lease"] = lease
+            data["agent_id"] = str((lease or {}).get("agent_id") or "")
+            projected.append(data)
+        return projected, "ready", "", len(ordered)
 
     def _version_dashboard_snapshot(
         self,

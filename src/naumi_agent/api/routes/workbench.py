@@ -490,17 +490,31 @@ def _lease_to_dict(
 
 async def _build_workbench_snapshot(engine, session_id: str) -> dict[str, Any]:
     snapshot = await engine.workbench_service.dashboard_snapshot(session_id)
+    if snapshot.get("worktrees_status") == "ready":
+        return snapshot
     manager = getattr(engine, "worktree_manager", None)
     if manager is None:
-        return {**snapshot, "worktrees": []}
+        return {
+            **snapshot,
+            "worktrees": [],
+            "worktrees_status": "unavailable",
+            "worktrees_code": "worktree_manager_unavailable",
+            "worktrees_total": 0,
+            "worktrees_truncated": False,
+        }
 
     records = await manager.status()
     if not isinstance(records, list):
         records = [records]
     tasks_by_id = await _task_summaries_by_id(engine)
+    worktrees = [_worktree_to_dict(record, tasks_by_id) for record in records]
     return {
         **snapshot,
-        "worktrees": [_worktree_to_dict(record, tasks_by_id) for record in records],
+        "worktrees": worktrees,
+        "worktrees_status": "ready",
+        "worktrees_code": "",
+        "worktrees_total": len(worktrees),
+        "worktrees_truncated": False,
     }
 
 

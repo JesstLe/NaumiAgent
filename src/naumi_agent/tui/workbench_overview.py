@@ -136,12 +136,81 @@ def format_workbench_overview_markdown(value: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def format_workbench_worktrees_markdown(
+    value: Mapping[str, Any],
+    *,
+    selected_index: int = 0,
+) -> str:
+    """Render the authoritative worktree inventory and one bounded detail card."""
+    snapshot = _validate_snapshot(value)
+    status = _normalized(snapshot.get("worktrees_status"))
+    if status != "ready":
+        return (
+            "## Worktrees\n\n"
+            "权威 worktree 状态暂时不可用。\n\n"
+            f"诊断码：`{_code(snapshot.get('worktrees_code') or 'unknown')}`"
+        )
+
+    worktrees = _records(snapshot.get("worktrees"))
+    if not worktrees:
+        return "## Worktrees\n\n当前没有由 NaumiAgent 管理的 worktree。"
+
+    index = min(len(worktrees) - 1, max(0, int(selected_index)))
+    selected = worktrees[index]
+    total = max(len(worktrees), _integer(snapshot.get("worktrees_total")))
+    start = max(0, min(index - 5, len(worktrees) - 10))
+    visible = worktrees[start : start + 10]
+    lines = [
+        "## Worktrees",
+        "",
+        f"共 {total} 个 · 当前 {index + 1}/{len(worktrees)} · ↑/↓ 选择",
+        "",
+        "### 列表",
+    ]
+    for offset, item in enumerate(visible, start=start):
+        marker = "▶" if offset == index else "·"
+        lines.append(
+            f"- {marker} {_plain(item.get('name')) or '未命名'} · "
+            f"{_worktree_status(item.get('status'))} · "
+            f"{_integer(item.get('dirty_files'))} 个未提交文件"
+        )
+    if snapshot.get("worktrees_truncated") is True:
+        lines.append("- 列表已按安全上限截断，请使用管理命令精确查询。")
+
+    task = _mapping(selected.get("task"))
+    lines.extend(
+        [
+            "",
+            "### 当前 Worktree",
+            f"- 名称：{_plain(selected.get('name')) or '-'}",
+            f"- 状态：{_worktree_status(selected.get('status'))}",
+            f"- 路径：`{_code(selected.get('path') or '-')}`",
+            f"- 分支：`{_code(selected.get('branch') or '-')}`",
+            f"- 任务：{_plain(task.get('subject') or task.get('id')) or '未绑定'}",
+            f"- Agent：{_plain(selected.get('agent_id')) or '未占用'}",
+            f"- 未提交文件：{_integer(selected.get('dirty_files'))}",
+            f"- 新提交：{_integer(selected.get('commits_ahead'))}",
+            f"- 可安全删除：{'是' if selected.get('removable') is True else '否'}",
+        ]
+    )
+    kept_reason = _plain(selected.get("kept_reason"))
+    if kept_reason:
+        lines.append(f"- 保留原因：{kept_reason}")
+    return "\n".join(lines)
+
+
 class WorkbenchOverviewScreen(Screen[None]):
     """Full-page TUI view backed by ``WorkbenchService.dashboard_snapshot``."""
 
     BINDINGS = [
         Binding("escape", "close", "返回"),
         Binding("r", "refresh", "刷新"),
+        Binding("tab", "next_tab", "切换页签", show=False),
+        Binding("shift+tab", "previous_tab", "切换页签", show=False),
+        Binding("1", "overview_tab", "概览", show=False),
+        Binding("2", "worktrees_tab", "Worktrees", show=False),
+        Binding("up", "select_previous", "上一项", show=False),
+        Binding("down", "select_next", "下一项", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -176,9 +245,11 @@ class WorkbenchOverviewScreen(Screen[None]):
         super().__init__()
         self.engine = engine
         self.snapshot: Mapping[str, Any] | None = None
+        self.selected_tab = "overview"
+        self.selected_worktree_index = 0
 
     def compose(self) -> ComposeResult:
-        yield Static("Workbench Overview · 后端权威只读视图", id="workbench-title")
+        yield Static("", id="workbench-title")
         yield Markdown("正在加载 Workbench 权威快照…", id="workbench-content")
         yield Static("", id="workbench-error")
         yield Footer()
@@ -220,15 +291,65 @@ class WorkbenchOverviewScreen(Screen[None]):
                 error.update("刷新失败，已保留上一次快照；请稍后重试。")
             return
         self.snapshot = snapshot
-        self.query_one("#workbench-content", Markdown).update(
-            format_workbench_overview_markdown(snapshot)
+        self.selected_worktree_index = min(
+            self.selected_worktree_index,
+            max(0, len(_records(snapshot.get("worktrees"))) - 1),
         )
+        self._render_snapshot()
 
     def action_refresh(self) -> None:
         self.refresh_snapshot()
 
     def action_close(self) -> None:
         self.app.pop_screen()
+
+    def action_next_tab(self) -> None:
+        self.selected_tab = (
+            "worktrees" if self.selected_tab == "overview" else "overview"
+        )
+        self._render_snapshot()
+
+    def action_previous_tab(self) -> None:
+        self.action_next_tab()
+
+    def action_overview_tab(self) -> None:
+        self.selected_tab = "overview"
+        self._render_snapshot()
+
+    def action_worktrees_tab(self) -> None:
+        self.selected_tab = "worktrees"
+        self._render_snapshot()
+
+    def action_select_previous(self) -> None:
+        if self.selected_tab == "worktrees":
+            self.selected_worktree_index = max(0, self.selected_worktree_index - 1)
+            self._render_snapshot()
+
+    def action_select_next(self) -> None:
+        if self.selected_tab == "worktrees" and self.snapshot is not None:
+            last = max(0, len(_records(self.snapshot.get("worktrees"))) - 1)
+            self.selected_worktree_index = min(last, self.selected_worktree_index + 1)
+            self._render_snapshot()
+
+    def _render_snapshot(self) -> None:
+        title = self.query_one("#workbench-title", Static)
+        title.update(
+            "Workbench · 1 概览 · [2 Worktrees]"
+            if self.selected_tab == "worktrees"
+            else "Workbench · [1 概览] · 2 Worktrees"
+        )
+        if self.snapshot is None:
+            return
+        content = self.query_one("#workbench-content", Markdown)
+        if self.selected_tab == "worktrees":
+            content.update(
+                format_workbench_worktrees_markdown(
+                    self.snapshot,
+                    selected_index=self.selected_worktree_index,
+                )
+            )
+        else:
+            content.update(format_workbench_overview_markdown(self.snapshot))
 
 
 def _validate_snapshot(
@@ -364,8 +485,18 @@ def _risk_label(value: Any) -> str:
     }.get(_normalized(value), "未标记")
 
 
+def _worktree_status(value: Any) -> str:
+    return {
+        "clean": "干净",
+        "dirty": "有未提交改动",
+        "missing": "目录缺失",
+        "kept": "已保留",
+    }.get(_normalized(value), _plain(value) or "未知")
+
+
 __all__ = [
     "WorkbenchOverviewScreen",
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",
+    "format_workbench_worktrees_markdown",
 ]

@@ -1112,6 +1112,16 @@ test("normalizes workbench snapshot events", () => {
       session_id: "s",
       counts: { tasks: "2", worktrees: 1, reviews: 1 },
       active_selection: { task_id: 7, mission_id: "m1" },
+      worktrees_status: "ready",
+      worktrees_code: "",
+      worktrees_total: 1,
+      worktrees_truncated: false,
+      worktrees: [{
+        name: "wt-1", path: "/repo/wt-1", branch: "codex/wt-1", status: "dirty",
+        task_id: "7", dirty_files: 2, commits_ahead: 1, removable: false,
+        task: { id: "7", subject: "协议", private_prompt: "do not expose" },
+        lease: { id: "lease-1", state: "active", private_token: "secret" }, agent_id: "Agent-1",
+      }],
       missions: [{ id: "m1", title: "Mac 工作台" }],
       issues: [],
       tasks: [],
@@ -1132,6 +1142,14 @@ test("normalizes workbench snapshot events", () => {
   });
   assert.equal(record.payload.active_selection.task_id, "7");
   assert.equal(record.payload.missions[0].title, "Mac 工作台");
+  assert.equal(record.payload.worktrees_status, "ready");
+  assert.equal(record.payload.worktrees_total, 1);
+  assert.equal(record.payload.worktrees_truncated, false);
+  assert.equal(record.payload.worktrees[0].dirty_files, 2);
+  assert.equal(record.payload.worktrees[0].removable, false);
+  assert.equal(record.payload.worktrees[0].agent_id, "Agent-1");
+  assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
+  assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
 });
 
 test("normalizes workbench event payloads", () => {

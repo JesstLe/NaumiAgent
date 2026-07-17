@@ -361,6 +361,13 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/snapshot") {
     const counts = normalizeObject(payload.counts);
     const selection = normalizeObject(payload.active_selection);
+    const worktrees = Array.isArray(payload.worktrees)
+      ? payload.worktrees.slice(0, 200).map(normalizeWorkbenchWorktree)
+      : [];
+    const worktreesStatus = ["ready", "unavailable"].includes(payload.worktrees_status)
+      ? payload.worktrees_status
+      : (Array.isArray(payload.worktrees) ? "ready" : "unavailable");
+    const worktreesTotal = Math.max(worktrees.length, Number(payload.worktrees_total) || 0);
     return {
       ...payload,
       schema_version: Number(payload.schema_version) || 1,
@@ -382,6 +389,11 @@ function normalizeServerPayload(type, payload) {
         worktree: String(selection.worktree ?? ""),
         review_id: String(selection.review_id ?? ""),
       },
+      worktrees_status: worktreesStatus,
+      worktrees_code: String(payload.worktrees_code ?? "").slice(0, 120),
+      worktrees_total: worktreesTotal,
+      worktrees_truncated: payload.worktrees_truncated === true || worktreesTotal > worktrees.length,
+      worktrees,
       missions: Array.isArray(payload.missions) ? payload.missions : [],
       tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
       issues: Array.isArray(payload.issues) ? payload.issues : [],
@@ -404,6 +416,46 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeWorkbenchWorktree(value) {
+  const item = normalizeObject(value);
+  const task = normalizeObject(item.task);
+  const lease = normalizeObject(item.lease);
+  const status = ["clean", "dirty", "missing", "kept"].includes(item.status)
+    ? item.status
+    : "unknown";
+  const normalizedTask = Object.keys(task).length ? {
+    id: String(task.id ?? "").slice(0, 200),
+    subject: String(task.subject ?? "").slice(0, 1_000),
+    status: String(task.status ?? "").slice(0, 80),
+    owner: String(task.owner ?? "").slice(0, 200),
+  } : null;
+  const normalizedLease = Object.keys(lease).length ? {
+    id: String(lease.id ?? "").slice(0, 200),
+    task_id: String(lease.task_id ?? "").slice(0, 200),
+    agent_id: String(lease.agent_id ?? "").slice(0, 200),
+    state: String(lease.state ?? "").slice(0, 80),
+    expires_at: String(lease.expires_at ?? "").slice(0, 100),
+    worktree_name: String(lease.worktree_name ?? "").slice(0, 200),
+  } : null;
+  return {
+    name: String(item.name ?? "").slice(0, 200),
+    path: String(item.path ?? "").slice(0, 2_000),
+    branch: String(item.branch ?? "").slice(0, 500),
+    base_ref: String(item.base_ref ?? "").slice(0, 200),
+    status,
+    task_id: String(item.task_id ?? "").slice(0, 200),
+    dirty_files: Math.max(0, Number(item.dirty_files) || 0),
+    commits_ahead: Math.max(0, Number(item.commits_ahead) || 0),
+    created_at: String(item.created_at ?? "").slice(0, 100),
+    updated_at: String(item.updated_at ?? "").slice(0, 100),
+    kept_reason: String(item.kept_reason ?? "").slice(0, 1_000),
+    removable: item.removable === true,
+    task: normalizedTask,
+    lease: normalizedLease,
+    agent_id: String(item.agent_id ?? lease.agent_id ?? "").slice(0, 200),
+  };
 }
 
 function normalizeHelloNegotiation(raw) {

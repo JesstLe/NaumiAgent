@@ -935,13 +935,17 @@ codex/terminal-completion-receipt
 - ✅ Workbench TUI fallback：Textual TUI 的 `/workbench` 直接消费当前会话的权威 Workbench snapshot，
   以只读全屏页展示目标、任务、变更载体、验证、风险与待审；支持刷新失败保留旧快照、跨会话拒绝和
   80/120/200 列降级，不复制 Store 查询。
+- ✅ Workbench Worktrees tab：WorkbenchService 将真实 Git worktree 状态与 Task/lease/Agent 组合为单一
+  权威快照；New UI 与 Textual TUI 共用 Overview/Worktrees 语义，支持键盘切换、精确选择、窄屏降级、
+  0/1/100 条有界渲染和失败隔离，重复只读刷新不制造新 revision。
 - ✅ Cache message rendering：`ui.render_cache` 提供 bounded LRU 与统计；CLI renderer 按 `message_id` 缓存 ANSI 输出，TUI renderer 对重复 message id 做幂等跳过，renderer override 会清空缓存避免旧结果污染。
 - ✅ Terminal UI E2E scenarios：`tests/e2e/ui_scenarios/*.yaml` 覆盖大文件写入、权限确认、历史恢复、大 diff、subagent/team/recovery、终端 resize；`tests/e2e/test_ui_scenarios.py` 用真实 `EngineEventAdapter`、CLI/TUI renderer、virtualized history、structured diff viewer 和宽字符裁剪逻辑回放并断言关键文本/viewport 边界。
 
 下一步：
 
 ```text
-M6 `/agents` Agent Control Center 已完成；`/workbench` 的 New UI Overview 与 Textual TUI fallback
-已完成。下一切片继续 UI-10.3 Worktrees tab；Agent 创建/重配、跨进程持久化与 Workbench 映射另行
-设计，跨终端兼容实测、性能基准和真实终端截图回归仍需继续。
+M6 `/agents` Agent Control Center 已完成；`/workbench` 的 New UI Overview、Worktrees tab 与 Textual
+TUI fallback 已完成。下一切片不顺序堆叠 UI-10，而是重新核对 Harness、Future Architecture、
+Claude Source 与自进化依赖，选择能解锁下一项用户能力的最小前置；跨终端兼容实测、性能基准和真实
+终端截图回归仍需继续。
 ```
