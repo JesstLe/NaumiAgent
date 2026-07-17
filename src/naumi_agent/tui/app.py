@@ -54,7 +54,11 @@ from naumi_agent.tui.working_indicator import (
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
-from naumi_agent.ui.history_screen import build_history_snapshot, render_history_preview
+from naumi_agent.ui.history_screen import (
+    build_history_snapshot,
+    render_history_preview,
+    render_session_delete_preview,
+)
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
     KeybindingSet,
@@ -2349,6 +2353,12 @@ class NaumiApp(App):
                 return
             self._show_history_preview(sub_arg)
             return
+        if subcommand in {"delete-preview", "delete_preview"}:
+            if not sub_arg:
+                status.status_text = "用法: /history delete-preview <session_id>"
+                return
+            self._show_session_delete_preview(sub_arg)
+            return
         if subcommand == "archive":
             if not sub_arg:
                 status.status_text = "用法: /history archive <session_id>"
@@ -2583,6 +2593,23 @@ class NaumiApp(App):
             return
         chat.mount(Markdown(render_history_preview(session), classes="agent-msg"))
         status.status_text = f"已预览: {session.title or session_id}"
+
+    @work(exclusive=True, exit_on_error=False)
+    async def _show_session_delete_preview(self, session_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            preview = await self.engine.preview_session_delete(session_id)
+        except Exception as exc:
+            status.status_text = f"删除影响预览失败: {exc}"
+            return
+        if preview is None:
+            status.status_text = f"会话不存在: {session_id}"
+            return
+        chat.mount(
+            Markdown(render_session_delete_preview(preview), classes="agent-msg")
+        )
+        status.status_text = f"已预览删除影响: {preview.title}"
 
     @work(exclusive=True, exit_on_error=False)
     async def _run_doctor(self) -> None:

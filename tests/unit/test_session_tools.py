@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tools.session import SessionDeleteTool, SessionHistoryTool, SessionLoadTool
@@ -58,6 +59,35 @@ async def test_session_history_tool_previews_session() -> None:
     assert "ID：`s2`" in output
     assert "测试摘要" in output
     engine.session_store.load.assert_awaited_once_with("s2")
+
+
+@pytest.mark.asyncio
+async def test_session_history_tool_previews_delete_impact_read_only() -> None:
+    engine = MagicMock()
+    engine.preview_session_delete = AsyncMock(
+        return_value=SessionDeletePreview(
+            session_id="s2",
+            title="Preview",
+            workspace_root="/tmp/naumi",
+            message_count=2,
+            is_active=False,
+            harness_run_count=1,
+            criterion_count=1,
+            check_count=2,
+            evidence_count=3,
+            replay_baseline_count=0,
+            check_artifact_reference_count=1,
+            evidence_artifact_reference_count=2,
+        )
+    )
+    tool = SessionHistoryTool(engine)
+
+    output = await tool.execute(action="delete_preview", session_id="s2")
+
+    assert tool.metadata.read_only is True
+    assert "Session 删除影响预览" in output
+    assert "Harness Run：1" in output
+    engine.preview_session_delete.assert_awaited_once_with("s2")
 
 
 def test_engine_registers_session_history_tool(tmp_path) -> None:

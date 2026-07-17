@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.ui.history_screen import (
     build_history_item,
     build_history_snapshot,
     render_history_preview,
     render_history_screen,
+    render_session_delete_preview,
     summarize_session_messages,
 )
 
@@ -77,3 +79,30 @@ def test_summarize_session_messages_is_deterministic_and_truncated() -> None:
 
     assert len(summary) == 80
     assert summary.endswith("…")
+
+
+def test_render_session_delete_preview_distinguishes_records_from_artifact_refs() -> None:
+    preview = SessionDeletePreview(
+        session_id="abc123",
+        title="调试 CLI",
+        workspace_root="/Users/lv/Workspace/NaumiAgent",
+        message_count=3,
+        is_active=True,
+        harness_run_count=2,
+        criterion_count=4,
+        check_count=3,
+        evidence_count=5,
+        replay_baseline_count=1,
+        check_artifact_reference_count=2,
+        evidence_artifact_reference_count=3,
+    )
+
+    rendered = render_session_delete_preview(preview)
+
+    assert "Session 删除影响预览" in rendered
+    assert "Harness Run：2" in rendered
+    assert "Evidence：5" in rendered
+    assert "Artifact 引用：5" in rendered
+    assert "不是可安全删除文件数" in rendered
+    assert "当前会话" in rendered
+    assert "/delete abc123" in rendered

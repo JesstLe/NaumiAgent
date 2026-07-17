@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from unittest.mock import MagicMock
 
 import pytest
 from textual.widgets import Input
@@ -61,7 +62,25 @@ class _PagedSessionEngine:
         return self.sessions[start:end], len(self.sessions)
 
 
+class _HistoryDispatchApp:
+    def __init__(self) -> None:
+        self.status = type("Status", (), {"status_text": ""})()
+        self._show_session_delete_preview = MagicMock()
+
+    def query_one(self, widget_type: type[object]) -> object:
+        if widget_type is StatusBar:
+            return self.status
+        return type("Widget", (), {})()
+
+
 class TestNaumiApp:
+    def test_history_delete_preview_dispatches_to_read_only_worker(self) -> None:
+        app = _HistoryDispatchApp()
+
+        NaumiApp._run_history_command(app, "delete-preview session-1")
+
+        app._show_session_delete_preview.assert_called_once_with("session-1")
+
     def test_semantic_markdown_parser_preserves_math_as_visible_content(self) -> None:
         tokens = semantic_markdown_parser().parse(
             "内联 $x^2$，未闭合 $y\n\n$$\ny=x+1\n$$"

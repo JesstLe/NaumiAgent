@@ -4309,6 +4309,7 @@ async def _show_history(engine: Any, arg: str = "") -> None:
         build_history_snapshot,
         render_history_preview,
         render_history_screen,
+        render_session_delete_preview,
     )
 
     parts = arg.strip().split(maxsplit=1)
@@ -4324,6 +4325,19 @@ async def _show_history(engine: Any, arg: str = "") -> None:
             console.print(f"[red]会话 {sub_arg} 不存在[/red]")
             return
         console.print(Markdown(render_history_preview(session)))
+        return
+
+    if subcommand in {"delete-preview", "delete_preview"}:
+        if not sub_arg:
+            console.print(
+                "[yellow]用法: /history delete-preview <session_id>[/yellow]"
+            )
+            return
+        preview = await engine.preview_session_delete(sub_arg)
+        if preview is None:
+            console.print(f"[red]会话 {sub_arg} 不存在[/red]")
+            return
+        console.print(Markdown(render_session_delete_preview(preview)))
         return
 
     if subcommand == "archive":

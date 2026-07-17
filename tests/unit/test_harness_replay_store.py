@@ -114,5 +114,5 @@ async def test_v1_database_migrates_additively_and_cascades_delete(tmp_path: Pat
     assert version == HARNESS_STORE_SCHEMA_VERSION == 2
     assert table is not None
 
-    assert await migrated.delete_session_records(contract.session_id) == 1
+    assert await migrated.delete_session_records(workspace, contract.session_id) == 1
     assert await migrated.get_replay_baseline(contract.run_id) is None
