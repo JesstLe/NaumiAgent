@@ -51,6 +51,8 @@
 - HAR-08.7a Identity Compatibility Comparator：已实现。源码 revision 是 informational 差异；
   Eval/Profile/Runner/model 差异硬阻断；平台与当前 provisional 状态产生 caveat。详细规则见
   `HAR-08-7a-identity-compatibility-comparator.md`。
-- Replay/Sandbox/Live、指标 Delta/门槛/统计 Comparator、Baseline promote 与完整存储仍为
-  planned；当前不得把
+- HAR-08.7b Suite Mechanical Comparator：已实现。Identity gate 通过后计算 case transition、
+  pass/failure 分类与机械 delta；fixture error、skip 和结构漂移返回 inconclusive，不伪装产品回归。
+  详见 `HAR-08-7b-suite-mechanical-comparator.md`。
+- Replay/Sandbox/Live、门槛/统计 Comparator、Baseline promote 与完整存储仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

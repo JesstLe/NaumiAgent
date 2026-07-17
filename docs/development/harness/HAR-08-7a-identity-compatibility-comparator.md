@@ -96,7 +96,8 @@ blocking/caveat。完全相同的 source 表示重复运行，也合法可比较
 
 ## 7. 后续模块
 
-- HAR-08.7b：从两个 compatible `HarnessEvalSuiteResult` 计算 case transition 与机械指标 delta；
+- HAR-08.7b：已实现；从两个 compatible `HarnessEvalSuiteResult` 计算 case transition 与机械
+  指标 delta，详见 `HAR-08-7b-suite-mechanical-comparator.md`；
 - HAR-08.7c：绝对门槛、guardrail 与 regression verdict；
 - HAR-08.7d：重复样本、均值/离散度/置信区间与 flaky 标记；
 - HAR-08 H5/HAR-08.8：持久化 Baseline、选择查询、Slash/Tool/API 和全屏详情。
