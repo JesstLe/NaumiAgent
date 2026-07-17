@@ -4322,6 +4322,7 @@ async def _show_history(engine: Any, arg: str = "") -> None:
         render_session_delete_preview,
         render_session_retention_preview,
         render_session_retention_result,
+        render_session_retention_worker,
     )
 
     parts = arg.strip().split(maxsplit=1)
@@ -4360,6 +4361,50 @@ async def _show_history(engine: Any, arg: str = "") -> None:
     if subcommand in {"retention-run", "retention_run"}:
         result = await engine.run_session_retention_once()
         console.print(Markdown(render_session_retention_result(result)))
+        return
+
+    if subcommand in {"retention-worker", "retention_worker"}:
+        action = sub_arg.lower()
+        if action == "start":
+            started = engine.start_session_retention_worker()
+            console.print(
+                "[green]Session retention worker 已启动[/green]"
+                if started
+                else "[yellow]Worker 未启动：配置未启用或已经运行[/yellow]"
+            )
+            return
+        if action == "stop":
+            stopped = await engine.stop_session_retention_worker()
+            console.print(
+                "[green]Session retention worker 已停止[/green]"
+                if stopped
+                else "[dim]Worker 已处于停止状态[/dim]"
+            )
+            return
+        if action == "wake":
+            woke = engine.wake_session_retention_worker()
+            console.print(
+                "[green]Session retention worker 已唤醒[/green]"
+                if woke
+                else "[yellow]Worker 尚未运行[/yellow]"
+            )
+            return
+        if action in {"", "status"}:
+            console.print(
+                Markdown(
+                    render_session_retention_worker(
+                        engine.session_retention_worker_snapshot(),
+                        configured_enabled=(
+                            engine.config.memory.session_retention.periodic_enabled
+                        ),
+                    )
+                )
+            )
+            return
+        console.print(
+            "[yellow]用法: /history retention-worker "
+            "[status|start|stop|wake][/yellow]"
+        )
         return
 
     if subcommand == "archive":

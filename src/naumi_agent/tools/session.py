@@ -13,6 +13,7 @@ from naumi_agent.ui.history_screen import (
     render_session_delete_preview,
     render_session_retention_preview,
     render_session_retention_result,
+    render_session_retention_worker,
 )
 
 
@@ -41,7 +42,13 @@ class SessionHistoryTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "preview", "delete_preview", "retention_preview"],
+                    "enum": [
+                        "list",
+                        "preview",
+                        "delete_preview",
+                        "retention_preview",
+                        "retention_worker_status",
+                    ],
                     "default": "list",
                     "description": (
                         "操作类型：list 列出历史会话，preview 预览指定会话，"
@@ -100,10 +107,17 @@ class SessionHistoryTool(Tool):
             return render_session_retention_preview(
                 await self._engine.preview_session_retention()
             )
+        if normalized_action == "retention_worker_status":
+            return render_session_retention_worker(
+                self._engine.session_retention_worker_snapshot(),
+                configured_enabled=(
+                    self._engine.config.memory.session_retention.periodic_enabled
+                ),
+            )
         if normalized_action != "list":
             return (
                 "不支持的历史会话操作。可用操作：list、preview、"
-                "delete_preview、retention_preview。"
+                "delete_preview、retention_preview、retention_worker_status。"
             )
         return await self._list(query=query, page=page, page_size=page_size)
 
@@ -334,6 +348,70 @@ class SessionRetentionTool(Tool):
         )
 
 
+class SessionRetentionWorkerTool(Tool):
+    """Explicit control plane for the configured periodic retention worker."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "session_retention_worker"
+
+    @property
+    def description(self) -> str:
+        return "启动、停止或立即唤醒周期 Session retention worker。"
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "stop", "wake"],
+                    "description": "明确的 worker 生命周期操作。",
+                }
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            concurrency_safe=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="控制 Session 保留 Worker",
+            search_hint="retention worker start stop wake 周期 清理",
+        )
+
+    async def execute(self, action: str) -> str:
+        normalized = (action or "").strip().lower()
+        if normalized == "start":
+            return (
+                "Session retention worker 已启动。"
+                if self._engine.start_session_retention_worker()
+                else "Session retention worker 未启动：配置未启用或已经运行。"
+            )
+        if normalized == "stop":
+            return (
+                "Session retention worker 已停止。"
+                if await self._engine.stop_session_retention_worker()
+                else "Session retention worker 已处于停止状态。"
+            )
+        if normalized == "wake":
+            return (
+                "Session retention worker 已唤醒。"
+                if self._engine.wake_session_retention_worker()
+                else "Session retention worker 尚未运行，无法唤醒。"
+            )
+        return "不支持的操作。可用操作：start、stop、wake。"
+
+
 def create_session_tools(engine: Any) -> list[Tool]:
     """Create session-related tools."""
     return [
@@ -341,4 +419,5 @@ def create_session_tools(engine: Any) -> list[Tool]:
         SessionLoadTool(engine),
         SessionDeleteTool(engine),
         SessionRetentionTool(engine),
+        SessionRetentionWorkerTool(engine),
     ]

@@ -11,6 +11,10 @@ from naumi_agent.harness.retention_executor import (
     RetentionPassStatus,
     SessionRetentionPassResult,
 )
+from naumi_agent.harness.retention_periodic import (
+    RetentionWorkerSnapshot,
+    RetentionWorkerState,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPreview,
     SessionRetentionReason,
@@ -142,7 +146,7 @@ def render_history_screen(snapshot: HistorySnapshot, *, max_summary: int = 96) -
         "操作：/load <编号或ID> 恢复；/history <关键词> 搜索；"
         "/history preview <ID> 预览；/history delete-preview <ID> 删除影响；"
         "/history retention-preview 保留策略；/history retention-run 执行一轮；"
-        "/history archive <ID> 归档。"
+        "/history retention-worker status 周期状态；/history archive <ID> 归档。"
     )
     return "\n".join(lines) + "\n"
 
@@ -287,6 +291,64 @@ def render_session_retention_result(result: SessionRetentionPassResult) -> str:
         lines.append("未完成协调已写入持久重试队列，不能视为完整删除。")
     if result.policy_blocked_count:
         lines.append("策略阻止通常表示会话已恢复或不再处于 archived 状态。")
+    return "\n".join(lines) + "\n"
+
+
+def render_session_retention_worker(
+    snapshot: RetentionWorkerSnapshot,
+    *,
+    configured_enabled: bool,
+) -> str:
+    """Render periodic worker authority and counters without raw exceptions."""
+    state_labels = {
+        RetentionWorkerState.STOPPED: "已停止",
+        RetentionWorkerState.STARTING: "启动中",
+        RetentionWorkerState.STANDBY: "待命（其他实例持有租约）",
+        RetentionWorkerState.RUNNING: "正在执行",
+        RetentionWorkerState.WAITING: "等待下一轮",
+        RetentionWorkerState.STOPPING: "停止中",
+    }
+    pass_status = "尚未执行"
+    if snapshot.last_pass_status:
+        try:
+            pass_status = _retention_status_label(
+                RetentionPassStatus(snapshot.last_pass_status)
+            )
+        except ValueError:
+            pass_status = "未知状态（已失败关闭）"
+    error_labels = {
+        "": "无",
+        "lease_acquire_failed": "租约获取失败",
+        "lease_renew_failed": "租约续期失败",
+        "lease_release_failed": "租约释放失败",
+        "pass_failed": "单轮执行失败",
+    }
+    error_label = error_labels.get(snapshot.last_error_code, "未知错误（已脱敏）")
+    lines = [
+        "## Session Retention Worker",
+        "",
+        f"- 配置启用：{'是' if configured_enabled else '否'}",
+        f"- 状态：{state_labels[snapshot.state]}",
+        f"- 持有租约：{'是' if snapshot.lease_held else '否'}",
+        f"- Owner：`{snapshot.owner_id}`",
+        f"- 执行轮数：{snapshot.pass_count}",
+        f"- 完整删除：{snapshot.completed_session_count}",
+        f"- 安全重试：{snapshot.retry_scheduled_count}",
+        f"- Worker 失败：{snapshot.failure_count}",
+        f"- 连续空轮：{snapshot.consecutive_empty_passes}",
+        f"- 下次等待：{snapshot.next_delay_seconds:.1f}s",
+        f"- 最近轮状态：{pass_status}",
+        f"- 最近错误：{error_label}",
+        f"- 启动时间：{snapshot.started_at or '尚未启动'}",
+        f"- 最近执行：{snapshot.last_pass_at or '尚未执行'}",
+    ]
+    if not configured_enabled:
+        lines.extend(
+            [
+                "",
+                "周期 worker 默认关闭；需在 memory.session_retention 中明确启用。",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 

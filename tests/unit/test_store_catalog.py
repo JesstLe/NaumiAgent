@@ -57,7 +57,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert core.retention is RetentionPolicy.USER_MANAGED
     harness = next(item for item in definitions if item.store_id == "harness.evidence")
     assert harness.version_strategy is VersionStrategy.SQLITE_USER_VERSION
-    assert harness.supported_schema_version == 5
+    assert harness.supported_schema_version == 7
 
 
 def test_absent_lazy_stores_are_read_only_and_do_not_create_state(
@@ -85,7 +85,7 @@ def test_catalog_distinguishes_current_unversioned_and_future_sqlite(
     core = next(item for item in definitions if item.store_id == "runtime.core")
     harness = next(item for item in definitions if item.store_id == "harness.evidence")
     _write_sqlite(core.path, user_version=0)
-    _write_sqlite(harness.path, user_version=5)
+    _write_sqlite(harness.path, user_version=7)
 
     report = inspect_store_catalog((core, harness))
 
@@ -93,10 +93,10 @@ def test_catalog_distinguishes_current_unversioned_and_future_sqlite(
     assert observations["runtime.core"].state is StoreState.LEGACY_UNVERSIONED
     assert observations["runtime.core"].status is CatalogStatus.WARN
     assert observations["harness.evidence"].state is StoreState.READY
-    assert observations["harness.evidence"].observed_schema_version == 5
+    assert observations["harness.evidence"].observed_schema_version == 7
 
     future_path = tmp_path / "future-harness.db"
-    _write_sqlite(future_path, user_version=6)
+    _write_sqlite(future_path, user_version=8)
     future = replace(harness, path=future_path)
     future_observation = inspect_store_catalog((future,)).stores[0]
     assert future_observation.state is StoreState.UNSUPPORTED_NEWER
@@ -168,7 +168,7 @@ def test_catalog_warns_without_mutating_overly_open_sensitive_file(
         for item in build_store_catalog(_config(tmp_path))
         if item.store_id == "harness.evidence"
     )
-    _write_sqlite(harness.path, user_version=5)
+    _write_sqlite(harness.path, user_version=7)
     harness.path.chmod(0o644)
 
     observation = inspect_store_catalog((harness,)).stores[0]

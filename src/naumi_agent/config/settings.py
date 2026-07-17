@@ -144,6 +144,20 @@ class SessionRetentionConfig(BaseSettings):
     max_bytes_per_pass: int = Field(default=256 * 1024 * 1024, ge=1)
     scan_limit: int = Field(default=10_000, ge=1, le=10_000)
     max_runtime_seconds: float = Field(default=10.0, gt=0, le=300)
+    periodic_enabled: bool = False
+    interval_seconds: float = Field(default=300.0, gt=0, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=1800.0, gt=0, le=604_800)
+    worker_lease_seconds: int = Field(default=60, ge=1, le=86_400)
+    standby_retry_seconds: float = Field(default=15.0, gt=0, le=3600)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_periodic_worker(self) -> SessionRetentionConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError("max_empty_backoff_seconds 不能小于 interval_seconds")
+        if self.worker_lease_seconds <= self.max_runtime_seconds:
+            raise ValueError("worker_lease_seconds 必须大于 max_runtime_seconds")
+        return self
 
 
 class MemoryConfig(BaseSettings):

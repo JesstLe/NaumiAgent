@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -86,3 +86,19 @@ async def test_show_history_routes_retention_run_through_engine() -> None:
     await _show_history(engine, "retention-run")
 
     engine.run_session_retention_once.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_show_history_routes_retention_worker_actions() -> None:
+    engine = MagicMock()
+    engine.start_session_retention_worker.return_value = True
+    engine.wake_session_retention_worker.return_value = True
+    engine.stop_session_retention_worker = AsyncMock(return_value=True)
+
+    await _show_history(engine, "retention-worker start")
+    await _show_history(engine, "retention-worker wake")
+    await _show_history(engine, "retention-worker stop")
+
+    engine.start_session_retention_worker.assert_called_once_with()
+    engine.wake_session_retention_worker.assert_called_once_with()
+    engine.stop_session_retention_worker.assert_awaited_once_with()

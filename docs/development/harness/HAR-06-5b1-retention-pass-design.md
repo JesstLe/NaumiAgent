@@ -56,6 +56,12 @@ memory:
     max_bytes_per_pass: 268435456
     scan_limit: 10000
     max_runtime_seconds: 10
+    periodic_enabled: false
+    interval_seconds: 300
+    max_empty_backoff_seconds: 1800
+    worker_lease_seconds: 60
+    standby_retry_seconds: 15
+    jitter_ratio: 0.1
 ```
 
 ## 验收标准
@@ -69,5 +75,5 @@ memory:
 
 ## 后续 HAR-06.5b2
 
-周期调度只能调用本单轮接口，并增加单实例租约、抖动、空轮退避、进程关闭 drain 和吞吐指标。
-后台 worker 默认关闭，启用配置与启动生命周期必须在 6.5b2 一起交付，不能提前加入无效开关。
+6.5b2a 已实现只调用本接口的周期核心、单实例租约、抖动、空轮退避、关闭 drain 和指标；
+6.5b2b 负责将明确启用的 worker 接入所有长期运行进程入口。

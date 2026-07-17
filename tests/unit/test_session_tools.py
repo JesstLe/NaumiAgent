@@ -17,6 +17,10 @@ from naumi_agent.harness.retention_executor import (
     RetentionPassStatus,
     SessionRetentionPassResult,
 )
+from naumi_agent.harness.retention_periodic import (
+    RetentionWorkerSnapshot,
+    RetentionWorkerState,
+)
 from naumi_agent.harness.retention_planner import (
     SessionRetentionPolicy,
     SessionRetentionPreview,
@@ -31,6 +35,7 @@ from naumi_agent.tools.session import (
     SessionHistoryTool,
     SessionLoadTool,
     SessionRetentionTool,
+    SessionRetentionWorkerTool,
 )
 
 
@@ -168,6 +173,34 @@ async def test_session_history_tool_previews_retention_plan_read_only() -> None:
     engine.preview_session_retention.assert_awaited_once_with()
 
 
+@pytest.mark.asyncio
+async def test_session_history_tool_reads_retention_worker_status_without_control() -> None:
+    engine = MagicMock()
+    engine.config.memory.session_retention.periodic_enabled = False
+    engine.session_retention_worker_snapshot.return_value = RetentionWorkerSnapshot(
+        owner_id="worker-a",
+        state=RetentionWorkerState.STOPPED,
+        lease_held=False,
+        pass_count=0,
+        completed_session_count=0,
+        retry_scheduled_count=0,
+        failure_count=0,
+        consecutive_empty_passes=0,
+        next_delay_seconds=300,
+        last_pass_status="",
+        last_error_code="",
+        started_at="",
+        last_pass_at="",
+    )
+    tool = SessionHistoryTool(engine)
+
+    output = await tool.execute(action="retention_worker_status")
+
+    assert "Session Retention Worker" in output
+    assert "配置启用：否" in output
+    assert tool.metadata.read_only is True
+
+
 def test_engine_registers_session_history_tool(tmp_path) -> None:
     engine = AgentEngine(
         AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
@@ -256,6 +289,32 @@ def test_engine_registers_session_retention_tool(tmp_path) -> None:
     )
 
     tool = engine.tool_registry.get("session_retention_run")
+
+    assert tool is not None
+    assert tool.metadata.destructive is True
+
+
+@pytest.mark.asyncio
+async def test_session_retention_worker_tool_controls_explicit_lifecycle() -> None:
+    engine = MagicMock()
+    engine.start_session_retention_worker.return_value = True
+    engine.wake_session_retention_worker.return_value = True
+    engine.stop_session_retention_worker = AsyncMock(return_value=True)
+    tool = SessionRetentionWorkerTool(engine)
+
+    assert "已启动" in await tool.execute(action="start")
+    assert "已唤醒" in await tool.execute(action="wake")
+    assert "已停止" in await tool.execute(action="stop")
+    assert tool.metadata.destructive is True
+    assert tool.metadata.requires_confirmation is True
+
+
+def test_engine_registers_session_retention_worker_tool(tmp_path) -> None:
+    engine = AgentEngine(
+        AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
+    )
+
+    tool = engine.tool_registry.get("session_retention_worker")
 
     assert tool is not None
     assert tool.metadata.destructive is True
