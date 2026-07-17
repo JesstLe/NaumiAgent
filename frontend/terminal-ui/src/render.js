@@ -14,6 +14,7 @@ import { renderRuntimeInspector } from "./components/runtime-inspector.js";
 import { renderWorkbenchOverview } from "./components/workbench-overview.js";
 import { renderHarnessDetailPage } from "./components/harness-detail-page.js";
 import { renderHarnessEvalBaselinePage } from "./components/harness-eval-baseline-page.js";
+import { renderHarnessEvalBatchPage } from "./components/harness-eval-batch-page.js";
 import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
@@ -46,6 +47,11 @@ export function renderScreen(state, width, height, env = {}) {
     ? renderHarnessEvalBaselinePage({
       ...state.harnessEvalBaseline,
       snapshot: state.harnessEvalBaselines[state.harnessEvalBaseline.suiteId],
+    }, width, bodyHeight)
+    : state.route?.name === "harness_eval_batch"
+    ? renderHarnessEvalBatchPage({
+      ...state.harnessEvalBatch,
+      snapshot: state.harnessEvalBatches[state.harnessEvalBatch.batchId],
     }, width, bodyHeight)
     : state.route?.name === "workbench"
     ? renderWorkbenchOverview(state.workbench, width, bodyHeight)

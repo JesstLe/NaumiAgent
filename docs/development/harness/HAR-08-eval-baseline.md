@@ -84,5 +84,8 @@
 - HAR-08.8e1 Typed Baseline 状态页：已实现。新 UI 通过 typed Bridge 请求并验证 active Baseline 与
   active-only Comparison snapshot；Textual TUI/兼容终端继续复用同一 Service 状态模型。
   详见 `HAR-08-8e1-typed-baseline-status-page.md`。
+- HAR-08.8e2 Typed Eval Batch 真实进度：已实现。runner 逐样本报告真实评测完成，Service 区分
+  evaluating/persisting，Bridge 非阻塞并发推送，新 UI 页面与 Textual TUI 状态栏同步显示。
+  详见 `HAR-08-8e2-typed-eval-batch-progress.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

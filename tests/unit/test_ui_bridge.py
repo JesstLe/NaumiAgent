@@ -24,6 +24,8 @@ from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBaselineView,
+    HarnessEvalBatchProgress,
+    HarnessEvalBatchStatus,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.models import HarnessTaskKind
@@ -1108,6 +1110,146 @@ async def test_bridge_returns_typed_harness_eval_baseline_snapshot() -> None:
     assert response["payload"]["active"]["version"] == 1
     assert response["payload"]["suite_id"] == "surface-protocol"
     assert len(response["payload"]["snapshot_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_bridge_streams_non_blocking_harness_eval_batch_progress() -> None:
+    class BatchService:
+        async def eval_repetition_batch(
+            self, suite: str, **kwargs: Any
+        ) -> HarnessEvalBatchStatus:
+            callback = kwargs["on_progress"]
+            await callback(
+                HarnessEvalBatchProgress(
+                    stage="evaluating",
+                    batch_id="candidate-1",
+                    suite_id=suite,
+                    requested=5,
+                    completed=1,
+                    persisted=0,
+                )
+            )
+            return HarnessEvalBatchStatus(
+                status="completed",
+                batch_id="candidate-1",
+                suite_id=suite,
+                requested=5,
+                completed=5,
+                persisted=5,
+                duration_ms=10,
+            )
+
+    engine = _FakeEngine()
+    engine.harness_service = BatchService()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "batch-request",
+            "type": ClientEventType.HARNESS_EVAL_BATCH_REQUEST,
+            "payload": {
+                "suite_id": "surface-protocol",
+                "repetitions": 5,
+                "batch_id": "candidate-1",
+            },
+        }
+    )
+    tasks = tuple(bridge._harness_eval_batch_tasks.values())
+    assert len(tasks) == 1
+    await asyncio.gather(*tasks)
+
+    responses = [
+        record for record in _records(writer) if record["type"] == "harness/eval-batch"
+    ]
+    assert [record["payload"]["stage"] for record in responses] == [
+        "evaluating",
+        "completed",
+    ]
+    assert all(record["request_id"] == "batch-request" for record in responses)
+    assert responses[-1]["payload"]["terminal"] is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_keeps_heartbeat_live_and_bounds_parallel_eval_batches() -> None:
+    gate = asyncio.Event()
+
+    class BlockingBatchService:
+        async def eval_repetition_batch(
+            self, suite: str, **kwargs: Any
+        ) -> HarnessEvalBatchStatus:
+            batch_id = kwargs["batch_id"]
+            await kwargs["on_progress"](
+                HarnessEvalBatchProgress(
+                    stage="preparing",
+                    batch_id=batch_id,
+                    suite_id=suite,
+                    requested=5,
+                    completed=0,
+                    persisted=0,
+                )
+            )
+            await gate.wait()
+            return HarnessEvalBatchStatus(
+                status="completed",
+                batch_id=batch_id,
+                suite_id=suite,
+                requested=5,
+                completed=5,
+                persisted=5,
+                duration_ms=10,
+            )
+
+    engine = _FakeEngine()
+    engine.harness_service = BlockingBatchService()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    for index in range(4):
+        await bridge.handle_client_record(
+            {
+                "id": f"batch-{index}",
+                "type": ClientEventType.HARNESS_EVAL_BATCH_REQUEST,
+                "payload": {
+                    "suite_id": "surface-protocol",
+                    "repetitions": 5,
+                    "batch_id": f"candidate-{index}",
+                },
+            }
+        )
+    await asyncio.sleep(0)
+    await bridge.handle_client_record(
+        {"id": "ping-during-batch", "type": ClientEventType.PING, "payload": {}}
+    )
+    await bridge.handle_client_record(
+        {
+            "id": "batch-over-limit",
+            "type": ClientEventType.HARNESS_EVAL_BATCH_REQUEST,
+            "payload": {
+                "suite_id": "surface-protocol",
+                "repetitions": 5,
+                "batch_id": "candidate-over-limit",
+            },
+        }
+    )
+
+    records = _records(writer)
+    assert any(
+        record["type"] == "pong" and record["request_id"] == "ping-during-batch"
+        for record in records
+    )
+    assert any(
+        record["type"] == "error"
+        and record["request_id"] == "batch-over-limit"
+        and record["payload"]["code"] == "harness_eval_batch_limit"
+        for record in records
+    )
+
+    tasks = tuple(bridge._harness_eval_batch_tasks.values())
+    gate.set()
+    await asyncio.gather(*tasks)
 
 
 @pytest.mark.asyncio

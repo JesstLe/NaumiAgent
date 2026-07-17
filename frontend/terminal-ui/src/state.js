@@ -254,6 +254,7 @@ export function createInitialState() {
     harnessExplanations: Object.create(null),
     harnessReplays: Object.create(null),
     harnessEvalBaselines: Object.create(null),
+    harnessEvalBatches: Object.create(null),
     harnessDetail: {
       runId: "",
       explainLoading: false,
@@ -263,6 +264,12 @@ export function createInitialState() {
     harnessEvalBaseline: {
       suiteId: "",
       loading: false,
+      scrollOffset: 0,
+    },
+    harnessEvalBatch: {
+      requestId: "",
+      batchId: "",
+      suiteId: "",
       scrollOffset: 0,
     },
     permissionCenter: {
@@ -545,6 +552,16 @@ export function reduceServerEvent(state, record) {
         state.harnessEvalBaseline.loading = false;
       }
       break;
+    case "harness/eval-batch":
+      addHarnessEvalBatch(state.harnessEvalBatches, payload);
+      if (
+        state.harnessEvalBatch.requestId === String(record.request_id || "")
+        || state.harnessEvalBatch.batchId === payload.batch_id
+      ) {
+        state.harnessEvalBatch.batchId = payload.batch_id;
+        state.harnessEvalBatch.suiteId = payload.suite_id;
+      }
+      break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
       if (
@@ -726,6 +743,7 @@ export function reduceServerEvent(state, record) {
       state.workbench = createEmptyWorkbenchState();
       const wasHarnessDetailRoute = state.route?.name === "harness_detail";
       const wasHarnessEvalBaselineRoute = state.route?.name === "harness_eval_baseline";
+      const wasHarnessEvalBatchRoute = state.route?.name === "harness_eval_batch";
       const wasPermissionRoute = state.route?.name === "permissions";
       state.harnessDetail = {
         runId: "",
@@ -738,7 +756,13 @@ export function reduceServerEvent(state, record) {
         loading: false,
         scrollOffset: 0,
       };
-      if (wasHarnessDetailRoute || wasHarnessEvalBaselineRoute) {
+      state.harnessEvalBatch = {
+        requestId: "",
+        batchId: "",
+        suiteId: "",
+        scrollOffset: 0,
+      };
+      if (wasHarnessDetailRoute || wasHarnessEvalBaselineRoute || wasHarnessEvalBatchRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
       state.permissionCenter = {
@@ -758,6 +782,7 @@ export function reduceServerEvent(state, record) {
         state.harnessExplanations = Object.create(null);
         state.harnessReplays = Object.create(null);
         state.harnessEvalBaselines = Object.create(null);
+        state.harnessEvalBatches = Object.create(null);
         state.activeAssistant = null;
         state.activeThinking = null;
         state.folds = {};
@@ -1386,6 +1411,15 @@ function addHarnessEvalBaseline(cache, payload) {
   const suiteIds = Object.keys(cache);
   while (suiteIds.length > MAX_HARNESS_DETAILS) delete cache[suiteIds.shift()];
   return cache[suiteId];
+}
+
+function addHarnessEvalBatch(cache, payload) {
+  const batchId = String(payload.batch_id ?? "").trim();
+  if (!batchId) return null;
+  cache[batchId] = { ...payload, batch_id: batchId };
+  const batchIds = Object.keys(cache);
+  while (batchIds.length > MAX_HARNESS_DETAILS) delete cache[batchIds.shift()];
+  return cache[batchId];
 }
 
 function moveCompletionReceiptToEnd(state, receiptId, runId) {
@@ -2225,6 +2259,22 @@ export function handleSubmitText(state, text, send) {
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
   }
+  const harnessBatch = parseHarnessEvalBatchCommand(commandText);
+  if (harnessBatch) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "harness_eval_batch", originAnchor };
+    state.harnessEvalBatch = {
+      requestId: "",
+      batchId: harnessBatch.batch_id,
+      suiteId: harnessBatch.suite_id,
+      scrollOffset: 0,
+    };
+    state.harnessEvalBatch.requestId = String(send("harness/eval-batch/request", harnessBatch) || "");
+    return;
+  }
   const harnessBaselineMatch = commandText.match(/^\/harness\s+baseline\s+([a-z][a-z0-9_-]{0,63})$/);
   if (harnessBaselineMatch) {
     const suiteId = harnessBaselineMatch[1];
@@ -2593,6 +2643,53 @@ export function handleHarnessEvalBaselineKey(state, key) {
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessEvalBaseline.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessEvalBaseline.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
+}
+
+export function handleHarnessEvalBatchKey(state, key) {
+  if (state.route?.name !== "harness_eval_batch") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  const current = Math.max(0, Number(state.harnessEvalBatch.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.harnessEvalBatch.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.harnessEvalBatch.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) state.harnessEvalBatch.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) state.harnessEvalBatch.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessEvalBatch.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessEvalBatch.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+function parseHarnessEvalBatchCommand(commandText) {
+  const match = String(commandText || "").match(
+    /^\/harness\s+eval\s+([a-z][a-z0-9_-]{0,63})\s+(.+)$/,
+  );
+  if (!match) return null;
+  const tokens = match[2].trim().split(/\s+/);
+  if (tokens.length % 2 !== 0) return null;
+  const request = { suite_id: match[1], repetitions: 5, batch_id: "" };
+  const seen = new Set();
+  for (let index = 0; index < tokens.length; index += 2) {
+    const option = tokens[index];
+    const value = tokens[index + 1];
+    if (!["--repeat", "--batch"].includes(option) || seen.has(option) || value.startsWith("--")) {
+      return null;
+    }
+    seen.add(option);
+    if (option === "--repeat") {
+      if (!/^\d+$/.test(value)) return null;
+      request.repetitions = Number(value);
+      if (!Number.isSafeInteger(request.repetitions) || request.repetitions < 5 || request.repetitions > 100) return null;
+    } else {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)) return null;
+      request.batch_id = value;
+    }
+  }
+  return seen.size ? request : null;
 }
 
 export function handlePermissionCenterKey(state, key, send) {

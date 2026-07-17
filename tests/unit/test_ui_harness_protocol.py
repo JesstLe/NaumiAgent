@@ -7,6 +7,7 @@ import pytest
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBaselineView,
+    HarnessEvalBatchProgress,
     HarnessEvalComparisonView,
 )
 from naumi_agent.harness.explain import (
@@ -27,6 +28,7 @@ from naumi_agent.harness.replay_models import (
 )
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
+    harness_eval_batch_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
@@ -84,6 +86,59 @@ def test_harness_eval_baseline_payload_rejects_incoherent_status() -> None:
     with pytest.raises(ValueError, match="active"):
         harness_eval_baseline_payload(
             HarnessEvalBaselineStatus(status="ok", suite_id="surface-protocol")
+        )
+
+
+def test_harness_eval_batch_payload_distinguishes_progress_and_terminal() -> None:
+    evaluating = harness_eval_batch_payload(
+        HarnessEvalBatchProgress(
+            stage="evaluating",
+            batch_id="candidate-1",
+            suite_id="surface-protocol",
+            requested=5,
+            completed=2,
+            persisted=0,
+            passed_cases=4,
+            duration_ms=12.3456,
+        )
+    )
+    completed = harness_eval_batch_payload(
+        HarnessEvalBatchProgress(
+            stage="completed",
+            batch_id="candidate-1",
+            suite_id="surface-protocol",
+            requested=5,
+            completed=5,
+            persisted=5,
+            identity_sha256="a" * 64,
+            baseline_eligible=True,
+        )
+    )
+
+    assert evaluating["terminal"] is False
+    assert evaluating["duration_ms"] == 12.346
+    assert completed["terminal"] is True
+    assert completed["baseline_eligible"] is True
+
+    with pytest.raises(ValueError, match="persisted"):
+        HarnessEvalBatchProgress(
+            stage="persisting",
+            batch_id="candidate-1",
+            suite_id="surface-protocol",
+            requested=5,
+            completed=2,
+            persisted=3,
+        )
+    with pytest.raises(ValueError, match="eligible"):
+        HarnessEvalBatchProgress(
+            stage="partial",
+            batch_id="candidate-1",
+            suite_id="surface-protocol",
+            requested=5,
+            completed=2,
+            persisted=2,
+            identity_sha256="a" * 64,
+            baseline_eligible=True,
         )
     with pytest.raises(ValueError, match="comparisons"):
         harness_eval_baseline_payload(

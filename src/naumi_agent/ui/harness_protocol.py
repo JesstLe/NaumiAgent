@@ -9,7 +9,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from naumi_agent.harness.checks import validate_run_id
-from naumi_agent.harness.eval_surface import HarnessEvalBaselineStatus
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalBaselineStatus,
+    HarnessEvalBatchProgress,
+)
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 
@@ -78,6 +81,29 @@ def harness_eval_baseline_payload(
         "schema_version": HARNESS_DETAIL_SCHEMA_VERSION,
         "snapshot_sha256": hashlib.sha256(canonical).hexdigest(),
         **snapshot,
+    }
+
+
+def harness_eval_batch_payload(progress: HarnessEvalBatchProgress) -> dict[str, Any]:
+    """Serialize one bounded factual Eval Batch progress snapshot."""
+    return {
+        "schema_version": HARNESS_DETAIL_SCHEMA_VERSION,
+        "stage": progress.stage,
+        "terminal": progress.stage in {"completed", "partial", "error"},
+        "batch_id": _text(progress.batch_id),
+        "suite_id": _text(progress.suite_id),
+        "requested": progress.requested,
+        "completed": progress.completed,
+        "persisted": progress.persisted,
+        "passed_cases": progress.passed_cases,
+        "implementation_failures": progress.implementation_failures,
+        "evaluation_errors": progress.evaluation_errors,
+        "skipped": progress.skipped,
+        "duration_ms": round(progress.duration_ms, 3),
+        "baseline_eligible": progress.baseline_eligible,
+        "identity_sha256": progress.identity_sha256,
+        "code": _text(progress.code),
+        "message": _text(progress.message),
     }
 
 
@@ -259,6 +285,7 @@ __all__ = [
     "HARNESS_DETAIL_REVISION",
     "HARNESS_DETAIL_SCHEMA_VERSION",
     "harness_eval_baseline_payload",
+    "harness_eval_batch_payload",
     "harness_explain_payload",
     "harness_replay_payload",
 ]

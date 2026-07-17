@@ -51,5 +51,5 @@
 
 - HAR-08.8c 已完成：对完整、eligible batch 做显式 promote，要求固定 actor/reason；
 - HAR-08.8d 已完成：Candidate 与 active Baseline 生成 H5c Comparison receipt；
-- HAR-08.8e：typed New UI/TUI batch progress 与 receipt detail；
+- HAR-08.8e2 已完成：真实逐样本 typed New UI/TUI batch progress；receipt detail 由 8e4 继续；
 - H5a batch transaction：在不牺牲 immutable prefix recovery 的前提下定义原子 cohort API。

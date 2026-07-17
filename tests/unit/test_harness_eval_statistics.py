@@ -543,6 +543,47 @@ def test_repetition_runner_returns_explicit_partial_batch_on_budget(
     assert batch.results[0].baseline_identity.configuration.repetitions == 5
 
 
+def test_repetition_runner_reports_each_real_sample_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = _identity(commit="1", repetitions=5)
+    raw = _suite(
+        commit="1",
+        statuses=(EvalCaseStatus.PASSED,),
+        duration_ms=1,
+        repetitions=5,
+    )
+    monkeypatch.setattr(
+        harness_eval,
+        "_capture_baseline_source",
+        lambda *_args, **_kwargs: (identity.source, ""),
+    )
+    monkeypatch.setattr(
+        harness_eval,
+        "_capture_baseline_source_after",
+        lambda *_args, **_kwargs: (identity.source, ""),
+    )
+    monkeypatch.setattr(
+        harness_eval,
+        "_evaluate_suite_file_raw",
+        lambda *_args, **_kwargs: raw,
+    )
+    progress: list[tuple[int, HarnessEvalSuiteResult]] = []
+
+    batch = evaluate_suite_repetitions(
+        ".",
+        "suite.yaml",
+        repetitions=5,
+        profile_digest="b" * 64,
+        profile_trusted=True,
+        on_sample=lambda completed, result: progress.append((completed, result)),
+    )
+
+    assert [completed for completed, _result in progress] == [1, 2, 3, 4, 5]
+    assert all(result is raw for _completed, result in progress)
+    assert batch.completed == 5
+
+
 def _git(path: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args],

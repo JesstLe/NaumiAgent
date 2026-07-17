@@ -79,6 +79,25 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_harness_eval_batch_request() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.HARNESS_EVAL_BATCH_REQUEST,
+            "payload": {
+                "suite_id": "surface-protocol",
+                "repetitions": 5,
+                "batch_id": "candidate:1",
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "suite_id": "surface-protocol",
+        "repetitions": 5,
+        "batch_id": "candidate:1",
+    }
+
+
 def test_protocol_normalizes_workbench_snapshot_requests() -> None:
     record = normalize_client_record(
         {

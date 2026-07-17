@@ -70,6 +70,69 @@ class HarnessEvalBatchStatus(_StrictModel):
     identity_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
 
 
+class HarnessEvalBatchProgress(_StrictModel):
+    stage: Literal[
+        "preparing",
+        "evaluating",
+        "persisting",
+        "completed",
+        "partial",
+        "error",
+    ]
+    batch_id: str
+    suite_id: str
+    requested: int = Field(ge=5, le=100)
+    completed: int = Field(ge=0, le=100)
+    persisted: int = Field(ge=0, le=100)
+    passed_cases: int = Field(default=0, ge=0)
+    implementation_failures: int = Field(default=0, ge=0)
+    evaluation_errors: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    duration_ms: float = Field(default=0, ge=0)
+    baseline_eligible: bool = False
+    identity_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    code: str = ""
+    message: str = ""
+
+    @model_validator(mode="after")
+    def _progress_is_coherent(self) -> HarnessEvalBatchProgress:
+        if self.completed > self.requested or self.persisted > self.completed:
+            raise ValueError("Eval Batch 进度必须满足 persisted <= completed <= requested。")
+        if self.stage == "preparing" and (self.completed or self.persisted):
+            raise ValueError("Eval Batch preparing 阶段不能声明已完成样本。")
+        if self.stage == "completed" and (
+            self.completed != self.requested or self.persisted != self.requested
+        ):
+            raise ValueError("Eval Batch completed 阶段必须已完成并保存全部样本。")
+        if self.baseline_eligible and (
+            self.stage != "completed" or not self.identity_sha256
+        ):
+            raise ValueError("Eval Batch 仅完整终态可声明 Baseline eligible。")
+        return self
+
+
+def eval_batch_terminal_progress(
+    status: HarnessEvalBatchStatus,
+) -> HarnessEvalBatchProgress:
+    return HarnessEvalBatchProgress(
+        stage=status.status,
+        batch_id=status.batch_id,
+        suite_id=status.suite_id,
+        requested=status.requested,
+        completed=status.completed,
+        persisted=status.persisted,
+        passed_cases=status.passed_cases,
+        implementation_failures=status.implementation_failures,
+        evaluation_errors=status.evaluation_errors,
+        skipped=status.skipped,
+        duration_ms=status.duration_ms,
+        baseline_eligible=status.baseline_eligible,
+        identity_sha256=status.identity_sha256,
+        code=status.code,
+        message=status.message,
+    )
+
+
 class HarnessEvalPromotionStatus(_StrictModel):
     status: Literal["promoted", "already_active", "not_selected", "error"]
     code: str = ""
