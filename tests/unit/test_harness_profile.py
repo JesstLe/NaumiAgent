@@ -110,6 +110,14 @@ def test_missing_profile_is_actionable_non_error_state(tmp_path: Path) -> None:
             "schema_version: 1\nevals:\n  suites: [../outside.yaml]\n",
             "path_outside_workspace",
         ),
+        (
+            "schema_version: 1\nevals:\n  suites: [one.yaml, one.yaml]\n",
+            "invalid_profile",
+        ),
+        (
+            "schema_version: 1\nevals:\n  live_default: true\n",
+            "invalid_profile",
+        ),
     ],
 )
 def test_invalid_profiles_return_stable_actionable_error(

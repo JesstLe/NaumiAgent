@@ -2,8 +2,8 @@
 
 ## 当前基线
 
-H1-H3、H4.1-H4.4 与 HAR-05 已实现：Profile/Trust/Knowledge、Completion Gate、Store、
-实时持久化、EvidenceCollector、确定性 Explain 与安全 Replay。权威代码位于
+H1-H3、H4.1-H4.4、HAR-05 与 HAR-08.1a 已实现：Profile/Trust/Knowledge、Completion Gate、Store、
+实时持久化、EvidenceCollector、确定性 Explain、安全 Replay 与离线协议 Eval。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
 
 ## 后续顺序

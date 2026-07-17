@@ -2164,6 +2164,7 @@ test("harness command is available before backend metadata arrives", () => {
   const harness = DEFAULT_SLASH_COMMAND_CANDIDATES.find((item) => item.command === "/harness");
   assert.equal(Boolean(harness), true);
   assert.equal(harness.description.includes("知识"), true);
+  assert.equal(harness.description.includes("评测"), true);
 });
 
 test("slash completion filters by partial command", () => {

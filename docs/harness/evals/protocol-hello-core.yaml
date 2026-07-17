@@ -1,0 +1,83 @@
+schema_version: 1
+id: protocol-hello-core
+title: UI Bridge hello 协商核心回归
+cases:
+  - id: modern-compatible
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-modern-compatible.json
+      sha256: a74f0d7624ca44f66d553068c51d0920e67bf0e8fb8bdc4545e2ccce260f8b3e
+    expected:
+      outcome: accepted
+      selected_version: 1
+      capabilities: [heartbeat, typed_ui_messages, workbench_snapshot]
+    metrics: &protocol_metrics
+      primary: protocol_outcome_match
+      guardrails: [no_model, no_side_effect]
+    budget: &case_budget {max_duration_ms: 100}
+
+  - id: capability-intersection
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-capability-intersection.json
+      sha256: e823ed07128f330743b8b4226f76eca1385085385f8a4f092b3af613c1c62e5d
+    expected:
+      outcome: accepted
+      selected_version: 1
+      capabilities: [typed_ui_messages]
+    metrics: *protocol_metrics
+    budget: *case_budget
+
+  - id: legacy-compatible
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-legacy.json
+      sha256: b428eae6dcd51cddd24d0bf71ce66fc4d0e824d70c4b597ac67e842b492b7c2a
+    expected:
+      outcome: accepted
+      selected_version: 1
+      capabilities: [heartbeat, typed_ui_messages, workbench_snapshot]
+    metrics: *protocol_metrics
+    budget: *case_budget
+
+  - id: version-unsupported
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-version-unsupported.json
+      sha256: 5e9ee3f5ef0db8faae3844ea12acc0874029dd7da10c88c3ca1d417d4d217780
+    expected:
+      outcome: rejected
+      error_code: protocol_version_unsupported
+    metrics: *protocol_metrics
+    budget: *case_budget
+
+  - id: required-capability-missing
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-capability-missing.json
+      sha256: 1fd563846ffbee82a623c5c950696961b443590ba5416b00db1e9a93dec47dea
+    expected:
+      outcome: rejected
+      error_code: protocol_capability_missing
+    metrics: *protocol_metrics
+    budget: *case_budget
+
+  - id: malformed-version
+    runner: protocol_hello
+    input: {transport: jsonl}
+    fixture:
+      path: fixtures/hello-malformed-version.json
+      sha256: dea42047b1e94a2516acbcafa7cf4428f99806fdfdb2b16e1ee543b9b8d3a5ee
+    expected:
+      outcome: rejected
+      error_code: bad_request
+    metrics: *protocol_metrics
+    budget: *case_budget
+
+budget:
+  max_duration_ms: 5000

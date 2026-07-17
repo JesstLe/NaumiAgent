@@ -65,3 +65,10 @@
 - 不保存原始用户对话、secret、reasoning 或源码正文；
 - 不新增 eval SQLite 表（文档规定 H5 后再迁移）。
 
+## 完成状态
+
+- Task 1：完成；RED 以缺少 `naumi_agent.harness.eval` 模块的 collection error 固定。
+- Task 2：完成；strict/frozen schema、有界读取、digest、预算与生产 protocol runner 已实现。
+- Task 3：完成；Service、共享 slash router 和 read-only Agent Tool 使用同一路径。
+- Task 4：完成；仓库内置六个 fixture 连续运行一致，真实工作区源文件 digest 前后不变。
+- Task 5：完成；自审、当前架构、债务、README 与模块注册表已同步。

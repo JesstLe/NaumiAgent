@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.harness.eval import render_harness_eval
 from naumi_agent.harness.explain import render_harness_explanation
 from naumi_agent.harness.service import (
     HarnessService,
@@ -22,6 +23,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessDoctorTool(service),
         HarnessExplainTool(service),
         HarnessReplayTool(service),
+        HarnessEvalTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
@@ -161,6 +163,54 @@ class HarnessReplayTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness Replay 参数无效：{exc}"
         return render_harness_replay(result)
+
+
+class HarnessEvalTool(_HarnessReadOnlyTool):
+    @property
+    def name(self) -> str:
+        return "harness_eval"
+
+    @property
+    def description(self) -> str:
+        return "运行当前 Profile 声明的离线 Harness Eval，不调用模型、命令或网络"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness eval offline protocol regression fixture suite deterministic"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1_024,
+                    "description": "可选 Profile 已声明的 Suite id 或相对路径；省略表示全部",
+                }
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        suite = kwargs.get("suite")
+        if suite is not None and not isinstance(suite, str):
+            return "Harness Eval 参数无效：suite 必须是字符串。"
+        if isinstance(suite, str) and (not suite.strip() or len(suite.strip()) > 1_024):
+            return "Harness Eval 参数无效：suite 必须是 1..1024 个字符。"
+        try:
+            result = await self._service.eval_suites(suite)
+        except ValueError as exc:
+            return f"Harness Eval 参数无效：{exc}"
+        return render_harness_eval(result)
 
 
 class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):

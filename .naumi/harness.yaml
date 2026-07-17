@@ -42,7 +42,7 @@ completion:
 
 checks:
   - id: harness_python
-    label: Harness H3 Python 定向测试
+    label: Harness Python 定向测试
     argv:
       - uv
       - run
@@ -55,6 +55,7 @@ checks:
       - tests/unit/test_harness_engine_gate.py
       - tests/unit/test_harness_trust.py
       - tests/unit/test_harness_service.py
+      - tests/unit/test_harness_eval.py
       - tests/unit/test_harness_tools.py
       - tests/unit/test_harness_surfaces.py
       - tests/unit/test_harness_knowledge.py
@@ -66,6 +67,7 @@ checks:
       - tests/unit/test_workbench_validation.py
       - tests/integration/test_harness_h1_real_workspace.py
       - tests/integration/test_harness_h2_real_workspace.py
+      - tests/integration/test_harness_eval_real_workspace.py
     timeout_seconds: 180
     when_changed:
       - src/naumi_agent/harness/**/*.py
@@ -77,7 +79,7 @@ checks:
       - change
 
   - id: harness_lint
-    label: Harness H3 静态检查
+    label: Harness 静态检查
     argv:
       - uv
       - run
@@ -93,6 +95,7 @@ checks:
       - tests/unit/test_harness_engine_gate.py
       - tests/unit/test_harness_trust.py
       - tests/unit/test_harness_service.py
+      - tests/unit/test_harness_eval.py
       - tests/unit/test_harness_tools.py
       - tests/unit/test_harness_surfaces.py
       - tests/unit/test_harness_knowledge.py
@@ -105,6 +108,7 @@ checks:
       - tests/integration/test_harness_h1_real_workspace.py
       - tests/integration/test_harness_h2_real_workspace.py
       - tests/integration/test_harness_h3_real_workspace.py
+      - tests/integration/test_harness_eval_real_workspace.py
     timeout_seconds: 120
     when_changed:
       - src/naumi_agent/harness/**/*.py
@@ -131,7 +135,8 @@ checks:
       - change
 
 evals:
-  suites: []
+  suites:
+    - docs/harness/evals/protocol-hello-core.yaml
   live_default: false
   max_cost_usd: 1.0
   max_duration_seconds: 1800
