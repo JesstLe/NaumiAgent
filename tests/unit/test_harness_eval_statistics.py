@@ -27,6 +27,7 @@ from naumi_agent.harness.eval_statistics import (
     compare_eval_repetitions,
     render_eval_statistical_comparison,
 )
+from naumi_agent.harness.store import HarnessStore
 
 
 def _identity(*, commit: str, repetitions: int = 5):
@@ -249,7 +250,10 @@ def test_minimum_samples_rejects_invalid_bounds() -> None:
         compare_eval_repetitions((), (), minimum_samples=4)
 
 
-def test_real_static_suite_runs_five_times_under_one_identity(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_real_static_suite_runs_persists_and_compares_five_samples(
+    tmp_path: Path,
+) -> None:
     fixture = tmp_path / "evals" / "fixtures" / "hello.json"
     fixture.parent.mkdir(parents=True)
     fixture_payload = {
@@ -312,7 +316,24 @@ def test_real_static_suite_runs_five_times_under_one_identity(tmp_path: Path) ->
         profile_trusted=True,
     )
     runs = batch.results
-    comparison = compare_eval_repetitions(runs, runs)
+    store = HarnessStore(tmp_path / "state" / "harness.db")
+    for index, result in enumerate(runs):
+        await store.record_eval_result(
+            workspace_root=tmp_path,
+            batch_id="real-static-001",
+            sample_index=index,
+            result=result,
+            created_at="2026-07-18T10:00:00+08:00",
+        )
+    restored = await HarnessStore(store.db_path).list_eval_results(
+        tmp_path,
+        "real-static-001",
+        "statistical-real",
+    )
+    comparison = compare_eval_repetitions(
+        tuple(item.result for item in restored),
+        tuple(item.result for item in restored),
+    )
 
     assert batch.status == "completed"
     assert batch.code == ""
@@ -324,6 +345,7 @@ def test_real_static_suite_runs_five_times_under_one_identity(tmp_path: Path) ->
         run.baseline_identity.configuration.repetitions == 5  # type: ignore[union-attr]
         for run in runs
     )
+    assert len(restored) == 5
     assert comparison.verdict is EvalStatisticalVerdict.UNCHANGED
 
 

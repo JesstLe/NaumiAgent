@@ -60,5 +60,8 @@
 - HAR-08.7d Statistical Comparator：已实现。每组至少 5 次，复用 Identity/结构 gate，计算均值、
   样本标准差、Student-t 95% CI 与 Welch 均值差区间；逐 case 组内摇摆优先标记 flaky，样本不足或
   Eval error 不形成产品结论。详见 `HAR-08-7d-statistical-comparator.md`。
-- Replay/Sandbox/Live、Baseline promote 与完整存储仍为 planned；当前不得把
+- HAR-08 H5a Eval Result Store：已实现。现有 HarnessStore schema v8 以 workspace/batch/suite/sample
+  不可变键保存脱敏 typed Result、Identity 与内容摘要；幂等重试、冲突拒绝、迁移、隔离和篡改检测
+  均已验证。详见 `HAR-08-H5a-eval-result-store.md`。
+- Replay/Sandbox/Live、Baseline promote、Comparison receipt 与其余存储仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

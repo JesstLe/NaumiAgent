@@ -26,6 +26,7 @@ from naumi_agent.harness.completion import (
     HarnessCompletionReceipt,
     HarnessEvidenceRef,
 )
+from naumi_agent.harness.eval_models import HarnessEvalSuiteResult
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactGcStatus,
@@ -49,8 +50,10 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 7
+HARNESS_STORE_SCHEMA_VERSION = 8
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
     re.IGNORECASE,
@@ -163,6 +166,19 @@ class HarnessStoredReplayBaseline:
     rule_version: str
     explanation_json: str
     explanation_sha256: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredEvalResult:
+    id: str
+    workspace_root: str
+    batch_id: str
+    suite_id: str
+    sample_index: int
+    identity_sha256: str
+    result_sha256: str
+    result: HarnessEvalSuiteResult
     created_at: str
 
 
@@ -776,6 +792,173 @@ class HarnessStore:
             raise HarnessStoreError("无法读取 Harness Replay 基线。") from exc
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("Harness Replay 基线损坏或无法读取。") from exc
+
+    async def record_eval_result(
+        self,
+        *,
+        workspace_root: str | Path,
+        batch_id: str,
+        sample_index: int,
+        result: HarnessEvalSuiteResult,
+        created_at: str,
+    ) -> HarnessStoredEvalResult:
+        """Insert one immutable typed Eval sample, or return an identical retry."""
+        workspace = _canonical_workspace(workspace_root)
+        normalized_batch = _normalize_eval_batch_id(batch_id)
+        if not isinstance(sample_index, int) or isinstance(sample_index, bool):
+            raise ValueError("sample_index 必须是整数。")
+        if not 0 <= sample_index <= 9_999:
+            raise ValueError("sample_index 必须在 0..9999 之间。")
+        if not isinstance(result, HarnessEvalSuiteResult):
+            raise ValueError("result 必须是 HarnessEvalSuiteResult。")
+        suite_id = _normalize_text(result.suite_id, field="suite_id", max_length=64)
+        created = _normalize_timestamp(created_at, field="created_at")
+        safe_payload = _redact_json_value(result.model_dump(mode="json"))
+        safe_result = HarnessEvalSuiteResult.model_validate(safe_payload)
+        result_json = _json_dumps(safe_result.model_dump(mode="json"))
+        if len(result_json.encode("utf-8")) > _MAX_EVAL_RESULT_BYTES:
+            raise ValueError("Eval Result 不能超过 4 MiB。")
+        result_sha256 = _stable_digest(result_json)
+        identity_sha256 = (
+            safe_result.baseline_identity.identity_sha256
+            if safe_result.baseline_identity is not None
+            else ""
+        )
+        record_id = _stable_id(
+            workspace,
+            normalized_batch,
+            suite_id,
+            str(sample_index),
+        )
+        stored = HarnessStoredEvalResult(
+            id=record_id,
+            workspace_root=workspace,
+            batch_id=normalized_batch,
+            suite_id=suite_id,
+            sample_index=sample_index,
+            identity_sha256=identity_sha256,
+            result_sha256=result_sha256,
+            result=safe_result,
+            created_at=created,
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    "SELECT * FROM harness_eval_results WHERE id = ?",
+                    (record_id,),
+                )
+                existing = await cursor.fetchone()
+                if existing is not None:
+                    restored = _eval_result_from_row(existing)
+                    if restored.result_sha256 != result_sha256:
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "同一 Eval batch/suite/sample 不可覆盖为不同结果。"
+                        )
+                    await db.rollback()
+                    return restored
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_results (
+                        id, workspace_root, batch_id, suite_id, sample_index,
+                        identity_sha256, result_sha256, result_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record_id,
+                        workspace,
+                        normalized_batch,
+                        suite_id,
+                        sample_index,
+                        identity_sha256,
+                        result_sha256,
+                        result_json,
+                        created,
+                    ),
+                )
+                await db.commit()
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法保存 Harness Eval Result。") from exc
+        return stored
+
+    async def get_eval_result(
+        self,
+        workspace_root: str | Path,
+        batch_id: str,
+        suite_id: str,
+        sample_index: int,
+    ) -> HarnessStoredEvalResult | None:
+        """Read one exact workspace-scoped Eval sample without mutation."""
+        workspace = _canonical_workspace(workspace_root)
+        batch = _normalize_eval_batch_id(batch_id)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if (
+            not isinstance(sample_index, int)
+            or isinstance(sample_index, bool)
+            or not 0 <= sample_index <= 9_999
+        ):
+            raise ValueError("sample_index 必须在 0..9999 之间。")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ?
+                      AND suite_id = ? AND sample_index = ?
+                    """,
+                    (workspace, batch, suite, sample_index),
+                )
+                row = await cursor.fetchone()
+                return _eval_result_from_row(row) if row is not None else None
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Harness Eval Result。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Harness Eval Result 损坏或无法读取。") from exc
+
+    async def list_eval_results(
+        self,
+        workspace_root: str | Path,
+        batch_id: str,
+        suite_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[HarnessStoredEvalResult, ...]:
+        """List one exact cohort in sample order for statistical comparison."""
+        workspace = _canonical_workspace(workspace_root)
+        batch = _normalize_eval_batch_id(batch_id)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        if not 1 <= limit <= 10_000:
+            raise ValueError("limit 必须在 1..10000 之间。")
+        if not self._db_path.is_file():
+            return ()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ? AND suite_id = ?
+                    ORDER BY sample_index ASC
+                    LIMIT ?
+                    """,
+                    (workspace, batch, suite, limit),
+                )
+                return tuple(
+                    _eval_result_from_row(row) for row in await cursor.fetchall()
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return ()
+            raise HarnessStoreError("无法列出 Harness Eval Result。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("Harness Eval Result 列表损坏或无法读取。") from exc
 
     async def get_run(self, run_id: str) -> HarnessStoredRun | None:
         normalized_run_id = _normalize_text(run_id, field="run_id", max_length=128)
@@ -2101,6 +2284,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V5)
                             await db.executescript(_SCHEMA_V6)
                             await db.executescript(_SCHEMA_V7)
+                            await db.executescript(_SCHEMA_V8)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -2351,6 +2535,43 @@ def _replay_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredReplayBaseline
     return baseline
 
 
+def _eval_result_from_row(row: aiosqlite.Row) -> HarnessStoredEvalResult:
+    result_json = str(row["result_json"])
+    result_sha256 = _validate_sha256(
+        str(row["result_sha256"]),
+        field="result_sha256",
+    )
+    if _stable_digest(result_json) != result_sha256:
+        raise ValueError("Eval Result digest 与内容不一致。")
+    result = HarnessEvalSuiteResult.model_validate_json(result_json)
+    identity_sha256 = str(row["identity_sha256"])
+    expected_identity = (
+        result.baseline_identity.identity_sha256
+        if result.baseline_identity is not None
+        else ""
+    )
+    if identity_sha256 != expected_identity:
+        raise ValueError("Eval Result identity 与内容不一致。")
+    workspace = _canonical_workspace(str(row["workspace_root"]))
+    batch_id = _normalize_eval_batch_id(str(row["batch_id"]))
+    suite_id = _normalize_text(str(row["suite_id"]), field="suite_id", max_length=64)
+    sample_index = int(row["sample_index"])
+    expected_id = _stable_id(workspace, batch_id, suite_id, str(sample_index))
+    if str(row["id"]) != expected_id or result.suite_id != suite_id:
+        raise ValueError("Eval Result immutable key 与内容不一致。")
+    return HarnessStoredEvalResult(
+        id=expected_id,
+        workspace_root=workspace,
+        batch_id=batch_id,
+        suite_id=suite_id,
+        sample_index=sample_index,
+        identity_sha256=identity_sha256,
+        result_sha256=result_sha256,
+        result=result,
+        created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
+    )
+
+
 def _check_row_payload(row: aiosqlite.Row) -> tuple[Any, ...]:
     return tuple(
         row[field]
@@ -2413,6 +2634,13 @@ def _normalize_text(value: str, *, field: str, max_length: int) -> str:
         raise ValueError(f"{field} 长度不能超过 {max_length}。")
     if "\x00" in normalized:
         raise ValueError(f"{field} 不能包含 NUL 字符。")
+    return normalized
+
+
+def _normalize_eval_batch_id(value: str) -> str:
+    normalized = _normalize_text(value, field="batch_id", max_length=128)
+    if not _EVAL_BATCH_ID_RE.fullmatch(normalized):
+        raise ValueError("batch_id 只能包含字母、数字、点、下划线、冒号和连字符。")
     return normalized
 
 
@@ -2939,5 +3167,25 @@ CREATE TABLE IF NOT EXISTS harness_retention_worker_leases (
     owner_id TEXT NOT NULL,
     lease_expires_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+"""
+
+_SCHEMA_V8 = """
+CREATE TABLE IF NOT EXISTS harness_eval_results (
+    id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    sample_index INTEGER NOT NULL CHECK (sample_index BETWEEN 0 AND 9999),
+    identity_sha256 TEXT NOT NULL,
+    result_sha256 TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (workspace_root, batch_id, suite_id, sample_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_eval_results_cohort
+ON harness_eval_results (
+    workspace_root, batch_id, suite_id, sample_index
 );
 """
