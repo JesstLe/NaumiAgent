@@ -97,6 +97,7 @@ constant-time compare 检查，防止字段和 digest 被分别篡改。
 
 ## 7. 当前不足
 
-- 尚未从 `/harness eval` 自动生成该身份；需等待结果 envelope 与 runner version 接口统一；
+- Static `protocol_hello@1` 已由 HAR-08.6b 从 `/harness eval` 自动生成并显示身份；其他 runner
+  仍需分别声明版本和相关维度；
 - 尚未持久化或提供 Baseline promote 命令；
 - 尚未定义跨平台聚合策略，当前只保证平台差异不会被错误合并。

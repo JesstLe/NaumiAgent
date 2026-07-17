@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from naumi_agent.harness.eval_identity import HarnessEvalBaselineIdentity
+
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _CAPABILITY_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
@@ -176,10 +178,13 @@ class HarnessEvalSuiteResult(_StrictModel):
     suite_id: str
     title: str
     suite_path: str
+    suite_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
     status: EvalRunStatus
     cases: tuple[HarnessEvalCaseResult, ...] = ()
     code: str = ""
     message: str = ""
+    baseline_identity: HarnessEvalBaselineIdentity | None = None
+    baseline_identity_code: str = Field(default="", max_length=128)
     duration_ms: float = Field(default=0, ge=0)
 
     @property
@@ -206,9 +211,16 @@ class HarnessEvalSuiteResult(_StrictModel):
             "suite_id": self.suite_id,
             "title": self.title,
             "suite_path": self.suite_path,
+            "suite_sha256": self.suite_sha256,
             "status": str(self.status),
             "code": self.code,
             "message": self.message,
+            "baseline_identity": (
+                self.baseline_identity.model_dump(mode="json")
+                if self.baseline_identity is not None
+                else None
+            ),
+            "baseline_identity_code": self.baseline_identity_code,
             "cases": [
                 {
                     key: value

@@ -5,12 +5,19 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import ValidationError
 
+from naumi_agent.harness.eval_identity import (
+    HarnessEvalConfigurationIdentity,
+    HarnessEvalSourceIdentity,
+    build_eval_baseline_identity,
+    capture_eval_source_identity,
+)
 from naumi_agent.harness.eval_models import (
     EvalCaseStatus,
     EvalRunStatus,
@@ -21,6 +28,7 @@ from naumi_agent.harness.eval_models import (
     HarnessEvalSuiteResult,
     HarnessProtocolActual,
 )
+from naumi_agent.harness.fingerprint import TreeFingerprintError
 from naumi_agent.ui.protocol import (
     ProtocolNegotiationError,
     negotiate_hello,
@@ -29,6 +37,13 @@ from naumi_agent.ui.protocol import (
 
 MAX_SUITE_BYTES = 256 * 1024
 MAX_FIXTURE_BYTES = 64 * 1024
+PROTOCOL_HELLO_RUNNER_VERSION = "protocol_hello@1"
+
+
+@dataclass(frozen=True, slots=True)
+class _LoadedSuite:
+    suite: HarnessEvalSuite
+    sha256: str
 
 
 class HarnessEvalAssetError(ValueError):
@@ -42,8 +57,38 @@ class HarnessEvalAssetError(ValueError):
 def evaluate_suite_file(
     workspace_root: str | Path,
     suite_path: str | Path,
+    *,
+    profile_digest: str | None = None,
+    profile_trusted: bool = False,
 ) -> HarnessEvalSuiteResult:
     """Load and run one declared offline suite without commands, model, or writes."""
+    workspace = Path(workspace_root).expanduser().resolve()
+    source_before, source_code = _capture_baseline_source(
+        workspace,
+        enabled=profile_digest is not None,
+    )
+    result = _evaluate_suite_file_raw(workspace, suite_path)
+    source_after, source_code = _capture_baseline_source_after(
+        workspace,
+        source_before,
+        source_code,
+    )
+    return _attach_baseline_identity(
+        result,
+        workspace=workspace,
+        profile_digest=profile_digest,
+        profile_trusted=profile_trusted,
+        source_before=source_before,
+        source_after=source_after,
+        source_code=source_code,
+    )
+
+
+def _evaluate_suite_file_raw(
+    workspace_root: str | Path,
+    suite_path: str | Path,
+) -> HarnessEvalSuiteResult:
+    """Evaluate one suite without baseline identity orchestration."""
     started = time.perf_counter()
     workspace = Path(workspace_root).expanduser().resolve()
     candidate = Path(suite_path).expanduser()
@@ -52,7 +97,7 @@ def evaluate_suite_file(
     resolved = candidate.resolve(strict=False)
     display = _display_path(resolved, workspace)
     try:
-        suite = _load_suite(workspace, resolved)
+        loaded = _load_suite(workspace, resolved)
     except HarnessEvalAssetError as exc:
         return HarnessEvalSuiteResult(
             suite_id="unknown",
@@ -63,13 +108,16 @@ def evaluate_suite_file(
             message=str(exc),
             duration_ms=_elapsed_ms(started),
         )
-    return _evaluate_loaded_suite(workspace, resolved, suite, started=started)
+    return _evaluate_loaded_suite(workspace, resolved, loaded, started=started)
 
 
 def evaluate_declared_suites(
     workspace_root: str | Path,
     declared_suites: tuple[str, ...] | list[str],
     target: str | None,
+    *,
+    profile_digest: str | None = None,
+    profile_trusted: bool = False,
 ) -> HarnessEvalReport:
     """Evaluate only Profile-declared suites, selected by exact path or suite id."""
     started = time.perf_counter()
@@ -93,7 +141,7 @@ def evaluate_declared_suites(
             for path_text in declared:
                 candidate = (workspace / path_text).resolve(strict=False)
                 try:
-                    suite = _load_suite(workspace, candidate)
+                    suite = _load_suite(workspace, candidate).suite
                 except HarnessEvalAssetError:
                     continue
                 if suite.id == requested:
@@ -108,7 +156,28 @@ def evaluate_declared_suites(
                 )
             selected = (matches[0],)
 
-    results = tuple(evaluate_suite_file(workspace, path) for path in selected)
+    source_before, source_code = _capture_baseline_source(
+        workspace,
+        enabled=profile_digest is not None,
+    )
+    raw_results = tuple(_evaluate_suite_file_raw(workspace, path) for path in selected)
+    source_after, source_code = _capture_baseline_source_after(
+        workspace,
+        source_before,
+        source_code,
+    )
+    results = tuple(
+        _attach_baseline_identity(
+            result,
+            workspace=workspace,
+            profile_digest=profile_digest,
+            profile_trusted=profile_trusted,
+            source_before=source_before,
+            source_after=source_after,
+            source_code=source_code,
+        )
+        for result in raw_results
+    )
     status = _aggregate_status(results)
     return HarnessEvalReport(
         requested=requested,
@@ -118,7 +187,7 @@ def evaluate_declared_suites(
     )
 
 
-def _load_suite(workspace: Path, path: Path) -> HarnessEvalSuite:
+def _load_suite(workspace: Path, path: Path) -> _LoadedSuite:
     if not _is_relative_to(path, workspace):
         raise HarnessEvalAssetError(
             "suite_outside_workspace",
@@ -140,7 +209,7 @@ def _load_suite(workspace: Path, path: Path) -> HarnessEvalSuite:
             "Eval Suite YAML 语法无效。",
         ) from exc
     try:
-        return HarnessEvalSuite.model_validate(payload)
+        suite = HarnessEvalSuite.model_validate(payload)
     except ValidationError as exc:
         fields = sorted({str(item["loc"][0]) for item in exc.errors() if item["loc"]})
         suffix = f"（字段：{', '.join(fields[:8])}）" if fields else ""
@@ -148,15 +217,17 @@ def _load_suite(workspace: Path, path: Path) -> HarnessEvalSuite:
             "suite_schema_invalid",
             f"Eval Suite schema version 1 校验失败{suffix}。",
         ) from exc
+    return _LoadedSuite(suite=suite, sha256=hashlib.sha256(raw).hexdigest())
 
 
 def _evaluate_loaded_suite(
     workspace: Path,
     path: Path,
-    suite: HarnessEvalSuite,
+    loaded: _LoadedSuite,
     *,
     started: float,
 ) -> HarnessEvalSuiteResult:
+    suite = loaded.suite
     results: list[HarnessEvalCaseResult] = []
     deadline = started + (suite.budget.max_duration_ms / 1_000)
     budget_exhausted = False
@@ -183,6 +254,7 @@ def _evaluate_loaded_suite(
         suite_id=suite.id,
         title=suite.title,
         suite_path=_display_path(path, workspace),
+        suite_sha256=loaded.sha256,
         status=status,
         cases=tuple(results),
         code="suite_budget_exhausted" if budget_exhausted else "",
@@ -412,6 +484,20 @@ def render_harness_eval(
     ])
     for suite in suites:
         lines.extend(["", f"### {suite.title} (`{suite.suite_id}`)"])
+        if suite.baseline_identity is not None:
+            identity = suite.baseline_identity
+            promotion = "可晋升" if identity.baseline_eligible else "不可晋升"
+            lines.append(
+                f"- Baseline：`{identity.identity_sha256[:12]}` · {promotion}"
+            )
+            if identity.warnings:
+                lines.append(f"- Baseline 提示：{identity.warnings[0]}")
+        elif suite.baseline_identity_code:
+            lines.append(
+                "- Baseline：不可用（"
+                + _baseline_identity_message(suite.baseline_identity_code)
+                + "）"
+            )
         if suite.message:
             lines.append(f"- 评测错误 `{suite.code}`：{suite.message}")
         for case in suite.cases:
@@ -425,6 +511,89 @@ def render_harness_eval(
     elif totals["evaluation"] or totals["skipped"] or any(suite.message for suite in suites):
         lines.append("\n下一步：修复 Suite schema、fixture integrity 或预算后重新运行。")
     return "\n".join(lines)
+
+
+def _capture_baseline_source(
+    workspace: Path,
+    *,
+    enabled: bool,
+) -> tuple[HarnessEvalSourceIdentity | None, str]:
+    if not enabled:
+        return None, ""
+    try:
+        return capture_eval_source_identity(workspace), ""
+    except (TreeFingerprintError, OSError):
+        return None, "baseline_source_unavailable"
+
+
+def _capture_baseline_source_after(
+    workspace: Path,
+    source_before: HarnessEvalSourceIdentity | None,
+    source_code: str,
+) -> tuple[HarnessEvalSourceIdentity | None, str]:
+    if source_before is None:
+        return None, source_code
+    try:
+        return capture_eval_source_identity(workspace), source_code
+    except (TreeFingerprintError, OSError):
+        return None, "baseline_source_unavailable"
+
+
+def _attach_baseline_identity(
+    result: HarnessEvalSuiteResult,
+    *,
+    workspace: Path,
+    profile_digest: str | None,
+    profile_trusted: bool,
+    source_before: HarnessEvalSourceIdentity | None,
+    source_after: HarnessEvalSourceIdentity | None,
+    source_code: str,
+) -> HarnessEvalSuiteResult:
+    if profile_digest is None:
+        return result
+    if source_code:
+        return result.model_copy(update={"baseline_identity_code": source_code})
+    if source_before is None or source_after is None:
+        return result.model_copy(
+            update={"baseline_identity_code": "baseline_source_unavailable"}
+        )
+    if source_before != source_after:
+        return result.model_copy(
+            update={"baseline_identity_code": "baseline_source_changed"}
+        )
+    if not result.suite_sha256 or result.suite_id == "unknown":
+        return result.model_copy(
+            update={"baseline_identity_code": "baseline_suite_unavailable"}
+        )
+    try:
+        configuration = HarnessEvalConfigurationIdentity.create(
+            suite_id=result.suite_id,
+            suite_sha256=result.suite_sha256,
+            profile_sha256=profile_digest,
+            runner_version=PROTOCOL_HELLO_RUNNER_VERSION,
+            repetitions=1,
+            live=False,
+        )
+        identity = build_eval_baseline_identity(
+            workspace,
+            configuration=configuration,
+            profile_trusted=profile_trusted,
+            source_identity=source_before,
+        )
+    except ValidationError:
+        return result.model_copy(
+            update={"baseline_identity_code": "baseline_configuration_invalid"}
+        )
+    return result.model_copy(update={"baseline_identity": identity})
+
+
+def _baseline_identity_message(code: str) -> str:
+    return {
+        "baseline_source_unavailable": "当前工作区不是可验证的 Git 仓库",
+        "baseline_source_changed": "源码状态在评测期间发生变化",
+        "baseline_suite_unavailable": "Suite 未能生成有效摘要",
+        "baseline_configuration_invalid": "Baseline 配置身份无效",
+    }.get(code, "Baseline identity 暂不可用")
 
 
 def _elapsed_ms(started: float) -> float:
