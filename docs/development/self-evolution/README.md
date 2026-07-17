@@ -2,7 +2,7 @@
 
 ## 当前事实
 
-- `self_review` 已有真实静态扫描 + 可选 LLM 综合，不是纯 Prompt 套壳。
+- `self_review` 已有结构化 AST 静态扫描、脱敏 Evolution Evidence 与可选 LLM 综合，不是纯 Prompt 套壳。
 - `self_modify` 已有路径保护、备份、ruff/compile/pytest 验证和回滚机制。
 - `self_evolve` 已有变更评估与 apply/reject/rollback 决策路径。
 - Pursuit 已有持久目标、criteria、checkpoint、worktree、等待和停止决定。

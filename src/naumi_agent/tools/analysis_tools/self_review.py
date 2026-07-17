@@ -6,12 +6,16 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.evolution.self_review import (
+    render_self_review_static_scan,
+    scan_self_review_files,
+)
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools import analysis_common
 from naumi_agent.tools.analysis_support.self_review import (
     build_self_review_report,
     find_agent_source_dir,
-    scan_self_review,
+    redact_self_review_source,
 )
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -138,7 +142,12 @@ class SelfReviewTool(Tool):
             return f"无法定位源码目录: {target_dir}"
 
         source_text = analysis_common.read_sources(files, max_chars=80000)
-        scan_evidence = scan_self_review(files, source_text)
+        safe_source_text = redact_self_review_source(source_text)
+        target_path = Path(target_dir)
+        scan_root = target_path if target_path.is_dir() else target_path.parent
+        scan_evidence = render_self_review_static_scan(
+            scan_self_review_files(files, workspace_root=scan_root)
+        )
         deterministic = build_self_review_report(target_dir, focus, scan_evidence)
 
         router = self._router_getter()
@@ -148,7 +157,7 @@ class SelfReviewTool(Tool):
         user_msg = (
             f"## 静态扫描证据\n{scan_evidence}\n\n"
             f"## 确定性 Self-Review 自审查报告\n{deterministic}\n\n"
-            f"## 源代码\n{source_text[:50000]}\n"
+            f"## 源代码\n{safe_source_text[:50000]}\n"
         )
         if focus != "all":
             user_msg += f"\n## 审查重点\n请重点关注: {focus}\n"

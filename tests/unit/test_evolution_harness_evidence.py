@@ -69,6 +69,8 @@ def test_failed_harness_check_becomes_redacted_hard_evidence() -> None:
     assert len(evidence) == 1
     item = evidence[0]
     assert item.failure_class.value == "verification_failure"
+    assert item.finding_code == "verification_failure"
+    assert item.scope == "checks:unit"
     assert item.hard_evidence is True
     assert item.source_uri == "harness://runs/evolution-run/checks/unit"
     assert len(item.refs) == 2
@@ -77,6 +79,11 @@ def test_failed_harness_check_becomes_redacted_hard_evidence() -> None:
     assert "用户原始目标" not in serialized
     assert "session-private" not in serialized
     assert "src/private.py" not in serialized
+
+    legacy_payload = item.model_dump(mode="json", exclude={"finding_code", "scope"})
+    restored = type(item).model_validate(legacy_payload)
+    assert restored.finding_code == "verification_failure"
+    assert restored.scope == "harness:run"
 
 
 def test_root_fingerprint_deduplicates_same_root_across_runs() -> None:

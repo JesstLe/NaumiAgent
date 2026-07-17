@@ -123,6 +123,8 @@ class TestSelfReviewTool:
         assert "Self-Review Inventory Script" in output
         assert "模型路由未初始化" in output
         assert "Router 未注入" not in output
+        assert "not-a-real-secret" not in output
+        assert "值已隐藏" in output
 
     @pytest.mark.asyncio
     async def test_execute_with_router_keeps_report_and_adds_enhancement(
@@ -177,3 +179,5 @@ class TestSelfReviewTool:
         assert calls[0][0] is router
         assert "自审查分析引擎" in calls[0][1]
         assert "请重点关注: quality" in calls[0][2]
+        assert "not-a-real-secret" not in calls[0][2]
+        assert "[REDACTED]" in calls[0][2]

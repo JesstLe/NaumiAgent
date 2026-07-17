@@ -5,6 +5,17 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(\b(?:api[_-]?key|password|secret|token)\b\s*(?::[^=\n]+)?=\s*)"
+    r"([\"'])([^\"'\n]{8,})([\"'])",
+    re.IGNORECASE,
+)
+
+
+def redact_self_review_source(source_text: str) -> str:
+    """Hide assignment literals before source is sent to an external model."""
+    return _SECRET_ASSIGNMENT_RE.sub(r"\1\2[REDACTED]\4", source_text)
+
 
 def scan_self_review(files: list[Path], source_text: str) -> str:
     """Scan NaumiAgent source text for self-review health signals."""
@@ -30,8 +41,7 @@ def scan_self_review(files: list[Path], source_text: str) -> str:
     )
     if secrets:
         findings.append(f"- 🔴 疑似硬编码密钥: {len(secrets)} 处")
-        for secret in secrets[:5]:
-            findings.append(f"  - `{secret[:60]}`")
+        findings.append("  - 命中值已隐藏；请使用结构化扫描定位文件与符号。")
     else:
         findings.append("- ✅ 无硬编码密钥")
 
