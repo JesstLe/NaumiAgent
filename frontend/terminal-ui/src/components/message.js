@@ -45,7 +45,10 @@ export function renderMessage(message, width, ctx = { width }) {
     return renderComponent(SubagentCard({ activity: message }), ctx);
   }
   if (message.kind === "completion_receipt") {
-    return renderComponent(CompletionReceiptCard({ receipt: message.receipt }), ctx);
+    return renderComponent(CompletionReceiptCard({
+      receipt: message.receipt,
+      harnessReceipt: message.harnessReceipt,
+    }), ctx);
   }
   if (message.kind === "permission") {
     return renderComponent(PermissionCard({ permission: message }), ctx);

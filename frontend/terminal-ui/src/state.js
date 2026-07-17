@@ -1126,6 +1126,7 @@ function addCompletionReceipt(state, receipt, requestId) {
     receiptId,
     runId,
     receipt,
+    harnessReceipt: state.harnessReceipts[runId] ?? null,
   };
   state.messages.push(message);
   clearRenderCache(state.renderCache);
@@ -1140,6 +1141,13 @@ function addHarnessReceipt(state, receipt) {
   if (existing && Number(existing.revision) >= revision) return existing;
   const normalized = { ...receipt, run_id: runId, revision };
   state.harnessReceipts[runId] = normalized;
+  const completionMessage = state.messages.find(
+    (message) => message.kind === "completion_receipt" && message.runId === runId,
+  );
+  if (completionMessage) {
+    completionMessage.harnessReceipt = normalized;
+    clearRenderCache(state.renderCache);
+  }
   const runIds = Object.keys(state.harnessReceipts);
   while (runIds.length > MAX_HARNESS_RECEIPTS) {
     delete state.harnessReceipts[runIds.shift()];

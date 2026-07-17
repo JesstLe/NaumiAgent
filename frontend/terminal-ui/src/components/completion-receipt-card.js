@@ -1,15 +1,15 @@
 import { ANSI, color, compactText } from "../ansi.js";
 import { boxComponent, line, renderComponent } from "./core.js";
 
-export function CompletionReceiptCard({ receipt }) {
+export function CompletionReceiptCard({ receipt, harnessReceipt = null }) {
   return {
     render(ctx) {
-      return renderCompletionReceiptCard(receipt, ctx);
+      return renderCompletionReceiptCard(receipt, ctx, harnessReceipt);
     },
   };
 }
 
-export function renderCompletionReceiptCard(receipt, ctx) {
+export function renderCompletionReceiptCard(receipt, ctx, harnessReceipt = null) {
   const view = receipt && typeof receipt === "object" ? receipt : {};
   const changes = array(view.changes);
   const taskChanges = changes.filter((item) => item.scope !== "background");
@@ -25,6 +25,7 @@ export function renderCompletionReceiptCard(receipt, ctx) {
     line(color(outcome.style, `${outcome.label} · ${formatDuration(view.duration_ms)}`)),
   ];
   if (view.summary) rows.push(line(compactText(view.summary, 500)));
+  rows.push(...harnessRows(harnessReceipt));
 
   if (validations.length) {
     for (const validation of validations.slice(0, 2)) {
@@ -76,6 +77,73 @@ export function renderCompletionReceiptCard(receipt, ctx) {
     rows.push(line(color(ANSI.cyan, `下一步 · ${compactText(action.label || action.kind, 300)}`)));
   }
   return renderComponent(boxComponent("完成回执", rows), ctx);
+}
+
+function harnessRows(receipt) {
+  if (!receipt || typeof receipt !== "object") return [];
+  const checks = array(receipt.checks);
+  const criteria = array(receipt.criteria);
+  const warnings = array(receipt.warnings);
+  const status = harnessStatusView(receipt.status);
+  const passedChecks = checks.filter((item) => item.status === "passed").length;
+  const satisfiedCriteria = criteria.filter((item) => item.status === "satisfied").length;
+  const evidenceIds = new Set(
+    criteria.flatMap((item) => array(item.evidence_ids))
+      .map((item) => String(item).trim())
+      .filter(Boolean),
+  );
+  const rows = [line(
+    `${color(status.style, status.label)}`
+    + ` · 检查 ${passedChecks}/${checks.length}`
+    + ` · 准则 ${satisfiedCriteria}/${criteria.length}`
+    + ` · 证据 ${evidenceIds.size}`,
+  )];
+
+  const nonPassing = checks.filter((item) => item.status !== "passed");
+  for (const check of nonPassing.slice(0, 2)) {
+    const checkStatus = harnessCheckStatusView(check.status);
+    rows.push(line(color(
+      checkStatus.style,
+      `${checkStatus.label} · ${compactText(check.id || "未知检查", 160)}`,
+    )));
+  }
+  if (nonPassing.length > 2) {
+    rows.push(line(color(ANSI.dim, `另有 ${nonPassing.length - 2} 项未通过检查`)));
+  }
+
+  if (satisfiedCriteria < criteria.length) {
+    rows.push(line(color(
+      receipt.status === "blocked" ? ANSI.red : ANSI.yellow,
+      `准则未满足 · ${satisfiedCriteria}/${criteria.length}`,
+    )));
+  }
+  for (const warning of warnings.slice(0, 2)) {
+    rows.push(line(color(ANSI.yellow, `Harness 警告 · ${compactText(warning, 300)}`)));
+  }
+  if (warnings.length > 2) {
+    rows.push(line(color(ANSI.dim, `另有 ${warnings.length - 2} 条 Harness 警告`)));
+  }
+  return rows;
+}
+
+function harnessStatusView(status) {
+  return {
+    completed_verified: { label: "Harness 已验证", style: ANSI.green },
+    completed_unverified: { label: "Harness 未验证", style: ANSI.yellow },
+    blocked: { label: "Harness 阻塞", style: ANSI.red },
+  }[status] ?? { label: "Harness 状态未知", style: ANSI.dim };
+}
+
+function harnessCheckStatusView(status) {
+  return {
+    failed: { label: "检查失败", style: ANSI.red },
+    timed_out: { label: "检查超时", style: ANSI.yellow },
+    cancelled: { label: "检查取消", style: ANSI.yellow },
+    blocked_by_policy: { label: "策略阻止", style: ANSI.yellow },
+    infrastructure_error: { label: "基础设施异常", style: ANSI.yellow },
+    stale: { label: "结果失效", style: ANSI.yellow },
+    missing: { label: "缺少检查", style: ANSI.yellow },
+  }[status] ?? { label: `检查状态 ${compactText(status || "未知", 40)}`, style: ANSI.dim };
 }
 
 function outcomeView(outcome) {
