@@ -303,6 +303,29 @@ async def test_unknown_failure_code_fails_before_writing(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_failure_time_cannot_predate_reconciliation(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    await store.prepare_session_delete_reconciliation(
+        request_id="request-1",
+        workspace_root=workspace,
+        session_id="session-1",
+        actor=LifecycleActor.USER,
+        created_at=DUE,
+    )
+
+    with pytest.raises(HarnessStoreConflictError, match="早于"):
+        await store.record_reconciliation_failure(
+            request_id="request-1",
+            failure_id="failure-1",
+            stage="session_delete",
+            error_code="infrastructure_error",
+            occurred_at=NOW,
+        )
+
+
+@pytest.mark.asyncio
 async def test_v3_database_migrates_additively_and_keeps_reconciliation(
     tmp_path: Path,
 ) -> None:
