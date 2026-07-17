@@ -108,6 +108,33 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "workbench/request") {
+    const mission = {
+      id: "mission-workbench-1",
+      title: "终端 Workbench 真实概览",
+      goal: "让用户直接掌握工程目标、验证与风险",
+      status: "active",
+    };
+    const task = {
+      id: "task-workbench-1",
+      subject: "实现 Overview 页面",
+      description: "展示权威 Workbench 快照",
+      status: "in_progress",
+      owner: "",
+    };
+    const issue = {
+      task_id: task.id,
+      mission_id: mission.id,
+      risk_level: "high",
+      related_branch: "codex/ui-10-overview",
+      related_worktree: "ui-10-overview",
+      related_pr: "#128",
+      expected_artifacts: ["overview-snapshot.txt"],
+    };
+    emit("workbench/snapshot", workbenchSnapshot(mission, task, issue), record.id);
+    return;
+  }
+
   if (record.type === "task_submit") {
     const text = payload.text ?? "";
     const mission = { id: "mission-1", title: "终端任务", status: "active" };
@@ -498,11 +525,26 @@ function statusPayload(overrides = {}) {
 
 function workbenchSnapshot(mission, task, issue) {
   return {
+    schema_version: 1,
+    stream_id: "fixture-workbench-stream",
+    revision: task.status === "completed" ? 2 : 1,
+    generated_at: "2026-07-17T14:20:00+08:00",
+    full: true,
     session_id: sessionId,
+    counts: { missions: 1, tasks: 1, worktrees: 1, reviews: 1, failures: 1 },
+    active_selection: {
+      mission_id: mission.id,
+      task_id: task.id,
+      worktree: issue.related_worktree || "",
+      review_id: "approval-fixture-1",
+    },
     missions: [mission],
     tasks: [task],
     issues: [issue],
-    failures: [],
+    leases: [{ task_id: task.id, agent_id: "Fixture-Agent", state: "active", worktree_name: issue.related_worktree || "" }],
+    validation_runs: [{ task_id: task.id, command: ["node", "--test"], status: "failed", exit_code: 1, started_at: "2026-07-17T14:00:00+08:00", completed_at: "2026-07-17T14:00:01+08:00" }],
+    failures: [{ id: "failure-fixture-1", task_id: task.id, kind: "test_failed", title: "终端快照失败", status: "open" }],
+    approvals: [{ id: "approval-fixture-1", task_id: task.id, state: "waiting", title: "等待终端 UI 审查" }],
     events: [{ id: "event-41", type: "issue.created" }],
   };
 }

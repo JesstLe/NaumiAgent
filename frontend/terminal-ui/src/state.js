@@ -677,7 +677,23 @@ export function reduceServerEvent(state, record) {
         clearRenderCache(state.renderCache);
       }
       pushSystemMessage(state, "resume", `已恢复会话: ${payload.title ?? payload.session_id}`, "info");
-      return [{ type: "session_replayed", sessionId: state.currentSessionId }];
+      {
+        const actions = [{ type: "session_replayed", sessionId: state.currentSessionId }];
+        if (state.route?.name === "workbench") {
+          state.route = {
+            name: "workbench",
+            originAnchor: { scrollOffset: 0, followTail: true },
+          };
+          state.workbench.loading = true;
+          actions.push({
+            type: "refresh_workbench",
+            knownRevision: 0,
+            knownStreamId: "",
+            sessionId: String(state.currentSessionId || ""),
+          });
+        }
+        return actions;
+      }
     case "error": {
       dismissWelcome(state);
       if (payload.code === "inspector_refresh_failed") {
@@ -2111,13 +2127,31 @@ export function handleSubmitText(state, text, send) {
     return { type: "exit" };
   }
   if (commandText === "/workbench") {
-    state.workbench.loading = true;
-    state.workbench.error = "";
-    send("workbench/request", {
-      session_id: String(state.currentSessionId || ""),
-      known_stream_id: String(state.workbench.stream_id || ""),
-      known_revision: Number(state.workbench.revision) || 0,
-    });
+    if (state.route?.name !== "workbench") {
+      const originAnchor = {
+        scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+        followTail: Boolean(state.followTail),
+      };
+      if (state.agents?.open) {
+        state.agents.open = false;
+        send("agents/request", {
+          open: false,
+          known_revision: state.agents.revision,
+          session_id: String(state.currentSessionId || ""),
+        });
+      }
+      if (state.inspector?.open) {
+        state.inspector.open = false;
+        state.inspector.focused = false;
+        send("inspector/request", {
+          open: false,
+          known_revision: state.inspector.revision,
+          session_id: String(state.currentSessionId || ""),
+        });
+      }
+      state.route = { name: "workbench", originAnchor };
+    }
+    requestWorkbenchSnapshot(state, send);
     return;
   }
   if (commandText === "/agents") {
@@ -2235,6 +2269,33 @@ export function handleSubmitText(state, text, send) {
     return submitTaskMessage(state, text, send);
   }
   return submitUserMessage(state, text, send);
+}
+
+function requestWorkbenchSnapshot(state, send) {
+  state.workbench.loading = true;
+  state.workbench.error = "";
+  send("workbench/request", {
+    session_id: String(state.currentSessionId || ""),
+    known_stream_id: String(state.workbench.stream_id || ""),
+    known_revision: Number(state.workbench.revision) || 0,
+  });
+}
+
+export function handleWorkbenchOverviewKey(state, key, send) {
+  if (state.route?.name !== "workbench") return false;
+  const normalized = String(key || "").toLowerCase();
+  if (key === "\u001b") {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (normalized === "r") {
+    requestWorkbenchSnapshot(state, send);
+    return true;
+  }
+  return true;
 }
 
 export function toggleComposerIntent(state) {

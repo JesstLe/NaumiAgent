@@ -1,0 +1,255 @@
+import {
+  ANSI,
+  charWidth,
+  color,
+  compactText,
+  padRight,
+  stripAnsi,
+  visibleWidth,
+  wrapAnsiLine,
+} from "../ansi.js";
+
+export function renderWorkbenchOverview(view, width, height) {
+  const safeWidth = Math.max(1, Number(width) || 1);
+  const safeHeight = Math.max(1, Number(height) || 1);
+  const snapshot = view && typeof view === "object" ? view : {};
+  const header = [
+    color(ANSI.cyan, fitAnsiWidth("Workbench Overview", safeWidth)),
+    fitAnsiWidth(renderSummary(snapshot), safeWidth),
+    fitAnsiWidth(renderPageState(snapshot), safeWidth),
+  ];
+  const bodyHeight = Math.max(0, safeHeight - header.length);
+  let body;
+  if (snapshot.error && Number(snapshot.revision) < 1) {
+    body = [color(ANSI.red, `加载失败 · ${compactText(snapshot.error, 500)}`)];
+  } else if (snapshot.loading && Number(snapshot.revision) < 1) {
+    body = [color(ANSI.cyan, "正在加载 Workbench 权威快照…")];
+  } else if (!array(snapshot.missions).length && !array(snapshot.tasks).length) {
+    body = [
+      color(ANSI.dim, "暂无 Workbench 任务。"),
+      color(ANSI.dim, "可先使用 /task 创建任务，或按 r 刷新当前会话。"),
+    ];
+  } else if (safeWidth >= 120) {
+    body = renderWideBody(snapshot, safeWidth, bodyHeight);
+  } else {
+    body = renderNarrowBody(snapshot, safeWidth, bodyHeight);
+  }
+  const lines = [...header, ...body.slice(0, bodyHeight)];
+  while (lines.length < safeHeight) lines.push("");
+  return lines.slice(0, safeHeight).map((line) => (
+    padRight(fitAnsiWidth(line, safeWidth), safeWidth)
+  ));
+}
+
+function renderSummary(snapshot) {
+  const counts = snapshot.counts || {};
+  return [
+    `rev ${number(snapshot.revision)}`,
+    `任务 ${number(counts.tasks)}`,
+    `worktree ${number(counts.worktrees)}`,
+    `待审 ${number(counts.reviews)}`,
+    `失败 ${number(counts.failures)}`,
+    snapshot.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function renderPageState(snapshot) {
+  if (snapshot.error) {
+    return color(ANSI.yellow, `刷新警告 · ${compactText(snapshot.error, 300)} · r 重试 · Esc 返回`);
+  }
+  if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
+  return color(ANSI.dim, "r 刷新 · Esc 返回对话 · Worktrees/Reviews 详情将在后续标签页提供");
+}
+
+function renderWideBody(snapshot, width, height) {
+  const leftWidth = Math.max(42, Math.min(Math.floor(width * 0.48), width - 43));
+  const rightWidth = Math.max(1, width - leftWidth - 1);
+  const left = [
+    ...renderSection("当前目标", renderMission(snapshot), leftWidth),
+    ...renderSection("当前任务", renderTask(snapshot), leftWidth),
+  ];
+  const right = [
+    ...renderSection("变更载体", renderChangeCarrier(snapshot), rightWidth),
+    ...renderSection("验证", renderValidation(snapshot), rightWidth),
+    ...renderSection("风险与待审", renderRisk(snapshot), rightWidth),
+  ];
+  return Array.from({ length: height }, (_, index) => {
+    const leftLine = padRight(fitAnsiWidth(left[index] || "", leftWidth), leftWidth);
+    const rightLine = padRight(fitAnsiWidth(right[index] || "", rightWidth), rightWidth);
+    return `${leftLine}${color(ANSI.blue, "│")}${rightLine}`;
+  });
+}
+
+function renderNarrowBody(snapshot, width, height) {
+  return [
+    ...renderSection("当前目标", renderMission(snapshot), width),
+    ...renderSection("当前任务", renderTask(snapshot), width),
+    ...renderSection("变更载体", renderChangeCarrier(snapshot), width),
+    ...renderSection("验证", renderValidation(snapshot), width),
+    ...renderSection("风险与待审", renderRisk(snapshot), width),
+  ].slice(0, height);
+}
+
+function renderSection(title, lines, width) {
+  const heading = color(ANSI.cyan, title);
+  return [heading, ...lines].flatMap((line) => (
+    wrapAnsiLine(line, Math.max(1, width)).map((wrapped) => fitAnsiWidth(wrapped, width))
+  ));
+}
+
+function renderMission(snapshot) {
+  const selection = snapshot.active_selection || {};
+  const missions = array(snapshot.missions);
+  const mission = missions.find((item) => String(item.id) === String(selection.mission_id))
+    || missions.find((item) => ["active", "planning"].includes(String(item.status)))
+    || missions[0];
+  if (!mission) return [color(ANSI.dim, "尚未设置目标")];
+  return [
+    `${missionStatus(mission.status)} ${compactText(mission.title || mission.id, 500)}`,
+    `目标 · ${compactText(mission.goal || "未填写", 800)}`,
+    color(ANSI.dim, `Mission · ${compactText(mission.id || "-", 120)}`),
+  ];
+}
+
+function renderTask(snapshot) {
+  const { task, issue, lease } = activeRecords(snapshot);
+  if (!task) return [color(ANSI.dim, "当前目标下暂无任务")];
+  const owner = task.owner || lease?.agent_id || "未分配";
+  return [
+    `${taskStatus(task.status)} ${compactText(task.subject || task.id, 500)}`,
+    `说明 · ${compactText(task.description || task.active_form || "未填写", 800)}`,
+    `Owner · ${compactText(owner, 160)} · Risk ${riskLabel(issue?.risk_level)}`,
+    array(task.blocked_by).length
+      ? color(ANSI.red, `阻塞于 · ${compactText(array(task.blocked_by).join(", "), 500)}`)
+      : color(ANSI.dim, `Task · ${compactText(task.id || "-", 120)}`),
+  ];
+}
+
+function renderChangeCarrier(snapshot) {
+  const { issue, lease } = activeRecords(snapshot);
+  if (!issue && !lease) return [color(ANSI.dim, "尚未绑定分支或 worktree")];
+  const artifacts = array(issue?.expected_artifacts);
+  return [
+    `分支 · ${compactText(issue?.related_branch || "尚未绑定", 300)}`,
+    `Worktree · ${compactText(issue?.related_worktree || lease?.worktree_name || "尚未绑定", 300)}`,
+    `PR · ${compactText(issue?.related_pr || "尚未绑定", 200)}`,
+    artifacts.length
+      ? `产物 · ${compactText(artifacts.slice(0, 3).join(", "), 500)}${artifacts.length > 3 ? ` · 另 ${artifacts.length - 3} 项` : ""}`
+      : color(ANSI.dim, "产物 · 尚未登记"),
+  ];
+}
+
+function renderValidation(snapshot) {
+  const { task } = activeRecords(snapshot);
+  const runs = array(snapshot.validation_runs)
+    .filter((run) => !task || String(run.task_id) === String(task.id));
+  const run = runs.at(-1);
+  if (!run) return [color(ANSI.yellow, "尚未记录验证")];
+  const command = Array.isArray(run.command) ? run.command.join(" ") : String(run.command || "-");
+  const duration = durationMs(run.started_at, run.completed_at);
+  return [
+    `${validationStatus(run.status)} · 退出码 ${run.exit_code ?? "-"}${duration ? ` · ${duration}ms` : ""}`,
+    `命令 · ${compactText(command, 600)}`,
+  ];
+}
+
+function renderRisk(snapshot) {
+  const { task, issue } = activeRecords(snapshot);
+  const failures = array(snapshot.failures)
+    .filter((item) => !task || String(item.task_id) === String(task.id));
+  const approvals = array(snapshot.approvals)
+    .filter((item) => !task || String(item.task_id) === String(task.id));
+  const lines = [riskLine(issue?.risk_level)];
+  if (failures.length) {
+    lines.push(color(ANSI.red, `失败 · ${compactText(failures[0].title || failures[0].kind, 500)}`));
+    if (failures.length > 1) lines.push(color(ANSI.red, `另有 ${failures.length - 1} 项失败`));
+  } else {
+    lines.push(color(ANSI.green, "失败 · 当前任务无已登记失败"));
+  }
+  if (approvals.length) {
+    lines.push(color(ANSI.yellow, `待审 · ${compactText(approvals[0].title || approvals[0].id, 500)}`));
+    if (approvals.length > 1) lines.push(color(ANSI.yellow, `另有 ${approvals.length - 1} 项待审`));
+  } else {
+    lines.push(color(ANSI.dim, "待审 · 无"));
+  }
+  return lines;
+}
+
+function activeRecords(snapshot) {
+  const selection = snapshot.active_selection || {};
+  const tasks = array(snapshot.tasks);
+  const task = tasks.find((item) => String(item.id) === String(selection.task_id))
+    || tasks.find((item) => String(item.status) === "in_progress")
+    || tasks[0];
+  const taskId = String(task?.id || "");
+  const issue = array(snapshot.issues).find((item) => String(item.task_id) === taskId);
+  const lease = array(snapshot.leases).find((item) => String(item.task_id) === taskId);
+  return { task, issue, lease };
+}
+
+function missionStatus(status) {
+  if (status === "completed") return color(ANSI.green, "已完成");
+  if (["blocked", "cancelled"].includes(status)) return color(ANSI.red, "已阻塞");
+  if (status === "active") return color(ANSI.cyan, "进行中");
+  return color(ANSI.yellow, compactText(status || "规划中", 40));
+}
+
+function taskStatus(status) {
+  if (status === "completed") return color(ANSI.green, "✓");
+  if (status === "blocked") return color(ANSI.red, "!");
+  if (status === "in_progress") return color(ANSI.cyan, "●");
+  return color(ANSI.dim, "○");
+}
+
+function validationStatus(status) {
+  if (["passed", "success", "completed"].includes(status)) return color(ANSI.green, "验证通过");
+  if (["failed", "error"].includes(status)) return color(ANSI.red, "验证失败");
+  return color(ANSI.yellow, `验证${compactText(status || "未知", 40)}`);
+}
+
+function riskLine(risk) {
+  const label = riskLabel(risk);
+  if (["high", "critical"].includes(risk)) return color(ANSI.red, `风险 · ${label}`);
+  if (risk === "medium") return color(ANSI.yellow, `风险 · ${label}`);
+  return color(ANSI.green, `风险 · ${label}`);
+}
+
+function riskLabel(risk) {
+  return {
+    critical: "严重风险",
+    high: "高风险",
+    medium: "中风险",
+    low: "低风险",
+  }[risk] || "未评级";
+}
+
+function durationMs(startedAt, completedAt) {
+  const started = Date.parse(startedAt || "");
+  const completed = Date.parse(completedAt || "");
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return 0;
+  return completed - started;
+}
+
+function array(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function number(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function fitAnsiWidth(line, width) {
+  const safeWidth = Math.max(1, Number(width) || 1);
+  if (visibleWidth(line) <= safeWidth) return line;
+  const target = Math.max(0, safeWidth - 1);
+  let used = 0;
+  let result = "";
+  for (const character of Array.from(stripAnsi(line))) {
+    const next = charWidth(character);
+    if (used + next > target) break;
+    result += character;
+    used += next;
+  }
+  return `${result}…`;
+}

@@ -133,6 +133,18 @@ export function AgentControlFooter({ agents }) {
   };
 }
 
+export function WorkbenchFooter({ state }) {
+  return {
+    render(ctx) {
+      if (state.route?.name !== "workbench") return [];
+      const message = state.workbench?.loading
+        ? "workbench: 正在刷新 · r 重试 · Esc 返回"
+        : "workbench: r 刷新 · Esc 返回";
+      return wrapAnsiLine(color(ANSI.cyan, message), ctx.width);
+    },
+  };
+}
+
 export function StatusFooter({ state, env = {} }) {
   return {
     render(ctx) {
@@ -287,6 +299,7 @@ export function renderFooterSections(state, width, env = {}) {
     { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
     { name: "interaction", lines: state.permission ? [] : InteractionFooter({ interaction: state.interaction }).render(ctx) },
     { name: "agents", lines: AgentControlFooter({ agents: state.agents }).render(ctx) },
+    { name: "workbench", lines: WorkbenchFooter({ state }).render(ctx) },
     { name: "todo", lines: TodoFooter({ todo: state.todo }).render(ctx) },
     { name: "task-selection", lines: TaskSelectionFooter({ taskPanel: state.taskPanel }).render(ctx) },
     { name: "history-search", lines: HistorySearchFooter({ state }).render(ctx) },
@@ -295,9 +308,16 @@ export function renderFooterSections(state, width, env = {}) {
     { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
     {
       name: "prompt",
-      lines: state.agents?.open || state.interaction ? [] : PromptFooter({ state }).render(ctx),
+      lines: state.agents?.open || state.interaction || state.route?.name === "workbench"
+        ? []
+        : PromptFooter({ state }).render(ctx),
     },
-    { name: "help", lines: state.agents?.open || state.interaction ? [] : HelpFooter().render(ctx) },
+    {
+      name: "help",
+      lines: state.agents?.open || state.interaction || state.route?.name === "workbench"
+        ? []
+        : HelpFooter().render(ctx),
+    },
   ].filter((section) => section.lines.length > 0);
 }
 

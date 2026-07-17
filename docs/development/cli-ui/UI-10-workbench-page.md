@@ -49,9 +49,24 @@
 - 真实 SQLite Task/Workbench Store 经新的 Service、Bridge JSONL、Node normalizer/reducer 验证：
   重复快照 revision 不变、任务状态变化 revision +1、counts/selection 与后端一致。
 
+### UI-10.2 已实现：全屏 Overview
+
+- `/workbench` 现在保存对话 timeline 锚点并进入独立全屏 Overview；`r` 只读刷新，`Esc` 恢复原
+  scroll/follow-tail。页面路由和 Workbench 快照不进入 UI session snapshot，新进程默认回到 conversation。
+- 显式 resume 若发生在 Workbench 页面，会丢弃旧会话快照、清零旧 timeline 锚点并请求新会话权威
+  快照，避免把旧会话选择或滚动位置带入新会话。
+- Overview 展示 active mission 的目标/状态、active task 的说明/owner、issue/lease 的 branch/worktree/PR、
+  最近 validation 的命令/状态/退出码/耗时，以及 risk/failure/waiting approval。缺失字段明确显示“尚未绑定”
+  或“尚未记录”，不从模型文案猜测。
+- `>=120` 列使用目标/任务与变更/验证/风险双栏；窄屏纵向降级。高/严重风险与验证失败为红色，
+  待审/中风险为黄色，进行中为青色，完成/通过为绿色；关闭 ANSI 后仍有完整中文标签。
+- loading、empty、ready、error 四态均有可行动提示；100 个 worktree/review 只展示权威 counts 与当前
+  对象，不展开巨大列表。组件和完整 `renderScreen` 在 80/120/200 列均验证无溢出。
+- 终端进程真实执行 `/workbench`→渲染→`r`→`Esc`，确认没有 `submit` 聊天事件。SQLite Store→
+  Service→Bridge→Node reducer→Overview renderer 的 80/120/200 列链路同时通过。
+
 ### 尚未完成
 
-- UI-10.2：Overview 页面及 80/120/200 列布局。
 - UI-10.3：Worktrees tab。
 - UI-10.4：Reviews tab。
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。

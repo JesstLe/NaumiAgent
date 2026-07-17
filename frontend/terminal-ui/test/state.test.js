@@ -13,6 +13,7 @@ import {
   getFoldEntries,
   handleAgentControlKey,
   handleRuntimeInspectorKey,
+  handleWorkbenchOverviewKey,
   handleInteractionKey,
   handleSubmitText,
   hasTaskPanelFocus,
@@ -2318,6 +2319,68 @@ test("workbench slash command requests a read-only current-session snapshot", ()
     },
   });
   assert.equal(state.workbench.loading, false);
+});
+
+test("workbench overview route refreshes and restores the conversation anchor", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.scrollOffset = 12;
+  state.followTail = false;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, "/workbench", send);
+  assert.deepEqual(state.route, {
+    name: "workbench",
+    originAnchor: { scrollOffset: 12, followTail: false },
+  });
+  assert.equal(state.workbench.loading, true);
+
+  assert.equal(handleWorkbenchOverviewKey(state, "r", send), true);
+  assert.equal(sent.filter((item) => item.type === "workbench/request").length, 2);
+  assert.equal(handleWorkbenchOverviewKey(state, "\u001b", send), true);
+  assert.deepEqual(state.route, { name: "conversation", originAnchor: null });
+  assert.equal(state.scrollOffset, 12);
+  assert.equal(state.followTail, false);
+  assert.equal(handleWorkbenchOverviewKey(state, "r", send), false);
+});
+
+test("session replay keeps an open Workbench route but requests new authority", () => {
+  const state = createInitialState();
+  state.currentSessionId = "old-session";
+  state.route = { name: "workbench", originAnchor: { scrollOffset: 3, followTail: false } };
+  state.workbench.stream_id = "old-stream";
+  state.workbench.revision = 8;
+
+  const actions = reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "new-session", title: "新会话", clear: true },
+  });
+
+  assert.equal(state.route.name, "workbench");
+  assert.deepEqual(state.route.originAnchor, { scrollOffset: 0, followTail: true });
+  assert.equal(state.workbench.revision, 0);
+  assert.equal(state.workbench.loading, true);
+  assert(actions.some((action) => action.type === "refresh_workbench"));
+  assert.equal(
+    actions.find((action) => action.type === "refresh_workbench").sessionId,
+    "new-session",
+  );
+});
+
+test("workbench route is transient and never restored into a new UI process", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  handleSubmitText(state, "/workbench", () => {});
+  state.workbench.revision = 4;
+
+  const persisted = createUiSnapshot(state);
+  const restarted = createInitialState();
+  applyUiSnapshot(restarted, persisted);
+
+  assert.equal("workbench" in persisted, false);
+  assert.deepEqual(restarted.route, { name: "conversation", originAnchor: null });
+  assert.equal(restarted.workbench.revision, 0);
 });
 
 test("task submit reuses optimistic delivery and task created accepts it in place", () => {
