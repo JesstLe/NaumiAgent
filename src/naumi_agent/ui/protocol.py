@@ -107,6 +107,7 @@ class ServerEventType(StrEnum):
     INTERACTION_REQUEST = "interaction/request"
     INTERACTION_RESOLVED = "interaction/resolved"
     PERMISSION_GRANTS_CHANGED = "permission/grants_changed"
+    PERMISSION_SNAPSHOT = "permissions/snapshot"
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"

@@ -1011,8 +1011,8 @@ test("terminal UI process opens permission panel through bridge protocol", async
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/permissions\n");
-    await waitForOutput(output, "permissions pending 1");
-    await waitForOutput(output, "perm-1 main -> bash_run");
+    await waitForOutput(output, "权限策略中心");
+    await waitForOutput(output, "perm-1 · main → bash_run");
     await waitForOutput(output, "tasks: perm 1");
 
     const code = await stopTerminalUi(app);

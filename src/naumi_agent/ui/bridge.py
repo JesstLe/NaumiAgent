@@ -2058,14 +2058,17 @@ class JsonlEngineBridge:
         request_id: str,
     ) -> None:
         """Render the read-only permission panel through the UI protocol."""
-        from naumi_agent.ui.permission_panel import render_permission_panel
+        from naumi_agent.ui.permission_panel import (
+            build_permission_panel_snapshot,
+            permission_panel_payload,
+        )
 
         raw_limit = payload.get("limit", 12)
         try:
             limit = int(raw_limit)
         except (TypeError, ValueError):
             limit = 12
-        content = render_permission_panel(
+        snapshot = build_permission_panel_snapshot(
             self.engine,
             pending={
                 pending_id: pending.public_payload
@@ -2074,15 +2077,8 @@ class JsonlEngineBridge:
             limit=limit,
         )
         await self.emit(
-            ServerEventType.UI_MESSAGE,
-            ui_message_payload(
-                SystemNoticeMessage(
-                    type=MessageType.SYSTEM_NOTICE,
-                    title="permissions",
-                    content=content,
-                    level="info",
-                )
-            ),
+            ServerEventType.PERMISSION_SNAPSHOT,
+            permission_panel_payload(snapshot),
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
