@@ -63,5 +63,8 @@
 - HAR-08 H5a Eval Result Store：已实现。现有 HarnessStore schema v8 以 workspace/batch/suite/sample
   不可变键保存脱敏 typed Result、Identity 与内容摘要；幂等重试、冲突拒绝、迁移、隔离和篡改检测
   均已验证。详见 `HAR-08-H5a-eval-result-store.md`。
-- Replay/Sandbox/Live、Baseline promote、Comparison receipt 与其余存储仍为 planned；当前不得把
+- HAR-08 H5b Baseline Version/Selector：已实现。schema v9 对合格 cohort 建立不可变单调版本，
+  原子切换 workspace/suite active selector，并追加带摘要的 previous/current 审计事件；无 Identity、
+  样本缺口、非全绿或未验证 guardrail 均不能晋升。详见 `HAR-08-H5b-baseline-version-selector.md`。
+- Replay/Sandbox/Live、Comparison receipt 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

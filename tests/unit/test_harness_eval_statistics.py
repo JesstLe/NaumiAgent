@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from naumi_agent.harness.eval_identity import (
 )
 from naumi_agent.harness.eval_models import (
     EvalCaseStatus,
+    EvalGuardrailStatus,
     EvalRunStatus,
     HarnessEvalCaseResult,
     HarnessEvalComparisonPolicy,
@@ -27,7 +29,7 @@ from naumi_agent.harness.eval_statistics import (
     compare_eval_repetitions,
     render_eval_statistical_comparison,
 )
-from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.store import HarnessStore, HarnessStoreError
 
 
 def _identity(*, commit: str, repetitions: int = 5):
@@ -334,6 +336,77 @@ async def test_real_static_suite_runs_persists_and_compares_five_samples(
         tuple(item.result for item in restored),
         tuple(item.result for item in restored),
     )
+    first_baseline = await store.promote_eval_baseline(
+        workspace_root=tmp_path,
+        batch_id="real-static-001",
+        suite_id="statistical-real",
+        promoted_by="Harness-Test",
+        promotion_reason="真实五次重复评测全绿",
+        created_at="2026-07-18T10:01:00+08:00",
+    )
+    retry = await store.promote_eval_baseline(
+        workspace_root=tmp_path,
+        batch_id="real-static-001",
+        suite_id="statistical-real",
+        promoted_by="Different-Retry-Actor",
+        promotion_reason="重试不得改写首次晋升事实",
+        created_at="2026-07-18T10:02:00+08:00",
+    )
+    for index, result in enumerate(runs):
+        await store.record_eval_result(
+            workspace_root=tmp_path,
+            batch_id="real-static-002",
+            sample_index=index,
+            result=result,
+            created_at="2026-07-18T10:03:00+08:00",
+        )
+    second_baseline = await store.promote_eval_baseline(
+        workspace_root=tmp_path,
+        batch_id="real-static-002",
+        suite_id="statistical-real",
+        promoted_by="Harness-Test",
+        promotion_reason="创建新版本并切换 selector",
+        created_at="2026-07-18T10:04:00+08:00",
+    )
+    old_retry = await store.promote_eval_baseline(
+        workspace_root=tmp_path,
+        batch_id="real-static-001",
+        suite_id="statistical-real",
+        promoted_by="Late-Retry",
+        promotion_reason="旧版本重试不得回拨 active selector",
+        created_at="2026-07-18T10:04:30+08:00",
+    )
+    active = await HarnessStore(store.db_path).get_active_eval_baseline(
+        tmp_path,
+        "statistical-real",
+    )
+    versions = await store.list_eval_baselines(tmp_path, "statistical-real")
+    events = await store.list_eval_baseline_events(tmp_path, "statistical-real")
+    invalid_guardrails = tuple(
+        item.model_copy(update={"status": EvalGuardrailStatus.UNVERIFIED})
+        for item in runs[0].cases[0].guardrails
+    )
+    invalid_case = runs[0].cases[0].model_copy(
+        update={"guardrails": invalid_guardrails}
+    )
+    invalid_result = runs[0].model_copy(update={"cases": (invalid_case,)})
+    for index, result in enumerate((invalid_result, *runs[1:])):
+        await store.record_eval_result(
+            workspace_root=tmp_path,
+            batch_id="real-static-invalid",
+            sample_index=index,
+            result=result,
+            created_at="2026-07-18T10:05:00+08:00",
+        )
+    with pytest.raises(ValueError, match="guardrail"):
+        await store.promote_eval_baseline(
+            workspace_root=tmp_path,
+            batch_id="real-static-invalid",
+            suite_id="statistical-real",
+            promoted_by="Harness-Test",
+            promotion_reason="不得晋升未验证 guardrail",
+            created_at="2026-07-18T10:06:00+08:00",
+        )
 
     assert batch.status == "completed"
     assert batch.code == ""
@@ -347,6 +420,37 @@ async def test_real_static_suite_runs_persists_and_compares_five_samples(
     )
     assert len(restored) == 5
     assert comparison.verdict is EvalStatisticalVerdict.UNCHANGED
+    assert retry == first_baseline
+    assert first_baseline.version == 1
+    assert second_baseline.version == 2
+    assert old_retry == first_baseline
+    assert active == second_baseline
+    assert [item.version for item in versions] == [2, 1]
+    assert [(item.baseline_id, item.previous_baseline_id) for item in events] == [
+        (first_baseline.id, ""),
+        (second_baseline.id, first_baseline.id),
+    ]
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "UPDATE harness_eval_baselines SET promotion_reason = ? "
+            "WHERE id = ?",
+            ("forged", second_baseline.id),
+        )
+        db.execute(
+            "UPDATE harness_eval_baseline_events SET actor = ? WHERE baseline_id = ?",
+            ("forged", second_baseline.id),
+        )
+        db.commit()
+    with pytest.raises(HarnessStoreError, match="损坏"):
+        await HarnessStore(store.db_path).get_active_eval_baseline(
+            tmp_path,
+            "statistical-real",
+        )
+    with pytest.raises(HarnessStoreError, match="损坏"):
+        await HarnessStore(store.db_path).list_eval_baseline_events(
+            tmp_path,
+            "statistical-real",
+        )
 
 
 def test_repetition_runner_returns_explicit_partial_batch_on_budget(
