@@ -53,6 +53,14 @@ class HarnessExplainEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class HarnessExplainCriterion:
+    id: str
+    description: str
+    status: str
+    evidence_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessRunExplanation:
     run_id: str
     status: str
@@ -66,6 +74,7 @@ class HarnessRunExplanation:
     findings: tuple[HarnessExplainFinding, ...]
     checks: tuple[HarnessExplainCheck, ...]
     evidence: tuple[HarnessExplainEvidence, ...]
+    criteria: tuple[HarnessExplainCriterion, ...] = ()
 
     @property
     def check_count(self) -> int:
@@ -273,6 +282,15 @@ class HarnessExplainer:
                 )
                 for evidence in run.evidence
             ),
+            criteria=tuple(
+                HarnessExplainCriterion(
+                    id=criterion.id,
+                    description=criterion.description,
+                    status=criterion.status,
+                    evidence_ids=criterion.evidence_ids,
+                )
+                for criterion in run.criteria
+            ),
         )
 
 
@@ -419,6 +437,7 @@ def _merge_sources(left: str, right: str) -> str:
 
 __all__ = [
     "HARNESS_EXPLAIN_RULE_VERSION",
+    "HarnessExplainCriterion",
     "HarnessExplainLookup",
     "HarnessExplainer",
     "HarnessFailureClass",

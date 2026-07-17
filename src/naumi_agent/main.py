@@ -2731,7 +2731,7 @@ def _print_help() -> None:
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         (
-            "/harness [status|doctor|explain|replay|eval|knowledge|check|trust|untrust]",
+            "/harness [status|doctor|explain|replay|detail|eval|knowledge|check|trust|untrust]",
             "管理仓库 Harness Profile、离线评测、运行解释、知识与验证检查",
         ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
@@ -2850,11 +2850,17 @@ async def _run_harness(engine: Any, arg: str) -> None:
         render_harness_status,
     )
     from naumi_agent.harness.trust import HarnessTrustStoreError
+    from naumi_agent.ui.harness_detail import render_harness_detail_markdown
+    from naumi_agent.ui.harness_protocol import (
+        harness_explain_payload,
+        harness_replay_payload,
+    )
 
     usage = (
-        "用法：/harness [status|doctor|explain|replay|eval|knowledge|check|trust|untrust]\n"
+        "用法：/harness [status|doctor|explain|replay|detail|eval|knowledge|check|trust|untrust]\n"
         "      /harness explain [run-id|latest]\n"
         "      /harness replay [run-id|latest]\n"
+        "      /harness detail [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness check <check-id>\n"
@@ -2894,6 +2900,25 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness Replay 参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_replay(result)))
+        return
+    if subcommand == "detail" and len(parts) <= 2:
+        target = parts[1] if len(parts) == 2 else "latest"
+        try:
+            explanation = await service.explain_run(target)
+            exact_run_id = (
+                explanation.explanation.run_id
+                if explanation.status == "ok" and explanation.explanation is not None
+                else target
+            )
+            replay = await service.replay_run(exact_run_id)
+            explain_payload = harness_explain_payload(exact_run_id, explanation)
+            replay_payload = harness_replay_payload(exact_run_id, replay)
+        except ValueError as exc:
+            console.print(f"[yellow]Harness 详情参数无效：{exc}[/yellow]")
+            return
+        console.print(
+            Markdown(render_harness_detail_markdown(explain_payload, replay_payload))
+        )
         return
     if subcommand == "eval" and len(parts) <= 2:
         target = parts[1] if len(parts) == 2 else None

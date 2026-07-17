@@ -50,6 +50,7 @@ import {
 } from "./protocol.js";
 import {
   handleAgentControlKey,
+  handleHarnessDetailKey,
   handleInteractionKey,
   handleSubmitText,
   handleRuntimeInspectorKey,
@@ -560,6 +561,10 @@ function handleSingleKeyInput(chunk) {
     ) return;
   }
   if (state.interaction && handleInteractionKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "harness_detail" && handleHarnessDetailKey(state, chunk)) {
     scheduleRedraw();
     return;
   }

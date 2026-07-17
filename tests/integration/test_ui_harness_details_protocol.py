@@ -120,6 +120,52 @@ process.stdout.write(JSON.stringify(normalized));
     return json.loads(completed.stdout)
 
 
+def _render_detail_with_real_node(
+    repo_root: Path,
+    records: list[dict[str, object]],
+) -> dict[str, object]:
+    source = r"""
+import { stripAnsi, visibleWidth } from "./frontend/terminal-ui/src/ansi.js";
+import {
+  renderHarnessDetailPage,
+} from "./frontend/terminal-ui/src/components/harness-detail-page.js";
+import { normalizeServerRecord } from "./frontend/terminal-ui/src/protocol.js";
+import { createInitialState, reduceServerEvent } from "./frontend/terminal-ui/src/state.js";
+let input = "";
+for await (const chunk of process.stdin) input += chunk;
+const records = input.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+const state = createInitialState();
+for (const record of records) reduceServerEvent(state, normalizeServerRecord(record));
+const runId = "detail-real-run";
+const widths = {};
+for (const width of [80, 120, 200]) {
+  const lines = renderHarnessDetailPage({
+    runId,
+    explainLoading: false,
+    replayLoading: false,
+    explain: state.harnessExplanations[runId],
+    replay: state.harnessReplays[runId],
+    scrollOffset: 0,
+  }, width, 24);
+  widths[width] = {
+    bounded: lines.every((line) => visibleWidth(line) <= width),
+    text: lines.map(stripAnsi).join("\n"),
+  };
+}
+process.stdout.write(JSON.stringify({ widths }));
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", source],
+        cwd=repo_root,
+        input="\n".join(json.dumps(record, ensure_ascii=False) for record in records),
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=20,
+    )
+    return json.loads(completed.stdout)
+
+
 def _render_compact_card_with_real_node(
     repo_root: Path,
     records: list[dict[str, object]],
@@ -242,6 +288,18 @@ async def test_real_store_bridge_and_node_recover_harness_details(
     assert normalized[0]["payload"]["explanation"]["verified"] is True
     assert normalized[1]["payload"]["result"]["status"] == "reproduced"
     assert normalized[2]["payload"]["lookup_status"] == "not_found"
+
+    rendered = _render_detail_with_real_node(repo_root, emitted[:2])
+    for width in ("80", "120", "200"):
+        snapshot = rendered["widths"][width]  # type: ignore[index]
+        assert snapshot["bounded"] is True
+        assert "Harness 运行详情" in snapshot["text"]
+        assert "验证 Harness 类型化详情协议" in snapshot["text"]
+        assert "准则" in snapshot["text"]
+        assert "检查" in snapshot["text"]
+        assert "证据" in snapshot["text"]
+        assert "Replay" in snapshot["text"]
+        assert "已复现" in snapshot["text"]
 
 
 @pytest.mark.asyncio
