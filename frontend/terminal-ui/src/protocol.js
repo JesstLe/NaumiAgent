@@ -58,6 +58,14 @@ const HARNESS_EVAL_DECISIONS = new Set([
   "inconclusive",
   "incompatible",
 ]);
+const HARNESS_EVAL_BATCH_STAGES = new Set([
+  "preparing",
+  "evaluating",
+  "persisting",
+  "completed",
+  "partial",
+  "error",
+]);
 const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
 const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
@@ -252,6 +260,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/eval-baseline") {
     return normalizeHarnessEvalBaseline(payload);
+  }
+  if (type === "harness/eval-batch") {
+    return normalizeHarnessEvalBatch(payload);
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
@@ -957,6 +968,73 @@ function normalizeHarnessEvalBaseline(payload) {
   };
 }
 
+function normalizeHarnessEvalBatch(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`harness/eval-batch schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const stage = harnessChoice(payload.stage, "harness/eval-batch stage", HARNESS_EVAL_BATCH_STAGES);
+  const terminal = harnessBoolean(payload.terminal, "harness/eval-batch terminal");
+  if (terminal !== ["completed", "partial", "error"].includes(stage)) {
+    throw new Error("harness/eval-batch terminal 与 stage 不一致");
+  }
+  const requested = harnessPositiveInteger(payload.requested, "harness/eval-batch requested");
+  const completed = harnessNonnegativeInteger(payload.completed, "harness/eval-batch completed");
+  const persisted = harnessNonnegativeInteger(payload.persisted, "harness/eval-batch persisted");
+  if (requested < 5 || requested > 100 || completed > requested || persisted > completed) {
+    throw new Error("harness/eval-batch 进度计数无效");
+  }
+  if (stage === "completed" && (completed !== requested || persisted !== requested)) {
+    throw new Error("harness/eval-batch completed 缺少完整样本");
+  }
+  const identity = harnessText(payload.identity_sha256, "harness/eval-batch identity_sha256");
+  if (identity && !/^[0-9a-f]{64}$/.test(identity)) {
+    throw new Error("harness/eval-batch identity_sha256 必须是 SHA-256");
+  }
+  const baselineEligible = harnessBoolean(
+    payload.baseline_eligible,
+    "harness/eval-batch baseline_eligible",
+  );
+  if (baselineEligible && (stage !== "completed" || !identity)) {
+    throw new Error("harness/eval-batch 仅完整终态可声明 Baseline eligible");
+  }
+  const batchId = harnessText(payload.batch_id, "harness/eval-batch batch_id");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(batchId)) {
+    throw new Error("harness/eval-batch batch_id 无效");
+  }
+  const suiteId = harnessText(payload.suite_id, "harness/eval-batch suite_id");
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(suiteId)) {
+    throw new Error("harness/eval-batch suite_id 无效");
+  }
+  return {
+    schema_version: 1,
+    stage,
+    terminal,
+    batch_id: batchId,
+    suite_id: suiteId,
+    requested,
+    completed,
+    persisted,
+    passed_cases: harnessNonnegativeInteger(payload.passed_cases, "harness/eval-batch passed_cases"),
+    implementation_failures: harnessNonnegativeInteger(
+      payload.implementation_failures,
+      "harness/eval-batch implementation_failures",
+    ),
+    evaluation_errors: harnessNonnegativeInteger(
+      payload.evaluation_errors,
+      "harness/eval-batch evaluation_errors",
+    ),
+    skipped: harnessNonnegativeInteger(payload.skipped, "harness/eval-batch skipped"),
+    duration_ms: harnessNonnegativeFiniteNumber(
+      payload.duration_ms,
+      "harness/eval-batch duration_ms",
+    ),
+    baseline_eligible: baselineEligible,
+    identity_sha256: identity,
+    code: harnessText(payload.code, "harness/eval-batch code"),
+    message: harnessText(payload.message, "harness/eval-batch message"),
+  };
+}
+
 function harnessSha256(value, field) {
   const normalized = harnessText(value, field);
   if (!/^[0-9a-f]{64}$/.test(normalized)) throw new Error(`${field} 必须是 SHA-256`);
@@ -1262,6 +1340,13 @@ function harnessBoolean(value, name) {
 function harnessNonnegativeInteger(value, name) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${name} 必须是非负整数`);
+  }
+  return value;
+}
+
+function harnessNonnegativeFiniteNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} 必须是非负有限数值`);
   }
   return value;
 }

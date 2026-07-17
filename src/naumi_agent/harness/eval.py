@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -137,6 +138,7 @@ def evaluate_suite_repetitions(
     profile_digest: str,
     profile_trusted: bool = False,
     max_total_duration_ms: int = 60_000,
+    on_sample: Callable[[int, HarnessEvalSuiteResult], None] | None = None,
 ) -> HarnessEvalRepetitionBatch:
     """Run one static suite repeatedly under one source identity boundary."""
     if not 5 <= repetitions <= 100:
@@ -158,6 +160,8 @@ def evaluate_suite_repetitions(
                 group_deadline=deadline,
             )
         )
+        if on_sample is not None:
+            on_sample(len(raw_results), raw_results[-1])
     source_after, source_code = _capture_baseline_source_after(
         workspace,
         source_before,

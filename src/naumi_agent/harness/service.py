@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shlex
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -39,17 +40,23 @@ from naumi_agent.harness.context import (
 )
 from naumi_agent.harness.eval import (
     HarnessEvalAssetError,
+    HarnessEvalRepetitionBatch,
     evaluate_declared_suites,
     evaluate_suite_repetitions,
     resolve_declared_eval_suite,
 )
-from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalReport
+from naumi_agent.harness.eval_models import (
+    EvalRunStatus,
+    HarnessEvalReport,
+    HarnessEvalSuiteResult,
+)
 from naumi_agent.harness.eval_receipt import (
     EvalReceiptSample,
     build_eval_comparison_receipt,
 )
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
+    HarnessEvalBatchProgress,
     HarnessEvalBatchStatus,
     HarnessEvalComparisonRunStatus,
     HarnessEvalPromotionStatus,
@@ -98,6 +105,11 @@ _STORE_WARNING = (
     "infrastructure_error: Harness 状态库写入失败，本次主任务结果仍会返回；"
     "请检查用户状态目录权限。"
 )
+logger = logging.getLogger(__name__)
+
+type EvalBatchProgressCallback = Callable[
+    [HarnessEvalBatchProgress], Awaitable[None]
+]
 
 
 class HarnessStatusCode(StrEnum):
@@ -301,6 +313,7 @@ class HarnessService:
         *,
         repetitions: int = 5,
         batch_id: str | None = None,
+        on_progress: EvalBatchProgressCallback | None = None,
     ) -> HarnessEvalBatchStatus:
         """Run and durably append one repeated static Eval candidate cohort."""
         if not isinstance(suite, str) or not suite.strip() or len(suite.strip()) > 1_024:
@@ -361,13 +374,27 @@ class HarnessService:
                 exc.code,
                 str(exc),
             )
-        batch = await asyncio.to_thread(
-            evaluate_suite_repetitions,
-            self.workspace_root,
-            suite_path,
+        progress_started = time.perf_counter()
+        await _notify_eval_batch_progress(
+            on_progress,
+            HarnessEvalBatchProgress(
+                stage="preparing",
+                batch_id=normalized_batch,
+                suite_id=suite.strip(),
+                requested=repetitions,
+                completed=0,
+                persisted=0,
+            ),
+        )
+        batch = await self._evaluate_repetition_batch_with_progress(
+            suite_path=suite_path,
+            suite_id=suite.strip(),
             repetitions=repetitions,
+            batch_id=normalized_batch,
             profile_digest=status.profile_digest,
             profile_trusted=status.trusted,
+            started=progress_started,
+            on_progress=on_progress,
         )
         persisted = 0
         created_at = datetime.now(UTC).isoformat()
@@ -381,6 +408,31 @@ class HarnessService:
                     created_at=created_at,
                 )
                 persisted += 1
+                await _notify_eval_batch_progress(
+                    on_progress,
+                    HarnessEvalBatchProgress(
+                        stage="persisting",
+                        batch_id=normalized_batch,
+                        suite_id=result.suite_id,
+                        requested=repetitions,
+                        completed=batch.completed,
+                        persisted=persisted,
+                        passed_cases=sum(item.passed for item in batch.results),
+                        implementation_failures=sum(
+                            item.implementation_failures for item in batch.results
+                        ),
+                        evaluation_errors=sum(
+                            item.evaluation_errors for item in batch.results
+                        ),
+                        skipped=sum(item.skipped for item in batch.results),
+                        duration_ms=(time.perf_counter() - progress_started) * 1_000,
+                        identity_sha256=(
+                            result.baseline_identity.identity_sha256
+                            if result.baseline_identity is not None
+                            else ""
+                        ),
+                    ),
+                )
         except (HarnessStoreError, ValueError) as exc:
             return _eval_batch_error(
                 normalized_batch,
@@ -390,7 +442,7 @@ class HarnessService:
                 str(exc),
                 completed=batch.completed,
                 persisted=persisted,
-                duration_ms=batch.duration_ms,
+                duration_ms=(time.perf_counter() - progress_started) * 1_000,
             )
         identity = (
             batch.results[0].baseline_identity if batch.results else None
@@ -411,10 +463,93 @@ class HarnessService:
                 result.evaluation_errors for result in batch.results
             ),
             skipped=sum(result.skipped for result in batch.results),
-            duration_ms=batch.duration_ms,
-            baseline_eligible=bool(identity and identity.baseline_eligible),
+            duration_ms=(time.perf_counter() - progress_started) * 1_000,
+            baseline_eligible=bool(
+                batch.status == "completed"
+                and persisted == repetitions
+                and identity
+                and identity.baseline_eligible
+            ),
             identity_sha256=identity.identity_sha256 if identity is not None else "",
         )
+
+    async def _evaluate_repetition_batch_with_progress(
+        self,
+        *,
+        suite_path: Path,
+        suite_id: str,
+        repetitions: int,
+        batch_id: str,
+        profile_digest: str,
+        profile_trusted: bool,
+        started: float,
+        on_progress: EvalBatchProgressCallback | None,
+    ) -> HarnessEvalRepetitionBatch:
+        if on_progress is None:
+            return await asyncio.to_thread(
+                evaluate_suite_repetitions,
+                self.workspace_root,
+                suite_path,
+                repetitions=repetitions,
+                profile_digest=profile_digest,
+                profile_trusted=profile_trusted,
+            )
+
+        queue: asyncio.Queue[tuple[int, HarnessEvalSuiteResult] | None] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def enqueue(item: tuple[int, HarnessEvalSuiteResult] | None) -> None:
+            try:
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+            except RuntimeError:
+                # The UI/event loop can close while a non-cancellable worker thread exits.
+                return
+
+        def on_sample(completed: int, result: HarnessEvalSuiteResult) -> None:
+            enqueue((completed, result))
+
+        def run() -> HarnessEvalRepetitionBatch:
+            try:
+                return evaluate_suite_repetitions(
+                    self.workspace_root,
+                    suite_path,
+                    repetitions=repetitions,
+                    profile_digest=profile_digest,
+                    profile_trusted=profile_trusted,
+                    on_sample=on_sample,
+                )
+            finally:
+                enqueue(None)
+
+        worker = asyncio.create_task(asyncio.to_thread(run))
+        observed: list[HarnessEvalSuiteResult] = []
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            completed, result = item
+            observed.append(result)
+            await _notify_eval_batch_progress(
+                on_progress,
+                HarnessEvalBatchProgress(
+                    stage="evaluating",
+                    batch_id=batch_id,
+                    suite_id=result.suite_id or suite_id,
+                    requested=repetitions,
+                    completed=completed,
+                    persisted=0,
+                    passed_cases=sum(value.passed for value in observed),
+                    implementation_failures=sum(
+                        value.implementation_failures for value in observed
+                    ),
+                    evaluation_errors=sum(
+                        value.evaluation_errors for value in observed
+                    ),
+                    skipped=sum(value.skipped for value in observed),
+                    duration_ms=(time.perf_counter() - started) * 1_000,
+                ),
+            )
+        return await worker
 
     async def promote_eval_baseline(
         self,
@@ -1836,6 +1971,21 @@ def _eval_batch_error(
         persisted=persisted,
         duration_ms=duration_ms,
     )
+
+
+async def _notify_eval_batch_progress(
+    callback: EvalBatchProgressCallback | None,
+    progress: HarnessEvalBatchProgress,
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(progress)
+    except Exception as exc:
+        logger.warning(
+            "Harness Eval Batch progress delivery failed (%s)",
+            type(exc).__name__,
+        )
 
 
 def _eval_promotion_error(

@@ -2958,10 +2958,17 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]{usage}[/yellow]")
             return
         try:
+            on_progress = (
+                _active_cli.update_harness_eval_batch
+                if _active_cli is not None
+                and hasattr(_active_cli, "update_harness_eval_batch")
+                else None
+            )
             result = await service.eval_repetition_batch(
                 target,
                 repetitions=repetitions,
                 batch_id=parsed.get("--batch"),
+                on_progress=on_progress,
             )
         except ValueError as exc:
             console.print(f"[yellow]Harness Eval Batch 参数无效：{exc}[/yellow]")

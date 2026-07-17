@@ -228,6 +228,20 @@ class _TuiSlashCommandFrontend:
         status = self._app.query_one(StatusBar)
         status.status_text = text
 
+    async def update_harness_eval_batch(self, progress: Any) -> None:
+        """Project factual repeated-Eval progress into the persistent TUI status bar."""
+        labels = {
+            "preparing": "准备",
+            "evaluating": "评测",
+            "persisting": "保存",
+        }
+        label = labels.get(str(progress.stage), str(progress.stage))
+        status = self._app.query_one(StatusBar)
+        status.status_text = (
+            f"Eval Batch {label}: {progress.completed}/{progress.requested}"
+            f" · 已保存 {progress.persisted} · {progress.batch_id}"
+        )
+
     def clear_output(self) -> None:
         self._app.query_one(ChatPanel).clear()
         self._app._clear_runtime_task_panels()

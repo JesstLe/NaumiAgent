@@ -50,6 +50,7 @@ class ClientEventType(StrEnum):
     HARNESS_EXPLAIN_REQUEST = "harness/explain/request"
     HARNESS_REPLAY_REQUEST = "harness/replay/request"
     HARNESS_EVAL_BASELINE_REQUEST = "harness/eval-baseline/request"
+    HARNESS_EVAL_BATCH_REQUEST = "harness/eval-batch/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
@@ -92,6 +93,7 @@ class ServerEventType(StrEnum):
     HARNESS_EXPLAIN = "harness/explain"
     HARNESS_REPLAY = "harness/replay"
     HARNESS_EVAL_BASELINE = "harness/eval-baseline"
+    HARNESS_EVAL_BATCH = "harness/eval-batch"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -283,6 +285,24 @@ def _normalize_client_payload(
                 "Harness Eval suite_id 必须以小写字母开头，且只含小写字母、数字、_ 或 -。"
             )
         return {"suite_id": suite_id}
+
+    if event_type == ClientEventType.HARNESS_EVAL_BATCH_REQUEST:
+        suite_id = str(payload.get("suite_id") or "").strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", suite_id):
+            raise ValueError("Harness Eval Batch suite_id 格式无效。")
+        repetitions = payload.get("repetitions", 5)
+        if isinstance(repetitions, bool) or not isinstance(repetitions, int):
+            raise ValueError("Harness Eval Batch repetitions 必须是整数。")
+        if not 5 <= repetitions <= 100:
+            raise ValueError("Harness Eval Batch repetitions 必须在 5..100 之间。")
+        batch_id = str(payload.get("batch_id") or "").strip()
+        if batch_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", batch_id):
+            raise ValueError("Harness Eval Batch batch_id 格式无效。")
+        return {
+            "suite_id": suite_id,
+            "repetitions": repetitions,
+            "batch_id": batch_id,
+        }
 
     if event_type == ClientEventType.INSPECTOR_REQUEST:
         raw_revision = payload.get("known_revision", 0)

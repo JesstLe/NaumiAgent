@@ -136,6 +136,30 @@ function harnessEvalBaselinePayload() {
   };
 }
 
+function harnessEvalBatchPayload(stage = "evaluating") {
+  const terminal = ["completed", "partial", "error"].includes(stage);
+  return {
+    schema_version: 1,
+    stage,
+    terminal,
+    batch_id: "candidate-1",
+    suite_id: "surface-protocol",
+    requested: 5,
+    completed: stage === "completed" ? 5 : 2,
+    persisted: stage === "completed" ? 5 : 0,
+    passed_cases: 4,
+    implementation_failures: 0,
+    evaluation_errors: 0,
+    skipped: 0,
+    duration_ms: 12.5,
+    baseline_eligible: stage === "completed",
+    identity_sha256: stage === "completed" ? "a".repeat(64) : "",
+    code: "",
+    message: "",
+    private_payload: "must-drop",
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -255,6 +279,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/explain/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/replay/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-baseline/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-batch/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -266,6 +291,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/explain"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/replay"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-baseline"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-batch"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -444,6 +470,30 @@ test("harness eval baseline response is strict and drops private fields", () => 
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-baseline", payload: mismatched }),
     /active/,
+  );
+});
+
+test("harness eval batch response validates factual progress and terminal state", () => {
+  const progress = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessEvalBatchPayload(),
+  }).payload;
+  const completed = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessEvalBatchPayload("completed"),
+  }).payload;
+
+  assert.equal(progress.stage, "evaluating");
+  assert.equal(progress.terminal, false);
+  assert.equal(completed.persisted, 5);
+  assert.equal(completed.baseline_eligible, true);
+  assert.equal(Object.hasOwn(progress, "private_payload"), false);
+
+  const invalid = harnessEvalBatchPayload("completed");
+  invalid.persisted = 4;
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
+    /完整样本/,
   );
 });
 

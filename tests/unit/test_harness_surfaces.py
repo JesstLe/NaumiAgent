@@ -271,12 +271,22 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
 ) -> None:
     engine = _engine(tmp_path)
     try:
+        class ProgressFrontend:
+            def __init__(self) -> None:
+                self.progress = []
+
+            async def update_harness_eval_batch(self, progress) -> None:
+                self.progress.append(progress)
+
+        frontend = ProgressFrontend()
         slash = _plain(
             await execute_slash_command(
                 engine,
                 "/harness eval surface-protocol --repeat 5 --batch surface-batch-1",
+                frontend=frontend,
             )
         )
+        progress = frontend.progress
         stored = await engine.harness_service.store.list_eval_results(
             engine.workspace_root,
             "surface-batch-1",
@@ -297,6 +307,17 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             "surface-protocol",
         )
 
+        assert [item.stage for item in progress] == [
+            "preparing",
+            *("evaluating" for _ in range(5)),
+            *("persisting" for _ in range(5)),
+        ]
+        assert [
+            item.completed for item in progress if item.stage == "evaluating"
+        ] == [1, 2, 3, 4, 5]
+        assert [
+            item.persisted for item in progress if item.stage == "persisting"
+        ] == [1, 2, 3, 4, 5]
         assert "完成 5/5 · 已保存 5" in slash
         assert "重复评测完成" in slash
         assert "surface-batch-1" in slash

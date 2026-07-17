@@ -21,7 +21,11 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
-from naumi_agent.harness.eval_surface import HarnessEvalBaselineStatus
+from naumi_agent.harness.eval_surface import (
+    HarnessEvalBaselineStatus,
+    HarnessEvalBatchProgress,
+    eval_batch_terminal_progress,
+)
 from naumi_agent.harness.explain import HarnessExplainLookup
 from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.inspector import RuntimeInspectorSnapshot
@@ -31,6 +35,7 @@ from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
+    harness_eval_batch_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
@@ -445,6 +450,7 @@ class JsonlEngineBridge:
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._run_task: asyncio.Task[Any] | None = None
+        self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._active_run_context: dict[str, str] = {}
         self._active_completion_receipt: CompletionReceipt | None = None
@@ -772,6 +778,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.HARNESS_EVAL_BASELINE_REQUEST:
             await self.query_harness_eval_baseline(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.HARNESS_EVAL_BATCH_REQUEST:
+            await self.start_harness_eval_batch(payload, request_id=request_id)
             return
         if event_type == ClientEventType.INSPECTOR_REQUEST:
             await self.show_inspector(payload, request_id=request_id)
@@ -1362,6 +1371,78 @@ class JsonlEngineBridge:
             response,
             request_id=request_id,
         )
+
+    async def start_harness_eval_batch(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Start one non-blocking repeated Eval and stream factual progress."""
+        if len(self._harness_eval_batch_tasks) >= 4:
+            await self.emit_error(
+                "并行 Eval Batch 已达上限（4 个），请等待任一 Batch 完成。",
+                code="harness_eval_batch_limit",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "harness_service", None)
+        if service is None:
+            await self.emit(
+                ServerEventType.HARNESS_EVAL_BATCH,
+                harness_eval_batch_payload(
+                    HarnessEvalBatchProgress(
+                        stage="error",
+                        batch_id=str(payload.get("batch_id") or "unassigned"),
+                        suite_id=str(payload["suite_id"]),
+                        requested=int(payload["repetitions"]),
+                        completed=0,
+                        persisted=0,
+                        code="service_unavailable",
+                        message="Harness Service 尚未初始化。",
+                    )
+                ),
+                request_id=request_id,
+            )
+            return
+
+        async def emit_progress(progress: HarnessEvalBatchProgress) -> None:
+            await self.emit(
+                ServerEventType.HARNESS_EVAL_BATCH,
+                harness_eval_batch_payload(progress),
+                request_id=request_id,
+            )
+
+        async def run() -> None:
+            try:
+                result = await service.eval_repetition_batch(
+                    str(payload["suite_id"]),
+                    repetitions=int(payload["repetitions"]),
+                    batch_id=str(payload.get("batch_id") or "") or None,
+                    on_progress=emit_progress,
+                )
+                await emit_progress(eval_batch_terminal_progress(result))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._trace_harness_lookup_failure("eval_batch", exc)
+                await emit_progress(
+                    HarnessEvalBatchProgress(
+                        stage="error",
+                        batch_id=str(payload.get("batch_id") or "unassigned"),
+                        suite_id=str(payload["suite_id"]),
+                        requested=int(payload["repetitions"]),
+                        completed=0,
+                        persisted=0,
+                        code="batch_failed",
+                        message="Eval Batch 执行失败；请运行 /harness doctor 后重试。",
+                    )
+                )
+            finally:
+                self._harness_eval_batch_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(run())
+        self._harness_eval_batch_tasks[request_id] = task
 
     def _trace_harness_lookup_failure(self, operation: str, error: Exception) -> None:
         error_type = type(error).__name__
@@ -2532,6 +2613,12 @@ class JsonlEngineBridge:
                 await self._run_task
             except asyncio.CancelledError:
                 pass
+        batch_tasks = tuple(self._harness_eval_batch_tasks.values())
+        for task in batch_tasks:
+            task.cancel()
+        if batch_tasks:
+            await asyncio.gather(*batch_tasks, return_exceptions=True)
+        self._harness_eval_batch_tasks.clear()
         await self.engine.shutdown()
         await self.emit(ServerEventType.SHUTDOWN, {"ok": True})
         if self.debug_trace is not None:

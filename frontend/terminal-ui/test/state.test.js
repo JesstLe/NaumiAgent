@@ -14,6 +14,7 @@ import {
   handleAgentControlKey,
   handleHarnessDetailKey,
   handleHarnessEvalBaselineKey,
+  handleHarnessEvalBatchKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -3366,6 +3367,50 @@ test("Harness baseline command opens typed snapshot route and restores origin", 
   assert.equal(state.route.name, "conversation");
   assert.equal(Object.keys(state.harnessEvalBaselines).length, 0);
   assert.equal(state.harnessEvalBaseline.suiteId, "");
+});
+
+test("Harness repeated Eval command opens live typed Batch route", () => {
+  const state = createInitialState();
+  state.scrollOffset = 6;
+  state.followTail = false;
+  const sent = [];
+
+  handleSubmitText(
+    state,
+    "/harness eval surface-protocol --batch candidate-1 --repeat 5",
+    (type, payload) => {
+      sent.push({ type, payload });
+      return "batch-request";
+    },
+  );
+
+  assert.equal(state.route.name, "harness_eval_batch");
+  assert.equal(state.harnessEvalBatch.requestId, "batch-request");
+  assert.deepEqual(sent, [{
+    type: "harness/eval-batch/request",
+    payload: { suite_id: "surface-protocol", repetitions: 5, batch_id: "candidate-1" },
+  }]);
+
+  reduceServerEvent(state, {
+    type: "harness/eval-batch",
+    request_id: "batch-request",
+    payload: {
+      schema_version: 1,
+      stage: "evaluating",
+      terminal: false,
+      batch_id: "candidate-1",
+      suite_id: "surface-protocol",
+      requested: 5,
+      completed: 2,
+      persisted: 0,
+    },
+  });
+  assert.equal(state.harnessEvalBatch.batchId, "candidate-1");
+  assert.equal(state.harnessEvalBatches["candidate-1"].completed, 2);
+  assert.equal(handleHarnessEvalBatchKey(state, INPUT_KEYS.escape), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 6);
+  assert.equal(state.followTail, false);
 });
 
 test("Harness detail command rejects an invalid explicit run id locally", () => {

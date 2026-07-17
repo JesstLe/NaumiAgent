@@ -38,7 +38,7 @@ Textual TUI 与兼容终端仍通过同一 Slash 路由渲染 `HarnessEvalBaseli
 
 ## 5. 后续边界
 
-- HAR-08.8e2：Batch typed progress/detail；
+- HAR-08.8e2 已完成：Batch typed 真实进度与终态详情；
 - HAR-08.8e3：晋升交互、理由输入与结果页；
 - HAR-08.8e4：Comparison receipt 详情、decision/时间筛选；
 - HAR-08.3/8.4/8.5：Replay、Sandbox、Live runner 复用这些 typed surface。
