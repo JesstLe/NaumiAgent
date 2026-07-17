@@ -12,6 +12,7 @@ from naumi_agent.harness.checks import validate_run_id
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchProgress,
+    HarnessEvalPromotionFlowStatus,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
@@ -104,6 +105,29 @@ def harness_eval_batch_payload(progress: HarnessEvalBatchProgress) -> dict[str, 
         "identity_sha256": progress.identity_sha256,
         "code": _text(progress.code),
         "message": _text(progress.message),
+    }
+
+
+def harness_eval_promotion_payload(
+    status: HarnessEvalPromotionFlowStatus,
+) -> dict[str, Any]:
+    """Serialize one guided promotion state without exposing Store internals."""
+    return {
+        "schema_version": HARNESS_DETAIL_SCHEMA_VERSION,
+        "stage": status.stage,
+        "terminal": status.terminal,
+        "suite_id": _text(status.suite_id),
+        "batch_id": _text(status.batch_id),
+        "code": _text(status.code),
+        "message": _text(status.message),
+        "baseline_id": status.baseline_id,
+        "active_baseline_id": status.active_baseline_id,
+        "previous_baseline_id": status.previous_baseline_id,
+        "version": status.version,
+        "sample_count": status.sample_count,
+        "promoted_by": _text(status.promoted_by),
+        "promotion_reason": _text(status.promotion_reason),
+        "created_at": _text(status.created_at),
     }
 
 
@@ -286,6 +310,7 @@ __all__ = [
     "HARNESS_DETAIL_SCHEMA_VERSION",
     "harness_eval_baseline_payload",
     "harness_eval_batch_payload",
+    "harness_eval_promotion_payload",
     "harness_explain_payload",
     "harness_replay_payload",
 ]

@@ -2841,10 +2841,12 @@ def _print_help() -> None:
 async def _run_harness(engine: Any, arg: str) -> None:
     """Run user-only Harness commands through the shared service facade."""
     from naumi_agent.harness.eval import render_harness_eval
+    from naumi_agent.harness.eval_promotion_flow import run_eval_promotion_flow
     from naumi_agent.harness.eval_surface import (
         render_eval_baseline_status,
         render_eval_batch_status,
         render_eval_comparison_run_status,
+        render_eval_promotion_flow_status,
         render_eval_promotion_status,
     )
     from naumi_agent.harness.explain import render_harness_explanation
@@ -2872,7 +2874,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
-        "      /harness baseline promote <suite-id> <batch-id> --reason <原因>\n"
+        "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
         "      /harness baseline compare <suite-id> <candidate-batch-id>\n"
         "      /harness knowledge <查询|相对路径> [--max-tokens 1..4000]\n"
         "      /harness check <check-id>\n"
@@ -2983,6 +2985,35 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness Eval 参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_eval(result)))
+        return
+    if (
+        subcommand == "baseline"
+        and len(parts) == 4
+        and parts[1].lower() == "promote"
+    ):
+        interaction = (
+            _active_cli.request_user_interaction
+            if _active_cli is not None
+            and hasattr(_active_cli, "request_user_interaction")
+            else None
+        )
+        if interaction is None:
+            console.print(
+                "[yellow]当前终端不支持引导式理由输入；请使用 "
+                "`--reason <原因>` 显式晋升。[/yellow]"
+            )
+            return
+        try:
+            result = await run_eval_promotion_flow(
+                service,
+                suite_id=parts[2],
+                batch_id=parts[3],
+                interact=interaction,
+            )
+        except ValueError as exc:
+            console.print(f"[yellow]Harness Baseline 晋升参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_eval_promotion_flow_status(result)))
         return
     if (
         subcommand == "baseline"

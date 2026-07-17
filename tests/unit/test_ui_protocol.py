@@ -98,6 +98,45 @@ def test_protocol_normalizes_harness_eval_batch_request() -> None:
     }
 
 
+def test_protocol_normalizes_harness_eval_promotion_request() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST,
+            "payload": {
+                "suite_id": "surface-protocol",
+                "batch_id": "candidate:1",
+                "reason": "  完整回归已通过  ",
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "suite_id": "surface-protocol",
+        "batch_id": "candidate:1",
+        "reason": "完整回归已通过",
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"suite_id": "Upper", "batch_id": "candidate-1"},
+        {"suite_id": "surface-protocol", "batch_id": "../candidate"},
+        {"suite_id": "surface-protocol", "batch_id": "candidate-1", "reason": "短"},
+    ],
+)
+def test_protocol_rejects_invalid_harness_eval_promotion_request(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="Harness Eval Promotion"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST,
+                "payload": payload,
+            }
+        )
+
+
 def test_protocol_normalizes_workbench_snapshot_requests() -> None:
     record = normalize_client_record(
         {

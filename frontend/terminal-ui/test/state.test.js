@@ -15,6 +15,7 @@ import {
   handleHarnessDetailKey,
   handleHarnessEvalBaselineKey,
   handleHarnessEvalBatchKey,
+  handleHarnessEvalPromotionKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -3410,6 +3411,56 @@ test("Harness repeated Eval command opens live typed Batch route", () => {
   assert.equal(handleHarnessEvalBatchKey(state, INPUT_KEYS.escape), true);
   assert.equal(state.route.name, "conversation");
   assert.equal(state.scrollOffset, 6);
+  assert.equal(state.followTail, false);
+});
+
+test("Harness Baseline promotion command opens guided typed route and restores origin", () => {
+  const state = createInitialState();
+  state.scrollOffset = 8;
+  state.followTail = false;
+  const sent = [];
+
+  handleSubmitText(
+    state,
+    "/harness baseline promote surface-protocol candidate-1",
+    (type, payload) => {
+      sent.push({ type, payload });
+      return "promotion-request";
+    },
+  );
+
+  assert.equal(state.route.name, "harness_eval_promotion");
+  assert.equal(state.harnessEvalPromotion.requestId, "promotion-request");
+  assert.deepEqual(sent, [{
+    type: "harness/eval-promotion/request",
+    payload: { suite_id: "surface-protocol", batch_id: "candidate-1", reason: "" },
+  }]);
+
+  reduceServerEvent(state, {
+    type: "harness/eval-promotion",
+    request_id: "promotion-request",
+    payload: {
+      schema_version: 1,
+      stage: "awaiting_reason",
+      terminal: false,
+      suite_id: "surface-protocol",
+      batch_id: "candidate-1",
+      code: "",
+      message: "请选择理由",
+      baseline_id: "",
+      active_baseline_id: "",
+      previous_baseline_id: "",
+      version: 0,
+      sample_count: 0,
+      promoted_by: "",
+      promotion_reason: "",
+      created_at: "",
+    },
+  });
+  assert.equal(state.harnessEvalPromotions["promotion-request"].stage, "awaiting_reason");
+  assert.equal(handleHarnessEvalPromotionKey(state, INPUT_KEYS.escape), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 8);
   assert.equal(state.followTail, false);
 });
 

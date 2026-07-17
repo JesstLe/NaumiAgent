@@ -242,6 +242,13 @@ class _TuiSlashCommandFrontend:
             f" · 已保存 {progress.persisted} · {progress.batch_id}"
         )
 
+    async def request_user_interaction(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, str]:
+        """Delegate guided Slash interactions to the same Textual modal host."""
+        return await self._app.request_user_interaction(payload)
+
     def clear_output(self) -> None:
         self._app.query_one(ChatPanel).clear()
         self._app._clear_runtime_task_panels()

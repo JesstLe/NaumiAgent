@@ -66,6 +66,15 @@ const HARNESS_EVAL_BATCH_STAGES = new Set([
   "partial",
   "error",
 ]);
+const HARNESS_EVAL_PROMOTION_STAGES = new Set([
+  "awaiting_reason",
+  "awaiting_confirmation",
+  "promoted",
+  "already_active",
+  "not_selected",
+  "cancelled",
+  "error",
+]);
 const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
 const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
@@ -263,6 +272,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/eval-batch") {
     return normalizeHarnessEvalBatch(payload);
+  }
+  if (type === "harness/eval-promotion") {
+    return normalizeHarnessEvalPromotion(payload);
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
@@ -1032,6 +1044,90 @@ function normalizeHarnessEvalBatch(payload) {
     identity_sha256: identity,
     code: harnessText(payload.code, "harness/eval-batch code"),
     message: harnessText(payload.message, "harness/eval-batch message"),
+  };
+}
+
+function normalizeHarnessEvalPromotion(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`harness/eval-promotion schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const stage = harnessChoice(
+    payload.stage,
+    "harness/eval-promotion stage",
+    HARNESS_EVAL_PROMOTION_STAGES,
+  );
+  const terminal = harnessBoolean(payload.terminal, "harness/eval-promotion terminal");
+  if (terminal !== !["awaiting_reason", "awaiting_confirmation"].includes(stage)) {
+    throw new Error("harness/eval-promotion terminal 与 stage 不一致");
+  }
+  const suiteId = harnessText(payload.suite_id, "harness/eval-promotion suite_id");
+  const batchId = harnessText(payload.batch_id, "harness/eval-promotion batch_id");
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(suiteId)) {
+    throw new Error("harness/eval-promotion suite_id 无效");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(batchId)) {
+    throw new Error("harness/eval-promotion batch_id 无效");
+  }
+  const optionalSha = (value, field) => {
+    const normalized = harnessText(value, field);
+    if (normalized && !/^[0-9a-f]{64}$/.test(normalized)) {
+      throw new Error(`${field} 必须是 SHA-256`);
+    }
+    return normalized;
+  };
+  const baselineId = optionalSha(payload.baseline_id, "harness/eval-promotion baseline_id");
+  const activeBaselineId = optionalSha(
+    payload.active_baseline_id,
+    "harness/eval-promotion active_baseline_id",
+  );
+  const previousBaselineId = optionalSha(
+    payload.previous_baseline_id,
+    "harness/eval-promotion previous_baseline_id",
+  );
+  const version = harnessNonnegativeInteger(payload.version, "harness/eval-promotion version");
+  const sampleCount = harnessNonnegativeInteger(
+    payload.sample_count,
+    "harness/eval-promotion sample_count",
+  );
+  const promotionReason = harnessText(
+    payload.promotion_reason,
+    "harness/eval-promotion promotion_reason",
+  );
+  const promotedBy = harnessText(payload.promoted_by, "harness/eval-promotion promoted_by");
+  const createdAt = harnessText(payload.created_at, "harness/eval-promotion created_at");
+  if (stage === "awaiting_confirmation" && !promotionReason) {
+    throw new Error("harness/eval-promotion 确认阶段缺少晋升理由");
+  }
+  if (["promoted", "already_active"].includes(stage)
+    && (
+      !baselineId
+      || version < 1
+      || sampleCount < 1
+      || !promotedBy
+      || !promotionReason
+      || !createdAt
+    )) {
+    throw new Error("harness/eval-promotion 成功终态缺少权威字段");
+  }
+  if (stage === "not_selected" && (!baselineId || !activeBaselineId || version < 1)) {
+    throw new Error("harness/eval-promotion not_selected 缺少权威字段");
+  }
+  return {
+    schema_version: 1,
+    stage,
+    terminal,
+    suite_id: suiteId,
+    batch_id: batchId,
+    code: harnessText(payload.code, "harness/eval-promotion code"),
+    message: harnessText(payload.message, "harness/eval-promotion message"),
+    baseline_id: baselineId,
+    active_baseline_id: activeBaselineId,
+    previous_baseline_id: previousBaselineId,
+    version,
+    sample_count: sampleCount,
+    promoted_by: promotedBy,
+    promotion_reason: promotionReason,
+    created_at: createdAt,
   };
 }
 

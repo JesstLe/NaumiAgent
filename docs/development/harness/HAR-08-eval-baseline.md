@@ -87,5 +87,8 @@
 - HAR-08.8e2 Typed Eval Batch 真实进度：已实现。runner 逐样本报告真实评测完成，Service 区分
   evaluating/persisting，Bridge 非阻塞并发推送，新 UI 页面与 Textual TUI 状态栏同步显示。
   详见 `HAR-08-8e2-typed-eval-batch-progress.md`。
+- HAR-08.8e3 引导式 Baseline 晋升：已实现。新 UI 与 Textual TUI 复用结构化理由选择和最终确认，
+  显式 reason 与 Agent Tool 保持直达；所有路径最终只调用 H5b 权威 gate，并以 typed 状态说明 selector
+  是否改变。详见 `HAR-08-8e3-guided-baseline-promotion.md`。
 - Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
   HAR-08 整体标记为 implemented。

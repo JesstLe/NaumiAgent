@@ -9,6 +9,7 @@ from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineView,
     HarnessEvalBatchProgress,
     HarnessEvalComparisonView,
+    HarnessEvalPromotionFlowStatus,
 )
 from naumi_agent.harness.explain import (
     HarnessExplainCheck,
@@ -29,6 +30,7 @@ from naumi_agent.harness.replay_models import (
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
     harness_eval_batch_payload,
+    harness_eval_promotion_payload,
     harness_explain_payload,
     harness_replay_payload,
 )
@@ -157,6 +159,43 @@ def test_harness_eval_batch_payload_distinguishes_progress_and_terminal() -> Non
                     ),
                 ),
             )
+        )
+
+
+def test_harness_eval_promotion_payload_preserves_guided_and_terminal_state() -> None:
+    waiting = harness_eval_promotion_payload(
+        HarnessEvalPromotionFlowStatus(
+            stage="awaiting_confirmation",
+            suite_id="surface-protocol",
+            batch_id="candidate-1",
+            promotion_reason="完整回归已通过",
+        )
+    )
+    promoted = harness_eval_promotion_payload(
+        HarnessEvalPromotionFlowStatus(
+            stage="promoted",
+            suite_id="surface-protocol",
+            batch_id="candidate-1",
+            baseline_id="a" * 64,
+            active_baseline_id="a" * 64,
+            version=1,
+            sample_count=5,
+            promoted_by="user",
+            promotion_reason="完整回归已通过",
+            created_at="2026-07-18T10:00:00+00:00",
+        )
+    )
+
+    assert waiting["terminal"] is False
+    assert waiting["promotion_reason"] == "完整回归已通过"
+    assert promoted["terminal"] is True
+    assert promoted["baseline_id"] == "a" * 64
+
+    with pytest.raises(ValueError, match="确认阶段"):
+        HarnessEvalPromotionFlowStatus(
+            stage="awaiting_confirmation",
+            suite_id="surface-protocol",
+            batch_id="candidate-1",
         )
 
 

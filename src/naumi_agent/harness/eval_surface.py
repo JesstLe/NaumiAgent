@@ -149,6 +149,122 @@ class HarnessEvalPromotionStatus(_StrictModel):
     created_at: str = ""
 
 
+class HarnessEvalPromotionFlowStatus(_StrictModel):
+    stage: Literal[
+        "awaiting_reason",
+        "awaiting_confirmation",
+        "promoted",
+        "already_active",
+        "not_selected",
+        "cancelled",
+        "error",
+    ]
+    suite_id: str
+    batch_id: str
+    code: str = ""
+    message: str = ""
+    baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    active_baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    previous_baseline_id: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    version: int = Field(default=0, ge=0)
+    sample_count: int = Field(default=0, ge=0, le=10_000)
+    promoted_by: str = ""
+    promotion_reason: str = ""
+    created_at: str = ""
+
+    @property
+    def terminal(self) -> bool:
+        return self.stage not in {"awaiting_reason", "awaiting_confirmation"}
+
+    @model_validator(mode="after")
+    def _promotion_flow_is_coherent(self) -> HarnessEvalPromotionFlowStatus:
+        if self.stage == "awaiting_confirmation" and not self.promotion_reason:
+            raise ValueError("Baseline 晋升确认阶段必须携带晋升理由。")
+        if self.stage in {"promoted", "already_active"} and (
+            not self.baseline_id
+            or self.version < 1
+            or self.sample_count < 1
+            or not self.promoted_by
+            or not self.promotion_reason
+            or not self.created_at
+        ):
+            raise ValueError("Baseline 晋升成功终态缺少权威字段。")
+        if self.stage == "not_selected" and (
+            not self.baseline_id
+            or not self.active_baseline_id
+            or self.version < 1
+        ):
+            raise ValueError("Baseline 历史版本终态缺少权威字段。")
+        return self
+
+
+def eval_promotion_flow_from_result(
+    result: HarnessEvalPromotionStatus,
+) -> HarnessEvalPromotionFlowStatus:
+    return HarnessEvalPromotionFlowStatus(
+        stage=result.status,
+        suite_id=result.suite_id,
+        batch_id=result.batch_id,
+        code=result.code,
+        message=result.message,
+        baseline_id=result.baseline_id,
+        active_baseline_id=result.active_baseline_id,
+        previous_baseline_id=result.previous_baseline_id,
+        version=result.version,
+        sample_count=result.sample_count,
+        promoted_by=result.promoted_by,
+        promotion_reason=result.promotion_reason,
+        created_at=result.created_at,
+    )
+
+
+def render_eval_promotion_flow_status(
+    result: HarnessEvalPromotionFlowStatus,
+) -> str:
+    if result.stage in {"awaiting_reason", "awaiting_confirmation"}:
+        state = "等待晋升理由" if result.stage == "awaiting_reason" else "等待最终确认"
+        return "\n".join(
+            [
+                "## Harness Eval Baseline 晋升",
+                "",
+                f"- Suite：`{result.suite_id}`",
+                f"- Batch：`{result.batch_id}`",
+                f"- 状态：{state}",
+                f"- 说明：{result.message}",
+            ]
+        )
+    if result.stage == "cancelled":
+        return "\n".join(
+            [
+                "## Harness Eval Baseline 晋升",
+                "",
+                f"- Suite：`{result.suite_id}`",
+                f"- Batch：`{result.batch_id}`",
+                "- 状态：用户已取消，Selector 未改变",
+                f"- 说明：{result.message or '未执行晋升。'}",
+            ]
+        )
+    terminal_stage: Literal["promoted", "already_active", "not_selected", "error"] = (
+        result.stage
+    )
+    status = HarnessEvalPromotionStatus(
+        status=terminal_stage,
+        code=result.code,
+        message=result.message,
+        suite_id=result.suite_id,
+        batch_id=result.batch_id,
+        baseline_id=result.baseline_id,
+        active_baseline_id=result.active_baseline_id,
+        previous_baseline_id=result.previous_baseline_id,
+        version=result.version,
+        sample_count=result.sample_count,
+        promoted_by=result.promoted_by,
+        promotion_reason=result.promotion_reason,
+        created_at=result.created_at,
+    )
+    return render_eval_promotion_status(status)
+
+
 class HarnessEvalComparisonRunStatus(_StrictModel):
     status: Literal["created", "existing", "stale_baseline", "error"]
     code: str = ""

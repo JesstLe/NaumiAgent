@@ -51,6 +51,7 @@ class ClientEventType(StrEnum):
     HARNESS_REPLAY_REQUEST = "harness/replay/request"
     HARNESS_EVAL_BASELINE_REQUEST = "harness/eval-baseline/request"
     HARNESS_EVAL_BATCH_REQUEST = "harness/eval-batch/request"
+    HARNESS_EVAL_PROMOTION_REQUEST = "harness/eval-promotion/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
@@ -94,6 +95,7 @@ class ServerEventType(StrEnum):
     HARNESS_REPLAY = "harness/replay"
     HARNESS_EVAL_BASELINE = "harness/eval-baseline"
     HARNESS_EVAL_BATCH = "harness/eval-batch"
+    HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -303,6 +305,18 @@ def _normalize_client_payload(
             "repetitions": repetitions,
             "batch_id": batch_id,
         }
+
+    if event_type == ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST:
+        suite_id = str(payload.get("suite_id") or "").strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", suite_id):
+            raise ValueError("Harness Eval Promotion suite_id 格式无效。")
+        batch_id = str(payload.get("batch_id") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", batch_id):
+            raise ValueError("Harness Eval Promotion batch_id 格式无效。")
+        reason = str(payload.get("reason") or "").strip()
+        if reason and not 3 <= len(reason) <= 2_000:
+            raise ValueError("Harness Eval Promotion reason 必须是 3..2000 个字符。")
+        return {"suite_id": suite_id, "batch_id": batch_id, "reason": reason}
 
     if event_type == ClientEventType.INSPECTOR_REQUEST:
         raw_revision = payload.get("known_revision", 0)

@@ -26,6 +26,7 @@ from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineView,
     HarnessEvalBatchProgress,
     HarnessEvalBatchStatus,
+    HarnessEvalPromotionStatus,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.models import HarnessTaskKind
@@ -1169,6 +1170,154 @@ async def test_bridge_streams_non_blocking_harness_eval_batch_progress() -> None
     ]
     assert all(record["request_id"] == "batch-request" for record in responses)
     assert responses[-1]["payload"]["terminal"] is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_runs_guided_harness_eval_promotion_through_interaction_protocol() -> None:
+    class PromotionService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        async def promote_eval_baseline(
+            self,
+            suite_id: str,
+            batch_id: str,
+            *,
+            actor: str,
+            reason: str,
+        ) -> HarnessEvalPromotionStatus:
+            self.calls.append(
+                {
+                    "suite_id": suite_id,
+                    "batch_id": batch_id,
+                    "actor": actor,
+                    "reason": reason,
+                }
+            )
+            return HarnessEvalPromotionStatus(
+                status="promoted",
+                suite_id=suite_id,
+                batch_id=batch_id,
+                baseline_id="a" * 64,
+                active_baseline_id="a" * 64,
+                version=1,
+                sample_count=5,
+                promoted_by="user",
+                promotion_reason=reason,
+                created_at="2026-07-18T10:00:00+00:00",
+            )
+
+    engine = _FakeEngine()
+    service = PromotionService()
+    engine.harness_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "promotion-request",
+            "type": ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST,
+            "payload": {
+                "suite_id": "surface-protocol",
+                "batch_id": "candidate-1",
+                "reason": "",
+            },
+        }
+    )
+    task = bridge._harness_eval_promotion_tasks["promotion-request"]
+    await asyncio.sleep(0)
+    first = next(
+        record
+        for record in _records(writer)
+        if record["type"] == "interaction/request"
+    )
+    await bridge.handle_client_record(
+        {
+            "id": "promotion-reason",
+            "type": ClientEventType.INTERACTION_RESPONSE,
+            "payload": {
+                "request_id": first["payload"]["request_id"],
+                "kind": "option",
+                "value": "recommended",
+            },
+        }
+    )
+    await asyncio.sleep(0)
+    interactions = [
+        record
+        for record in _records(writer)
+        if record["type"] == "interaction/request"
+    ]
+    assert len(interactions) == 2
+    await bridge.handle_client_record(
+        {
+            "id": "promotion-confirm",
+            "type": ClientEventType.INTERACTION_RESPONSE,
+            "payload": {
+                "request_id": interactions[1]["payload"]["request_id"],
+                "kind": "option",
+                "value": "confirm",
+            },
+        }
+    )
+    await task
+
+    promotion_events = [
+        record
+        for record in _records(writer)
+        if record["type"] == "harness/eval-promotion"
+    ]
+    assert [record["payload"]["stage"] for record in promotion_events] == [
+        "awaiting_reason",
+        "awaiting_confirmation",
+        "promoted",
+    ]
+    assert all(record["request_id"] == "promotion-request" for record in promotion_events)
+    assert promotion_events[-1]["payload"]["terminal"] is True
+    assert service.calls[0]["actor"] == "user"
+    assert "审阅完整 Eval Batch" in service.calls[0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_duplicate_and_fifth_pending_harness_promotions() -> None:
+    engine = _FakeEngine()
+    engine.harness_service = object()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    payload = {
+        "suite_id": "surface-protocol",
+        "batch_id": "candidate-1",
+        "reason": "",
+    }
+
+    await bridge.start_harness_eval_promotion(payload, request_id="promotion-0")
+    await asyncio.sleep(0)
+    await bridge.start_harness_eval_promotion(payload, request_id="promotion-0")
+    for index in range(1, 4):
+        await bridge.start_harness_eval_promotion(
+            {**payload, "batch_id": f"candidate-{index + 1}"},
+            request_id=f"promotion-{index}",
+        )
+    await asyncio.sleep(0)
+    await bridge.start_harness_eval_promotion(
+        {**payload, "batch_id": "candidate-5"},
+        request_id="promotion-4",
+    )
+
+    codes = [
+        record["payload"]["code"]
+        for record in _records(writer)
+        if record["type"] == "error"
+    ]
+    assert "harness_eval_promotion_duplicate" in codes
+    assert "harness_eval_promotion_limit" in codes
+    tasks = tuple(bridge._harness_eval_promotion_tasks.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    assert bridge._harness_eval_promotion_tasks == {}
 
 
 @pytest.mark.asyncio
