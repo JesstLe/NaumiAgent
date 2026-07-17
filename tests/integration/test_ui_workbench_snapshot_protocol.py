@@ -16,6 +16,7 @@ from naumi_agent.ui.protocol import ClientEventType
 from naumi_agent.workbench.models import RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
+from naumi_agent.worktree.manager import WorktreeManager
 
 
 class _WorkbenchBridgeEngine:
@@ -54,12 +55,20 @@ for (const line of input.trim().split("\n").filter(Boolean)) {
   reduceServerEvent(state, normalizeServerRecord(JSON.parse(line)));
 }
 const widths = {};
+const worktreeWidths = {};
 for (const width of [80, 120, 200]) {
   const lines = renderWorkbenchOverview(state.workbench, width, 24);
   widths[width] = {
     bounded: lines.every((line) => visibleWidth(line) <= width),
     text: lines.map(stripAnsi).join("\n"),
   };
+  state.workbench.selected_tab = "worktrees";
+  const worktreeLines = renderWorkbenchOverview(state.workbench, width, 24);
+  worktreeWidths[width] = {
+    bounded: worktreeLines.every((line) => visibleWidth(line) <= width),
+    text: worktreeLines.map(stripAnsi).join("\n"),
+  };
+  state.workbench.selected_tab = "overview";
 }
 process.stdout.write(JSON.stringify({
   streamId: state.workbench.stream_id,
@@ -69,6 +78,7 @@ process.stdout.write(JSON.stringify({
   taskStatus: state.workbench.tasks[0]?.status ?? "",
   loading: state.workbench.loading,
   widths,
+  worktreeWidths,
 }));
 """
     completed = subprocess.run(
@@ -88,14 +98,28 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
     tmp_path: Path,
 ) -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    git_repo = tmp_path / "repo"
+    git_repo.mkdir()
+    _git(git_repo, "init", "-q")
+    _git(git_repo, "config", "user.email", "tests@naumi.local")
+    _git(git_repo, "config", "user.name", "Naumi Tests")
+    (git_repo / "README.md").write_text("# fixture\n", encoding="utf-8")
+    _git(git_repo, "add", "README.md")
+    _git(git_repo, "commit", "-qm", "initial")
     database = tmp_path / "workbench.db"
     session_id = "session-workbench-real"
     task_store = TaskStore(database)
     task_store.set_session(session_id)
     workbench_store = WorkbenchStore(database)
+    manager = WorktreeManager(
+        repo_root=git_repo,
+        storage_dir=tmp_path / "managed-worktrees",
+        task_store=task_store,
+    )
     writer_service = WorkbenchService(
         task_store=task_store,
         workbench_store=workbench_store,
+        worktree_manager=manager,
     )
     mission = await writer_service.create_mission(
         session_id=session_id,
@@ -113,6 +137,17 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
     await workbench_store.set_issue_worktree(
         session_id=session_id,
         task_id=task.id,
+        worktree_name="ui-10-real",
+    )
+    assert "已创建" in await manager.create("ui-10-real", task.id)
+    record = await manager.status("ui-10-real")
+    assert not isinstance(record, list)
+    (Path(record.path) / "dirty.txt").write_text("uncommitted\n", encoding="utf-8")
+    await workbench_store.create_lease(
+        session_id=session_id,
+        task_id=task.id,
+        agent_id="Workbench-Agent",
+        expires_at="2099-01-01T00:00:00+00:00",
         worktree_name="ui-10-real",
     )
     await workbench_store.upsert_issue(
@@ -149,6 +184,11 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
     reader_service = WorkbenchService(
         task_store=TaskStore(database),
         workbench_store=WorkbenchStore(database),
+        worktree_manager=WorktreeManager(
+            repo_root=git_repo,
+            storage_dir=tmp_path / "managed-worktrees",
+            task_store=TaskStore(database),
+        ),
     )
     engine = _WorkbenchBridgeEngine(reader_service, session_id)
     writer = io.StringIO()
@@ -204,3 +244,21 @@ async def test_real_workbench_store_bridge_and_node_keep_revisioned_snapshot(
         assert "codex/ui-10-overview" in rendered["text"]
         assert "验证通过" in rendered["text"]
         assert "高风险" in rendered["text"]
+        worktree_rendered = reduced["worktreeWidths"][width]
+        assert worktree_rendered["bounded"] is True
+        assert "ui-10-real" in worktree_rendered["text"]
+        assert "naumi/worktree-ui-10-real" in worktree_rendered["text"]
+        assert "Workbench-Agent" in worktree_rendered["text"]
+        assert "未提交 1" in worktree_rendered["text"]
+
+
+def _git(path: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return completed.stdout.strip()

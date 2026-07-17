@@ -624,6 +624,11 @@ class AgentEngine:
 
         self.task_store = TaskStore(config.memory.session_db_path)
         self.workbench_store = WorkbenchStore(config.memory.session_db_path)
+        self.worktree_manager = WorktreeManager(
+            repo_root=self.workspace_root,
+            storage_dir=self._worktree_storage_dir,
+            task_store=self.task_store,
+        )
         self.validation_runner = ValidationRunner(
             store=self.workbench_store,
             allowed_commands=[
@@ -647,6 +652,7 @@ class AgentEngine:
             validation_runner=self.validation_runner,
             workspace_root=str(self.workspace_root),
             review_evidence_collector=self.review_evidence_collector,
+            worktree_manager=self.worktree_manager,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
@@ -657,11 +663,6 @@ class AgentEngine:
         self.goal_store = GoalStore(self._runtime_data_dir / "goals")
         self.pursuit_store = PursuitStore(
             self._runtime_data_dir / "pursuit"
-        )
-        self.worktree_manager = WorktreeManager(
-            repo_root=self.workspace_root,
-            storage_dir=self._worktree_storage_dir,
-            task_store=self.task_store,
         )
         self.runtime_inspector = RuntimeInspectorService(self)
 

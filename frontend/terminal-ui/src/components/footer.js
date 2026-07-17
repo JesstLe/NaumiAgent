@@ -139,7 +139,9 @@ export function WorkbenchFooter({ state }) {
       if (state.route?.name !== "workbench") return [];
       const message = state.workbench?.loading
         ? "workbench: 正在刷新 · r 重试 · Esc 返回"
-        : "workbench: r 刷新 · Esc 返回";
+        : state.workbench?.selected_tab === "worktrees"
+        ? "workbench: Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回"
+        : "workbench: Tab 标签 · r 刷新 · Esc 返回";
       return wrapAnsiLine(color(ANSI.cyan, message), ctx.width);
     },
   };

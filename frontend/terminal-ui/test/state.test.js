@@ -2313,6 +2313,14 @@ test("initial state includes empty workbench bucket", () => {
     session_id: "",
     counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
     active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+    worktrees_status: "unavailable",
+    worktrees_code: "worktree_snapshot_pending",
+    worktrees_total: 0,
+    worktrees_truncated: false,
+    worktrees: [],
+    selected_tab: "overview",
+    selected_worktree_name: "",
+    selected_worktree_index: 0,
     missions: [],
     tasks: [],
     issues: [],
@@ -2495,6 +2503,66 @@ test("workbench overview route refreshes and restores the conversation anchor", 
   assert.equal(state.scrollOffset, 12);
   assert.equal(state.followTail, false);
   assert.equal(handleWorkbenchOverviewKey(state, "r", send), false);
+});
+
+test("workbench tabs navigate 100 worktrees and preserve stable selection on refresh", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  handleSubmitText(state, "/workbench", () => {});
+  const worktrees = Array.from({ length: 100 }, (_, index) => ({
+    name: `worktree-${index}`,
+    path: `/repo/worktree-${index}`,
+    branch: `codex/worktree-${index}`,
+    status: index === 99 ? "dirty" : "clean",
+    task_id: `task-${index}`,
+    dirty_files: index === 99 ? 1 : 0,
+    commits_ahead: 0,
+    removable: index !== 99,
+    task: { id: `task-${index}`, subject: `任务 ${index}` },
+    lease: { id: `lease-${index}`, state: "active" },
+    agent_id: `agent-${index}`,
+  }));
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 1,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 100, worktrees: 100, reviews: 0 },
+      active_selection: { worktree: "worktree-0" },
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+      worktrees_status: "ready", worktrees,
+    },
+  });
+
+  assert.equal(state.workbench.selected_tab, "overview");
+  assert.equal(handleWorkbenchOverviewKey(state, "\t", () => {}), true);
+  assert.equal(state.workbench.selected_tab, "worktrees");
+  assert.equal(state.workbench.selected_worktree_name, "worktree-0");
+  handleWorkbenchOverviewKey(state, "\x1b[F", () => {});
+  assert.equal(state.workbench.selected_worktree_name, "worktree-99");
+  handleWorkbenchOverviewKey(state, "\x1b[A", () => {});
+  assert.equal(state.workbench.selected_worktree_name, "worktree-98");
+  handleWorkbenchOverviewKey(state, "\x1b[6~", () => {});
+  assert.equal(state.workbench.selected_worktree_name, "worktree-99");
+
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 2,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 99, worktrees: 99, reviews: 0 },
+      active_selection: { worktree: "worktree-0" },
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+      worktrees_status: "ready", worktrees: worktrees.slice(0, 99),
+    },
+  });
+  assert.equal(state.workbench.selected_tab, "worktrees");
+  assert.equal(state.workbench.selected_worktree_name, "worktree-98");
+
+  handleWorkbenchOverviewKey(state, "1", () => {});
+  assert.equal(state.workbench.selected_tab, "overview");
+  handleWorkbenchOverviewKey(state, "2", () => {});
+  assert.equal(state.workbench.selected_tab, "worktrees");
 });
 
 test("session replay keeps an open Workbench route but requests new authority", () => {

@@ -14,6 +14,7 @@ from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
+    format_workbench_worktrees_markdown,
 )
 
 
@@ -63,6 +64,57 @@ def test_workbench_formatter_has_bounded_empty_state() -> None:
     assert len(rendered.splitlines()) < 20
 
 
+def test_worktree_formatter_renders_authoritative_detail_and_error_states() -> None:
+    rendered = format_workbench_worktrees_markdown(_snapshot())
+
+    assert "共 1 个" in rendered
+    assert "ui-10-real" in rendered
+    assert "有未提交改动" in rendered
+    assert "codex/ui-10-worktrees" in rendered
+    assert "实现 TUI fallback" in rendered
+    assert "Workbench-Agent" in rendered
+    assert "可安全删除：否" in rendered
+
+    unavailable = format_workbench_worktrees_markdown(
+        {
+            **_snapshot(),
+            "worktrees_status": "unavailable",
+            "worktrees_code": "worktree_snapshot_failed",
+            "worktrees": [],
+        }
+    )
+    assert "暂时不可用" in unavailable
+    assert "worktree_snapshot_failed" in unavailable
+
+
+def test_worktree_formatter_bounds_one_hundred_items_around_selection() -> None:
+    worktrees = [
+        {
+            "name": f"worktree-{index}",
+            "path": f"/tmp/worktree-{index}",
+            "branch": f"naumi/worktree-{index}",
+            "status": "clean",
+            "dirty_files": 0,
+            "commits_ahead": 0,
+            "removable": True,
+        }
+        for index in range(100)
+    ]
+    rendered = format_workbench_worktrees_markdown(
+        {
+            **_snapshot(),
+            "worktrees": worktrees,
+            "worktrees_total": 100,
+        },
+        selected_index=99,
+    )
+
+    assert "当前 100/100" in rendered
+    assert "worktree-99" in rendered
+    assert "worktree-50" not in rendered
+    assert len(rendered.splitlines()) < 30
+
+
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
     snapshot = _snapshot()
     snapshot["missions"][0]["title"] = "# injected\n[link](file:///secret)"  # type: ignore[index]
@@ -97,6 +149,17 @@ async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot
         engine.workbench_service.dashboard_snapshot.assert_awaited_once_with(
             "session-workbench-tui"
         )
+
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+        assert screen.selected_tab == "worktrees"
+        assert "ui-10-real" in screen.query_one(
+            "#workbench-content", Markdown
+        )._markdown
+
+        await pilot.press("1")
+        await pilot.pause(0.05)
+        assert screen.selected_tab == "overview"
 
         await pilot.press("r")
         await pilot.pause(0.1)
@@ -258,4 +321,25 @@ def _snapshot() -> dict[str, object]:
             "title": "等待用户确认",
         }],
         "events": [],
+        "worktrees_status": "ready",
+        "worktrees_code": "",
+        "worktrees_total": 1,
+        "worktrees_truncated": False,
+        "worktrees": [{
+            "name": "ui-10-real",
+            "path": "/tmp/ui-10-real",
+            "branch": "codex/ui-10-worktrees",
+            "status": "dirty",
+            "dirty_files": 2,
+            "commits_ahead": 1,
+            "removable": False,
+            "kept_reason": "",
+            "task_id": "task-1",
+            "task": {
+                "id": "task-1",
+                "subject": "实现 TUI fallback",
+            },
+            "lease": {"id": "lease-1", "agent_id": "Workbench-Agent"},
+            "agent_id": "Workbench-Agent",
+        }],
     }

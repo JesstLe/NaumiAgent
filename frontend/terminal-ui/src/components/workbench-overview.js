@@ -14,7 +14,7 @@ export function renderWorkbenchOverview(view, width, height) {
   const safeHeight = Math.max(1, Number(height) || 1);
   const snapshot = view && typeof view === "object" ? view : {};
   const header = [
-    color(ANSI.cyan, fitAnsiWidth("Workbench Overview", safeWidth)),
+    fitAnsiWidth(renderTabs(snapshot), safeWidth),
     fitAnsiWidth(renderSummary(snapshot), safeWidth),
     fitAnsiWidth(renderPageState(snapshot), safeWidth),
   ];
@@ -24,6 +24,8 @@ export function renderWorkbenchOverview(view, width, height) {
     body = [color(ANSI.red, `加载失败 · ${compactText(snapshot.error, 500)}`)];
   } else if (snapshot.loading && Number(snapshot.revision) < 1) {
     body = [color(ANSI.cyan, "正在加载 Workbench 权威快照…")];
+  } else if (snapshot.selected_tab === "worktrees") {
+    body = renderWorktrees(snapshot, safeWidth, bodyHeight);
   } else if (!array(snapshot.missions).length && !array(snapshot.tasks).length) {
     body = [
       color(ANSI.dim, "暂无 Workbench 任务。"),
@@ -39,6 +41,13 @@ export function renderWorkbenchOverview(view, width, height) {
   return lines.slice(0, safeHeight).map((line) => (
     padRight(fitAnsiWidth(line, safeWidth), safeWidth)
   ));
+}
+
+function renderTabs(snapshot) {
+  const selected = snapshot.selected_tab === "worktrees" ? "worktrees" : "overview";
+  const overview = selected === "overview" ? color(ANSI.cyan, "[1 概览]") : color(ANSI.dim, "1 概览");
+  const worktrees = selected === "worktrees" ? color(ANSI.cyan, "[2 Worktrees]") : color(ANSI.dim, "2 Worktrees");
+  return `Workbench Overview · ${overview} · ${worktrees}`;
 }
 
 function renderSummary(snapshot) {
@@ -58,7 +67,103 @@ function renderPageState(snapshot) {
     return color(ANSI.yellow, `刷新警告 · ${compactText(snapshot.error, 300)} · r 重试 · Esc 返回`);
   }
   if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
-  return color(ANSI.dim, "r 刷新 · Esc 返回对话 · Worktrees/Reviews 详情将在后续标签页提供");
+  if (snapshot.selected_tab === "worktrees") {
+    return color(ANSI.dim, "Tab/Shift+Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回");
+  }
+  return color(ANSI.dim, "Tab/Shift+Tab 标签 · r 刷新 · Esc 返回对话");
+}
+
+function renderWorktrees(snapshot, width, height) {
+  if (snapshot.worktrees_status !== "ready") {
+    return [
+      color(ANSI.yellow, "Worktree 状态暂不可用。"),
+      color(ANSI.dim, "Overview 仍可使用；按 r 重试，或运行 /doctor 检查环境。"),
+    ];
+  }
+  const worktrees = array(snapshot.worktrees);
+  if (!worktrees.length) {
+    return [
+      color(ANSI.dim, "暂无由 NaumiAgent 管理的 worktree。"),
+      color(ANSI.dim, "可通过 /worktree create 创建隔离执行区。"),
+    ];
+  }
+  const selectedIndex = selectedWorktreeIndex(snapshot, worktrees);
+  const selected = worktrees[selectedIndex];
+  if (width >= 120) {
+    const leftWidth = Math.max(48, Math.min(Math.floor(width * 0.52), width - 43));
+    const rightWidth = Math.max(1, width - leftWidth - 1);
+    const left = renderWorktreeList(snapshot, worktrees, selectedIndex, leftWidth, height);
+    const right = renderWorktreeDetail(selected, rightWidth);
+    return Array.from({ length: height }, (_, index) => {
+      const leftLine = padRight(fitAnsiWidth(left[index] || "", leftWidth), leftWidth);
+      const rightLine = padRight(fitAnsiWidth(right[index] || "", rightWidth), rightWidth);
+      return `${leftLine}${color(ANSI.blue, "│")}${rightLine}`;
+    });
+  }
+  const listHeight = Math.max(4, Math.min(7, Math.floor(height * 0.42)));
+  return [
+    ...renderWorktreeList(snapshot, worktrees, selectedIndex, width, listHeight),
+    ...renderWorktreeDetail(selected, width),
+  ].slice(0, height);
+}
+
+function renderWorktreeList(snapshot, worktrees, selectedIndex, width, height) {
+  const total = Math.max(worktrees.length, number(snapshot.worktrees_total));
+  const heading = `Worktrees · ${worktrees.length}/${total} · 当前 ${selectedIndex + 1}`;
+  const rowCount = Math.max(1, height - 1);
+  const start = Math.max(
+    0,
+    Math.min(worktrees.length - rowCount, selectedIndex - Math.floor(rowCount / 2)),
+  );
+  const rows = worktrees.slice(start, start + rowCount).map((item, offset) => {
+    const index = start + offset;
+    const marker = index === selectedIndex ? color(ANSI.cyan, "›") : " ";
+    const status = worktreeStatus(item.status);
+    const task = compactText(item.task?.subject || item.task_id || "未绑定任务", 180);
+    const agent = compactText(item.agent_id || "未占用", 120);
+    return fitAnsiWidth(`${marker} ${status} ${compactText(item.name || "-", 180)} · ${task} · ${agent}`, width);
+  });
+  return [color(ANSI.cyan, heading), ...rows];
+}
+
+function renderWorktreeDetail(item, width) {
+  if (!item) return [color(ANSI.dim, "未选择 worktree")];
+  const lease = item.lease || {};
+  const task = item.task || {};
+  const safeRemoval = item.removable
+    ? color(ANSI.green, "可安全移除")
+    : color(ANSI.yellow, "不可安全移除");
+  const lines = [
+    color(ANSI.cyan, `详情 · ${compactText(item.name || "-", 300)}`),
+    `${worktreeStatus(item.status)} · 未提交 ${number(item.dirty_files)} · 领先 ${number(item.commits_ahead)}`,
+    safeRemoval,
+    `路径 · ${compactText(item.path || "-", 1_500)}`,
+    `分支 · ${compactText(item.branch || "-", 500)}`,
+    `任务 · ${compactText(task.subject || item.task_id || "未绑定", 500)}`,
+    `Agent · ${compactText(item.agent_id || "未占用", 200)}`,
+    `Lease · ${compactText(lease.state || "无", 80)}${lease.expires_at ? ` · 到期 ${compactText(lease.expires_at, 100)}` : ""}`,
+  ];
+  if (item.kept_reason) lines.push(`保留原因 · ${compactText(item.kept_reason, 600)}`);
+  return lines.flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function selectedWorktreeIndex(snapshot, worktrees) {
+  const byName = worktrees.findIndex(
+    (item) => String(item.name || "") === String(snapshot.selected_worktree_name || ""),
+  );
+  if (byName >= 0) return byName;
+  const byAuthority = worktrees.findIndex(
+    (item) => String(item.name || "") === String(snapshot.active_selection?.worktree || ""),
+  );
+  return byAuthority >= 0 ? byAuthority : 0;
+}
+
+function worktreeStatus(status) {
+  if (status === "clean") return color(ANSI.green, "干净");
+  if (status === "dirty") return color(ANSI.yellow, "有变更");
+  if (status === "missing") return color(ANSI.red, "目录缺失");
+  if (status === "kept") return color(ANSI.cyan, "已保留");
+  return color(ANSI.dim, "未知");
 }
 
 function renderWideBody(snapshot, width, height) {

@@ -241,6 +241,21 @@ function workbenchOverviewFixture() {
     tasks: [{ id: "task-1", subject: "实现 Overview", description: "展示目标、验证与风险", status: "in_progress", owner: "" }],
     issues: [{ task_id: "task-1", mission_id: "mission-1", risk_level: "high", related_branch: "codex/ui-10-overview", related_worktree: "ui-10-overview", related_pr: "#128", expected_artifacts: ["snapshot.png"], acceptance_criteria: ["80/120/200 列无溢出"] }],
     leases: [{ task_id: "task-1", agent_id: "Frontend-Agent", state: "active", worktree_name: "ui-10-overview" }],
+    worktrees_status: "ready",
+    worktrees_code: "",
+    worktrees: [{
+      name: "ui-10-overview",
+      path: "/repo/.naumi/worktrees/ui-10-overview",
+      branch: "codex/ui-10-overview",
+      status: "dirty",
+      task_id: "task-1",
+      dirty_files: 2,
+      commits_ahead: 1,
+      removable: false,
+      task: { id: "task-1", subject: "实现 Overview", status: "in_progress" },
+      lease: { id: "lease-1", state: "active", expires_at: "2099-01-01T00:00:00Z" },
+      agent_id: "Frontend-Agent",
+    }],
     validation_runs: [{ id: "validation-1", task_id: "task-1", command: ["node", "--test", "render.test.js"], status: "failed", exit_code: 1, output: "PRIVATE_VALIDATION_OUTPUT", started_at: "2026-07-17T14:00:00+08:00", completed_at: "2026-07-17T14:00:02+08:00" }],
     failures: [{ id: "failure-1", task_id: "task-1", kind: "test_failed", title: "窄屏快照失败", detail: "中文行宽超出", status: "open" }],
     approvals: [{ id: "approval-1", task_id: "task-1", state: "waiting", title: "等待 UI 审查", requester: "Frontend-Agent" }],
@@ -303,10 +318,56 @@ test("workbench route takes full-screen priority and keeps the footer usable", (
   const rendered = renderScreen(state, 120, 24).map(stripAnsi);
   const plain = rendered.join("\n");
   assert(plain.includes("Workbench Overview"));
-  assert(plain.includes("workbench: r 刷新 · Esc 返回"));
+  assert(plain.includes("workbench: Tab 标签 · r 刷新 · Esc 返回"));
   assert(!plain.includes("chat >"));
   assert(!plain.includes("NAUMI"));
   assert.equal(rendered.length, 24);
+});
+
+test("workbench Worktrees tab renders real status and bounded 0/1/100 navigation", () => {
+  const view = { ...workbenchOverviewFixture(), selected_tab: "worktrees", selected_worktree_name: "ui-10-overview" };
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert.equal(rendered.length, 24);
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Worktrees"));
+    assert(plain.includes("ui-10-overview"));
+    assert(plain.includes("codex/ui-10-overview"));
+    assert(plain.includes("Frontend-Agent"));
+    assert(plain.includes("未提交 2"));
+    assert(plain.includes("领先 1"));
+    assert(plain.includes("不可安全移除"));
+  }
+
+  const empty = {
+    ...view,
+    worktrees: [],
+    counts: { ...view.counts, worktrees: 0 },
+    selected_worktree_name: "",
+  };
+  assert(renderWorkbenchOverview(empty, 80, 12).map(stripAnsi).join("\n").includes("暂无由 NaumiAgent 管理的 worktree"));
+
+  const crowded = { ...view };
+  crowded.worktrees = Array.from({ length: 100 }, (_, index) => ({
+    ...view.worktrees[0],
+    name: `worktree-${index}`,
+    path: `/repo/.naumi/worktrees/worktree-${index}`,
+    branch: `codex/worktree-${index}`,
+    task_id: `task-${index}`,
+    task: { id: `task-${index}`, subject: `任务 ${index}`, status: "in_progress" },
+    agent_id: `agent-${index}`,
+  }));
+  crowded.counts = { ...view.counts, worktrees: 100 };
+  crowded.selected_worktree_name = "worktree-99";
+  const rendered = renderWorkbenchOverview(crowded, 80, 18);
+  const plain = rendered.map(stripAnsi).join("\n");
+  assert(rendered.every((line) => visibleWidth(line) <= 80));
+  assert(plain.includes("worktree-99"));
+  assert(!plain.includes("worktree-50"));
+
+  const unavailable = { ...view, worktrees_status: "unavailable", worktrees_code: "worktree_snapshot_failed", worktrees: [] };
+  assert(renderWorkbenchOverview(unavailable, 80, 12).map(stripAnsi).join("\n").includes("Worktree 状态暂不可用"));
 });
 
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
