@@ -180,6 +180,20 @@ class BackgroundRunner:
     def get(self, task_id: str) -> BackgroundTask | None:
         return self._store.get(task_id)
 
+    def get_by_idempotency_key(self, idempotency_key: str) -> BackgroundTask | None:
+        return self._store.get_by_idempotency_key(idempotency_key)
+
+    def is_managed_active(self, task_id: str) -> bool:
+        """Return whether this runner owns a live process and its watcher."""
+        process = self._processes.get(task_id)
+        watcher = self._watchers.get(task_id)
+        return (
+            process is not None
+            and process.returncode is None
+            and watcher is not None
+            and not watcher.done()
+        )
+
     def read_output(self, task_id: str, max_chars: int = 20000) -> str:
         return self._store.read_output(task_id, max_chars=max_chars)
 

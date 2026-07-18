@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import AsyncMock, MagicMock
@@ -10,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
+from naumi_agent.background.models import BackgroundStatus, BackgroundTask
+from naumi_agent.background.runner import BackgroundRunner
+from naumi_agent.background.store import BackgroundTaskStore
 from naumi_agent.orchestrator.pursuit import (
     CriterionStatus,
     GoalPursuitLoop,
@@ -19,6 +23,12 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRun,
     PursuitRunStatus,
     SuccessCriterion,
+)
+from naumi_agent.orchestrator.pursuit_action_ledger import (
+    PursuitActionRecord,
+    PursuitActionState,
+    canonical_action_arguments,
+    make_action_key,
 )
 from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointBudget,
@@ -96,6 +106,72 @@ def _store_with_run(tmp_path) -> PursuitStore:
         criteria_total=1,
     ))
     return store
+
+
+def _action_record(
+    *,
+    tool_name: str = "background_run",
+    command: str = "echo reconcile",
+) -> PursuitActionRecord:
+    arguments = {"command": command, "cwd": "", "timeout_seconds": 1800}
+    _, digest, size = canonical_action_arguments(arguments)
+    action_key = make_action_key(
+        run_id="pursuit_checkpoint",
+        iteration=1,
+        action_id="a1",
+        tool_name=tool_name,
+        arguments_sha256=digest,
+    )
+    return PursuitActionRecord(
+        action_key=action_key,
+        run_id="pursuit_checkpoint",
+        iteration=1,
+        action_id="a1",
+        tool_name=tool_name,
+        arguments_sha256=digest,
+        arguments_size_bytes=size,
+        argument_summary=f"tool={tool_name}; arguments_sha256={digest}",
+        state=PursuitActionState.PREPARED,
+        sequence=1,
+        dispatch_token=action_key,
+        background_task_id="",
+        result_status="",
+        result_summary="",
+        result_sha256="",
+        prepared_at=1.0,
+        updated_at=1.0,
+    )
+
+
+def _resume_loop(
+    store: PursuitStore,
+    *,
+    background_source: BackgroundRunner | None = None,
+) -> GoalPursuitLoop:
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        background_reconcile_source=background_source,
+    )
+    loop._assess = AsyncMock(return_value={  # type: ignore[method-assign]
+        "checkpoint": IterationCheckpoint(
+            iteration=2,
+            timestamp=2.0,
+            assessment="恢复后重新评估",
+            gaps_found=["仍需下一步"],
+            actions_planned=[],
+            actions_taken=[],
+            verification_results=[],
+            criteria_status={"c1": "in_progress"},
+            convergence_score=0.4,
+        ),
+        "gaps": ["仍需下一步"],
+    })
+    loop._plan = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    loop._generate_report = AsyncMock(return_value="reconcile 恢复报告")  # type: ignore[method-assign]
+    return loop
 
 
 def test_checkpoint_round_trips_across_store_reopen(tmp_path) -> None:
@@ -398,9 +474,147 @@ async def test_resume_blocks_inflight_action_without_replaying_tools(tmp_path) -
     assert "安全停在恢复边界" in result
     assert restored is not None
     assert restored.phase == "reconcile_required"
-    assert "核对外部副作用" in restored.blocked_reason
+    assert "没有行动账本" in restored.blocked_reason
     loop._assess.assert_not_awaited()
     assert store.get_checkpoint(checkpoint.run_id) == checkpoint
+
+
+@pytest.mark.asyncio
+async def test_resume_abandons_prepared_action_and_continues_from_new_checkpoint(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.phase = "action_inflight"
+    store.save_run(run)
+    checkpoint = _checkpoint(phase="action_inflight")
+    store.save_checkpoint(checkpoint)
+    action = store.prepare_action(_action_record())
+    loop = _resume_loop(store)
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored_action = store.get_action(action.action_key)
+    reconciled = store.get_checkpoint(checkpoint.run_id)
+
+    assert "恢复执行（lease epoch 0）" in result
+    assert restored_action is not None
+    assert restored_action.state is PursuitActionState.FAILED
+    assert restored_action.result_status == "abandoned_before_dispatch"
+    assert reconciled is not None
+    assert reconciled.sequence > checkpoint.sequence
+    assert reconciled.phase != "action_inflight"
+    loop._assess.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resume_reconciles_terminal_background_receipt_and_continues(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.phase = "action_inflight"
+    store.save_run(run)
+    checkpoint = _checkpoint(phase="action_inflight")
+    store.save_checkpoint(checkpoint)
+    action = store.prepare_action(_action_record())
+    store.mark_action_dispatched(action.action_key, updated_at=2.0)
+    background_store = BackgroundTaskStore(tmp_path / "background")
+    background_store.save(BackgroundTask(
+        id="bg_0042",
+        command="echo reconcile",
+        cwd=str(tmp_path),
+        status=BackgroundStatus.COMPLETED,
+        output_path=str(background_store.artifacts_dir / "bg_0042.log"),
+        exit_code=0,
+        started_at="2026-07-18T12:00:00",
+        completed_at="2026-07-18T12:00:01",
+        idempotency_key=action.dispatch_token,
+    ))
+    background_runner = BackgroundRunner(background_store)
+    loop = _resume_loop(store, background_source=background_runner)
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored_action = store.get_action(action.action_key)
+
+    assert "恢复执行（lease epoch 0）" in result
+    assert restored_action is not None
+    assert restored_action.state is PursuitActionState.COMPLETED
+    assert restored_action.result_status == "completed"
+    loop._assess.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resume_reconstructs_wait_from_live_background_receipt(tmp_path) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.phase = "action_inflight"
+    store.save_run(run)
+    checkpoint = _checkpoint(phase="action_inflight")
+    store.save_checkpoint(checkpoint)
+    command = f'{sys.executable} -c "import time; time.sleep(10)"'
+    action = store.prepare_action(_action_record(command=command))
+    store.mark_action_dispatched(action.action_key, updated_at=2.0)
+    background_store = BackgroundTaskStore(tmp_path / "background")
+    background_runner = BackgroundRunner(background_store)
+    background_task = await background_runner.run(
+        command,
+        idempotency_key=action.dispatch_token,
+    )
+    loop = _resume_loop(store, background_source=background_runner)
+
+    try:
+        result = await loop.resume_persisted(checkpoint.run_id)
+        restored = store.get_run(checkpoint.run_id)
+        reconciled = store.get_checkpoint(checkpoint.run_id)
+
+        assert "仍在等待后台任务" in result or "持久状态已安全检查" in result
+        assert restored is not None
+        assert restored.status is PursuitRunStatus.WAITING
+        assert restored.waiting_on is not None
+        assert restored.waiting_on[0].task_id == background_task.id
+        assert reconciled is not None
+        assert reconciled.sequence == checkpoint.sequence + 1
+        assert reconciled.phase == "waiting"
+        loop._assess.assert_not_awaited()
+    finally:
+        await background_runner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_resume_blocks_stale_preparing_background_reservation(tmp_path) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.phase = "action_inflight"
+    store.save_run(run)
+    checkpoint = _checkpoint(phase="action_inflight")
+    store.save_checkpoint(checkpoint)
+    action = store.prepare_action(_action_record())
+    store.mark_action_dispatched(action.action_key, updated_at=2.0)
+    background_store = BackgroundTaskStore(tmp_path / "background")
+    background_store.save(BackgroundTask(
+        id="bg_0044",
+        command="echo reconcile",
+        cwd=str(tmp_path),
+        status=BackgroundStatus.PREPARING,
+        output_path=str(background_store.artifacts_dir / "bg_0044.log"),
+        started_at="2026-01-01T00:00:00",
+        idempotency_key=action.dispatch_token,
+    ))
+    background_runner = BackgroundRunner(background_store)
+    loop = _resume_loop(store, background_source=background_runner)
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "reconcile_required"
+    assert "没有 PID" in restored.blocked_reason
+    loop._assess.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -376,6 +376,24 @@ class PursuitStore:
             result_sha256=digest_result(result),
         )
 
+    def mark_action_abandoned(
+        self,
+        action_key: str,
+        *,
+        reason: str,
+        updated_at: float,
+    ) -> PursuitActionRecord:
+        """Close a prepared action that durable evidence proves was never dispatched."""
+        return self._transition_action(
+            action_key,
+            target=PursuitActionState.FAILED,
+            allowed_from={PursuitActionState.PREPARED},
+            updated_at=updated_at,
+            result_status="abandoned_before_dispatch",
+            result_summary=action_safe_text(reason, limit=2_000),
+            result_sha256=digest_result(reason),
+        )
+
     def get_action(self, action_key: str) -> PursuitActionRecord | None:
         if not self._db_path.exists():
             return None

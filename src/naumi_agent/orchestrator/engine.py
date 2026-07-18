@@ -913,6 +913,7 @@ class AgentEngine:
             execute_tool_call=self.execute_tool,
             lease_port=self._harness_store,
             workspace_root=self.workspace_root,
+            background_reconcile_source=self.background_runner,
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool():
