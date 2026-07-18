@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from enum import StrEnum
 from pathlib import Path
@@ -207,13 +208,63 @@ class HarnessEvalGuardrailResult(_StrictModel):
     code: str = Field(default="", max_length=128)
 
 
+class HarnessEvalMetricObservation(_StrictModel):
+    """One finite, unit-bound mechanical observation produced by a runner."""
+
+    metric: str = Field(pattern=r"^[a-z][a-z0-9_.-]{0,127}$")
+    value: float = Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
+    unit: Literal["count", "ratio", "milliseconds", "tokens", "usd", "scalar"]
+    direction: Literal["decrease", "increase"]
+    target: float = Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
+    primary: bool = False
+
+    @field_validator("value", "target", mode="before")
+    @classmethod
+    def _reject_boolean_number(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("数值指标不得使用布尔值。")
+        return value
+
+    @model_validator(mode="after")
+    def _value_matches_unit(self) -> HarnessEvalMetricObservation:
+        if self.unit in {"count", "milliseconds", "tokens", "usd"} and (
+            self.value < 0 or self.target < 0
+        ):
+            raise ValueError("非负指标的 value 与 target 不能小于 0。")
+        if self.unit in {"count", "tokens"} and (
+            not self.value.is_integer() or not self.target.is_integer()
+        ):
+            raise ValueError("count/tokens 指标必须是整数值。")
+        if self.unit == "ratio" and not (
+            0 <= self.value <= 1 and 0 <= self.target <= 1
+        ):
+            raise ValueError("ratio 指标必须位于 0..1。")
+        return self
+
+    @property
+    def target_met(self) -> bool:
+        equal = math.isclose(
+            self.value,
+            self.target,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        if self.direction == "decrease":
+            return self.value < self.target or equal
+        return self.value > self.target or equal
+
+
 class HarnessEvalCaseResult(_StrictModel):
     case_id: str
     runner: str
     status: EvalCaseStatus
     expected: HarnessProtocolExpected | None = None
     actual: HarnessProtocolActual | None = None
-    primary_metric: Literal["", "protocol_outcome_match", "replay_reproduced"] = ""
+    primary_metric: str = Field(default="", max_length=128)
+    metric_observations: tuple[HarnessEvalMetricObservation, ...] = Field(
+        default=(),
+        max_length=32,
+    )
     guardrails: tuple[HarnessEvalGuardrailResult, ...] = Field(
         default=(),
         max_length=16,
@@ -221,6 +272,13 @@ class HarnessEvalCaseResult(_StrictModel):
     code: str = ""
     message: str = ""
     duration_ms: float = Field(default=0, ge=0)
+
+    @field_validator("primary_metric")
+    @classmethod
+    def _valid_primary_metric(cls, value: str) -> str:
+        if value and not re.fullmatch(r"^[a-z][a-z0-9_.-]{0,127}$", value):
+            raise ValueError("primary_metric 格式无效。")
+        return value
 
     @field_validator("guardrails")
     @classmethod
@@ -232,6 +290,28 @@ class HarnessEvalCaseResult(_StrictModel):
         if len(names) != len(set(names)):
             raise ValueError("guardrail result 不能重复。")
         return tuple(sorted(values, key=lambda item: item.guardrail))
+
+    @model_validator(mode="after")
+    def _metric_observations_are_authoritative(self) -> HarnessEvalCaseResult:
+        observations = self.metric_observations
+        names = tuple(item.metric for item in observations)
+        if names != tuple(sorted(set(names))):
+            raise ValueError("metric observations 必须排序且不得重复。")
+        if not observations:
+            return self
+        if self.status in {EvalCaseStatus.EVALUATION_ERROR, EvalCaseStatus.SKIPPED}:
+            raise ValueError("评测错误或跳过的 case 不得携带数值指标。")
+        primaries = tuple(item for item in observations if item.primary)
+        if len(primaries) != 1 or self.primary_metric != primaries[0].metric:
+            raise ValueError("metric observations 必须唯一绑定 primary_metric。")
+        expected_status = (
+            EvalCaseStatus.PASSED
+            if primaries[0].target_met
+            else EvalCaseStatus.IMPLEMENTATION_FAILURE
+        )
+        if self.status is not expected_status:
+            raise ValueError("case status 与 primary metric target 判定不一致。")
+        return self
 
 
 class HarnessEvalSuiteResult(_StrictModel):

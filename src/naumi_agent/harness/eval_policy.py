@@ -83,7 +83,9 @@ def evaluate_eval_policy(
         violations,
         code="max_regressions_violated",
         metric="regressions",
-        observed=mechanical.regression_count,
+        observed=(
+            mechanical.regression_count + mechanical.metric_regression_count
+        ),
         threshold=policy.max_regressions,
         scope="relative",
     )

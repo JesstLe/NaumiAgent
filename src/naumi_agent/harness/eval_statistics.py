@@ -30,22 +30,32 @@ class EvalStatisticalVerdict(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class EvalSampleSummary:
-    metric: Literal["pass_rate", "duration_ms"]
+    metric: str
     samples: int
     mean: float
     standard_deviation: float
     confidence_low: float
     confidence_high: float
+    unit: str = ""
+    direction: str = ""
+    target: float | None = None
+    case_id: str | None = None
+    primary: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class EvalMeanDifference:
-    metric: Literal["pass_rate", "duration_ms"]
+    metric: str
     baseline_mean: float
     current_mean: float
     delta: float
     confidence_low: float
     confidence_high: float
+    unit: str = ""
+    direction: str = ""
+    target: float | None = None
+    case_id: str | None = None
+    primary: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,21 +134,7 @@ def compare_eval_repetitions(
         verdict = EvalStatisticalVerdict.FLAKY
         code = "case_status_flaky"
     else:
-        pass_rate = next(
-            item for item in differences if item.metric == "pass_rate"
-        )
-        if pass_rate.confidence_low > 0:
-            verdict = EvalStatisticalVerdict.IMPROVED
-            code = ""
-        elif pass_rate.confidence_high < 0:
-            verdict = EvalStatisticalVerdict.REGRESSED
-            code = ""
-        elif math.isclose(pass_rate.delta, 0.0, abs_tol=1e-12):
-            verdict = EvalStatisticalVerdict.UNCHANGED
-            code = ""
-        else:
-            verdict = EvalStatisticalVerdict.INCONCLUSIVE
-            code = "confidence_interval_overlaps_zero"
+        verdict, code = _directional_verdict(differences)
     return EvalStatisticalComparison(
         verdict=verdict,
         code=code,
@@ -205,26 +201,67 @@ def _flaky_cases(
 def _summaries(
     runs: tuple[HarnessEvalSuiteResult, ...],
 ) -> tuple[EvalSampleSummary, ...]:
-    values = {
-        "pass_rate": tuple(run.passed / len(run.cases) for run in runs),
-        "duration_ms": tuple(float(run.duration_ms) for run in runs),
-    }
-    return tuple(
-        _sample_summary(metric, samples)
-        for metric, samples in values.items()
-    )
+    summaries = [
+        _sample_summary(
+            "pass_rate",
+            tuple(run.passed / len(run.cases) for run in runs),
+            unit="ratio",
+            direction="increase",
+            target=1.0,
+            primary=True,
+        ),
+        _sample_summary(
+            "duration_ms",
+            tuple(float(run.duration_ms) for run in runs),
+            unit="milliseconds",
+            direction="decrease",
+            target=None,
+            primary=False,
+        ),
+    ]
+    case_maps = [
+        {case.case_id: case for case in run.cases}
+        for run in runs
+    ]
+    for case_id in sorted(case_maps[0]):
+        reference = case_maps[0][case_id]
+        for observation in reference.metric_observations:
+            values = tuple(
+                next(
+                    item.value
+                    for item in cases[case_id].metric_observations
+                    if item.metric == observation.metric
+                )
+                for cases in case_maps
+            )
+            summaries.append(_sample_summary(
+                f"case:{case_id}:{observation.metric}",
+                values,
+                unit=observation.unit,
+                direction=observation.direction,
+                target=observation.target,
+                case_id=case_id,
+                primary=observation.primary,
+            ))
+    return tuple(summaries)
 
 
 def _sample_summary(
-    metric: Literal["pass_rate", "duration_ms"],
+    metric: str,
     values: tuple[float, ...],
+    *,
+    unit: str,
+    direction: str,
+    target: float | None,
+    case_id: str | None = None,
+    primary: bool,
 ) -> EvalSampleSummary:
     mean = statistics.fmean(values)
     deviation = statistics.stdev(values)
     margin = _t_critical(len(values) - 1) * deviation / math.sqrt(len(values))
     low = mean - margin
     high = mean + margin
-    if metric == "pass_rate":
+    if unit == "ratio":
         low = max(0.0, low)
         high = min(1.0, high)
     return EvalSampleSummary(
@@ -234,6 +271,11 @@ def _sample_summary(
         standard_deviation=deviation,
         confidence_low=low,
         confidence_high=high,
+        unit=unit,
+        direction=direction,
+        target=target,
+        case_id=case_id,
+        primary=primary,
     )
 
 
@@ -241,6 +283,32 @@ def _mean_difference(
     baseline: EvalSampleSummary,
     current: EvalSampleSummary,
 ) -> EvalMeanDifference:
+    if (
+        baseline.metric != current.metric
+        or baseline.unit != current.unit
+        or baseline.direction != current.direction
+        or (
+            baseline.target is None
+            and current.target is not None
+        )
+        or (
+            baseline.target is not None
+            and current.target is None
+        )
+        or (
+            baseline.target is not None
+            and current.target is not None
+            and not math.isclose(
+                baseline.target,
+                current.target,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
+        )
+        or baseline.case_id != current.case_id
+        or baseline.primary != current.primary
+    ):
+        raise ValueError("Baseline/Current 数值指标统计合同不一致。")
     baseline_variance = baseline.standard_deviation**2 / baseline.samples
     current_variance = current.standard_deviation**2 / current.samples
     standard_error = math.sqrt(baseline_variance + current_variance)
@@ -262,7 +330,46 @@ def _mean_difference(
         delta=delta,
         confidence_low=delta - margin,
         confidence_high=delta + margin,
+        unit=baseline.unit,
+        direction=baseline.direction,
+        target=baseline.target,
+        case_id=baseline.case_id,
+        primary=baseline.primary,
     )
+
+
+def _directional_verdict(
+    differences: tuple[EvalMeanDifference, ...],
+) -> tuple[EvalStatisticalVerdict, str]:
+    decision_metrics = tuple(
+        item
+        for item in differences
+        if item.metric == "pass_rate" or item.primary
+    )
+    signals: list[str] = []
+    for item in decision_metrics:
+        if math.isclose(item.delta, 0.0, rel_tol=1e-12, abs_tol=1e-12):
+            signals.append("unchanged")
+            continue
+        if item.direction == "decrease":
+            improved = item.confidence_high < 0
+            regressed = item.confidence_low > 0
+        else:
+            improved = item.confidence_low > 0
+            regressed = item.confidence_high < 0
+        signals.append(
+            "improved" if improved else "regressed" if regressed else "inconclusive"
+        )
+    if "regressed" in signals:
+        return EvalStatisticalVerdict.REGRESSED, ""
+    if "inconclusive" in signals:
+        return (
+            EvalStatisticalVerdict.INCONCLUSIVE,
+            "confidence_interval_overlaps_zero",
+        )
+    if "improved" in signals:
+        return EvalStatisticalVerdict.IMPROVED, ""
+    return EvalStatisticalVerdict.UNCHANGED, ""
 
 
 def _t_critical(degrees_of_freedom: int) -> float:
@@ -328,7 +435,12 @@ def render_eval_statistical_comparison(result: EvalStatisticalComparison) -> str
     if result.code:
         lines.append(f"- 原因：{_CODE_MESSAGES.get(result.code, result.code)}")
     for difference in result.differences:
-        label = "通过率" if difference.metric == "pass_rate" else "耗时 ms"
+        if difference.metric == "pass_rate":
+            label = "通过率"
+        elif difference.metric == "duration_ms":
+            label = "耗时 ms"
+        else:
+            label = difference.metric
         lines.append(
             f"- {label}：{difference.baseline_mean:.4f} → "
             f"{difference.current_mean:.4f} · Δ {difference.delta:+.4f} · "
