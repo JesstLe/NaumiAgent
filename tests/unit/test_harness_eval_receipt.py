@@ -393,7 +393,7 @@ async def test_receipt_store_is_immutable_scoped_and_tamper_evident(
             "UPDATE harness_eval_comparison_receipts SET decision = 'failed'"
         )
         db.commit()
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 15
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 16
     with pytest.raises(HarnessStoreError, match="损坏"):
         await HarnessStore(store.db_path).get_eval_comparison_receipt(
             workspace,
@@ -401,3 +401,188 @@ async def test_receipt_store_is_immutable_scoped_and_tamper_evident(
             baseline.id,
             "candidate-001",
         )
+
+
+@pytest.mark.asyncio
+async def test_failed_red_cohort_can_be_a_non_selected_comparison_reference(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    red_results = tuple(
+        _result(commit="1", status=EvalCaseStatus.IMPLEMENTATION_FAILURE)
+        for _ in range(5)
+    )
+    green_results = _stable_results(commit="2")
+    for batch_id, results, created_at in (
+        ("evo-red", red_results, _NOW),
+        ("evo-green", green_results, _LATER),
+    ):
+        for index, result in enumerate(results):
+            await store.record_eval_result(
+                workspace_root=workspace,
+                batch_id=batch_id,
+                sample_index=index,
+                result=result,
+                created_at=created_at,
+            )
+
+    with pytest.raises(ValueError, match="全绿"):
+        await store.promote_eval_baseline(
+            workspace_root=workspace,
+            batch_id="evo-red",
+            suite_id="receipt-protocol",
+            promoted_by="test",
+            promotion_reason="RED 必须保持失败态",
+            created_at=_NOW,
+        )
+    reference = await store.register_eval_comparison_reference(
+        workspace_root=workspace,
+        batch_id="evo-red",
+        suite_id="receipt-protocol",
+        registered_by="evolution-validator",
+        registration_reason="EVO-03 RED comparison reference",
+        created_at=_NOW,
+    )
+    retry = await store.register_eval_comparison_reference(
+        workspace_root=workspace,
+        batch_id="evo-red",
+        suite_id="receipt-protocol",
+        registered_by="ignored-retry",
+        registration_reason="幂等重试不得覆盖首次审计字段",
+        created_at=_LATER,
+    )
+    red_records = await store.list_eval_results(
+        workspace,
+        "evo-red",
+        "receipt-protocol",
+    )
+    green_records = await store.list_eval_results(
+        workspace,
+        "evo-green",
+        "receipt-protocol",
+    )
+    receipt = build_eval_comparison_receipt(
+        workspace_root=workspace,
+        suite_id="receipt-protocol",
+        baseline_id=reference.id,
+        baseline_batch_id=reference.batch_id,
+        baseline_samples_sha256=reference.samples_sha256,
+        baseline_samples=tuple(
+            EvalReceiptSample(
+                sample_index=item.sample_index,
+                result_sha256=item.result_sha256,
+                result=item.result,
+            )
+            for item in red_records
+        ),
+        current_batch_id="evo-green",
+        current_samples=tuple(
+            EvalReceiptSample(
+                sample_index=item.sample_index,
+                result_sha256=item.result_sha256,
+                result=item.result,
+            )
+            for item in green_records
+        ),
+        created_at=_LATER,
+    )
+    stored = await store.record_eval_comparison_receipt(receipt)
+
+    assert retry == reference
+    assert reference.purpose == "comparison_reference"
+    assert reference.promoted_by == "evolution-validator"
+    assert await store.get_active_eval_baseline(
+        workspace,
+        "receipt-protocol",
+    ) is None
+    assert await store.get_eval_baseline_event(
+        workspace,
+        "receipt-protocol",
+        reference.id,
+    ) is None
+    assert stored.receipt.statistical_verdict == "improved"
+    assert stored.receipt.decision is EvalComparisonDecision.PASSED
+
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "UPDATE harness_eval_baselines SET purpose = 'promotion' WHERE id = ?",
+            (reference.id,),
+        )
+        db.commit()
+    with pytest.raises(HarnessStoreError, match="损坏"):
+        await HarnessStore(store.db_path).get_eval_baseline_by_batch(
+            workspace,
+            "receipt-protocol",
+            "evo-red",
+        )
+
+
+@pytest.mark.asyncio
+async def test_comparison_reference_rejects_unstable_red_cases(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    for index in range(5):
+        await store.record_eval_result(
+            workspace_root=workspace,
+            batch_id="unstable-red",
+            sample_index=index,
+            result=_result(commit="1", status=EvalCaseStatus.EVALUATION_ERROR),
+            created_at=_NOW,
+        )
+
+    with pytest.raises(ValueError, match="不稳定"):
+        await store.register_eval_comparison_reference(
+            workspace_root=workspace,
+            batch_id="unstable-red",
+            suite_id="receipt-protocol",
+            registered_by="evolution-validator",
+            registration_reason="不应接受 runner error",
+            created_at=_NOW,
+        )
+    assert await store.get_active_eval_baseline(
+        workspace,
+        "receipt-protocol",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_schema_v15_baseline_migrates_to_promoted_purpose(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    for index, result in enumerate(_stable_results(commit="1")):
+        await store.record_eval_result(
+            workspace_root=workspace,
+            batch_id="baseline-v15",
+            sample_index=index,
+            result=result,
+            created_at=_NOW,
+        )
+    baseline = await store.promote_eval_baseline(
+        workspace_root=workspace,
+        batch_id="baseline-v15",
+        suite_id="receipt-protocol",
+        promoted_by="migration-test",
+        promotion_reason="构造 schema v15 Baseline",
+        created_at=_NOW,
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute("ALTER TABLE harness_eval_baselines DROP COLUMN purpose")
+        db.execute("PRAGMA user_version = 15")
+        db.commit()
+
+    restored = await HarnessStore(store.db_path).get_eval_baseline_by_batch(
+        workspace,
+        "receipt-protocol",
+        "baseline-v15",
+    )
+
+    assert restored is not None
+    assert restored.id == baseline.id
+    assert restored.baseline_sha256 == baseline.baseline_sha256
+    assert restored.purpose == "promotion"
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 16

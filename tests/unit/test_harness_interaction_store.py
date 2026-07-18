@@ -453,7 +453,7 @@ async def test_v12_database_adds_interaction_tables_without_losing_heartbeat(
     assert heartbeat is not None
     assert heartbeat.instance_id == "worker-a"
     with sqlite3.connect(db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 16
         assert db.execute(
             "SELECT COUNT(*) FROM harness_interactions"
         ).fetchone()[0] == 1

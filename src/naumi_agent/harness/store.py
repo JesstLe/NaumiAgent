@@ -76,7 +76,8 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 15
+HARNESS_STORE_SCHEMA_VERSION = 16
+_EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -224,6 +225,7 @@ class HarnessStoredEvalBaseline:
     sample_count: int
     samples_sha256: str
     baseline_sha256: str
+    purpose: str
     promoted_by: str
     promotion_reason: str
     created_at: str
@@ -1116,6 +1118,12 @@ class HarnessStore:
                 existing = await cursor.fetchone()
                 if existing is not None:
                     baseline = _eval_baseline_from_row(existing)
+                    if baseline.purpose != "promotion":
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "Comparison Reference 不能原地升级为 active Baseline；"
+                            "请生成新的全绿 batch 后显式晋升。"
+                        )
                     if (
                         baseline.identity_sha256 != identity_sha256
                         or baseline.samples_sha256 != samples_sha256
@@ -1247,6 +1255,131 @@ class HarnessStore:
         assert restored is not None
         return restored
 
+    async def register_eval_comparison_reference(
+        self,
+        *,
+        workspace_root: str | Path,
+        batch_id: str,
+        suite_id: str,
+        registered_by: str,
+        registration_reason: str,
+        created_at: str,
+    ) -> HarnessStoredEvalBaseline:
+        """Register an immutable comparison-only baseline without selecting it."""
+        workspace = _canonical_workspace(workspace_root)
+        batch = _normalize_eval_batch_id(batch_id)
+        suite = _normalize_text(suite_id, field="suite_id", max_length=64)
+        actor = _normalize_text(
+            registered_by,
+            field="registered_by",
+            max_length=128,
+        )
+        reason = _normalize_text(
+            registration_reason,
+            field="registration_reason",
+            max_length=2_000,
+        )
+        created = _normalize_timestamp(created_at, field="created_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_results
+                    WHERE workspace_root = ? AND batch_id = ? AND suite_id = ?
+                    ORDER BY sample_index ASC
+                    """,
+                    (workspace, batch, suite),
+                )
+                samples = tuple(
+                    _eval_result_from_row(row) for row in await cursor.fetchall()
+                )
+                identity_sha256, samples_sha256 = (
+                    _validate_comparison_reference_cohort(samples)
+                )
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ? AND batch_id = ?
+                    """,
+                    (workspace, suite, batch),
+                )
+                existing = await cursor.fetchone()
+                if existing is not None:
+                    baseline = _eval_baseline_from_row(existing)
+                    if (
+                        baseline.identity_sha256 != identity_sha256
+                        or baseline.samples_sha256 != samples_sha256
+                    ):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "已注册的 Comparison Reference 不可覆盖为不同 cohort。"
+                        )
+                    await db.rollback()
+                    return baseline
+                cursor = await db.execute(
+                    """
+                    SELECT COALESCE(MAX(version), 0) + 1
+                    FROM harness_eval_baselines
+                    WHERE workspace_root = ? AND suite_id = ?
+                    """,
+                    (workspace, suite),
+                )
+                version = int((await cursor.fetchone())[0])
+                baseline_id = _stable_id(workspace, suite, batch)
+                baseline_sha256 = _eval_baseline_digest(
+                    baseline_id=baseline_id,
+                    workspace_root=workspace,
+                    suite_id=suite,
+                    version=version,
+                    batch_id=batch,
+                    identity_sha256=identity_sha256,
+                    sample_count=len(samples),
+                    samples_sha256=samples_sha256,
+                    promoted_by=actor,
+                    promotion_reason=reason,
+                    created_at=created,
+                    purpose="comparison_reference",
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_eval_baselines (
+                        id, workspace_root, suite_id, version, batch_id,
+                        identity_sha256, sample_count, samples_sha256,
+                        baseline_sha256, purpose, promoted_by, promotion_reason,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        baseline_id,
+                        workspace,
+                        suite,
+                        version,
+                        batch,
+                        identity_sha256,
+                        len(samples),
+                        samples_sha256,
+                        baseline_sha256,
+                        "comparison_reference",
+                        actor,
+                        reason,
+                        created,
+                    ),
+                )
+                await db.commit()
+        except HarnessStoreConflictError:
+            raise
+        except ValueError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError(
+                "无法注册 Eval Comparison Reference。"
+            ) from exc
+        restored = await self.get_eval_baseline_by_batch(workspace, suite, batch)
+        assert restored is not None
+        return restored
+
     async def get_active_eval_baseline(
         self,
         workspace_root: str | Path,
@@ -1256,6 +1389,7 @@ class HarnessStore:
         suite = _normalize_text(suite_id, field="suite_id", max_length=64)
         if not self._db_path.is_file():
             return None
+        await self._ensure_schema()
         try:
             async with self._connection() as db:
                 cursor = await db.execute(
@@ -1287,6 +1421,10 @@ class HarnessStore:
                 if row is None:
                     raise ValueError("active Eval Baseline selector 引用了越界或缺失版本。")
                 baseline = _eval_baseline_from_row(row)
+                if baseline.purpose != "promotion":
+                    raise ValueError(
+                        "active Eval Baseline selector 不得引用 Comparison Reference。"
+                    )
                 if baseline.workspace_root != workspace or baseline.suite_id != suite:
                     raise ValueError("active Eval Baseline selector 越过工作区边界。")
                 return baseline
@@ -1310,6 +1448,7 @@ class HarnessStore:
             raise ValueError("limit 必须在 1..1000 之间。")
         if not self._db_path.is_file():
             return ()
+        await self._ensure_schema()
         try:
             async with self._connection() as db:
                 cursor = await db.execute(
@@ -1342,6 +1481,7 @@ class HarnessStore:
         batch = _normalize_eval_batch_id(batch_id)
         if not self._db_path.is_file():
             return None
+        await self._ensure_schema()
         try:
             async with self._connection() as db:
                 cursor = await db.execute(
@@ -4451,6 +4591,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V13)
                             await db.executescript(_SCHEMA_V14)
                             await db.executescript(_SCHEMA_V15)
+                            await _migrate_eval_baseline_purpose_v16(db)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -4781,6 +4922,52 @@ def _validate_baseline_cohort(
     return next(iter(identity_values)), samples_sha256
 
 
+def _validate_comparison_reference_cohort(
+    samples: tuple[HarnessStoredEvalResult, ...],
+) -> tuple[str, str]:
+    if not samples:
+        raise ValueError("Eval cohort 为空，不能注册 Comparison Reference。")
+    if [item.sample_index for item in samples] != list(range(len(samples))):
+        raise ValueError("Comparison Reference sample_index 必须从 0 连续递增。")
+    identity_values = {item.identity_sha256 for item in samples}
+    if "" in identity_values or len(identity_values) != 1:
+        raise ValueError("Comparison Reference 缺少统一、可验证的 Identity。")
+    for sample in samples:
+        result = sample.result
+        identity = result.baseline_identity
+        if identity is None or result.baseline_identity_code:
+            raise ValueError("Eval sample Identity 不可用于 Comparison Reference。")
+        if not identity.baseline_eligible:
+            raise ValueError("Eval sample 未通过 Comparison Reference identity gate。")
+        if identity.configuration.repetitions != len(samples):
+            raise ValueError("Identity repetitions 与 reference 样本数不一致。")
+        if not result.cases:
+            raise ValueError("Comparison Reference 必须包含非空 Suite Result。")
+        if any(
+            case.status in {EvalCaseStatus.EVALUATION_ERROR, EvalCaseStatus.SKIPPED}
+            for case in result.cases
+        ):
+            raise ValueError("Comparison Reference 含不稳定或未执行的 case。")
+        if any(
+            guardrail.status is not EvalGuardrailStatus.PASSED
+            for case in result.cases
+            for guardrail in case.guardrails
+        ):
+            raise ValueError("Comparison Reference 含未通过或未验证 guardrail。")
+    samples_sha256 = _stable_digest(
+        _json_dumps(
+            [
+                {
+                    "sample_index": item.sample_index,
+                    "result_sha256": item.result_sha256,
+                }
+                for item in samples
+            ]
+        )
+    )
+    return next(iter(identity_values)), samples_sha256
+
+
 def _eval_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredEvalBaseline:
     workspace = _canonical_workspace(str(row["workspace_root"]))
     suite_id = _normalize_text(str(row["suite_id"]), field="suite_id", max_length=64)
@@ -4802,6 +4989,9 @@ def _eval_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredEvalBaseline:
         str(row["baseline_sha256"]),
         field="baseline_sha256",
     )
+    purpose = str(row["purpose"])
+    if purpose not in _EVAL_BASELINE_PURPOSES:
+        raise ValueError("Eval Baseline purpose 无效。")
     promoted_by = _normalize_text(
         str(row["promoted_by"]),
         field="promoted_by",
@@ -4825,6 +5015,7 @@ def _eval_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredEvalBaseline:
         promoted_by=promoted_by,
         promotion_reason=promotion_reason,
         created_at=created_at,
+        purpose=purpose,
     )
     if baseline_sha256 != expected_digest:
         raise ValueError("Eval Baseline digest 与内容不一致。")
@@ -4838,6 +5029,7 @@ def _eval_baseline_from_row(row: aiosqlite.Row) -> HarnessStoredEvalBaseline:
         sample_count=sample_count,
         samples_sha256=samples_sha256,
         baseline_sha256=baseline_sha256,
+        purpose=purpose,
         promoted_by=promoted_by,
         promotion_reason=promotion_reason,
         created_at=created_at,
@@ -4857,24 +5049,24 @@ def _eval_baseline_digest(
     promoted_by: str,
     promotion_reason: str,
     created_at: str,
+    purpose: str = "promotion",
 ) -> str:
-    return _stable_digest(
-        _json_dumps(
-            {
-                "id": baseline_id,
-                "workspace_root": workspace_root,
-                "suite_id": suite_id,
-                "version": version,
-                "batch_id": batch_id,
-                "identity_sha256": identity_sha256,
-                "sample_count": sample_count,
-                "samples_sha256": samples_sha256,
-                "promoted_by": promoted_by,
-                "promotion_reason": promotion_reason,
-                "created_at": created_at,
-            }
-        )
-    )
+    payload = {
+        "id": baseline_id,
+        "workspace_root": workspace_root,
+        "suite_id": suite_id,
+        "version": version,
+        "batch_id": batch_id,
+        "identity_sha256": identity_sha256,
+        "sample_count": sample_count,
+        "samples_sha256": samples_sha256,
+        "promoted_by": promoted_by,
+        "promotion_reason": promotion_reason,
+        "created_at": created_at,
+    }
+    if purpose != "promotion":
+        payload["purpose"] = purpose
+    return _stable_digest(_json_dumps(payload))
 
 
 def _eval_baseline_event_from_row(
@@ -5729,6 +5921,19 @@ async def _migrate_tombstone_stage_v5(db: aiosqlite.Connection) -> None:
         );
         COMMIT;
         """
+    )
+
+
+async def _migrate_eval_baseline_purpose_v16(db: aiosqlite.Connection) -> None:
+    """Add an explicit promoted/reference purpose without rewriting old rows."""
+    cursor = await db.execute("PRAGMA table_info(harness_eval_baselines)")
+    columns = {str(row["name"]) for row in await cursor.fetchall()}
+    if "purpose" in columns:
+        return
+    await db.execute(
+        "ALTER TABLE harness_eval_baselines "
+        "ADD COLUMN purpose TEXT NOT NULL DEFAULT 'promotion' "
+        "CHECK (purpose IN ('promotion', 'comparison_reference'))"
     )
 
 
