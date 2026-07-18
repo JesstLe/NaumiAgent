@@ -107,6 +107,13 @@ if TYPE_CHECKING:
         EvolutionStoredCandidate,
         EvolutionStoreError,
     )
+    from naumi_agent.evolution.validation_cohorts import (
+        BaselineCohortCheckCase,
+        BaselineCohortMetricCase,
+        EvolutionBaselineCohortRequest,
+        EvolutionBaselineCohortRequestBuilder,
+        EvolutionCohortRequestError,
+    )
     from naumi_agent.evolution.validation_plans import (
         EvolutionValidationBindingError,
         EvolutionValidationPlan,
@@ -180,6 +187,9 @@ __all__ = [
     "EvolutionValidationBindingError",
     "EvolutionValidationProfileBinder",
     "EvolutionValidationProfileBinding",
+    "EvolutionBaselineCohortRequest",
+    "EvolutionBaselineCohortRequestBuilder",
+    "EvolutionCohortRequestError",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
@@ -205,6 +215,8 @@ __all__ = [
     "ValidationMetricPair",
     "ValidationCheckCoverage",
     "ValidationProfileCheckBinding",
+    "BaselineCohortCheckCase",
+    "BaselineCohortMetricCase",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -331,6 +343,13 @@ def __getattr__(name: str) -> object:
         "ValidationProfileCheckBinding",
         "validation_requirements_for_path",
     }
+    validation_cohort_exports = {
+        "BaselineCohortCheckCase",
+        "BaselineCohortMetricCase",
+        "EvolutionBaselineCohortRequest",
+        "EvolutionBaselineCohortRequestBuilder",
+        "EvolutionCohortRequestError",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -367,6 +386,8 @@ def __getattr__(name: str) -> object:
         module_name = "static_guards"
     elif name in validation_plan_exports:
         module_name = "validation_plans"
+    elif name in validation_cohort_exports:
+        module_name = "validation_cohorts"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

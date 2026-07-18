@@ -36,6 +36,9 @@ from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
+from naumi_agent.evolution.validation_cohorts import (
+    EvolutionBaselineCohortRequestBuilder,
+)
 from naumi_agent.evolution.validation_plans import (
     EvolutionValidationPlanner,
     EvolutionValidationProfileBinder,
@@ -169,6 +172,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_validation_profile_binder,
         EvolutionValidationProfileBinder,
+    )
+    assert isinstance(
+        engine.evolution_baseline_cohort_request_builder,
+        EvolutionBaselineCohortRequestBuilder,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,
