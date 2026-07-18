@@ -33,7 +33,9 @@ from naumi_agent.harness.eval_surface import (
 from naumi_agent.harness.explain import HarnessExplainLookup
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
-    new_interaction_record,
+)
+from naumi_agent.harness.interaction_runtime import (
+    DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.inspector import RuntimeInspectorSnapshot
@@ -128,6 +130,7 @@ class PendingInteraction:
     ) = None
     replay_only: bool = False
     timeout_task: asyncio.Task[None] | None = None
+    owner_renew_task: asyncio.Task[None] | None = None
 
 
 def _backend_choices_error_message(kind: str) -> str:
@@ -494,6 +497,10 @@ class JsonlEngineBridge:
         self._pending_permissions: dict[str, PendingPermission] = {}
         self._pending_interactions: dict[str, PendingInteraction] = {}
         self._interaction_owner_id = f"bridge-{uuid4().hex}"
+        self._interaction_authority_client: (
+            DurableInteractionAuthorityClient | None
+        ) = None
+        self._interaction_authority_store: object | None = None
         self._interaction_replay_task: asyncio.Task[None] | None = None
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
@@ -549,49 +556,43 @@ class JsonlEngineBridge:
             )
         await self._replay_durable_interactions()
 
-    async def _replay_durable_interactions(self) -> None:
-        """Take over expired UI owners and replay recoverable pending questions."""
+    def _interaction_authority(
+        self,
+    ) -> DurableInteractionAuthorityClient | None:
         harness_service = getattr(self.engine, "harness_service", None)
         store = getattr(harness_service, "store", None)
         if store is None:
+            self._interaction_authority_client = None
+            self._interaction_authority_store = None
+            return None
+        if (
+            self._interaction_authority_client is None
+            or self._interaction_authority_store is not store
+        ):
+            self._interaction_authority_client = DurableInteractionAuthorityClient(
+                store=store,
+                workspace_root=self.engine.workspace_root,
+                owner_id=self._interaction_owner_id,
+            )
+            self._interaction_authority_store = store
+        return self._interaction_authority_client
+
+    async def _replay_durable_interactions(self) -> None:
+        """Take over expired UI owners and replay recoverable pending questions."""
+        authority = self._interaction_authority()
+        if authority is None:
             return
         now = datetime.now(UTC)
         retry_after_seconds: float | None = None
         try:
-            records = await store.list_pending_interactions(
-                workspace_root=self.engine.workspace_root,
+            recovery = await authority.recover_pending(
+                now=now.isoformat(),
                 limit=50,
             )
-            for record in records:
+            retry_after_seconds = recovery.retry_after_seconds
+            for record in recovery.claimed:
                 if record.interaction_id in self._pending_interactions:
                     continue
-                if record.expires_at and datetime.fromisoformat(record.expires_at) <= now:
-                    await store.expire_interaction(
-                        workspace_root=self.engine.workspace_root,
-                        interaction_id=record.interaction_id,
-                        expected_sequence=record.sequence,
-                        now=now.isoformat(),
-                    )
-                    continue
-                if record.owner_id != self._interaction_owner_id:
-                    owner_lease_expires_at = datetime.fromisoformat(
-                        record.owner_lease_expires_at
-                    )
-                    if owner_lease_expires_at > now:
-                        remaining = (owner_lease_expires_at - now).total_seconds()
-                        retry_after_seconds = min(
-                            retry_after_seconds or remaining,
-                            remaining,
-                        )
-                        continue
-                    record = await store.takeover_interaction(
-                        workspace_root=self.engine.workspace_root,
-                        interaction_id=record.interaction_id,
-                        expected_sequence=record.sequence,
-                        owner_id=self._interaction_owner_id,
-                        now=now.isoformat(),
-                        owner_lease_seconds=30,
-                    )
                 request = record.request()
                 future: asyncio.Future[dict[str, str]] = (
                     asyncio.get_running_loop().create_future()
@@ -616,6 +617,9 @@ class JsonlEngineBridge:
                     ServerEventType.INTERACTION_REQUEST,
                     public_payload,
                     request_id=record.interaction_id,
+                )
+                self._schedule_pending_interaction_owner_renewal(
+                    record.interaction_id
                 )
                 self._schedule_pending_interaction_timeout(record.interaction_id)
         except Exception as exc:
@@ -685,6 +689,70 @@ class JsonlEngineBridge:
             name=f"naumi-interaction-timeout-{interaction_id}",
         )
 
+    def _schedule_pending_interaction_owner_renewal(
+        self,
+        interaction_id: str,
+    ) -> None:
+        pending = self._pending_interactions.get(interaction_id)
+        authority = self._interaction_authority()
+        if pending is None or pending.durable_record is None or authority is None:
+            return
+        if pending.owner_renew_task is not None and not pending.owner_renew_task.done():
+            return
+
+        async def keep_owner_live() -> None:
+            failures = 0
+            try:
+                while not self._closed:
+                    await asyncio.sleep(authority.owner_renew_interval_seconds)
+                    current = self._pending_interactions.get(interaction_id)
+                    if current is not pending or current.future.done():
+                        return
+                    try:
+                        pending.durable_record = await authority.renew(
+                            record=pending.durable_record,
+                        )
+                        failures = 0
+                    except Exception:
+                        failures += 1
+                        try:
+                            latest = await authority.store.get_interaction(
+                                workspace_root=self.engine.workspace_root,
+                                interaction_id=interaction_id,
+                            )
+                        except Exception:
+                            latest = None
+                        if (
+                            latest is not None
+                            and latest.state == "pending"
+                            and latest.owner_id == authority.owner_id
+                        ):
+                            pending.durable_record = latest
+                        elif latest is not None or failures >= 3:
+                            return
+                        await asyncio.sleep(float(min(failures, 3)))
+            except asyncio.CancelledError:
+                raise
+            finally:
+                if pending.owner_renew_task is asyncio.current_task():
+                    pending.owner_renew_task = None
+
+        pending.owner_renew_task = asyncio.create_task(
+            keep_owner_live(),
+            name=f"naumi-interaction-owner-{interaction_id}",
+        )
+
+    async def _stop_pending_interaction_owner_renewal(
+        self,
+        pending: PendingInteraction,
+    ) -> None:
+        owner_task = pending.owner_renew_task
+        if owner_task is None or owner_task is asyncio.current_task():
+            return
+        owner_task.cancel()
+        await asyncio.gather(owner_task, return_exceptions=True)
+        pending.owner_renew_task = None
+
     async def _commit_pending_interaction_expiry(
         self,
         interaction_id: str,
@@ -696,20 +764,21 @@ class JsonlEngineBridge:
         durable = pending.durable_record if pending is not None else None
         if pending is None or durable is None or durable.state != "pending":
             return
-        harness_service = getattr(self.engine, "harness_service", None)
-        store = getattr(harness_service, "store", None)
-        if store is None:
+        await self._stop_pending_interaction_owner_renewal(pending)
+        durable = pending.durable_record
+        if durable is None or durable.state != "pending":
+            return
+        authority = self._interaction_authority()
+        if authority is None:
             return
         try:
-            expired = await store.expire_interaction(
-                workspace_root=self.engine.workspace_root,
-                interaction_id=interaction_id,
-                expected_sequence=durable.sequence,
+            expired = await authority.expire(
+                record=durable,
                 now=now,
             )
         except Exception as exc:
             try:
-                current = await store.get_interaction(
+                current = await authority.store.get_interaction(
                     workspace_root=self.engine.workspace_root,
                     interaction_id=interaction_id,
                 )
@@ -3154,11 +3223,9 @@ class JsonlEngineBridge:
         request_id = str(payload.get("_interaction_id") or "").strip()
         if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", request_id):
             request_id = self._next_interaction_request_id()
-        harness_service = getattr(self.engine, "harness_service", None)
-        harness_store = getattr(harness_service, "store", None)
+        authority = self._interaction_authority()
         durable_record: HarnessInteractionRecord | None = None
-        if harness_store is not None:
-            now = datetime.now(UTC).isoformat()
+        if authority is not None:
             subject_kind = str(
                 payload.get("_durable_subject_kind") or "runtime"
             )
@@ -3167,23 +3234,15 @@ class JsonlEngineBridge:
                 or getattr(getattr(self.engine, "_session", None), "id", "")
                 or "runtime-sessionless"
             )
-            durable_record = new_interaction_record(
+            durable_record = await authority.create(
                 request=request,
-                subject_kind=subject_kind,  # type: ignore[arg-type]
+                subject_kind=subject_kind,
                 subject_id=subject_id,
                 session_id=str(
                     getattr(getattr(self.engine, "_session", None), "id", "") or ""
                 ),
                 agent_name=str(payload.get("agent_name") or "main"),
-                owner_id=self._interaction_owner_id,
-                created_at=now,
-                owner_lease_seconds=30,
-                timeout_seconds=request.timeout_seconds,
                 interaction_id=request_id,
-            )
-            durable_record = await harness_store.create_interaction(
-                workspace_root=self.engine.workspace_root,
-                record=durable_record,
             )
         pursuit_begin = payload.get("_pursuit_begin")
         if callable(pursuit_begin):
@@ -3217,6 +3276,7 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         self._schedule_pending_interaction_timeout(request_id)
+        self._schedule_pending_interaction_owner_renewal(request_id)
         try:
             return await future
         finally:
@@ -3253,11 +3313,11 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
+        await self._stop_pending_interaction_owner_renewal(pending)
         durable = pending.durable_record
         if durable is not None:
-            harness_service = getattr(self.engine, "harness_service", None)
-            harness_store = getattr(harness_service, "store", None)
-            if harness_store is None:
+            authority = self._interaction_authority()
+            if authority is None:
                 await self.emit_error(
                     "持久交互 authority 不可用，答案尚未提交。",
                     code="interaction_authority_unavailable",
@@ -3265,24 +3325,11 @@ class JsonlEngineBridge:
                 )
                 return
             try:
-                if durable.state == "pending":
-                    durable = await harness_store.answer_interaction(
-                        workspace_root=self.engine.workspace_root,
-                        interaction_id=durable.interaction_id,
-                        expected_sequence=durable.sequence,
-                        owner_id=durable.owner_id,
-                        owner_epoch=durable.owner_epoch,
-                        response=response,
-                        answered_by="user",
-                        now=datetime.now(UTC).isoformat(),
-                    )
-                    pending.durable_record = durable
-                response = {
-                    "kind": durable.answer_kind,
-                    "value": durable.answer_value,
-                    "label": durable.answer_label,
-                    "custom_text": durable.custom_text,
-                }
+                durable, response = await authority.answer(
+                    record=durable,
+                    response=response,
+                )
+                pending.durable_record = durable
             except Exception as exc:
                 logger.warning(
                     "Durable interaction answer failed (%s)",
@@ -3458,10 +3505,14 @@ class JsonlEngineBridge:
                 pending.future.set_result("deny")
         self._pending_permissions.clear()
         interaction_timeout_tasks: list[asyncio.Task[None]] = []
+        interaction_owner_tasks: list[asyncio.Task[None]] = []
         for pending in list(self._pending_interactions.values()):
             if pending.timeout_task is not None:
                 pending.timeout_task.cancel()
                 interaction_timeout_tasks.append(pending.timeout_task)
+            if pending.owner_renew_task is not None:
+                pending.owner_renew_task.cancel()
+                interaction_owner_tasks.append(pending.owner_renew_task)
             if not pending.future.done():
                 if pending.replay_only:
                     pending.future.cancel()
@@ -3472,6 +3523,11 @@ class JsonlEngineBridge:
         if interaction_timeout_tasks:
             await asyncio.gather(
                 *interaction_timeout_tasks,
+                return_exceptions=True,
+            )
+        if interaction_owner_tasks:
+            await asyncio.gather(
+                *interaction_owner_tasks,
                 return_exceptions=True,
             )
         self._pending_interactions.clear()

@@ -12,6 +12,9 @@ from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
     new_interaction_record,
 )
+from naumi_agent.harness.interaction_runtime import (
+    DurableInteractionAuthorityClient,
+)
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import (
     HarnessStore,
@@ -208,6 +211,45 @@ async def test_takeover_requires_expired_owner_lease_and_fences_old_owner(
             answered_by="user",
             now="2026-07-18T00:00:12+00:00",
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_client_renews_expired_same_owner_before_answer(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    client = DurableInteractionAuthorityClient(
+        store=store,
+        workspace_root=workspace,
+        owner_id="bridge-a",
+        owner_lease_seconds=10,
+    )
+    record = await client.create(
+        request=_record().request(),
+        interaction_id="ask-runtime-renew",
+        subject_kind="pursuit",
+        subject_id="pursuit-1",
+        session_id="session-1",
+        agent_name="main",
+        now=T0,
+    )
+
+    recovery = await client.recover_pending(now=T11)
+
+    assert len(recovery.claimed) == 1
+    renewed = recovery.claimed[0]
+    assert renewed.sequence == record.sequence + 1
+    assert renewed.owner_id == record.owner_id
+    assert renewed.owner_epoch == record.owner_epoch
+    answered, response = await client.answer(
+        record=renewed,
+        response={"kind": "option", "value": "safe"},
+        now="2026-07-18T00:00:12+00:00",
+    )
+    assert answered.state == "answered"
+    assert response["label"] == "安全恢复"
 
 
 @pytest.mark.asyncio

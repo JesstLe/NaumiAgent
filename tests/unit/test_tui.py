@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,6 +12,11 @@ from textual.widgets import Input
 
 from naumi_agent.config.settings import AppConfig, ModelConfig, ModelMeta
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.interaction_runtime import (
+    DurableInteractionAuthorityClient,
+)
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.tui.app import (
     ActivityPanel,
@@ -35,6 +41,10 @@ from naumi_agent.tui.completion_receipt import (
 from naumi_agent.tui.semantic_markdown import semantic_markdown_parser
 from naumi_agent.ui.keybindings import build_keybindings
 from naumi_agent.ui.theme import build_ui_style_config
+from naumi_agent.user_interaction import (
+    UserInteractionUnavailableError,
+    normalize_interaction_request,
+)
 
 
 class FakeMarkdown:
@@ -565,8 +575,12 @@ class TestNaumiApp:
         assert choice == "allow"
 
     @pytest.mark.asyncio
-    async def test_user_interaction_modal_supports_arrow_choice(self) -> None:
+    async def test_user_interaction_modal_supports_arrow_choice(self, tmp_path) -> None:
         engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(
+            store=HarnessStore(tmp_path / "harness.db")
+        )
         app = NaumiApp(engine)
         async with app.run_test(size=(100, 30)) as pilot:
             task = asyncio.create_task(engine.request_user_input({
@@ -584,11 +598,20 @@ class TestNaumiApp:
             await pilot.press("down", "enter")
             result = await asyncio.wait_for(task, timeout=2)
 
-        assert result == {"kind": "option", "value": "fast"}
+        assert result == {
+            "kind": "option",
+            "value": "fast",
+            "label": "快速方案",
+            "custom_text": "",
+        }
 
     @pytest.mark.asyncio
-    async def test_user_interaction_modal_accepts_custom_text(self) -> None:
+    async def test_user_interaction_modal_accepts_custom_text(self, tmp_path) -> None:
         engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(
+            store=HarnessStore(tmp_path / "harness.db")
+        )
         app = NaumiApp(engine)
         async with app.run_test(size=(100, 30)) as pilot:
             task = asyncio.create_task(engine.request_user_input({
@@ -609,7 +632,206 @@ class TestNaumiApp:
             await pilot.press("enter")
             result = await asyncio.wait_for(task, timeout=2)
 
-        assert result == {"kind": "custom", "custom_text": "仅当前工作区"}
+        assert result == {
+            "kind": "custom",
+            "value": "",
+            "label": "其他方案",
+            "custom_text": "仅当前工作区",
+        }
+
+    @pytest.mark.asyncio
+    async def test_tui_durable_interaction_fences_callbacks(
+        self,
+        tmp_path,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        app = NaumiApp(engine)
+        authority = app._interaction_authority()
+        assert authority is not None
+        authority.owner_renew_interval_seconds = 0.02
+        observed: list[str] = []
+
+        async def begin(interaction_id: str, _request: dict[str, object]) -> None:
+            record = await store.get_interaction(
+                workspace_root=tmp_path,
+                interaction_id=interaction_id,
+            )
+            assert record is not None and record.state == "pending"
+            observed.append("created")
+
+        async def resolve(interaction_id: str, _response: dict[str, str]) -> None:
+            record = await store.get_interaction(
+                workspace_root=tmp_path,
+                interaction_id=interaction_id,
+            )
+            assert record is not None and record.state == "answered"
+            observed.append("answered")
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            task = asyncio.create_task(app.request_user_interaction({
+                "header": "恢复策略",
+                "question": "请选择恢复方式",
+                "options": [
+                    {"value": "safe", "label": "安全恢复", "description": "核对后继续"},
+                    {"value": "stop", "label": "停止", "description": "保持暂停"},
+                ],
+                "allow_custom": True,
+                "_interaction_id": "ask-tui-durable",
+                "_durable_subject_kind": "pursuit",
+                "_durable_subject_id": "pursuit-tui",
+                "_pursuit_begin": begin,
+                "_pursuit_resolve": resolve,
+            }))
+            await pilot.pause(0.12)
+            assert observed == ["created"]
+            renewed = await store.get_interaction(
+                workspace_root=tmp_path,
+                interaction_id="ask-tui-durable",
+            )
+            assert renewed is not None
+            assert renewed.sequence > 1
+            await pilot.press("enter")
+            result = await asyncio.wait_for(task, timeout=2)
+
+        assert result["value"] == "safe"
+        assert observed == ["created", "answered"]
+
+    @pytest.mark.asyncio
+    async def test_tui_replays_expired_foreign_owner_interaction(
+        self,
+        tmp_path,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        request = normalize_interaction_request({
+            "header": "恢复问题",
+            "question": "是否继续旧目标",
+            "options": [
+                {"value": "continue", "label": "继续", "description": "恢复执行"},
+                {"value": "stop", "label": "停止", "description": "保持暂停"},
+            ],
+        })
+        record = new_interaction_record(
+            request=request,
+            subject_kind="pursuit",
+            subject_id="pursuit-replay-tui",
+            session_id="session-replay-tui",
+            agent_name="main",
+            owner_id="bridge-dead",
+            created_at=(datetime.now(UTC) - timedelta(seconds=10)).isoformat(),
+            owner_lease_seconds=3,
+            interaction_id="ask-tui-replay",
+        )
+        await store.create_interaction(workspace_root=tmp_path, record=record)
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, UserInteractionScreen)
+            assert app.screen.payload["request_id"] == "ask-tui-replay"
+            await pilot.press("enter")
+            for _ in range(30):
+                answered = await store.get_interaction(
+                    workspace_root=tmp_path,
+                    interaction_id="ask-tui-replay",
+                )
+                if answered is not None and answered.state == "answered":
+                    break
+                await pilot.pause(0.05)
+            else:
+                pytest.fail("TUI replay answer 未提交")
+
+        assert answered.owner_id.startswith("tui-")
+        assert answered.owner_epoch == 2
+        assert answered.answer_value == "continue"
+
+    @pytest.mark.asyncio
+    async def test_tui_interaction_checkpoint_failure_preserves_durable_answer(
+        self,
+        tmp_path,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        app = NaumiApp(engine)
+
+        async def fail_checkpoint(
+            _interaction_id: str,
+            _response: dict[str, str],
+        ) -> None:
+            raise RuntimeError("checkpoint unavailable")
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            task = asyncio.create_task(app.request_user_interaction({
+                "header": "恢复策略",
+                "question": "请选择",
+                "options": [
+                    {"value": "safe", "label": "安全", "description": "继续"},
+                    {"value": "stop", "label": "停止", "description": "暂停"},
+                ],
+                "_interaction_id": "ask-tui-checkpoint-failure",
+                "_durable_subject_kind": "pursuit",
+                "_durable_subject_id": "pursuit-checkpoint-failure",
+                "_pursuit_resolve": fail_checkpoint,
+            }))
+            await pilot.pause(0.1)
+            await pilot.press("enter")
+            with pytest.raises(UserInteractionUnavailableError, match="pursue resume"):
+                await asyncio.wait_for(task, timeout=2)
+            assert "pursue resume" in app.query_one(StatusBar).status_text
+
+        answered = await store.get_interaction(
+            workspace_root=tmp_path,
+            interaction_id="ask-tui-checkpoint-failure",
+        )
+        assert answered is not None
+        assert answered.state == "answered"
+        assert answered.answer_value == "safe"
+
+    @pytest.mark.asyncio
+    async def test_tui_durable_interaction_timeout_expires_authority(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        app = NaumiApp(engine)
+        monkeypatch.setattr(
+            DurableInteractionAuthorityClient,
+            "remaining_timeout_seconds",
+            staticmethod(lambda _record: 0.01),
+        )
+
+        async with app.run_test(size=(100, 30)):
+            with pytest.raises(UserInteractionUnavailableError, match="已超时"):
+                await app.request_user_interaction({
+                    "header": "超时问题",
+                    "question": "请选择",
+                    "options": [
+                        {"value": "a", "label": "A", "description": "方案 A"},
+                        {"value": "b", "label": "B", "description": "方案 B"},
+                    ],
+                    "timeout_seconds": 3,
+                    "_interaction_id": "ask-tui-timeout",
+                    "_durable_subject_kind": "runtime",
+                    "_durable_subject_id": "runtime-tui-timeout",
+                })
+
+        expired = await store.get_interaction(
+            workspace_root=tmp_path,
+            interaction_id="ask-tui-timeout",
+        )
+        assert expired is not None
+        assert expired.state == "expired"
 
     @pytest.mark.asyncio
     async def test_shift_tab_cycles_runtime_mode_in_status_bar(self) -> None:

@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import logging
+import re
 import shlex
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,10 @@ from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.harness.interaction import HarnessInteractionRecord
+from naumi_agent.harness.interaction_runtime import (
+    DurableInteractionAuthorityClient,
+)
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.streaming.sinks import CallbackEventSink
@@ -73,6 +78,10 @@ from naumi_agent.ui.keybindings import (
 )
 from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
+from naumi_agent.user_interaction import (
+    UserInteractionUnavailableError,
+    normalize_interaction_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1588,6 +1597,14 @@ class NaumiApp(App):
         self._show_reasoning = show_reasoning
         self._slash_frontend = _TuiSlashCommandFrontend(self)
         self._interaction_lock = asyncio.Lock()
+        self._active_interaction_ids: set[str] = set()
+        self._interaction_records: dict[str, HarnessInteractionRecord] = {}
+        self._interaction_owner_tasks: dict[str, asyncio.Task[None]] = {}
+        self._interaction_owner_id = f"tui-{uuid4().hex}"
+        self._interaction_authority_client: (
+            DurableInteractionAuthorityClient | None
+        ) = None
+        self._interaction_authority_store: object | None = None
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -1608,6 +1625,13 @@ class NaumiApp(App):
         if self.debug_trace is not None:
             self.debug_trace.event("tui.unmount", {})
             self.debug_trace.close()
+        owner_tasks = tuple(self._interaction_owner_tasks.values())
+        for task in owner_tasks:
+            task.cancel()
+        if owner_tasks:
+            await asyncio.gather(*owner_tasks, return_exceptions=True)
+        self._interaction_owner_tasks.clear()
+        self._interaction_records.clear()
         await self.engine.shutdown()
 
     def on_mount(self) -> None:
@@ -1627,6 +1651,7 @@ class NaumiApp(App):
         self._update_git_title()
         self._show_startup_status()
         self._recover_session_reconciliations()
+        self._recover_durable_interactions()
 
     @work(exclusive=False, exit_on_error=False)
     async def _recover_session_reconciliations(self) -> None:
@@ -1697,17 +1722,301 @@ class NaumiApp(App):
         return choice
 
     async def request_user_interaction(self, payload: dict[str, Any]) -> dict[str, str]:
-        """Serialize model questions and return the exact modal response."""
-        async with self._interaction_lock:
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[dict[str, str]] = loop.create_future()
+        """Persist, serialize, and fence one model question in the fallback TUI."""
+        request = normalize_interaction_request(payload)
+        interaction_id = str(payload.get("_interaction_id") or "").strip()
+        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
+            interaction_id = f"ask-{uuid4().hex}"
+        authority = self._interaction_authority()
+        record: HarnessInteractionRecord | None = None
+        if authority is not None:
+            session_id = str(
+                getattr(getattr(self.engine, "_session", None), "id", "") or ""
+            )
+            record = await authority.create(
+                request=request,
+                interaction_id=interaction_id,
+                subject_kind=str(
+                    payload.get("_durable_subject_kind") or "runtime"
+                ),
+                subject_id=str(
+                    payload.get("_durable_subject_id")
+                    or session_id
+                    or "runtime-sessionless"
+                ),
+                session_id=session_id,
+                agent_name=str(payload.get("agent_name") or "main"),
+            )
+        self._active_interaction_ids.add(interaction_id)
+        if record is not None:
+            self._start_interaction_owner_renewal(record)
+        try:
+            pursuit_begin = payload.get("_pursuit_begin")
+            if callable(pursuit_begin):
+                await pursuit_begin(interaction_id, request.to_public_dict())
+            async with self._interaction_lock:
+                record = self._interaction_records.get(interaction_id, record)
+                raw_response = await self._present_user_interaction(
+                    {
+                        **request.to_public_dict(),
+                        "request_id": interaction_id,
+                        "expires_at": record.expires_at if record else "",
+                    },
+                    record=record,
+                )
+            if authority is None or record is None:
+                return raw_response
+            record = await self._stop_interaction_owner_renewal(
+                interaction_id,
+                fallback=record,
+            )
+            try:
+                record, response = await authority.answer(
+                    record=record,
+                    response=raw_response,
+                )
+            except Exception as exc:
+                self._set_interaction_status(
+                    "答案未能提交到持久交互 authority；请重新打开 TUI 后重试。"
+                )
+                raise UserInteractionUnavailableError(
+                    "答案未能提交到持久交互 authority"
+                ) from exc
+            pursuit_resolve = payload.get("_pursuit_resolve")
+            if callable(pursuit_resolve):
+                try:
+                    await pursuit_resolve(interaction_id, response)
+                except Exception as exc:
+                    self._set_interaction_status(
+                        "答案已持久化，但目标 checkpoint 尚未确认；"
+                        "请执行 /pursue resume。"
+                    )
+                    raise UserInteractionUnavailableError(
+                        "答案已持久化，请执行 /pursue resume"
+                    ) from exc
+            return response
+        except TimeoutError as exc:
+            if authority is not None and record is not None:
+                record = await self._stop_interaction_owner_renewal(
+                    interaction_id,
+                    fallback=record,
+                )
+                try:
+                    await authority.expire(record=record, now=record.expires_at)
+                except Exception:
+                    logger.warning("TUI durable interaction timeout commit failed")
+            raise UserInteractionUnavailableError("用户交互等待已超时") from exc
+        finally:
+            if interaction_id in self._interaction_owner_tasks:
+                await self._stop_interaction_owner_renewal(
+                    interaction_id,
+                    fallback=record,
+                )
+            self._active_interaction_ids.discard(interaction_id)
 
-            def on_answer(answer: dict[str, str] | None) -> None:
-                if not future.done():
-                    future.set_result(dict(answer or {}))
+    def _interaction_authority(
+        self,
+    ) -> DurableInteractionAuthorityClient | None:
+        harness_service = getattr(self.engine, "harness_service", None)
+        store = getattr(harness_service, "store", None)
+        if store is None:
+            self._interaction_authority_client = None
+            self._interaction_authority_store = None
+            return None
+        if (
+            self._interaction_authority_client is None
+            or self._interaction_authority_store is not store
+        ):
+            self._interaction_authority_client = DurableInteractionAuthorityClient(
+                store=store,
+                workspace_root=self.engine.workspace_root,
+                owner_id=self._interaction_owner_id,
+            )
+            self._interaction_authority_store = store
+        return self._interaction_authority_client
 
-            self.push_screen(UserInteractionScreen(payload), on_answer)
-            return await future
+    def _set_interaction_status(self, message: str) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one(StatusBar).status_text = message
+
+    def _start_interaction_owner_renewal(
+        self,
+        record: HarnessInteractionRecord,
+    ) -> None:
+        interaction_id = record.interaction_id
+        authority = self._interaction_authority()
+        if authority is None:
+            return
+        self._interaction_records[interaction_id] = record
+        current = self._interaction_owner_tasks.get(interaction_id)
+        if current is not None and not current.done():
+            return
+
+        async def keep_owner_live() -> None:
+            failures = 0
+            try:
+                while interaction_id in self._active_interaction_ids:
+                    await asyncio.sleep(authority.owner_renew_interval_seconds)
+                    latest = self._interaction_records.get(interaction_id)
+                    if latest is None or latest.state != "pending":
+                        return
+                    try:
+                        self._interaction_records[interaction_id] = (
+                            await authority.renew(record=latest)
+                        )
+                        failures = 0
+                    except Exception:
+                        failures += 1
+                        try:
+                            current_record = await authority.store.get_interaction(
+                                workspace_root=self.engine.workspace_root,
+                                interaction_id=interaction_id,
+                            )
+                        except Exception:
+                            current_record = None
+                        if (
+                            current_record is not None
+                            and current_record.state == "pending"
+                            and current_record.owner_id == authority.owner_id
+                        ):
+                            self._interaction_records[interaction_id] = current_record
+                        elif current_record is not None or failures >= 3:
+                            self._set_interaction_status(
+                                "持久交互 owner 续租失败；答案提交前将再次核对。"
+                            )
+                            return
+                        await asyncio.sleep(float(min(failures, 3)))
+            except asyncio.CancelledError:
+                raise
+            finally:
+                if self._interaction_owner_tasks.get(interaction_id) is asyncio.current_task():
+                    self._interaction_owner_tasks.pop(interaction_id, None)
+
+        self._interaction_owner_tasks[interaction_id] = asyncio.create_task(
+            keep_owner_live(),
+            name=f"naumi-tui-interaction-owner-{interaction_id}",
+        )
+
+    async def _stop_interaction_owner_renewal(
+        self,
+        interaction_id: str,
+        *,
+        fallback: HarnessInteractionRecord,
+    ) -> HarnessInteractionRecord:
+        owner_task = self._interaction_owner_tasks.pop(interaction_id, None)
+        if owner_task is not None and owner_task is not asyncio.current_task():
+            owner_task.cancel()
+            await asyncio.gather(owner_task, return_exceptions=True)
+        return self._interaction_records.pop(interaction_id, fallback)
+
+    async def _present_user_interaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        record: HarnessInteractionRecord | None,
+    ) -> dict[str, str]:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, str]] = loop.create_future()
+
+        def on_answer(answer: dict[str, str] | None) -> None:
+            if not future.done():
+                future.set_result(dict(answer or {}))
+
+        screen = UserInteractionScreen(payload)
+        self.push_screen(screen, on_answer)
+        timeout = (
+            DurableInteractionAuthorityClient.remaining_timeout_seconds(record)
+            if record is not None
+            else None
+        )
+        try:
+            if timeout is None:
+                return await future
+            return await asyncio.wait_for(future, timeout=timeout)
+        except TimeoutError:
+            if screen.is_mounted:
+                screen.dismiss(None)
+            raise
+
+    @work(exclusive=False, exit_on_error=False)
+    async def _recover_durable_interactions(self) -> None:
+        """Replay authority-owned pending questions without resuming a model run."""
+        authority = self._interaction_authority()
+        if authority is None:
+            return
+        recovery_failures = 0
+        while self.is_running:
+            try:
+                recovery = await authority.recover_pending(limit=50)
+            except Exception:
+                logger.warning("TUI durable interaction recovery failed")
+                self._set_interaction_status(
+                    "持久交互恢复失败；请运行 /doctor 后重试。"
+                )
+                recovery_failures += 1
+                if recovery_failures >= 3:
+                    return
+                await asyncio.sleep(float(2 ** (recovery_failures - 1)))
+                continue
+            recovery_failures = 0
+            claimed = tuple(
+                record for record in recovery.claimed
+                if record.interaction_id not in self._active_interaction_ids
+            )
+            for record in claimed:
+                self._active_interaction_ids.add(record.interaction_id)
+                self._start_interaction_owner_renewal(record)
+            for record in claimed:
+                try:
+                    async with self._interaction_lock:
+                        record = self._interaction_records.get(
+                            record.interaction_id,
+                            record,
+                        )
+                        raw_response = await self._present_user_interaction(
+                            {
+                                "request_id": record.interaction_id,
+                                **record.request().to_public_dict(),
+                                "expires_at": record.expires_at,
+                            },
+                            record=record,
+                        )
+                    record = await self._stop_interaction_owner_renewal(
+                        record.interaction_id,
+                        fallback=record,
+                    )
+                    await authority.answer(record=record, response=raw_response)
+                    self._set_interaction_status(
+                        f"已恢复并保存交互 {record.interaction_id}；"
+                        "若属于目标追踪，请执行 /pursue resume。"
+                    )
+                except TimeoutError:
+                    record = await self._stop_interaction_owner_renewal(
+                        record.interaction_id,
+                        fallback=record,
+                    )
+                    try:
+                        await authority.expire(
+                            record=record,
+                            now=record.expires_at,
+                        )
+                    except Exception:
+                        logger.warning("TUI replay interaction timeout commit failed")
+                except Exception:
+                    logger.warning("TUI replay interaction answer failed")
+                    self._set_interaction_status(
+                        "恢复问题的答案未能持久化；重开 TUI 后可重试。"
+                    )
+                finally:
+                    if record.interaction_id in self._interaction_owner_tasks:
+                        await self._stop_interaction_owner_renewal(
+                            record.interaction_id,
+                            fallback=record,
+                        )
+                    self._active_interaction_ids.discard(record.interaction_id)
+            if recovery.retry_after_seconds is None:
+                return
+            await asyncio.sleep(max(0.05, recovery.retry_after_seconds + 0.05))
 
     def _show_startup_status(self) -> None:
         """Show model, budget, and context info in status bar on startup."""
