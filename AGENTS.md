@@ -131,6 +131,7 @@ src/naumi_agent/
 | `/autopsy <目标>` | 执行迹切片与爆炸半径隔离 (DTS-CHE) | ✅ |
 | `/pursue <目标>` | 目标追踪 — 自主循环执行直至真正达成 | ✅ |
 | `/feedback <类别> <scope> <topic> <摘要>` | 可信反馈 — 脱敏形成不可执行改进候选 | ✅ |
+| `/evolution [list|detail <id>]` | 只读审查 Evolution Candidate | ✅ |
 | `/history` | 历史会话列表 | ✅ |
 | `/load <id>` | 加载历史会话 | ✅ |
 | `/delete <id>` | 删除指定会话 | ✅ |

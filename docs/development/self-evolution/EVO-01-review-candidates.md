@@ -45,6 +45,9 @@ Evolution Candidate，而不是直接触发 self_modify。
   `EVO-01-3a-candidate-store-core.md`。
 - HAR-09.1a Feedback adapter：已实现。直接用户反馈和 Agent 对 durable user turn 的解释使用
   不同 source kind，摘要不落库，非缺陷反馈不生成 Candidate；所有结果仍固定不可执行。
+- EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过
+  `evolution_candidates` 读取同一服务；过滤、详情、审计链和资源上限均为确定性实现，读取不改变
+  Candidate。设计与证据见 `EVO-01-6a-readonly-review-surface.md`。
 - runtime metric/Eval adapters、provider/model/platform 时间窗聚合策略、
-  Eligibility、Prioritization 与
-  Review surface 仍为 planned；不得把 EVO-01 整体标记为完成。
+  Eligibility、Prioritization、专用全屏页和 approve/reject/defer 动作仍为 planned；不得把
+  EVO-01 整体标记为完成。
