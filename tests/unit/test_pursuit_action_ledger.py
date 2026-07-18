@@ -340,6 +340,59 @@ async def test_background_task_id_and_terminal_collection_update_same_action(tmp
 
 
 @pytest.mark.asyncio
+async def test_dispatched_background_action_retries_through_caller_idempotency_key(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_action")
+    assert run is not None
+    command = "python3 -c \"import time; time.sleep(0.1)\""
+    background = MagicMock()
+
+    async def execute_background(**arguments):
+        assert arguments["idempotency_key"].startswith("pact_")
+        persisted = store.get_action(arguments["idempotency_key"])
+        assert persisted is not None
+        assert persisted.state is PursuitActionState.DISPATCHED
+        return "后台任务已启动。\n\n- 任务 ID：`bg_0091`"
+
+    background.execute = AsyncMock(side_effect=execute_background)
+    tools = MagicMock()
+    tools.get = MagicMock(side_effect=lambda name: {
+        "background_run": background,
+    }.get(name))
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=tools,
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    loop._run = run
+    loop._llm_call = AsyncMock(return_value=command)  # type: ignore[method-assign]
+    base_arguments = {"command": command, "cwd": "", "timeout_seconds": 1800}
+    prepared = await loop._prepare_action_dispatch(
+        action_id="retry-bg",
+        tool_name="background_run",
+        arguments=base_arguments,
+    )
+    assert prepared is not None
+    store.mark_action_dispatched(prepared.action_key, updated_at=2.0)
+
+    result = await loop._execute_via_bash(
+        MagicMock(),
+        "运行 sleep 后台任务",
+        "retry-bg",
+    )
+
+    assert result["status"] == "waiting"
+    assert result["background_task_id"] == "bg_0091"
+    background.execute.assert_awaited_once()
+    waiting = store.get_action(prepared.action_key)
+    assert waiting is not None
+    assert waiting.state is PursuitActionState.WAITING
+
+
+@pytest.mark.asyncio
 async def test_real_background_process_reconciles_to_terminal_ledger(tmp_path) -> None:
     store = _store_with_run(tmp_path)
     run = store.get_run("pursuit_action")

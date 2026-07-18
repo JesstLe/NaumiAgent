@@ -456,6 +456,7 @@ class _RuntimeSnapshot:
         lines = [
             "### 资源与后台",
             "- 后台任务："
+            f"{background_counts[BackgroundStatus.PREPARING]} 准备中，"
             f"{background_counts[BackgroundStatus.RUNNING]} 运行中，"
             f"{background_counts[BackgroundStatus.COMPLETED]} 已完成，"
             f"{background_counts[BackgroundStatus.FAILED]} 失败，"

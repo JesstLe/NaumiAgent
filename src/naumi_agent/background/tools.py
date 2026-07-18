@@ -43,6 +43,13 @@ class BackgroundRunTool(Tool):
                     "description": "超时时间，默认 1800 秒",
                     "default": 1800,
                 },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": (
+                        "可选调用方幂等键；相同键和相同参数只会接纳一个后台任务。"
+                    ),
+                    "default": "",
+                },
             },
             "required": ["command"],
         }
@@ -53,6 +60,7 @@ class BackgroundRunTool(Tool):
         command: str,
         cwd: str = "",
         timeout_seconds: int = 1800,
+        idempotency_key: str = "",
         **kwargs: Any,
     ) -> str:
         try:
@@ -60,13 +68,27 @@ class BackgroundRunTool(Tool):
                 command,
                 cwd=cwd,
                 timeout_seconds=timeout_seconds,
+                idempotency_key=idempotency_key,
             )
         except ValueError as e:
             return f"错误：{e}"
+        status_label = {
+            "preparing": "准备中",
+            "running": "运行中",
+            "completed": "已完成",
+            "failed": "失败",
+            "cancelled": "已取消",
+            "timed_out": "已超时",
+        }[task.status.value]
+        headline = (
+            "后台任务已启动。"
+            if task.status.value == "running"
+            else "后台任务已存在或已接纳。"
+        )
         return (
-            "后台任务已启动。\n\n"
+            f"{headline}\n\n"
             f"- 任务 ID：`{task.id}`\n"
-            f"- 状态：运行中\n"
+            f"- 状态：{status_label}\n"
             f"- PID：{task.pid}\n"
             f"- 进程组：{task.process_group_id or '-'}\n"
             f"- 输出文件：`{task.output_path}`\n\n"

@@ -2559,6 +2559,7 @@ async def test_bridge_status_payload_includes_compact_task_activity() -> None:
     engine = _FakeEngine()
     engine.background_runner = SimpleNamespace(
         list_tasks=lambda: [
+            SimpleNamespace(status=BackgroundStatus.PREPARING),
             SimpleNamespace(status=BackgroundStatus.RUNNING),
             SimpleNamespace(status=BackgroundStatus.FAILED, notified=False),
             SimpleNamespace(status=BackgroundStatus.FAILED, notified=True),
@@ -2592,7 +2593,7 @@ async def test_bridge_status_payload_includes_compact_task_activity() -> None:
     tasks = bridge.status_payload()["tasks"]
 
     assert tasks == {
-        "background_running": 1,
+        "background_running": 2,
         "background_attention": 1,
         "subagents_active": 1,
         "browser_active": 1,

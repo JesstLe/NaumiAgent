@@ -9,6 +9,7 @@ from enum import StrEnum
 class BackgroundStatus(StrEnum):
     """Lifecycle states for a background command."""
 
+    PREPARING = "preparing"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -34,6 +35,8 @@ class BackgroundTask:
     output_preview: str = ""
     error: str = ""
     notified: bool = False
+    idempotency_key: str = ""
+    timeout_seconds: int = 1800
 
     @property
     def is_finished(self) -> bool:

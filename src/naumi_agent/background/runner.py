@@ -18,6 +18,7 @@ from naumi_agent.runtime.shell import (
 )
 
 _PREVIEW_CHARS = 2000
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PORT_PATTERNS = (
     re.compile(r"\bhttp\.server\s+(?P<port>\d{2,5})(?:\s|$)"),
     re.compile(r"(?:^|\s)(?:--port|-p|--bind-port)\s+(?P<port>\d{2,5})(?:\s|$)"),
@@ -33,6 +34,7 @@ class BackgroundRunner:
         self._store = store
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._watchers: dict[str, asyncio.Task[None]] = {}
+        self._dispatch_lock = asyncio.Lock()
         self._store.prune()
 
     @property
@@ -45,6 +47,7 @@ class BackgroundRunner:
         *,
         cwd: str = "",
         timeout_seconds: int = 1800,
+        idempotency_key: str = "",
     ) -> BackgroundTask:
         """Start a background shell command and return immediately."""
         command = command.strip()
@@ -52,47 +55,89 @@ class BackgroundRunner:
             raise ValueError("后台命令不能为空")
         if timeout_seconds <= 0:
             raise ValueError("超时时间必须大于 0 秒")
-
-        workdir = Path(cwd).expanduser().resolve() if cwd else Path.cwd().resolve()
-        if not workdir.is_dir():
-            raise ValueError(f"工作目录不存在：{workdir}")
-
-        port_hints = _extract_port_hints(command)
-        busy_ports = [port for port in port_hints if _is_port_listening(port)]
-        if busy_ports:
-            ports = ", ".join(str(port) for port in busy_ports)
+        idempotency_key = idempotency_key.strip()
+        if idempotency_key and not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
             raise ValueError(
-                f"端口已被占用：{ports}。请换端口，或先用 /background cleanup 清理遗留服务。"
+                "幂等键必须为 1-128 位字母、数字、点、下划线、冒号或连字符"
             )
 
-        task_id = self._store.next_id()
-        output_path = self._store.artifacts_dir / f"{task_id}.log"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        workdir = Path(cwd).expanduser().resolve() if cwd else Path.cwd().resolve()
 
-        proc = await create_shell_process(
-            command,
-            cwd=str(workdir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        now = _now()
-        task = BackgroundTask(
-            id=task_id,
-            command=command,
-            cwd=str(workdir),
-            status=BackgroundStatus.RUNNING,
-            output_path=str(output_path),
-            pid=proc.pid,
-            process_group_id=proc.pid,
-            port_hints=port_hints,
-            started_at=now,
-        )
-        self._processes[task_id] = proc
-        self._store.save(task)
-        self._watchers[task_id] = asyncio.create_task(
-            self._watch(task_id, proc, output_path, timeout_seconds)
-        )
-        return task
+        async with self._dispatch_lock:
+            if idempotency_key:
+                existing = self._store.get_by_idempotency_key(idempotency_key)
+                if existing is not None:
+                    _validate_idempotent_replay(
+                        existing,
+                        command=command,
+                        cwd=str(workdir),
+                        timeout_seconds=timeout_seconds,
+                    )
+                    return existing
+
+            if not workdir.is_dir():
+                raise ValueError(f"工作目录不存在：{workdir}")
+
+            port_hints = _extract_port_hints(command)
+            busy_ports = [port for port in port_hints if _is_port_listening(port)]
+            if busy_ports:
+                ports = ", ".join(str(port) for port in busy_ports)
+                raise ValueError(
+                    f"端口已被占用：{ports}。请换端口，"
+                    "或先用 /background cleanup 清理遗留服务。"
+                )
+
+            now = _now()
+            if idempotency_key:
+                task, created = self._store.reserve(
+                    command=command,
+                    cwd=str(workdir),
+                    idempotency_key=idempotency_key,
+                    timeout_seconds=timeout_seconds,
+                    port_hints=port_hints,
+                    started_at=now,
+                )
+                if not created:
+                    return task
+            else:
+                task_id = self._store.next_id()
+                task = BackgroundTask(
+                    id=task_id,
+                    command=command,
+                    cwd=str(workdir),
+                    status=BackgroundStatus.PREPARING,
+                    output_path=str(self._store.artifacts_dir / f"{task_id}.log"),
+                    port_hints=port_hints,
+                    started_at=now,
+                    timeout_seconds=timeout_seconds,
+                )
+
+            output_path = Path(task.output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                proc = await create_shell_process(
+                    command,
+                    cwd=str(workdir),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+            except BaseException as exc:
+                if idempotency_key:
+                    task.status = BackgroundStatus.FAILED
+                    task.completed_at = _now()
+                    task.error = f"后台进程启动失败：{type(exc).__name__}"
+                    self._store.save(task)
+                raise
+
+            task.status = BackgroundStatus.RUNNING
+            task.pid = proc.pid
+            task.process_group_id = proc.pid
+            self._processes[task.id] = proc
+            self._store.save(task)
+            self._watchers[task.id] = asyncio.create_task(
+                self._watch(task.id, proc, output_path, timeout_seconds)
+            )
+            return task
 
     async def cancel(self, task_id: str) -> BackgroundTask | None:
         """Cancel a running task."""
@@ -241,6 +286,8 @@ def format_task(task: BackgroundTask) -> str:
     detail_lines: list[str] = []
     if task.process_group_id:
         detail_lines.append(f"- 进程组：{task.process_group_id}")
+    if task.idempotency_key:
+        detail_lines.append(f"- 幂等键：{task.idempotency_key}")
     if task.port_hints:
         detail_lines.append(f"- 端口提示：{', '.join(str(port) for port in task.port_hints)}")
     details = ("\n" + "\n".join(detail_lines)) if detail_lines else ""
@@ -305,6 +352,7 @@ def _preview(output: str) -> str:
 
 def _status_label(status: BackgroundStatus) -> str:
     return {
+        BackgroundStatus.PREPARING: "准备中",
         BackgroundStatus.RUNNING: "运行中",
         BackgroundStatus.COMPLETED: "已完成",
         BackgroundStatus.FAILED: "失败",
@@ -315,3 +363,18 @@ def _status_label(status: BackgroundStatus) -> str:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _validate_idempotent_replay(
+    task: BackgroundTask,
+    *,
+    command: str,
+    cwd: str,
+    timeout_seconds: int,
+) -> None:
+    if (
+        task.command != command
+        or task.cwd != cwd
+        or task.timeout_seconds != timeout_seconds
+    ):
+        raise ValueError("幂等键已绑定不同的后台命令、工作目录或超时时间")

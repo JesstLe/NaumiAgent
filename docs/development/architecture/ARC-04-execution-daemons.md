@@ -31,3 +31,10 @@
 - 现有 `ValidationExecutor` 只能提供 argv/timeout/process-group/output bound；`CodeExecuteTool`
   在容器不可用时允许本机降级。两者都不能单独证明 Sandbox Eval 的 `no_host_side_effect`，因此
   ARC-04 隔离后端完成前，HAR-08.4 保持 planned，禁止用“临时目录 + subprocess”冒充沙箱。
+
+## 已完成的最小前置
+
+HAR-10.5b 已在本地 BackgroundRunner 接通 caller idempotency key、pre-spawn reservation、同 runtime 并发
+去重和重启回执复用。这验证了 ARC-04.2 的 job identity/immutable input 形状，但 `tasks.json` 没有跨进程事务、
+permission grant、workspace lease 或 daemon authority，因此 ARC-04.2 仍是 planned，禁止把该前置标记为
+Tool daemon 已完成。
