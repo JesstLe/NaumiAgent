@@ -23,3 +23,11 @@
 - worker crash 后 Runtime 判断已执行/未执行/未知，不盲重试未知副作用。
 - 100 并发 job 资源上限生效，日志进入 artifact 而非内存堆积。
 - daemon 版本不兼容时 drain 并提示升级，不接受新任务。
+
+## 下游硬依赖
+
+- HAR-08.4 Sandbox Eval 只能消费 ARC-04 提供的显式隔离能力合同：临时 workspace/worktree、
+  默认断网、环境变量 allowlist、资源上限、进程树取消、artifact digest 与可审计退出状态。
+- 现有 `ValidationExecutor` 只能提供 argv/timeout/process-group/output bound；`CodeExecuteTool`
+  在容器不可用时允许本机降级。两者都不能单独证明 Sandbox Eval 的 `no_host_side_effect`，因此
+  ARC-04 隔离后端完成前，HAR-08.4 保持 planned，禁止用“临时目录 + subprocess”冒充沙箱。

@@ -30,6 +30,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessExplainTool(service),
         HarnessReplayTool(service),
         HarnessEvalTool(service),
+        HarnessEvalReplayTool(service),
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
         HarnessEvalBaselinePromoteTool(service),
@@ -220,6 +221,52 @@ class HarnessEvalTool(_HarnessReadOnlyTool):
             result = await self._service.eval_suites(suite)
         except ValueError as exc:
             return f"Harness Eval 参数无效：{exc}"
+        return render_harness_eval(result)
+
+
+class HarnessEvalReplayTool(_HarnessReadOnlyTool):
+    @property
+    def name(self) -> str:
+        return "harness_eval_replay"
+
+    @property
+    def description(self) -> str:
+        return "将既有 Harness Safe Replay 转为可比较 Eval 结果，不执行或写入任何任务"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness eval safe replay deterministic baseline regression no side effect"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "可选 Harness run id；省略或 latest 表示最新运行",
+                }
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        run_id = kwargs.get("run_id")
+        if run_id is not None and not isinstance(run_id, str):
+            return "Harness Replay Eval 参数无效：run_id 必须是字符串。"
+        try:
+            result = await self._service.eval_replay_run(run_id)
+        except ValueError as exc:
+            return f"Harness Replay Eval 参数无效：{exc}"
         return render_harness_eval(result)
 
 

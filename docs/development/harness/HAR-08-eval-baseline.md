@@ -40,6 +40,11 @@
   协议 runner、错误分类、`/harness eval` 与 `harness_eval` Tool 共用同一 Service；实施见
   `HAR-08-1a-offline-protocol-eval-design.md` 与
   `HAR-08-1a-offline-protocol-eval-implementation-plan.md`。
+- HAR-08.3a Safe Replay Eval Runner：已实现。将 HAR-05 的既有持久 Replay baseline 映射为
+  `safe_replay@1` typed Eval result；不调用模型、工具、Check 或 session，也不在 Eval 路径创建
+  baseline。缺少 baseline、证据不完整或损坏都归类为 evaluation error，不冒充产品回归。
+  `/harness eval replay [run-id|latest]` 与只读 `harness_eval_replay` Tool 共用 Service。详见
+  `HAR-08-3a-safe-replay-eval.md`。
 - HAR-08.6a Baseline Identity 契约：已实现。真实 Git HEAD/脏树 fingerprint、Suite/Profile/
   Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
   identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
@@ -90,5 +95,6 @@
 - HAR-08.8e3 引导式 Baseline 晋升：已实现。新 UI 与 Textual TUI 复用结构化理由选择和最终确认，
   显式 reason 与 Agent Tool 保持直达；所有路径最终只调用 H5b 权威 gate，并以 typed 状态说明 selector
   是否改变。详见 `HAR-08-8e3-guided-baseline-promotion.md`。
-- Replay/Sandbox/Live 与其余 surface 仍为 planned；当前不得把
+- Sandbox/Live 与其余 surface 仍为 planned；其中 HAR-08.4 必须等待 ARC-04 提供可证明的隔离
+  worker，不得复用会降级到本机执行的普通命令路径。当前不得把
   HAR-08 整体标记为 implemented。

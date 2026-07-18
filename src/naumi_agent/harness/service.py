@@ -45,6 +45,7 @@ from naumi_agent.harness.eval import (
     evaluate_suite_repetitions,
     resolve_declared_eval_suite,
 )
+from naumi_agent.harness.eval_identity import capture_eval_source_identity
 from naumi_agent.harness.eval_models import (
     EvalRunStatus,
     HarnessEvalReport,
@@ -54,6 +55,7 @@ from naumi_agent.harness.eval_receipt import (
     EvalReceiptSample,
     build_eval_comparison_receipt,
 )
+from naumi_agent.harness.eval_replay import build_safe_replay_eval_result
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchProgress,
@@ -940,7 +942,12 @@ class HarnessService:
             explanation=self._explainer.explain(stored_run),
         )
 
-    async def replay_run(self, run_id: str | None = None) -> HarnessReplayLookup:
+    async def replay_run(
+        self,
+        run_id: str | None = None,
+        *,
+        require_existing_baseline: bool = False,
+    ) -> HarnessReplayLookup:
         """Safely replay durable facts without tools, models, checks, or sessions."""
         store = self._store
         if store is None:
@@ -975,6 +982,14 @@ class HarnessService:
             baseline = await store.get_replay_baseline(stored_run.id)
             legacy_created = baseline is None
             if baseline is None:
+                if require_existing_baseline:
+                    return HarnessReplayLookup(
+                        status="unavailable",
+                        message=(
+                            "该运行尚无持久 Replay baseline。请先执行一次 "
+                            "`/harness replay` 建立基线，再运行 Replay Eval。"
+                        ),
+                    )
                 payload = await asyncio.to_thread(
                     capture_replay_baseline,
                     stored_run,
@@ -1008,6 +1023,56 @@ class HarnessService:
                 ),
             )
         return HarnessReplayLookup(status="ok", result=result)
+
+    async def eval_replay_run(
+        self,
+        run_id: str | None = None,
+    ) -> HarnessEvalSuiteResult:
+        """Evaluate one existing replay baseline without executing or persisting work."""
+        started = time.perf_counter()
+        try:
+            source_before = await asyncio.to_thread(
+                capture_eval_source_identity,
+                self.workspace_root,
+            )
+            source_code = ""
+        except (OSError, TreeFingerprintError):
+            source_before = None
+            source_code = "baseline_source_unavailable"
+        status = await self.status()
+        lookup = await self.replay_run(
+            run_id,
+            require_existing_baseline=True,
+        )
+        if source_before is None:
+            source_after = None
+        else:
+            try:
+                source_after = await asyncio.to_thread(
+                    capture_eval_source_identity,
+                    self.workspace_root,
+                )
+            except (OSError, TreeFingerprintError):
+                source_after = None
+                source_code = "baseline_source_unavailable"
+        if status.code is HarnessStatusCode.MISSING:
+            profile_digest = None
+            source_code = source_code or "profile_missing"
+        elif status.code is HarnessStatusCode.INVALID:
+            profile_digest = None
+            source_code = source_code or "profile_invalid"
+        else:
+            profile_digest = status.profile_digest
+        return build_safe_replay_eval_result(
+            lookup,
+            workspace_root=self.workspace_root,
+            profile_digest=profile_digest,
+            profile_trusted=status.trusted,
+            source_before=source_before,
+            source_after=source_after,
+            source_code=source_code,
+            duration_ms=(time.perf_counter() - started) * 1_000,
+        )
 
     async def begin_completion_run(
         self,

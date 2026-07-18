@@ -134,7 +134,7 @@ def _evidence_problem(
 
 
 def _required_guardrails(case: HarnessEvalCaseResult) -> set[str]:
-    if case.runner == "protocol_hello":
+    if case.runner in {"protocol_hello", "safe_replay@1"}:
         return {"no_model", "no_side_effect"}
     return set()
 

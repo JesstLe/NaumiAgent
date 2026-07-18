@@ -28,6 +28,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_explain",
         "harness_replay",
         "harness_eval",
+        "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",
         "harness_eval_baseline_promote",
@@ -35,11 +36,13 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_read_knowledge",
         "harness_run_check",
     ]
-    assert all(tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 5, 9))
-    assert not tools[6].metadata.read_only
+    assert all(
+        tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 5, 6, 10)
+    )
     assert not tools[7].metadata.read_only
     assert not tools[8].metadata.read_only
-    assert not tools[10].metadata.read_only
+    assert not tools[9].metadata.read_only
+    assert not tools[11].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -49,7 +52,8 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     assert "诊断" in await tools[1].execute()
     assert "没有找到" in await tools[2].execute()
     assert "尚未配置" in await tools[4].execute()
-    assert "尚无 Baseline" in await tools[5].execute(suite="protocol")
+    assert "评测错误" in await tools[5].execute(run_id="latest")
+    assert "尚无 Baseline" in await tools[6].execute(suite="protocol")
     assert all(tool.name not in {"harness_trust", "harness_untrust"} for tool in tools)
 
 
@@ -143,3 +147,28 @@ async def test_harness_eval_tool_is_read_only_allowlisted_and_validates_suite(
     assert "参数无效" in await tool.execute(suite=" ")
     assert "参数无效" in await tool.execute(suite="x" * 1_025)
     assert "尚未配置" in await tool.execute()
+
+
+@pytest.mark.asyncio
+async def test_harness_eval_replay_tool_is_read_only_and_validates_run_id(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        store=HarnessStore(tmp_path / "harness.db"),
+    )
+    tool = next(
+        item
+        for item in create_harness_tools(service)
+        if item.name == "harness_eval_replay"
+    )
+
+    assert tool.metadata.read_only
+    assert tool.metadata.concurrency_safe
+    assert set(tool.parameters_schema["properties"]) == {"run_id"}
+    assert tool.parameters_schema["additionalProperties"] is False
+    assert "参数无效" in await tool.execute(run_id=1)
+    assert "评测错误" in await tool.execute(run_id="latest")

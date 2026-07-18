@@ -3033,6 +3033,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness replay [run-id|latest]\n"
         "      /harness detail [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
+        "      /harness eval replay [run-id|latest]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -3094,6 +3095,19 @@ async def _run_harness(engine: Any, arg: str) -> None:
         console.print(
             Markdown(render_harness_detail_markdown(explain_payload, replay_payload))
         )
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) in {2, 3}
+        and parts[1].lower() == "replay"
+    ):
+        target = parts[2] if len(parts) == 3 else None
+        try:
+            result = await service.eval_replay_run(target)
+        except ValueError as exc:
+            console.print(f"[yellow]Harness Replay Eval 参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_harness_eval(result)))
         return
     if subcommand == "eval" and len(parts) > 2:
         target = parts[1]
