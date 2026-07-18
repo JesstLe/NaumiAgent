@@ -70,6 +70,7 @@ _DOMAIN_RULES: tuple[tuple[re.Pattern[str], DoctorHealthDomain], ...] = (
     (re.compile(r"^模型契约"), "model"),
     (re.compile(r"^(API key|model provider|模型实时连接)$"), "provider"),
     (re.compile(r"^(状态存储目录|debug log 写入权限)$"), "store"),
+    (re.compile(r"^Worker authority$"), "runtime"),
     (re.compile(r"^git 状态$"), "git"),
     (re.compile(r"^Node\.js$"), "node"),
     (re.compile(r"^(browser daemon|网络搜索)$"), "browser"),
@@ -185,7 +186,12 @@ def _responsibility(
         return "user_config"
     if name in {"模型实时连接", "browser daemon", "网络搜索", "MCP servers"}:
         return "external_service"
-    if name in {"状态存储目录", "debug log 写入权限", "Doctor 运行时"}:
+    if name in {
+        "状态存储目录",
+        "debug log 写入权限",
+        "Doctor 运行时",
+        "Worker authority",
+    }:
         return "product_runtime"
     return "local_environment"
 

@@ -73,9 +73,10 @@ heartbeat timeout 取 `min(lease_seconds, ceil(renew_interval × 2.5))`，下限
 
 - 当前只接入 Pursuit execution domain；browser、background daemon、subagent 和 runtime service 尚未接入；
 - 只有 latest snapshot，没有有界历史/丢包统计、jitter 或 crash-loop 事件；
-- UI-13/UI-18 还没有读取 Harness heartbeat，当前界面仍只能展示各自已有的局部事实；
+- UI-13.1b 已把 active Worker contract 与对应 Harness heartbeat 组合为严格只读 Doctor 检查；UI-18 仍只展示
+  当前 Pursuit recovery 的局部事实，尚无通用 Worker 列表；
 - heartbeat 与 lease renew 是同一 Store 中的两个顺序事务，不是单 SQL 原子提交；
 - offline 只是一种诊断状态，不会自动 takeover、kill 或 restart；这些属于 ARC-04.6/HAR-10.5。
 
-下一最小切片应先把 typed heartbeat 组合进一个只读运行健康 snapshot，供 UI-13 Doctor 与 UI-18.5 Recovery
-共同消费，再选择 browser 或 agent 的第二个 producer；不要直接扩张成完整 Supervisor。
+UI-13.1b 已完成 typed heartbeat 到 Doctor 的第一个跨域只读投影。下一最小切片应根据依赖选择 browser/agent
+的真实 producer，或让 UI-18 消费通用 Worker 健康；不要直接扩张成完整 Supervisor。

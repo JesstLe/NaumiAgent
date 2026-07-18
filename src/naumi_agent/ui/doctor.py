@@ -17,6 +17,12 @@ import httpx
 
 from naumi_agent.config.configurator import validate_provider_configuration
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.worker_authority_health import (
+    WorkerAuthorityEntry,
+    WorkerAuthorityHealthError,
+    WorkerAuthoritySnapshot,
+    inspect_worker_authority_health,
+)
 from naumi_agent.persistence.store_catalog import (
     CatalogStatus,
     build_store_catalog,
@@ -95,6 +101,7 @@ async def run_doctor(
         ),
         _check_workspace(root),
         _check_state_store_catalog(config),
+        _check_worker_authority(config, workspace_root=root),
         _check_git(root),
         _check_command("Node.js", "node", ["node", "--version"]),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
@@ -248,6 +255,126 @@ def _check_state_store_catalog(config: AppConfig) -> DoctorCheck:
     elif report.warning_count:
         suggestion = "未版本化或权限过宽的 Store 将由 ARC-05 迁移与备份流程治理。"
     return DoctorCheck("状态存储目录", status, detail, suggestion)
+
+
+def _check_worker_authority(
+    config: AppConfig,
+    *,
+    workspace_root: Path,
+) -> DoctorCheck:
+    """Project strictly read-only worker registration and heartbeat facts."""
+    from naumi_agent.runtime.composition import build_runtime_paths
+
+    try:
+        paths = build_runtime_paths(config)
+        snapshot = inspect_worker_authority_health(
+            registry_db_path=paths.worker_registry_db_path,
+            harness_db_path=paths.harness_db_path,
+            workspace_root=workspace_root,
+        )
+    except (OSError, ValueError, WorkerAuthorityHealthError) as exc:
+        code = exc.code if isinstance(exc, WorkerAuthorityHealthError) else "path_invalid"
+        reason = {
+            "registry_wrong_type": "注册库路径类型错误",
+            "registry_schema_incompatible": "注册库版本不兼容",
+            "registry_unreadable": "注册库损坏或不可读",
+            "path_unreadable": "状态路径不可读",
+            "path_invalid": "状态路径配置无效",
+        }.get(code, "未知的只读诊断错误")
+        return DoctorCheck(
+            "Worker authority",
+            "error",
+            f"注册 authority 无法可信读取：{reason}。",
+            "停止向 Worker 派发任务；保留数据库并运行迁移预检或导出脱敏诊断。",
+        )
+    return _worker_authority_check(snapshot)
+
+
+def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
+    if snapshot.registry_health == "absent":
+        return DoctorCheck(
+            "Worker authority",
+            "pass",
+            "尚未启动隔离 Worker；注册中心会在首次真实注册时按需创建。",
+        )
+    if snapshot.active_count == 0:
+        return DoctorCheck(
+            "Worker authority",
+            "pass",
+            "注册中心 schema 正常，当前没有 active Worker。",
+        )
+
+    unhealthy = [
+        worker for worker in snapshot.workers if worker.heartbeat_health != "healthy"
+    ]
+    status: DoctorStatus = "pass" if not unhealthy and not snapshot.truncated else "warn"
+    if any(
+        worker.heartbeat_health
+        in {
+            "stale",
+            "offline",
+            "stopped",
+            "failed",
+            "clock_regression",
+            "missing",
+            "identity_mismatch",
+            "invalid",
+            "unavailable",
+        }
+        for worker in snapshot.workers
+    ):
+        status = "error"
+
+    heartbeat_store = {
+        "not_needed": "无需读取",
+        "absent": "尚未创建",
+        "ready": "正常",
+        "incompatible": "版本不兼容",
+        "error": "读取失败",
+    }[snapshot.heartbeat_store_health]
+    detail = (
+        f"active Worker {snapshot.active_count} 个；心跳 Store {heartbeat_store}。"
+    )
+    summaries = [_worker_authority_summary(worker) for worker in snapshot.workers[:3]]
+    if summaries:
+        detail += " " + "；".join(summaries)
+    if snapshot.active_count > len(summaries):
+        detail += f"；另有 {snapshot.active_count - len(summaries)} 个未展开"
+    suggestion = ""
+    if status == "error":
+        suggestion = "暂停新任务派发，核对 Worker instance/epoch 与 Harness heartbeat 后再恢复。"
+    elif status == "warn":
+        suggestion = "等待启动或排空完成后刷新；若状态持续不变，请检查 Worker 日志。"
+    return DoctorCheck("Worker authority", status, detail, suggestion)
+
+
+def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
+    health = {
+        "starting": "启动中",
+        "healthy": "健康",
+        "draining": "排空中",
+        "stale": "陈旧",
+        "offline": "离线",
+        "stopped": "已停止",
+        "failed": "失败",
+        "clock_regression": "时钟倒退",
+        "missing": "缺失",
+        "identity_mismatch": "身份不匹配",
+        "invalid": "内容无效",
+        "unavailable": "不可读取",
+    }.get(worker.heartbeat_health, "未知")
+    age = (
+        f"/{worker.heartbeat_age_seconds:.1f}s"
+        if worker.heartbeat_age_seconds is not None
+        else ""
+    )
+    worker_id = worker.worker_id if len(worker.worker_id) <= 48 else worker.worker_id[:47] + "…"
+    machine = worker.machine if len(worker.machine) <= 32 else worker.machine[:31] + "…"
+    return (
+        f"{worker_id} {worker.kind} epoch {worker.epoch} "
+        f"{worker.platform}/{machine} 容量 {worker.max_concurrent_jobs} "
+        f"心跳{health}{age}"
+    )
 
 
 def _check_api_key(config: AppConfig) -> DoctorCheck:

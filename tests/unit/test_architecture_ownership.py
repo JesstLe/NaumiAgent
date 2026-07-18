@@ -394,6 +394,10 @@ def test_default_policy_assigns_daemon_contracts_to_runtime() -> None:
                     "naumi_agent.daemons.worker_registry",
                     "src/naumi_agent/daemons/worker_registry.py",
                 ),
+                ModuleRecord(
+                    "naumi_agent.daemons.worker_authority_health",
+                    "src/naumi_agent/daemons/worker_authority_health.py",
+                ),
             ),
             digest="daemon-graph",
         ),
