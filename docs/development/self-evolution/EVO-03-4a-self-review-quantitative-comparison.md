@@ -55,5 +55,5 @@ Executor 返回 `HarnessStoredEvalComparisonReceipt`：
 
 - H5c `passed` 只代表当前 Suite/Policy/统计证据允许，不等于整个变异可推广；
 - Profile command、项目测试、并发、安全、跨平台等 interventional checks 仍等待 ARC-04 worker；
-- 下一切片应实现 EVO-03.5a Failure Attribution Contract：把 H5c 非 passed 结论与 runner/environment/
-  candidate/flaky 原因机械分类；随后 EVO-03.6 补 adversarial suites，EVO-03.7 才生成完整 Evaluation Receipt。
+- EVO-03.5a 已把 H5c 结论机械分类为 candidate/environment/runner/flaky/incomplete 等 typed artifact；下一步
+  跨查 ARC-04 隔离 worker 与 EVO-03.6 adversarial suite 的最小真实执行前置。

@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseStore,
     ExperimentLeaseState,
     ExperimentWorktreeLease,
+)
+from naumi_agent.evolution.failure_attribution import (
+    EvolutionFailureAttributionBuilder,
+    EvolutionFailureAttributionError,
+    EvolutionFailureAttributionExecutor,
+    EvolutionFailureAttributionStore,
+    FailureAttributionCategory,
 )
 from naumi_agent.evolution.self_review_comparison import (
     EvolutionSelfReviewComparisonError,
@@ -831,12 +839,21 @@ async def test_green_create_cohort_uses_candidate_after_empty_red_fixture(
         green_request=green_request,
         green_receipt=green,
     )
+    attribution = EvolutionFailureAttributionBuilder().build(
+        validation_plan=plan,
+        red_receipt=red,
+        green_receipt=green,
+        comparison=comparison,
+    )
 
     assert plan.files[0].operation == "create"
     assert red.metrics[0].sample_values == (0, 0, 0, 0, 0)
     assert green.metrics[0].sample_values == (0, 0, 0, 0, 0)
     assert comparison.receipt.statistical_verdict == "unchanged"
     assert comparison.receipt.decision == "passed"
+    assert attribution.category is FailureAttributionCategory.OBJECTIVE_NOT_IMPROVED
+    assert not attribution.candidate_fault
+    assert not attribution.reflection_eligible
 
 
 @pytest.mark.asyncio
@@ -1050,6 +1067,27 @@ async def test_self_review_comparison_persists_native_h5c_idempotently(
         request.suite_id,
         request.batch_id,
     )
+    attribution_store = EvolutionFailureAttributionStore(tmp_path / "sessions.db")
+    attribution_executor = EvolutionFailureAttributionExecutor(
+        harness_store=store,
+        attribution_store=attribution_store,
+    )
+    attribution = await attribution_executor.execute(
+        validation_plan=plan,
+        red_receipt=red,
+        green_receipt=green,
+        comparison=first,
+    )
+    persisted = await attribution_executor.execute(
+        validation_plan=plan,
+        red_receipt=red,
+        green_receipt=green,
+        comparison=first,
+    )
+    retried = await attribution_store.record(attribution)
+    restored = await EvolutionFailureAttributionStore(
+        tmp_path / "sessions.db"
+    ).get(first.id)
 
     assert second == first
     assert reference is not None and reference.purpose == "comparison_reference"
@@ -1059,6 +1097,26 @@ async def test_self_review_comparison_persists_native_h5c_idempotently(
     assert first.receipt.baseline_batch_id == request.batch_id
     assert first.receipt.current_batch_id == green_request.batch_id
     assert first.receipt.baseline_samples_sha256 == reference.samples_sha256
+    assert attribution.category is FailureAttributionCategory.NONE
+    assert attribution.reason_code == "verified_improvement"
+    assert attribution.reflection_eligible
+    assert persisted == retried == restored == attribution
+    with pytest.raises(EvolutionFailureAttributionError) as source_error:
+        await attribution_executor.execute(
+            validation_plan=plan,
+            red_receipt=red,
+            green_receipt=green,
+            comparison=replace(first, receipt_sha256="0" * 64),
+        )
+    assert source_error.value.code == "attribution_comparison_not_authoritative"
+    with sqlite3.connect(tmp_path / "sessions.db") as db:
+        db.execute(
+            "UPDATE evolution_failure_attributions SET attribution_sha256 = ?",
+            ("0" * 64,),
+        )
+        db.commit()
+    with pytest.raises(EvolutionFailureAttributionError, match="损坏"):
+        await EvolutionFailureAttributionStore(tmp_path / "sessions.db").get(first.id)
 
 
 @pytest.mark.asyncio

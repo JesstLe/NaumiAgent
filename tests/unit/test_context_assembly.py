@@ -17,6 +17,11 @@ from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.failure_attribution import (
+    EvolutionFailureAttributionBuilder,
+    EvolutionFailureAttributionExecutor,
+    EvolutionFailureAttributionStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
     EvolutionMutationGenerationTraceStore,
@@ -209,6 +214,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_self_review_comparison_executor,
         EvolutionSelfReviewComparisonExecutor,
+    )
+    assert isinstance(
+        engine.evolution_failure_attribution_builder,
+        EvolutionFailureAttributionBuilder,
+    )
+    assert isinstance(
+        engine.evolution_failure_attribution_store,
+        EvolutionFailureAttributionStore,
+    )
+    assert isinstance(
+        engine.evolution_failure_attribution_executor,
+        EvolutionFailureAttributionExecutor,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

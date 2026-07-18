@@ -101,4 +101,4 @@ Baseline cohort 尚未持久化完成前，不允许生成 GREEN request。
 - EVO-03.2c 已为纯 `self_review_static` Request 实现精确 Git baseline 扫描、连续 H5a sample 与防篡改
   completion receipt；执行 Profile checks 或项目代码的完整 Request 仍等待 ARC-04；
 - EVO-03.3a/3.4a 已保持同 metric/seed/order/平台合同生成 GREEN H5a cohort，并接入 H5b2/H5c 原生
-  Comparison Receipt；下一切片实现 EVO-03.5a Failure Attribution Contract。
+  Comparison Receipt，EVO-03.5a 已机械持久化 Failure Attribution；下一步跨查 ARC-04/EVO-03.6。

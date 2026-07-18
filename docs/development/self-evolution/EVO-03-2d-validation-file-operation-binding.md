@@ -58,5 +58,4 @@ EVO-03.2c executor 按 v2 operation 读取 baseline：
 - Plan v1 只读兼容，不自动升级；升级必须重新取得原始 Receipt authority；
 - EVO-03.3a 已重新验证 candidate Lease、HEAD/branch、精确 dirty path 集合和每个 `candidate_sha256`，并
   复用 RED Request 的 metric/seed/order/平台身份生成独立 GREEN H5a cohort；
-- EVO-03.4a 已消费真实 RED/GREEN 样本形成原生 H5c receipt；下一切片实现 EVO-03.5a Failure
-  Attribution Contract。
+- EVO-03.4a/3.5a 已形成原生 H5c receipt 与 Failure Attribution；下一步跨查 ARC-04/EVO-03.6。
