@@ -497,6 +497,9 @@ def _normalize_client_payload(
         }
         return normalized
 
+    if event_type == ClientEventType.INTERACTION_RESPONSE:
+        return _normalize_interaction_response_payload(payload)
+
     if event_type == ClientEventType.PERMISSION_REVOKE:
         grant_id = str(payload.get("grant_id") or "").strip()
         if grant_id:
@@ -573,6 +576,57 @@ def _normalize_client_payload(
         }
 
     return dict(payload)
+
+
+def _normalize_interaction_response_payload(payload: dict[str, Any]) -> dict[str, str]:
+    """Validate one interaction answer before it reaches pending runtime state."""
+    request_id = str(payload.get("request_id") or "").strip()
+    if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", request_id):
+        raise ValueError("交互响应 request_id 格式无效。")
+    kind = str(payload.get("kind") or "option").strip().lower()
+    if kind not in {"option", "custom"}:
+        raise ValueError("交互响应 kind 只能是 option 或 custom。")
+    value = _interaction_text(payload.get("value"), field="选择值", maximum=80)
+    custom_text = _interaction_text(
+        payload.get("custom_text"),
+        field="自定义输入",
+        maximum=4_000,
+        multiline=True,
+    )
+    if kind == "option":
+        if not value:
+            raise ValueError("选项响应必须提供选择值。")
+        if custom_text:
+            raise ValueError("选项响应不能同时携带自定义输入。")
+    else:
+        if value:
+            raise ValueError("自定义响应不能同时携带选择值。")
+        if not custom_text:
+            raise ValueError("自定义输入不能为空。")
+    return {
+        "request_id": request_id,
+        "kind": kind,
+        "value": value,
+        "custom_text": custom_text,
+    }
+
+
+def _interaction_text(
+    value: Any,
+    *,
+    field: str,
+    maximum: int,
+    multiline: bool = False,
+) -> str:
+    text = str(value or "").replace("\x00", "")
+    if any(ord(char) < 32 and char not in {"\n", "\t"} for char in text):
+        raise ValueError(f"{field}包含不允许的控制字符。")
+    if not multiline:
+        text = " ".join(text.split())
+    text = text.strip()
+    if len(text) > maximum:
+        raise ValueError(f"{field}最多 {maximum} 个字符。")
+    return text
 
 
 def _normalize_hello_payload(payload: dict[str, Any]) -> dict[str, Any]:

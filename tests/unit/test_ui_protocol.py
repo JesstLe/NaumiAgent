@@ -156,6 +156,46 @@ def test_protocol_normalizes_workbench_snapshot_requests() -> None:
     }
 
 
+def test_protocol_normalizes_typed_interaction_response() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.INTERACTION_RESPONSE,
+        "payload": {
+            "request_id": " ask-response-1 ",
+            "kind": " OPTION ",
+            "value": " safe ",
+            "private_payload": "drop",
+        },
+    })
+
+    assert record["payload"] == {
+        "request_id": "ask-response-1",
+        "kind": "option",
+        "value": "safe",
+        "custom_text": "",
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"request_id": "bad", "kind": "option", "value": "safe"},
+        {"request_id": "ask-1", "kind": "option", "value": ""},
+        {
+            "request_id": "ask-1", "kind": "option", "value": "safe",
+            "custom_text": "also custom",
+        },
+        {"request_id": "ask-1", "kind": "custom", "custom_text": ""},
+        {"request_id": "ask-1", "kind": "unknown", "value": "safe"},
+    ],
+)
+def test_protocol_rejects_invalid_interaction_response_combinations(payload) -> None:
+    with pytest.raises(ValueError, match="交互响应|选项响应|自定义输入"):
+        normalize_client_record({
+            "type": ClientEventType.INTERACTION_RESPONSE,
+            "payload": payload,
+        })
+
+
 def test_protocol_normalizes_workbench_review_requests() -> None:
     record = normalize_client_record(
         {

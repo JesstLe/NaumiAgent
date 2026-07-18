@@ -31,10 +31,14 @@ Artifact、Harness 和 interaction，防止 Python/Node/TUI 各自漂移。
   义务；Python/Node 在加载时做同语义校验，Bridge 运行状态公开确定性摘要与事件数量，
   新 UI `/debug` 可查询摘要。设计、边界与证据见
   `ARC-03-2a-event-governance-registry.md`。
+- ARC-03.2b1 Interaction payload boundary：已实现。interaction request/response/resolved 在 Node 发送端、
+  Python 入站端和 Node 接收端执行有界字段、字段组合、稳定 ID 与私有字段投影校验；见
+  `ARC-03-2b1-interaction-payload-boundary.md`。
 - ARC-03.4a 启动协议协商：已实现。Python/Node 使用同一发布 contract 校验版本区间与能力，
   hello ACK 返回确定性协商结果，失败使用 typed error；新 UI 在成功 ACK 前排队输入且不启动心跳。
   设计与证据见
   `ARC-03-4a-hello-negotiation-design.md` 与
   `ARC-03-4a-hello-negotiation-implementation-plan.md`。
-- 其余 Envelope、完整 payload Schema registry、Compatibility、Ordering、Code generation 与
-  Conformance suite 仍保持 planned；不得因 3.2a/4a 完成而把 ARC-03 整体标记为完成。
+- 其余 Envelope、permission/receipt payload schema、完整机器可读 Schema registry、Compatibility、
+  Ordering、Code generation 与 Conformance suite 仍保持 planned；不得因 3.2a/3.2b1/4a 完成而把
+  ARC-03 整体标记为完成。

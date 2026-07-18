@@ -39,7 +39,8 @@
     waiting 重建，以及 stale/orphan/identity/store error 的 fail-closed blocker；见
     [设计](HAR-10-5c-background-reconcile.md)。
   - 未完成：同步 shell、browser、agent/API 外部状态核对，跨 Store 原子性和孤儿进程接管。
-- HAR-10.6 Human interaction：结构化选项、自定义输入、超时、暂停和 takeover。
+- HAR-10.6 Human interaction：结构化选项、自定义输入、超时、暂停和 takeover。ARC-03.2b1 已完成实时
+  interaction 三事件的双端严格 payload 边界；durable authority 与 Pursuit 写回尚未实现。
 - HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
