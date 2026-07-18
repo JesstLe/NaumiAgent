@@ -106,6 +106,16 @@ const PURSUIT_STATUSES = new Set([
   "running", "waiting", "blocked", "completed", "failed", "cancelled", "budget_exceeded",
 ]);
 const PURSUIT_LINK_STATUSES = new Set(["not_linked", "ready", "missing"]);
+const PURSUIT_RECOVERY_STATES = new Set([
+  "active", "waiting", "blocked", "reconcile_required", "orphaned",
+  "inconsistent", "terminal", "unknown",
+]);
+const PURSUIT_HEARTBEAT_HEALTH = new Set([
+  "starting", "healthy", "draining", "stale", "offline", "stopped",
+  "failed", "clock_regression", "missing", "error",
+]);
+const PURSUIT_LEASE_STATUSES = new Set(["active", "released", "missing", "error"]);
+const PURSUIT_CHECKPOINT_STATUSES = new Set(["ready", "missing", "error"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -2264,6 +2274,7 @@ function normalizePursuitItem(value) {
   }
   const runId = harnessText(item.run_id, "goals/snapshot pursuit.run_id");
   validateGoalId(runId, "goals/snapshot pursuit.run_id");
+  const recovery = item.recovery == null ? null : normalizePursuitRecovery(item.recovery, runId);
   return {
     run_id: runId,
     goal: harnessText(item.goal, "goals/snapshot pursuit.goal"),
@@ -2295,6 +2306,102 @@ function normalizePursuitItem(value) {
       .map(normalizePursuitWait),
     evidence: harnessObjectArray(item.evidence, "goals/snapshot pursuit.evidence", 20)
       .map(normalizePursuitEvidence),
+    recovery,
+  };
+}
+
+function normalizePursuitRecovery(value, runId) {
+  const item = harnessObject(value, "goals/snapshot pursuit.recovery");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("goals/snapshot pursuit.recovery schema_version 不兼容");
+  }
+  const recoveryRunId = harnessText(item.run_id, "goals/snapshot recovery.run_id");
+  if (recoveryRunId !== runId) {
+    throw new Error("goals/snapshot recovery.run_id 与 Pursuit 不一致");
+  }
+  const heartbeat = harnessObject(item.heartbeat, "goals/snapshot recovery.heartbeat");
+  const lease = harnessObject(item.lease, "goals/snapshot recovery.lease");
+  const checkpoint = harnessObject(item.checkpoint, "goals/snapshot recovery.checkpoint");
+  const normalizedHeartbeat = {
+    health: harnessChoice(heartbeat.health, "goals/snapshot heartbeat.health", PURSUIT_HEARTBEAT_HEALTH),
+    phase: harnessText(heartbeat.phase, "goals/snapshot heartbeat.phase"),
+    instance_id: harnessText(heartbeat.instance_id, "goals/snapshot heartbeat.instance_id"),
+    epoch: harnessNonnegativeInteger(heartbeat.epoch, "goals/snapshot heartbeat.epoch"),
+    sequence: harnessNonnegativeInteger(heartbeat.sequence, "goals/snapshot heartbeat.sequence"),
+    observed_at: harnessText(heartbeat.observed_at, "goals/snapshot heartbeat.observed_at"),
+    timeout_seconds: harnessNonnegativeInteger(heartbeat.timeout_seconds, "goals/snapshot heartbeat.timeout_seconds"),
+    age_seconds: harnessNonnegativeInteger(heartbeat.age_seconds, "goals/snapshot heartbeat.age_seconds"),
+    detail_code: harnessText(heartbeat.detail_code, "goals/snapshot heartbeat.detail_code"),
+  };
+  const normalizedLease = {
+    status: harnessChoice(lease.status, "goals/snapshot lease.status", PURSUIT_LEASE_STATUSES),
+    owner_id: harnessText(lease.owner_id, "goals/snapshot lease.owner_id"),
+    epoch: harnessNonnegativeInteger(lease.epoch, "goals/snapshot lease.epoch"),
+    expires_at: harnessText(lease.expires_at, "goals/snapshot lease.expires_at"),
+    updated_at: harnessText(lease.updated_at, "goals/snapshot lease.updated_at"),
+    expired: harnessBoolean(lease.expired, "goals/snapshot lease.expired"),
+  };
+  const normalizedCheckpoint = {
+    status: harnessChoice(
+      checkpoint.status,
+      "goals/snapshot checkpoint.status",
+      PURSUIT_CHECKPOINT_STATUSES,
+    ),
+    checkpoint_id: harnessText(checkpoint.checkpoint_id, "goals/snapshot checkpoint.checkpoint_id"),
+    sequence: harnessNonnegativeInteger(checkpoint.sequence, "goals/snapshot checkpoint.sequence"),
+    phase: harnessText(checkpoint.phase, "goals/snapshot checkpoint.phase"),
+    iteration: harnessNonnegativeInteger(checkpoint.iteration, "goals/snapshot checkpoint.iteration"),
+    created_at: harnessText(checkpoint.created_at, "goals/snapshot checkpoint.created_at"),
+  };
+  if (!normalizedHeartbeat.observed_at && !["missing", "error"].includes(normalizedHeartbeat.health)) {
+    throw new Error("goals/snapshot heartbeat observed_at 不能为空");
+  }
+  if (!["missing", "error"].includes(normalizedHeartbeat.health)
+      && (!normalizedHeartbeat.instance_id || normalizedHeartbeat.epoch < 1
+        || normalizedHeartbeat.sequence < 1 || normalizedHeartbeat.timeout_seconds < 3
+        || normalizedHeartbeat.timeout_seconds > 86_400)) {
+    throw new Error("goals/snapshot heartbeat identity 或 timeout 无效");
+  }
+  if (["active", "released"].includes(normalizedLease.status)
+      && (!normalizedLease.owner_id || normalizedLease.epoch < 1)) {
+    throw new Error("goals/snapshot lease identity 无效");
+  }
+  if (normalizedCheckpoint.status === "ready"
+      && (!normalizedCheckpoint.checkpoint_id || normalizedCheckpoint.sequence < 1)) {
+    throw new Error("goals/snapshot checkpoint identity 无效");
+  }
+  if (["missing", "error"].includes(normalizedHeartbeat.health)
+      && (normalizedHeartbeat.instance_id || normalizedHeartbeat.epoch || normalizedHeartbeat.sequence)) {
+    throw new Error("goals/snapshot 缺失 heartbeat 不得携带 owner identity");
+  }
+  if (["missing", "error"].includes(normalizedLease.status)
+      && (normalizedLease.owner_id || normalizedLease.epoch)) {
+    throw new Error("goals/snapshot 缺失 lease 不得携带 owner identity");
+  }
+  if (["missing", "error"].includes(normalizedCheckpoint.status)
+      && (normalizedCheckpoint.checkpoint_id || normalizedCheckpoint.sequence)) {
+    throw new Error("goals/snapshot 缺失 checkpoint 不得携带 identity");
+  }
+  const generatedAt = harnessText(item.generated_at, "goals/snapshot recovery.generated_at");
+  if (!generatedAt) throw new Error("goals/snapshot recovery.generated_at 不能为空");
+  return {
+    schema_version: 1,
+    run_id: recoveryRunId,
+    generated_at: generatedAt,
+    recovery_state: harnessChoice(
+      item.recovery_state,
+      "goals/snapshot recovery.recovery_state",
+      PURSUIT_RECOVERY_STATES,
+    ),
+    heartbeat: normalizedHeartbeat,
+    lease: normalizedLease,
+    checkpoint: normalizedCheckpoint,
+    reconcile_required: harnessBoolean(
+      item.reconcile_required,
+      "goals/snapshot recovery.reconcile_required",
+    ),
+    reconcile_reason: harnessText(item.reconcile_reason, "goals/snapshot recovery.reconcile_reason"),
+    alerts: harnessTextArray(item.alerts, "goals/snapshot recovery.alerts", 8),
   };
 }
 

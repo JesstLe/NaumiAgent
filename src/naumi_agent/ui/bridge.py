@@ -2458,13 +2458,16 @@ class JsonlEngineBridge:
     ) -> None:
         """Emit one read-only typed Goal/Pursuit snapshot."""
         from naumi_agent.ui.goal_panel import (
-            build_goal_pursuit_snapshot,
+            build_goal_pursuit_snapshot_with_recovery,
             render_goal_pursuit_snapshot,
         )
 
-        snapshot = build_goal_pursuit_snapshot(
+        harness_service = getattr(self.engine, "harness_service", None)
+        snapshot = await build_goal_pursuit_snapshot_with_recovery(
             self.engine.goal_store,
             self.engine.pursuit_store,
+            getattr(harness_service, "store", None),
+            workspace_root=self.engine.workspace_root,
             limit=int(payload.get("limit", 20)),
             include_finished=bool(payload.get("include_finished", True)),
         )
@@ -2679,9 +2682,19 @@ class JsonlEngineBridge:
         from naumi_agent.ui.doctor_health import (
             build_doctor_health_snapshot,
             doctor_health_payload,
+            pursuit_recovery_health_item,
         )
 
         config = getattr(self.engine, "_config", AppConfig())
+        additional_items = ()
+        try:
+            recovery = await self._current_pursuit_recovery_snapshot()
+            if recovery is not None:
+                additional_items = (pursuit_recovery_health_item(recovery),)
+        except Exception as exc:
+            logger.warning("Pursuit recovery health lookup failed (%s)", type(exc).__name__)
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.pursuit_recovery", exc)
         try:
             report = await run_doctor(
                 config,
@@ -2689,7 +2702,10 @@ class JsonlEngineBridge:
                 mcp_manager=getattr(self.engine, "mcp_manager", None),
                 model_router=self.engine.router,
             )
-            health_snapshot = build_doctor_health_snapshot(report)
+            health_snapshot = build_doctor_health_snapshot(
+                report,
+                additional_items=additional_items,
+            )
         except Exception as exc:
             logger.warning("Local doctor failed (%s)", type(exc).__name__)
             if self.debug_trace is not None:
@@ -2704,7 +2720,10 @@ class JsonlEngineBridge:
                     ),
                 )
             )
-            health_snapshot = build_doctor_health_snapshot(report)
+            health_snapshot = build_doctor_health_snapshot(
+                report,
+                additional_items=additional_items,
+            )
         await self.emit(
             ServerEventType.DOCTOR_HEALTH,
             doctor_health_payload(health_snapshot),
@@ -2723,6 +2742,30 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def _current_pursuit_recovery_snapshot(self) -> Any | None:
+        """Read the current Goal's recovery facts without mutating runtime state."""
+        from naumi_agent.ui.pursuit_recovery import (
+            build_pursuit_recovery_snapshot,
+        )
+
+        goal_store = getattr(self.engine, "goal_store", None)
+        pursuit_store = getattr(self.engine, "pursuit_store", None)
+        if goal_store is None or pursuit_store is None:
+            return None
+        goal = goal_store.current()
+        if goal is None or not goal.pursuit_run_id:
+            return None
+        run = pursuit_store.get_run(goal.pursuit_run_id)
+        if run is None:
+            return None
+        harness_service = getattr(self.engine, "harness_service", None)
+        return await build_pursuit_recovery_snapshot(
+            run,
+            pursuit_store,
+            getattr(harness_service, "store", None),
+            workspace_root=self.engine.workspace_root,
+        )
 
     async def _find_latest_resumable_session_id(self) -> str:
         page = 1

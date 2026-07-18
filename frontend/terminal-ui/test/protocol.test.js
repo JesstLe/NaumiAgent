@@ -828,6 +828,32 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       timestamp: "2026-07-18T00:00:00+00:00",
       private_payload: "drop",
     })),
+    recovery: {
+      schema_version: 1,
+      run_id: "pursuit_1",
+      generated_at: "2026-07-18T00:00:01+00:00",
+      recovery_state: "reconcile_required",
+      heartbeat: {
+        health: "stale", phase: "running", instance_id: "worker-a",
+        epoch: 2, sequence: 7, observed_at: "2026-07-18T00:00:00+00:00",
+        timeout_seconds: 30, age_seconds: 31, detail_code: "lease_active",
+        private_payload: "drop",
+      },
+      lease: {
+        status: "active", owner_id: "worker-a", epoch: 2,
+        expires_at: "2026-07-18T00:05:00+00:00",
+        updated_at: "2026-07-18T00:00:00+00:00", expired: false,
+      },
+      checkpoint: {
+        status: "ready", checkpoint_id: "pchk_1", sequence: 4,
+        phase: "action_inflight", iteration: 3,
+        created_at: "2026-07-18T00:00:00+00:00",
+      },
+      reconcile_required: true,
+      reconcile_reason: "stale_preparing",
+      alerts: ["需要核对后台任务"],
+      private_reasoning: "drop",
+    },
     private_reasoning: "drop",
   };
   const goal = {
@@ -867,6 +893,10 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.goals[0].pursuit.run_id, "pursuit_1");
   assert.equal(normalized.goals[0].pursuit.waits.length, 20);
   assert.equal(normalized.goals[0].pursuit.evidence.length, 20);
+  assert.equal(normalized.goals[0].pursuit.recovery.recovery_state, "reconcile_required");
+  assert.equal(normalized.goals[0].pursuit.recovery.heartbeat.health, "stale");
+  assert.equal(Object.hasOwn(normalized.goals[0].pursuit.recovery, "private_reasoning"), false);
+  assert.equal(Object.hasOwn(normalized.goals[0].pursuit.recovery.heartbeat, "private_payload"), false);
   assert.equal(Object.hasOwn(normalized.goals[0], "private_payload"), false);
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit, "private_reasoning"), false);
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.waits[0], "private_payload"), false);
@@ -886,6 +916,38 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /一致/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{
+          ...goal,
+          pursuit: { ...pursuit, recovery: { ...pursuit.recovery, run_id: "pursuit_other" } },
+        }],
+      },
+    }),
+    /recovery.run_id/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{
+          ...goal,
+          pursuit: {
+            ...pursuit,
+            recovery: {
+              ...pursuit.recovery,
+              heartbeat: { ...pursuit.recovery.heartbeat, timeout_seconds: 0 },
+            },
+          },
+        }],
+      },
+    }),
+    /timeout/,
   );
 });
 

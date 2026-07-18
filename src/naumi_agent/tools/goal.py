@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.orchestrator.goal_store import (
@@ -15,9 +16,10 @@ from naumi_agent.orchestrator.goal_store import (
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.goal_panel import (
-    build_goal_pursuit_snapshot,
+    build_goal_pursuit_snapshot_with_recovery,
     render_goal_pursuit_snapshot,
 )
+from naumi_agent.ui.pursuit_recovery import PursuitRecoveryAuthority
 
 _RUN_ID_RE = re.compile(r"run_id:\s*`([A-Za-z0-9_.:-]{1,128})`")
 
@@ -69,9 +71,20 @@ class GoalCreateTool(Tool):
 
 
 class GoalStatusTool(Tool):
-    def __init__(self, store: GoalStore, pursuit_store: PursuitStore) -> None:
+    def __init__(
+        self,
+        store: GoalStore,
+        pursuit_store: PursuitStore,
+        *,
+        recovery_authority: PursuitRecoveryAuthority | None = None,
+        workspace_root: str | Path | None = None,
+    ) -> None:
         self._store = store
         self._pursuit_store = pursuit_store
+        self._recovery_authority = recovery_authority
+        self._workspace_root = Path(
+            workspace_root or store.base_dir.parent
+        ).expanduser().resolve()
 
     @property
     def name(self) -> str:
@@ -112,9 +125,11 @@ class GoalStatusTool(Tool):
         if goal_id:
             return format_goal(goal)
         return render_goal_pursuit_snapshot(
-            build_goal_pursuit_snapshot(
+            await build_goal_pursuit_snapshot_with_recovery(
                 self._store,
                 self._pursuit_store,
+                self._recovery_authority,
+                workspace_root=self._workspace_root,
                 limit=1,
                 include_finished=False,
             )
@@ -122,9 +137,20 @@ class GoalStatusTool(Tool):
 
 
 class GoalListTool(Tool):
-    def __init__(self, store: GoalStore, pursuit_store: PursuitStore) -> None:
+    def __init__(
+        self,
+        store: GoalStore,
+        pursuit_store: PursuitStore,
+        *,
+        recovery_authority: PursuitRecoveryAuthority | None = None,
+        workspace_root: str | Path | None = None,
+    ) -> None:
         self._store = store
         self._pursuit_store = pursuit_store
+        self._recovery_authority = recovery_authority
+        self._workspace_root = Path(
+            workspace_root or store.base_dir.parent
+        ).expanduser().resolve()
 
     @property
     def name(self) -> str:
@@ -159,9 +185,11 @@ class GoalListTool(Tool):
 
     async def execute(self, *, include_finished: bool = True, **kwargs: Any) -> str:
         return render_goal_pursuit_snapshot(
-            build_goal_pursuit_snapshot(
+            await build_goal_pursuit_snapshot_with_recovery(
                 self._store,
                 self._pursuit_store,
+                self._recovery_authority,
+                workspace_root=self._workspace_root,
                 limit=50,
                 include_finished=include_finished,
             )
@@ -288,11 +316,23 @@ def create_goal_tools(
     *,
     session_id_getter: Callable[[], str],
     pursuit_tool_getter: Callable[[], Tool | None],
+    recovery_authority: PursuitRecoveryAuthority | None = None,
+    workspace_root: str | Path | None = None,
 ) -> list[Tool]:
     return [
         GoalCreateTool(store, session_id_getter),
-        GoalStatusTool(store, pursuit_store),
-        GoalListTool(store, pursuit_store),
+        GoalStatusTool(
+            store,
+            pursuit_store,
+            recovery_authority=recovery_authority,
+            workspace_root=workspace_root,
+        ),
+        GoalListTool(
+            store,
+            pursuit_store,
+            recovery_authority=recovery_authority,
+            workspace_root=workspace_root,
+        ),
         GoalUpdateTool(store),
         GoalPursueTool(store, pursuit_tool_getter),
     ]

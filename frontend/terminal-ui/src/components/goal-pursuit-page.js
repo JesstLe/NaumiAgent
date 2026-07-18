@@ -89,6 +89,9 @@ function renderPursuit(run) {
   if (run.blocked_reason) {
     lines.push(color(ANSI.red, `阻塞 · ${compactText(run.blocked_reason, 2_000)}`));
   }
+  if (run.recovery) {
+    lines.push(...renderRecovery(run.recovery));
+  }
   if (run.waits?.length) {
     lines.push(color(ANSI.yellow, `等待任务 · ${run.waits.length}`));
     for (const wait of run.waits) {
@@ -103,6 +106,66 @@ function renderPursuit(run) {
     }
   }
   return lines;
+}
+
+function renderRecovery(recovery) {
+  const style = recoveryColor(recovery.recovery_state);
+  const lines = [
+    color(
+      style,
+      `恢复健康 · ${recoveryLabel(recovery.recovery_state)} · 心跳 ${heartbeatLabel(recovery.heartbeat.health)} · 租约 ${leaseLabel(recovery.lease.status)}`,
+    ),
+    color(
+      ANSI.dim,
+      `Worker · ${recovery.heartbeat.instance_id || "未知"} · seq ${recovery.heartbeat.sequence} · age ${recovery.heartbeat.age_seconds}s`,
+    ),
+    color(
+      ANSI.dim,
+      `Lease · ${recovery.lease.owner_id || "无 owner"} · epoch ${recovery.lease.epoch} · ${recovery.lease.expired ? "已过期" : "未过期"}`,
+    ),
+    color(
+      ANSI.dim,
+      `Checkpoint · ${checkpointLabel(recovery.checkpoint.status)} · seq ${recovery.checkpoint.sequence} · ${recovery.checkpoint.phase || "-"}`,
+    ),
+  ];
+  if (recovery.reconcile_required) {
+    lines.push(color(ANSI.red, `Reconcile · ${recovery.reconcile_reason || "需要人工核对"}`));
+  }
+  for (const alert of recovery.alerts || []) {
+    lines.push(color(ANSI.yellow, `恢复提醒 · ${compactText(alert, 500)}`));
+  }
+  return lines;
+}
+
+function recoveryColor(state) {
+  if (["active", "terminal"].includes(state)) return ANSI.green;
+  if (["orphaned", "inconsistent", "reconcile_required"].includes(state)) return ANSI.red;
+  if (["waiting", "blocked"].includes(state)) return ANSI.yellow;
+  return ANSI.dim;
+}
+
+function recoveryLabel(state) {
+  return {
+    active: "运行健康", waiting: "安全等待", blocked: "已阻塞",
+    reconcile_required: "需要核对", orphaned: "疑似孤立",
+    inconsistent: "状态不一致", terminal: "已终止", unknown: "未知",
+  }[state] || state;
+}
+
+function heartbeatLabel(value) {
+  return {
+    starting: "启动中", healthy: "健康", draining: "排空中", stale: "陈旧",
+    offline: "离线", stopped: "已停止", failed: "失败",
+    clock_regression: "时钟倒退", missing: "缺失", error: "读取失败",
+  }[value] || value;
+}
+
+function leaseLabel(value) {
+  return { active: "生效", released: "已释放", missing: "缺失", error: "读取失败" }[value] || value;
+}
+
+function checkpointLabel(value) {
+  return { ready: "可用", missing: "缺失", error: "校验失败" }[value] || value;
 }
 
 function progressBar(verified, total) {

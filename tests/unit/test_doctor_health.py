@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
-from naumi_agent.ui.doctor_health import build_doctor_health_snapshot
+from naumi_agent.ui.doctor_health import (
+    build_doctor_health_snapshot,
+    pursuit_recovery_health_item,
+)
+from naumi_agent.ui.pursuit_recovery import PursuitRecoverySnapshot
 
 
 def test_doctor_health_snapshot_maps_domains_severity_and_responsibility() -> None:
@@ -79,3 +83,41 @@ def test_doctor_health_snapshot_redacts_secret_shaped_text() -> None:
 
     assert secret not in snapshot.items[0].detail
     assert "REDACTED" in snapshot.items[0].detail
+
+
+def test_pursuit_recovery_item_uses_shared_state_and_raises_overall_severity() -> None:
+    recovery = PursuitRecoverySnapshot.model_validate({
+        "schema_version": 1,
+        "run_id": "pursuit-1",
+        "generated_at": "2026-07-18T00:00:00+00:00",
+        "recovery_state": "orphaned",
+        "heartbeat": {
+            "health": "offline", "phase": "running", "instance_id": "worker-a",
+            "epoch": 1, "sequence": 2, "observed_at": "2026-07-17T23:00:00+00:00",
+            "timeout_seconds": 30, "age_seconds": 3600, "detail_code": "lease_active",
+        },
+        "lease": {
+            "status": "released", "owner_id": "worker-a", "epoch": 1,
+            "expires_at": "2026-07-17T23:30:00+00:00",
+            "updated_at": "2026-07-17T23:30:00+00:00", "expired": True,
+        },
+        "checkpoint": {
+            "status": "ready", "checkpoint_id": "pchk_1", "sequence": 3,
+            "phase": "assess", "iteration": 1,
+            "created_at": "2026-07-17T23:20:00+00:00",
+        },
+        "reconcile_required": False,
+        "reconcile_reason": "",
+        "alerts": ["运行中但没有 live lease"],
+    })
+    item = pursuit_recovery_health_item(recovery)
+    snapshot = build_doctor_health_snapshot(
+        DoctorReport(checks=(DoctorCheck("Node.js", "pass", "v22"),)),
+        additional_items=(item,),
+    )
+
+    assert item.id == "runtime-pursuit-recovery"
+    assert item.severity == "error"
+    assert "疑似孤立" in item.detail
+    assert snapshot.status == "error"
+    assert snapshot.items[-1] == item

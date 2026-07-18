@@ -15,8 +15,11 @@
   权威路径，写操作展示风险和结果，不在前端改状态。
 - UI-18.4 Interaction：接入 HAR-10.6 的结构化选项、自定义输入、超时和 takeover；等待用户时不伪装
   成模型运行。
-- UI-18.5 Recovery UX：展示 heartbeat、lease owner、checkpoint、reconcile 与孤立 run；依赖 HAR-10，
-  在后端合同完成前不得用 UI 本地计时器模拟。
+- UI-18.5 Recovery UX（partial）：
+  - UI-18.5a 已实现：展示 typed heartbeat、lease owner/epoch、checkpoint、reconcile reason、orphaned 与
+    inconsistent 状态；新 UI 与 CLI/TUI fallback 同源，Doctor health 复用相同 snapshot；见
+    [HAR-10.2b](../harness/HAR-10-2b-pursuit-recovery-snapshot.md)。
+  - 未完成：受权威 ToolExecution 保护的 resume/takeover/cleanup 动作与多 run 恢复历史。
 - UI-18.6 TUI parity：Textual TUI 消费相同 snapshot/动作协议，以紧凑布局提供核心状态和操作。
 
 ## UI-18.1 已实现边界
@@ -62,9 +65,9 @@ implemented。
 
 ## 当前不足
 
-UI-18.1 是只读状态页，不包含 Goal/Pursuit 写按钮、可展开完整证据时间线或 HAR-10 恢复健康；这些分别
-属于 UI-18.2/18.3/18.5。Pursuit wait/evidence 当前按快照显示最近有界集合，尚无 cursor 分页。页面也
-不会伪造 lease、heartbeat 或 checkpoint。UI-18 因此保持 partial，不能标记整体完成。
+UI-18.1/18.5a 是只读状态与恢复页，不包含 Goal/Pursuit 写按钮、可展开完整证据时间线或 recovery action；
+这些分别属于 UI-18.2/18.3/18.5b。Pursuit wait/evidence 当前按快照显示最近有界集合，尚无 cursor 分页。
+页面读取真实 lease、heartbeat、checkpoint，但不会据此自动恢复。UI-18 因此保持 partial。
 
-HAR-10.2a 已提供 Pursuit lease worker 的持久 typed heartbeat，HAR-10.5c 已提供 background reconcile reason；
-UI-18.5 仍需组合并渲染这些权威事实，不能因为后端前置存在就标记 Recovery UX 已完成。
+HAR-10.2b 已组合并渲染 Pursuit recovery 权威事实；UI-18.5 仍需完成动作闭环，不能把只读观测标记为完整
+Recovery UX。

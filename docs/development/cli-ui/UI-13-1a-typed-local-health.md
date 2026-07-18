@@ -56,5 +56,6 @@ ripgrep、Docker、browser daemon、MCP、debug log 和 terminal 检查，并新
 - ARC-08：把相同 Health contract 接入 SLO、故障审计和恢复建议；
 - CC-03：诊断组件对齐时复用该 contract，而不是解析 Markdown。
 
-HAR-10.2a 已补齐持久 typed heartbeat authority 与 Pursuit worker producer，但本页尚未消费该 snapshot；现有
-Bridge heartbeat 仍只能代表前端连接活性，禁止据此声称后台 worker 健康。聚合接入属于后续小切片。
+HAR-10.2b 已把当前 Goal 的 Pursuit Recovery Snapshot 作为独立 runtime health item 接入本页，并参与整体
+severity；现有 Bridge heartbeat 仍只代表前端连接活性，与 worker heartbeat 分栏呈现。没有当前 Pursuit 时
+不会制造虚假 recovery item。

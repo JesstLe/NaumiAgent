@@ -5,11 +5,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.orchestrator.goal_store import Goal, GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import PursuitRun
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.ui.pursuit_recovery import (
+    PursuitRecoveryAuthority,
+    build_pursuit_recovery_snapshot,
+)
 
 GOAL_PANEL_SCHEMA_VERSION = 1
 MAX_GOAL_PANEL_ITEMS = 50
@@ -101,6 +106,54 @@ def build_goal_pursuit_snapshot(
     )
 
 
+async def build_goal_pursuit_snapshot_with_recovery(
+    goal_store: GoalStore,
+    pursuit_store: PursuitStore,
+    authority: PursuitRecoveryAuthority | None,
+    *,
+    workspace_root: str | Path,
+    limit: int = 20,
+    include_finished: bool = True,
+) -> GoalPursuitSnapshot:
+    """Add typed recovery facts while preserving the bounded base projection."""
+    base = build_goal_pursuit_snapshot(
+        goal_store,
+        pursuit_store,
+        limit=limit,
+        include_finished=include_finished,
+    )
+    items: list[dict[str, Any]] = []
+    warnings = list(base.warnings)
+    for item in base.goals:
+        projected = dict(item)
+        pursuit = projected.get("pursuit")
+        if isinstance(pursuit, dict):
+            try:
+                run = pursuit_store.get_run(str(pursuit.get("run_id") or ""))
+                if run is None:
+                    raise ValueError("Pursuit run disappeared during snapshot")
+                recovery = await build_pursuit_recovery_snapshot(
+                    run,
+                    pursuit_store,
+                    authority,
+                    workspace_root=workspace_root,
+                )
+                pursuit = {**pursuit, "recovery": recovery.model_dump(mode="json")}
+            except Exception:
+                warnings.append(
+                    f"目标 {projected['goal_id']} 的恢复健康读取失败，请运行 `/doctor`。"
+                )
+            projected["pursuit"] = pursuit
+        items.append(projected)
+    return GoalPursuitSnapshot(
+        current_goal_id=base.current_goal_id,
+        goals=tuple(items),
+        warnings=tuple(dict.fromkeys(warnings))[:20],
+        truncated=base.truncated,
+        include_finished=base.include_finished,
+    )
+
+
 def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
     """Render the typed snapshot as safe Markdown for CLI and TUI fallback."""
     if not snapshot.goals:
@@ -135,6 +188,9 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
                     f"- 下一步：{pursuit['next_action'] or '暂无'}",
                     f"- 等待任务：{len(pursuit['waits'])} · 证据：{len(pursuit['evidence'])}",
                 ])
+                recovery = pursuit.get("recovery")
+                if isinstance(recovery, dict):
+                    lines.extend(_render_recovery(recovery))
             elif item["pursuit_link_status"] == "missing":
                 lines.append(
                     f"- Pursuit：`{item['pursuit_run_id']}` · ⚠️ 追踪记录不可用"
@@ -240,9 +296,73 @@ def _pursuit_status_label(status: str) -> str:
     }.get(status, status)
 
 
+def _render_recovery(recovery: dict[str, Any]) -> list[str]:
+    heartbeat = recovery.get("heartbeat") or {}
+    lease = recovery.get("lease") or {}
+    checkpoint = recovery.get("checkpoint") or {}
+    state = _bounded_text(recovery.get("recovery_state"), 64) or "unknown"
+    lines = [
+        f"- 恢复健康：{_recovery_label(state)}"
+        f" · 心跳 {_heartbeat_label(str(heartbeat.get('health', 'missing')))}"
+        f" · 租约 {_lease_label(str(lease.get('status', 'missing')))}",
+        f"- Worker：`{heartbeat.get('instance_id') or '未知'}`"
+        f" · seq {heartbeat.get('sequence', 0)}"
+        f" · age {heartbeat.get('age_seconds', 0)}s",
+        f"- Lease：`{lease.get('owner_id') or '无 owner'}`"
+        f" · epoch {lease.get('epoch', 0)}"
+        f" · {'已过期' if lease.get('expired') else '未过期'}",
+        f"- Checkpoint：{_checkpoint_label(str(checkpoint.get('status', 'missing')))}"
+        f" · seq {checkpoint.get('sequence', 0)}"
+        f" · {checkpoint.get('phase') or '-'}",
+    ]
+    reason = _bounded_text(recovery.get("reconcile_reason"), 128)
+    if recovery.get("reconcile_required"):
+        lines.append(f"- Reconcile：需要核对 · {reason or 'reason unavailable'}")
+    alerts = recovery.get("alerts")
+    if isinstance(alerts, list | tuple):
+        lines.extend(f"- 恢复提醒：{_bounded_text(item, 500)}" for item in alerts[:3])
+    return lines
+
+
+def _recovery_label(value: str) -> str:
+    return {
+        "active": "运行健康",
+        "waiting": "安全等待",
+        "blocked": "已阻塞",
+        "reconcile_required": "需要核对",
+        "orphaned": "疑似孤立",
+        "inconsistent": "状态不一致",
+        "terminal": "已终止",
+        "unknown": "未知",
+    }.get(value, value)
+
+
+def _heartbeat_label(value: str) -> str:
+    return {
+        "starting": "启动中", "healthy": "健康", "draining": "排空中",
+        "stale": "陈旧", "offline": "离线", "stopped": "已停止",
+        "failed": "失败", "clock_regression": "时钟倒退", "missing": "缺失",
+        "error": "读取失败",
+    }.get(value, value)
+
+
+def _lease_label(value: str) -> str:
+    return {
+        "active": "生效", "released": "已释放", "missing": "缺失",
+        "error": "读取失败",
+    }.get(value, value)
+
+
+def _checkpoint_label(value: str) -> str:
+    return {"ready": "可用", "missing": "缺失", "error": "校验失败"}.get(
+        value, value,
+    )
+
+
 __all__ = [
     "GOAL_PANEL_SCHEMA_VERSION",
     "GoalPursuitSnapshot",
     "build_goal_pursuit_snapshot",
+    "build_goal_pursuit_snapshot_with_recovery",
     "render_goal_pursuit_snapshot",
 ]

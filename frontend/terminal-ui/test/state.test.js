@@ -1758,6 +1758,28 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
           blocked_reason: "",
           waits: [],
           evidence: [],
+          recovery: {
+            schema_version: 1,
+            run_id: "pursuit_1",
+            generated_at: "now",
+            recovery_state: "reconcile_required",
+            heartbeat: {
+              health: "stale", phase: "running", instance_id: "worker-a",
+              epoch: 1, sequence: 2, observed_at: "now", timeout_seconds: 30,
+              age_seconds: 31, detail_code: "lease_active",
+            },
+            lease: {
+              status: "active", owner_id: "worker-a", epoch: 1,
+              expires_at: "later", updated_at: "now", expired: false,
+            },
+            checkpoint: {
+              status: "ready", checkpoint_id: "pchk_1", sequence: 3,
+              phase: "action_inflight", iteration: 2, created_at: "now",
+            },
+            reconcile_required: true,
+            reconcile_reason: "stale_preparing",
+            alerts: ["需要核对后台任务"],
+          },
         },
       }],
       warnings: [],
@@ -1767,6 +1789,8 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   });
   assert.equal(state.goalPanel.loading, false);
   assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /完成可视化 Goal 页面/);
+  assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /恢复健康 · 需要核对/);
+  assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /stale_preparing/);
 
   assert.equal(handleGoalPanelKey(state, "r", send), true);
   assert.deepEqual(sent[1], {
