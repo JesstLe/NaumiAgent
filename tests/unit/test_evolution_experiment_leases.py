@@ -80,6 +80,11 @@ from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuardReceipt,
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.evolution.validation_plans import (
+    EvolutionValidationPlan,
+    EvolutionValidationPlanner,
+    validation_requirements_for_path,
+)
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType, thaw_event_data
@@ -3746,6 +3751,195 @@ async def test_mutation_turn_runner_refuses_source_truncation_when_prompt_is_ove
     assert model.calls == []
     assert store.get_for_attempt(plan.plan_id, 1) is None
     assert Path(lease.worktree_path, plan.authorized_files[0]).read_bytes() == large_source
+
+
+async def _validation_receipt_fixture(tmp_path: Path):
+    workspace, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    generation_session = EvolutionMutationGenerationService(
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        clock=lambda: NOW,
+    ).begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="validation-plan-fixture",
+        attempt=1,
+    )
+    proposed = "def render_footer():\n    return 'validation-plan'\n"
+    result = await generation_session.execute(ToolCall(
+        id="validation-plan-write",
+        name="file_write",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "content": proposed,
+        }),
+    ))
+    assert result.status == "success"
+    generation = await generation_session.finalize()
+    static_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=generation.proposed_contents,
+        generation_trace=generation.trace,
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=static_receipt,
+        proposed_contents=generation.proposed_contents,
+        generation_trace=generation.trace,
+    )
+    receipt = EvolutionMutationReceiptService(
+        journal_store=writer._journal_store,
+        patch_set_store=EvolutionPatchSetStore(tmp_path / "runtime.db"),
+        receipt_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+    ).finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=static_receipt,
+        generation_trace=generation.trace,
+    )
+    return workspace, contract, lease, snapshot, receipt
+
+
+@pytest.mark.asyncio
+async def test_validation_plan_binds_real_receipt_to_symmetric_red_green(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path
+    )
+    planner = EvolutionValidationPlanner()
+    isolated_before = _git(Path(lease.worktree_path), "status", "--porcelain")
+
+    first = planner.plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    second = planner.plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+
+    assert first == second
+    assert first.validation_plan_id == f"evvplan_{first.validation_plan_sha256[:24]}"
+    assert first.mutation_receipt_sha256 == receipt.receipt_sha256
+    assert first.baseline_commit == contract.baseline.commit
+    assert first.candidate_files_sha256 == receipt.files_sha256
+    assert first.metrics[0].metric_name == receipt.required_metrics[0]
+    assert first.metrics[0].baseline_phase == "red"
+    assert first.metrics[0].candidate_phase == "green"
+    assert first.metrics[0].same_fixture_required is True
+    assert first.metrics[0].same_seed_required is True
+    assert first.files[0].file_kind == "python"
+    assert first.files[0].required_checks == ("lint", "compile", "unit", "contract")
+    assert first.required_check_kinds == ("compile", "contract", "lint", "unit")
+    assert first.har08_comparison_receipt_required is True
+    assert first.runner_binding_status == "required"
+    assert first.execution_ready is False
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == isolated_before
+
+
+@pytest.mark.asyncio
+async def test_validation_plan_rejects_authority_metric_and_profile_drift(
+    tmp_path: Path,
+) -> None:
+    _, contract, lease, snapshot, receipt = await _validation_receipt_fixture(tmp_path)
+    planner = EvolutionValidationPlanner()
+
+    with pytest.raises(ValueError, match="metrics"):
+        planner.plan(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_receipt=receipt.model_copy(
+                update={"required_metrics": ("unexpected.metric",)}
+            ),
+        )
+    with pytest.raises(ValidationError, match="Mutation Receipt 摘要"):
+        planner.plan(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_receipt=receipt.model_copy(
+                update={"receipt_sha256": "0" * 64}
+            ),
+        )
+    with pytest.raises(ValueError, match="Profile"):
+        planner.plan(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot.model_copy(update={"profile_status": "missing"}),
+            mutation_receipt=receipt,
+        )
+    inactive = lease.model_copy(
+        update={"state": ExperimentLeaseState.RELEASED, "worktree_ready": False}
+    )
+    with pytest.raises(ValueError, match="active"):
+        planner.plan(
+            contract=contract,
+            lease=inactive,
+            source_snapshot=snapshot,
+            mutation_receipt=receipt,
+        )
+
+
+@pytest.mark.asyncio
+async def test_validation_plan_detects_nested_requirement_tampering(
+    tmp_path: Path,
+) -> None:
+    _, contract, lease, snapshot, receipt = await _validation_receipt_fixture(tmp_path)
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    payload = plan.model_dump(mode="json")
+    payload["files"][0]["required_checks"] = ["smoke"]
+
+    with pytest.raises(ValidationError, match="required_check_kinds|摘要"):
+        EvolutionValidationPlan.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("path", "kind", "checks"),
+    [
+        ("src/agent.py", "python", ("lint", "compile", "unit", "contract")),
+        ("ui/view.js", "javascript", ("lint", "unit", "contract")),
+        ("ui/view.tsx", "typescript", ("lint", "compile", "unit", "contract")),
+        ("App/View.swift", "swift", ("compile", "unit", "contract")),
+        ("core/lib.rs", "rust", ("compile", "unit", "contract")),
+        ("cmd/main.go", "go", ("compile", "unit", "contract")),
+        ("config/app.yaml", "yaml", ("lint", "contract")),
+        ("assets/blob.bin", "other", ("contract", "smoke")),
+    ],
+)
+def test_validation_requirements_cover_supported_language_groups(
+    path: str,
+    kind: str,
+    checks: tuple[str, ...],
+) -> None:
+    requirement = validation_requirements_for_path(path)
+
+    assert requirement.file_kind == kind
+    assert requirement.required_checks == checks
 
 
 @pytest.mark.asyncio

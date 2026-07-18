@@ -1,7 +1,7 @@
 schema_version: 1
 updated_at: "2026-07-19"
 statuses: [implemented, partial, planned, blocked, superseded]
-implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, HAR-09.2a, HAR-09.3a, HAR-10.1a, HAR-10.1b, HAR-10.2a, HAR-10.2b, HAR-10.3a, HAR-10.3b1, HAR-10.3b2, HAR-10.3b3, HAR-10.4a, HAR-10.4b, HAR-10.5a, HAR-10.5b, HAR-10.5c, HAR-10.6a, HAR-10.6b, HAR-10.8a, UI-11.1a, UI-13.1a, UI-18.1, UI-18.4a, UI-18.4b, UI-18.4c, UI-18.5a, CC-01.1a, ARC-01.4b2e, ARC-03.2a, ARC-03.2b1, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a, EVO-01.4a, EVO-01.6a, EVO-01.6a1, EVO-02.5c1, EVO-02.5c2a, EVO-02.5c2b, EVO-02.6b, EVO-02.7a, EVO-02.7b1, EVO-02.7b2, EVO-02.7c1]
+implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, HAR-09.2a, HAR-09.3a, HAR-10.1a, HAR-10.1b, HAR-10.2a, HAR-10.2b, HAR-10.3a, HAR-10.3b1, HAR-10.3b2, HAR-10.3b3, HAR-10.4a, HAR-10.4b, HAR-10.5a, HAR-10.5b, HAR-10.5c, HAR-10.6a, HAR-10.6b, HAR-10.8a, UI-11.1a, UI-13.1a, UI-18.1, UI-18.4a, UI-18.4b, UI-18.4c, UI-18.5a, CC-01.1a, ARC-01.4b2e, ARC-03.2a, ARC-03.2b1, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a, EVO-01.4a, EVO-01.6a, EVO-01.6a1, EVO-02.5c1, EVO-02.5c2a, EVO-02.5c2b, EVO-02.6b, EVO-02.7a, EVO-02.7b1, EVO-02.7b2, EVO-02.7c1, EVO-03.1a]
 modules:
   - {id: HAR-05, status: implemented, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
   - {id: HAR-06, status: implemented, path: harness/HAR-06-session-lifecycle.md, depends_on: [HAR-05]}
@@ -33,7 +33,7 @@ modules:
   - {id: ARC-08, status: planned, path: architecture/ARC-08-reliability.md, depends_on: [ARC-02, ARC-05]}
   - {id: EVO-01, status: partial, path: self-evolution/EVO-01-review-candidates.md, depends_on: [HAR-05]}
   - {id: EVO-02, status: partial, path: self-evolution/EVO-02-isolated-mutation.md, depends_on: [EVO-01]}
-  - {id: EVO-03, status: planned, path: self-evolution/EVO-03-validation-evaluation.md, depends_on: [EVO-02, HAR-08]}
+  - {id: EVO-03, status: partial, path: self-evolution/EVO-03-validation-evaluation.md, depends_on: [EVO-02, HAR-08]}
   - {id: EVO-04, status: planned, path: self-evolution/EVO-04-reflection-decision.md, depends_on: [EVO-03]}
   - {id: EVO-05, status: planned, path: self-evolution/EVO-05-promotion-rollback.md, depends_on: [EVO-04, ARC-07]}
   - {id: EVO-06, status: planned, path: self-evolution/EVO-06-continuous-evolution.md, depends_on: [EVO-05, HAR-09]}
