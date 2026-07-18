@@ -207,7 +207,7 @@ async def test_schema_v8_migration_is_idempotent_and_tamper_evident(
 
 
 @pytest.mark.asyncio
-async def test_v8_eval_results_survive_additive_v9_migration(tmp_path: Path) -> None:
+async def test_v8_eval_results_survive_migration_to_latest_schema(tmp_path: Path) -> None:
     db_path = tmp_path / "harness.db"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -244,7 +244,7 @@ async def test_v8_eval_results_survive_additive_v9_migration(tmp_path: Path) -> 
             ).fetchone()[0]
         )
 
-    assert version == 14
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 15
     assert rows == 2
     assert baseline_tables == 3
 

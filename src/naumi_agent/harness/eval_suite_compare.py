@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -44,7 +45,7 @@ class EvalCaseTransition:
     kind: EvalCaseTransitionKind
 
 
-MetricName = Literal[
+BuiltinMetricName = Literal[
     "cases",
     "passed",
     "implementation_failures",
@@ -56,11 +57,16 @@ MetricName = Literal[
 
 @dataclass(frozen=True, slots=True)
 class EvalMetricDelta:
-    metric: MetricName
+    metric: str
     baseline: int | float
     current: int | float
     delta: int | float
     relative_delta: float | None
+    unit: str = ""
+    direction: str = ""
+    target: float | None = None
+    case_id: str | None = None
+    primary: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +78,8 @@ class EvalSuiteComparison:
     metric_deltas: tuple[EvalMetricDelta, ...]
     regression_count: int
     improvement_count: int
+    metric_regression_count: int = 0
+    metric_improvement_count: int = 0
 
 
 def compare_eval_suite_results(
@@ -121,6 +129,13 @@ def compare_eval_suite_results(
             "case_runner_mismatch",
             identity=identity,
         )
+    metric_problem = _metric_observation_problem(baseline_cases, current_cases)
+    if metric_problem:
+        return _terminal(
+            EvalMechanicalVerdict.INCONCLUSIVE,
+            metric_problem,
+            identity=identity,
+        )
     if not _run_status_consistent(baseline) or not _run_status_consistent(current):
         return _terminal(
             EvalMechanicalVerdict.INCONCLUSIVE,
@@ -139,16 +154,21 @@ def compare_eval_suite_results(
     improvements = sum(
         item.kind is EvalCaseTransitionKind.IMPROVEMENT for item in transitions
     )
+    metric_regressions, metric_improvements = _quantitative_signals(
+        baseline_cases,
+        current_cases,
+        transitions,
+    )
     if any(
         item.kind is EvalCaseTransitionKind.EVALUATION_INSTABILITY
         for item in transitions
     ):
         verdict = EvalMechanicalVerdict.INCONCLUSIVE
         code = "evaluation_instability"
-    elif regressions:
+    elif regressions or metric_regressions:
         verdict = EvalMechanicalVerdict.REGRESSED
         code = ""
-    elif improvements:
+    elif improvements or metric_improvements:
         verdict = EvalMechanicalVerdict.IMPROVED
         code = ""
     else:
@@ -162,6 +182,8 @@ def compare_eval_suite_results(
         metric_deltas=metrics,
         regression_count=regressions,
         improvement_count=improvements,
+        metric_regression_count=metric_regressions,
+        metric_improvement_count=metric_improvements,
     )
 
 
@@ -231,7 +253,7 @@ def _metric_deltas(
 ) -> tuple[EvalMetricDelta, ...]:
     baseline_values = _metrics(baseline)
     current_values = _metrics(current)
-    order: tuple[MetricName, ...] = (
+    order: tuple[BuiltinMetricName, ...] = (
         "cases",
         "passed",
         "implementation_failures",
@@ -239,13 +261,40 @@ def _metric_deltas(
         "skipped",
         "pass_rate",
     )
-    return tuple(
+    builtins = tuple(
         _metric_delta(metric, baseline_values[metric], current_values[metric])
         for metric in order
     )
+    observations: list[EvalMetricDelta] = []
+    baseline_cases = _case_map(baseline.cases)
+    current_cases = _case_map(current.cases)
+    assert baseline_cases is not None and current_cases is not None
+    for case_id in sorted(baseline_cases):
+        baseline_items = {
+            item.metric: item
+            for item in baseline_cases[case_id].metric_observations
+        }
+        current_items = {
+            item.metric: item
+            for item in current_cases[case_id].metric_observations
+        }
+        for metric in sorted(baseline_items):
+            left = baseline_items[metric]
+            right = current_items[metric]
+            observations.append(_metric_delta(
+                f"case:{case_id}:{metric}",
+                left.value,
+                right.value,
+                unit=left.unit,
+                direction=left.direction,
+                target=left.target,
+                case_id=case_id,
+                primary=left.primary,
+            ))
+    return (*builtins, *observations)
 
 
-def _metrics(result: HarnessEvalSuiteResult) -> dict[MetricName, int | float]:
+def _metrics(result: HarnessEvalSuiteResult) -> dict[BuiltinMetricName, int | float]:
     cases = len(result.cases)
     return {
         "cases": cases,
@@ -258,9 +307,15 @@ def _metrics(result: HarnessEvalSuiteResult) -> dict[MetricName, int | float]:
 
 
 def _metric_delta(
-    metric: MetricName,
+    metric: str,
     baseline: int | float,
     current: int | float,
+    *,
+    unit: str = "",
+    direction: str = "",
+    target: float | None = None,
+    case_id: str | None = None,
+    primary: bool = False,
 ) -> EvalMetricDelta:
     delta = current - baseline
     relative = float(delta / abs(baseline)) if baseline != 0 else None
@@ -270,7 +325,76 @@ def _metric_delta(
         current=current,
         delta=delta,
         relative_delta=relative,
+        unit=unit,
+        direction=direction,
+        target=target,
+        case_id=case_id,
+        primary=primary,
     )
+
+
+def _metric_observation_problem(
+    baseline: dict[str, HarnessEvalCaseResult],
+    current: dict[str, HarnessEvalCaseResult],
+) -> str:
+    for case_id in baseline:
+        left = {item.metric: item for item in baseline[case_id].metric_observations}
+        right = {item.metric: item for item in current[case_id].metric_observations}
+        if left.keys() != right.keys():
+            return "metric_observation_set_mismatch"
+        for metric in left:
+            left_item = left[metric]
+            right_item = right[metric]
+            if (
+                left_item.unit != right_item.unit
+                or left_item.direction != right_item.direction
+                or not math.isclose(
+                    left_item.target,
+                    right_item.target,
+                    rel_tol=0.0,
+                    abs_tol=1e-12,
+                )
+                or left_item.primary != right_item.primary
+            ):
+                return "metric_observation_contract_mismatch"
+    return ""
+
+
+def _quantitative_signals(
+    baseline: dict[str, HarnessEvalCaseResult],
+    current: dict[str, HarnessEvalCaseResult],
+    transitions: tuple[EvalCaseTransition, ...],
+) -> tuple[int, int]:
+    transition_by_case = {item.case_id: item for item in transitions}
+    regressions = 0
+    improvements = 0
+    unchanged = {
+        EvalCaseTransitionKind.UNCHANGED_PASS,
+        EvalCaseTransitionKind.UNCHANGED_IMPLEMENTATION_FAILURE,
+    }
+    for case_id in sorted(baseline):
+        if transition_by_case[case_id].kind not in unchanged:
+            continue
+        left = next(
+            (item for item in baseline[case_id].metric_observations if item.primary),
+            None,
+        )
+        if left is None:
+            continue
+        right = next(
+            item
+            for item in current[case_id].metric_observations
+            if item.metric == left.metric
+        )
+        delta = right.value - left.value
+        if math.isclose(delta, 0.0, rel_tol=1e-12, abs_tol=1e-12):
+            continue
+        favorable = delta < 0 if left.direction == "decrease" else delta > 0
+        if favorable:
+            improvements += 1
+        else:
+            regressions += 1
+    return regressions, improvements
 
 
 def _terminal(
@@ -287,6 +411,8 @@ def _terminal(
         metric_deltas=(),
         regression_count=0,
         improvement_count=0,
+        metric_regression_count=0,
+        metric_improvement_count=0,
     )
 
 
@@ -315,6 +441,11 @@ def render_eval_suite_comparison(result: EvalSuiteComparison) -> str:
                 f"- Case：回归 {result.regression_count} · "
                 f"改善 {result.improvement_count} · 总计 {len(result.transitions)}"
             )
+        if result.metric_regression_count or result.metric_improvement_count:
+            lines.append(
+                f"- 数值主指标：回归 {result.metric_regression_count} · "
+                f"改善 {result.metric_improvement_count}"
+            )
         for item in result.transitions:
             if item.kind in {
                 EvalCaseTransitionKind.REGRESSION,
@@ -324,6 +455,13 @@ def render_eval_suite_comparison(result: EvalSuiteComparison) -> str:
                 lines.append(
                     f"  - `{item.case_id}`：{item.baseline_status} → {item.current_status}"
                 )
+    primary_deltas = tuple(item for item in result.metric_deltas if item.primary)
+    for item in primary_deltas[:20]:
+        unit = f" {item.unit}" if item.unit else ""
+        lines.append(
+            f"- `{item.metric}`：{item.baseline:g} → {item.current:g}{unit} · "
+            f"Δ {item.delta:+g}"
+        )
     return "\n".join(lines)
 
 
@@ -334,6 +472,8 @@ _CODE_MESSAGES = {
     "duplicate_case_id": "Result 中存在重复 case ID。",
     "case_set_mismatch": "Baseline 与当前的 case 集合不同。",
     "case_runner_mismatch": "同一 case 使用了不同 Runner。",
+    "metric_observation_set_mismatch": "同一 case 的数值指标集合不同。",
+    "metric_observation_contract_mismatch": "数值指标的单位、方向或目标不同。",
     "result_status_inconsistent": "Suite 汇总状态与 case 状态不一致。",
     "evaluation_instability": "存在评测基础设施错误或跳过，无法形成产品结论。",
 }

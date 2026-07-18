@@ -65,6 +65,9 @@
 - HAR-08.7d Statistical Comparator：已实现。每组至少 5 次，复用 Identity/结构 gate，计算均值、
   样本标准差、Student-t 95% CI 与 Welch 均值差区间；逐 case 组内摇摆优先标记 flaky，样本不足或
   Eval error 不形成产品结论。详见 `HAR-08-7d-statistical-comparator.md`。
+- HAR-08.7e Quantitative Metric Observations：已实现。Typed Result 可保存有限数值、单位、方向、目标
+  和唯一主指标；机械 Comparator、零回归 Policy、重复样本置信区间及 H5a Store 均保留数值证据。
+  详见 `HAR-08-7e-quantitative-metric-observations.md`。
 - HAR-08 H5a Eval Result Store：已实现。现有 HarnessStore schema v8 以 workspace/batch/suite/sample
   不可变键保存脱敏 typed Result、Identity 与内容摘要；幂等重试、冲突拒绝、迁移、隔离和篡改检测
   均已验证。详见 `HAR-08-H5a-eval-result-store.md`。
