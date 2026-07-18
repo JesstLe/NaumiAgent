@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import re
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,12 @@ from naumi_agent.harness.eval_receipt import HarnessEvalComparisonReceipt
 from naumi_agent.harness.heartbeat import (
     HarnessHeartbeat,
     HarnessHeartbeatPhase,
+)
+from naumi_agent.harness.interaction import (
+    HarnessInteractionRecord,
+    answer_interaction,
+    expire_interaction,
+    takeover_interaction,
 )
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
@@ -68,10 +75,11 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 12
+HARNESS_STORE_SCHEMA_VERSION = 13
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_INTERACTION_ID_RE = re.compile(r"^ask-[A-Za-z0-9._:-]{1,128}$")
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -2323,6 +2331,350 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法读取 Harness 心跳。") from exc
 
+    async def create_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        record: HarnessInteractionRecord,
+    ) -> HarnessInteractionRecord:
+        """Persist an immutable interaction identity and its first event."""
+        workspace = _canonical_workspace(workspace_root)
+        if record.sequence != 1 or record.state != "pending":
+            raise ValueError("新 interaction 必须从 pending/sequence=1 开始。")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await self._get_interaction_with_connection(
+                    db, workspace, record.interaction_id,
+                )
+                if existing is not None:
+                    if existing.digest() == record.digest():
+                        await db.rollback()
+                        return existing
+                    raise HarnessStoreConflictError(
+                        f"interaction_id 已绑定不同问题：{record.interaction_id}"
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO harness_interactions (
+                        workspace_root, interaction_id, subject_kind, subject_id,
+                        latest_sequence, state, owner_id, owner_epoch,
+                        owner_lease_expires_at, expires_at, payload_json, payload_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace, record.interaction_id, record.subject_kind,
+                        record.subject_id, record.sequence, record.state,
+                        record.owner_id, record.owner_epoch,
+                        record.owner_lease_expires_at, record.expires_at,
+                        record.canonical_json(), record.digest(),
+                    ),
+                )
+                await self._append_interaction_event(db, workspace, record, "")
+                await db.commit()
+                return record
+        except (HarnessStoreConflictError, ValueError):
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法创建持久用户交互。") from exc
+
+    async def get_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+    ) -> HarnessInteractionRecord | None:
+        workspace = _canonical_workspace(workspace_root)
+        identifier = _normalize_interaction_id(interaction_id)
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                return await self._get_interaction_with_connection(
+                    db, workspace, identifier,
+                )
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取持久用户交互。") from exc
+
+    async def list_pending_interactions(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str | None = None,
+        subject_id: str = "",
+        limit: int = 50,
+    ) -> tuple[HarnessInteractionRecord, ...]:
+        """Return bounded pending records without silently changing timeout state."""
+        workspace = _canonical_workspace(workspace_root)
+        if not 1 <= limit <= 100:
+            raise ValueError("interaction limit 必须在 1..100 之间。")
+        kind = _coerce_run_kind(subject_kind) if subject_kind is not None else None
+        subject = (
+            _normalize_run_lease_id(subject_id, field="subject_id")
+            if subject_id else ""
+        )
+        if kind is None and subject:
+            raise ValueError("按 subject_id 查询时必须同时提供 subject_kind。")
+        if not self._db_path.is_file():
+            return ()
+        await self._ensure_schema()
+        query = (
+            "SELECT interaction_id FROM harness_interactions "
+            "WHERE workspace_root = ? AND state = 'pending'"
+        )
+        params: list[object] = [workspace]
+        if kind is not None:
+            query += " AND subject_kind = ?"
+            params.append(kind.value)
+        if subject:
+            query += " AND subject_id = ?"
+            params.append(subject)
+        query += " ORDER BY rowid ASC LIMIT ?"
+        params.append(limit)
+        try:
+            async with self._connection() as db:
+                rows = await (await db.execute(query, tuple(params))).fetchall()
+                records = []
+                for row in rows:
+                    record = await self._get_interaction_with_connection(
+                        db, workspace, str(row["interaction_id"]),
+                    )
+                    if record is not None:
+                        records.append(record)
+                return tuple(records)
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法列出待回答用户交互。") from exc
+
+    async def takeover_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+        expected_sequence: int,
+        owner_id: str,
+        now: str,
+        owner_lease_seconds: int,
+    ) -> HarnessInteractionRecord:
+        return await self._transition_interaction(
+            workspace_root=workspace_root,
+            interaction_id=interaction_id,
+            expected_sequence=expected_sequence,
+            transition=lambda record: takeover_interaction(
+                record,
+                owner_id=owner_id,
+                now=now,
+                owner_lease_seconds=owner_lease_seconds,
+            ),
+        )
+
+    async def answer_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+        expected_sequence: int,
+        owner_id: str,
+        owner_epoch: int,
+        response: dict[str, object],
+        answered_by: str,
+        now: str,
+    ) -> HarnessInteractionRecord:
+        return await self._transition_interaction(
+            workspace_root=workspace_root,
+            interaction_id=interaction_id,
+            expected_sequence=expected_sequence,
+            transition=lambda record: answer_interaction(
+                record,
+                owner_id=owner_id,
+                owner_epoch=owner_epoch,
+                response=response,
+                answered_by=answered_by,
+                now=now,
+            ),
+        )
+
+    async def expire_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+        expected_sequence: int,
+        now: str,
+    ) -> HarnessInteractionRecord:
+        return await self._transition_interaction(
+            workspace_root=workspace_root,
+            interaction_id=interaction_id,
+            expected_sequence=expected_sequence,
+            transition=lambda record: expire_interaction(record, now=now),
+        )
+
+    async def _transition_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+        expected_sequence: int,
+        transition: Callable[[HarnessInteractionRecord], HarnessInteractionRecord],
+    ) -> HarnessInteractionRecord:
+        workspace = _canonical_workspace(workspace_root)
+        identifier = _normalize_interaction_id(interaction_id)
+        if expected_sequence < 1:
+            raise ValueError("expected_sequence 必须大于或等于 1。")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                current = await self._get_interaction_with_connection(
+                    db, workspace, identifier,
+                )
+                if current is None:
+                    raise HarnessStoreConflictError("interaction 不存在，拒绝状态迁移。")
+                if current.sequence != expected_sequence:
+                    raise HarnessStoreConflictError(
+                        "interaction sequence 已变化："
+                        f"{expected_sequence} != {current.sequence}。"
+                    )
+                candidate = transition(current)
+                if candidate.interaction_id != current.interaction_id:
+                    raise HarnessStoreConflictError("interaction transition 改写了稳定 ID。")
+                immutable_fields = (
+                    "subject_kind", "subject_id", "session_id", "agent_name",
+                    "header", "question", "options", "allow_custom",
+                    "custom_label", "created_at", "expires_at",
+                )
+                if any(
+                    getattr(candidate, field) != getattr(current, field)
+                    for field in immutable_fields
+                ):
+                    raise HarnessStoreConflictError(
+                        "interaction transition 改写了不可变问题字段。"
+                    )
+                if candidate.sequence != current.sequence + 1:
+                    raise HarnessStoreConflictError(
+                        "interaction transition 必须恰好推进一个 sequence。"
+                    )
+                if candidate.owner_epoch < current.owner_epoch:
+                    raise HarnessStoreConflictError(
+                        "interaction owner epoch 不能倒退。"
+                    )
+                previous_digest = current.digest()
+                cursor = await db.execute(
+                    """
+                    UPDATE harness_interactions SET
+                        latest_sequence = ?, state = ?, owner_id = ?, owner_epoch = ?,
+                        owner_lease_expires_at = ?, expires_at = ?,
+                        payload_json = ?, payload_sha256 = ?
+                    WHERE workspace_root = ? AND interaction_id = ?
+                      AND latest_sequence = ?
+                    """,
+                    (
+                        candidate.sequence, candidate.state, candidate.owner_id,
+                        candidate.owner_epoch, candidate.owner_lease_expires_at,
+                        candidate.expires_at, candidate.canonical_json(),
+                        candidate.digest(), workspace, identifier, expected_sequence,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise HarnessStoreConflictError(
+                        "interaction 被并发更新，拒绝覆盖。"
+                    )
+                await self._append_interaction_event(
+                    db, workspace, candidate, previous_digest,
+                )
+                await db.commit()
+                return candidate
+        except (HarnessStoreConflictError, ValueError):
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法更新持久用户交互。") from exc
+
+    async def _get_interaction_with_connection(
+        self,
+        db: aiosqlite.Connection,
+        workspace: str,
+        interaction_id: str,
+    ) -> HarnessInteractionRecord | None:
+        row = await (await db.execute(
+            "SELECT * FROM harness_interactions "
+            "WHERE workspace_root = ? AND interaction_id = ?",
+            (workspace, interaction_id),
+        )).fetchone()
+        if row is None:
+            return None
+        event_rows = await (await db.execute(
+            "SELECT * FROM harness_interaction_events "
+            "WHERE workspace_root = ? AND interaction_id = ? ORDER BY sequence ASC",
+            (workspace, interaction_id),
+        )).fetchall()
+        previous_digest = ""
+        latest: HarnessInteractionRecord | None = None
+        for expected, event in enumerate(event_rows, start=1):
+            payload = str(event["payload_json"])
+            digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(event["sequence"]) != expected:
+                raise HarnessStoreError("interaction 事件序号不连续，拒绝读取。")
+            if not hmac.compare_digest(digest, str(event["payload_sha256"])):
+                raise HarnessStoreError("interaction 事件摘要校验失败，拒绝读取。")
+            if not hmac.compare_digest(
+                previous_digest, str(event["previous_payload_sha256"])
+            ):
+                raise HarnessStoreError("interaction 事件哈希链断裂，拒绝读取。")
+            latest = HarnessInteractionRecord.model_validate_json(payload)
+            if (
+                latest.interaction_id != interaction_id
+                or latest.sequence != expected
+                or latest.state != str(event["state"])
+            ):
+                raise HarnessStoreError("interaction 事件元数据不一致，拒绝读取。")
+            previous_digest = digest
+        if latest is None:
+            raise HarnessStoreError("interaction 快照存在但事件链为空。")
+        payload = str(row["payload_json"])
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        snapshot = HarnessInteractionRecord.model_validate_json(payload)
+        if (
+            not hmac.compare_digest(digest, str(row["payload_sha256"]))
+            or snapshot != latest
+            or int(row["latest_sequence"]) != latest.sequence
+            or str(row["state"]) != latest.state
+            or str(row["subject_kind"]) != latest.subject_kind
+            or str(row["subject_id"]) != latest.subject_id
+            or str(row["owner_id"]) != latest.owner_id
+            or int(row["owner_epoch"]) != latest.owner_epoch
+            or str(row["owner_lease_expires_at"])
+                != latest.owner_lease_expires_at
+            or str(row["expires_at"]) != latest.expires_at
+        ):
+            raise HarnessStoreError("interaction 快照与事件链末端不一致。")
+        return latest
+
+    @staticmethod
+    async def _append_interaction_event(
+        db: aiosqlite.Connection,
+        workspace: str,
+        record: HarnessInteractionRecord,
+        previous_digest: str,
+    ) -> None:
+        await db.execute(
+            """
+            INSERT INTO harness_interaction_events (
+                workspace_root, interaction_id, sequence, state,
+                payload_json, payload_sha256, previous_payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                workspace, record.interaction_id, record.sequence, record.state,
+                record.canonical_json(), record.digest(), previous_digest,
+                record.updated_at,
+            ),
+        )
+
     async def renew_run_lease(
         self,
         *,
@@ -3386,6 +3738,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V10)
                             await db.executescript(_SCHEMA_V11)
                             await db.executescript(_SCHEMA_V12)
+                            await db.executescript(_SCHEMA_V13)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -4059,6 +4412,17 @@ def _normalize_run_lease_id(value: str, *, field: str) -> str:
         raise ValueError(
             f"{field} 只能包含字母、数字、点、下划线、冒号和连字符。"
         )
+    return normalized
+
+
+def _normalize_interaction_id(value: str) -> str:
+    normalized = _normalize_text(
+        value,
+        field="interaction_id",
+        max_length=132,
+    )
+    if not _INTERACTION_ID_RE.fullmatch(normalized):
+        raise ValueError("interaction_id 必须是 ask- 前缀的稳定 ID。")
     return normalized
 
 
@@ -4899,4 +5263,48 @@ CREATE TABLE IF NOT EXISTS harness_heartbeats (
 
 CREATE INDEX IF NOT EXISTS idx_harness_heartbeats_observed
 ON harness_heartbeats (workspace_root, subject_kind, observed_at, subject_id);
+"""
+
+_SCHEMA_V13 = """
+CREATE TABLE IF NOT EXISTS harness_interactions (
+    workspace_root TEXT NOT NULL,
+    interaction_id TEXT NOT NULL,
+    subject_kind TEXT NOT NULL CHECK (
+        subject_kind IN ('pursuit', 'tool', 'browser', 'agent', 'runtime')
+    ),
+    subject_id TEXT NOT NULL,
+    latest_sequence INTEGER NOT NULL CHECK (latest_sequence >= 1),
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'answered', 'expired', 'cancelled')
+    ),
+    owner_id TEXT NOT NULL,
+    owner_epoch INTEGER NOT NULL CHECK (owner_epoch >= 1),
+    owner_lease_expires_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, interaction_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_interactions_pending
+ON harness_interactions (
+    workspace_root, state, subject_kind, subject_id, interaction_id
+);
+
+CREATE TABLE IF NOT EXISTS harness_interaction_events (
+    workspace_root TEXT NOT NULL,
+    interaction_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'answered', 'expired', 'cancelled')
+    ),
+    payload_json TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    previous_payload_sha256 TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, interaction_id, sequence),
+    FOREIGN KEY (workspace_root, interaction_id)
+        REFERENCES harness_interactions(workspace_root, interaction_id)
+        ON DELETE CASCADE
+);
 """

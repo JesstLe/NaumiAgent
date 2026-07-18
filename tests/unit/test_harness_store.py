@@ -169,8 +169,10 @@ async def test_schema_migration_is_idempotent_and_adds_current_tables(
         "harness_run_leases",
         "harness_run_fence_events",
         "harness_heartbeats",
+        "harness_interactions",
+        "harness_interaction_events",
     }
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 12
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 13
     assert rows == 1
 
 
