@@ -98,6 +98,6 @@ Baseline cohort 尚未持久化完成前，不允许生成 GREEN request。
 - Safe Replay 经审计属于非干预型 runner，不能证明代码修复效果；feedback recurrence 仍缺可信
   observation-window runner，二者均保持 blocked；
 - ARC-04 ephemeral worker 尚未实现，因此不能真实物化 baseline commit；
-- Request 尚未进入 H5a Store，也没有 cohort completion receipt；
-- HAR-08.7e 已提供数值指标载体；下一切片应实现 EVO-03.2c Self-Review Static RED Baseline 与连续 H5a
-  sample 写入。执行项目代码的 runner 仍等待 ARC-04。
+- EVO-03.2c 已为纯 `self_review_static` Request 实现精确 Git baseline 扫描、连续 H5a sample 与防篡改
+  completion receipt；执行 Profile checks 或项目代码的完整 Request 仍等待 ARC-04；
+- 下一切片应实现 EVO-03.3a Self-Review Static GREEN Cohort，并保持同 metric/seed/order/平台合同。
