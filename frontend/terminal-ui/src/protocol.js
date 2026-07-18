@@ -161,7 +161,7 @@ export function createEventSender(writable, { debugLog = null } = {}) {
       id,
       type,
       version: PROTOCOL_VERSION,
-      payload,
+      payload: type === "interaction_response" ? normalizeInteractionResponse(payload) : payload,
     };
     const line = `${JSON.stringify(record)}\n`;
     debugLog?.log("protocol.send", { record, line });
@@ -296,6 +296,87 @@ export function createHelloPayload(client = "naumi-terminal-ui") {
     maximum_version: PROTOCOL_CONTRACT.negotiation.maximum_version,
     capabilities: [...PROTOCOL_CONTRACT.negotiation.capabilities],
   };
+}
+
+function interactionText(value, field, maximum, { required = false, multiline = false } = {}) {
+  let text = String(value ?? "").replaceAll("\u0000", "");
+  for (const char of text) {
+    if (char.charCodeAt(0) < 32 && !["\n", "\t"].includes(char)) {
+      throw new Error(`${field} 包含不允许的控制字符`);
+    }
+  }
+  if (!multiline) text = text.split(/\s+/u).filter(Boolean).join(" ");
+  text = text.trim();
+  if (required && !text) throw new Error(`${field} 不能为空`);
+  if (text.length > maximum) throw new Error(`${field} 最多 ${maximum} 个字符`);
+  return text;
+}
+
+function interactionRequestId(value) {
+  const requestId = String(value ?? "").trim();
+  if (!/^ask-[A-Za-z0-9._:-]{1,128}$/u.test(requestId)) {
+    throw new Error("interaction request_id 格式无效");
+  }
+  return requestId;
+}
+
+function normalizeInteractionRequest(payload) {
+  if (!Array.isArray(payload.options) || payload.options.length < 2 || payload.options.length > 3) {
+    throw new Error("interaction/request 必须包含 2 到 3 个选项");
+  }
+  const options = payload.options.map((option) => {
+    if (!option || typeof option !== "object" || Array.isArray(option)) {
+      throw new Error("interaction/request 选项必须是对象");
+    }
+    return {
+      value: interactionText(option.value, "选项 value", 80, { required: true }),
+      label: interactionText(option.label, "选项标签", 80, { required: true }),
+      description: interactionText(option.description, "选项说明", 300, { multiline: true }),
+    };
+  });
+  if (new Set(options.map((option) => option.value)).size !== options.length) {
+    throw new Error("interaction/request 选项 value 不能重复");
+  }
+  if (typeof payload.allow_custom !== "boolean") {
+    throw new Error("interaction/request allow_custom 必须是布尔值");
+  }
+  const status = String(payload.status ?? "needs_input");
+  if (status !== "needs_input") throw new Error("interaction/request status 无效");
+  return {
+    request_id: interactionRequestId(payload.request_id),
+    session_id: interactionText(payload.session_id, "interaction session_id", 128),
+    run_id: interactionText(payload.run_id, "interaction run_id", 128),
+    agent_name: interactionText(payload.agent_name ?? "main", "interaction agent_name", 128, { required: true }),
+    header: interactionText(payload.header, "interaction 标题", 40, { required: true }),
+    question: interactionText(payload.question, "interaction 问题", 2_000, { required: true, multiline: true }),
+    options,
+    allow_custom: payload.allow_custom,
+    custom_label: interactionText(payload.custom_label ?? "其他", "自定义标签", 80, { required: true }),
+    status,
+  };
+}
+
+function normalizeInteractionResponse(payload) {
+  const kind = String(payload?.kind ?? "option").trim().toLowerCase();
+  if (!["option", "custom"].includes(kind)) throw new Error("交互响应 kind 无效");
+  const value = interactionText(payload?.value, "选择值", 80);
+  const customText = interactionText(payload?.custom_text, "自定义输入", 4_000, { multiline: true });
+  if (kind === "option" && (!value || customText)) throw new Error("选项响应字段组合无效");
+  if (kind === "custom" && (value || !customText)) throw new Error("自定义响应字段组合无效");
+  return {
+    request_id: interactionRequestId(payload?.request_id),
+    kind,
+    value,
+    custom_text: customText,
+  };
+}
+
+function normalizeInteractionResolved(payload) {
+  const response = normalizeInteractionResponse(payload);
+  const status = String(payload.status ?? "answered");
+  if (status !== "answered") throw new Error("interaction/resolved status 无效");
+  const label = interactionText(payload.label, "interaction 答案标签", 80, { required: true });
+  return { ...response, status, label };
 }
 
 export function normalizeServerRecord(record) {
@@ -439,32 +520,10 @@ function normalizeServerPayload(type, payload) {
     };
   }
   if (type === "interaction/request") {
-    return {
-      request_id: String(payload.request_id ?? ""),
-      header: String(payload.header ?? ""),
-      question: String(payload.question ?? ""),
-      options: Array.isArray(payload.options)
-        ? payload.options
-          .filter((option) => option && typeof option === "object" && !Array.isArray(option))
-          .map((option) => ({
-            value: String(option.value ?? ""),
-            label: String(option.label ?? ""),
-            description: String(option.description ?? ""),
-          }))
-        : [],
-      allow_custom: toBool(payload.allow_custom),
-      custom_label: String(payload.custom_label ?? "其他"),
-    };
+    return normalizeInteractionRequest(payload);
   }
   if (type === "interaction/resolved") {
-    return {
-      request_id: String(payload.request_id ?? ""),
-      status: String(payload.status ?? "answered"),
-      kind: String(payload.kind ?? "option"),
-      value: String(payload.value ?? ""),
-      label: String(payload.label ?? ""),
-      custom_text: String(payload.custom_text ?? ""),
-    };
+    return normalizeInteractionResolved(payload);
   }
   if (type === "permission/grants_changed") {
     return {

@@ -312,6 +312,34 @@ test("event sender accepts a caller supplied request id", () => {
   assert.equal(send("ping", {}), "ui-1");
 });
 
+test("interaction sender rejects ambiguous answers and drops private fields", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("interaction_response", {
+    request_id: "ask-option-1",
+    kind: "option",
+    value: "safe",
+    private_payload: "drop",
+  });
+  assert.deepEqual(JSON.parse(chunks[0]).payload, {
+    request_id: "ask-option-1",
+    kind: "option",
+    value: "safe",
+    custom_text: "",
+  });
+  assert.throws(
+    () => send("interaction_response", {
+      request_id: "ask-option-1",
+      kind: "option",
+      value: "safe",
+      custom_text: "ambiguous",
+    }),
+    /字段组合无效/,
+  );
+  assert.equal(chunks.length, 1);
+});
+
 test("protocol contract drives client and server event validation", () => {
   assert.equal(PROTOCOL_VERSION, PROTOCOL_CONTRACT.version);
   assert.deepEqual(PROTOCOL_CONTRACT.negotiation, {
@@ -1331,21 +1359,79 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
   assert.deepEqual(normalizeServerRecord({
     type: "interaction/request",
     payload: {
-      request_id: 7,
+      request_id: "ask-7",
       header: "实现策略",
       question: "请选择",
-      options: [{ value: 1, label: "A", description: null }],
-      allow_custom: 1,
+      options: [
+        { value: "a", label: "A", description: null },
+        { value: "b", label: "B", description: "保留兼容" },
+      ],
+      allow_custom: true,
       custom_label: null,
     },
   }).payload, {
-    request_id: "7",
+    request_id: "ask-7",
+    session_id: "",
+    run_id: "",
+    agent_name: "main",
     header: "实现策略",
     question: "请选择",
-    options: [{ value: "1", label: "A", description: "" }],
+    options: [
+      { value: "a", label: "A", description: "" },
+      { value: "b", label: "B", description: "保留兼容" },
+    ],
     allow_custom: true,
     custom_label: "其他",
+    status: "needs_input",
   });
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "interaction/request",
+      payload: {
+        request_id: "ask-bad",
+        header: "实现策略",
+        question: "请选择",
+        options: [{ value: "same", label: "A" }, { value: "same", label: "B" }],
+        allow_custom: false,
+      },
+    }),
+    /不能重复/,
+  );
+
+  assert.deepEqual(normalizeServerRecord({
+    type: "interaction/resolved",
+    payload: {
+      request_id: "ask-7",
+      status: "answered",
+      kind: "custom",
+      value: "",
+      label: "其他",
+      custom_text: "仅当前工作区",
+      private_payload: "drop",
+    },
+  }).payload, {
+    request_id: "ask-7",
+    kind: "custom",
+    value: "",
+    custom_text: "仅当前工作区",
+    status: "answered",
+    label: "其他",
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "interaction/resolved",
+      payload: {
+        request_id: "ask-7",
+        status: "answered",
+        kind: "option",
+        value: "safe",
+        custom_text: "ambiguous",
+        label: "安全方案",
+      },
+    }),
+    /字段组合无效/,
+  );
 
   assert.deepEqual(normalizeServerRecord({
     type: "permission/grants_changed",

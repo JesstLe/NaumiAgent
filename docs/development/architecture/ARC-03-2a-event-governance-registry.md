@@ -82,4 +82,6 @@
 - 持久化前按字段策略执行 redaction/拒绝并生成审计证据；
 - 对 raw secret、private reasoning、Harness artifact 的端到端泄漏检测。
 
-建议下一切片为 ARC-03.2b：先选择权限、interaction、Harness receipt 三类高风险事件，建立 payload schema 与持久化边界执行器，再扩展到全部事件。
+ARC-03.2b1 已先完成 interaction request/response/resolved 的双端严格 payload 边界，见
+[设计](ARC-03-2b1-interaction-payload-boundary.md)。permission、Harness receipt、机器可读 JSON Schema、
+类型生成与持久化 redaction executor 仍属于后续 ARC-03.2b 子切片。
