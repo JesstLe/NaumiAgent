@@ -20,6 +20,7 @@ from naumi_agent.evolution.experiment_leases import (
 )
 from naumi_agent.evolution.experiment_snapshots import EvolutionExperimentSourceSnapshot
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
+from naumi_agent.evolution.mutation_generation import EvolutionMutationGenerationTrace
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlan
 from naumi_agent.evolution.patch_journals import (
     EvolutionPatchJournal,
@@ -46,7 +47,7 @@ from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuardReceipt,
 )
 
-MUTATION_RECEIPT_POLICY = "evolution-mutation-receipt-v1"
+MUTATION_RECEIPT_POLICY = "evolution-mutation-receipt-v2"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_RECEIPT_BYTES = 256 * 1024
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
@@ -101,9 +102,15 @@ class MutationReceiptFile(_StrictModel):
 
 
 class MutationToolEvidence(_StrictModel):
-    order: int = Field(ge=1, le=3)
-    phase: Literal["static_guard", "patch_write", "postflight_guard"]
+    order: int = Field(ge=1, le=4)
+    phase: Literal[
+        "mutation_generation",
+        "static_guard",
+        "patch_write",
+        "postflight_guard",
+    ]
     tool_name: Literal[
+        "evolution_mutation_generation",
         "evolution_static_guard",
         "evolution_patch_writer",
         "evolution_patch_set_writer",
@@ -125,6 +132,10 @@ class MutationToolEvidence(_StrictModel):
             )
         else:
             expected_tool, expected_prefix = {
+                "mutation_generation": (
+                    "evolution_mutation_generation",
+                    "evmgt_",
+                ),
                 "static_guard": ("evolution_static_guard", "evg_"),
                 "postflight_guard": ("evolution_postflight_guard", "evpg_"),
             }[self.phase]
@@ -138,8 +149,11 @@ class MutationToolEvidence(_StrictModel):
 
 
 class EvolutionMutationReceipt(_StrictModel):
-    schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-mutation-receipt-v1"] = (
+    schema_version: Literal[1, 2] = 2
+    policy_version: Literal[
+        "evolution-mutation-receipt-v1",
+        "evolution-mutation-receipt-v2",
+    ] = (
         MUTATION_RECEIPT_POLICY
     )
     mutation_receipt_id: str = Field(pattern=r"^evmr_[0-9a-f]{24}$")
@@ -152,6 +166,14 @@ class EvolutionMutationReceipt(_StrictModel):
     source_snapshot_sha256: str = Field(pattern=_SHA256_RE)
     mutation_plan_id: str = Field(pattern=r"^evpplan_[0-9a-f]{24}$")
     mutation_plan_sha256: str = Field(pattern=_SHA256_RE)
+    mutation_generation_trace_id: str | None = Field(
+        default=None,
+        pattern=r"^evmgt_[0-9a-f]{24}$",
+    )
+    mutation_generation_trace_sha256: str | None = Field(
+        default=None,
+        pattern=_SHA256_RE,
+    )
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
     candidate_revision: int = Field(ge=1)
     candidate_sha256: str = Field(pattern=_SHA256_RE)
@@ -174,7 +196,7 @@ class EvolutionMutationReceipt(_StrictModel):
     total_added_lines: int = Field(ge=0, le=67_108_864)
     total_deleted_lines: int = Field(ge=0, le=67_108_864)
     required_metrics: tuple[str, ...] = Field(min_length=1, max_length=8)
-    tool_evidence: tuple[MutationToolEvidence, ...] = Field(min_length=3, max_length=3)
+    tool_evidence: tuple[MutationToolEvidence, ...] = Field(min_length=3, max_length=4)
     mutation_completed: Literal[True] = True
     validation_status: Literal["pending"] = "pending"
     validation_ready: Literal[True] = True
@@ -207,6 +229,26 @@ class EvolutionMutationReceipt(_StrictModel):
     @model_validator(mode="after")
     def _receipt_is_bound_and_tamper_evident(self) -> Self:
         _parse_time(self.created_at)
+        generation_fields = (
+            self.mutation_generation_trace_id,
+            self.mutation_generation_trace_sha256,
+        )
+        if self.schema_version == 2 and (
+            self.policy_version != MUTATION_RECEIPT_POLICY
+            or any(item is None for item in generation_fields)
+        ):
+            raise ValueError("Mutation Receipt v2 缺少 Generation Trace。")
+        if self.schema_version == 1 and (
+            self.policy_version != "evolution-mutation-receipt-v1"
+            or any(item is not None for item in generation_fields)
+        ):
+            raise ValueError("Mutation Receipt v1 字段不一致。")
+        if self.mutation_generation_trace_id is not None and (
+            self.mutation_generation_trace_sha256 is None
+            or self.mutation_generation_trace_id
+            != f"evmgt_{self.mutation_generation_trace_sha256[:24]}"
+        ):
+            raise ValueError("Mutation Receipt Generation Trace identity 不一致。")
         if self.attempt > self.max_attempts:
             raise ValueError("Mutation Receipt attempt 超过计划上限。")
         if self.contract_id != f"evx_{self.contract_manifest_sha256[:24]}":
@@ -259,29 +301,41 @@ class EvolutionMutationReceipt(_StrictModel):
             if self.writer_kind == "single_file"
             else "evolution_patch_set_writer"
         )
-        expected_evidence = (
+        governance_evidence = (
             (
-                1,
+                2 if self.schema_version == 2 else 1,
                 "static_guard",
                 "evolution_static_guard",
                 self.static_guard_id,
                 self.static_guard_sha256,
             ),
             (
-                2,
+                3 if self.schema_version == 2 else 2,
                 "patch_write",
                 expected_writer_tool,
                 self.write_receipt_id,
                 self.write_receipt_sha256,
             ),
             (
-                3,
+                4 if self.schema_version == 2 else 3,
                 "postflight_guard",
                 "evolution_postflight_guard",
                 self.postflight_guard_id,
                 self.postflight_guard_sha256,
             ),
         )
+        expected_evidence = governance_evidence
+        if self.schema_version == 2:
+            expected_evidence = (
+                (
+                    1,
+                    "mutation_generation",
+                    "evolution_mutation_generation",
+                    self.mutation_generation_trace_id,
+                    self.mutation_generation_trace_sha256,
+                ),
+                *governance_evidence,
+            )
         observed_evidence = tuple(
             (
                 item.order,
@@ -294,12 +348,13 @@ class EvolutionMutationReceipt(_StrictModel):
         )
         if observed_evidence != expected_evidence:
             raise ValueError("Mutation Receipt tool evidence 顺序或引用不一致。")
-        expected = _sha256_payload(
-            self.model_dump(
-                mode="json",
-                exclude={"mutation_receipt_id", "receipt_sha256"},
-            )
-        )
+        excluded = {"mutation_receipt_id", "receipt_sha256"}
+        if self.schema_version == 1:
+            excluded.update({
+                "mutation_generation_trace_id",
+                "mutation_generation_trace_sha256",
+            })
+        expected = _sha256_payload(self.model_dump(mode="json", exclude=excluded))
         if not hmac.compare_digest(self.receipt_sha256, expected):
             raise ValueError("Mutation Receipt 摘要不一致。")
         if self.mutation_receipt_id != f"evmr_{expected[:24]}":
@@ -475,6 +530,7 @@ class EvolutionMutationReceiptService:
         source_snapshot: EvolutionExperimentSourceSnapshot,
         mutation_plan: EvolutionMutationPlan,
         static_guard: EvolutionStaticGuardReceipt,
+        generation_trace: EvolutionMutationGenerationTrace,
     ) -> EvolutionMutationReceipt:
         (
             contract,
@@ -482,11 +538,22 @@ class EvolutionMutationReceiptService:
             source_snapshot,
             mutation_plan,
             static_guard,
+            generation_trace,
         ) = _revalidate_authority_inputs(
-            contract, lease, source_snapshot, mutation_plan, static_guard,
+            contract,
+            lease,
+            source_snapshot,
+            mutation_plan,
+            static_guard,
+            generation_trace,
         )
         _require_authority(
-            contract, lease, source_snapshot, mutation_plan, static_guard,
+            contract,
+            lease,
+            source_snapshot,
+            mutation_plan,
+            static_guard,
+            generation_trace,
         )
         _require_safe_rationale(mutation_plan.objective.hypothesis)
         journal = self._journal_store.get_by_lease(lease.lease_id)
@@ -502,7 +569,13 @@ class EvolutionMutationReceiptService:
             source_snapshot=source_snapshot,
             mutation_plan=mutation_plan,
             static_guard=static_guard,
+            generation_trace=generation_trace,
         )
+        if attempt != generation_trace.attempt:
+            raise EvolutionMutationReceiptError(
+                "mutation_generation_attempt_mismatch",
+                "Committed Patch attempt 与 Mutation Generation Trace 不一致。",
+            )
         try:
             postflight = self._postflight_guard.inspect(
                 contract=contract,
@@ -531,6 +604,7 @@ class EvolutionMutationReceiptService:
             max_attempts=max_attempts,
             writer_kind=writer_kind,
             created_at=source.updated_at,
+            generation_trace=generation_trace,
         )
         return self._receipt_store.put(receipt)
 
@@ -565,10 +639,10 @@ class EvolutionMutationReceiptService:
             raise EvolutionMutationReceiptError(
                 "mutation_write_receipt_corrupt", "已提交 Write Receipt 不可验证。"
             ) from exc
-        if receipt.schema_version != 2 or receipt.postflight_guard is None:
+        if receipt.schema_version != 3 or receipt.postflight_guard is None:
             raise EvolutionMutationReceiptError(
                 "mutation_write_receipt_legacy",
-                "历史 Write Receipt 缺少完整 Postflight，不能进入自进化验证。",
+                "历史 Write Receipt 缺少 Generation Trace，不能进入自进化验证。",
             )
         return (
             receipt,
@@ -605,12 +679,14 @@ def _revalidate_authority_inputs(
     snapshot: EvolutionExperimentSourceSnapshot,
     plan: EvolutionMutationPlan,
     guard: EvolutionStaticGuardReceipt,
+    generation_trace: EvolutionMutationGenerationTrace,
 ) -> tuple[
     EvolutionExperimentContract,
     ExperimentWorktreeLease,
     EvolutionExperimentSourceSnapshot,
     EvolutionMutationPlan,
     EvolutionStaticGuardReceipt,
+    EvolutionMutationGenerationTrace,
 ]:
     try:
         return (
@@ -621,6 +697,9 @@ def _revalidate_authority_inputs(
             ),
             EvolutionMutationPlan.model_validate(plan.model_dump(mode="json")),
             EvolutionStaticGuardReceipt.model_validate(guard.model_dump(mode="json")),
+            EvolutionMutationGenerationTrace.model_validate(
+                generation_trace.model_dump(mode="json")
+            ),
         )
     except (AttributeError, TypeError, ValueError) as exc:
         raise EvolutionMutationReceiptError(
@@ -646,7 +725,16 @@ def _require_authority(
     snapshot: EvolutionExperimentSourceSnapshot,
     plan: EvolutionMutationPlan,
     guard: EvolutionStaticGuardReceipt,
+    generation_trace: EvolutionMutationGenerationTrace,
 ) -> None:
+    trace_files = tuple(
+        (item.path, item.operation, item.before_sha256, item.after_sha256)
+        for item in generation_trace.final_files
+    )
+    guard_files = tuple(
+        (item.path, item.operation, item.before_sha256, item.after_sha256)
+        for item in guard.changes
+    )
     if (
         lease.contract_id != contract.contract_id
         or lease.manifest_sha256 != contract.manifest_sha256
@@ -672,6 +760,19 @@ def _require_authority(
         or guard.mutation_plan_id != plan.plan_id
         or guard.mutation_plan_sha256 != plan.plan_sha256
         or not guard.preflight_passed
+        or guard.schema_version != 2
+        or guard.mutation_generation_trace_id != generation_trace.trace_id
+        or guard.mutation_generation_trace_sha256 != generation_trace.trace_sha256
+        or guard.mutation_generation_attempt != generation_trace.attempt
+        or generation_trace.contract_id != contract.contract_id
+        or generation_trace.contract_manifest_sha256 != contract.manifest_sha256
+        or generation_trace.lease_id != lease.lease_id
+        or generation_trace.source_snapshot_id != snapshot.snapshot_id
+        or generation_trace.source_snapshot_sha256 != snapshot.snapshot_sha256
+        or generation_trace.mutation_plan_id != plan.plan_id
+        or generation_trace.mutation_plan_sha256 != plan.plan_sha256
+        or generation_trace.max_attempts != plan.max_attempts
+        or trace_files != guard_files
     ):
         raise EvolutionMutationReceiptError(
             "mutation_authority_mismatch", "Mutation Receipt 权威绑定不一致。"
@@ -686,6 +787,7 @@ def _require_write_binding(
     source_snapshot: EvolutionExperimentSourceSnapshot,
     mutation_plan: EvolutionMutationPlan,
     static_guard: EvolutionStaticGuardReceipt,
+    generation_trace: EvolutionMutationGenerationTrace,
 ) -> None:
     receipt_paths = (
         (receipt.change.path,)
@@ -699,6 +801,11 @@ def _require_write_binding(
         or receipt.mutation_plan_id != mutation_plan.plan_id
         or receipt.guard_id != static_guard.guard_id
         or receipt.guard_receipt_sha256 != static_guard.receipt_sha256
+        or receipt.schema_version != 3
+        or receipt.mutation_generation_trace_id != generation_trace.trace_id
+        or receipt.mutation_generation_trace_sha256
+        != generation_trace.trace_sha256
+        or receipt.mutation_generation_attempt != generation_trace.attempt
         or receipt_paths != mutation_plan.authorized_files
         or not receipt.postflight_passed
         or not receipt.write_completed
@@ -721,6 +828,7 @@ def _build_mutation_receipt(
     max_attempts: int,
     writer_kind: Literal["single_file", "multi_file"],
     created_at: str,
+    generation_trace: EvolutionMutationGenerationTrace,
 ) -> EvolutionMutationReceipt:
     files = tuple(_mutation_file(item) for item in postflight.facts)
     write_id = write_receipt.write_id
@@ -734,20 +842,27 @@ def _build_mutation_receipt(
     evidence = (
         _tool_evidence(
             order=1,
+            phase="mutation_generation",
+            tool_name="evolution_mutation_generation",
+            artifact_id=generation_trace.trace_id,
+            artifact_sha256=generation_trace.trace_sha256,
+        ),
+        _tool_evidence(
+            order=2,
             phase="static_guard",
             tool_name="evolution_static_guard",
             artifact_id=static_guard.guard_id,
             artifact_sha256=static_guard.receipt_sha256,
         ),
         _tool_evidence(
-            order=2,
+            order=3,
             phase="patch_write",
             tool_name=writer_tool,
             artifact_id=write_id,
             artifact_sha256=write_sha,
         ),
         _tool_evidence(
-            order=3,
+            order=4,
             phase="postflight_guard",
             tool_name="evolution_postflight_guard",
             artifact_id=postflight.postflight_guard_id,
@@ -755,7 +870,7 @@ def _build_mutation_receipt(
         ),
     )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "policy_version": MUTATION_RECEIPT_POLICY,
         "created_at": created_at,
         "contract_id": contract.contract_id,
@@ -765,6 +880,8 @@ def _build_mutation_receipt(
         "source_snapshot_sha256": source_snapshot.snapshot_sha256,
         "mutation_plan_id": mutation_plan.plan_id,
         "mutation_plan_sha256": mutation_plan.plan_sha256,
+        "mutation_generation_trace_id": generation_trace.trace_id,
+        "mutation_generation_trace_sha256": generation_trace.trace_sha256,
         "candidate_id": mutation_plan.candidate_id,
         "candidate_revision": mutation_plan.candidate_revision,
         "candidate_sha256": mutation_plan.candidate_sha256,
@@ -824,7 +941,12 @@ def _mutation_file(fact: PostflightDiffFact) -> MutationReceiptFile:
 def _tool_evidence(
     *,
     order: int,
-    phase: Literal["static_guard", "patch_write", "postflight_guard"],
+    phase: Literal[
+        "mutation_generation",
+        "static_guard",
+        "patch_write",
+        "postflight_guard",
+    ],
     tool_name: str,
     artifact_id: str,
     artifact_sha256: str,

@@ -76,8 +76,8 @@ info/warning/error 级别、完成/失败/延后、filesystem changed 与脱敏 
 - Windows 文件占用、断电、磁盘满、目录 fsync 差异仍需 A4/A5 平台矩阵；
 - recovery_failed 的人工审查/重试操作面尚未进入 Workbench；
 - 当前 postflight 是全文件 after digest + 精确 Git scope，尚缺 EVO-02.6b 完整 diff/API surface policy；
-- EVO-02.7a Receipt Core 与 2.7b1 Generation Trace 已在后续切片实现；2.7b2 Trace→Receipt v2 绑定和
-  HAR-08 RED/GREEN 尚未串成最终实验闭环。
+- EVO-02.7a Receipt Core、2.7b1 Generation Trace 与 2.7b2 Trace→Receipt v2 绑定已在后续切片实现；
+  专用 Mutation Turn Runner 和 HAR-08 RED/GREEN 尚未串成最终实验闭环。
 
 完成本切片后，EVO-02.5c 的多文件写入与启动恢复链路闭合。下一开发选择应重新横向检查 Harness、CLI/TUI、
 Future Architecture 与自进化依赖，优先推进能解锁 HAR-08/EVO-03 的最小前置，而不是继续无限扩张 Writer。

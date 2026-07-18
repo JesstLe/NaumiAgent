@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from naumi_agent.evolution.experiment_leases import ExperimentWorktreeLease
 from naumi_agent.evolution.experiment_snapshots import EvolutionExperimentSourceSnapshot
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
+from naumi_agent.evolution.mutation_generation import EvolutionMutationGenerationTrace
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlan
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_sets import (
@@ -29,6 +30,7 @@ from naumi_agent.evolution.patch_writers import (
     _git_status,
     _managed_worktree_root,
     _release_lock,
+    _require_generation_binding,
     _rollback,
     _target_matches_baseline,
     _target_matches_digest,
@@ -46,7 +48,7 @@ from naumi_agent.evolution.static_guards import (
     StaticGuardChangeFact,
 )
 
-PATCH_SET_WRITER_POLICY = "evolution-multi-file-patch-writer-v2"
+PATCH_SET_WRITER_POLICY = "evolution-multi-file-patch-writer-v3"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
 
@@ -60,10 +62,11 @@ class _StrictModel(BaseModel):
 
 
 class EvolutionPatchSetWriteReceipt(_StrictModel):
-    schema_version: Literal[1, 2] = 2
+    schema_version: Literal[1, 2, 3] = 3
     policy_version: Literal[
         "evolution-multi-file-patch-writer-v1",
         "evolution-multi-file-patch-writer-v2",
+        "evolution-multi-file-patch-writer-v3",
     ] = (
         PATCH_SET_WRITER_POLICY
     )
@@ -76,6 +79,15 @@ class EvolutionPatchSetWriteReceipt(_StrictModel):
     mutation_plan_id: str = Field(pattern=r"^evpplan_[0-9a-f]{24}$")
     guard_id: str = Field(pattern=r"^evg_[0-9a-f]{24}$")
     guard_receipt_sha256: str = Field(pattern=_SHA256_RE)
+    mutation_generation_trace_id: str | None = Field(
+        default=None,
+        pattern=r"^evmgt_[0-9a-f]{24}$",
+    )
+    mutation_generation_trace_sha256: str | None = Field(
+        default=None,
+        pattern=_SHA256_RE,
+    )
+    mutation_generation_attempt: int | None = Field(default=None, ge=1, le=3)
     changes: tuple[StaticGuardChangeFact, ...] = Field(min_length=2, max_length=16)
     worktree_status_sha256: str = Field(pattern=_SHA256_RE)
     postflight_guard_id: str | None = Field(
@@ -90,18 +102,34 @@ class EvolutionPatchSetWriteReceipt(_StrictModel):
 
     @model_validator(mode="after")
     def _receipt_is_tamper_evident(self) -> Self:
-        if self.schema_version == 2 and (
-            self.policy_version != PATCH_SET_WRITER_POLICY
+        if self.schema_version in {2, 3} and (
+            self.policy_version
+            != f"evolution-multi-file-patch-writer-v{self.schema_version}"
             or self.postflight_guard_id is None
             or self.postflight_guard_sha256 is None
             or self.postflight_guard is None
         ):
-            raise ValueError("Patch Set Write Receipt v2 缺少 Postflight Guard。")
-        if self.schema_version == 2 and self.postflight_guard is not None and (
+            raise ValueError("Patch Set Write Receipt 缺少 Postflight Guard。")
+        if self.schema_version in {2, 3} and self.postflight_guard is not None and (
             self.postflight_guard_id != self.postflight_guard.postflight_guard_id
             or self.postflight_guard_sha256 != self.postflight_guard.receipt_sha256
         ):
             raise ValueError("Patch Set Receipt 与 Postflight Guard binding 不一致。")
+        generation_fields = (
+            self.mutation_generation_trace_id,
+            self.mutation_generation_trace_sha256,
+            self.mutation_generation_attempt,
+        )
+        if self.schema_version == 3 and any(item is None for item in generation_fields):
+            raise ValueError("Patch Set Write Receipt v3 缺少 Generation Trace。")
+        if self.schema_version < 3 and any(item is not None for item in generation_fields):
+            raise ValueError("历史 Patch Set Receipt 不得包含 Generation Trace。")
+        if self.mutation_generation_trace_id is not None and (
+            self.mutation_generation_trace_sha256 is None
+            or self.mutation_generation_trace_id
+            != f"evmgt_{self.mutation_generation_trace_sha256[:24]}"
+        ):
+            raise ValueError("Patch Set Receipt Generation Trace identity 不一致。")
         if self.schema_version == 1 and (
             self.policy_version != "evolution-multi-file-patch-writer-v1"
             or self.postflight_guard_id is not None
@@ -118,6 +146,12 @@ class EvolutionPatchSetWriteReceipt(_StrictModel):
                 "postflight_guard_id",
                 "postflight_guard_sha256",
                 "postflight_guard",
+            })
+        if self.schema_version < 3:
+            excluded.update({
+                "mutation_generation_trace_id",
+                "mutation_generation_trace_sha256",
+                "mutation_generation_attempt",
             })
         expected = _sha256_payload(self.model_dump(mode="json", exclude=excluded))
         if not hmac.compare_digest(self.write_sha256, expected):
@@ -152,7 +186,9 @@ class EvolutionPatchSetWriter:
         mutation_plan: EvolutionMutationPlan,
         guard_receipt: EvolutionStaticGuardReceipt,
         proposed_contents: Mapping[str, str | bytes],
+        generation_trace: EvolutionMutationGenerationTrace | None = None,
     ) -> EvolutionPatchSetWriteReceipt:
+        _require_generation_binding(guard_receipt, generation_trace)
         if not 2 <= len(proposed_contents) <= 16 or len(guard_receipt.changes) != len(
             proposed_contents
         ):
@@ -186,6 +222,7 @@ class EvolutionPatchSetWriter:
                         source_snapshot,
                         mutation_plan,
                         guard_receipt,
+                        generation_trace,
                     )
                 if existing.state in {
                     PatchSetState.PREPARED,
@@ -204,6 +241,7 @@ class EvolutionPatchSetWriter:
                 source_snapshot=source_snapshot,
                 mutation_plan=mutation_plan,
                 proposed_contents=proposed_contents,
+                generation_trace=generation_trace,
             )
             if not fresh.preflight_passed:
                 raise EvolutionPatchWriteError(
@@ -223,6 +261,7 @@ class EvolutionPatchSetWriter:
                 mutation_plan,
                 guard_receipt,
                 proposed_contents,
+                generation_trace,
             )
         finally:
             await asyncio.to_thread(_release_lock, lock_path, lock_token)
@@ -236,6 +275,7 @@ class EvolutionPatchSetWriter:
         mutation_plan: EvolutionMutationPlan,
         guard_receipt: EvolutionStaticGuardReceipt,
         proposed_contents: Mapping[str, str | bytes],
+        generation_trace: EvolutionMutationGenerationTrace | None,
     ) -> EvolutionPatchSetWriteReceipt:
         contents = _bind_contents(guard_receipt, proposed_contents)
         baselines: dict[str, bytes | None] = {}
@@ -260,6 +300,14 @@ class EvolutionPatchSetWriter:
                 before_contents=baselines,
                 file_modes=modes,
             )
+            if (
+                generation_trace is not None
+                and transaction.attempt != generation_trace.attempt
+            ):
+                raise EvolutionPatchWriteError(
+                    "mutation_generation_attempt_mismatch",
+                    "Patch Set attempt 与 Mutation Generation Trace 不一致。",
+                )
             if transaction.state is PatchSetState.ROLLED_BACK:
                 raise EvolutionPatchWriteError(
                     "attempt_budget_exhausted",
@@ -294,6 +342,7 @@ class EvolutionPatchSetWriter:
                 guard_receipt=guard_receipt,
                 status=status,
                 postflight=postflight,
+                generation_trace=generation_trace,
             )
             self._patch_set_store.mark_committed(
                 transaction.transaction_id,
@@ -383,6 +432,7 @@ class EvolutionPatchSetWriter:
         source_snapshot: EvolutionExperimentSourceSnapshot,
         mutation_plan: EvolutionMutationPlan,
         guard_receipt: EvolutionStaticGuardReceipt,
+        generation_trace: EvolutionMutationGenerationTrace | None,
     ) -> EvolutionPatchSetWriteReceipt:
         if (
             transaction.guard_id != guard_receipt.guard_id
@@ -403,7 +453,7 @@ class EvolutionPatchSetWriter:
             )
         receipt = EvolutionPatchSetWriteReceipt.model_validate_json(receipt_json)
         _postflight(root, guard_receipt.changes)
-        if receipt.schema_version == 2:
+        if receipt.schema_version in {2, 3}:
             postflight = self._postflight_guard.inspect(
                 contract=contract,
                 lease=lease,
@@ -419,6 +469,18 @@ class EvolutionPatchSetWriter:
                     "committed_postflight_mismatch",
                     "已提交 Patch Set Receipt 的 Postflight Guard 已漂移。",
                 )
+        if receipt.schema_version == 3 and (
+            generation_trace is None
+            or transaction.attempt != generation_trace.attempt
+            or receipt.mutation_generation_trace_id != generation_trace.trace_id
+            or receipt.mutation_generation_trace_sha256
+            != generation_trace.trace_sha256
+            or receipt.mutation_generation_attempt != generation_trace.attempt
+        ):
+            raise EvolutionPatchWriteError(
+                "committed_generation_trace_mismatch",
+                "已提交 Patch Set Receipt 与 Generation Trace 不一致。",
+            )
         return receipt
 
 
@@ -476,10 +538,15 @@ def _build_receipt(
     guard_receipt: EvolutionStaticGuardReceipt,
     status: bytes,
     postflight: EvolutionPostflightGuardReceipt,
+    generation_trace: EvolutionMutationGenerationTrace | None,
 ) -> EvolutionPatchSetWriteReceipt:
     payload = {
-        "schema_version": 2,
-        "policy_version": PATCH_SET_WRITER_POLICY,
+        "schema_version": 3 if generation_trace is not None else 2,
+        "policy_version": (
+            PATCH_SET_WRITER_POLICY
+            if generation_trace is not None
+            else "evolution-multi-file-patch-writer-v2"
+        ),
         "transaction_id": transaction.transaction_id,
         "contract_id": contract.contract_id,
         "lease_id": lease.lease_id,
@@ -497,6 +564,12 @@ def _build_receipt(
         "write_completed": True,
         "execution_ready": False,
     }
+    if generation_trace is not None:
+        payload.update({
+            "mutation_generation_trace_id": generation_trace.trace_id,
+            "mutation_generation_trace_sha256": generation_trace.trace_sha256,
+            "mutation_generation_attempt": generation_trace.attempt,
+        })
     digest = _sha256_payload(payload)
     return EvolutionPatchSetWriteReceipt.model_validate(
         {**payload, "write_id": f"evsw_{digest[:24]}", "write_sha256": digest}

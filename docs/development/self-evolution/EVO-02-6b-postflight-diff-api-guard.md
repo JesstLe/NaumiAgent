@@ -99,5 +99,5 @@ Writer Receipt 升级为 schema v2，内嵌防篡改 Postflight Receipt、ID 和
   `__all__` 时不会把它误当成权威导出清单；
 - 本门禁不运行测试、不比较行为指标，也不证明修改目标已经达成；
 - EVO-02.7a 已把 rationale、attempt、治理 tool evidence 与本 Postflight Receipt 汇总为不可变实验
-  artifact；EVO-02.7b1 已生成 proposed contents 的不可变原始 tool-call Trace，2.7b2 继续把同 attempt
-  Trace 强制绑定到 Static Guard、Writer 与 Mutation Receipt v2。
+  artifact；EVO-02.7b1 已生成 proposed contents 的不可变原始 tool-call Trace，2.7b2 已把同 attempt
+  Trace 强制绑定到 Static Guard v2、Writer v3 与 Mutation Receipt v2。

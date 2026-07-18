@@ -25,6 +25,7 @@ from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
+from naumi_agent.evolution.mutation_generation import EvolutionMutationGenerationTrace
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlan
 
 STATIC_GUARD_POLICY = "evolution-static-guard-v1"
@@ -146,7 +147,7 @@ class StaticGuardChangeFact(_StrictModel):
 
 
 class EvolutionStaticGuardReceipt(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     policy_version: Literal["evolution-static-guard-v1"] = STATIC_GUARD_POLICY
     guard_id: str = Field(pattern=r"^evg_[0-9a-f]{24}$")
     receipt_sha256: str = Field(pattern=_SHA256_RE)
@@ -156,6 +157,15 @@ class EvolutionStaticGuardReceipt(_StrictModel):
     source_snapshot_id: str = Field(pattern=r"^evs_[0-9a-f]{24}$")
     mutation_plan_id: str = Field(pattern=r"^evpplan_[0-9a-f]{24}$")
     mutation_plan_sha256: str = Field(pattern=_SHA256_RE)
+    mutation_generation_trace_id: str | None = Field(
+        default=None,
+        pattern=r"^evmgt_[0-9a-f]{24}$",
+    )
+    mutation_generation_trace_sha256: str | None = Field(
+        default=None,
+        pattern=_SHA256_RE,
+    )
+    mutation_generation_attempt: int | None = Field(default=None, ge=1, le=3)
     changes: tuple[StaticGuardChangeFact, ...] = Field(max_length=16)
     changes_sha256: str = Field(pattern=_SHA256_RE)
     violations: tuple[StaticGuardViolation, ...] = Field(max_length=64)
@@ -168,6 +178,23 @@ class EvolutionStaticGuardReceipt(_StrictModel):
 
     @model_validator(mode="after")
     def _receipt_is_consistent_and_tamper_evident(self) -> Self:
+        generation_fields = (
+            self.mutation_generation_trace_id,
+            self.mutation_generation_trace_sha256,
+            self.mutation_generation_attempt,
+        )
+        if self.schema_version == 2 and any(item is None for item in generation_fields):
+            raise ValueError("Static Guard Receipt v2 缺少 Mutation Generation Trace。")
+        if self.schema_version == 1 and any(
+            item is not None for item in generation_fields
+        ):
+            raise ValueError("Static Guard Receipt v1 字段不一致。")
+        if self.mutation_generation_trace_id is not None and (
+            self.mutation_generation_trace_sha256 is None
+            or self.mutation_generation_trace_id
+            != f"evmgt_{self.mutation_generation_trace_sha256[:24]}"
+        ):
+            raise ValueError("Static Guard Mutation Generation Trace identity 不一致。")
         if self.preflight_passed != (not self.violations):
             raise ValueError("Static Guard passed 与 violations 不一致。")
         if self.total_changed_files != len(self.changes):
@@ -177,9 +204,14 @@ class EvolutionStaticGuardReceipt(_StrictModel):
         expected_changes = _sha256_payload([item.model_dump(mode="json") for item in self.changes])
         if not hmac.compare_digest(self.changes_sha256, expected_changes):
             raise ValueError("changes_sha256 与 Guard change facts 不一致。")
-        expected = _sha256_payload(
-            self.model_dump(mode="json", exclude={"guard_id", "receipt_sha256"})
-        )
+        excluded = {"guard_id", "receipt_sha256"}
+        if self.schema_version == 1:
+            excluded.update({
+                "mutation_generation_trace_id",
+                "mutation_generation_trace_sha256",
+                "mutation_generation_attempt",
+            })
+        expected = _sha256_payload(self.model_dump(mode="json", exclude=excluded))
         if not hmac.compare_digest(self.receipt_sha256, expected):
             raise ValueError("receipt_sha256 与 Static Guard Receipt 不一致。")
         if self.guard_id != f"evg_{expected[:24]}":
@@ -294,6 +326,7 @@ class EvolutionStaticGuard:
         source_snapshot: EvolutionExperimentSourceSnapshot,
         mutation_plan: EvolutionMutationPlan,
         proposed_contents: Mapping[str, str | bytes],
+        generation_trace: EvolutionMutationGenerationTrace | None = None,
     ) -> EvolutionStaticGuardReceipt:
         _require_bindings(contract, lease, source_snapshot, mutation_plan)
         root = Path(lease.worktree_path).resolve(strict=True)
@@ -323,6 +356,16 @@ class EvolutionStaticGuard:
             else:
                 raise TypeError("Static Guard proposed content 必须是 str 或 bytes。")
             normalized_contents[path] = content
+
+        if generation_trace is not None:
+            generation_trace = _require_generation_trace(
+                contract=contract,
+                lease=lease,
+                source_snapshot=source_snapshot,
+                mutation_plan=mutation_plan,
+                generation_trace=generation_trace,
+                proposed_contents=normalized_contents,
+            )
 
         planned = {item.path: item for item in mutation_plan.planned_files}
         if not normalized_contents:
@@ -359,7 +402,7 @@ class EvolutionStaticGuard:
         changes_tuple = tuple(changes)
         changes_sha256 = _sha256_payload([item.model_dump(mode="json") for item in changes_tuple])
         payload = {
-            "schema_version": 1,
+            "schema_version": 2 if generation_trace is not None else 1,
             "policy_version": STATIC_GUARD_POLICY,
             "policy_sha256": self._policy.digest,
             "contract_id": contract.contract_id,
@@ -377,6 +420,12 @@ class EvolutionStaticGuard:
             "write_authorized": False,
             "execution_ready": False,
         }
+        if generation_trace is not None:
+            payload.update({
+                "mutation_generation_trace_id": generation_trace.trace_id,
+                "mutation_generation_trace_sha256": generation_trace.trace_sha256,
+                "mutation_generation_attempt": generation_trace.attempt,
+            })
         digest = _sha256_payload(payload)
         return EvolutionStaticGuardReceipt.model_validate(
             {
@@ -424,6 +473,45 @@ def _require_bindings(
         raise ValueError("Static Guard Contract/Lease/Snapshot/Plan binding 不一致。")
     if plan.execution_ready or not plan.static_guard_required:
         raise ValueError("Mutation Plan Static Guard 前置不完整。")
+
+
+def _require_generation_trace(
+    *,
+    contract: EvolutionExperimentContract,
+    lease: ExperimentWorktreeLease,
+    source_snapshot: EvolutionExperimentSourceSnapshot,
+    mutation_plan: EvolutionMutationPlan,
+    generation_trace: EvolutionMutationGenerationTrace,
+    proposed_contents: Mapping[str, bytes],
+) -> EvolutionMutationGenerationTrace:
+    try:
+        trace = EvolutionMutationGenerationTrace.model_validate(
+            generation_trace.model_dump(mode="json")
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("Static Guard Mutation Generation Trace 不可验证。") from exc
+    expected_files = {
+        item.path: item.after_sha256 for item in trace.final_files
+    }
+    observed_files = {
+        path: hashlib.sha256(content).hexdigest()
+        for path, content in proposed_contents.items()
+    }
+    if (
+        trace.contract_id != contract.contract_id
+        or trace.contract_manifest_sha256 != contract.manifest_sha256
+        or trace.lease_id != lease.lease_id
+        or trace.source_snapshot_id != source_snapshot.snapshot_id
+        or trace.source_snapshot_sha256 != source_snapshot.snapshot_sha256
+        or trace.mutation_plan_id != mutation_plan.plan_id
+        or trace.mutation_plan_sha256 != mutation_plan.plan_sha256
+        or trace.max_attempts != mutation_plan.max_attempts
+        or expected_files != observed_files
+        or trace.write_authorized
+        or trace.execution_ready
+    ):
+        raise ValueError("Static Guard 与 Mutation Generation Trace 绑定不一致。")
+    return trace
 
 
 def _change_fact(
