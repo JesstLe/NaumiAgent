@@ -212,6 +212,7 @@ DEFAULT_OWNERSHIP_RULES: tuple[OwnershipRule, ...] = (
     _package_rule(DomainOwner.RUNTIME, "hooks", "运行时 Hook 生命周期"),
     _package_rule(DomainOwner.RUNTIME, "architecture", "架构契约与运行时边界"),
     _package_rule(DomainOwner.RUNTIME, "release", "发布运行时基础设施"),
+    _package_rule(DomainOwner.RUNTIME, "daemons", "隔离 Worker 合同与 Runtime authority"),
     _module_rule(DomainOwner.RUNTIME, "deploy", "部署入口"),
     _module_rule(DomainOwner.RUNTIME, "packaging_entry", "打包启动入口"),
     _module_rule(DomainOwner.RUNTIME, "log_setup", "运行时日志装配"),

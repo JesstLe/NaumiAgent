@@ -369,7 +369,7 @@ def test_default_policy_owns_every_real_naumi_module_exactly_once() -> None:
 
     report = analyze_domain_ownership(import_report, source_base="test-base")
 
-    assert len(DEFAULT_OWNERSHIP_RULES) == 40
+    assert len(DEFAULT_OWNERSHIP_RULES) == 41
     assert len(report.assignments) == len(import_report.modules)
     assert report.issues == ()
     assert {summary.owner for summary in report.summaries if summary.module_count} == set(
@@ -378,6 +378,31 @@ def test_default_policy_owns_every_real_naumi_module_exactly_once() -> None:
     assert sum(summary.module_count for summary in report.summaries) == len(
         import_report.modules
     )
+
+
+def test_default_policy_assigns_daemon_contracts_to_runtime() -> None:
+    report = analyze_domain_ownership(
+        ImportGraphReport(
+            source_root="src/naumi_agent",
+            modules=(
+                ModuleRecord(
+                    "naumi_agent.daemons",
+                    "src/naumi_agent/daemons/__init__.py",
+                    True,
+                ),
+                ModuleRecord(
+                    "naumi_agent.daemons.worker_registry",
+                    "src/naumi_agent/daemons/worker_registry.py",
+                ),
+            ),
+            digest="daemon-graph",
+        ),
+        source_base="test-base",
+    )
+
+    assert report.issues == ()
+    assert {item.owner for item in report.assignments} == {DomainOwner.RUNTIME}
+    assert {item.rule_id for item in report.assignments} == {"runtime-daemons"}
 
 
 def test_default_policy_rejects_unknown_future_top_level_package() -> None:

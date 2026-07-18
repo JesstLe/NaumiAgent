@@ -55,6 +55,7 @@ class WorkerAdmissionDecision(StrEnum):
 
 class WorkerAdmissionReason(StrEnum):
     ADMITTED = "admitted"
+    REGISTRATION_MISSING = "registration_missing"
     CONTRACT_TAMPERED = "contract_tampered"
     HEALTH_TAMPERED = "health_tampered"
     IDENTITY_MISMATCH = "identity_mismatch"
@@ -545,6 +546,11 @@ def _canonical_timestamp(value: str, *, field: str) -> str:
     return parsed.isoformat()
 
 
+def normalize_worker_timestamp(value: str, *, field: str = "timestamp") -> str:
+    """Normalize an aware ISO timestamp for daemon persistence boundaries."""
+    return _canonical_timestamp(value, field=field)
+
+
 def _require_aware_iso(value: str, *, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value)
@@ -571,6 +577,7 @@ __all__ = [
     "detect_worker_platform",
     "issue_worker_contract",
     "issue_worker_health_report",
+    "normalize_worker_timestamp",
     "verify_worker_contract",
     "verify_worker_health_report",
 ]

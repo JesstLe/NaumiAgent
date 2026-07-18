@@ -16,8 +16,17 @@ from naumi_agent.daemons.worker_contract import (
     detect_worker_platform,
     issue_worker_contract,
     issue_worker_health_report,
+    normalize_worker_timestamp,
     verify_worker_contract,
     verify_worker_health_report,
+)
+from naumi_agent.daemons.worker_registry import (
+    WORKER_REGISTRY_SCHEMA_VERSION,
+    WorkerRegistration,
+    WorkerRegistrationState,
+    WorkerRegistryConflictError,
+    WorkerRegistryStore,
+    WorkerRegistryStoreError,
 )
 
 __all__ = [
@@ -32,10 +41,17 @@ __all__ = [
     "WorkerKind",
     "WorkerPlatform",
     "WorkerResourceEnvelope",
+    "WORKER_REGISTRY_SCHEMA_VERSION",
+    "WorkerRegistration",
+    "WorkerRegistrationState",
+    "WorkerRegistryConflictError",
+    "WorkerRegistryStore",
+    "WorkerRegistryStoreError",
     "assess_worker_admission",
     "detect_worker_platform",
     "issue_worker_contract",
     "issue_worker_health_report",
+    "normalize_worker_timestamp",
     "verify_worker_contract",
     "verify_worker_health_report",
 ]

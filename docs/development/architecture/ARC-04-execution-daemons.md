@@ -19,7 +19,10 @@
 
 - ARC-04.1a 已完成 Worker 身份/版本、跨平台事实、能力与隔离声明、资源容量、健康绑定和 fail-closed
   admission 合同，详见 `ARC-04-1a-worker-contract.md`。
-- 当前摘要只证明内容一致性，不认证 daemon；没有 registration authority、job/grant/lease、执行 producer 或
+- ARC-04.1b 已完成 Runtime-owned SQLite registration authority、最高 epoch incarnation fencing、撤销、
+  authority-only admission 与 Store Catalog/Composition Root 装配，详见
+  `ARC-04-1b-worker-registration-authority.md`。
+- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有 job/grant/lease、执行 producer 或
   Supervisor。因此 ARC-04 仅为 partial，HAR-08.4 仍不得把本地 subprocess 当作隔离 worker。
 
 ## 验收标准
@@ -56,4 +59,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态由 planned 更新为 partial (4.1a)。
+ARC-04 当前状态为 partial (4.1a, 4.1b)。
