@@ -66,12 +66,12 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
 
 ## 当前不足与下一步
 
-- Textual TUI 仍提供实时结构化选项，但尚未复用 durable create/answer/replay coordinator；UI-18.4 因而只达到
-  New UI 运行时部分完成，不能标记 parity；
+- UI-18.4b 已让 Textual TUI 复用 durable create/answer/expire/recover adapter；UI-18.4 仍因 Goal 页面
+  interaction state/actions 未完成而保持 partial；
 - replay 回答后不会擅自启动一个新 Pursuit 执行器，用户需显式 `/pursue resume`，避免隐藏并发 owner；
 - cancelled authority 尚无显式用户动作；
 - pending 列表目前上限 50，无 cursor 与优先级；这应与 HAR-10.3 durable queue 一起设计；
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
 
-下一最小切片应跨文档比较 `UI-18.4b TUI durable parity` 与 `HAR-10.3a immediate-message queue`，选择能直接
-改善用户闭环且不提前实现完整 ARC-06 的前置。
+下一最小切片应跨文档比较 `UI-18.4c Goal interaction state/actions` 与
+`HAR-10.3a immediate-message queue`，选择能直接改善用户闭环且不提前实现完整 ARC-06 的前置。

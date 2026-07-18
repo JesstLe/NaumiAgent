@@ -5468,6 +5468,9 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
+    authority = bridge._interaction_authority()
+    assert authority is not None
+    authority.owner_renew_interval_seconds = 0.02
     observed: list[str] = []
 
     async def begin(interaction_id: str, _request: dict[str, Any]) -> None:
@@ -5513,6 +5516,13 @@ async def test_bridge_commits_durable_interaction_before_ui_release(
     assert request["payload"]["request_id"] == "ask-durable-bridge"
     assert request["payload"]["timeout_seconds"] == 60
     assert request["payload"]["expires_at"]
+    await asyncio.sleep(0.08)
+    renewed = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-durable-bridge",
+    )
+    assert renewed is not None
+    assert renewed.sequence > 1
 
     await bridge.handle_client_record({
         "id": "answer-durable",

@@ -62,7 +62,8 @@ Harness DB v13 新增：
 - Pursuit checkpoint 已改为 stable interaction ID 引用，resume 从 authority 机械区分 pending、answered、
   expired/cancelled，answered 可幂等补写 hard evidence；
 - Harness/Pursuit 两个 Store 仍无同库原子事务，当前以 authority-first 顺序和 resume reconcile 收敛；
-- New UI 已消费重放的 typed card 与 timeout；TUI durable parity 和 Goal 页面 pending/takeover 状态仍未完成；
+- New UI 已消费重放的 typed card 与 timeout，UI-18.4b 已补齐 TUI durable parity；Goal 页面
+  pending/takeover 状态仍未完成；
 - cancelled 已保留为合法终态，但显式 cancel authority 尚未开放；
 - 当前正文是脱敏明文而非加密存储；密钥管理与 at-rest encryption 属于 ARC-08/打包安全路线。
 
