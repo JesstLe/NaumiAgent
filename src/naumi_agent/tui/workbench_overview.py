@@ -1,4 +1,4 @@
-"""Read-only Textual fallback for the authoritative Workbench overview."""
+"""Textual fallback for the authoritative Workbench overview and governance."""
 
 from __future__ import annotations
 
@@ -7,11 +7,17 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from textual import work
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.screen import Screen
-from textual.widgets import Footer, Markdown, Static
+from textual.containers import Container, Horizontal
+from textual.screen import ModalScreen, Screen
+from textual.widgets import Button, Footer, Input, Label, Markdown, Static
+
+from naumi_agent.workbench.proposal_governance import (
+    ProposalAction,
+    ProposalGovernanceConflictError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -206,15 +212,18 @@ def format_workbench_reviews_markdown(
     detail: Mapping[str, Any] | None = None,
     loading: bool = False,
     error: str = "",
+    notice: str = "",
 ) -> str:
-    """Render waiting approvals and bounded evidence from the shared service."""
+    """Render waiting approvals and open Proposals from the shared service."""
     snapshot = _validate_snapshot(value)
-    reviews = _records(snapshot.get("approvals"))
+    reviews = _review_records(snapshot)
     if not reviews:
-        return (
-            "## Reviews\n\n当前没有待审请求。\n\n"
-            "Review 页面只读；审批动作将在 UI-10.6 接入。"
-        )
+        lines = ["## Reviews", "", "当前没有待审 Approval 或开放 Proposal。"]
+        if notice:
+            lines.extend(["", f"**{_plain(notice)}**"])
+        if error:
+            lines.extend(["", f"- 决策失败：{_plain(error)}"])
+        return "\n".join(lines)
     index = min(len(reviews) - 1, max(0, int(selected_index)))
     selected = reviews[index]
     start = max(0, min(index - 4, len(reviews) - 8))
@@ -227,10 +236,25 @@ def format_workbench_reviews_markdown(
     ]
     for offset, item in enumerate(reviews[start : start + 8], start=start):
         marker = "▶" if offset == index else "·"
-        lines.append(
-            f"- {marker} 待审 · {_plain(item.get('title') or item.get('id'))} · "
-            f"{_plain(item.get('requester')) or '未知发起者'}"
-        )
+        if item.get("review_kind") == "proposal":
+            lines.append(
+                f"- {marker} Proposal · "
+                f"{_plain(item.get('title') or item.get('id'))} · "
+                f"{_risk_label(item.get('risk_level'))}"
+            )
+        else:
+            lines.append(
+                f"- {marker} Approval · "
+                f"{_plain(item.get('title') or item.get('id'))} · "
+                f"{_plain(item.get('requester')) or '未知发起者'}"
+            )
+    if notice:
+        lines.extend(["", f"**{_plain(notice)}**"])
+    if item_kind := _normalized(selected.get("review_kind")):
+        if item_kind == "proposal":
+            if error:
+                lines.extend(["", f"- 决策失败：{_plain(error)}"])
+            return _append_proposal_review(lines, selected)
     lines.extend(["", "### 审查证据"])
     if error:
         lines.extend([f"- 证据不可用：{_plain(error)}", "- 下一步：按 `r` 重试。"])
@@ -298,6 +322,137 @@ def format_workbench_reviews_markdown(
     return "\n".join(lines)
 
 
+def _append_proposal_review(
+    lines: list[str],
+    proposal: Mapping[str, Any],
+) -> str:
+    lines.extend(
+        [
+            "",
+            "### Proposal 决策",
+            f"- 标题：{_plain(proposal.get('title') or proposal.get('id'))}",
+            f"- 状态：{_plain(proposal.get('state')) or 'open'}",
+            f"- 风险：{_risk_label(proposal.get('risk_level'))}",
+            f"- 类型：{_plain(proposal.get('proposal_kind')) or 'manual'}",
+            f"- 来源：{_plain(proposal.get('source_kind')) or 'manual'} · "
+            f"{_plain(proposal.get('source_id')) or '-'} · "
+            f"r{_integer(proposal.get('source_revision'))}",
+            f"- 影响：{_plain(proposal.get('impact_scope')) or '未填写'}",
+            f"- Agent：{_plain(proposal.get('agent_id')) or '-'}",
+            f"- Task：{_plain(proposal.get('task_id')) or '-'}",
+        ]
+    )
+    files = _strings(proposal.get("intended_files"))
+    validation = _strings(proposal.get("validation_plan"))
+    lines.extend(["", f"### 目标文件 · {len(files)}"])
+    lines.extend(f"- `{_code(path)}`" for path in files[:8])
+    if not files:
+        lines.append("- 未声明")
+    lines.extend(["", f"### 验证计划 · {len(validation)}"])
+    lines.extend(f"- {_plain(step)}" for step in validation[:8])
+    if not validation:
+        lines.append("- 未声明")
+    lines.extend(
+        [
+            "",
+            "> 批准只进入下一 policy gate，不执行代码，也不授予实验资格。",
+            "",
+            "`a` 批准 · `x` 拒绝 · `r` 刷新 · `Esc` 返回",
+        ]
+    )
+    return "\n".join(lines)
+
+
+class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
+    """Collect one explicit Proposal decision without persisting draft input."""
+
+    BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
+
+    DEFAULT_CSS = """
+    ProposalDecisionScreen {
+        align: center middle;
+    }
+    ProposalDecisionScreen > Container {
+        width: 76;
+        max-width: 92%;
+        height: auto;
+        padding: 1 2;
+        border: thick $warning 80%;
+        background: $surface;
+    }
+    ProposalDecisionScreen Label,
+    ProposalDecisionScreen Input {
+        width: 1fr;
+        margin: 0 0 1 0;
+    }
+    ProposalDecisionScreen .proposal-decision-error {
+        color: $error;
+        margin: 0 0 1 0;
+    }
+    ProposalDecisionScreen Horizontal {
+        width: auto;
+        height: auto;
+    }
+    ProposalDecisionScreen Button {
+        margin: 0 1 0 0;
+    }
+    """
+
+    def __init__(self, *, action: ProposalAction, title: str) -> None:
+        super().__init__()
+        self.proposal_action = action
+        self.proposal_title = title
+
+    def compose(self) -> ComposeResult:
+        label = "批准" if self.proposal_action is ProposalAction.APPROVE else "拒绝"
+        with Container():
+            yield Label(f"[bold]确认{label} Proposal？[/bold]")
+            yield Label(_plain(self.proposal_title) or "未命名 Proposal")
+            if self.proposal_action is ProposalAction.REJECT:
+                yield Input(
+                    placeholder="填写拒绝原因（必填，最多 2000 字符）",
+                    max_length=2_000,
+                    id="proposal-decision-note",
+                )
+            error = Static("", classes="proposal-decision-error", id="proposal-decision-error")
+            error.display = False
+            yield error
+            with Horizontal():
+                yield Button(f"确认{label}", variant="warning", id="proposal-confirm")
+                yield Button("取消", variant="primary", id="proposal-cancel")
+
+    def on_mount(self) -> None:
+        inputs = list(self.query(Input))
+        (inputs[0] if inputs else self.query_one("#proposal-confirm", Button)).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Input.Submitted, "#proposal-decision-note")
+    def on_note_submitted(self) -> None:
+        self._submit()
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "proposal-cancel":
+            self.dismiss(None)
+            return
+        if event.button.id == "proposal-confirm":
+            self._submit()
+
+    def _submit(self) -> None:
+        note_input = self.query("#proposal-decision-note").first(Input)
+        note = note_input.value.strip() if note_input is not None else ""
+        if self.proposal_action is ProposalAction.REJECT and not note:
+            error = self.query_one("#proposal-decision-error", Static)
+            error.update("拒绝原因不能为空。")
+            error.display = True
+            if note_input is not None:
+                note_input.focus()
+            return
+        self.dismiss({"action": self.proposal_action.value, "decision_note": note})
+
+
 class WorkbenchOverviewScreen(Screen[None]):
     """Full-page TUI view backed by ``WorkbenchService.dashboard_snapshot``."""
 
@@ -311,6 +466,8 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("3", "reviews_tab", "Reviews", show=False),
         Binding("up", "select_previous", "上一项", show=False),
         Binding("down", "select_next", "下一项", show=False),
+        Binding("a", "approve_proposal", "批准 Proposal", show=False),
+        Binding("x", "reject_proposal", "拒绝 Proposal", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -351,6 +508,8 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.review_detail: Mapping[str, Any] | None = None
         self.review_loading = False
         self.review_error = ""
+        self.review_notice = ""
+        self.proposal_action_pending = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="workbench-title")
@@ -401,7 +560,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         )
         self.selected_review_index = min(
             self.selected_review_index,
-            max(0, len(_records(snapshot.get("approvals"))) - 1),
+            max(0, len(_review_records(snapshot)) - 1),
         )
         self._render_snapshot()
         if self.selected_tab == "reviews":
@@ -456,7 +615,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.selected_worktree_index = min(last, self.selected_worktree_index + 1)
             self._render_snapshot()
         elif self.selected_tab == "reviews" and self.snapshot is not None:
-            last = max(0, len(_records(self.snapshot.get("approvals"))) - 1)
+            last = max(0, len(_review_records(self.snapshot)) - 1)
             self.selected_review_index = min(last, self.selected_review_index + 1)
             self.review_detail = None
             self._render_snapshot()
@@ -466,7 +625,7 @@ class WorkbenchOverviewScreen(Screen[None]):
     async def refresh_review_detail(self) -> None:
         if self.snapshot is None:
             return
-        reviews = _records(self.snapshot.get("approvals"))
+        reviews = _review_records(self.snapshot)
         if not reviews:
             self.review_detail = None
             self.review_loading = False
@@ -474,7 +633,14 @@ class WorkbenchOverviewScreen(Screen[None]):
             self._render_snapshot()
             return
         index = min(len(reviews) - 1, max(0, self.selected_review_index))
-        review_id = _normalized(reviews[index].get("id"))
+        selected = reviews[index]
+        if selected.get("review_kind") == "proposal":
+            self.review_detail = None
+            self.review_loading = False
+            self.review_error = ""
+            self._render_snapshot()
+            return
+        review_id = _normalized(selected.get("id"))
         self.review_loading = True
         self.review_error = ""
         self._render_snapshot()
@@ -497,6 +663,161 @@ class WorkbenchOverviewScreen(Screen[None]):
         finally:
             self.review_loading = False
             self._render_snapshot()
+
+    def action_approve_proposal(self) -> None:
+        self._begin_proposal_action(ProposalAction.APPROVE)
+
+    def action_reject_proposal(self) -> None:
+        self._begin_proposal_action(ProposalAction.REJECT)
+
+    def _begin_proposal_action(self, action: ProposalAction) -> None:
+        if self.proposal_action_pending:
+            return
+        selected = self._selected_review()
+        if selected is None or selected.get("review_kind") != "proposal":
+            return
+        decision = self.engine._permission_checker.check(
+            "workbench_govern_proposal",
+            {"proposal_id": selected.get("id"), "action": action.value},
+        )
+        if not decision.allowed:
+            self.review_error = "当前权限模式不允许治理 Proposal。"
+            self._render_snapshot()
+            return
+        if action is ProposalAction.APPROVE and not decision.requires_confirmation:
+            self._start_proposal_action(
+                _normalized(selected.get("id")),
+                action,
+                decision_note="",
+                confirmed=False,
+            )
+            return
+
+        def on_decision(result: dict[str, str] | None) -> None:
+            if result is None:
+                return
+            self._start_proposal_action(
+                _normalized(selected.get("id")),
+                ProposalAction(result["action"]),
+                decision_note=result.get("decision_note", ""),
+                confirmed=True,
+            )
+
+        self.app.push_screen(
+            ProposalDecisionScreen(
+                action=action,
+                title=_plain(selected.get("title") or selected.get("id")),
+            ),
+            on_decision,
+        )
+
+    def _start_proposal_action(
+        self,
+        proposal_id: str,
+        action: ProposalAction,
+        *,
+        decision_note: str,
+        confirmed: bool,
+    ) -> None:
+        if self.proposal_action_pending:
+            return
+        self.proposal_action_pending = True
+        self.submit_proposal_action(
+            proposal_id,
+            action,
+            decision_note=decision_note,
+            confirmed=confirmed,
+        )
+
+    @work(exclusive=True, group="workbench-proposal-action", exit_on_error=False)
+    async def submit_proposal_action(
+        self,
+        proposal_id: str,
+        action: ProposalAction,
+        *,
+        decision_note: str,
+        confirmed: bool,
+    ) -> None:
+        try:
+            decision = self.engine._permission_checker.check(
+                "workbench_govern_proposal",
+                {"proposal_id": proposal_id, "action": action.value},
+            )
+            if not decision.allowed:
+                self.review_error = "当前权限模式不允许治理 Proposal。"
+                self._render_snapshot()
+                return
+            if decision.requires_confirmation and not confirmed:
+                self.review_error = "该 Proposal 决策需要明确确认。"
+                self._render_snapshot()
+                return
+            self.review_error = ""
+            self.review_notice = "正在提交 Proposal 决策…"
+            self._render_snapshot()
+            session_id = _normalized(self.snapshot.get("session_id"))  # type: ignore[union-attr]
+            proposal = await self.engine.workbench_service.govern_proposal(
+                session_id,
+                proposal_id,
+                action=action,
+                reviewer="Human",
+                decision_note=decision_note,
+            )
+            if proposal is None:
+                raise WorkbenchSnapshotError("Proposal 不存在或不属于当前会话。")
+            snapshot = _validate_snapshot(
+                await self.engine.workbench_service.dashboard_snapshot(session_id),
+                session_id=session_id,
+            )
+        except ProposalGovernanceConflictError as exc:
+            self.review_error = _plain(exc)
+            self.review_notice = ""
+            await self._refresh_after_proposal_conflict()
+            return
+        except (RuntimeError, ValueError) as exc:
+            logger.warning("TUI Workbench Proposal action failed (%s)", type(exc).__name__)
+            self.review_error = (
+                _plain(exc) if isinstance(exc, ValueError) else "Proposal 决策暂时失败。"
+            )
+            self.review_notice = ""
+            self._render_snapshot()
+            return
+        finally:
+            self.proposal_action_pending = False
+        self.snapshot = snapshot
+        self.review_notice = (
+            "Proposal 已批准。"
+            if action is ProposalAction.APPROVE
+            else "Proposal 已拒绝。"
+        )
+        self.selected_review_index = min(
+            self.selected_review_index,
+            max(0, len(_review_records(snapshot)) - 1),
+        )
+        self.review_detail = None
+        self._render_snapshot()
+        self.refresh_review_detail()
+
+    async def _refresh_after_proposal_conflict(self) -> None:
+        if self.snapshot is None:
+            return
+        session_id = _normalized(self.snapshot.get("session_id"))
+        try:
+            self.snapshot = _validate_snapshot(
+                await self.engine.workbench_service.dashboard_snapshot(session_id),
+                session_id=session_id,
+            )
+        except (RuntimeError, ValueError):
+            pass
+        self._render_snapshot()
+
+    def _selected_review(self) -> dict[str, Any] | None:
+        if self.snapshot is None or self.selected_tab != "reviews":
+            return None
+        reviews = _review_records(self.snapshot)
+        if not reviews:
+            return None
+        index = min(len(reviews) - 1, max(0, self.selected_review_index))
+        return reviews[index]
 
     def _render_snapshot(self) -> None:
         title = self.query_one("#workbench-title", Static)
@@ -522,6 +843,7 @@ class WorkbenchOverviewScreen(Screen[None]):
                     detail=self.review_detail,
                     loading=self.review_loading,
                     error=self.review_error,
+                    notice=self.review_notice,
                 )
             )
         else:
@@ -545,6 +867,19 @@ def _validate_snapshot(
     if session_id is not None and _normalized(value.get("session_id")) != session_id:
         raise WorkbenchSnapshotError("Workbench snapshot 会话不匹配")
     return value
+
+
+def _review_records(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+    approvals = [
+        {**item, "review_kind": "approval"}
+        for item in _records(snapshot.get("approvals"))
+    ]
+    proposals = [
+        {**item, "review_kind": "proposal"}
+        for item in _records(snapshot.get("proposals"))
+        if _normalized(item.get("state")) == "open"
+    ]
+    return [*approvals, *proposals]
 
 
 def _select_record(
@@ -671,6 +1006,7 @@ def _worktree_status(value: Any) -> str:
 
 
 __all__ = [
+    "ProposalDecisionScreen",
     "WorkbenchOverviewScreen",
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",

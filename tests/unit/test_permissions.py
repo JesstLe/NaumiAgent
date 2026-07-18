@@ -50,6 +50,20 @@ class TestPermissionChecker:
         assert not allowed.requires_confirmation
         assert not blocked.allowed
 
+    def test_workbench_proposal_governance_confirms_except_in_bypass(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        bypass = PermissionChecker(PermissionMode.BYPASS)
+        arguments = {"proposal_id": "proposal-1", "action": "approve"}
+
+        guarded = moderate.check("workbench_govern_proposal", arguments)
+        unrestricted = bypass.check("workbench_govern_proposal", arguments)
+
+        assert guarded.allowed
+        assert guarded.requires_confirmation
+        assert guarded.risk_level == PermissionRiskLevel.HIGH
+        assert unrestricted.allowed
+        assert not unrestricted.requires_confirmation
+
     def test_lockdown_blocks_write(self) -> None:
         checker = PermissionChecker(PermissionMode.LOCKDOWN, allowed_dirs=["/workspace"])
         result = checker.check("file_write", {"path": "/workspace/test.txt"})

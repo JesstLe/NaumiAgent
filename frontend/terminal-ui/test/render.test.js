@@ -411,6 +411,40 @@ test("workbench Reviews tab renders checks blockers files and semantic diff colo
   }
 });
 
+test("workbench Reviews tab renders Proposal preview and decision form at common widths", () => {
+  const proposal = {
+    id: "proposal-1", state: "open", title: "优化 footer 截断", risk_level: "medium",
+    proposal_kind: "code", source_kind: "evolution_candidate",
+    source_id: `evc_${"a".repeat(24)}`, source_revision: 4,
+    impact_scope: "frontend/terminal-ui/src/components/footer.js",
+    agent_id: "Evolution-Agent", task_id: "task-1",
+    intended_files: ["frontend/terminal-ui/src/components/footer.js"],
+    validation_plan: ["node --test footer.test.js"],
+  };
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "proposal-1",
+    selected_review_kind: "proposal",
+    approvals: [],
+    proposals: [proposal],
+    proposal_action: {
+      proposal_id: "proposal-1", action: "reject", phase: "note", input: "证据不足",
+    },
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 26);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Proposal"));
+    assert(plain.includes("优化 footer 截断"));
+    assert(plain.includes("批准只进入下一 policy gate"));
+    assert(plain.includes("拒绝原因"));
+    assert(plain.includes("证据不足"));
+  }
+});
+
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
   const rendered = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120);

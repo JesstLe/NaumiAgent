@@ -83,7 +83,9 @@ function createEmptyWorkbenchState() {
     full: true,
     session_id: "",
     counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
-    active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+    active_selection: {
+      mission_id: "", task_id: "", worktree: "", review_id: "", review_kind: "",
+    },
     worktrees_status: "unavailable",
     worktrees_code: "worktree_snapshot_pending",
     worktrees_total: 0,
@@ -93,10 +95,14 @@ function createEmptyWorkbenchState() {
     selected_worktree_name: "",
     selected_worktree_index: 0,
     selected_review_id: "",
+    selected_review_kind: "",
     selected_review_index: 0,
     review_loading: false,
     review_error: "",
     review_detail: null,
+    proposal_action: null,
+    action_notice: "",
+    action_error: "",
     missions: [],
     tasks: [],
     issues: [],
@@ -451,11 +457,15 @@ function applyWorkbenchSnapshot(state, payload) {
     previousWorktrees.findIndex((item) => String(item.name || "") === previousName),
   );
   const previousReviewId = String(state.workbench.selected_review_id || "");
+  const previousReviewKind = String(state.workbench.selected_review_kind || "");
   const previousReviewIndex = Math.max(0, Number(state.workbench.selected_review_index) || 0);
   const selectedTab = ["overview", "worktrees", "reviews"].includes(state.workbench.selected_tab)
     ? state.workbench.selected_tab
     : "overview";
   const previousReviewDetail = state.workbench.review_detail;
+  const previousProposalAction = state.workbench.proposal_action;
+  const previousActionNotice = state.workbench.action_notice;
+  const previousActionError = state.workbench.action_error;
   state.workbench = {
     ...createEmptyWorkbenchState(),
     ...payload,
@@ -466,14 +476,19 @@ function applyWorkbenchSnapshot(state, payload) {
   reconcileWorkbenchSelection(state.workbench, { previousName, previousIndex });
   reconcileWorkbenchReviewSelection(state.workbench, {
     previousId: previousReviewId,
+    previousKind: previousReviewKind,
     previousIndex: previousReviewIndex,
   });
   if (
     previousReviewDetail
+    && state.workbench.selected_review_kind === "approval"
     && String(previousReviewDetail.review_id || "") === state.workbench.selected_review_id
   ) {
     state.workbench.review_detail = previousReviewDetail;
   }
+  state.workbench.proposal_action = previousProposalAction;
+  state.workbench.action_notice = previousActionNotice;
+  state.workbench.action_error = previousActionError;
   return true;
 }
 
@@ -1028,6 +1043,10 @@ export function reduceServerEvent(state, record) {
         ? "该审查已不存在或不再可读，请刷新列表。"
         : "";
       state.workbench.review_detail = payload;
+      break;
+    }
+    case "workbench/proposal/action_result": {
+      applyWorkbenchProposalActionResult(state, payload);
       break;
     }
     case "workbench/event": {
@@ -2678,8 +2697,9 @@ function requestWorkbenchSnapshot(state, send) {
 }
 
 function requestWorkbenchReview(state, send, { force = false } = {}) {
-  const reviewId = String(state.workbench.selected_review_id || "");
-  if (!reviewId) {
+  const selected = selectedWorkbenchReview(state.workbench);
+  const reviewId = String(selected?.id || "");
+  if (!reviewId || selected?.review_kind !== "approval") {
     state.workbench.review_loading = false;
     state.workbench.review_error = "";
     state.workbench.review_detail = null;
@@ -2705,6 +2725,9 @@ function requestWorkbenchReview(state, send, { force = false } = {}) {
 export function handleWorkbenchOverviewKey(state, key, send) {
   if (state.route?.name !== "workbench") return false;
   const normalized = String(key || "").toLowerCase();
+  if (state.workbench.proposal_action) {
+    return handleWorkbenchProposalActionKey(state, key, send);
+  }
   if (key === "\u001b") {
     const anchor = state.route.originAnchor || {};
     state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
@@ -2753,6 +2776,15 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     return true;
   }
   if (state.workbench.selected_tab === "reviews") {
+    const selected = selectedWorkbenchReview(state.workbench);
+    if (selected?.review_kind === "proposal" && normalized === "a") {
+      beginWorkbenchProposalAction(state, selected, "approve", send);
+      return true;
+    }
+    if (selected?.review_kind === "proposal" && normalized === "x") {
+      beginWorkbenchProposalAction(state, selected, "reject", send);
+      return true;
+    }
     let delta = 0;
     if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) delta = -1;
     else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) delta = 1;
@@ -2785,16 +2817,26 @@ export function handleWorkbenchOverviewKey(state, key, send) {
 }
 
 function reconcileWorkbenchReviewSelection(workbench, previous = {}) {
-  const reviews = Array.isArray(workbench.approvals) ? workbench.approvals : [];
+  const reviews = workbenchReviewItems(workbench);
   if (!reviews.length) {
     workbench.selected_review_id = "";
+    workbench.selected_review_kind = "";
     workbench.selected_review_index = 0;
     workbench.review_detail = null;
     return;
   }
   const preferred = String(previous.previousId || workbench.selected_review_id || workbench.active_selection?.review_id || "");
+  const preferredKind = String(
+    previous.previousKind
+    || workbench.selected_review_kind
+    || workbench.active_selection?.review_kind
+    || "",
+  );
   let index = preferred
-    ? reviews.findIndex((item) => String(item.id || "") === preferred)
+    ? reviews.findIndex((item) => (
+      String(item.id || "") === preferred
+      && (!preferredKind || item.review_kind === preferredKind)
+    ))
     : -1;
   if (index < 0) index = Math.min(reviews.length - 1, Math.max(0, Number(previous.previousIndex) || 0));
   setWorkbenchReviewSelectionIndex(workbench, index);
@@ -2808,21 +2850,168 @@ function moveWorkbenchReviewSelection(workbench, delta) {
 }
 
 function setWorkbenchReviewSelectionIndex(workbench, value) {
-  const reviews = Array.isArray(workbench.approvals) ? workbench.approvals : [];
+  const reviews = workbenchReviewItems(workbench);
   if (!reviews.length) {
     workbench.selected_review_index = 0;
     workbench.selected_review_id = "";
+    workbench.selected_review_kind = "";
     return;
   }
   const index = Math.min(reviews.length - 1, Math.max(0, Math.trunc(Number(value) || 0)));
   const previousId = String(workbench.selected_review_id || "");
+  const previousKind = String(workbench.selected_review_kind || "");
   workbench.selected_review_index = index;
   workbench.selected_review_id = String(reviews[index]?.id || "");
-  if (previousId && previousId !== workbench.selected_review_id) {
+  workbench.selected_review_kind = String(reviews[index]?.review_kind || "");
+  if (
+    previousId
+    && (previousId !== workbench.selected_review_id || previousKind !== workbench.selected_review_kind)
+  ) {
     workbench.review_loading = false;
     workbench.review_detail = null;
     workbench.review_error = "";
   }
+}
+
+function workbenchReviewItems(workbench) {
+  const approvals = Array.isArray(workbench.approvals) ? workbench.approvals : [];
+  const proposals = Array.isArray(workbench.proposals)
+    ? workbench.proposals.filter((item) => item?.state === "open")
+    : [];
+  return [
+    ...approvals.map((item) => ({ ...item, review_kind: "approval" })),
+    ...proposals.map((item) => ({ ...item, review_kind: "proposal" })),
+  ];
+}
+
+function selectedWorkbenchReview(workbench) {
+  const reviews = workbenchReviewItems(workbench);
+  if (!reviews.length) return null;
+  const index = Math.min(
+    reviews.length - 1,
+    Math.max(0, Number(workbench.selected_review_index) || 0),
+  );
+  return reviews[index] || null;
+}
+
+function beginWorkbenchProposalAction(state, proposal, action, send) {
+  state.workbench.action_notice = "";
+  state.workbench.action_error = "";
+  state.workbench.proposal_action = {
+    proposal_id: String(proposal.id || ""),
+    title: String(proposal.title || proposal.id || "Proposal"),
+    action,
+    phase: action === "reject" ? "note" : "confirm",
+    decision_note: "",
+    input: "",
+    inputCursor: 0,
+    inputPreferredColumn: null,
+  };
+  if (action === "approve" && state.status?.permission_mode === "bypass") {
+    sendWorkbenchProposalAction(state, send, false);
+  }
+}
+
+function handleWorkbenchProposalActionKey(state, key, send) {
+  const action = state.workbench.proposal_action;
+  if (!action) return false;
+  if (action.phase === "loading") return true;
+  if (action.phase === "confirm") {
+    const normalized = String(key || "").toLowerCase();
+    if (normalized === "y" || key === "\r" || key === "\n") {
+      sendWorkbenchProposalAction(state, send, true);
+    } else if (normalized === "n" || key === INPUT_KEYS.escape) {
+      state.workbench.proposal_action = null;
+      state.workbench.action_notice = "已取消 Proposal 决策，未写入任何变更。";
+    }
+    return true;
+  }
+  if (action.phase !== "note") return true;
+  if (key === INPUT_KEYS.escape) {
+    state.workbench.proposal_action = null;
+    state.workbench.action_notice = "已取消 Proposal 决策，未写入任何变更。";
+    return true;
+  }
+  if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
+    const note = String(action.input || "").trim();
+    if (!note) {
+      state.workbench.action_error = "拒绝原因不能为空。";
+      return true;
+    }
+    action.decision_note = note;
+    state.workbench.action_error = "";
+    if (state.status?.permission_mode === "bypass") {
+      sendWorkbenchProposalAction(state, send, false);
+    } else {
+      action.phase = "confirm";
+    }
+    return true;
+  }
+  if (key === "\u007f" || key === "\b") return backspaceInput(action) || true;
+  if (key === INPUT_KEYS.delete) return deleteInputForward(action) || true;
+  if ([INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
+    moveInputCursor(action, "left");
+    return true;
+  }
+  if ([INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
+    moveInputCursor(action, "right");
+    return true;
+  }
+  if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3, INPUT_KEYS.ctrlA].includes(key)) {
+    moveInputCursor(action, "home");
+    return true;
+  }
+  if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3, INPUT_KEYS.ctrlE].includes(key)) {
+    moveInputCursor(action, "end");
+    return true;
+  }
+  if (key >= " " && key !== "\x7f" && !key.includes("\n") && !key.includes("\r")) {
+    insertInputText(action, key);
+    action.input = Array.from(action.input).slice(0, 2_000).join("");
+    action.inputCursor = Math.min(action.inputCursor, Array.from(action.input).length);
+  }
+  return true;
+}
+
+function sendWorkbenchProposalAction(state, send, confirmed) {
+  const action = state.workbench.proposal_action;
+  if (!action || action.phase === "loading") return;
+  action.phase = "loading";
+  state.workbench.action_error = "";
+  send("workbench/proposal/action", {
+    session_id: String(state.currentSessionId || ""),
+    proposal_id: action.proposal_id,
+    action: action.action,
+    decision_note: action.decision_note,
+    confirmed: confirmed === true,
+  });
+}
+
+function applyWorkbenchProposalActionResult(state, payload) {
+  if (!workbenchMatchesCurrentSession(state, payload)) return false;
+  const pending = state.workbench.proposal_action;
+  if (
+    pending
+    && (
+      String(pending.proposal_id || "") !== String(payload.proposal_id || "")
+      || String(pending.action || "") !== String(payload.action || "")
+    )
+  ) return false;
+  if (payload.status === "needs_confirmation") {
+    if (pending) pending.phase = "confirm";
+    state.workbench.action_error = "";
+    return true;
+  }
+  state.workbench.proposal_action = null;
+  if (payload.status === "completed") {
+    state.workbench.action_notice = String(payload.message || "Proposal 决策已完成。");
+    state.workbench.action_error = "";
+  } else {
+    state.workbench.action_notice = "";
+    state.workbench.action_error = String(payload.message || "Proposal 决策失败。");
+  }
+  if (payload.workbench_snapshot) applyWorkbenchSnapshot(state, payload.workbench_snapshot);
+  return true;
 }
 
 function reconcileWorkbenchSelection(workbench, previous = {}) {

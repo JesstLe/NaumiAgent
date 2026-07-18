@@ -84,3 +84,9 @@ Bridge 必须拒绝跨会话读取；approval id 必须与请求 id 一致。Nod
 - UI-10.5 可复用 Review detail 中的事件摘要进入统一 Timeline。
 - UI-10.6 在本页之上增加预览、确认、approve/reject/cancel；动作必须走 Python 权限与审计。
 - HAR-09.4/09.5 后续应把 Evolution Proposal 适配进现有 Workbench 治理对象，而不是新建第二套 Review UI。
+
+## 后续实现状态（2026-07-18）
+
+UI-10.6a 已在本只读基础之上把 open Proposal 合并进同一 Reviews 列表，并实现
+approve/reject/cancel。Approval 证据链仍保持只读，Proposal 动作走 Python 权限、既有 Service 与审计；
+详见 `UI-10-6a-proposal-actions.md`。本文件描述的 UI-10.4a 验收边界不被追溯改写。

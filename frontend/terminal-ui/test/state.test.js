@@ -2454,7 +2454,13 @@ test("initial state includes empty workbench bucket", () => {
     full: true,
     session_id: "",
     counts: { missions: 0, tasks: 0, worktrees: 0, reviews: 0, failures: 0 },
-    active_selection: { mission_id: "", task_id: "", worktree: "", review_id: "" },
+    active_selection: {
+      mission_id: "",
+      task_id: "",
+      worktree: "",
+      review_id: "",
+      review_kind: "",
+    },
     worktrees_status: "unavailable",
     worktrees_code: "worktree_snapshot_pending",
     worktrees_total: 0,
@@ -2464,10 +2470,14 @@ test("initial state includes empty workbench bucket", () => {
     selected_worktree_name: "",
     selected_worktree_index: 0,
     selected_review_id: "",
+    selected_review_kind: "",
     selected_review_index: 0,
     review_loading: false,
     review_error: "",
     review_detail: null,
+    proposal_action: null,
+    action_notice: "",
+    action_error: "",
     missions: [],
     tasks: [],
     issues: [],
@@ -2760,6 +2770,98 @@ test("workbench Reviews tab lazily requests selected evidence and ignores stale 
   });
   assert.equal(state.workbench.review_loading, false);
   assert.equal(state.workbench.review_detail.review_id, "approval-99");
+});
+
+test("workbench Proposal decisions collect reason, confirm, cancel, and refresh authority", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "moderate";
+  handleSubmitText(state, "/workbench", () => {});
+  const proposal = {
+    id: "proposal-1", state: "open", title: "优化 footer", risk_level: "medium",
+    source_kind: "evolution_candidate", source_revision: 2, intended_files: [],
+    validation_plan: [],
+  };
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 1,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 1, worktrees: 0, reviews: 1 },
+      active_selection: { review_id: "proposal-1", review_kind: "proposal" },
+      missions: [], tasks: [], issues: [], failures: [], events: [],
+      approvals: [], proposals: [proposal],
+    },
+  });
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "3", send);
+  assert.equal(state.workbench.selected_review_kind, "proposal");
+  assert.equal(sent.some((item) => item.type === "workbench/review/request"), false);
+
+  handleWorkbenchOverviewKey(state, "x", send);
+  assert.equal(state.workbench.proposal_action.phase, "note");
+  handleWorkbenchOverviewKey(state, "证据不足", send);
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.equal(state.workbench.proposal_action.phase, "confirm");
+  handleWorkbenchOverviewKey(state, "\x1b", send);
+  assert.equal(state.workbench.proposal_action, null);
+  assert.match(state.workbench.action_notice, /已取消/);
+
+  handleWorkbenchOverviewKey(state, "x", send);
+  handleWorkbenchOverviewKey(state, "证据不足", send);
+  handleWorkbenchOverviewKey(state, "\r", send);
+  handleWorkbenchOverviewKey(state, "y", send);
+  assert.deepEqual(sent.at(-1), {
+    type: "workbench/proposal/action",
+    payload: {
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "reject",
+      decision_note: "证据不足",
+      confirmed: true,
+    },
+  });
+  reduceServerEvent(state, {
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1, session_id: "session-workbench", proposal_id: "proposal-1",
+      action: "reject", status: "completed", message: "Proposal 已拒绝。",
+      proposal: { ...proposal, state: "rejected" },
+      workbench_snapshot: {
+        schema_version: 1, stream_id: "stream-a", revision: 2, generated_at: "",
+        full: true, session_id: "session-workbench", counts: { reviews: 0 },
+        active_selection: {}, approvals: [], proposals: [], missions: [], tasks: [],
+        issues: [], failures: [], events: [],
+      },
+    },
+  });
+  assert.equal(state.workbench.proposal_action, null);
+  assert.equal(state.workbench.action_notice, "Proposal 已拒绝。");
+  assert.equal(state.workbench.counts.reviews, 0);
+});
+
+test("workbench bypass approves Proposal without a second confirmation", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "优化 footer", intended_files: [],
+    validation_plan: [],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "a", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.proposal_action.phase, "loading");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "workbench/proposal/action");
+  assert.equal(sent[0].payload.confirmed, false);
 });
 
 test("session replay keeps an open Workbench route but requests new authority", () => {

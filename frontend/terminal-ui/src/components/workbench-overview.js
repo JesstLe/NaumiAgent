@@ -72,6 +72,15 @@ function renderPageState(snapshot) {
     return color(ANSI.yellow, `刷新警告 · ${compactText(snapshot.error, 300)} · r 重试 · Esc 返回`);
   }
   if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
+  if (snapshot.proposal_action?.phase === "note") {
+    return color(ANSI.yellow, "拒绝原因 · 输入文字后 Enter 继续 · Esc 取消");
+  }
+  if (snapshot.proposal_action?.phase === "confirm") {
+    return color(ANSI.yellow, "确认决策 · y/Enter 确认 · n/Esc 取消");
+  }
+  if (snapshot.proposal_action?.phase === "loading") {
+    return color(ANSI.cyan, "正在写入 Proposal 决策与审计…");
+  }
   if (["worktrees", "reviews"].includes(snapshot.selected_tab)) {
     return color(ANSI.dim, "Tab/Shift+Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回");
   }
@@ -79,11 +88,11 @@ function renderPageState(snapshot) {
 }
 
 function renderReviews(snapshot, width, height) {
-  const reviews = array(snapshot.approvals);
+  const reviews = reviewItems(snapshot);
   if (!reviews.length) {
     return [
       color(ANSI.green, "当前没有待审请求。"),
-      color(ANSI.dim, "Review 只读取权威审批与证据；审批动作将在 UI-10.6 接入。"),
+      color(ANSI.dim, "当前没有 waiting Approval 或 open Proposal。"),
     ];
   }
   const selectedIndex = selectedReviewIndex(snapshot, reviews);
@@ -116,14 +125,20 @@ function renderReviewList(reviews, selectedIndex, width, height) {
     const index = start + offset;
     const marker = index === selectedIndex ? color(ANSI.cyan, "›") : " ";
     const title = compactText(item.title || item.id || "未命名审查", 500);
-    const requester = compactText(item.requester || "未知发起者", 160);
-    return fitAnsiWidth(`${marker} ${color(ANSI.yellow, "待审")} ${title} · ${requester}`, width);
+    const requester = compactText(item.requester || item.agent_id || "未知发起者", 160);
+    const kind = item.review_kind === "proposal"
+      ? color(ANSI.cyan, "Proposal")
+      : color(ANSI.yellow, "Approval");
+    return fitAnsiWidth(`${marker} ${kind} ${title} · ${requester}`, width);
   });
   return [color(ANSI.cyan, `Reviews · ${reviews.length} · 当前 ${selectedIndex + 1}`), ...rows];
 }
 
 function renderReviewDetail(snapshot, selected, width) {
   if (!selected) return [color(ANSI.dim, "未选择审查请求")];
+  if (selected.review_kind === "proposal") {
+    return renderProposalDetail(snapshot, selected, width);
+  }
   if (snapshot.review_error) {
     return [
       color(ANSI.red, `证据不可用 · ${compactText(snapshot.review_error, 500)}`),
@@ -181,15 +196,73 @@ function renderReviewDetail(snapshot, selected, width) {
   return lines.flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
 }
 
+function renderProposalDetail(snapshot, proposal, width) {
+  const lines = [
+    color(ANSI.cyan, `Proposal · ${compactText(proposal.title || proposal.id, 600)}`),
+    `${proposalRiskLabel(proposal.risk_level)} · 状态 ${proposal.state} · 类型 ${compactText(proposal.proposal_kind || "manual", 80)}`,
+    `来源 · ${compactText(proposal.source_kind || "manual", 120)} · Candidate ${compactText(proposal.source_id || "-", 160)} · r${number(proposal.source_revision)}`,
+    `影响 · ${compactText(proposal.impact_scope || "未填写", 1_500)}`,
+    color(ANSI.dim, `Agent · ${compactText(proposal.agent_id || "-", 200)} · Task ${compactText(proposal.task_id || "-", 160)}`),
+    color(ANSI.cyan, `目标文件 · ${array(proposal.intended_files).length}`),
+    ...array(proposal.intended_files).slice(0, 8).map((path) => color(ANSI.dim, `• ${compactText(path, 900)}`)),
+    color(ANSI.cyan, `验证计划 · ${array(proposal.validation_plan).length}`),
+    ...array(proposal.validation_plan).slice(0, 8).map((step) => color(ANSI.dim, `• ${compactText(step, 1_000)}`)),
+    color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
+    color(ANSI.dim, "a 批准 · x 拒绝 · r 刷新 · Esc 返回"),
+  ];
+  if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
+  if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
+  const action = snapshot.proposal_action;
+  if (action?.proposal_id === proposal.id) {
+    if (action.phase === "note") {
+      lines.push(
+        color(ANSI.yellow, "拒绝原因（必填）"),
+        `> ${compactText(action.input || "", 2_000)}${color(ANSI.cyan, "▌")}`,
+      );
+    } else if (action.phase === "confirm") {
+      const label = action.action === "approve" ? "批准" : "拒绝";
+      lines.push(
+        color(ANSI.yellow, `确认${label}此 Proposal？`),
+        action.decision_note ? color(ANSI.dim, `原因 · ${compactText(action.decision_note, 1_000)}`) : "",
+        color(ANSI.yellow, "y/Enter 确认 · n/Esc 取消"),
+      );
+    } else if (action.phase === "loading") {
+      lines.push(color(ANSI.cyan, "正在提交决策并等待权威快照…"));
+    }
+  }
+  return lines.filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function reviewItems(snapshot) {
+  return [
+    ...array(snapshot.approvals).map((item) => ({ ...item, review_kind: "approval" })),
+    ...array(snapshot.proposals)
+      .filter((item) => item?.state === "open")
+      .map((item) => ({ ...item, review_kind: "proposal" })),
+  ];
+}
+
 function selectedReviewIndex(snapshot, reviews) {
   const byId = reviews.findIndex(
-    (item) => String(item.id || "") === String(snapshot.selected_review_id || ""),
+    (item) => (
+      String(item.id || "") === String(snapshot.selected_review_id || "")
+      && (
+        !snapshot.selected_review_kind
+        || item.review_kind === snapshot.selected_review_kind
+      )
+    ),
   );
   if (byId >= 0) return byId;
   const byAuthority = reviews.findIndex(
     (item) => String(item.id || "") === String(snapshot.active_selection?.review_id || ""),
   );
   return byAuthority >= 0 ? byAuthority : 0;
+}
+
+function proposalRiskLabel(value) {
+  if (["high", "critical"].includes(value)) return color(ANSI.red, `风险 ${value}`);
+  if (value === "medium") return color(ANSI.yellow, "风险 medium");
+  return color(ANSI.green, `风险 ${value || "low"}`);
 }
 
 function reviewGateLine(worktree, runs, failed) {

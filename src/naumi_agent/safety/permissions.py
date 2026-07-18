@@ -299,6 +299,18 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "workbench_govern_proposal": PermissionRule(
+        tool_name="workbench_govern_proposal",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="workbench_governance",
+    ),
     "session_load": PermissionRule(
         tool_name="session_load",
         allowed_modes=[

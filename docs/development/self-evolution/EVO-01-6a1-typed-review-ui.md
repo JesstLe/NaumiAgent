@@ -50,3 +50,10 @@ renderer。它们采用线性降级而非复制 Node 全屏视觉，但 list/det
 Candidate 页面不直接实现 approve/reject/defer，不写 Candidate，也不提供排序权重。治理动作已由
 HAR-09.5b1 Workbench Service/API 提供，交互页面仍等待 HAR-09.5b2b/UI-10.6；EVO-02 experiment
 contract 尚未实现。
+
+## 后续治理入口（2026-07-18）
+
+HAR-09.5b2b/UI-10.6a 已在 Workbench Reviews 中实现 Proposal approve/reject/cancel。Candidate 页面
+继续保持只读，避免把 Evidence 审阅与治理写操作混在同一页面。批准只改变 Proposal 状态，不授予
+EVO-02 实验资格；defer/merge 和实验转换仍未实现。详见
+`../cli-ui/UI-10-6a-proposal-actions.md`。
