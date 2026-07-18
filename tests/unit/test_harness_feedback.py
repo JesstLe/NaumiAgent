@@ -40,6 +40,27 @@ def _direct(*, now: datetime = NOW, summary: str = "子智能体状态显示错�
     )
 
 
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "files:src/one.py",
+        "files:src/one.py,src/one.py",
+        "files:src/one.py,../secret.py",
+        "files:src/one.py,/tmp/two.py",
+    ],
+)
+def test_feedback_rejects_invalid_multi_file_scope_before_persistence(scope: str) -> None:
+    with pytest.raises(ValueError):
+        build_direct_user_feedback(
+            session_id="session-1",
+            category="defect",
+            scope=scope,
+            topic="multi_file_scope",
+            summary="多文件范围异常",
+            now=NOW,
+        )
+
+
 @pytest.mark.asyncio
 async def test_direct_feedback_is_idempotent_per_minute_and_never_stores_summary(
     tmp_path: Path,
