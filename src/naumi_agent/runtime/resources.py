@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
@@ -18,6 +19,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
     "worker_registry_store": (
         WorkerRegistryStore,
         "worker_registry_store 必须是 WorkerRegistryStore 实例。",
+    ),
+    "execution_grant_store": (
+        ExecutionGrantStore,
+        "execution_grant_store 必须是 ExecutionGrantStore 实例。",
     ),
     "chat_run_store": (
         ChatRunStore,
@@ -60,6 +65,7 @@ class RuntimeResources:
 
     chat_run_store: ChatRunStore
     worker_registry_store: WorkerRegistryStore
+    execution_grant_store: ExecutionGrantStore
     evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
@@ -83,6 +89,7 @@ class RuntimeResourceOverrides:
 
     chat_run_store: ChatRunStore | None = None
     worker_registry_store: WorkerRegistryStore | None = None
+    execution_grant_store: ExecutionGrantStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None
