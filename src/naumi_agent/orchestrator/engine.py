@@ -926,6 +926,8 @@ class AgentEngine:
             self.pursuit_store,
             session_id_getter=lambda: self._session.id if self._session else "",
             pursuit_tool_getter=lambda: self._tool_registry.get("pursue_goal"),
+            recovery_authority=self._harness_store,
+            workspace_root=self.workspace_root,
         ):
             self._tool_registry.register(tool)
 

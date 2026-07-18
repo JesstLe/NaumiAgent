@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
+from naumi_agent.ui.pursuit_recovery import PursuitRecoverySnapshot
 
 DoctorHealthDomain = Literal[
     "runtime",
@@ -81,10 +83,16 @@ def build_doctor_health_snapshot(
     *,
     live_probe: bool = False,
     generated_at: str | None = None,
+    additional_items: Sequence[DoctorHealthItem] = (),
 ) -> DoctorHealthSnapshot:
     """Convert one local Doctor report into the stable UI-13 health contract."""
-    items = tuple(_health_item(check) for check in report.checks)
-    status = _severity(report.status)
+    items = (
+        *(_health_item(check) for check in report.checks),
+        *tuple(additional_items),
+    )
+    status = _worst_severity(
+        (_severity(report.status), *(item.severity for item in additional_items))
+    )
     canonical = {
         "schema_version": 1,
         "status": status,
@@ -100,6 +108,44 @@ def build_doctor_health_snapshot(
         live_probe=live_probe,
         snapshot_sha256=digest,
         items=items,
+    )
+
+
+def pursuit_recovery_health_item(
+    snapshot: PursuitRecoverySnapshot,
+) -> DoctorHealthItem:
+    """Project shared Pursuit recovery facts into the UI-13 health list."""
+    severity: DoctorHealthSeverity = {
+        "active": "ok",
+        "waiting": "ok",
+        "terminal": "ok",
+        "blocked": "degraded",
+        "unknown": "unknown",
+        "reconcile_required": "error",
+        "orphaned": "error",
+        "inconsistent": "error",
+    }[snapshot.recovery_state]
+    detail = (
+        f"状态 {_recovery_state_label(snapshot.recovery_state)}；"
+        f"心跳 {_heartbeat_health_label(snapshot.heartbeat.health)}；"
+        f"租约 {_lease_status_label(snapshot.lease.status)}；"
+        f"Checkpoint {_checkpoint_status_label(snapshot.checkpoint.status)}。"
+    )
+    suggestion = {
+        "reconcile_required": "打开 `/goal` 审查 reconcile reason，核对外部副作用后再恢复。",
+        "orphaned": "运行状态缺少有效 lease；不要重复提交，先审查 checkpoint 与 worker。",
+        "inconsistent": "Heartbeat 与 lease 不一致；运行 `/doctor` 并停止盲目恢复。",
+        "blocked": "查看 Goal 页面中的阻塞原因与下一步。",
+        "unknown": "刷新诊断；若持续未知，请检查 Harness Store。",
+    }.get(snapshot.recovery_state, "")
+    return DoctorHealthItem(
+        id="runtime-pursuit-recovery",
+        domain="runtime",
+        label="Pursuit 恢复健康",
+        severity=severity,
+        responsibility="product_runtime",
+        detail=_bounded(detail, 500),
+        suggestion=_bounded(suggestion, 500),
     )
 
 
@@ -148,6 +194,43 @@ def _severity(status: str) -> DoctorHealthSeverity:
     return {"pass": "ok", "warn": "degraded", "error": "error"}.get(status, "unknown")
 
 
+def _worst_severity(
+    values: Sequence[DoctorHealthSeverity],
+) -> DoctorHealthSeverity:
+    rank = {"ok": 0, "unknown": 1, "degraded": 2, "error": 3}
+    return max(values, key=lambda item: rank[item], default="unknown")
+
+
+def _recovery_state_label(value: str) -> str:
+    return {
+        "active": "运行健康", "waiting": "安全等待", "blocked": "已阻塞",
+        "reconcile_required": "需要核对", "orphaned": "疑似孤立",
+        "inconsistent": "状态不一致", "terminal": "已终止", "unknown": "未知",
+    }.get(value, value)
+
+
+def _heartbeat_health_label(value: str) -> str:
+    return {
+        "starting": "启动中", "healthy": "健康", "draining": "排空中",
+        "stale": "陈旧", "offline": "离线", "stopped": "已停止",
+        "failed": "失败", "clock_regression": "时钟倒退", "missing": "缺失",
+        "error": "读取失败",
+    }.get(value, value)
+
+
+def _lease_status_label(value: str) -> str:
+    return {
+        "active": "生效", "released": "已释放", "missing": "缺失",
+        "error": "读取失败",
+    }.get(value, value)
+
+
+def _checkpoint_status_label(value: str) -> str:
+    return {"ready": "可用", "missing": "缺失", "error": "校验失败"}.get(
+        value, value,
+    )
+
+
 def _bounded(value: object, limit: int) -> str:
     text = " ".join(OutputGuardrail.redact(str(value or "")).split())
     return text[:limit]
@@ -158,4 +241,5 @@ __all__ = [
     "DoctorHealthSnapshot",
     "build_doctor_health_snapshot",
     "doctor_health_payload",
+    "pursuit_recovery_health_item",
 ]

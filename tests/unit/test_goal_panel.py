@@ -16,6 +16,7 @@ from naumi_agent.orchestrator.pursuit import (
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot,
+    build_goal_pursuit_snapshot_with_recovery,
     render_goal_pursuit_snapshot,
 )
 
@@ -90,6 +91,38 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
     assert item["pursuit"]["evidence"][0]["source"] == "case:5"
     assert "\x1b" not in str(payload)
     assert "private" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_recovery_projection_is_shared_by_typed_and_text_views(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    goal = goal_store.create("展示恢复健康")
+    run = PursuitRun(
+        id="pursuit_recovery_view",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        goal_store,
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+    )
+    recovery = snapshot.goals[0]["pursuit"]["recovery"]
+
+    assert recovery["run_id"] == run.id
+    assert recovery["recovery_state"] == "waiting"
+    assert recovery["heartbeat"]["health"] == "missing"
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "恢复健康：安全等待" in rendered
+    assert "心跳 缺失" in rendered
 
 
 def test_snapshot_exposes_missing_link_without_creating_pursuit_db(tmp_path) -> None:

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import types
 from dataclasses import fields, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,8 +30,11 @@ from naumi_agent.harness.eval_surface import (
     HarnessEvalPromotionStatus,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
+from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
+from naumi_agent.harness.run_lease import HarnessRunKind
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.reasoning import (
     ReasoningEffort,
@@ -39,7 +43,10 @@ from naumi_agent.model.reasoning import (
 )
 from naumi_agent.model.router import StreamChunk
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRuntimeMode, AgentUsage
+from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
+from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
@@ -5075,14 +5082,20 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
 
     build_calls: list[dict[str, Any]] = []
 
-    def fake_build(goal_store: Any, pursuit_store: Any, **kwargs: Any) -> Any:
+    async def fake_build(
+        goal_store: Any,
+        pursuit_store: Any,
+        authority: Any,
+        **kwargs: Any,
+    ) -> Any:
         assert goal_store is engine.goal_store
         assert pursuit_store is engine.pursuit_store
+        assert authority is None
         build_calls.append(kwargs)
         return snapshot
 
     monkeypatch.setattr(
-        "naumi_agent.ui.goal_panel.build_goal_pursuit_snapshot",
+        "naumi_agent.ui.goal_panel.build_goal_pursuit_snapshot_with_recovery",
         fake_build,
     )
     await bridge.handle_client_record({
@@ -5095,7 +5108,11 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
     typed = next(record for record in records if record["type"] == "goals/snapshot")
     assert typed["request_id"] == "goal-open"
     assert typed["payload"]["current_goal_id"] == "goal_1"
-    assert build_calls == [{"limit": 7, "include_finished": False}]
+    assert build_calls == [{
+        "workspace_root": engine.workspace_root,
+        "limit": 7,
+        "include_finished": False,
+    }]
 
     writer.seek(0)
     writer.truncate(0)
@@ -5115,7 +5132,74 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
     )
     assert fallback["payload"]["title"] == "goal"
     assert "当前没有未完成目标" in fallback["payload"]["content"]
-    assert build_calls[-1] == {"limit": 20, "include_finished": True}
+    assert build_calls[-1] == {
+        "workspace_root": engine.workspace_root,
+        "limit": 20,
+        "include_finished": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_goal_snapshot_contains_real_recovery_authorities(tmp_path) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    engine.harness_service = SimpleNamespace(store=harness_store)
+    goal = engine.goal_store.create("显示真实恢复健康")
+    run = PursuitRun(
+        id="pursuit-bridge-recovery",
+        goal=goal.objective,
+        status=PursuitRunStatus.RUNNING,
+        phase="assess",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    engine.goal_store.attach_pursuit(goal.id, run.id)
+    now = datetime.now(UTC).isoformat()
+    lease = await harness_store.acquire_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id=run.id,
+        owner_id="worker-a",
+        now=now,
+        lease_seconds=86_400,
+    )
+    assert lease is not None
+    await harness_store.record_heartbeat(
+        workspace_root=tmp_path,
+        subject_kind=HarnessRunKind.PURSUIT,
+        subject_id=run.id,
+        instance_id=lease.owner_id,
+        epoch=lease.epoch,
+        sequence=1,
+        phase=HarnessHeartbeatPhase.RUNNING,
+        observed_at=now,
+        timeout_seconds=86_400,
+        detail_code="lease_active",
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_snapshot", "typed_ui_messages"}
+
+    await bridge.handle_client_record({
+        "id": "goal-recovery",
+        "type": ClientEventType.GOAL_PANEL,
+        "payload": {"limit": 1, "include_finished": False},
+    })
+
+    record = next(
+        item for item in _records(writer) if item["type"] == "goals/snapshot"
+    )
+    recovery = record["payload"]["goals"][0]["pursuit"]["recovery"]
+    assert recovery["run_id"] == run.id
+    assert recovery["recovery_state"] == "active"
+    assert recovery["lease"]["owner_id"] == "worker-a"
+    assert recovery["heartbeat"]["health"] == "healthy"
+    assert recovery["heartbeat"]["instance_id"] == "worker-a"
 
 
 @pytest.mark.asyncio
@@ -5213,8 +5297,24 @@ async def test_bridge_rejects_unsupported_task_cancel_without_mutating() -> None
 @pytest.mark.asyncio
 async def test_bridge_renders_doctor_report_as_system_notice(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.harness_service = SimpleNamespace(store=HarnessStore(tmp_path / "harness.db"))
+    goal = engine.goal_store.create("诊断追踪恢复")
+    run = PursuitRun(
+        id="pursuit-doctor-recovery",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    engine.goal_store.attach_pursuit(goal.id, run.id)
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
@@ -5263,6 +5363,13 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     assert health["request_id"] == "doctor-1"
     assert health["payload"]["status"] == "degraded"
     assert health["payload"]["items"][0]["domain"] == "browser"
+    recovery_item = next(
+        item
+        for item in health["payload"]["items"]
+        if item["id"] == "runtime-pursuit-recovery"
+    )
+    assert recovery_item["severity"] == "ok"
+    assert "安全等待" in recovery_item["detail"]
     assert any(record["type"] == "runtime/status" for record in records)
 
 
