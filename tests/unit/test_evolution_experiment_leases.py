@@ -80,6 +80,11 @@ from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuardReceipt,
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
+from naumi_agent.evolution.validation_cohorts import (
+    EvolutionBaselineCohortRequest,
+    EvolutionBaselineCohortRequestBuilder,
+    EvolutionCohortRequestError,
+)
 from naumi_agent.evolution.validation_plans import (
     EvolutionValidationBindingError,
     EvolutionValidationPlan,
@@ -4084,6 +4089,122 @@ async def test_validation_profile_binding_rejects_incomplete_or_ambiguous_capabi
             workspace_root=workspace,
         )
     assert blocked.value.code == expected
+
+
+async def _validation_binding_fixture(tmp_path: Path):
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path,
+        profile_text=VALIDATION_BINDING_PROFILE,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "harness-trust.db")
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+    binding = await EvolutionValidationProfileBinder(trust_store).bind(
+        plan,
+        workspace_root=workspace,
+    )
+    return workspace, contract, lease, plan, binding
+
+
+@pytest.mark.asyncio
+async def test_baseline_cohort_request_is_deterministic_bounded_and_har08_ready(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, plan, binding = await _validation_binding_fixture(
+        tmp_path
+    )
+    builder = EvolutionBaselineCohortRequestBuilder()
+    isolated_before = _git(Path(lease.worktree_path), "status", "--porcelain")
+
+    first = builder.build(
+        contract=contract,
+        validation_plan=plan,
+        profile_binding=binding,
+    )
+    second = builder.build(
+        contract=contract,
+        validation_plan=plan,
+        profile_binding=binding,
+    )
+
+    assert first == second
+    assert first.request_id == f"evvred_{first.request_sha256[:24]}"
+    assert first.phase == "red"
+    assert first.suite_id == f"evo_{plan.validation_plan_sha256[:24]}"
+    assert first.batch_id == f"evo:red:{plan.validation_plan_sha256[:24]}"
+    assert first.requested_samples == len(first.sample_seeds) == 5
+    assert len(set(first.sample_seeds)) == 5
+    assert first.baseline_commit == contract.baseline.commit
+    assert first.source_materialization == "arc04_ephemeral_git_worktree"
+    assert tuple(item.check_id for item in first.checks) == (
+        "python_compile",
+        "python_contract",
+        "python_lint",
+    )
+    assert first.check_timeout_seconds_per_sample == 240
+    assert first.max_total_duration_seconds == contract.budget.max_duration_seconds
+    assert first.metrics[0].metric_name == plan.metrics[0].metric_name
+    assert first.metrics[0].baseline_operation == "measure"
+    assert first.runtime_identity_required is True
+    assert first.profile_trust_revalidation_required is True
+    assert first.metric_timeout_binding_required is True
+    assert first.harness_result_store_required is True
+    assert first.har08_comparison_receipt_required is True
+    assert first.candidate_request_allowed is False
+    assert first.arc04_worker_required is True
+    assert first.execution_ready is False
+    serialized = first.model_dump_json()
+    assert "tests/unit/test_footer.py" not in serialized
+    assert lease.worktree_path not in serialized
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == isolated_before
+
+
+@pytest.mark.asyncio
+async def test_baseline_cohort_request_rejects_sample_budget_and_nested_tampering(
+    tmp_path: Path,
+) -> None:
+    _, contract, _, plan, binding = await _validation_binding_fixture(tmp_path)
+    builder = EvolutionBaselineCohortRequestBuilder()
+    with pytest.raises(EvolutionCohortRequestError) as too_few:
+        builder.build(
+            contract=contract,
+            validation_plan=plan,
+            profile_binding=binding,
+            requested_samples=4,
+        )
+    assert too_few.value.code == "baseline_sample_count_invalid"
+
+    with pytest.raises(EvolutionCohortRequestError) as over_budget:
+        builder.build(
+            contract=contract,
+            validation_plan=plan,
+            profile_binding=binding,
+            requested_samples=6,
+        )
+    assert over_budget.value.code == "baseline_duration_budget_exceeded"
+
+    request = builder.build(
+        contract=contract,
+        validation_plan=plan,
+        profile_binding=binding,
+    )
+    tampered = request.model_dump(mode="json")
+    tampered["sample_seeds"][0] += 1
+    with pytest.raises(ValidationError, match="sample seeds"):
+        EvolutionBaselineCohortRequest.model_validate(tampered)
+
+    missing_coverage = request.model_dump(mode="json")
+    missing_coverage["checks"][1]["coverage"] = missing_coverage["checks"][1][
+        "coverage"
+    ][:1]
+    with pytest.raises(ValidationError, match="Binding requirements"):
+        EvolutionBaselineCohortRequest.model_validate(missing_coverage)
 
 
 @pytest.mark.asyncio

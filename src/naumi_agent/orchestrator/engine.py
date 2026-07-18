@@ -50,6 +50,9 @@ from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
+from naumi_agent.evolution.validation_cohorts import (
+    EvolutionBaselineCohortRequestBuilder,
+)
 from naumi_agent.evolution.validation_plans import (
     EvolutionValidationPlanner,
     EvolutionValidationProfileBinder,
@@ -763,6 +766,9 @@ class AgentEngine:
         self.evolution_validation_planner = EvolutionValidationPlanner()
         self.evolution_validation_profile_binder = EvolutionValidationProfileBinder(
             resources.harness_trust_store
+        )
+        self.evolution_baseline_cohort_request_builder = (
+            EvolutionBaselineCohortRequestBuilder()
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

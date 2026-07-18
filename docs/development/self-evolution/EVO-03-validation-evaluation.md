@@ -32,6 +32,9 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.1b Validation Profile Check Binding：已实现。按 changed path 将每类要求唯一绑定到当前、用户
   信任的 Harness Profile check，artifact 只保存 spec/argv digest 并要求执行前重验 trust；同时修复深层
   `**` changed-path 匹配。详见 `EVO-03-1b-validation-profile-binding.md`。
+- EVO-03.2a Baseline Cohort Request：已实现。引用 Plan/Binding 固定 HAR-08 RED Suite/Batch、至少 5 次
+  样本、确定性 seed、baseline/environment identity、check coverage 与总预算；保持不可执行并要求 ARC-04
+  物化。详见 `EVO-03-2a-baseline-cohort-request.md`。
 
-HAR-08 baseline/candidate cohort、Comparator、failure attribution、adversarial suite 与 Evaluation Receipt
-仍未实现，因此 EVO-03 整体保持 partial。
+Baseline Request 尚未实际执行或写入 H5a；candidate cohort、Comparator、failure attribution、adversarial
+suite 与 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。

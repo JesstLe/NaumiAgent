@@ -83,5 +83,5 @@ capability 必须唯一并规范排序。旧 Profile 没有 `provides` 时仍可
 - Binding 仍不是执行许可；ARC-04 worker、进程组回收与资源隔离未完成；
 - 尚未捕获 baseline/candidate cohort，也没有 HAR-08 Comparison Receipt；
 - Profile trust 必须在每次实际执行前再次检查，不能只依赖 artifact 中的历史 `true`；
-- 下一切片应先实现 EVO-03.2a Baseline Cohort Request：只描述 HAR-08 runner、fixture、sample、预算和
-  Binding 引用，不自行调用 subprocess；待 ARC-04 可用后再接真实执行 adapter。
+- EVO-03.2a 已实现 Baseline Cohort Request：固定 HAR-08 Suite/Batch、5..100 样本、seed、baseline
+  identity、Profile checks 与预算，但不自行调用 subprocess；详见 `EVO-03-2a-baseline-cohort-request.md`。
