@@ -14,10 +14,12 @@ from naumi_agent.config.settings import (
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter
 from naumi_agent.runtime.composition import (
+    build_runtime_paths,
     build_runtime_ports,
     create_agent_engine,
 )
 from naumi_agent.runtime.dependencies import RuntimePortOverrides
+from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tools.execution import LocalToolExecutor
@@ -53,6 +55,64 @@ def test_build_runtime_ports_selects_all_production_defaults(tmp_path: Path) -> 
     assert isinstance(ports.model_port, ModelRouter)
     assert isinstance(ports.tool_execution_port, LocalToolExecutor)
     assert isinstance(ports.event_sink, NullEventSink)
+
+
+def test_build_runtime_paths_resolves_one_absolute_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_home = tmp_path / "user-state"
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+
+    paths = build_runtime_paths(_config(tmp_path))
+
+    assert all(
+        isinstance(getattr(paths, name), Path) and getattr(paths, name).is_absolute()
+        for name in paths.__slots__
+    )
+    assert paths.workspace_root == tmp_path.resolve()
+    assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
+    assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
+    assert paths.harness_db_path == state_home.resolve() / "harness.db"
+    assert paths.harness_trust_db_path == state_home.resolve() / "harness-trust.db"
+    assert not state_home.exists()
+
+
+def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) -> None:
+    absolute = tmp_path.resolve()
+    values = {
+        "workspace_root": absolute,
+        "runtime_data_dir": absolute / "data",
+        "worktree_storage_dir": absolute / "data" / "worktrees",
+        "harness_db_path": absolute / "state" / "harness.db",
+        "harness_trust_db_path": absolute / "state" / "harness-trust.db",
+        "browser_data_dir": absolute / "data" / "browser",
+        "browser_daemon_log_dir": absolute / "data" / "browser-daemon",
+    }
+
+    with pytest.raises(TypeError, match="workspace_root 必须是绝对 Path"):
+        RuntimePaths(**{**values, "workspace_root": Path("relative")})
+    with pytest.raises(ValueError, match="workspace_root 必须是已规范化"):
+        RuntimePaths(
+            **{
+                **values,
+                "workspace_root": absolute / "nested" / "..",
+            }
+        )
+    with pytest.raises(ValueError, match="browser_data_dir 必须位于"):
+        RuntimePaths(**{**values, "browser_data_dir": absolute / "outside"})
+
+
+def test_build_runtime_ports_rejects_invalid_paths_before_defaults(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch("naumi_agent.runtime.composition.SessionStore") as session_store,
+        pytest.raises(TypeError, match="paths 必须是完整的 RuntimePaths"),
+    ):
+        build_runtime_ports(_config(tmp_path), paths=object())  # type: ignore[arg-type]
+
+    session_store.assert_not_called()
 
 
 def test_build_runtime_ports_preserves_every_override_identity(
@@ -161,9 +221,13 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
 
     with (
         patch(
+            "naumi_agent.runtime.composition.build_runtime_paths",
+            return_value=build_runtime_paths(config),
+        ) as build_paths,
+        patch(
             "naumi_agent.runtime.composition.build_runtime_ports",
             return_value=ports,
-        ),
+        ) as build_ports,
         patch(
             "naumi_agent.orchestrator.engine.AgentEngine",
             return_value=sentinel,
@@ -172,4 +236,6 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
         result = create_agent_engine(config)
 
     assert result is sentinel
-    engine_type.assert_called_once_with(config, ports=ports)
+    paths = build_paths.return_value
+    build_ports.assert_called_once_with(config, paths=paths, overrides=None)
+    engine_type.assert_called_once_with(config, ports=ports, paths=paths)

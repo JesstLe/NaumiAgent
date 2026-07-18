@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.harness.store import resolve_harness_db_path
+from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter
@@ -14,6 +16,7 @@ from naumi_agent.runtime.dependencies import (
     RuntimePorts,
     validate_runtime_port_overrides,
 )
+from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tools.execution import LocalToolExecutor
@@ -25,15 +28,16 @@ if TYPE_CHECKING:
 def build_runtime_ports(
     config: AppConfig,
     *,
+    paths: RuntimePaths | None = None,
     overrides: RuntimePortOverrides[Session] | None = None,
 ) -> RuntimePorts[Session]:
     """Build one independent, fully validated Runtime Port bundle."""
     resolved = RuntimePortOverrides[Session]() if overrides is None else overrides
     validate_runtime_port_overrides(resolved)
 
-    workspace_root = config.resolve_workspace_root()
-    runtime_data_dir = Path(config.memory.session_db_path).parent
-    worktree_storage_dir = runtime_data_dir / "worktrees"
+    if paths is not None and not isinstance(paths, RuntimePaths):
+        raise TypeError("paths 必须是完整的 RuntimePaths。")
+    resolved_paths = build_runtime_paths(config) if paths is None else paths
 
     session_port = resolved.session_port
     if session_port is None:
@@ -45,10 +49,10 @@ def build_runtime_ports(
             mode=PermissionMode(config.safety.permission_mode),
             allowed_dirs=[
                 *config.safety.allowed_dirs,
-                str(workspace_root),
-                str(worktree_storage_dir),
+                str(resolved_paths.workspace_root),
+                str(resolved_paths.worktree_storage_dir),
             ],
-            workspace_root=str(workspace_root),
+            workspace_root=str(resolved_paths.workspace_root),
         )
 
     model_port = resolved.model_port
@@ -77,6 +81,20 @@ def build_runtime_ports(
     )
 
 
+def build_runtime_paths(config: AppConfig) -> RuntimePaths:
+    """Resolve the complete runtime path snapshot without creating directories."""
+    runtime_data_dir = Path(config.memory.session_db_path).expanduser().resolve().parent
+    return RuntimePaths(
+        workspace_root=config.resolve_workspace_root(),
+        runtime_data_dir=runtime_data_dir,
+        worktree_storage_dir=runtime_data_dir / "worktrees",
+        harness_db_path=resolve_harness_db_path(),
+        harness_trust_db_path=resolve_harness_trust_db_path(),
+        browser_data_dir=runtime_data_dir / "browser",
+        browser_daemon_log_dir=runtime_data_dir / "browser-daemon",
+    )
+
+
 def create_agent_engine(
     config: AppConfig,
     *,
@@ -85,8 +103,9 @@ def create_agent_engine(
     """Create one Engine from the authoritative default Port composition."""
     from naumi_agent.orchestrator.engine import AgentEngine
 
-    ports = build_runtime_ports(config, overrides=port_overrides)
-    return AgentEngine(config, ports=ports)
+    paths = build_runtime_paths(config)
+    ports = build_runtime_ports(config, paths=paths, overrides=port_overrides)
+    return AgentEngine(config, ports=ports, paths=paths)
 
 
-__all__ = ["build_runtime_ports", "create_agent_engine"]
+__all__ = ["build_runtime_paths", "build_runtime_ports", "create_agent_engine"]

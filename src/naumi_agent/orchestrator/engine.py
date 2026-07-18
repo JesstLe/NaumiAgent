@@ -73,12 +73,9 @@ from naumi_agent.harness.retention_planner import (
     plan_session_retention,
 )
 from naumi_agent.harness.service import HarnessService
-from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
-from naumi_agent.harness.trust import (
-    HarnessTrustStore,
-    resolve_harness_trust_db_path,
-)
+from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
@@ -112,6 +109,7 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
+from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.runtime.ports.events import (
     EventSink,
     LegacyEventCallback,
@@ -520,6 +518,7 @@ class AgentEngine:
         config: AppConfig,
         *,
         ports: RuntimePorts[Session] | None = None,
+        paths: RuntimePaths | None = None,
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
@@ -538,34 +537,43 @@ class AgentEngine:
             raise TypeError("ports 与单独 Port 参数不能同时提供")
         if ports is not None and not isinstance(ports, RuntimePorts):
             raise TypeError("ports 必须是完整的 RuntimePorts")
-        if ports is None:
-            from naumi_agent.runtime.composition import build_runtime_ports
-
-            ports = build_runtime_ports(
-                config,
-                overrides=RuntimePortOverrides(
-                    session_port=session_port,
-                    permission_port=permission_port,
-                    model_port=model_port,
-                    tool_execution_port=tool_execution_port,
-                    event_sink=event_sink,
-                ),
+        if paths is not None and not isinstance(paths, RuntimePaths):
+            raise TypeError("paths 必须是完整的 RuntimePaths")
+        if ports is None or paths is None:
+            from naumi_agent.runtime.composition import (
+                build_runtime_paths,
+                build_runtime_ports,
             )
+
+            if paths is None:
+                paths = build_runtime_paths(config)
+
+            if ports is None:
+                ports = build_runtime_ports(
+                    config,
+                    paths=paths,
+                    overrides=RuntimePortOverrides(
+                        session_port=session_port,
+                        permission_port=permission_port,
+                        model_port=model_port,
+                        tool_execution_port=tool_execution_port,
+                        event_sink=event_sink,
+                    ),
+                )
 
         self._event_sink = ports.event_sink
         self._session_port = ports.session_port
         self._permission_port = ports.permission_port
         self._model_port = ports.model_port
         self._tool_execution_port = ports.tool_execution_port
-        self.workspace_root = config.resolve_workspace_root()
-        self._runtime_data_dir = Path(config.memory.session_db_path).parent
-        self._worktree_storage_dir = self._runtime_data_dir / "worktrees"
-        self._harness_store = HarnessStore(resolve_harness_db_path())
+        self._paths = paths
+        self.workspace_root = paths.workspace_root
+        self._runtime_data_dir = paths.runtime_data_dir
+        self._worktree_storage_dir = paths.worktree_storage_dir
+        self._harness_store = HarnessStore(paths.harness_db_path)
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
-            trust_store=HarnessTrustStore(
-                resolve_harness_trust_db_path()
-            ),
+            trust_store=HarnessTrustStore(paths.harness_trust_db_path),
             store=self._harness_store,
         )
         self.evolution_candidate_store = EvolutionCandidateStore(
@@ -641,14 +649,14 @@ class AgentEngine:
         self._openai_tools_cache_key: tuple[tuple[str, int], ...] = ()
         self._openai_tools_cache: list[dict[str, Any]] | None = None
         self._browser_session = BrowserRuntime(
-            self._runtime_data_dir / "browser",
+            paths.browser_data_dir,
             replay_recording_enabled=(
                 config.browser.replay_recording_enabled
             ),
         )
         self.browser_daemon = BrowserDaemonClient(
             config.browser_daemon,
-            log_dir=self._runtime_data_dir / "browser-daemon",
+            log_dir=paths.browser_daemon_log_dir,
         )
         self._planner = AdaptivePlanner(
             self._model_port,
