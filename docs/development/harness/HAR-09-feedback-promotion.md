@@ -31,5 +31,8 @@
 ## 已具备的跨模块前置
 
 - EVO-01.2a 已提供稳定、脱敏且固定不可执行的 Candidate Draft 契约，可作为未来 HAR-09
-  Proposal/Review Queue 的输入边界；HAR-09 仍未实现 feedback adapter、聚合策略、Store、
+  Proposal/Review Queue 的输入边界。
+- EVO-01.3a 已提供用户级 versioned Candidate Store、不可变 Evidence、幂等并发 merge 和
+  digest audit chain；HAR-09 必须复用该 Store，不再创建第二套候选表。
+- HAR-09 仍未实现 feedback adapter、provider/model/platform 聚合策略、阈值/冷却 policy、
   review action 或 outcome tracking，因此整体继续保持 planned。

@@ -39,5 +39,10 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.2a Candidate Draft 契约：已实现。同根 Evidence 可幂等构建稳定、脱敏、带风险和
   机械指标的候选草案；所有 Draft 固定不可执行，不能绕过后续 eligibility。设计与证据见
   `EVO-01-2a-candidate-draft-contract.md`。
-- runtime metric/Eval/feedback adapters、Candidate Store/Dedup、Eligibility、Prioritization 与
+- EVO-01.3a Candidate Store Core：已实现。平台原生用户状态库以 versioned SQLite 保存
+  不可变 Evidence、Candidate materialization 和 digest audit chain；并发投递、100 次同根
+  聚合、幂等重试、工作区隔离与篡改检测均有机械测试。设计与证据见
+  `EVO-01-3a-candidate-store-core.md`。
+- runtime metric/Eval/feedback adapters、provider/model/platform 聚合维度与时间窗策略、
+  Eligibility、Prioritization 与
   Review surface 仍为 planned；不得把 EVO-01 整体标记为完成。

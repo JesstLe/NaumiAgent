@@ -11,6 +11,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from naumi_agent.evolution.store import (
+    EVOLUTION_STORE_SCHEMA_VERSION,
+    resolve_evolution_db_path,
+)
 from naumi_agent.harness.store import (
     HARNESS_STORE_SCHEMA_VERSION,
     resolve_harness_db_path,
@@ -218,6 +222,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.USER_MANAGED,
             "用户级 Harness Profile 信任状态",
+        ),
+        _definition(
+            "evolution.candidates",
+            resolve_evolution_db_path(),
+            StorageKind.SQLITE,
+            ("evolution", "harness.feedback"),
+            VersionStrategy.SQLITE_USER_VERSION,
+            EVOLUTION_STORE_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "不可变 Evolution Evidence、候选聚合物与修订审计事件",
         ),
         _definition(
             "tasks.background",

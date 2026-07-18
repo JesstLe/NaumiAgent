@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.evolution.store import EVOLUTION_STORE_SCHEMA_VERSION
+from naumi_agent.harness.store import HARNESS_STORE_SCHEMA_VERSION
 from naumi_agent.persistence.store_catalog import (
     CatalogStatus,
     DataSensitivity,
@@ -46,7 +48,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
 
     definitions = build_store_catalog(_config(tmp_path))
 
-    assert len(definitions) == 11
+    assert len(definitions) == 12
     assert len({item.store_id for item in definitions}) == len(definitions)
     assert len({item.path for item in definitions}) == len(definitions)
     assert all(item.path.is_absolute() for item in definitions)
@@ -57,7 +59,14 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert core.retention is RetentionPolicy.USER_MANAGED
     harness = next(item for item in definitions if item.store_id == "harness.evidence")
     assert harness.version_strategy is VersionStrategy.SQLITE_USER_VERSION
-    assert harness.supported_schema_version == 7
+    assert harness.supported_schema_version == HARNESS_STORE_SCHEMA_VERSION == 10
+    evolution = next(
+        item for item in definitions if item.store_id == "evolution.candidates"
+    )
+    assert evolution.version_strategy is VersionStrategy.SQLITE_USER_VERSION
+    assert evolution.supported_schema_version == EVOLUTION_STORE_SCHEMA_VERSION == 1
+    assert evolution.retention is RetentionPolicy.AUDIT_LONG_TERM
+    assert evolution.sensitivity is DataSensitivity.RESTRICTED
 
 
 def test_absent_lazy_stores_are_read_only_and_do_not_create_state(
@@ -85,7 +94,7 @@ def test_catalog_distinguishes_current_unversioned_and_future_sqlite(
     core = next(item for item in definitions if item.store_id == "runtime.core")
     harness = next(item for item in definitions if item.store_id == "harness.evidence")
     _write_sqlite(core.path, user_version=0)
-    _write_sqlite(harness.path, user_version=7)
+    _write_sqlite(harness.path, user_version=HARNESS_STORE_SCHEMA_VERSION)
 
     report = inspect_store_catalog((core, harness))
 
@@ -93,10 +102,13 @@ def test_catalog_distinguishes_current_unversioned_and_future_sqlite(
     assert observations["runtime.core"].state is StoreState.LEGACY_UNVERSIONED
     assert observations["runtime.core"].status is CatalogStatus.WARN
     assert observations["harness.evidence"].state is StoreState.READY
-    assert observations["harness.evidence"].observed_schema_version == 7
+    assert (
+        observations["harness.evidence"].observed_schema_version
+        == HARNESS_STORE_SCHEMA_VERSION
+    )
 
     future_path = tmp_path / "future-harness.db"
-    _write_sqlite(future_path, user_version=8)
+    _write_sqlite(future_path, user_version=HARNESS_STORE_SCHEMA_VERSION + 1)
     future = replace(harness, path=future_path)
     future_observation = inspect_store_catalog((future,)).stores[0]
     assert future_observation.state is StoreState.UNSUPPORTED_NEWER
@@ -168,7 +180,7 @@ def test_catalog_warns_without_mutating_overly_open_sensitive_file(
         for item in build_store_catalog(_config(tmp_path))
         if item.store_id == "harness.evidence"
     )
-    _write_sqlite(harness.path, user_version=7)
+    _write_sqlite(harness.path, user_version=HARNESS_STORE_SCHEMA_VERSION)
     harness.path.chmod(0o644)
 
     observation = inspect_store_catalog((harness,)).stores[0]

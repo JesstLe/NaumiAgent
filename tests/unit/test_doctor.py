@@ -56,7 +56,7 @@ async def test_run_doctor_checks_local_environment(
     assert names["browser daemon"].status == "warn"
     assert names["debug log 写入权限"].status == "pass"
     assert names["状态存储目录"].status == "pass"
-    assert "已登记 11 个" in names["状态存储目录"].detail
+    assert "已登记 12 个" in names["状态存储目录"].detail
     assert "环境诊断" in rendered
     assert "可直接复制" in rendered
 

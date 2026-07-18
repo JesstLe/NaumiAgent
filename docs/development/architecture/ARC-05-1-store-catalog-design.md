@@ -23,6 +23,8 @@ Session、Task、Workbench 共用 `sessions.db`，Harness 当前为 `user_versio
 
 首批目录覆盖：Runtime Core（Session/Task/Workbench）、Chat Runs、Goal、Pursuit、Scheduler、
 Harness Evidence、Harness Trust、Background、Browser Runtime、Browser Daemon 和 Vector Memory。
+EVO-01.3a 随后按同一契约登记 `evolution.candidates`，用于不可变 Evidence、Candidate
+materialization 和审计事件；Catalog 当前共 12 个物理 Store。
 
 ## 只读探测
 
