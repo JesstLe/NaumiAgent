@@ -40,6 +40,8 @@ if TYPE_CHECKING:
     from naumi_agent.evolution.patch_recovery import (
         EvolutionPatchRecoveryCoordinator,
         EvolutionPatchRecoveryResult,
+        EvolutionPatchSetRecoveryCoordinator,
+        EvolutionPatchSetRecoveryResult,
     )
     from naumi_agent.evolution.patch_set_writers import (
         EvolutionPatchSetWriter,
@@ -104,6 +106,8 @@ __all__ = [
     "EvolutionPatchSetWriter",
     "EvolutionPatchRecoveryCoordinator",
     "EvolutionPatchRecoveryResult",
+    "EvolutionPatchSetRecoveryCoordinator",
+    "EvolutionPatchSetRecoveryResult",
     "EvolutionPatchWriteError",
     "EvolutionPatchWriteReceipt",
     "EvolutionPatchWriter",
@@ -190,6 +194,8 @@ def __getattr__(name: str) -> object:
     patch_recovery_exports = {
         "EvolutionPatchRecoveryCoordinator",
         "EvolutionPatchRecoveryResult",
+        "EvolutionPatchSetRecoveryCoordinator",
+        "EvolutionPatchSetRecoveryResult",
     }
     patch_writer_exports = {
         "EvolutionPatchWriteError",

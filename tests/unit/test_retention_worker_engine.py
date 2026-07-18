@@ -76,6 +76,10 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         order.append("patch")
         return ()
 
+    async def recover_patch_sets():
+        order.append("patch_set")
+        return ()
+
     async def recover():
         order.append("recover")
         return ()
@@ -85,6 +89,7 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         return True
 
     engine.evolution_patch_recovery.recover_pending = recover_patches  # type: ignore[method-assign]
+    engine.evolution_patch_set_recovery.recover_pending = recover_patch_sets  # type: ignore[method-assign]
     engine.recover_session_reconciliations = recover  # type: ignore[method-assign]
     engine.start_session_retention_worker = start  # type: ignore[method-assign]
     try:
@@ -93,7 +98,7 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         await engine.shutdown()
 
     assert recovered == ()
-    assert order == ["patch", "recover", "start"]
+    assert order == ["patch_set", "patch", "recover", "start"]
 
 
 @pytest.mark.asyncio
@@ -113,3 +118,50 @@ async def test_long_running_startup_does_not_start_worker_after_recovery_failure
         engine.start_session_retention_worker.assert_not_called()
     finally:
         await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_patch_recovery_status_aggregates_single_and_multi_transactions(
+    tmp_path,
+) -> None:
+    engine = _engine(tmp_path, enabled=False)
+    engine._last_evolution_patch_recovery = (
+        SimpleNamespace(
+            status="already_baseline",
+            failure_code="",
+            filesystem_changed=False,
+            recovery_complete=True,
+        ),
+    )
+    engine._last_evolution_patch_set_recovery = (
+        SimpleNamespace(
+            status="rolled_back",
+            failure_code="recovered_after_replace",
+            filesystem_changed=True,
+            recovery_complete=True,
+        ),
+        SimpleNamespace(
+            status="failed",
+            failure_code="target_digest_unknown",
+            filesystem_changed=False,
+            recovery_complete=False,
+        ),
+    )
+    try:
+        status = engine.evolution_patch_recovery_status()
+    finally:
+        await engine.shutdown()
+
+    assert status == {
+        "total": 3,
+        "single_file_total": 1,
+        "multi_file_total": 2,
+        "completed": 2,
+        "rolled_back": 1,
+        "already_baseline": 1,
+        "orphan_lock_removed": 0,
+        "deferred": 0,
+        "failed": 1,
+        "filesystem_changed": 1,
+        "failure_codes": ["recovered_after_replace", "target_digest_unknown"],
+    }

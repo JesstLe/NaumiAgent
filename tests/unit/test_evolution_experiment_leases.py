@@ -33,7 +33,10 @@ from naumi_agent.evolution.patch_journals import (
     EvolutionPatchJournalStore,
     PatchJournalState,
 )
-from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
+from naumi_agent.evolution.patch_recovery import (
+    EvolutionPatchRecoveryCoordinator,
+    EvolutionPatchSetRecoveryCoordinator,
+)
 from naumi_agent.evolution.patch_set_writers import (
     EvolutionPatchSetWriter,
     EvolutionPatchSetWriteReceipt,
@@ -1348,6 +1351,186 @@ async def test_patch_set_writer_crash_leaves_ordered_recoverable_intent(
     recoverable, failures = store.scan_recoverable()
     assert recoverable == (transaction,)
     assert failures == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("crash_state", ["prepared", "applying", "rolling_back"])
+async def test_patch_set_recovery_restores_known_crash_windows(
+    tmp_path: Path,
+    crash_state: str,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        proposed,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    if crash_state in {"applying", "rolling_back"}:
+        for index, item in enumerate(transaction.files):
+            content = proposed[item.path].encode("utf-8")
+            patch_set_writer_module._atomic_replace(
+                Path(lease.worktree_path, item.path),
+                content,
+                mode=modes[item.path],
+            )
+            if crash_state == "rolling_back" or index == 0:
+                store.mark_file_replaced(transaction.transaction_id, file_index=index)
+    if crash_state == "rolling_back":
+        store.begin_rollback(transaction.transaction_id)
+        last = transaction.files[-1]
+        patch_set_writer_module._atomic_replace(
+            Path(lease.worktree_path, last.path),
+            before[last.path],
+            mode=modes[last.path],
+        )
+        store.mark_file_rolled_back(
+            transaction.transaction_id,
+            file_index=last.index,
+        )
+
+    outcomes = await EvolutionPatchSetRecoveryCoordinator(
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    ).recover_pending()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == (
+        "already_baseline" if crash_state == "prepared" else "rolled_back"
+    )
+    assert outcomes[0].filesystem_changed is (crash_state != "prepared")
+    assert outcomes[0].recovery_complete is True
+    assert outcomes[0].file_count == 2
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes() for path in plan.authorized_files
+    } == before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    recovered = store.get_by_lease(lease.lease_id)
+    assert recovered is not None
+    assert recovered.state is PatchSetState.ROLLED_BACK
+    assert store.load_backups(transaction.transaction_id) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_set_recovery_fails_closed_on_unknown_target_without_partial_restore(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _proposed,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    unknown = b"unrecognized third-state content\n"
+    first = transaction.files[0]
+    patch_set_writer_module._atomic_replace(
+        Path(lease.worktree_path, first.path),
+        unknown,
+        mode=modes[first.path],
+    )
+
+    outcomes = await EvolutionPatchSetRecoveryCoordinator(
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    ).recover_pending()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].failure_code == "target_digest_unknown"
+    assert outcomes[0].filesystem_changed is False
+    assert Path(lease.worktree_path, first.path).read_bytes() == unknown
+    second = transaction.files[1]
+    assert Path(lease.worktree_path, second.path).read_bytes() == before[second.path]
+    failed = store.get_by_lease(lease.lease_id)
+    assert failed is not None
+    assert failed.state is PatchSetState.RECOVERY_FAILED
+    assert store.load_backups(transaction.transaction_id) == tuple(
+        before[item.path] for item in transaction.files
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_recovery_defers_live_writer_lock_without_touching_files(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _proposed,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    lock_path = (
+        Path(lease.worktree_path).parent
+        / f".{lease.worktree_name}.{lease.lease_id}.patch.lock"
+    )
+    token = patch_writer_module._acquire_lock(lock_path, lease)
+    try:
+        outcomes = await EvolutionPatchSetRecoveryCoordinator(
+            patch_set_store=store,
+            journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+        ).recover_pending()
+    finally:
+        patch_writer_module._release_lock(lock_path, token)
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "deferred"
+    assert outcomes[0].failure_code == "writer_locked"
+    assert outcomes[0].recovery_complete is False
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes() for path in plan.authorized_files
+    } == before
+    current = store.get_by_lease(lease.lease_id)
+    assert current == transaction
 
 
 async def _guard_fixture(tmp_path: Path):

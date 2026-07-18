@@ -18,7 +18,10 @@ from naumi_agent.evolution.experiment_snapshots import (
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
-from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
+from naumi_agent.evolution.patch_recovery import (
+    EvolutionPatchRecoveryCoordinator,
+    EvolutionPatchSetRecoveryCoordinator,
+)
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
@@ -114,6 +117,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(engine.evolution_patch_set_store, EvolutionPatchSetStore)
     assert isinstance(engine.evolution_patch_set_writer, EvolutionPatchSetWriter)
     assert isinstance(engine.evolution_patch_recovery, EvolutionPatchRecoveryCoordinator)
+    assert isinstance(
+        engine.evolution_patch_set_recovery,
+        EvolutionPatchSetRecoveryCoordinator,
+    )
     assert isinstance(engine.evolution_patch_writer, EvolutionPatchWriter)
     assert (
         engine.evolution_experiment_lease_manager._worktree_manager
