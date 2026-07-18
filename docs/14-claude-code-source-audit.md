@@ -23,7 +23,8 @@ NaumiAgent 当前第一阶段选择的是“协议分离 + 小型 Node 终端前
 | 任务与后台进度 | `src/components/TaskListV2.tsx`, `src/components/tasks/*`, `src/tasks/types.ts` | `src/naumi_agent/tasks/*`, `src/naumi_agent/ui/task_status_renderer.py`, `src/naumi_agent/ui/task_panel.py`, `frontend/terminal-ui/src/state.js`, `frontend/terminal-ui/src/components/task-panel.js` | 已接入 |
 | 诊断与日志 | `src/screens/Doctor.tsx`, `src/bridge/bridgeDebug.ts`, `src/components/StatusNotices.tsx` | `src/naumi_agent/debug_trace.py`, `src/naumi_agent/ui/bridge.py`, `frontend/terminal-ui/src/debug-log.js` | 已接入 |
 
-机器可读映射见：`frontend/terminal-ui/cc-source-map.json`。
+机器可读映射见：`frontend/terminal-ui/cc-source-map.json`。来源身份与漂移校验基线见
+`frontend/terminal-ui/cc-source-map.v2.json`；v1 在 CC-01 迁移期继续作为映射内容权威。
 协议契约见：`frontend/terminal-ui/protocol-contract.json`，前端运行时与 Python 回归测试都以该 JSON 为事件清单来源，避免两端各自维护事件名称。
 
 ## UI Event Protocol 当前边界

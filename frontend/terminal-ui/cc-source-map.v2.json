@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "manifest_kind": "claude_code_source_identity",
+  "generated_at": "2026-07-18T08:23:18+08:00",
+  "source_name": "local-claude-code",
+  "checkout_hint": "../claude-code",
+  "git": {
+    "remote": "https://github.com/JesstLe/claude-code.git",
+    "commit": "b9c3fb6c2e15476d77f28557e70f2f6dd48bee65",
+    "branch": "main",
+    "upstream": "origin/main",
+    "ahead": 1,
+    "behind": 0,
+    "dirty": false,
+    "worktree_sha256": null,
+    "dirty_reason": ""
+  },
+  "license": {
+    "path": "README.md",
+    "sha256": "440c9accfada69aff1024ca8ee50a2b90a75dd846ff2ec5b415abc0881fed450",
+    "claim": "本项目内容可自由复用、参考和学习"
+  },
+  "legacy_mapping": {
+    "path": "frontend/terminal-ui/cc-source-map.json",
+    "sha256": "f00e8dcf8e0be6a8cc7ae6420c3d93eca85e13faedf02a8b33cab3fb56997ad0",
+    "compatibility": "read_only_one_release"
+  }
+}
