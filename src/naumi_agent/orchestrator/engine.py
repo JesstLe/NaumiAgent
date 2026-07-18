@@ -26,6 +26,10 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceipt,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.shell_worker import (
+    AuthenticatedLocalShellTransport,
+    ShellWorkerCoordinator,
+)
 from naumi_agent.daemons.tool_jobs import (
     ToolJobAuthority,
     ToolJobLifecycleAuthority,
@@ -116,6 +120,7 @@ from naumi_agent.harness.retention_planner import (
     SessionRetentionPreview,
     plan_session_retention,
 )
+from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
@@ -633,6 +638,20 @@ class AgentEngine:
         self.tool_job_lifecycle_authority = ToolJobLifecycleAuthority(
             resources.tool_job_store,
             resources.worker_registry_store,
+        )
+        self.shell_worker_transport = AuthenticatedLocalShellTransport(
+            runtime_dir=paths.shell_worker_runtime_dir
+        )
+        self.shell_worker_coordinator = ShellWorkerCoordinator(
+            jobs=self.tool_job_authority,
+            lifecycle=self.tool_job_lifecycle_authority,
+            worker_registry=resources.worker_registry_store,
+            transport=self.shell_worker_transport,
+        )
+        self.harness_sandbox_check_runner = HarnessSandboxCheckRunner(
+            workspace_root=paths.workspace_root,
+            sandbox_root=paths.shell_worker_sandbox_dir,
+            artifact_root=paths.shell_worker_artifact_dir,
         )
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
