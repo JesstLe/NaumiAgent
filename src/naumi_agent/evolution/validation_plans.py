@@ -26,7 +26,7 @@ from naumi_agent.harness.models import (
 from naumi_agent.harness.profile import load_harness_profile
 from naumi_agent.harness.trust import HarnessTrustStore
 
-VALIDATION_PLAN_POLICY = "evolution-validation-plan-v1"
+VALIDATION_PLAN_POLICY = "evolution-validation-plan-v2"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _SAFE_CODE_RE = r"^[a-z][a-z0-9_-]{0,63}$"
 
@@ -76,6 +76,9 @@ class ValidationFileRequirement(_StrictModel):
     path: str = Field(min_length=1, max_length=1_024)
     file_kind: ValidationFileKind
     required_checks: tuple[ValidationCheckKind, ...] = Field(min_length=1, max_length=5)
+    operation: Literal["unknown", "modify", "create"] = "unknown"
+    baseline_sha256: str | None = Field(default=None, pattern=_SHA256_RE)
+    candidate_sha256: str | None = Field(default=None, pattern=_SHA256_RE)
 
     @field_validator("path")
     @classmethod
@@ -101,10 +104,29 @@ class ValidationFileRequirement(_StrictModel):
             raise ValueError("Validation file checks 不得重复。")
         return values
 
+    @model_validator(mode="after")
+    def _operation_digests_are_consistent(self) -> Self:
+        if self.operation == "unknown" and (
+            self.baseline_sha256 is not None or self.candidate_sha256 is not None
+        ):
+            raise ValueError("Legacy Validation file 不得携带 operation digest。")
+        if self.operation == "modify" and (
+            self.baseline_sha256 is None or self.candidate_sha256 is None
+        ):
+            raise ValueError("Modify Validation file 缺少 RED/GREEN digest。")
+        if self.operation == "create" and (
+            self.baseline_sha256 is not None or self.candidate_sha256 is None
+        ):
+            raise ValueError("Create Validation file digest 状态不一致。")
+        return self
+
 
 class EvolutionValidationPlan(_StrictModel):
-    schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-validation-plan-v1"] = VALIDATION_PLAN_POLICY
+    schema_version: Literal[1, 2] = 2
+    policy_version: Literal[
+        "evolution-validation-plan-v1",
+        "evolution-validation-plan-v2",
+    ] = VALIDATION_PLAN_POLICY
     validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
     validation_plan_sha256: str = Field(pattern=_SHA256_RE)
     contract_id: str = Field(pattern=r"^evx_[0-9a-f]{24}$")
@@ -139,6 +161,16 @@ class EvolutionValidationPlan(_StrictModel):
 
     @model_validator(mode="after")
     def _plan_is_ordered_and_tamper_evident(self) -> Self:
+        if self.schema_version == 1 and (
+            self.policy_version != "evolution-validation-plan-v1"
+            or any(item.operation != "unknown" for item in self.files)
+        ):
+            raise ValueError("Validation Plan v1 文件语义不一致。")
+        if self.schema_version == 2 and (
+            self.policy_version != VALIDATION_PLAN_POLICY
+            or any(item.operation == "unknown" for item in self.files)
+        ):
+            raise ValueError("Validation Plan v2 必须绑定文件 operation。")
         if tuple(item.order for item in self.metrics) != tuple(
             range(1, len(self.metrics) + 1)
         ):
@@ -149,12 +181,16 @@ class EvolutionValidationPlan(_StrictModel):
         derived = tuple(sorted({kind for item in self.files for kind in item.required_checks}))
         if self.required_check_kinds != derived:
             raise ValueError("required_check_kinds 与文件要求不一致。")
-        expected = _sha256_payload(
-            self.model_dump(
-                mode="json",
-                exclude={"validation_plan_id", "validation_plan_sha256"},
-            )
+        payload = self.model_dump(
+            mode="json",
+            exclude={"validation_plan_id", "validation_plan_sha256"},
         )
+        if self.schema_version == 1:
+            for item in payload["files"]:
+                item.pop("operation", None)
+                item.pop("baseline_sha256", None)
+                item.pop("candidate_sha256", None)
+        expected = _sha256_payload(payload)
         if not hmac.compare_digest(self.validation_plan_sha256, expected):
             raise ValueError("Validation Plan 摘要不一致。")
         if self.validation_plan_id != f"evvplan_{expected[:24]}":
@@ -437,11 +473,16 @@ class EvolutionValidationPlanner:
             for index, check in enumerate(contract.allowed_checks, start=1)
         )
         files = tuple(
-            validation_requirements_for_path(item.path)
+            validation_requirements_for_path(
+                item.path,
+                operation=item.operation,
+                baseline_sha256=item.before_sha256,
+                candidate_sha256=item.after_sha256,
+            )
             for item in mutation_receipt.files
         )
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "policy_version": VALIDATION_PLAN_POLICY,
             "contract_id": contract.contract_id,
             "contract_manifest_sha256": contract.manifest_sha256,
@@ -545,13 +586,22 @@ def _file_kind(path: str) -> ValidationFileKind:
     return kinds.get(suffix, "other")
 
 
-def validation_requirements_for_path(path: str) -> ValidationFileRequirement:
+def validation_requirements_for_path(
+    path: str,
+    *,
+    operation: Literal["unknown", "modify", "create"] = "unknown",
+    baseline_sha256: str | None = None,
+    candidate_sha256: str | None = None,
+) -> ValidationFileRequirement:
     """Return deterministic language-aware checks without inventing commands."""
     kind = _file_kind(path)
     return ValidationFileRequirement(
         path=path,
         file_kind=kind,
         required_checks=_required_checks(kind),
+        operation=operation,
+        baseline_sha256=baseline_sha256,
+        candidate_sha256=candidate_sha256,
     )
 
 

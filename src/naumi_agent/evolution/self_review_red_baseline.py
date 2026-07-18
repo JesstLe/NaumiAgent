@@ -303,7 +303,8 @@ def _validated_authority(
             "Self-Review RED baseline authority 无效或已被篡改。",
         ) from exc
     if not (
-        request.validation_plan_id == plan.validation_plan_id
+        plan.schema_version == 2
+        and request.validation_plan_id == plan.validation_plan_id
         and request.validation_plan_sha256 == plan.validation_plan_sha256
         and request.baseline_commit == plan.baseline_commit
         and request.baseline_tree_sha256 == plan.baseline_tree_sha256
@@ -545,6 +546,19 @@ def _load_exact_git_blobs(
             "--",
             file.path,
         )
+        if file.operation == "create":
+            if entry:
+                raise EvolutionSelfReviewRedBaselineError(
+                    "created_path_exists_at_baseline",
+                    "Create Validation file 已存在于 Git baseline。",
+                )
+            blobs.append((file.path, b""))
+            continue
+        if file.operation != "modify" or file.baseline_sha256 is None:
+            raise EvolutionSelfReviewRedBaselineError(
+                "validation_file_operation_unbound",
+                "Validation Plan 未绑定可信文件 operation。",
+            )
         parts = entry.rstrip(b"\0").split(b"\t", maxsplit=1)
         if len(parts) != 2 or parts[1] != file.path.encode("utf-8"):
             raise EvolutionSelfReviewRedBaselineError(
@@ -576,6 +590,11 @@ def _load_exact_git_blobs(
             raise EvolutionSelfReviewRedBaselineError(
                 "baseline_blob_size_mismatch",
                 "Git baseline blob 读取不完整。",
+            )
+        if hashlib.sha256(content).hexdigest() != file.baseline_sha256:
+            raise EvolutionSelfReviewRedBaselineError(
+                "baseline_blob_digest_mismatch",
+                "Git baseline blob 与 Mutation Receipt before digest 不一致。",
             )
         blobs.append((file.path, content))
     return tuple(blobs)

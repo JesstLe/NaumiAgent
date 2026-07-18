@@ -58,31 +58,59 @@ def _git(root: Path, *args: str) -> bytes:
     ).stdout
 
 
-def _repository(tmp_path: Path, *, symlink: bool = False) -> tuple[Path, str, str]:
+def _repository(
+    tmp_path: Path,
+    *,
+    symlink: bool = False,
+    operation: str = "modify",
+) -> tuple[Path, str, str, str | None, str]:
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
-    if symlink:
+    candidate = b"def clean() -> None:\n    pass\n"
+    baseline: bytes | None
+    if operation == "create":
+        baseline = None
+        (root / "README.md").write_text("baseline\n")
+    elif symlink:
+        baseline = b"target.py"
         (root / "target.py").write_text("def target() -> None:\n    pass\n")
         (root / "sample.py").symlink_to("target.py")
     else:
-        (root / "sample.py").write_text(
-            "def risky():\n"
-            "    try:\n"
-            "        return 1\n"
-            "    except Exception:\n"
-            "        return 0\n"
+        baseline = (
+            b"def risky():\n"
+            b"    try:\n"
+            b"        return 1\n"
+            b"    except Exception:\n"
+            b"        return 0\n"
         )
+        (root / "sample.py").write_bytes(baseline)
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "baseline")
     commit = _git(root, "rev-parse", "HEAD").decode().strip()
     listing = _git(root, "ls-tree", "-r", "-z", "--full-tree", commit)
-    return root, commit, hashlib.sha256(listing).hexdigest()
+    if operation == "create":
+        (root / "sample.py").write_bytes(candidate)
+    return (
+        root,
+        commit,
+        hashlib.sha256(listing).hexdigest(),
+        hashlib.sha256(baseline).hexdigest() if baseline is not None else None,
+        hashlib.sha256(candidate).hexdigest(),
+    )
 
 
-def _plan(*, commit: str, tree_sha256: str, file_kind: str = "python"):
+def _plan(
+    *,
+    commit: str,
+    tree_sha256: str,
+    baseline_sha256: str | None,
+    candidate_sha256: str,
+    operation: str = "modify",
+    file_kind: str = "python",
+):
     metric = ValidationMetricPair(
         order=1,
         metric_name="self_review.broad_except.count",
@@ -92,7 +120,7 @@ def _plan(*, commit: str, tree_sha256: str, file_kind: str = "python"):
         procedure="统计指定 Python 文件中的 broad_except finding。",
     )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "policy_version": VALIDATION_PLAN_POLICY,
         "contract_id": f"evx_{'1' * 24}",
         "contract_manifest_sha256": "2" * 64,
@@ -114,6 +142,9 @@ def _plan(*, commit: str, tree_sha256: str, file_kind: str = "python"):
             path="sample.py",
             file_kind=file_kind,
             required_checks=("unit",),
+            operation=operation,
+            baseline_sha256=baseline_sha256,
+            candidate_sha256=candidate_sha256,
         ).model_dump(mode="json")],
         "metrics": [metric.model_dump(mode="json")],
         "required_check_kinds": ["unit"],
@@ -210,9 +241,31 @@ def _request(plan: EvolutionValidationPlan, *, samples: int = 5):
     })
 
 
-async def _authority(tmp_path: Path, *, symlink: bool = False, file_kind="python"):
-    root, commit, tree_sha256 = _repository(tmp_path, symlink=symlink)
-    plan = _plan(commit=commit, tree_sha256=tree_sha256, file_kind=file_kind)
+async def _authority(
+    tmp_path: Path,
+    *,
+    symlink: bool = False,
+    operation: str = "modify",
+    baseline_sha256_override: str | None = None,
+    file_kind="python",
+):
+    root, commit, tree_sha256, baseline_sha256, candidate_sha256 = _repository(
+        tmp_path,
+        symlink=symlink,
+        operation=operation,
+    )
+    plan = _plan(
+        commit=commit,
+        tree_sha256=tree_sha256,
+        baseline_sha256=(
+            baseline_sha256_override
+            if baseline_sha256_override is not None
+            else baseline_sha256
+        ),
+        candidate_sha256=candidate_sha256,
+        operation=operation,
+        file_kind=file_kind,
+    )
     request = _request(plan)
     binding = EvolutionMetricRunnerBindingBuilder().build(
         baseline_request=request,
@@ -270,6 +323,66 @@ async def test_exact_committed_source_is_repeated_persisted_and_idempotent(
     tampered["metrics"][0]["sample_values"][0] = 2
     with pytest.raises(ValidationError, match="摘要"):
         EvolutionSelfReviewRedCohortReceipt.model_validate(tampered)
+
+
+@pytest.mark.asyncio
+async def test_created_file_uses_an_empty_red_fixture_without_reading_candidate(
+    tmp_path: Path,
+) -> None:
+    root, plan, request, binding, store, trust = await _authority(
+        tmp_path,
+        operation="create",
+    )
+    status_before = _git(root, "status", "--porcelain")
+
+    receipt = await EvolutionSelfReviewRedBaselineExecutor(
+        store=store,
+        trust_store=trust,
+    ).execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+    )
+    records = await store.list_eval_results(root, request.batch_id, request.suite_id)
+
+    assert receipt.metrics[0].sample_values == (0, 0, 0, 0, 0)
+    assert all(item.result.status is EvalRunStatus.PASSED for item in records)
+    assert plan.files[0].operation == "create"
+    assert plan.files[0].baseline_sha256 is None
+    assert _git(root, "status", "--porcelain") == status_before
+
+
+def test_legacy_validation_plan_v1_remains_readable_but_operation_unbound(
+    tmp_path: Path,
+) -> None:
+    _, commit, tree_sha256, baseline_sha256, candidate_sha256 = _repository(tmp_path)
+    current = _plan(
+        commit=commit,
+        tree_sha256=tree_sha256,
+        baseline_sha256=baseline_sha256,
+        candidate_sha256=candidate_sha256,
+    )
+    legacy = current.model_dump(
+        mode="json",
+        exclude={"validation_plan_id", "validation_plan_sha256"},
+    )
+    legacy["schema_version"] = 1
+    legacy["policy_version"] = "evolution-validation-plan-v1"
+    for file in legacy["files"]:
+        file.pop("operation")
+        file.pop("baseline_sha256")
+        file.pop("candidate_sha256")
+    digest = _sha256(legacy)
+
+    restored = EvolutionValidationPlan.model_validate({
+        **legacy,
+        "validation_plan_id": f"evvplan_{digest[:24]}",
+        "validation_plan_sha256": digest,
+    })
+
+    assert restored.schema_version == 1
+    assert restored.files[0].operation == "unknown"
 
 
 class _FailAfterTwoStore(HarnessStore):
@@ -394,6 +507,33 @@ async def test_revoked_profile_trust_fails_before_h5a_write(tmp_path: Path) -> N
         )
 
     assert error.value.code == "profile_trust_revalidation_failed"
+    assert await store.list_eval_results(root, request.batch_id, request.suite_id) == ()
+
+
+@pytest.mark.asyncio
+async def test_modify_before_digest_mismatch_fails_before_h5a_write(
+    tmp_path: Path,
+) -> None:
+    root, plan, request, binding, store, trust = await _authority(
+        tmp_path,
+        baseline_sha256_override="0" * 64,
+    )
+
+    with pytest.raises(
+        EvolutionSelfReviewRedBaselineError,
+        match="before digest",
+    ) as error:
+        await EvolutionSelfReviewRedBaselineExecutor(
+            store=store,
+            trust_store=trust,
+        ).execute(
+            workspace_root=root,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+        )
+
+    assert error.value.code == "baseline_blob_digest_mismatch"
     assert await store.list_eval_results(root, request.batch_id, request.suite_id) == ()
 
 

@@ -46,6 +46,10 @@ Eval 和真实 Harness 检查产生。
   Plan Python blob，实际重复 AST 扫描并把 finding count 以连续 sample 写入 H5a；执行前重验 Profile
   trust，支持一致前缀续写和防篡改完成回执，不运行项目代码或冒充 ARC-04。详见
   `EVO-03-2c-self-review-static-red-baseline.md`。
+- EVO-03.2d Validation File Operation Binding：已实现。Validation Plan v2 防篡改地继承 Mutation Receipt
+  的 modify/create、baseline before 与 candidate after digest；v1 保持只读兼容但不能执行。RED executor
+  现可安全表示新建文件的空 baseline，并重验 modify blob digest。详见
+  `EVO-03-2d-validation-file-operation-binding.md`。
 
 Self-Review Static GREEN cohort、interventional Harness runner、Evolution 目标 Comparator、failure attribution、
 adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
