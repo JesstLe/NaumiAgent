@@ -104,5 +104,6 @@
 - Sandbox/Live 与其余 surface 仍为 planned；其中 HAR-08.4 必须等待 ARC-04 提供可证明的隔离
   worker，不得复用会降级到本机执行的普通命令路径。当前不得把
   HAR-08 整体标记为 implemented。
-- ARC-04.2b 已提供 immutable ToolJob admission envelope 和 dispatch 前 authority 复验，但尚无执行 payload
-  transport、ToolJob lifecycle receipt 或 Shell worker；因此它是 HAR-08.4 的真实前置，不是 Sandbox 完成证据。
+- ARC-04.2b/2c 已提供 immutable ToolJob admission、dispatch 前 authority 复验、单调 lifecycle receipt 和
+  unknown 副作用边界，但尚无执行 payload transport、Shell worker 或 OS sandbox；因此它们是 HAR-08.4 的
+  真实前置，不是 Sandbox 完成证据。下一步只接一个真实 Profile check 的 non-PTY worker 垂直切片。

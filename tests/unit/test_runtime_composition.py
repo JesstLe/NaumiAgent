@@ -525,6 +525,14 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         engine.tool_job_authority._worker_registry
         is engine._resources.worker_registry_store
     )
+    assert (
+        engine.tool_job_lifecycle_authority._store
+        is engine._resources.tool_job_store
+    )
+    assert (
+        engine.tool_job_lifecycle_authority._worker_registry
+        is engine._resources.worker_registry_store
+    )
     assert not engine._paths.execution_grant_db_path.exists()
     assert not engine._paths.permission_decision_db_path.exists()
     assert not engine._paths.tool_job_db_path.exists()
