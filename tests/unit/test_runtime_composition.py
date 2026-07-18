@@ -11,21 +11,30 @@ from naumi_agent.config.settings import (
     ModelConfig,
     SafetyConfig,
 )
+from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter
 from naumi_agent.runtime.composition import (
     build_runtime_paths,
     build_runtime_ports,
+    build_runtime_resources,
     create_agent_engine,
 )
 from naumi_agent.runtime.dependencies import RuntimePortOverrides
 from naumi_agent.runtime.paths import RuntimePaths
+from naumi_agent.runtime.resources import RuntimeResourceOverrides, RuntimeResources
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tools.execution import LocalToolExecutor
 
 
 class _FalseySink(NullEventSink):
+    def __bool__(self) -> bool:
+        return False
+
+
+class _FalseyHarnessStore(HarnessStore):
     def __bool__(self) -> bool:
         return False
 
@@ -113,6 +122,57 @@ def test_build_runtime_ports_rejects_invalid_paths_before_defaults(
         build_runtime_ports(_config(tmp_path), paths=object())  # type: ignore[arg-type]
 
     session_store.assert_not_called()
+
+
+def test_build_runtime_resources_selects_paths_and_preserves_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
+    paths = build_runtime_paths(_config(tmp_path))
+
+    defaults = build_runtime_resources(paths)
+    falsey_store = _FalseyHarnessStore(tmp_path / "custom-harness.db")
+    trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
+    overridden = build_runtime_resources(
+        paths,
+        overrides=RuntimeResourceOverrides(
+            harness_store=falsey_store,
+            harness_trust_store=trust_store,
+        ),
+    )
+
+    assert defaults.harness_store.db_path == paths.harness_db_path
+    assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
+    assert overridden.harness_store is falsey_store
+    assert overridden.harness_trust_store is trust_store
+    assert not (tmp_path / "state").exists()
+
+
+def test_invalid_resource_override_fails_before_default_constructor(
+    tmp_path: Path,
+) -> None:
+    paths = build_runtime_paths(_config(tmp_path))
+    with (
+        patch("naumi_agent.runtime.composition.HarnessStore") as harness_store,
+        pytest.raises(TypeError, match="harness_trust_store 必须是"),
+    ):
+        build_runtime_resources(
+            paths,
+            overrides=RuntimeResourceOverrides(
+                harness_trust_store=object(),  # type: ignore[arg-type]
+            ),
+        )
+
+    harness_store.assert_not_called()
+
+
+def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="harness_store 必须是"):
+        RuntimeResources(
+            harness_store=object(),  # type: ignore[arg-type]
+            harness_trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        )
 
 
 def test_build_runtime_ports_preserves_every_override_identity(
@@ -217,6 +277,7 @@ def test_explicit_catalog_is_loaded_once_and_passed_to_model_router(
 def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
     config = _config(tmp_path)
     ports = build_runtime_ports(config)
+    resources = build_runtime_resources(build_runtime_paths(config))
     sentinel = object()
 
     with (
@@ -229,6 +290,10 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
             return_value=ports,
         ) as build_ports,
         patch(
+            "naumi_agent.runtime.composition.build_runtime_resources",
+            return_value=resources,
+        ) as build_resources,
+        patch(
             "naumi_agent.orchestrator.engine.AgentEngine",
             return_value=sentinel,
         ) as engine_type,
@@ -238,4 +303,10 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
     assert result is sentinel
     paths = build_paths.return_value
     build_ports.assert_called_once_with(config, paths=paths, overrides=None)
-    engine_type.assert_called_once_with(config, ports=ports, paths=paths)
+    build_resources.assert_called_once_with(paths, overrides=None)
+    engine_type.assert_called_once_with(
+        config,
+        ports=ports,
+        paths=paths,
+        resources=resources,
+    )

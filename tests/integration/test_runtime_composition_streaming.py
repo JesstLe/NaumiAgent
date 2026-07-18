@@ -60,6 +60,8 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     assert engine._paths.workspace_root == tmp_path.resolve()
     assert engine._paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert engine._paths.browser_data_dir == engine._paths.runtime_data_dir / "browser"
+    assert engine._harness_store is engine._resources.harness_store
+    assert engine.harness_service._trust_store is engine._resources.harness_trust_store
     call_count = 0
 
     async def stream_response(**_: object):
@@ -126,6 +128,7 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
             for event in events.events
         ) == 1
         assert engine.session_store._db is not None
+        assert engine._resources.harness_store.db_path.exists()
     finally:
         await engine.shutdown()
 

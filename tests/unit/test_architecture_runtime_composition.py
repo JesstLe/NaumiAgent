@@ -11,6 +11,8 @@ DEPENDENCIES_PATH = SOURCE_ROOT / "runtime" / "dependencies.py"
 COMPOSITION_PATH = SOURCE_ROOT / "runtime" / "composition.py"
 PATHS_PATH = SOURCE_ROOT / "runtime" / "paths.py"
 _BANNED_ENGINE_NAMES = {
+    "HarnessStore",
+    "HarnessTrustStore",
     "LocalToolExecutor",
     "ModelRouter",
     "NullEventSink",
@@ -47,6 +49,19 @@ def _agent_engine_calls(root: Path) -> list[tuple[Path, ast.Call]]:
     return calls
 
 
+def _constructor_paths(root: Path, names: set[str]) -> dict[str, list[Path]]:
+    calls = {name: [] for name in names}
+    for path in root.rglob("*.py"):
+        for node in ast.walk(_tree(path)):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in names
+            ):
+                calls[node.func.id].append(path)
+    return calls
+
+
 def test_engine_imports_and_constructs_no_default_port_adapter() -> None:
     assert _imported_names(ENGINE_PATH).isdisjoint(_BANNED_ENGINE_NAMES)
     called = {
@@ -80,9 +95,18 @@ def test_only_composition_root_constructs_agent_engine_in_product_source() -> No
 
     assert [path for path, _ in calls] == [COMPOSITION_PATH]
     assert all(
-        {keyword.arg for keyword in call.keywords} >= {"ports", "paths"}
+        {keyword.arg for keyword in call.keywords} >= {"ports", "paths", "resources"}
         for _, call in calls
     )
+
+
+def test_only_composition_root_constructs_harness_resources() -> None:
+    calls = _constructor_paths(SOURCE_ROOT, {"HarnessStore", "HarnessTrustStore"})
+
+    assert calls == {
+        "HarnessStore": [COMPOSITION_PATH],
+        "HarnessTrustStore": [COMPOSITION_PATH],
+    }
 
 
 def test_runtime_paths_contract_has_no_adapter_or_config_imports() -> None:
