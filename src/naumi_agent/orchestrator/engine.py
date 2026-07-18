@@ -73,9 +73,7 @@ from naumi_agent.harness.retention_planner import (
     plan_session_retention,
 )
 from naumi_agent.harness.service import HarnessService
-from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
-from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorService
 from naumi_agent.mcp.client import MCPClientManager, MCPServerConfig, setup_mcp_servers
@@ -120,6 +118,7 @@ from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.runtime.ports.tool_execution import ToolExecutionPort
+from naumi_agent.runtime.resources import RuntimeResources
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
@@ -519,6 +518,7 @@ class AgentEngine:
         *,
         ports: RuntimePorts[Session] | None = None,
         paths: RuntimePaths | None = None,
+        resources: RuntimeResources | None = None,
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
@@ -539,10 +539,13 @@ class AgentEngine:
             raise TypeError("ports 必须是完整的 RuntimePorts")
         if paths is not None and not isinstance(paths, RuntimePaths):
             raise TypeError("paths 必须是完整的 RuntimePaths")
-        if ports is None or paths is None:
+        if resources is not None and not isinstance(resources, RuntimeResources):
+            raise TypeError("resources 必须是完整的 RuntimeResources")
+        if ports is None or paths is None or resources is None:
             from naumi_agent.runtime.composition import (
                 build_runtime_paths,
                 build_runtime_ports,
+                build_runtime_resources,
             )
 
             if paths is None:
@@ -561,19 +564,23 @@ class AgentEngine:
                     ),
                 )
 
+            if resources is None:
+                resources = build_runtime_resources(paths)
+
         self._event_sink = ports.event_sink
         self._session_port = ports.session_port
         self._permission_port = ports.permission_port
         self._model_port = ports.model_port
         self._tool_execution_port = ports.tool_execution_port
         self._paths = paths
+        self._resources = resources
         self.workspace_root = paths.workspace_root
         self._runtime_data_dir = paths.runtime_data_dir
         self._worktree_storage_dir = paths.worktree_storage_dir
-        self._harness_store = HarnessStore(paths.harness_db_path)
+        self._harness_store = resources.harness_store
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
-            trust_store=HarnessTrustStore(paths.harness_trust_db_path),
+            trust_store=resources.harness_trust_store,
             store=self._harness_store,
         )
         self.evolution_candidate_store = EvolutionCandidateStore(

@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from naumi_agent.config.settings import AppConfig
-from naumi_agent.harness.store import resolve_harness_db_path
-from naumi_agent.harness.trust import resolve_harness_trust_db_path
+from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
+from naumi_agent.harness.trust import (
+    HarnessTrustStore,
+    resolve_harness_trust_db_path,
+)
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter
@@ -17,6 +20,11 @@ from naumi_agent.runtime.dependencies import (
     validate_runtime_port_overrides,
 )
 from naumi_agent.runtime.paths import RuntimePaths
+from naumi_agent.runtime.resources import (
+    RuntimeResourceOverrides,
+    RuntimeResources,
+    validate_runtime_resource_overrides,
+)
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tools.execution import LocalToolExecutor
@@ -95,17 +103,51 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
     )
 
 
+def build_runtime_resources(
+    paths: RuntimePaths,
+    *,
+    overrides: RuntimeResourceOverrides | None = None,
+) -> RuntimeResources:
+    """Build Harness resources without opening databases or creating directories."""
+    if not isinstance(paths, RuntimePaths):
+        raise TypeError("paths 必须是完整的 RuntimePaths。")
+    resolved = RuntimeResourceOverrides() if overrides is None else overrides
+    if not isinstance(resolved, RuntimeResourceOverrides):
+        raise TypeError("overrides 必须是 RuntimeResourceOverrides。")
+    validate_runtime_resource_overrides(resolved)
+
+    harness_store = resolved.harness_store
+    if harness_store is None:
+        harness_store = HarnessStore(paths.harness_db_path)
+
+    harness_trust_store = resolved.harness_trust_store
+    if harness_trust_store is None:
+        harness_trust_store = HarnessTrustStore(paths.harness_trust_db_path)
+
+    return RuntimeResources(
+        harness_store=harness_store,
+        harness_trust_store=harness_trust_store,
+    )
+
+
 def create_agent_engine(
     config: AppConfig,
     *,
     port_overrides: RuntimePortOverrides[Session] | None = None,
+    resource_overrides: RuntimeResourceOverrides | None = None,
 ) -> AgentEngine:
     """Create one Engine from the authoritative default Port composition."""
     from naumi_agent.orchestrator.engine import AgentEngine
 
     paths = build_runtime_paths(config)
     ports = build_runtime_ports(config, paths=paths, overrides=port_overrides)
-    return AgentEngine(config, ports=ports, paths=paths)
+    resources = build_runtime_resources(paths, overrides=resource_overrides)
+    return AgentEngine(config, ports=ports, paths=paths, resources=resources)
 
 
-__all__ = ["build_runtime_paths", "build_runtime_ports", "create_agent_engine"]
+__all__ = [
+    "build_runtime_paths",
+    "build_runtime_ports",
+    "build_runtime_resources",
+    "create_agent_engine",
+]

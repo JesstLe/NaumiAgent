@@ -53,7 +53,8 @@ PermissionChecker 的 workspace/worktree allowlist 与 Engine 的 Harness/Browse
 
 ## 未完成
 
-- ARC-01.4b2：把 Store/Runner/Browser 等 Resource 实例和 override 迁入 typed `RuntimeResources`；
+- ARC-01.4b2a 已完成：HarnessStore/HarnessTrustStore 已迁入 typed `RuntimeResources`；
+- ARC-01.4b2b：继续迁移 ChatRun/Evolution 等无后台任务 Store，再处理 Runner/Browser；
 - ARC-01.4c：把 Harness/Workbench/Planner 等长期 Service 与 Tool bootstrap 移出 Engine；
 - ARC-01.4d：反向、幂等、失败隔离的 `RuntimeLifecycle`；
 - ARC-01.5/1.6：删除 legacy 默认入口并启用新增 import violation gate。
