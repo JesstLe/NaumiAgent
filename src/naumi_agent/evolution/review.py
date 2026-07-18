@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from naumi_agent.evolution.eligibility import (
+    CandidateEligibilityAssessment,
+    assess_candidate_eligibility,
+)
 from naumi_agent.evolution.store import (
     EvolutionCandidateEvent,
     EvolutionCandidateStore,
@@ -60,6 +64,7 @@ class EvolutionReviewItem:
     experiment_eligible: bool
     expected_metrics: tuple[str, ...]
     evidence_refs: tuple[str, ...]
+    eligibility: CandidateEligibilityAssessment
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +149,9 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         f"# Candidate `{item.candidate_id}`",
         "",
         f"- 状态：`{item.status}`（不可执行：{'否' if item.experiment_eligible else '是'}）",
+        f"- Policy：`{item.eligibility.policy_version}` / `{item.eligibility.decision}`",
+        f"- 可进入人工审阅：{'是' if item.eligibility.review_ready else '否'}",
+        f"- 必须人工治理：{'是' if item.eligibility.human_review_required else '否'}",
         f"- 类型/风险：`{item.kind}` / **{item.risk}**",
         f"- Finding：`{item.finding_code}`",
         f"- Scope：`{_escape(item.scope)}`",
@@ -162,6 +170,15 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         "",
     ]
     lines.extend(f"- `{_escape(metric)}`" for metric in item.expected_metrics)
+    lines.extend(["", "## Eligibility Gates", ""])
+    lines.extend(
+        (
+            f"- {'通过' if check.passed else '未通过'} `{check.code}`"
+            f"{'（硬阻断）' if not check.passed and check.hard_block else ''}："
+            f"{_escape(check.detail)}"
+        )
+        for check in item.eligibility.checks
+    )
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -176,7 +193,7 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
     )
     lines.extend([
         "",
-        "> 当前仅供审查；Eligibility、approve/reject/defer 尚未开放。",
+        "> 当前仅供审查；完整实验 Eligibility、approve/reject/defer 尚未开放。",
     ])
     return "\n".join(lines)
 
@@ -221,6 +238,7 @@ def _review_item(
             if include_refs
             else ()
         ),
+        eligibility=assess_candidate_eligibility(draft),
     )
 
 
