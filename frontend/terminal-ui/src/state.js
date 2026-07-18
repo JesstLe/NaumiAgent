@@ -522,6 +522,9 @@ export function reduceServerEvent(state, record) {
           state,
           "实验补丁恢复",
           `完成 ${recovery.completed}/${recovery.total}`
+            + (recovery.multi_file_total
+              ? ` · 多文件事务 ${recovery.multi_file_total}`
+              : "")
             + ` · 回滚 ${recovery.rolled_back}`
             + ` · 清理孤儿锁 ${recovery.orphan_lock_removed}`
             + ` · 失败 ${recovery.failed}`

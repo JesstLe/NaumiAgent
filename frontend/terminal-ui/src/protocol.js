@@ -1000,6 +1000,12 @@ function normalizePatchRecoveryStatus(value, source) {
   const count = (name) => strictNonnegativeInteger(recovery[name], `${source}.${name}`);
   const normalized = {
     total: count("total"),
+    single_file_total: Object.hasOwn(recovery, "single_file_total")
+      ? count("single_file_total")
+      : count("total"),
+    multi_file_total: Object.hasOwn(recovery, "multi_file_total")
+      ? count("multi_file_total")
+      : 0,
     completed: count("completed"),
     rolled_back: count("rolled_back"),
     already_baseline: count("already_baseline"),
@@ -1015,6 +1021,12 @@ function normalizePatchRecoveryStatus(value, source) {
   normalized.failure_codes = recovery.failure_codes.map((item) => (
     strictStatusText(item, `${source}.failure_codes[]`)
   ));
+  if (
+    normalized.total
+    !== normalized.single_file_total + normalized.multi_file_total
+  ) {
+    throw new Error(`${source}.total 与单/多文件事务分类不一致`);
+  }
   if (
     normalized.completed
     !== normalized.rolled_back

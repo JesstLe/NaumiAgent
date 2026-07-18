@@ -67,5 +67,8 @@
 - EVO-02.5c2a 已实现 Guard-bound 多文件 Writer：完整 preflight 复核、首写前全集 intent、逐文件 CAS、
   精确 Git scope postflight、普通异常严格逆序回滚、持久回执 replay，以及单/多事务双向互斥。详见
   `EVO-02-5c2a-multi-file-patch-writer.md`。
-- EVO-02.5c2b 多文件启动恢复、02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体
-  保持 partial。
+- EVO-02.5c2b 已实现多文件启动恢复：全组 before/after/unknown 判定、严格逆序 cursor、活动锁延后、
+  单/多 journal 冲突、Engine 启动顺序，以及 TUI/新 UI 分类状态。详见
+  `EVO-02-5c2b-write-set-recovery.md`。
+- EVO-02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，HAR-08 RED/GREEN 尚未串联，因此 EVO-02
+  整体保持 partial。

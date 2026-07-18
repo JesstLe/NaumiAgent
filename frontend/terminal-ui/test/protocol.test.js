@@ -1441,6 +1441,8 @@ test("normalizes and validates evolution patch recovery status", () => {
     payload: {
       evolution_patch_recovery: {
         total: 3,
+        single_file_total: 2,
+        multi_file_total: 1,
         completed: 1,
         rolled_back: 1,
         already_baseline: 0,
@@ -1455,6 +1457,8 @@ test("normalizes and validates evolution patch recovery status", () => {
 
   assert.deepEqual(record.payload.evolution_patch_recovery, {
     total: 3,
+    single_file_total: 2,
+    multi_file_total: 1,
     completed: 1,
     rolled_back: 1,
     already_baseline: 0,
@@ -1483,6 +1487,28 @@ test("normalizes and validates evolution patch recovery status", () => {
       },
     }),
     /completed 与完成分类不一致/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: {
+        evolution_patch_recovery: {
+          total: 2,
+          single_file_total: 0,
+          multi_file_total: 1,
+          completed: 0,
+          rolled_back: 0,
+          already_baseline: 0,
+          orphan_lock_removed: 0,
+          deferred: 2,
+          failed: 0,
+          filesystem_changed: 0,
+          failure_codes: [],
+        },
+      },
+    }),
+    /单\/多文件事务分类不一致/,
   );
 });
 

@@ -32,6 +32,8 @@ from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
     EvolutionPatchRecoveryResult,
+    EvolutionPatchSetRecoveryCoordinator,
+    EvolutionPatchSetRecoveryResult,
 )
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
@@ -727,10 +729,18 @@ class AgentEngine:
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
+            patch_set_store=self.evolution_patch_set_store,
             worktree_storage_dir=self._worktree_storage_dir,
+        )
+        self.evolution_patch_set_recovery = EvolutionPatchSetRecoveryCoordinator(
+            patch_set_store=self.evolution_patch_set_store,
+            journal_store=self.evolution_patch_journal_store,
         )
         self._last_evolution_patch_recovery: tuple[
             EvolutionPatchRecoveryResult, ...
+        ] = ()
+        self._last_evolution_patch_set_recovery: tuple[
+            EvolutionPatchSetRecoveryResult, ...
         ] = ()
         self.evolution_patch_writer = EvolutionPatchWriter(
             static_guard=self.evolution_static_guard,
@@ -1801,6 +1811,9 @@ class AgentEngine:
         self,
     ) -> tuple[ReconciliationCoordinatorResult, ...]:
         """Recover durable Patch/Session work before enabling background services."""
+        self._last_evolution_patch_set_recovery = (
+            await self.evolution_patch_set_recovery.recover_pending()
+        )
         self._last_evolution_patch_recovery = (
             await self.evolution_patch_recovery.recover_pending()
         )
@@ -1810,10 +1823,14 @@ class AgentEngine:
 
     def evolution_patch_recovery_status(self) -> dict[str, object]:
         """Return a content-free startup recovery summary for CLI/UI surfaces."""
-        outcomes = self._last_evolution_patch_recovery
+        single_outcomes = self._last_evolution_patch_recovery
+        multi_outcomes = self._last_evolution_patch_set_recovery
+        outcomes = (*multi_outcomes, *single_outcomes)
         failure_codes = sorted({item.failure_code for item in outcomes if item.failure_code})
         return {
             "total": len(outcomes),
+            "single_file_total": len(single_outcomes),
+            "multi_file_total": len(multi_outcomes),
             "completed": sum(item.recovery_complete for item in outcomes),
             "rolled_back": sum(item.status == "rolled_back" for item in outcomes),
             "already_baseline": sum(item.status == "already_baseline" for item in outcomes),

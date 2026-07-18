@@ -138,6 +138,7 @@ class TestNaumiApp:
                 "completed": 1,
                 "failed": 1,
                 "deferred": 1,
+                "multi_file_total": 1,
             },
         )
         status = SimpleNamespace(status_text="")
@@ -152,7 +153,9 @@ class TestNaumiApp:
 
         await NaumiApp._recover_session_reconciliations.__wrapped__(_App())
 
-        assert status.status_text == "实验补丁恢复: 1/3 完成 · 失败 1 · 延后 1"
+        assert status.status_text == (
+            "实验补丁恢复: 1/3 完成 · 多文件 1 · 失败 1 · 延后 1"
+        )
 
     @pytest.mark.asyncio
     async def test_delete_session_surfaces_durable_retry_and_clears_active_chat(

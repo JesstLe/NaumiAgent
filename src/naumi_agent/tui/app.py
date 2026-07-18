@@ -1648,6 +1648,7 @@ class NaumiApp(App):
         patch_completed = int(patch_status.get("completed", 0)) if patch_status else 0
         patch_failed = int(patch_status.get("failed", 0)) if patch_status else 0
         patch_deferred = int(patch_status.get("deferred", 0)) if patch_status else 0
+        patch_multi = int(patch_status.get("multi_file_total", 0)) if patch_status else 0
         if not results and patch_total == 0:
             return
         completed = sum(
@@ -1656,9 +1657,10 @@ class NaumiApp(App):
         )
         parts: list[str] = []
         if patch_total:
+            multi_text = f" · 多文件 {patch_multi}" if patch_multi else ""
             parts.append(
                 f"实验补丁恢复: {patch_completed}/{patch_total} 完成"
-                f" · 失败 {patch_failed} · 延后 {patch_deferred}"
+                f"{multi_text} · 失败 {patch_failed} · 延后 {patch_deferred}"
             )
         if results:
             parts.append(f"会话协调恢复: {completed}/{len(results)} 完成")

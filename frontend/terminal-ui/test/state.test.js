@@ -270,6 +270,8 @@ test("ready surfaces durable patch recovery and dismisses empty welcome", () => 
     payload: {
       evolution_patch_recovery: {
         total: 2,
+        single_file_total: 1,
+        multi_file_total: 1,
         completed: 1,
         rolled_back: 1,
         already_baseline: 0,
@@ -286,6 +288,7 @@ test("ready surfaces durable patch recovery and dismisses empty welcome", () => 
   assert.equal(state.messages.length, 1);
   assert.equal(state.messages[0].title, "实验补丁恢复");
   assert.equal(state.messages[0].level, "error");
+  assert.match(state.messages[0].content, /多文件事务 1/);
   assert.match(state.messages[0].content, /回滚 1/);
   assert.match(state.messages[0].content, /journal_corrupt/);
 });

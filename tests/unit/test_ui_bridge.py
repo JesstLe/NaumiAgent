@@ -2395,6 +2395,8 @@ def test_bridge_status_payload_exposes_patch_recovery_without_source_content() -
     engine = _FakeEngine()
     engine.evolution_patch_recovery_status = lambda: {  # type: ignore[attr-defined]
             "total": 2,
+            "single_file_total": 1,
+            "multi_file_total": 1,
             "completed": 1,
             "rolled_back": 1,
             "already_baseline": 0,
@@ -2409,6 +2411,8 @@ def test_bridge_status_payload_exposes_patch_recovery_without_source_content() -
 
     assert payload["evolution_patch_recovery"] == {
         "total": 2,
+        "single_file_total": 1,
+        "multi_file_total": 1,
         "completed": 1,
         "rolled_back": 1,
         "already_baseline": 0,
