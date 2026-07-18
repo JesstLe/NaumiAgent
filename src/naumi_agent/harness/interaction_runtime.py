@@ -31,6 +31,8 @@ class InteractionAuthorityStore(Protocol):
 
     async def expire_interaction(self, **kwargs: Any) -> HarnessInteractionRecord: ...
 
+    async def cancel_interaction(self, **kwargs: Any) -> HarnessInteractionRecord: ...
+
     async def takeover_interaction(self, **kwargs: Any) -> HarnessInteractionRecord: ...
 
     async def list_pending_interactions(
@@ -130,6 +132,19 @@ class DurableInteractionAuthorityClient:
         now: str | None = None,
     ) -> HarnessInteractionRecord:
         return await self.store.expire_interaction(
+            workspace_root=self.workspace_root,
+            interaction_id=record.interaction_id,
+            expected_sequence=record.sequence,
+            now=now or datetime.now(UTC).isoformat(),
+        )
+
+    async def cancel(
+        self,
+        *,
+        record: HarnessInteractionRecord,
+        now: str | None = None,
+    ) -> HarnessInteractionRecord:
+        return await self.store.cancel_interaction(
             workspace_root=self.workspace_root,
             interaction_id=record.interaction_id,
             expected_sequence=record.sequence,

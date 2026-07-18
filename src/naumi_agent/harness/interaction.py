@@ -308,6 +308,24 @@ def expire_interaction(
     })
 
 
+def cancel_interaction(
+    record: HarnessInteractionRecord,
+    *,
+    now: str,
+) -> HarnessInteractionRecord:
+    """Cancel exactly one pending interaction at an explicit user boundary."""
+    current = _aware(now, "now")
+    if record.state != "pending":
+        raise ValueError("只有 pending interaction 可以取消。")
+    if current < _parsed(record.updated_at):
+        raise ValueError("interaction 取消时间不能早于最近更新时间。")
+    return _replace(record, {
+        "sequence": record.sequence + 1,
+        "state": "cancelled",
+        "updated_at": current.isoformat(),
+    })
+
+
 def _safe(value: object) -> str:
     text = str(value or "").replace("\x00", "�")
     text = "".join(
@@ -348,6 +366,7 @@ def _parsed(value: str) -> datetime:
 __all__ = [
     "HarnessInteractionRecord",
     "answer_interaction",
+    "cancel_interaction",
     "expire_interaction",
     "new_interaction_record",
     "takeover_interaction",

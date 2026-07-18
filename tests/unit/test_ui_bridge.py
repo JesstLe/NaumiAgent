@@ -5688,6 +5688,105 @@ async def test_bridge_live_interaction_timeout_commits_expired_and_closes_card(
 
 
 @pytest.mark.asyncio
+async def test_bridge_cancels_live_durable_interaction_and_closes_card(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("取消等待中的交互")
+    engine.goal_store.attach_pursuit(goal.id, "pursuit-cancel")
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    pending_task = asyncio.create_task(engine.user_interaction_handler({
+        **_interaction_payload(),
+        "_interaction_id": "ask-goal-cancel",
+        "_durable_subject_kind": "pursuit",
+        "_durable_subject_id": "pursuit-cancel",
+    }))
+    for _ in range(50):
+        if "ask-goal-cancel" in bridge._pending_interactions:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("durable interaction 未进入 pending")
+
+    await bridge.handle_client_record({
+        "id": "cancel-goal-interaction",
+        "type": ClientEventType.INTERACTION_CANCEL,
+        "payload": {"interaction_id": "ask-goal-cancel"},
+    })
+
+    with pytest.raises(UserInteractionUnavailableError, match="已取消"):
+        await pending_task
+    durable = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-goal-cancel",
+    )
+    assert durable is not None
+    assert durable.state == "cancelled"
+    assert durable.sequence == 2
+    resolved = next(
+        record for record in _records(writer)
+        if record["type"] == "interaction/resolved"
+    )
+    assert resolved["request_id"] == "cancel-goal-interaction"
+    assert resolved["payload"]["status"] == "cancelled"
+    assert "ask-goal-cancel" not in bridge._pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_interaction_cancel_outside_goal_scope(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="runtime",
+        subject_id="runtime-private",
+        session_id="session-private",
+        agent_name="main",
+        owner_id="bridge-a",
+        created_at=datetime.now(UTC).isoformat(),
+        owner_lease_seconds=30,
+        interaction_id="ask-outside-goal",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "cancel-outside-goal",
+        "type": ClientEventType.INTERACTION_CANCEL,
+        "payload": {"interaction_id": record.interaction_id},
+    })
+
+    persisted = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+    )
+    assert persisted is not None
+    assert persisted.state == "pending"
+    error = next(
+        item for item in _records(writer)
+        if item["type"] == "error" and item.get("request_id") == "cancel-outside-goal"
+    )
+    assert error["payload"]["code"] == "interaction_scope_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_bridge_replays_expired_foreign_interaction_owner(
     tmp_path: Path,
 ) -> None:

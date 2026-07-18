@@ -323,6 +323,36 @@ test("event sender publishes an explicit queue promotion target", () => {
   });
 });
 
+test("interaction cancellation uses a strict target and terminal receipt", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("interaction_cancel", { interaction_id: "ask-goal-1" });
+  const resolved = normalizeServerRecord({
+    type: "interaction/resolved",
+    payload: {
+      request_id: "ask-goal-1",
+      status: "cancelled",
+      reason: "用户已取消。",
+    },
+  });
+
+  assert.equal(JSON.parse(chunks[0]).payload.interaction_id, "ask-goal-1");
+  assert.equal(resolved.payload.status, "cancelled");
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "interaction/resolved",
+      payload: {
+        request_id: "ask-goal-1",
+        status: "cancelled",
+        reason: "用户已取消。",
+        value: "private",
+      },
+    }),
+    /不能携带答案字段/,
+  );
+});
+
 test("queue promotion receipt normalizes boundary metadata", () => {
   const normalized = normalizeServerRecord({
     type: "run/queue_promoted",
@@ -946,6 +976,19 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       warnings: [],
       truncated: true,
       include_finished: true,
+      interactions: [{
+        interaction_id: "ask-goal-1",
+        pursuit_run_id: "pursuit_1",
+        state: "pending",
+        sequence: 2,
+        header: "继续方式",
+        question: "是否继续执行？",
+        created_at: "2026-07-18T00:00:00+00:00",
+        expires_at: "2026-07-18T01:00:00+00:00",
+        updated_at: "2026-07-18T00:00:01+00:00",
+        can_cancel: true,
+        owner_id: "private-owner",
+      }],
     },
   }).payload;
 
@@ -960,6 +1003,9 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(Object.hasOwn(normalized.goals[0], "private_payload"), false);
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit, "private_reasoning"), false);
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.waits[0], "private_payload"), false);
+  assert.equal(normalized.interactions[0].interaction_id, "ask-goal-1");
+  assert.equal(normalized.interactions[0].can_cancel, true);
+  assert.equal(Object.hasOwn(normalized.interactions[0], "owner_id"), false);
   assert.throws(
     () => normalizeServerRecord({
       type: "goals/snapshot",
@@ -989,6 +1035,16 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /recovery.run_id/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        interactions: [{ ...normalized.interactions[0], can_cancel: false }],
+      },
+    }),
+    /can_cancel/,
   );
   assert.throws(
     () => normalizeServerRecord({

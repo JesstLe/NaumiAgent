@@ -39,11 +39,11 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 ## 明确未完成
 
 - 本切片不是 JSON Schema 注册表或自动类型生成器；
-- request/answer 尚未写入 durable append-only authority，进程关闭仍会释放当前 Future；
+- HAR-10.6a/6b 已在本切片之后把 request/answer 写入 durable append-only authority，并提供重启重放；
 - HAR-10.6a/6b 已在本 payload 边界之上增加 timeout、takeover、answer fencing 与 New UI 重开重放；
-- UI-18.4b 已补齐 TUI durable parity；显式 cancel 与通用审计 redaction executor 仍未完成；
+- UI-18.4b 已补齐 TUI durable parity，UI-18.4c 已补齐显式 cancel；通用审计 redaction executor 仍未完成；
 - permission 与 Harness receipt 的 ARC-03.2b 高风险 payload schema 仍未实现。
 
 HAR-10.6a 已建立单一 durable interaction authority；HAR-10.6b 已让 Pursuit checkpoint 只引用稳定
 interaction ID，并由 New UI Bridge 消费 pending/timeout/takeover 事实。UI-18.4b 已让 TUI 复用相同
-authority adapter；Goal 页面 state/actions 继续由 UI-18.4 收口。
+authority adapter；UI-18.4c 已收口 Goal ledger/cancel，手动 takeover、cursor 与详情页继续由 UI-18.4 收口。

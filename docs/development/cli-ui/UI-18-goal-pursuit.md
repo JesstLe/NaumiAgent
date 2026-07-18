@@ -15,8 +15,10 @@
   权威路径，写操作展示风险和结果，不在前端改状态。
 - UI-18.4 Interaction（partial）：HAR-10.6b 已让 New UI 的结构化选项、自定义输入、超时与 takeover
   重放进入 durable authority；UI-18.4b 已让 Textual TUI 复用相同 create/answer/expire/recover adapter 与
-  Pursuit checkpoint callback。Goal 页面 pending/expired 历史和显式 takeover/cancel 动作仍未完成；见
-  [UI-18.4b](UI-18-4b-tui-durable-interaction.md)。
+  Pursuit checkpoint callback；UI-18.4c 已把有界 interaction ledger、显式 cancel、New UI 实时关闭与
+  CLI/TUI ToolExecution fallback 接入同一 authority。手动 takeover、cursor 和详情页仍未完成；见
+  [UI-18.4b](UI-18-4b-tui-durable-interaction.md) 与
+  [UI-18.4c](UI-18-4c-goal-interaction-ledger-cancel.md)。
 - UI-18.5 Recovery UX（partial）：
   - UI-18.5a 已实现：展示 typed heartbeat、lease owner/epoch、checkpoint、reconcile reason、orphaned 与
     inconsistent 状态；新 UI 与 CLI/TUI fallback 同源，Doctor health 复用相同 snapshot；见
@@ -67,9 +69,9 @@ implemented。
 
 ## 当前不足
 
-UI-18.1/18.4a/18.4b/18.5a 已提供类型化 Goal 快照、New UI/TUI durable interaction 和只读恢复事实，但
-不包含 Goal/Pursuit 写按钮、可展开完整证据时间线、interaction state/actions 或 recovery action；这些分别
-属于 UI-18.2/18.3/18.4c/18.5b。Pursuit wait/evidence 当前按快照显示最近有界集合，尚无 cursor 分页。页面读取
+UI-18.1/18.4a/18.4b/18.4c/18.5a 已提供类型化 Goal 快照、New UI/TUI durable interaction、显式取消和只读恢复事实，但
+不包含 Goal/Pursuit 写按钮、可展开完整证据时间线、interaction 手动 takeover/详情或 recovery action；这些分别
+属于 UI-18.2/18.3/18.4d/18.5b。Pursuit wait/evidence 和 interaction 当前按快照显示最近有界集合，尚无 cursor 分页。页面读取
 真实 lease、heartbeat、checkpoint，但不会据此自动恢复。UI-18 因此保持 partial。
 
 HAR-10.2b 已组合并渲染 Pursuit recovery 权威事实；UI-18.5 仍需完成动作闭环，不能把只读观测标记为完整

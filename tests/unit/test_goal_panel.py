@@ -6,6 +6,8 @@ import time
 
 import pytest
 
+from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import (
     PursuitBackgroundWait,
@@ -19,6 +21,7 @@ from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot_with_recovery,
     render_goal_pursuit_snapshot,
 )
+from naumi_agent.user_interaction import normalize_interaction_request
 
 
 def test_empty_snapshot_does_not_create_missing_databases(tmp_path) -> None:
@@ -123,6 +126,81 @@ async def test_recovery_projection_is_shared_by_typed_and_text_views(tmp_path) -
     rendered = render_goal_pursuit_snapshot(snapshot)
     assert "恢复健康：安全等待" in rendered
     assert "心跳 缺失" in rendered
+
+
+@pytest.mark.asyncio
+async def test_goal_snapshot_projects_only_linked_interaction_public_state(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    goal = goal_store.create("展示等待用户的问题")
+    run = PursuitRun(
+        id="pursuit_interaction_view",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    request = normalize_interaction_request({
+        "header": "继续方式",
+        "question": "是否继续执行？",
+        "options": [
+            {"value": "yes", "label": "继续"},
+            {"value": "no", "label": "停止"},
+        ],
+    })
+    linked = new_interaction_record(
+        request=request,
+        subject_kind="pursuit",
+        subject_id=run.id,
+        session_id="session-1",
+        agent_name="main",
+        owner_id="bridge-a",
+        created_at="2026-07-18T00:00:00+00:00",
+        owner_lease_seconds=30,
+        interaction_id="ask-goal-linked",
+    )
+    unrelated = new_interaction_record(
+        request=request,
+        subject_kind="pursuit",
+        subject_id="pursuit-unrelated",
+        session_id="session-2",
+        agent_name="main",
+        owner_id="bridge-b",
+        created_at="2026-07-18T00:00:00+00:00",
+        owner_lease_seconds=30,
+        interaction_id="ask-goal-unrelated",
+    )
+    await harness_store.create_interaction(workspace_root=tmp_path, record=linked)
+    await harness_store.create_interaction(workspace_root=tmp_path, record=unrelated)
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        goal_store,
+        pursuit_store,
+        harness_store,
+        workspace_root=tmp_path,
+    )
+    payload = snapshot.to_protocol_dict()
+
+    assert payload["interactions"] == [{
+        "interaction_id": "ask-goal-linked",
+        "pursuit_run_id": run.id,
+        "state": "pending",
+        "sequence": 1,
+        "header": "继续方式",
+        "question": "是否继续执行？",
+        "created_at": "2026-07-18T00:00:00+00:00",
+        "expires_at": "",
+        "updated_at": "2026-07-18T00:00:00+00:00",
+        "can_cancel": True,
+    }]
+    assert "owner_id" not in str(payload["interactions"])
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "ask-goal-linked" in rendered
+    assert "/goal interaction cancel ask-goal-linked" in rendered
 
 
 def test_snapshot_exposes_missing_link_without_creating_pursuit_db(tmp_path) -> None:

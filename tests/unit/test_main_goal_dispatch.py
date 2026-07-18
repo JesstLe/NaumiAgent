@@ -25,6 +25,7 @@ class _EngineFake:
                 "goal_status",
                 "goal_list",
                 "goal_update",
+                "goal_interaction_cancel",
                 "goal_pursue",
             )
         }
@@ -60,6 +61,11 @@ class _EngineFake:
         ("complete 已验收", "goal_update", {"status": "completed", "note": "已验收"}),
         ("cancel 改变方向", "goal_update", {"status": "cancelled", "note": "改变方向"}),
         ("pursue", "goal_pursue", {}),
+        (
+            "interaction cancel ask-goal-1",
+            "goal_interaction_cancel",
+            {"interaction_id": "ask-goal-1"},
+        ),
     ],
 )
 async def test_run_goal_routes_all_operations_through_engine_executor(
@@ -79,7 +85,17 @@ async def test_run_goal_routes_all_operations_through_engine_executor(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("argument", ["create", "block", "pursue later", "unknown later"])
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "create",
+        "block",
+        "pursue later",
+        "interaction",
+        "interaction cancel bad",
+        "unknown later",
+    ],
+)
 async def test_run_goal_rejects_invalid_or_ambiguous_operations(argument: str) -> None:
     engine = _EngineFake()
 
