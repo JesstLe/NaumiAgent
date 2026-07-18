@@ -55,5 +55,8 @@
 - EVO-02.5a 已实现 Guard-bound 单文件原子 Patch Writer：Lease 互斥、fresh Receipt 等值复核、同目录
   原子替换、摘要/Git scope postflight 和失败字节回滚；仍固定 `execution_ready=false`。详见
   `EVO-02-5a-single-file-patch-writer.md`。
-- EVO-02.5b 持久 journal/多文件事务、02.6 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02
-  整体保持 partial。
+- EVO-02.5b 已实现持久 intent journal 与崩溃恢复：prepared/replaced/committed/rollback CAS、backup
+  digest、dead owner/orphan lock 回收、启动恢复，以及 TUI/新 UI 状态闭环。详见
+  `EVO-02-5b-patch-journal-recovery.md`。
+- EVO-02.5c 多文件事务、02.6 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体保持
+  partial。

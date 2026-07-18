@@ -2388,6 +2388,37 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["protocol_registry"]["client_event_count"] == len(ClientEventType)
     assert payload["protocol_registry"]["server_event_count"] == len(ServerEventType)
     assert len(payload["protocol_registry"]["registry_sha256"]) == 64
+    assert payload["evolution_patch_recovery"]["total"] == 0
+
+
+def test_bridge_status_payload_exposes_patch_recovery_without_source_content() -> None:
+    engine = _FakeEngine()
+    engine.evolution_patch_recovery_status = lambda: {  # type: ignore[attr-defined]
+            "total": 2,
+            "completed": 1,
+            "rolled_back": 1,
+            "already_baseline": 0,
+            "orphan_lock_removed": 0,
+            "deferred": 0,
+            "failed": 1,
+            "filesystem_changed": 1,
+            "failure_codes": ["journal_corrupt"],
+        }
+
+    payload = JsonlEngineBridge(engine, config_path="config.yaml").status_payload()
+
+    assert payload["evolution_patch_recovery"] == {
+        "total": 2,
+        "completed": 1,
+        "rolled_back": 1,
+        "already_baseline": 0,
+        "orphan_lock_removed": 0,
+        "deferred": 0,
+        "failed": 1,
+        "filesystem_changed": 1,
+        "failure_codes": ["journal_corrupt"],
+    }
+    assert "backup" not in str(payload["evolution_patch_recovery"])
 
 
 @pytest.mark.asyncio

@@ -72,6 +72,10 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
     engine = _engine(tmp_path, enabled=True)
     order: list[str] = []
 
+    async def recover_patches():
+        order.append("patch")
+        return ()
+
     async def recover():
         order.append("recover")
         return ()
@@ -80,6 +84,7 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         order.append("start")
         return True
 
+    engine.evolution_patch_recovery.recover_pending = recover_patches  # type: ignore[method-assign]
     engine.recover_session_reconciliations = recover  # type: ignore[method-assign]
     engine.start_session_retention_worker = start  # type: ignore[method-assign]
     try:
@@ -88,7 +93,7 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         await engine.shutdown()
 
     assert recovered == ()
-    assert order == ["recover", "start"]
+    assert order == ["patch", "recover", "start"]
 
 
 @pytest.mark.asyncio

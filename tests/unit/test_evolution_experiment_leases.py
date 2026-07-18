@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,11 @@ from naumi_agent.evolution.mutation_plans import (
     EvolutionMutationPlan,
     EvolutionMutationPlanner,
 )
+from naumi_agent.evolution.patch_journals import (
+    EvolutionPatchJournalStore,
+    PatchJournalState,
+)
+from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
 from naumi_agent.evolution.patch_writers import (
     EvolutionPatchWriteError,
     EvolutionPatchWriter,
@@ -50,6 +56,10 @@ from naumi_agent.worktree.manager import WorktreeManager
 from naumi_agent.worktree.models import WorktreeStatus
 
 NOW = datetime(2026, 7, 18, 23, 0, tzinfo=UTC)
+
+
+class _SimulatedProcessCrash(BaseException):
+    pass
 
 
 def _git(root: Path, *args: str) -> str:
@@ -889,7 +899,10 @@ async def _writer_fixture(tmp_path: Path):
         plan,
         guard_receipt,
         proposed,
-        EvolutionPatchWriter(static_guard=guard),
+        EvolutionPatchWriter(
+            static_guard=guard,
+            journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+        ),
     )
 
 
@@ -929,6 +942,20 @@ async def test_patch_writer_atomically_writes_only_isolated_worktree(tmp_path: P
     assert receipt.postflight_passed is True
     assert receipt.rollback_performed is False
     assert receipt.execution_ready is False
+    journal = writer._journal_store.get_by_lease(lease.lease_id)
+    assert journal is not None
+    assert journal.state is PatchJournalState.COMMITTED
+    assert journal.backup_present is False
+    assert writer._journal_store.load_backup(journal.journal_id) is None
+    replay = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.planned_files[0].path: proposed},
+    )
+    assert replay == receipt
 
 
 @pytest.mark.asyncio
@@ -998,6 +1025,135 @@ async def test_patch_writer_rolls_back_real_bytes_when_postflight_fails(
     assert captured.value.rollback_completed is True
     assert isolated.read_bytes() == before
     assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    journal = writer._journal_store.get_by_lease(lease.lease_id)
+    assert journal is not None
+    assert journal.state is PatchJournalState.ROLLED_BACK
+    assert journal.backup_present is False
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_accepts_revised_guard_within_attempt_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    real_postflight = writer._postflight
+
+    def fail_first(*_args) -> bytes:
+        raise EvolutionPatchWriteError("first_attempt_failed", "第一次尝试失败。")
+
+    monkeypatch.setattr(writer, "_postflight", fail_first)
+    with pytest.raises(EvolutionPatchWriteError):
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+    monkeypatch.setattr(writer, "_postflight", real_postflight)
+    revised = "def render_footer():\n    return 'revised-fixed'\n"
+    revised_guard = await writer._static_guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: revised},
+    )
+    assert revised_guard.preflight_passed is True
+
+    receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=revised_guard,
+        proposed_contents={plan.planned_files[0].path: revised},
+    )
+
+    journal = writer._journal_store.get_by_lease(lease.lease_id)
+    assert journal is not None
+    assert journal.state is PatchJournalState.COMMITTED
+    assert journal.attempt == 2
+    assert journal.guard_id == revised_guard.guard_id
+    assert journal.guard_id != guard_receipt.guard_id
+    assert receipt.guard_id == revised_guard.guard_id
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_enforces_plan_attempt_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        _,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+
+    def fail_postflight(*_args) -> bytes:
+        raise EvolutionPatchWriteError("attempt_failed", "尝试失败。")
+
+    monkeypatch.setattr(writer, "_postflight", fail_postflight)
+    for attempt in range(1, plan.max_attempts + 1):
+        proposed = f"def render_footer():\n    return 'attempt-{attempt}'\n"
+        guard = await writer._static_guard.preflight(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+        with pytest.raises(EvolutionPatchWriteError) as captured:
+            await writer.apply(
+                contract=contract,
+                lease=lease,
+                source_snapshot=snapshot,
+                mutation_plan=plan,
+                guard_receipt=guard,
+                proposed_contents={plan.planned_files[0].path: proposed},
+            )
+        assert captured.value.code == "attempt_failed"
+
+    final_content = "def render_footer():\n    return 'over-budget'\n"
+    final_guard = await writer._static_guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: final_content},
+    )
+    with pytest.raises(EvolutionPatchWriteError) as captured:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=final_guard,
+            proposed_contents={plan.planned_files[0].path: final_content},
+        )
+    assert captured.value.code == "attempt_budget_exhausted"
+    journal = writer._journal_store.get_by_lease(lease.lease_id)
+    assert journal is not None
+    assert journal.attempt == plan.max_attempts
+    assert journal.state is PatchJournalState.ROLLED_BACK
 
 
 @pytest.mark.asyncio
@@ -1047,6 +1203,48 @@ async def test_patch_writer_rolls_back_when_directory_fsync_fails_after_replace(
 
 
 @pytest.mark.asyncio
+async def test_patch_writer_finalizes_pre_replace_failure_without_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before = isolated.read_bytes()
+
+    def fail_before_replace(*_args, **_kwargs) -> None:
+        raise OSError("injected temp write failure")
+
+    monkeypatch.setattr(patch_writer_module, "_atomic_replace", fail_before_replace)
+    with pytest.raises(EvolutionPatchWriteError) as captured:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+
+    assert captured.value.code == "write_failed"
+    assert captured.value.rollback_completed is True
+    assert isolated.read_bytes() == before
+    journal = writer._journal_store.get_by_lease(lease.lease_id)
+    assert journal is not None
+    assert journal.state is PatchJournalState.ROLLED_BACK
+    assert journal.backup_present is False
+
+
+@pytest.mark.asyncio
 async def test_patch_writer_serializes_concurrent_replay(tmp_path: Path) -> None:
     (
         _,
@@ -1075,10 +1273,229 @@ async def test_patch_writer_serializes_concurrent_replay(tmp_path: Path) -> None
         return_exceptions=True,
     )
 
-    assert sum(isinstance(item, EvolutionPatchWriteReceipt) for item in results) == 1
+    receipts = [item for item in results if isinstance(item, EvolutionPatchWriteReceipt)]
+    assert len(receipts) >= 1
+    assert len({item.write_id for item in receipts}) == 1
     errors = [item for item in results if isinstance(item, EvolutionPatchWriteError)]
-    assert len(errors) == 1
-    assert errors[0].code in {"writer_locked", "guard_rejected"}
+    assert all(item.code == "writer_locked" for item in errors)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("crash_after_replace_mark", [False, True])
+async def test_patch_recovery_rolls_back_prepared_and_replaced_crash_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crash_after_replace_mark: bool,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before = isolated.read_bytes()
+    if crash_after_replace_mark:
+        def crash_postflight(*_args) -> bytes:
+            raise _SimulatedProcessCrash()
+
+        monkeypatch.setattr(writer, "_postflight", crash_postflight)
+        expected_state = PatchJournalState.REPLACED
+    else:
+        def crash_mark_replaced(_journal_id: str):
+            raise _SimulatedProcessCrash()
+
+        monkeypatch.setattr(writer._journal_store, "mark_replaced", crash_mark_replaced)
+        expected_state = PatchJournalState.PREPARED
+
+    with pytest.raises(_SimulatedProcessCrash):
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+    assert isolated.read_text(encoding="utf-8") == proposed
+    pending = writer._journal_store.get_by_lease(lease.lease_id)
+    assert pending is not None
+    assert pending.state is expected_state
+
+    outcomes = await EvolutionPatchRecoveryCoordinator(
+        journal_store=writer._journal_store,
+    ).recover_pending()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "rolled_back"
+    assert outcomes[0].recovery_complete is True
+    assert isolated.read_bytes() == before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    recovered = writer._journal_store.get_by_lease(lease.lease_id)
+    assert recovered is not None
+    assert recovered.state is PatchJournalState.ROLLED_BACK
+    assert recovered.backup_present is False
+
+
+@pytest.mark.asyncio
+async def test_patch_recovery_defers_live_lock_then_reclaims_dead_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+
+    def crash_mark_replaced(_journal_id: str):
+        raise _SimulatedProcessCrash()
+
+    monkeypatch.setattr(writer._journal_store, "mark_replaced", crash_mark_replaced)
+    with pytest.raises(_SimulatedProcessCrash):
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+    lock_path = (
+        Path(lease.worktree_path).parent
+        / f".{lease.worktree_name}.{lease.lease_id}.patch.lock"
+    )
+    token = patch_writer_module._acquire_lock(lock_path, lease)
+    coordinator = EvolutionPatchRecoveryCoordinator(journal_store=writer._journal_store)
+    deferred = await coordinator.recover_pending()
+    assert deferred[0].status == "deferred"
+    assert deferred[0].failure_code == "writer_locked"
+
+    monkeypatch.setattr(patch_writer_module, "_pid_alive", lambda _pid: False)
+    recovered = await coordinator.recover_pending()
+    assert recovered[0].status == "rolled_back"
+    assert not lock_path.exists()
+    patch_writer_module._release_lock(lock_path, token)
+
+
+@pytest.mark.asyncio
+async def test_patch_recovery_removes_dead_lock_created_before_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        _,
+        lease,
+        _,
+        _,
+        _,
+        _,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    storage = Path(lease.worktree_path).parent
+    lock_path = storage / f".{lease.worktree_name}.{lease.lease_id}.patch.lock"
+    original_token = patch_writer_module._acquire_lock(lock_path, lease)
+    assert writer._journal_store.get_by_lease(lease.lease_id) is None
+    monkeypatch.setattr(patch_writer_module, "_pid_alive", lambda _pid: False)
+
+    outcomes = await EvolutionPatchRecoveryCoordinator(
+        journal_store=writer._journal_store,
+        worktree_storage_dir=storage,
+    ).recover_pending()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "orphan_lock_removed"
+    assert outcomes[0].recovery_complete is True
+    assert not lock_path.exists()
+    patch_writer_module._release_lock(lock_path, original_token)
+
+
+@pytest.mark.asyncio
+async def test_patch_recovery_reports_corrupt_backup_without_touching_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+
+    def crash_mark_replaced(_journal_id: str):
+        raise _SimulatedProcessCrash()
+
+    monkeypatch.setattr(writer._journal_store, "mark_replaced", crash_mark_replaced)
+    with pytest.raises(_SimulatedProcessCrash):
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    after_crash = isolated.read_bytes()
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        db.execute(
+            "UPDATE evolution_patch_journals SET backup = ? WHERE lease_id = ?",
+            (b"tampered-backup", lease.lease_id),
+        )
+
+    outcomes = await EvolutionPatchRecoveryCoordinator(
+        journal_store=writer._journal_store,
+    ).recover_pending()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].status == "failed"
+    assert outcomes[0].failure_code == "journal_corrupt"
+    assert outcomes[0].filesystem_changed is False
+    assert isolated.read_bytes() == after_crash
+
+
+def test_patch_journal_store_migrates_pre_updated_at_schema(tmp_path: Path) -> None:
+    database = tmp_path / "old-runtime.db"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """CREATE TABLE evolution_patch_journals (
+                   journal_id TEXT PRIMARY KEY,
+                   journal_json TEXT NOT NULL,
+                   lease_id TEXT NOT NULL UNIQUE,
+                   state TEXT NOT NULL,
+                   backup BLOB,
+                   receipt_json TEXT
+               )"""
+        )
+
+    journals, failures = EvolutionPatchJournalStore(database).scan_recoverable()
+
+    assert journals == ()
+    assert failures == ()
+    with sqlite3.connect(database) as db:
+        columns = {
+            str(row[1])
+            for row in db.execute("PRAGMA table_info(evolution_patch_journals)")
+        }
+    assert "updated_at" in columns
 
 
 @pytest.mark.asyncio

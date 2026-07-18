@@ -1434,6 +1434,58 @@ test("normalizes authoritative terminal welcome identity fields", () => {
   );
 });
 
+test("normalizes and validates evolution patch recovery status", () => {
+  const record = normalizeServerRecord({
+    type: "ready",
+    version: 1,
+    payload: {
+      evolution_patch_recovery: {
+        total: 3,
+        completed: 1,
+        rolled_back: 1,
+        already_baseline: 0,
+        orphan_lock_removed: 0,
+        deferred: 1,
+        failed: 1,
+        filesystem_changed: 1,
+        failure_codes: ["journal_corrupt"],
+      },
+    },
+  });
+
+  assert.deepEqual(record.payload.evolution_patch_recovery, {
+    total: 3,
+    completed: 1,
+    rolled_back: 1,
+    already_baseline: 0,
+    orphan_lock_removed: 0,
+    deferred: 1,
+    failed: 1,
+    filesystem_changed: 1,
+    failure_codes: ["journal_corrupt"],
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: {
+        evolution_patch_recovery: {
+          total: 1,
+          completed: 1,
+          rolled_back: 0,
+          already_baseline: 0,
+          orphan_lock_removed: 0,
+          deferred: 0,
+          failed: 0,
+          filesystem_changed: 0,
+          failure_codes: [],
+        },
+      },
+    }),
+    /completed 与完成分类不一致/,
+  );
+});
+
 test("normalizes bounded retention worker runtime status", () => {
   const record = normalizeServerRecord({
     type: "runtime/status",

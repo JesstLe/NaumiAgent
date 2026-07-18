@@ -903,6 +903,12 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       `${source}.retention_worker`,
     );
   }
+  if (Object.hasOwn(status, "evolution_patch_recovery")) {
+    normalized.evolution_patch_recovery = normalizePatchRecoveryStatus(
+      status.evolution_patch_recovery,
+      `${source}.evolution_patch_recovery`,
+    );
+  }
   if (Object.hasOwn(status, "protocol_registry")) {
     const registry = requireObject(status.protocol_registry, `${source}.protocol_registry`);
     const digest = strictStatusText(
@@ -987,6 +993,46 @@ function normalizeRetentionWorkerStatus(value, source) {
     started_at: textField("started_at"),
     last_pass_at: textField("last_pass_at"),
   };
+}
+
+function normalizePatchRecoveryStatus(value, source) {
+  const recovery = requireObject(value, source);
+  const count = (name) => strictNonnegativeInteger(recovery[name], `${source}.${name}`);
+  const normalized = {
+    total: count("total"),
+    completed: count("completed"),
+    rolled_back: count("rolled_back"),
+    already_baseline: count("already_baseline"),
+    orphan_lock_removed: count("orphan_lock_removed"),
+    deferred: count("deferred"),
+    failed: count("failed"),
+    filesystem_changed: count("filesystem_changed"),
+    failure_codes: [],
+  };
+  if (!Array.isArray(recovery.failure_codes) || recovery.failure_codes.length > 32) {
+    throw new Error(`${source}.failure_codes 必须是最多 32 项的字符串数组`);
+  }
+  normalized.failure_codes = recovery.failure_codes.map((item) => (
+    strictStatusText(item, `${source}.failure_codes[]`)
+  ));
+  if (
+    normalized.completed
+    !== normalized.rolled_back
+      + normalized.already_baseline
+      + normalized.orphan_lock_removed
+  ) {
+    throw new Error(`${source}.completed 与完成分类不一致`);
+  }
+  if (
+    normalized.total
+    !== normalized.completed + normalized.deferred + normalized.failed
+  ) {
+    throw new Error(`${source}.total 与恢复分类不一致`);
+  }
+  if (normalized.filesystem_changed > normalized.rolled_back) {
+    throw new Error(`${source}.filesystem_changed 超过 rolled_back`);
+  }
+  return normalized;
 }
 
 function normalizeModelContract(value, source) {

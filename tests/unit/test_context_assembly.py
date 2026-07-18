@@ -17,6 +17,8 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
+from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
+from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.orchestrator.context_assembly import (
@@ -106,6 +108,8 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     )
     assert isinstance(engine.evolution_mutation_planner, EvolutionMutationPlanner)
     assert isinstance(engine.evolution_static_guard, EvolutionStaticGuard)
+    assert isinstance(engine.evolution_patch_journal_store, EvolutionPatchJournalStore)
+    assert isinstance(engine.evolution_patch_recovery, EvolutionPatchRecoveryCoordinator)
     assert isinstance(engine.evolution_patch_writer, EvolutionPatchWriter)
     assert (
         engine.evolution_experiment_lease_manager._worktree_manager

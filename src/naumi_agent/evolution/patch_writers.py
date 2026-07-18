@@ -7,12 +7,15 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
+import socket
 import stat
 import subprocess
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -20,6 +23,11 @@ from naumi_agent.evolution.experiment_leases import ExperimentWorktreeLease
 from naumi_agent.evolution.experiment_snapshots import EvolutionExperimentSourceSnapshot
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlan
+from naumi_agent.evolution.patch_journals import (
+    EvolutionPatchJournal,
+    EvolutionPatchJournalStore,
+    PatchJournalState,
+)
 from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuard,
     EvolutionStaticGuardReceipt,
@@ -29,6 +37,12 @@ from naumi_agent.evolution.static_guards import (
 PATCH_WRITER_POLICY = "evolution-single-file-patch-writer-v1"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_GIT_STATUS_BYTES = 64 * 1024
+_MAX_LOCK_BYTES = 4_096
+
+
+class _LockBinding(Protocol):
+    lease_id: str
+    worktree_name: str
 
 
 class _StrictModel(BaseModel):
@@ -82,8 +96,14 @@ class EvolutionPatchWriteError(RuntimeError):
 class EvolutionPatchWriter:
     """Atomically apply exactly one preflight-approved file in a leased worktree."""
 
-    def __init__(self, *, static_guard: EvolutionStaticGuard) -> None:
+    def __init__(
+        self,
+        *,
+        static_guard: EvolutionStaticGuard,
+        journal_store: EvolutionPatchJournalStore,
+    ) -> None:
         self._static_guard = static_guard
+        self._journal_store = journal_store
 
     async def apply(
         self,
@@ -102,8 +122,29 @@ class EvolutionPatchWriter:
             )
         root = _managed_worktree_root(lease)
         lock_path = root.parent / f".{lease.worktree_name}.{lease.lease_id}.patch.lock"
-        await asyncio.to_thread(_acquire_lock, lock_path, lease)
+        lock_token = await asyncio.to_thread(_acquire_lock, lock_path, lease)
         try:
+            existing = await asyncio.to_thread(
+                self._journal_store.get_by_lease,
+                lease.lease_id,
+            )
+            if existing is not None:
+                if existing.state is PatchJournalState.COMMITTED:
+                    return await asyncio.to_thread(
+                        self._load_committed_receipt,
+                        root,
+                        existing,
+                        guard_receipt,
+                    )
+                if existing.state in {
+                    PatchJournalState.PREPARED,
+                    PatchJournalState.REPLACED,
+                    PatchJournalState.RECOVERY_FAILED,
+                }:
+                    raise EvolutionPatchWriteError(
+                        "journal_recovery_required",
+                        "发现未完成 Patch Journal，必须先执行恢复。",
+                    )
             fresh = await self._static_guard.preflight(
                 contract=contract,
                 lease=lease,
@@ -132,7 +173,7 @@ class EvolutionPatchWriter:
                 proposed_contents,
             )
         finally:
-            await asyncio.to_thread(_release_lock, lock_path)
+            await asyncio.to_thread(_release_lock, lock_path, lock_token)
 
     def _apply_sync(
         self,
@@ -159,21 +200,71 @@ class EvolutionPatchWriter:
         target = root / change.path
         _verify_target_path(root, target)
         before, mode = _verify_baseline(target, change)
+        journal: EvolutionPatchJournal | None = None
         replaced = False
         try:
+            journal = self._journal_store.prepare(
+                contract=contract,
+                lease=lease,
+                source_snapshot=source_snapshot,
+                mutation_plan=mutation_plan,
+                guard_receipt=guard_receipt,
+                change=change,
+                before=before,
+                file_mode=mode,
+            )
+            if journal.state is PatchJournalState.ROLLED_BACK:
+                raise EvolutionPatchWriteError(
+                    "attempt_budget_exhausted",
+                    "Patch Journal 已达到 Mutation Plan 尝试上限。",
+                )
+            if journal.state is not PatchJournalState.PREPARED:
+                raise EvolutionPatchWriteError(
+                    "journal_state_mismatch",
+                    "Patch Journal 未处于 prepared 状态。",
+                )
             _atomic_replace(target, content, mode=mode)
             replaced = True
+            self._journal_store.mark_replaced(journal.journal_id)
             status = self._postflight(root, target, change)
+            receipt = _build_write_receipt(
+                contract=contract,
+                lease=lease,
+                source_snapshot=source_snapshot,
+                mutation_plan=mutation_plan,
+                guard_receipt=guard_receipt,
+                change=change,
+                status=status,
+            )
+            self._journal_store.mark_committed(
+                journal.journal_id,
+                receipt_json=receipt.model_dump_json(),
+            )
+            return receipt
         except Exception as exc:
             if not replaced:
                 replaced = _target_matches_digest(target, change.after_sha256)
-            rollback_completed = False
+            rollback_completed = (
+                not replaced and _target_matches_baseline(target, change)
+            )
             if replaced:
                 try:
                     _rollback(target, before, mode)
                     rollback_completed = True
                 except OSError:
                     rollback_completed = False
+            if journal is not None and rollback_completed:
+                try:
+                    self._journal_store.mark_rolled_back(
+                        journal.journal_id,
+                        failure_code=(
+                            exc.code
+                            if isinstance(exc, EvolutionPatchWriteError)
+                            else "write_failed"
+                        ),
+                    )
+                except (KeyError, RuntimeError, ValueError):
+                    pass
             if isinstance(exc, EvolutionPatchWriteError):
                 raise EvolutionPatchWriteError(
                     exc.code,
@@ -186,26 +277,35 @@ class EvolutionPatchWriter:
                 rollback_completed=rollback_completed,
             ) from exc
 
-        payload = {
-            "schema_version": 1,
-            "policy_version": PATCH_WRITER_POLICY,
-            "contract_id": contract.contract_id,
-            "lease_id": lease.lease_id,
-            "source_snapshot_id": source_snapshot.snapshot_id,
-            "mutation_plan_id": mutation_plan.plan_id,
-            "guard_id": guard_receipt.guard_id,
-            "guard_receipt_sha256": guard_receipt.receipt_sha256,
-            "change": change.model_dump(mode="json"),
-            "worktree_status_sha256": hashlib.sha256(status).hexdigest(),
-            "postflight_passed": True,
-            "rollback_performed": False,
-            "write_completed": True,
-            "execution_ready": False,
-        }
-        digest = _sha256_payload(payload)
-        return EvolutionPatchWriteReceipt.model_validate(
-            {**payload, "write_id": f"evw_{digest[:24]}", "write_sha256": digest}
+    def _load_committed_receipt(
+        self,
+        root: Path,
+        journal: EvolutionPatchJournal,
+        guard_receipt: EvolutionStaticGuardReceipt,
+    ) -> EvolutionPatchWriteReceipt:
+        if (
+            journal.guard_id != guard_receipt.guard_id
+            or journal.guard_receipt_sha256 != guard_receipt.receipt_sha256
+            or len(guard_receipt.changes) != 1
+            or journal.target_path != guard_receipt.changes[0].path
+        ):
+            raise EvolutionPatchWriteError(
+                "committed_journal_mismatch",
+                "已提交 Patch Journal 与本次 Guard Receipt 不一致。",
+            )
+        receipt_json = self._journal_store.load_receipt_json(journal.journal_id)
+        if receipt_json is None:
+            raise EvolutionPatchWriteError(
+                "committed_receipt_missing",
+                "已提交 Patch Journal 缺少写入回执。",
+            )
+        receipt = EvolutionPatchWriteReceipt.model_validate_json(receipt_json)
+        self._postflight(
+            root,
+            root / journal.target_path,
+            guard_receipt.changes[0],
         )
+        return receipt
 
     def _postflight(
         self,
@@ -243,6 +343,38 @@ class EvolutionPatchWriter:
         return status
 
 
+def _build_write_receipt(
+    *,
+    contract: EvolutionExperimentContract,
+    lease: ExperimentWorktreeLease,
+    source_snapshot: EvolutionExperimentSourceSnapshot,
+    mutation_plan: EvolutionMutationPlan,
+    guard_receipt: EvolutionStaticGuardReceipt,
+    change: StaticGuardChangeFact,
+    status: bytes,
+) -> EvolutionPatchWriteReceipt:
+    payload = {
+        "schema_version": 1,
+        "policy_version": PATCH_WRITER_POLICY,
+        "contract_id": contract.contract_id,
+        "lease_id": lease.lease_id,
+        "source_snapshot_id": source_snapshot.snapshot_id,
+        "mutation_plan_id": mutation_plan.plan_id,
+        "guard_id": guard_receipt.guard_id,
+        "guard_receipt_sha256": guard_receipt.receipt_sha256,
+        "change": change.model_dump(mode="json"),
+        "worktree_status_sha256": hashlib.sha256(status).hexdigest(),
+        "postflight_passed": True,
+        "rollback_performed": False,
+        "write_completed": True,
+        "execution_ready": False,
+    }
+    digest = _sha256_payload(payload)
+    return EvolutionPatchWriteReceipt.model_validate(
+        {**payload, "write_id": f"evw_{digest[:24]}", "write_sha256": digest}
+    )
+
+
 def _managed_worktree_root(lease: ExperimentWorktreeLease) -> Path:
     if not lease.worktree_ready:
         raise EvolutionPatchWriteError("lease_inactive", "Patch Writer 需要 active Lease。")
@@ -258,7 +390,19 @@ def _managed_worktree_root(lease: ExperimentWorktreeLease) -> Path:
     return root
 
 
-def _acquire_lock(path: Path, lease: ExperimentWorktreeLease) -> None:
+def _acquire_lock(path: Path, lease: _LockBinding) -> str:
+    token = secrets.token_hex(24)
+    payload = {
+        "schema_version": 1,
+        "policy_version": PATCH_WRITER_POLICY,
+        "token": token,
+        "lease_id": lease.lease_id,
+        "worktree_name": lease.worktree_name,
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
         descriptor = os.open(path, flags, 0o600)
@@ -270,7 +414,8 @@ def _acquire_lock(path: Path, lease: ExperimentWorktreeLease) -> None:
     except OSError as exc:
         raise EvolutionPatchWriteError("lock_failed", "无法获取 Patch Writer 互斥锁。") from exc
     try:
-        os.write(descriptor, f"{PATCH_WRITER_POLICY}\n{lease.lease_id}\n".encode())
+        if os.write(descriptor, encoded) != len(encoded):
+            raise OSError("short lock write")
         os.fsync(descriptor)
     except Exception:
         os.close(descriptor)
@@ -281,13 +426,99 @@ def _acquire_lock(path: Path, lease: ExperimentWorktreeLease) -> None:
             os.close(descriptor)
         except OSError:
             pass
+    return token
 
 
-def _release_lock(path: Path) -> None:
+def _release_lock(path: Path, token: str) -> None:
+    try:
+        payload = _read_lock(path)
+    except FileNotFoundError:
+        return
+    if payload["token"] != token:
+        raise EvolutionPatchWriteError(
+            "lock_ownership_lost",
+            "Patch Writer 锁所有权已变化，拒绝删除未知锁。",
+        )
+    path.unlink()
+
+
+def _reclaim_stale_lock(path: Path, lease: _LockBinding) -> str:
+    try:
+        return _acquire_lock(path, lease)
+    except EvolutionPatchWriteError as exc:
+        if exc.code != "writer_locked":
+            raise
+    payload = _read_lock(path)
+    if payload["lease_id"] != lease.lease_id or payload["worktree_name"] != lease.worktree_name:
+        raise EvolutionPatchWriteError("stale_lock_binding", "残留锁与 Lease binding 不一致。")
+    if payload["hostname"] != socket.gethostname():
+        raise EvolutionPatchWriteError("remote_lock_owner", "残留锁属于其他主机，禁止自动接管。")
+    if _pid_alive(payload["pid"]):
+        raise EvolutionPatchWriteError("writer_locked", "Patch Writer 进程仍存活。")
     try:
         path.unlink()
     except FileNotFoundError:
-        return
+        pass
+    return _acquire_lock(path, lease)
+
+
+def _read_lock(path: Path) -> dict[str, object]:
+    data = path.read_bytes()
+    if len(data) > _MAX_LOCK_BYTES:
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁超过安全上限。")
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁格式损坏。") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "schema_version",
+        "policy_version",
+        "token",
+        "lease_id",
+        "worktree_name",
+        "pid",
+        "hostname",
+        "created_at",
+    }:
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁字段不完整。")
+    if (
+        payload["schema_version"] != 1
+        or payload["policy_version"] != PATCH_WRITER_POLICY
+        or not isinstance(payload["token"], str)
+        or len(payload["token"]) != 48
+        or any(char not in "0123456789abcdef" for char in payload["token"])
+        or not isinstance(payload["lease_id"], str)
+        or not re.fullmatch(r"evl_[0-9a-f]{24}", payload["lease_id"])
+        or not isinstance(payload["worktree_name"], str)
+        or not re.fullmatch(r"experiment-[0-9a-f]{16}", payload["worktree_name"])
+        or not isinstance(payload["pid"], int)
+        or payload["pid"] < 1
+        or not isinstance(payload["hostname"], str)
+        or not payload["hostname"]
+        or not isinstance(payload["created_at"], str)
+    ):
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁字段格式无效。")
+    try:
+        parsed = datetime.fromisoformat(payload["created_at"])
+    except ValueError as exc:
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁时间无效。") from exc
+    if parsed.tzinfo is None:
+        raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁时间缺少时区。")
+    return payload
+
+
+def _pid_alive(pid: object) -> bool:
+    if not isinstance(pid, int) or pid < 1:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 def _verify_baseline(target: Path, change: StaticGuardChangeFact) -> tuple[bytes | None, int]:
@@ -387,6 +618,14 @@ def _target_matches_digest(target: Path, expected_sha256: str) -> bool:
     except OSError:
         return False
     return hmac.compare_digest(actual, expected_sha256)
+
+
+def _target_matches_baseline(target: Path, change: StaticGuardChangeFact) -> bool:
+    if change.operation == "create":
+        return not target.exists() and not target.is_symlink()
+    if change.before_sha256 is None:
+        return False
+    return _target_matches_digest(target, change.before_sha256)
 
 
 def _fsync_directory(path: Path) -> None:

@@ -32,6 +32,15 @@ if TYPE_CHECKING:
         MutationObjective,
         MutationPlanStage,
     )
+    from naumi_agent.evolution.patch_journals import (
+        EvolutionPatchJournal,
+        EvolutionPatchJournalStore,
+        PatchJournalState,
+    )
+    from naumi_agent.evolution.patch_recovery import (
+        EvolutionPatchRecoveryCoordinator,
+        EvolutionPatchRecoveryResult,
+    )
     from naumi_agent.evolution.patch_writers import (
         EvolutionPatchWriteError,
         EvolutionPatchWriter,
@@ -73,6 +82,10 @@ __all__ = [
     "EvolutionExperimentSourceSnapshotBuilder",
     "EvolutionMutationPlan",
     "EvolutionMutationPlanner",
+    "EvolutionPatchJournal",
+    "EvolutionPatchJournalStore",
+    "EvolutionPatchRecoveryCoordinator",
+    "EvolutionPatchRecoveryResult",
     "EvolutionPatchWriteError",
     "EvolutionPatchWriteReceipt",
     "EvolutionPatchWriter",
@@ -87,6 +100,7 @@ __all__ = [
     "MutationFileFact",
     "MutationObjective",
     "MutationPlanStage",
+    "PatchJournalState",
     "StaticGuardChangeFact",
     "StaticGuardViolation",
     "EvolutionStoreConflictError",
@@ -134,6 +148,15 @@ def __getattr__(name: str) -> object:
         "MutationObjective",
         "MutationPlanStage",
     }
+    patch_journal_exports = {
+        "EvolutionPatchJournal",
+        "EvolutionPatchJournalStore",
+        "PatchJournalState",
+    }
+    patch_recovery_exports = {
+        "EvolutionPatchRecoveryCoordinator",
+        "EvolutionPatchRecoveryResult",
+    }
     patch_writer_exports = {
         "EvolutionPatchWriteError",
         "EvolutionPatchWriteReceipt",
@@ -160,6 +183,10 @@ def __getattr__(name: str) -> object:
         module_name = "experiment_snapshots"
     elif name in mutation_plan_exports:
         module_name = "mutation_plans"
+    elif name in patch_journal_exports:
+        module_name = "patch_journals"
+    elif name in patch_recovery_exports:
+        module_name = "patch_recovery"
     elif name in patch_writer_exports:
         module_name = "patch_writers"
     elif name in static_guard_exports:
