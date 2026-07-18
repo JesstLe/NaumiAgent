@@ -28,7 +28,10 @@
     [设计](HAR-10-5a-pursuit-action-ledger.md)。
   - HAR-10.5b 已实现：BackgroundRunner caller idempotency key、pre-spawn reservation、同 runtime 并发去重、
     重启回执复用和 Pursuit dispatched retry；见 [设计](HAR-10-5b-background-idempotency.md)。
-  - 未完成：`reconcile_required` 类型化自动解除，以及 browser/agent/API 外部状态核对。
+  - HAR-10.5c 已实现：checkpoint + action ledger + BackgroundTask 的类型化核对、提交前 lease 校验、
+    waiting 重建，以及 stale/orphan/identity/store error 的 fail-closed blocker；见
+    [设计](HAR-10-5c-background-reconcile.md)。
+  - 未完成：同步 shell、browser、agent/API 外部状态核对，跨 Store 原子性和孤儿进程接管。
 - HAR-10.6 Human interaction：结构化选项、自定义输入、超时、暂停和 takeover。
 - HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
@@ -51,8 +54,8 @@ ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 
 ARC-01.4b2e 只解决资源归属和稳定引用。HAR-10.1a 已在 Harness schema v11 交付通用 lease/epoch 与结果
 fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入，HAR-10.4a/4b 已交付权威 checkpoint 与安全
 continuation，HAR-10.5a/5b 已让 shell/background 行动在外部派发前进入持久账本并用 caller key 复用后台
-task；browser/agent/runtime 逐域接入、跨进程/跨 Store 原子性、heartbeat、interaction queue 和自动
-reconcile 仍属于后续实现。
+task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting/terminal/continue；同步 shell、
+browser/agent/runtime 逐域接入、跨进程/跨 Store 原子性、heartbeat 和 interaction queue 仍属于后续实现。
 
 ## 验收标准
 

@@ -38,3 +38,7 @@ HAR-10.5b 已在本地 BackgroundRunner 接通 caller idempotency key、pre-spaw
 去重和重启回执复用。这验证了 ARC-04.2 的 job identity/immutable input 形状，但 `tasks.json` 没有跨进程事务、
 permission grant、workspace lease 或 daemon authority，因此 ARC-04.2 仍是 planned，禁止把该前置标记为
 Tool daemon 已完成。
+
+HAR-10.5c 又验证了本地 reconcile contract：只有当前 Runner 同时持有活进程与 watcher 才能报告 managed
+active；PID 存在但所有权丢失必须报告 orphan 并 fail closed。该合同可作为 ARC-04.6 Supervisor 的输入形状，
+但尚不具备 daemon 接管、心跳、跨进程 fencing 或孤儿清理能力。

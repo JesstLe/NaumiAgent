@@ -52,10 +52,17 @@ from naumi_agent.orchestrator.pursuit_lease import (
     PursuitLeaseSession,
     PursuitLeaseUnavailableError,
 )
+from naumi_agent.orchestrator.pursuit_reconcile import (
+    PursuitReconcileDecision,
+    ReconcileDisposition,
+    decide_background_reconcile,
+)
+from naumi_agent.runtime.shell import pid_exists
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
+    from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
     from naumi_agent.orchestrator.pursuit_store import PursuitStore
     from naumi_agent.orchestrator.subagent_manager import SubAgentManager
     from naumi_agent.runtime.ports.model import ModelPort
@@ -540,6 +547,7 @@ class GoalPursuitLoop:
         execute_tool_call: ToolExecutor | None = None,
         lease_port: PursuitLeasePort | None = None,
         workspace_root: str | Path | None = None,
+        background_reconcile_source: BackgroundTaskLookup | None = None,
     ) -> None:
         self._router = router
         self._tools = tool_registry
@@ -553,6 +561,7 @@ class GoalPursuitLoop:
             if workspace_root is not None
             else None
         )
+        self._background_reconcile_source = background_reconcile_source
         if (self._lease_port is None) != (self._workspace_root is None):
             raise ValueError("Pursuit lease_port 与 workspace_root 必须同时提供。")
         self._history: list[IterationCheckpoint] = []
@@ -898,6 +907,8 @@ class GoalPursuitLoop:
     def _checkpoint_resume_blocker(
         self,
         checkpoint: PursuitCheckpoint,
+        *,
+        reconcile_blocker: str = "",
     ) -> str:
         """Return a reason when resuming could duplicate or corrupt work."""
         if self._run is None:
@@ -929,11 +940,104 @@ class GoalPursuitLoop:
             "completed", "failed", "cancelled", "budget_exceeded",
         }:
             return "checkpoint 已是终态，但运行摘要不是终态，拒绝猜测恢复。"
+        if reconcile_blocker:
+            return reconcile_blocker
         if self._run.phase == "action_inflight" or checkpoint.phase == "action_inflight":
             return "上次进程在工具行动执行中退出，必须先核对外部副作用。"
         if checkpoint.phase == "execute" and checkpoint.pending_actions:
             return "旧版 checkpoint 无法证明计划行动是否已经发出，必须先核对外部副作用。"
         return ""
+
+    async def _reconcile_inflight_checkpoint(
+        self,
+        checkpoint: PursuitCheckpoint,
+    ) -> tuple[PursuitCheckpoint, str]:
+        """Apply a typed decision after checking the current run lease."""
+        if (
+            self._store is None
+            or self._run is None
+            or (
+                self._run.phase != "action_inflight"
+                and checkpoint.phase != "action_inflight"
+            )
+        ):
+            return checkpoint, ""
+        actions = self._store.list_actions(self._run.id)
+        decision = decide_background_reconcile(
+            actions=actions,
+            iteration=checkpoint.iteration,
+            background_tasks=self._background_reconcile_source,
+            now=time.time(),
+            pid_probe=pid_exists,
+        )
+        await self._require_run_lease(
+            f"reconcile-{checkpoint.iteration}-{decision.reason.value}"
+        )
+        self._apply_reconcile_action_updates(decision)
+        self._run.add_evidence(PursuitEvidence(
+            kind="reconcile",
+            source=decision.reason.value,
+            summary=decision.summary,
+            is_hard=decision.disposition is not ReconcileDisposition.BLOCKED,
+            timestamp=time.time(),
+        ))
+
+        if decision.disposition is ReconcileDisposition.BLOCKED:
+            self._pending_background = []
+            self._run.waiting_on = []
+            self._persist_run()
+            return checkpoint, decision.summary
+
+        if decision.disposition is ReconcileDisposition.WAITING:
+            self._pending_background = [
+                PursuitBackgroundWait(
+                    task_id=item.task_id,
+                    action_id=item.action_id,
+                    command=item.command,
+                    created_at=max(0.0, item.created_at),
+                )
+                for item in decision.waits
+            ]
+            self._run.waiting_on = list(self._pending_background)
+            self._run.status = PursuitRunStatus.WAITING
+            self._run.phase = "waiting"
+            self._run.blocked_reason = ""
+            self._run.next_action = "等待已核对的后台任务完成后再次恢复。"
+            self._run.updated_at = time.time()
+            self._persist_run()
+            # The resume tail writes the single authoritative waiting checkpoint.
+            return checkpoint, ""
+
+        self._run.status = PursuitRunStatus.RUNNING
+        self._run.phase = "action_result"
+        self._run.blocked_reason = ""
+        self._run.next_action = "已核对上轮行动；从最新状态重新评估。"
+        self._run.waiting_on = []
+        self._run.updated_at = time.time()
+        self._persist_run()
+        return self._persist_reconciled_checkpoint(checkpoint), ""
+
+    def _apply_reconcile_action_updates(
+        self,
+        decision: PursuitReconcileDecision,
+    ) -> None:
+        if self._store is None:
+            return
+        now = time.time()
+        for action_key in decision.abandon_action_keys:
+            self._store.mark_action_abandoned(
+                action_key,
+                reason="恢复核对确认行动仅 prepared，尚未派发。",
+                updated_at=now,
+            )
+        for update in decision.terminal_updates:
+            self._store.mark_action_terminal(
+                update.action_key,
+                succeeded=update.succeeded,
+                result_status=update.result_status,
+                result=update.result_summary,
+                updated_at=now,
+            )
 
     async def _open_run_lease(self, run_id: str) -> None:
         if self._lease_port is None or self._workspace_root is None:
@@ -1015,8 +1119,14 @@ class GoalPursuitLoop:
             if self._pending_background:
                 await self._collect_background_results()
 
+            reconcile_blocker = ""
+            if checkpoint is not None:
+                checkpoint, reconcile_blocker = (
+                    await self._reconcile_inflight_checkpoint(checkpoint)
+                )
+
             await self._require_run_lease("resume-commit")
-            if self._pending_background:
+            if self._pending_background and not reconcile_blocker:
                 self._record_waiting("目标追踪仍在等待后台任务完成。")
             elif checkpoint is None:
                 self._run.status = PursuitRunStatus.BLOCKED
@@ -1030,7 +1140,10 @@ class GoalPursuitLoop:
                 self._run.updated_at = time.time()
                 self._persist_run()
             else:
-                blocker = self._checkpoint_resume_blocker(checkpoint)
+                blocker = self._checkpoint_resume_blocker(
+                    checkpoint,
+                    reconcile_blocker=reconcile_blocker,
+                )
                 if blocker:
                     self._run.status = PursuitRunStatus.BLOCKED
                     self._run.phase = (
