@@ -59,7 +59,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert core.retention is RetentionPolicy.USER_MANAGED
     harness = next(item for item in definitions if item.store_id == "harness.evidence")
     assert harness.version_strategy is VersionStrategy.SQLITE_USER_VERSION
-    assert harness.supported_schema_version == HARNESS_STORE_SCHEMA_VERSION == 10
+    assert harness.supported_schema_version == HARNESS_STORE_SCHEMA_VERSION == 11
     evolution = next(
         item for item in definitions if item.store_id == "evolution.candidates"
     )

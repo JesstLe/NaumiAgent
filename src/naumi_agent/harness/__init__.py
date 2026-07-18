@@ -20,6 +20,14 @@ from naumi_agent.harness.models import (
     HarnessProfileStatus,
 )
 from naumi_agent.harness.profile import load_harness_profile
+from naumi_agent.harness.run_lease import (
+    HarnessRunFenceDecision,
+    HarnessRunFenceReason,
+    HarnessRunFenceReceipt,
+    HarnessRunKind,
+    HarnessRunLease,
+    HarnessRunLeaseState,
+)
 
 __all__ = [
     "HarnessKnowledgeContextComposer",
@@ -28,6 +36,12 @@ __all__ = [
     "HarnessProfileError",
     "HarnessProfileSnapshot",
     "HarnessProfileStatus",
+    "HarnessRunFenceDecision",
+    "HarnessRunFenceReason",
+    "HarnessRunFenceReceipt",
+    "HarnessRunKind",
+    "HarnessRunLease",
+    "HarnessRunLeaseState",
     "KnowledgeBudget",
     "KnowledgeCandidate",
     "KnowledgeContextBundle",
