@@ -49,6 +49,9 @@ from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.self_review_red_baseline import (
+    EvolutionSelfReviewRedBaselineExecutor,
+)
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
@@ -775,6 +778,12 @@ class AgentEngine:
         )
         self.evolution_metric_runner_binding_builder = (
             EvolutionMetricRunnerBindingBuilder()
+        )
+        self.evolution_self_review_red_baseline_executor = (
+            EvolutionSelfReviewRedBaselineExecutor(
+                store=self._harness_store,
+                trust_store=resources.harness_trust_store,
+            )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

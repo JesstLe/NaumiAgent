@@ -235,6 +235,19 @@ class EvolutionMetricRunnerRegistry:
                 finding_code=finding_code or "invalid_metric",
                 blocking_code="self_review_metric_unsupported",
             )
+        if (
+            metric.direction != "decrease"
+            or metric.target < 0
+            or not float(metric.target).is_integer()
+        ):
+            return MetricRunnerResolution(
+                verifier=metric.verifier,
+                status="blocked",
+                runner_version=SELF_REVIEW_STATIC_RUNNER_VERSION,
+                fixture_kind="validation_paths",
+                finding_code=finding_code,
+                blocking_code="self_review_metric_contract_invalid",
+            )
         fixture_sha256 = _sha256_payload({
             "finding_code": finding_code,
             "validation_paths": validation_paths,

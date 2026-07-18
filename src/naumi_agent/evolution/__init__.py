@@ -92,6 +92,12 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.self_review_red_baseline import (
+        EvolutionSelfReviewRedBaselineError,
+        EvolutionSelfReviewRedBaselineExecutor,
+        EvolutionSelfReviewRedCohortReceipt,
+        SelfReviewRedMetricSummary,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -231,6 +237,10 @@ __all__ = [
     "BaselineCohortMetricCase",
     "MetricRunnerBindingEntry",
     "MetricRunnerResolution",
+    "EvolutionSelfReviewRedBaselineError",
+    "EvolutionSelfReviewRedBaselineExecutor",
+    "EvolutionSelfReviewRedCohortReceipt",
+    "SelfReviewRedMetricSummary",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -372,6 +382,12 @@ def __getattr__(name: str) -> object:
         "MetricRunnerBindingEntry",
         "MetricRunnerResolution",
     }
+    self_review_red_baseline_exports = {
+        "EvolutionSelfReviewRedBaselineError",
+        "EvolutionSelfReviewRedBaselineExecutor",
+        "EvolutionSelfReviewRedCohortReceipt",
+        "SelfReviewRedMetricSummary",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -412,6 +428,8 @@ def __getattr__(name: str) -> object:
         module_name = "validation_cohorts"
     elif name in validation_metric_binding_exports:
         module_name = "validation_metric_bindings"
+    elif name in self_review_red_baseline_exports:
+        module_name = "self_review_red_baseline"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

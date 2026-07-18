@@ -42,6 +42,10 @@ Eval 和真实 Harness 检查产生。
 - HAR-08.7e Quantitative Metric Observations：已作为跨模块前置实现。finding count 等数值现在能进入
   typed Result、方向机械比较、Policy、重复样本置信区间与 H5a Store。审计同时确认 Safe Replay
   非干预，不能代替 baseline/candidate 代码执行。
+- EVO-03.2c Self-Review Static RED Baseline：已实现。从精确 Git commit/tree 的 object database 读取
+  Plan Python blob，实际重复 AST 扫描并把 finding count 以连续 sample 写入 H5a；执行前重验 Profile
+  trust，支持一致前缀续写和防篡改完成回执，不运行项目代码或冒充 ARC-04。详见
+  `EVO-03-2c-self-review-static-red-baseline.md`。
 
-Self-Review Static RED Baseline、interventional Harness runner、candidate cohort、Evolution 目标 Comparator、
-failure attribution、adversarial suite 与 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+Self-Review Static GREEN cohort、interventional Harness runner、Evolution 目标 Comparator、failure attribution、
+adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
