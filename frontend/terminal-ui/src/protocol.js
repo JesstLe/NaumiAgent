@@ -1765,8 +1765,46 @@ function normalizeEvolutionItem(value, detail) {
       hard_block: harnessBoolean(check.hard_block, "evolution/review check.hard_block"),
       detail: harnessText(check.detail, "evolution/review check.detail"),
     })),
+    governance: normalizeEvolutionGovernance(item.governance),
     aggregation: normalizeEvolutionAggregation(item.aggregation),
     proposal,
+  };
+}
+
+function normalizeEvolutionGovernance(value) {
+  if (value == null) return null;
+  const item = harnessObject(value, "evolution/review governance");
+  return {
+    policy_version: harnessText(item.policy_version, "evolution/review governance.policy_version"),
+    allowed: harnessBoolean(item.allowed, "evolution/review governance.allowed"),
+    reason: harnessChoice(
+      item.reason,
+      "evolution/review governance.reason",
+      new Set([
+        "no_active_cooldown",
+        "cooldown_expired",
+        "significant_new_evidence",
+        "cooldown_active",
+        "cooldown_record_missing",
+      ]),
+    ),
+    proposal_state: harnessChoice(
+      item.proposal_state,
+      "evolution/review governance.proposal_state",
+      new Set(["", "open", "approved", "rejected", "deferred", "merged", "converted"]),
+    ),
+    proposal_revision: harnessNonnegativeInteger(
+      item.proposal_revision,
+      "evolution/review governance.proposal_revision",
+    ),
+    cooldown_until: harnessText(
+      item.cooldown_until,
+      "evolution/review governance.cooldown_until",
+    ),
+    significant_new_evidence: harnessBoolean(
+      item.significant_new_evidence,
+      "evolution/review governance.significant_new_evidence",
+    ),
   };
 }
 

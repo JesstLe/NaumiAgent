@@ -817,7 +817,13 @@ test("evolution review snapshot is strict and drops private fields", () => {
     ...normalized, mode: "detail", items: [], events: [], selected: {
       ...item, status: "draft", hypothesis: "机械验证", providers: [], models: [], platforms: [],
       first_observed_at: "before", expected_metrics: [], evidence_refs: [],
-      policy_version: "candidate-eligibility-v1", checks: [],
+      policy_version: "candidate-eligibility-v2", checks: [],
+      governance: {
+        policy_version: "proposal-governance-v1", allowed: true,
+        reason: "no_active_cooldown", proposal_state: "", proposal_revision: 0,
+        cooldown_until: "", significant_new_evidence: false,
+        private_decision_note: "drop-me",
+      },
       aggregation: {
         policy_version: "candidate-aggregation-v1", anchor_at: "now", span_seconds: 10,
         total_count: 2, count_24h: 2, count_7d: 2, count_30d: 2,
@@ -844,6 +850,8 @@ test("evolution review snapshot is strict and drops private fields", () => {
     },
   } }).payload;
   assert.equal(detail.selected.aggregation.provider_counts[0].count, 2);
+  assert.equal(detail.selected.governance.reason, "no_active_cooldown");
+  assert.equal(Object.hasOwn(detail.selected.governance, "private_decision_note"), false);
   assert.equal(detail.selected.proposal.proposal_kind, "code");
   assert.equal(detail.selected.proposal.executable, false);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {

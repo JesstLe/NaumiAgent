@@ -26,6 +26,8 @@ Evidence 引用以及每个维度 50 个唯一值。
 - 列表按 risk 与 decision 使用语义色，同时保留完整文字标签。
 - 详情显示 Eligibility Gate、硬阻断、机械指标和审计链，并始终显示“实验资格 否”。
 - 详情消费 HAR-09.2a 同一聚合对象，显示稳定时间窗、趋势和 Provider/Model/Platform/source 分布。
+- 详情消费 HAR-09.5b2a 的只读治理 Context，显示 Proposal state/revision、cooldown reason 和截止
+  时间；活跃冷却时不显示可入队 Preview。
 - 页面状态不持久化；显式 resume 会清除旧 Candidate snapshot 并返回 conversation。
 - Bridge/Store 失败返回固定 `evolution_review_failed`，不泄露数据库路径或异常正文。
 
@@ -45,5 +47,6 @@ renderer。它们采用线性降级而非复制 Node 全屏视觉，但 list/det
 
 ## 非目标
 
-本切片不实现 approve/reject/defer，不写 Candidate，不提供排序权重，也不把 Candidate 混入 Workbench
-approval。动作仍等待 EVO-01.6b、HAR-09.5 与 EVO-02 experiment contract。
+Candidate 页面不直接实现 approve/reject/defer，不写 Candidate，也不提供排序权重。治理动作已由
+HAR-09.5b1 Workbench Service/API 提供，交互页面仍等待 HAR-09.5b2b/UI-10.6；EVO-02 experiment
+contract 尚未实现。

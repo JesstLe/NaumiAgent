@@ -8,13 +8,19 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.proposal import generate_proposal_preview
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.evolution_review import evolution_review_payload
 from naumi_agent.ui.protocol import ClientEventType, normalize_client_record
+from naumi_agent.workbench.models import ProposalSourceKind, RiskLevel
+from naumi_agent.workbench.proposal_governance import ProposalAction
+from naumi_agent.workbench.service import WorkbenchService
+from naumi_agent.workbench.store import WorkbenchStore
 
 NOW = datetime(2026, 7, 18, 18, 0, tzinfo=UTC)
 
@@ -58,6 +64,84 @@ async def test_typed_payload_is_bounded_private_and_contains_policy(tmp_path: Pa
     assert payload["selected"]["proposal"]["state"] == "preview"  # type: ignore[index]
     assert len(payload["events"]) == 2
     assert "never-render" not in json.dumps(payload, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_typed_detail_reflects_durable_cooldown_and_significant_evidence(
+    tmp_path: Path,
+) -> None:
+    evolution_store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    candidate_id = await _seed(tmp_path, evolution_store)
+    stored = await evolution_store.get_candidate(tmp_path, candidate_id)
+    assert stored is not None
+    preview = generate_proposal_preview(stored)
+    assert preview is not None
+
+    database = str(tmp_path / "workbench.db")
+    workbench_store = WorkbenchStore(database)
+    workbench = WorkbenchService(
+        task_store=TaskStore(database),
+        workbench_store=workbench_store,
+    )
+    proposal = await workbench_store.create_proposal(
+        session_id="typed-ui-session",
+        mission_id="mission-1",
+        task_id="task-1",
+        agent_id="Evolution-Agent",
+        title=preview.title,
+        impact_scope=preview.impact_scope,
+        risk_level=RiskLevel(preview.risk_level),
+        source_kind=ProposalSourceKind.EVOLUTION_CANDIDATE,
+        source_id=candidate_id,
+        source_revision=preview.source.candidate_revision,
+        source_occurrence_count=preview.source.occurrence_count,
+        source_sha256=preview.source.candidate_sha256,
+        source_proposal_id=preview.proposal_id,
+        generator_version=preview.generator_version,
+        proposal_kind=preview.proposal_kind,
+        idempotency_key=f"evolution:{preview.proposal_id}",
+    )
+    await workbench.govern_proposal(
+        "typed-ui-session",
+        proposal.id,
+        action=ProposalAction.REJECT,
+        reviewer="Human",
+        decision_note="当前证据不足",
+        now=NOW,
+    )
+    review = EvolutionReviewService(
+        evolution_store,
+        governance_reader=workbench,
+    )
+
+    blocked = evolution_review_payload(
+        await review.detail_snapshot(tmp_path, candidate_id)
+    )
+    assert blocked["selected"]["decision"] == "needs_evidence"  # type: ignore[index]
+    assert blocked["selected"]["proposal"] is None  # type: ignore[index]
+    assert blocked["selected"]["governance"]["reason"] == "cooldown_active"  # type: ignore[index]
+    assert blocked["selected"]["governance"]["allowed"] is False  # type: ignore[index]
+
+    intake = FeedbackIntakeService(evolution_store)
+    for offset in range(2, 4):
+        await intake.ingest(
+            tmp_path,
+            build_direct_user_feedback(
+                session_id="typed-ui",
+                category="defect",
+                scope="ui:footer",
+                topic="truncation",
+                summary=f"底栏截断新增证据 {offset}",
+                now=NOW + timedelta(minutes=offset),
+            ),
+        )
+    significant = evolution_review_payload(
+        await review.detail_snapshot(tmp_path, candidate_id)
+    )
+    assert significant["selected"]["decision"] == "review_ready"  # type: ignore[index]
+    assert significant["selected"]["proposal"] is not None  # type: ignore[index]
+    assert significant["selected"]["governance"]["reason"] == "significant_new_evidence"  # type: ignore[index]
+    assert significant["selected"]["governance"]["allowed"] is True  # type: ignore[index]
 
 
 def test_protocol_normalizes_and_rejects_evolution_review_requests() -> None:

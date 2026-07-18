@@ -43,7 +43,7 @@ Evolution Candidate，而不是直接触发 self_modify。
   不可变 Evidence、Candidate materialization 和 digest audit chain；并发投递、100 次同根
   聚合、幂等重试、工作区隔离与篡改检测均有机械测试。设计与证据见
   `EVO-01-3a-candidate-store-core.md`。
-- EVO-01.4a Eligibility Policy v1：已实现。机械证据、重复直接反馈、Agent-only 信号、机械
+- EVO-01.4a Eligibility Policy v2：已实现。机械证据、重复直接反馈、Agent-only 信号、机械
   verifier 和 protected scope 由版本化纯函数给出稳定 reason codes；只判断是否可进入人工审阅，
   冷却期和 experiment contract 未完成前永不授予实验资格。详见
   `EVO-01-4a-candidate-eligibility-policy.md`。
@@ -57,9 +57,9 @@ Evolution Candidate，而不是直接触发 self_modify。
   `EVO-01-6a1-typed-review-ui.md`。
 - HAR-09.2a Candidate Aggregation View：已实现单 Candidate 的稳定时间窗、趋势、维度分布与代表
   Evidence，并进入共享 Review detail；详见 `../harness/HAR-09-2a-candidate-aggregation-view.md`。
-- HAR-09.5a/5b1 已实现 Proposal 显式入队、持久来源、approve/reject/defer/merge 状态机和有效冷却；
-  单条噪声不能越过 reject/defer，显著新证据规则有版本和审计。Workbench 决策 UI 与 Eligibility
-  展示接线仍未完成。
+- HAR-09.5a/5b1/5b2a 已实现 Proposal 显式入队、持久来源、治理状态机、有效冷却与 Eligibility
+  只读接线；单条噪声不能越过 reject/defer，显著新证据规则有版本和审计，New UI/TUI 可见同一
+  治理结论。Workbench 决策交互页仍未完成。
 - runtime metric/Eval adapters、跨 Candidate 影响范围分析、
   完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。

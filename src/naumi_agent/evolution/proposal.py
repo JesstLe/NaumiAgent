@@ -10,7 +10,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from naumi_agent.evolution.aggregation import aggregate_candidate
-from naumi_agent.evolution.eligibility import assess_candidate_eligibility
+from naumi_agent.evolution.eligibility import (
+    CandidateGovernanceContext,
+    assess_candidate_eligibility,
+)
 from naumi_agent.evolution.store import EvolutionStoredCandidate
 
 ProposalKind = Literal["knowledge", "profile", "prompt", "tool", "test", "code"]
@@ -170,6 +173,8 @@ class EvolutionProposalPreview(_StrictModel):
 
 def generate_proposal_preview(
     stored: EvolutionStoredCandidate,
+    *,
+    governance: CandidateGovernanceContext | None = None,
 ) -> EvolutionProposalPreview | None:
     """Build a review preview, or ``None`` when policy disallows proposal entry."""
     if not isinstance(stored, EvolutionStoredCandidate):
@@ -178,7 +183,7 @@ def generate_proposal_preview(
     candidate_sha256 = _candidate_sha256(candidate.model_dump(mode="json"))
     if stored.revision < 1 or stored.draft_sha256 != candidate_sha256:
         raise ValueError("Stored Candidate revision 或摘要不可信。")
-    assessment = assess_candidate_eligibility(candidate)
+    assessment = assess_candidate_eligibility(candidate, governance=governance)
     if not assessment.review_ready:
         return None
     aggregation = aggregate_candidate(candidate)

@@ -22,6 +22,15 @@ _PROTECTED_PREFIXES = (
     "migrations:",
     "updater:",
 )
+_COOLDOWN_ALLOWED_REASONS = frozenset({
+    "no_active_cooldown",
+    "cooldown_expired",
+    "significant_new_evidence",
+})
+_COOLDOWN_BLOCKED_REASONS = frozenset({
+    "cooldown_active",
+    "cooldown_record_missing",
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +39,19 @@ class EligibilityCheck:
     passed: bool
     hard_block: bool
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateGovernanceContext:
+    """Read-only projection of durable Workbench governance for one Candidate."""
+
+    allowed: bool
+    reason: str
+    proposal_state: str = ""
+    proposal_revision: int = 0
+    cooldown_until: str = ""
+    significant_new_evidence: bool = False
+    policy_version: str = "proposal-governance-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +66,8 @@ class CandidateEligibilityAssessment:
 
 def assess_candidate_eligibility(
     candidate: EvolutionCandidateDraft,
+    *,
+    governance: CandidateGovernanceContext | None = None,
 ) -> CandidateEligibilityAssessment:
     """Assess proposal readiness without granting experiment authority."""
     if not isinstance(candidate, EvolutionCandidateDraft):
@@ -64,6 +88,11 @@ def assess_candidate_eligibility(
         for metric in candidate.expected_metrics
     )
 
+    cooldown_passed = bool(
+        governance is not None
+        and governance.allowed
+        and governance.reason in _COOLDOWN_ALLOWED_REASONS
+    )
     checks = (
         EligibilityCheck(
             code="protected_scope",
@@ -97,12 +126,9 @@ def assess_candidate_eligibility(
         ),
         EligibilityCheck(
             code="cooldown_gate",
-            passed=False,
+            passed=cooldown_passed,
             hard_block=False,
-            detail=(
-                "Workbench 已强制执行持久 reject/defer 冷却；当前纯 Assessment 尚未绑定"
-                "治理记录，因此本页不把该 Gate 标为通过。"
-            ),
+            detail=_cooldown_detail(governance),
         ),
         EligibilityCheck(
             code="experiment_contract",
@@ -113,12 +139,12 @@ def assess_candidate_eligibility(
     )
     if protected or not verifier_ready:
         decision: EligibilityDecision = "blocked"
-    elif not evidence_ready:
+    elif not evidence_ready or (governance is not None and not cooldown_passed):
         decision = "needs_evidence"
     else:
         decision = "review_ready"
     return CandidateEligibilityAssessment(
-        policy_version="candidate-eligibility-v1",
+        policy_version="candidate-eligibility-v2",
         decision=decision,
         review_ready=decision == "review_ready",
         experiment_eligible=False,
@@ -147,7 +173,28 @@ def _evidence_detail(
     return "仅有 Agent 解释反馈；需要直接用户反馈或机械证据。"
 
 
+def _cooldown_detail(governance: CandidateGovernanceContext | None) -> str:
+    if governance is None:
+        return "当前调用未绑定 Workbench 治理上下文，不把 cooldown Gate 标为通过。"
+    expected_allowed = governance.reason in _COOLDOWN_ALLOWED_REASONS
+    known_reason = expected_allowed or governance.reason in _COOLDOWN_BLOCKED_REASONS
+    if not known_reason or governance.allowed is not expected_allowed:
+        return "Workbench 返回了不一致的治理结论，已 fail-closed。"
+    if governance.reason == "no_active_cooldown":
+        return "当前没有生效的 reject/defer 冷却记录。"
+    if governance.reason == "cooldown_expired":
+        return f"治理冷却已于 {governance.cooldown_until} 到期。"
+    if governance.reason == "significant_new_evidence":
+        return "Candidate revision 已增加，并达到显著新证据阈值，可重新进入人工审阅。"
+    if governance.reason == "cooldown_record_missing":
+        return "历史 reject/defer 记录缺少可信截止时间，已 fail-closed 等待人工复核。"
+    if governance.reason == "cooldown_active":
+        return f"Proposal 仍处于冷却期，截止 {governance.cooldown_until}。"
+    return "Workbench 返回了未知治理结论，已 fail-closed。"
+
+
 __all__ = [
+    "CandidateGovernanceContext",
     "CandidateEligibilityAssessment",
     "EligibilityCheck",
     "assess_candidate_eligibility",

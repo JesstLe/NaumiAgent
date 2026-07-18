@@ -50,6 +50,14 @@ function detailLines(item, rawEvents) {
     color(ANSI.dim, `来源 · ${item.source_kinds.join(", ") || "-"}`),
     color(ANSI.dim, `Provider/Model/Platform · ${item.providers.join(", ") || "-"} / ${item.models.join(", ") || "-"} / ${item.platforms.join(", ") || "-"}`),
   ];
+  if (item.governance) {
+    const governance = item.governance;
+    lines.push(
+      color(ANSI.cyan, `── Workbench 治理 · ${governance.policy_version}`),
+      color(governance.allowed ? ANSI.green : ANSI.yellow, `${governance.allowed ? "可重新审阅" : "冷却阻断"} · ${governance.reason}`),
+      color(ANSI.dim, `最近 Proposal · ${governance.proposal_state || "-"} / r${governance.proposal_revision || "-"} · 冷却截止 ${governance.cooldown_until || "-"}`),
+    );
+  }
   if (item.proposal) {
     const proposal = item.proposal;
     lines.push(
@@ -92,7 +100,7 @@ function detailLines(item, rawEvents) {
   lines.push(...(item.expected_metrics || []).map((metric) => color(ANSI.dim, `• ${compactText(metric, 1000)}`)));
   lines.push(color(ANSI.cyan, `── 审计链 · ${events.length}`));
   lines.push(...events.map((event) => color(ANSI.dim, `r${event.revision} · ${event.event_type} · +${event.added_evidence_count} evidence · ${event.occurred_at}`)));
-  lines.push(color(ANSI.yellow, "只读 · 完整实验 Eligibility、approve/reject/defer 尚未开放"));
+  lines.push(color(ANSI.yellow, "只读 · 治理动作在 Workbench 执行 · approved 不授予实验资格"));
   return lines;
 }
 

@@ -54,5 +54,8 @@
 - HAR-09.5b1 已实现版本化 approve/reject/defer/merge 状态机、CAS 并发决策、30 天 reject 冷却、
   有界 defer、同 Candidate 高 revision merge，以及“风险升级或至少 max(2, 50%) 新证据”提前重开；
   Evolution 再入队已强制执行该策略。详见 `HAR-09-5b1-governance-cooldown.md`。
-- HAR-09 仍未实现 Workbench Proposal 决策页、Eligibility Gate 治理上下文展示、EVO-02 转换和
+- HAR-09.5b2a 已实现 Eligibility v2 治理上下文接线：Review Service 批量读取最新 Proposal，
+  typed New UI 和 Markdown 同步显示 cooldown 原因、状态、revision 与截止时间；活跃冷却不再显示
+  `review_ready` 或生成 Preview。详见 `HAR-09-5b2a-eligibility-governance-context.md`。
+- HAR-09 仍未实现 Workbench Proposal 决策页、EVO-02 转换和
   outcome tracking，因此整体继续保持 partial。

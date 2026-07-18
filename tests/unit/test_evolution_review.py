@@ -122,7 +122,7 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert snapshot.selected.revision == 2
     assert len(snapshot.events) == 2
     assert "feedback_recurrence" in rendered
-    assert "candidate-eligibility-v1" in rendered
+    assert "candidate-eligibility-v2" in rendered
     assert "candidate-aggregation-v1" in rendered
     assert "24h/7d/30d" in rendered
     assert "review_ready" in rendered
@@ -136,7 +136,7 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert "artifact://feedback/" in rendered
     assert "r1 `created`" in rendered
     assert "r2 `evidence_merged`" in rendered
-    assert "完整实验 Eligibility、approve/reject/defer 尚未开放" in rendered
+    assert "治理动作由 Workbench 执行" in rendered
     assert "secret-never-render" not in rendered
 
     missing = await service.detail_snapshot(tmp_path, "evc_" + "0" * 24)

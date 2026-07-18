@@ -1438,6 +1438,43 @@ class WorkbenchService:
             now=now or datetime.now(UTC),
         )
 
+    async def evaluate_source_cooldowns(
+        self,
+        sources: list[tuple[str, int, int, RiskLevel]],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, tuple[WorkbenchProposal | None, ProposalCooldownDecision]]:
+        """Batch-evaluate Candidate cooldowns from one consistent instant."""
+        if len(sources) > 500:
+            raise ValueError("批量治理评估最多支持 500 个 Candidate。")
+        normalized: dict[str, tuple[int, int, RiskLevel]] = {}
+        for source_id, revision, occurrence_count, risk_level in sources:
+            clean_id = source_id.strip()
+            if not clean_id:
+                raise ValueError("Candidate source_id 不能为空。")
+            value = (revision, occurrence_count, risk_level)
+            if clean_id in normalized and normalized[clean_id] != value:
+                raise ValueError("同一 Candidate 的批量治理输入不一致。")
+            normalized[clean_id] = value
+        previous = await self._workbench_store.latest_proposals_for_sources(
+            source_kind=ProposalSourceKind.EVOLUTION_CANDIDATE,
+            source_ids=list(normalized),
+        )
+        instant = now or datetime.now(UTC)
+        return {
+            source_id: (
+                previous.get(source_id),
+                evaluate_proposal_cooldown(
+                    previous.get(source_id),
+                    candidate_revision=revision,
+                    occurrence_count=occurrence_count,
+                    risk_level=risk_level,
+                    now=instant,
+                ),
+            )
+            for source_id, (revision, occurrence_count, risk_level) in normalized.items()
+        }
+
     async def reopen_proposal(
         self,
         session_id: str,

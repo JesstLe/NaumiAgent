@@ -1622,6 +1622,41 @@ class WorkbenchStore:
             row = await cursor.fetchone()
         return _row_to_proposal(dict(row)) if row else None
 
+    async def latest_proposals_for_sources(
+        self,
+        *,
+        source_kind: ProposalSourceKind,
+        source_ids: list[str],
+    ) -> dict[str, WorkbenchProposal]:
+        """Return one newest durable governance record per bounded source id."""
+        clean_ids = sorted({value.strip() for value in source_ids if value.strip()})
+        if len(clean_ids) > 500:
+            raise ValueError("批量治理查询最多支持 500 个 Candidate。")
+        if not clean_ids:
+            return {}
+        placeholders = ",".join("?" for _ in clean_ids)
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                f"""SELECT * FROM (
+                       SELECT p.*,
+                              ROW_NUMBER() OVER (
+                                  PARTITION BY source_id
+                                  ORDER BY source_revision DESC, updated_at DESC, rowid DESC
+                              ) AS source_rank
+                       FROM workbench_proposals AS p
+                       WHERE source_kind = ? AND source_id IN ({placeholders})
+                   ) AS ranked
+                   WHERE source_rank = 1""",
+                (source_kind.value, *clean_ids),
+            )
+            rows = await cursor.fetchall()
+        return {
+            str(row["source_id"]): _row_to_proposal(dict(row))
+            for row in rows
+        }
+
     async def list_proposals_for_snapshot(
         self, session_id: str
     ) -> list[WorkbenchProposal]:

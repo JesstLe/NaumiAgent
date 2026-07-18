@@ -1,4 +1,4 @@
-# EVO-01.4a Candidate Eligibility Policy v1
+# EVO-01.4a Candidate Eligibility Policy v2
 
 ## 目标
 
@@ -39,24 +39,27 @@ v1 明确保护安全/权限、凭据、迁移与更新相关 authority scope，
 4. `cooldown_gate`
 5. `experiment_contract`
 
-后两个 Gate 在本切片明确未通过：当前纯 Assessment 尚未绑定 HAR-09.5b1 已落库的 reject/defer
-治理上下文，隔离 experiment contract 也尚未实现。因此
-`review_ready` 只表示可进入未来 Review Queue，不等于允许修改代码。
+`cooldown_gate` 在运行时由 Review Service 注入 HAR-09.5b1 的只读治理上下文：无生效冷却、冷却
+到期或显著新证据时通过；活跃冷却、缺失可信截止时间或未知结论时 fail-closed。纯函数调用未绑定
+上下文时仍不伪造通过。`experiment_contract` 继续固定未通过，因此 `review_ready` 只表示可进入
+Review Queue，不等于允许修改代码。
 每个 Gate 另有 `hard_block`；只有 protected scope 与 verifier 缺失属于不可继续的硬阻断，证据
 不足、冷却记录和 experiment contract 缺失仍可通过后续证据或治理步骤补齐。
 
 ## 接入与验收
 
 - `/evolution detail` 和 `evolution_candidates` Tool 通过现有 Review Service 展示同一 Assessment。
-- 每个判断包含 `candidate-eligibility-v1`、稳定 reason code、通过状态和中文解释。
+- 每个判断包含 `candidate-eligibility-v2`、稳定 reason code、通过状态和中文解释；v2 可接收只读
+  Workbench 治理上下文，未绑定上下文时 fail-closed 且不伪造 cooldown 通过。
 - 重复直接反馈、单次反馈、Agent-only、单条机械证据、受保护源码 scope 均有 focused tests。
-- Assessment 不读取时钟、不访问网络、不写 Store，因此相同 Candidate 必须得到相同结果。
+- Assessment 不读取时钟、不访问网络、不写 Store；治理时间由 Workbench 在外层评估后作为不可变
+  Context 注入，因此相同 Candidate + Context 必须得到相同结果。
 - secret 不进入 Assessment 或 renderer。
 
 ## 后续
 
 - HAR-09.2 补齐时间窗趋势与 provider/model/platform 聚合视图。
-- HAR-09.5b1 已实现持久 review actions 和强制冷却；HAR-09.5b2/EVO-01.6b 需把治理状态注入
-  Review Assessment，届时 `cooldown_gate` 才能按 Candidate 真实显示通过或阻断。
+- HAR-09.5b2a 已把治理状态注入 Review Assessment 与 typed UI payload；HAR-09.5b2b/UI-10.6
+  继续实现 Proposal 决策交互页。
 - EVO-02.1/02.6 提供隔离 experiment contract 与完整 protected-scope guard，届时才允许计算真正的
   `experiment_eligible`。

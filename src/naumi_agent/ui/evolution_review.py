@@ -73,10 +73,26 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
                 }
                 for check in item.eligibility.checks[:16]
             ],
+            "governance": _governance_payload(item),
             "aggregation": _aggregation_payload(item),
             "proposal": _proposal_payload(item),
         })
     return payload
+
+
+def _governance_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
+    value = item.governance
+    if value is None:
+        return None
+    return {
+        "policy_version": value.policy_version,
+        "allowed": value.allowed,
+        "reason": value.reason,
+        "proposal_state": value.proposal_state,
+        "proposal_revision": value.proposal_revision,
+        "cooldown_until": value.cooldown_until,
+        "significant_new_evidence": value.significant_new_evidence,
+    }
 
 
 def _aggregation_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
