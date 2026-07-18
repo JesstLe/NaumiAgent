@@ -15,6 +15,7 @@ import naumi_agent.evolution.mutation_receipts as mutation_receipt_module
 import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
+import naumi_agent.evolution.validation_metric_bindings as metric_binding_module
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -74,6 +75,7 @@ from naumi_agent.evolution.patch_writers import (
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.self_review import scan_self_review_files
 from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuard,
     EvolutionStaticGuardPolicy,
@@ -81,9 +83,17 @@ from naumi_agent.evolution.static_guards import (
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.evolution.validation_cohorts import (
+    BaselineCohortMetricCase,
     EvolutionBaselineCohortRequest,
     EvolutionBaselineCohortRequestBuilder,
     EvolutionCohortRequestError,
+)
+from naumi_agent.evolution.validation_metric_bindings import (
+    EvolutionMetricBindingError,
+    EvolutionMetricRunnerBinding,
+    EvolutionMetricRunnerBindingBuilder,
+    EvolutionMetricRunnerRegistry,
+    MetricRunnerBindingEntry,
 )
 from naumi_agent.evolution.validation_plans import (
     EvolutionValidationBindingError,
@@ -93,6 +103,7 @@ from naumi_agent.evolution.validation_plans import (
     EvolutionValidationProfileBinding,
     validation_requirements_for_path,
 )
+from naumi_agent.harness.eval_replay import SAFE_REPLAY_EVAL_RUNNER_VERSION
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.model.router import ModelResponse, TokenUsage
@@ -4205,6 +4216,169 @@ async def test_baseline_cohort_request_rejects_sample_budget_and_nested_tamperin
     ][:1]
     with pytest.raises(ValidationError, match="Binding requirements"):
         EvolutionBaselineCohortRequest.model_validate(missing_coverage)
+
+
+def _metric_case(
+    *,
+    metric_name: str,
+    verifier: str,
+) -> BaselineCohortMetricCase:
+    return BaselineCohortMetricCase(
+        order=1,
+        metric_name=metric_name,
+        direction="decrease",
+        target=0,
+        verifier=verifier,
+        procedure_sha256="a" * 64,
+    )
+
+
+def test_metric_runner_registry_binds_only_real_mechanical_runners(
+    tmp_path: Path,
+) -> None:
+    registry = EvolutionMetricRunnerRegistry()
+    source = tmp_path / "src" / "naumi_agent" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "def risky() -> None:\n    try:\n        pass\n    except Exception:\n        pass\n",
+        encoding="utf-8",
+    )
+    validation_paths = ("src/naumi_agent/example.py",)
+
+    static = registry.resolve(
+        _metric_case(
+            metric_name="self_review.broad_except.count",
+            verifier="self_review_static",
+        ),
+        validation_paths=validation_paths,
+    )
+    replay = registry.resolve(
+        _metric_case(metric_name="replay.error_rate", verifier="harness_replay"),
+        validation_paths=validation_paths,
+    )
+    feedback = registry.resolve(
+        _metric_case(
+            metric_name="feedback.same_root.recurrence",
+            verifier="feedback_recurrence",
+        ),
+        validation_paths=validation_paths,
+    )
+
+    assert static.status == "ready"
+    assert static.runner_version == "self_review_static@1"
+    assert static.timeout_seconds_per_sample == 30
+    assert static.finding_code == "broad_except"
+    assert static.fixture_sha256 is not None
+    assert static.model_access is static.network_access is False
+    assert static.side_effect_free is True
+    scan = scan_self_review_files([source], workspace_root=tmp_path)
+    assert sum(
+        finding.code.value == static.finding_code for finding in scan.findings
+    ) == 1
+    assert replay.status == "blocked"
+    assert replay.runner_version == SAFE_REPLAY_EVAL_RUNNER_VERSION
+    assert replay.blocking_code == "replay_fixture_required"
+    assert feedback.status == "blocked"
+    assert feedback.runner_version is None
+    assert feedback.blocking_code == "feedback_window_runner_unavailable"
+
+
+def test_metric_runner_registry_rejects_unsupported_self_review_metric() -> None:
+    resolution = EvolutionMetricRunnerRegistry().resolve(
+        _metric_case(
+            metric_name="self_review.imaginary.count",
+            verifier="self_review_static",
+        ),
+        validation_paths=("src/naumi_agent/example.py",),
+    )
+
+    assert resolution.status == "blocked"
+    assert resolution.blocking_code == "self_review_metric_unsupported"
+
+    with pytest.raises(EvolutionMetricBindingError) as unsafe:
+        EvolutionMetricRunnerRegistry().resolve(
+            _metric_case(
+                metric_name="self_review.broad_except.count",
+                verifier="self_review_static",
+            ),
+            validation_paths=("../outside.py",),
+        )
+    assert unsafe.value.code == "validation_paths_invalid"
+
+
+def test_metric_runner_budget_blocks_an_otherwise_ready_runner() -> None:
+    metric = _metric_case(
+        metric_name="self_review.broad_except.count",
+        verifier="self_review_static",
+    )
+    resolution = EvolutionMetricRunnerRegistry().resolve(
+        metric,
+        validation_paths=("src/naumi_agent/example.py",),
+    )
+    entry = MetricRunnerBindingEntry(
+        order=metric.order,
+        metric_name=metric.metric_name,
+        direction=metric.direction,
+        target=metric.target,
+        procedure_sha256=metric.procedure_sha256,
+        resolution=resolution,
+    )
+
+    blocked = metric_binding_module._apply_duration_budget(
+        (entry,),
+        required_duration_seconds=1_350,
+        max_total_duration_seconds=1_200,
+    )
+
+    assert blocked[0].resolution.runner_version == "self_review_static@1"
+    assert blocked[0].resolution.timeout_seconds_per_sample == 30
+    assert blocked[0].resolution.status == "blocked"
+    assert blocked[0].resolution.blocking_code == "metric_duration_budget_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_metric_runner_binding_is_deterministic_blocked_and_tamper_evident(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, plan, profile_binding = (
+        await _validation_binding_fixture(tmp_path)
+    )
+    baseline_request = EvolutionBaselineCohortRequestBuilder().build(
+        contract=contract,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+    )
+    builder = EvolutionMetricRunnerBindingBuilder()
+    main_before = _git(workspace, "status", "--porcelain")
+    isolated_before = _git(Path(lease.worktree_path), "status", "--porcelain")
+
+    first = builder.build(
+        baseline_request=baseline_request,
+        validation_plan=plan,
+    )
+    second = builder.build(
+        baseline_request=baseline_request,
+        validation_plan=plan,
+    )
+
+    assert first == second
+    assert first.binding_id == f"evvmetric_{first.binding_sha256[:24]}"
+    assert first.binding_status == "blocked"
+    assert first.blocking_codes == ("feedback_window_runner_unavailable",)
+    assert first.metric_binding_complete is False
+    assert first.profile_timeout_seconds_total == 1_200
+    assert first.metric_timeout_seconds_total == 0
+    assert first.required_duration_seconds == 1_200
+    assert first.budget_headroom_seconds == 0
+    assert first.entries[0].resolution.status == "blocked"
+    assert first.execution_ready is False
+    assert _git(workspace, "status", "--porcelain") == main_before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == isolated_before
+
+    tampered = first.model_dump(mode="json")
+    tampered["entries"][0]["resolution"]["blocking_code"] = "invented_success"
+    with pytest.raises(ValidationError, match="blocking codes|摘要"):
+        EvolutionMetricRunnerBinding.model_validate(tampered)
 
 
 @pytest.mark.asyncio

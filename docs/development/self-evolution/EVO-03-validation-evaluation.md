@@ -35,6 +35,10 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.2a Baseline Cohort Request：已实现。引用 Plan/Binding 固定 HAR-08 RED Suite/Batch、至少 5 次
   样本、确定性 seed、baseline/environment identity、check coverage 与总预算；保持不可执行并要求 ARC-04
   物化。详见 `EVO-03-2a-baseline-cohort-request.md`。
+- EVO-03.2b Metric Runner / Timeout Binding：已实现。`self_review_static@1` 绑定真实 AST scanner，HAR-05
+  replay 绑定现有 `safe_replay@1` 并在缺精确 fixture 时阻断，feedback recurrence 在缺 observation-window
+  runner 时阻断；所有可执行 metric timeout 纳入 cohort 总预算。详见
+  `EVO-03-2b-metric-runner-binding.md`。
 
-Baseline Request 尚未实际执行或写入 H5a；candidate cohort、Comparator、failure attribution、adversarial
-suite 与 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+Replay Fixture Binding、Baseline 实际执行/H5a 写入、candidate cohort、Comparator、failure attribution、
+adversarial suite 与 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。

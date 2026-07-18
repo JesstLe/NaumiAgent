@@ -114,6 +114,14 @@ if TYPE_CHECKING:
         EvolutionBaselineCohortRequestBuilder,
         EvolutionCohortRequestError,
     )
+    from naumi_agent.evolution.validation_metric_bindings import (
+        EvolutionMetricBindingError,
+        EvolutionMetricRunnerBinding,
+        EvolutionMetricRunnerBindingBuilder,
+        EvolutionMetricRunnerRegistry,
+        MetricRunnerBindingEntry,
+        MetricRunnerResolution,
+    )
     from naumi_agent.evolution.validation_plans import (
         EvolutionValidationBindingError,
         EvolutionValidationPlan,
@@ -190,6 +198,10 @@ __all__ = [
     "EvolutionBaselineCohortRequest",
     "EvolutionBaselineCohortRequestBuilder",
     "EvolutionCohortRequestError",
+    "EvolutionMetricBindingError",
+    "EvolutionMetricRunnerBinding",
+    "EvolutionMetricRunnerBindingBuilder",
+    "EvolutionMetricRunnerRegistry",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
@@ -217,6 +229,8 @@ __all__ = [
     "ValidationProfileCheckBinding",
     "BaselineCohortCheckCase",
     "BaselineCohortMetricCase",
+    "MetricRunnerBindingEntry",
+    "MetricRunnerResolution",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -350,6 +364,14 @@ def __getattr__(name: str) -> object:
         "EvolutionBaselineCohortRequestBuilder",
         "EvolutionCohortRequestError",
     }
+    validation_metric_binding_exports = {
+        "EvolutionMetricBindingError",
+        "EvolutionMetricRunnerBinding",
+        "EvolutionMetricRunnerBindingBuilder",
+        "EvolutionMetricRunnerRegistry",
+        "MetricRunnerBindingEntry",
+        "MetricRunnerResolution",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -388,6 +410,8 @@ def __getattr__(name: str) -> object:
         module_name = "validation_plans"
     elif name in validation_cohort_exports:
         module_name = "validation_cohorts"
+    elif name in validation_metric_binding_exports:
+        module_name = "validation_metric_bindings"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

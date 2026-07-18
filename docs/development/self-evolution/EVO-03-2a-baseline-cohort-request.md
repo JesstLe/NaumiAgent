@@ -91,11 +91,12 @@ Baseline cohort 尚未持久化完成前，不允许生成 GREEN request。
 - Builder 前后主工作树与隔离 worktree 状态不变；
 - Engine 组合 Builder，3.1a/3.1b 与 Mutation Receipt 聚焦回归继续通过。
 
-## 当前不足与下一步
+## 后续状态
 
-- metric verifier 的独立时间预算和 runner identity 尚未绑定；
+- EVO-03.2b 已实现 metric verifier runner identity、fixture 类型与独立 timeout 预算绑定，详见
+  `EVO-03-2b-metric-runner-binding.md`；
+- Replay 仍缺精确 HAR-05 fixture，feedback recurrence 仍缺可信 observation-window runner，均保持 blocked；
 - ARC-04 ephemeral worker 尚未实现，因此不能真实物化 baseline commit；
 - Request 尚未进入 H5a Store，也没有 cohort completion receipt；
-- 下一切片应实现 EVO-03.2b Metric Runner/Timeout Binding Request，优先复用 HAR-05 replay 与现有静态
-  self-review 能力；无法机械执行的 feedback recurrence 必须明确 blocked，不得伪造数值；
-- 完成所有 runner authority 后，才实现 ARC-04 baseline execution adapter 与连续 H5a sample 写入。
+- 下一切片应实现 EVO-03.2c Replay Fixture Binding；完成可用 runner authority 后，才实现 ARC-04
+  baseline execution adapter 与连续 H5a sample 写入。
