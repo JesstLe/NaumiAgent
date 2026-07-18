@@ -3,11 +3,22 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from naumi_agent.evolution.experiment_leases import (
+    EvolutionExperimentLeaseStore,
+    ExperimentLeaseState,
+    ExperimentWorktreeLease,
+)
+from naumi_agent.evolution.self_review_green_cohort import (
+    EvolutionSelfReviewGreenCohortError,
+    EvolutionSelfReviewGreenCohortExecutor,
+    EvolutionSelfReviewGreenCohortRequestBuilder,
+)
 from naumi_agent.evolution.self_review_red_baseline import (
     EvolutionSelfReviewRedBaselineError,
     EvolutionSelfReviewRedBaselineExecutor,
@@ -35,6 +46,10 @@ from naumi_agent.harness.eval_models import (
     EvalCaseStatus,
     EvalRunStatus,
     HarnessEvalSuiteResult,
+)
+from naumi_agent.harness.eval_statistics import (
+    EvalStatisticalVerdict,
+    compare_eval_repetitions,
 )
 from naumi_agent.harness.store import HarnessStore, HarnessStoreError
 from naumi_agent.harness.trust import HarnessTrustStore
@@ -111,6 +126,11 @@ def _plan(
     operation: str = "modify",
     file_kind: str = "python",
 ):
+    contract_id = f"evx_{'1' * 24}"
+    contract_manifest_sha256 = "2" * 64
+    lease_digest = hashlib.sha256(
+        f"{contract_id}:{contract_manifest_sha256}".encode()
+    ).hexdigest()
     metric = ValidationMetricPair(
         order=1,
         metric_name="self_review.broad_except.count",
@@ -122,9 +142,9 @@ def _plan(
     payload = {
         "schema_version": 2,
         "policy_version": VALIDATION_PLAN_POLICY,
-        "contract_id": f"evx_{'1' * 24}",
-        "contract_manifest_sha256": "2" * 64,
-        "lease_id": f"evl_{'3' * 24}",
+        "contract_id": contract_id,
+        "contract_manifest_sha256": contract_manifest_sha256,
+        "lease_id": f"evl_{lease_digest[:24]}",
         "source_snapshot_id": f"evs_{'4' * 24}",
         "source_snapshot_sha256": "5" * 64,
         "mutation_receipt_id": f"evmr_{'6' * 24}",
@@ -275,6 +295,89 @@ async def _authority(
     trust = HarnessTrustStore(tmp_path / "trust.db")
     await trust.trust(root, plan.profile_sha256, source="test")
     return root, plan, request, binding, store, trust
+
+
+class _StaticLeaseStore(EvolutionExperimentLeaseStore):
+    def __init__(self, db_path: Path, lease: ExperimentWorktreeLease) -> None:
+        super().__init__(db_path)
+        self.current = lease
+
+    async def get(self, contract_id: str):
+        assert contract_id == self.current.contract_id
+        return self.current
+
+
+async def _green_authority(tmp_path: Path, *, operation: str = "modify"):
+    root, plan, request, binding, store, trust = await _authority(
+        tmp_path,
+        operation=operation,
+    )
+    red = await EvolutionSelfReviewRedBaselineExecutor(
+        store=store,
+        trust_store=trust,
+    ).execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+    )
+    storage = tmp_path / "worktrees"
+    storage.mkdir()
+    worktree_name = f"experiment-{plan.contract_id.removeprefix('evx_')[:16]}"
+    candidate = storage / worktree_name
+    branch = f"codex/evo-green-{operation}"
+    _git(
+        root,
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        branch,
+        str(candidate),
+        plan.baseline_commit,
+    )
+    (candidate / "sample.py").write_text("def clean() -> None:\n    pass\n")
+    lease = ExperimentWorktreeLease(
+        lease_id=plan.lease_id,
+        contract_id=plan.contract_id,
+        manifest_sha256=plan.contract_manifest_sha256,
+        session_id="session-green",
+        mission_id="mission-green",
+        task_id="task-green",
+        owner="test",
+        state=ExperimentLeaseState.ACTIVE,
+        worktree_name=worktree_name,
+        worktree_path=str(candidate),
+        branch=branch,
+        baseline_commit=plan.baseline_commit,
+        expires_at=datetime(2030, 1, 1, tzinfo=UTC).isoformat(),
+        created_at=datetime(2026, 7, 19, tzinfo=UTC).isoformat(),
+        updated_at=datetime(2026, 7, 19, tzinfo=UTC).isoformat(),
+        worktree_ready=True,
+        execution_ready=False,
+    )
+    lease_store = _StaticLeaseStore(tmp_path / "leases.db", lease)
+    green_request = EvolutionSelfReviewGreenCohortRequestBuilder().build(
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+    return (
+        root,
+        candidate,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    )
 
 
 @pytest.mark.asyncio
@@ -602,3 +705,272 @@ def test_self_review_count_runner_rejects_invalid_metric_contract() -> None:
 
     assert resolution.status == "blocked"
     assert resolution.blocking_code == "self_review_metric_contract_invalid"
+
+
+@pytest.mark.asyncio
+async def test_green_modify_cohort_is_idempotent_and_statistically_improved(
+    tmp_path: Path,
+) -> None:
+    (
+        root,
+        candidate,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    status_before = _git(candidate, "status", "--porcelain")
+    executor = EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    )
+
+    first = await executor.execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+    second = await executor.execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+    red_records = await store.list_eval_results(
+        root,
+        request.batch_id,
+        request.suite_id,
+    )
+    green_records = await store.list_eval_results(
+        root,
+        green_request.batch_id,
+        green_request.suite_id,
+    )
+    statistical = compare_eval_repetitions(
+        tuple(item.result for item in red_records),
+        tuple(item.result for item in green_records),
+    )
+
+    assert first == second
+    assert first.metrics[0].sample_values == (0, 0, 0, 0, 0)
+    assert red.metrics[0].sample_values == (1, 1, 1, 1, 1)
+    assert green_request.sample_seeds == request.sample_seeds
+    assert [item.sample_index for item in green_records] == list(range(5))
+    assert statistical.verdict is EvalStatisticalVerdict.IMPROVED
+    assert all(item.result.status is EvalRunStatus.PASSED for item in green_records)
+    assert all(
+        item.result.baseline_identity is not None
+        and item.result.baseline_identity.source.dirty
+        and not item.result.baseline_identity.baseline_eligible
+        for item in green_records
+    )
+    assert _git(candidate, "status", "--porcelain") == status_before
+
+
+@pytest.mark.asyncio
+async def test_green_create_cohort_uses_candidate_after_empty_red_fixture(
+    tmp_path: Path,
+) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path, operation="create")
+
+    green = await EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    ).execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+
+    assert plan.files[0].operation == "create"
+    assert red.metrics[0].sample_values == (0, 0, 0, 0, 0)
+    assert green.metrics[0].sample_values == (0, 0, 0, 0, 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["extra_path", "digest"])
+async def test_green_candidate_drift_fails_before_h5a_write(
+    tmp_path: Path,
+    drift: str,
+) -> None:
+    (
+        root,
+        candidate,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    if drift == "extra_path":
+        (candidate / "extra.py").write_text("EXTRA = True\n")
+        expected_code = "candidate_status_mismatch"
+    else:
+        (candidate / "sample.py").write_text("def drifted() -> int:\n    return 2\n")
+        expected_code = "candidate_file_digest_mismatch"
+
+    with pytest.raises(EvolutionSelfReviewGreenCohortError) as error:
+        await EvolutionSelfReviewGreenCohortExecutor(
+            store=store,
+            trust_store=trust,
+            lease_store=lease_store,
+            worktree_storage_dir=storage,
+            clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+        ).execute(
+            workspace_root=root,
+            green_request=green_request,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+            red_receipt=red,
+            lease=lease,
+        )
+
+    assert error.value.code == expected_code
+    assert await store.list_eval_results(
+        root,
+        green_request.batch_id,
+        green_request.suite_id,
+    ) == ()
+
+
+@pytest.mark.asyncio
+async def test_green_rejects_a_stale_lease_store_record(tmp_path: Path) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    lease_store.current = lease.model_copy(update={
+        "state": ExperimentLeaseState.RELEASED,
+        "worktree_ready": False,
+    })
+
+    with pytest.raises(EvolutionSelfReviewGreenCohortError) as error:
+        await EvolutionSelfReviewGreenCohortExecutor(
+            store=store,
+            trust_store=trust,
+            lease_store=lease_store,
+            worktree_storage_dir=storage,
+            clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+        ).execute(
+            workspace_root=root,
+            green_request=green_request,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+            red_receipt=red,
+            lease=lease,
+        )
+
+    assert error.value.code == "candidate_lease_stale"
+
+
+@pytest.mark.asyncio
+async def test_green_matching_partial_prefix_resumes_safely(tmp_path: Path) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        _,
+        trust,
+    ) = await _green_authority(tmp_path)
+    failing = _FailAfterTwoStore(tmp_path / "harness.db")
+    with pytest.raises(HarnessStoreError, match="interruption"):
+        await EvolutionSelfReviewGreenCohortExecutor(
+            store=failing,
+            trust_store=trust,
+            lease_store=lease_store,
+            worktree_storage_dir=storage,
+            clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+        ).execute(
+            workspace_root=root,
+            green_request=green_request,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+            red_receipt=red,
+            lease=lease,
+        )
+    store = HarnessStore(tmp_path / "harness.db")
+    partial = await store.list_eval_results(
+        root,
+        green_request.batch_id,
+        green_request.suite_id,
+    )
+    assert [item.sample_index for item in partial] == [0, 1]
+
+    receipt = await EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    ).execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+
+    assert receipt.persisted_samples == 5

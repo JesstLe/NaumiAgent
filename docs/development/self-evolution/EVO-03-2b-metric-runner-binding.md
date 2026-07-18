@@ -84,6 +84,7 @@ Blocked runner 没有 timeout 时不会伪造耗时，其缺失由 blocking code
 - `harness_replay` 保持 blocked；需要运行项目代码的 Harness failure 指标必须改用 ARC-04 interventional
   runner，不能仅补 Replay fixture；
 - `feedback_recurrence` 需要独立 observation-window 数据模型、最短观察期和缺失数据语义；
-- EVO-03.2c 已完成 Self-Review 静态 RED baseline、H5a 连续 sample 与 completion receipt；
+- EVO-03.2c/3.3a 已完成 Self-Review 静态 RED/GREEN cohort、H5a 连续 sample 与 completion receipt；
 - ARC-04 ephemeral worker 和执行项目代码的 baseline 仍未实现；
-- 下一切片优先实现 EVO-03.3a Self-Review Static GREEN Cohort，再形成第一份真实 RED→GREEN 数值对照。
+- 下一切片优先实现 EVO-03.4a Self-Review Quantitative Comparison Receipt，冻结第一份真实 RED→GREEN
+  数值判定。

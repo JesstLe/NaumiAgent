@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
 import re
 import subprocess
 import tempfile
-import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
@@ -17,17 +15,20 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from naumi_agent.evolution.self_review import (
-    SELF_REVIEW_STATIC_RUNNER_VERSION,
     SelfReviewFindingCode,
-    SelfReviewStaticScan,
-    scan_self_review_files,
+)
+from naumi_agent.evolution.self_review_eval_runtime import (
+    SelfReviewEvalRuntimeError,
+    build_self_review_eval_configuration,
+    require_continuous_eval_prefix,
+    run_self_review_static_repetitions,
+    validate_self_review_cohort_authority,
 )
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequest,
 )
 from naumi_agent.evolution.validation_metric_bindings import (
     EvolutionMetricRunnerBinding,
-    EvolutionMetricRunnerRegistry,
 )
 from naumi_agent.evolution.validation_plans import EvolutionValidationPlan
 from naumi_agent.harness.eval_identity import (
@@ -37,16 +38,7 @@ from naumi_agent.harness.eval_identity import (
     build_eval_baseline_identity,
     capture_eval_platform_identity,
 )
-from naumi_agent.harness.eval_models import (
-    EvalCaseStatus,
-    EvalGuardrailStatus,
-    EvalRunStatus,
-    HarnessEvalCaseResult,
-    HarnessEvalComparisonPolicy,
-    HarnessEvalGuardrailResult,
-    HarnessEvalMetricObservation,
-    HarnessEvalSuiteResult,
-)
+from naumi_agent.harness.eval_models import HarnessEvalSuiteResult
 from naumi_agent.harness.store import (
     HarnessStore,
     HarnessStoreConflictError,
@@ -186,7 +178,6 @@ class EvolutionSelfReviewRedBaselineExecutor:
             raise TypeError("Self-Review RED executor 需要 HarnessTrustStore。")
         self._store = store
         self._trust_store = trust_store
-        self._registry = EvolutionMetricRunnerRegistry()
 
     async def execute(
         self,
@@ -197,12 +188,14 @@ class EvolutionSelfReviewRedBaselineExecutor:
         validation_plan: EvolutionValidationPlan,
     ) -> EvolutionSelfReviewRedCohortReceipt:
         root = _canonical_git_root(workspace_root)
-        request, binding, plan = _validated_authority(
-            baseline_request,
-            metric_binding,
-            validation_plan,
-            registry=self._registry,
-        )
+        try:
+            request, binding, plan = validate_self_review_cohort_authority(
+                baseline_request,
+                metric_binding,
+                validation_plan,
+            )
+        except SelfReviewEvalRuntimeError as exc:
+            raise EvolutionSelfReviewRedBaselineError(exc.code, str(exc)) from exc
         if not await self._trust_store.is_trusted(root, request.profile_sha256):
             raise EvolutionSelfReviewRedBaselineError(
                 "profile_trust_revalidation_failed",
@@ -216,7 +209,7 @@ class EvolutionSelfReviewRedBaselineExecutor:
             request.suite_id,
             limit=request.requested_samples + 1,
         )
-        _require_continuous_prefix(existing, request.requested_samples)
+        _require_red_prefix(existing, request.requested_samples)
         results = await _run_repetitions(
             blobs=blobs,
             request=request,
@@ -267,87 +260,13 @@ class EvolutionSelfReviewRedBaselineExecutor:
             request.suite_id,
             limit=request.requested_samples + 1,
         )
-        _require_continuous_prefix(persisted, request.requested_samples)
+        _require_red_prefix(persisted, request.requested_samples)
         if len(persisted) != request.requested_samples:
             raise EvolutionSelfReviewRedBaselineError(
                 "cohort_persistence_incomplete",
                 "Self-Review RED cohort 未完整写入 H5a。",
             )
         return _build_receipt(request, binding, plan, persisted)
-
-
-def _validated_authority(
-    baseline_request: EvolutionBaselineCohortRequest,
-    metric_binding: EvolutionMetricRunnerBinding,
-    validation_plan: EvolutionValidationPlan,
-    *,
-    registry: EvolutionMetricRunnerRegistry,
-) -> tuple[
-    EvolutionBaselineCohortRequest,
-    EvolutionMetricRunnerBinding,
-    EvolutionValidationPlan,
-]:
-    try:
-        request = EvolutionBaselineCohortRequest.model_validate(
-            baseline_request.model_dump(mode="json")
-        )
-        binding = EvolutionMetricRunnerBinding.model_validate(
-            metric_binding.model_dump(mode="json")
-        )
-        plan = EvolutionValidationPlan.model_validate(
-            validation_plan.model_dump(mode="json")
-        )
-    except (AttributeError, ValueError, TypeError) as exc:
-        raise EvolutionSelfReviewRedBaselineError(
-            "red_baseline_authority_invalid",
-            "Self-Review RED baseline authority 无效或已被篡改。",
-        ) from exc
-    if not (
-        plan.schema_version == 2
-        and request.validation_plan_id == plan.validation_plan_id
-        and request.validation_plan_sha256 == plan.validation_plan_sha256
-        and request.baseline_commit == plan.baseline_commit
-        and request.baseline_tree_sha256 == plan.baseline_tree_sha256
-        and binding.baseline_request_id == request.request_id
-        and binding.baseline_request_sha256 == request.request_sha256
-        and binding.validation_plan_id == plan.validation_plan_id
-        and binding.validation_plan_sha256 == plan.validation_plan_sha256
-        and binding.requested_samples == request.requested_samples
-        and binding.binding_status == "ready"
-        and binding.metric_binding_complete
-    ):
-        raise EvolutionSelfReviewRedBaselineError(
-            "red_baseline_authority_mismatch",
-            "Self-Review RED baseline Request、Binding 与 Plan 不一致。",
-        )
-    if any(item.file_kind != "python" for item in plan.files):
-        raise EvolutionSelfReviewRedBaselineError(
-            "self_review_python_paths_required",
-            "Self-Review 静态 baseline 只接受 Plan 中的 Python 文件。",
-        )
-    if len(binding.entries) != len(request.metrics):
-        raise EvolutionSelfReviewRedBaselineError(
-            "metric_binding_set_mismatch",
-            "Self-Review metric binding 数量与 Request 不一致。",
-        )
-    validation_paths = tuple(item.path for item in plan.files)
-    for metric, entry in zip(request.metrics, binding.entries, strict=True):
-        expected_resolution = registry.resolve(metric, validation_paths=validation_paths)
-        if not (
-            entry.order == metric.order
-            and entry.metric_name == metric.metric_name
-            and entry.direction == metric.direction
-            and entry.target == metric.target
-            and entry.procedure_sha256 == metric.procedure_sha256
-            and entry.resolution == expected_resolution
-            and entry.resolution.status == "ready"
-            and entry.resolution.verifier == "self_review_static"
-        ):
-            raise EvolutionSelfReviewRedBaselineError(
-                "self_review_metric_binding_mismatch",
-                "Self-Review metric runner authority 不完整或不匹配。",
-            )
-    return request, binding, plan
 
 
 async def _run_repetitions(
@@ -359,7 +278,6 @@ async def _run_repetitions(
     configuration: HarnessEvalConfigurationIdentity,
     identity: HarnessEvalBaselineIdentity,
 ) -> tuple[HarnessEvalSuiteResult, ...]:
-    results: list[HarnessEvalSuiteResult] = []
     with tempfile.TemporaryDirectory(prefix="naumi-evo-red-") as temporary:
         root = Path(temporary).resolve()
         files: list[Path] = []
@@ -368,112 +286,29 @@ async def _run_repetitions(
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
             files.append(destination)
-        timeout = min(
-            item.resolution.timeout_seconds_per_sample or 0
-            for item in binding.entries
-        )
-        for _ in range(request.requested_samples):
-            started = time.perf_counter()
-            try:
-                scan = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        scan_self_review_files,
-                        files,
-                        workspace_root=root,
-                    ),
-                    timeout=timeout,
-                )
-            except TimeoutError as exc:
-                raise EvolutionSelfReviewRedBaselineError(
-                    "self_review_static_timeout",
-                    "Self-Review 静态 baseline 扫描超时，未写入部分结果。",
-                ) from exc
-            if scan.errors or scan.files_scanned != len(files):
-                raise EvolutionSelfReviewRedBaselineError(
-                    "self_review_static_scan_failed",
-                    "Self-Review 静态 baseline 未完整扫描全部可信文件。",
-                )
-            results.append(_build_result(
+        try:
+            return await run_self_review_static_repetitions(
+                files=files,
+                scan_root=root,
+                phase="red",
                 request=request,
                 binding=binding,
                 plan=plan,
                 configuration=configuration,
                 identity=identity,
-                scan=scan,
-                duration_ms=(time.perf_counter() - started) * 1_000,
-            ))
-    return tuple(results)
-
-
-def _build_result(
-    *,
-    request: EvolutionBaselineCohortRequest,
-    binding: EvolutionMetricRunnerBinding,
-    plan: EvolutionValidationPlan,
-    configuration: HarnessEvalConfigurationIdentity,
-    identity: HarnessEvalBaselineIdentity,
-    scan: SelfReviewStaticScan,
-    duration_ms: float,
-) -> HarnessEvalSuiteResult:
-    counts = {
-        code.value: sum(1 for finding in scan.findings if finding.code is code)
-        for code in SelfReviewFindingCode
-    }
-    cases: list[HarnessEvalCaseResult] = []
-    for entry in binding.entries:
-        finding_code = entry.resolution.finding_code
-        if finding_code is None or finding_code not in counts:
-            raise EvolutionSelfReviewRedBaselineError(
-                "self_review_finding_code_invalid",
-                "Self-Review metric finding code 无效。",
             )
-        observation = HarnessEvalMetricObservation(
-            metric=entry.metric_name,
-            value=counts[finding_code],
-            unit="count",
-            direction=entry.direction,
-            target=entry.target,
-            primary=True,
-        )
-        status = (
-            EvalCaseStatus.PASSED
-            if observation.target_met
-            else EvalCaseStatus.IMPLEMENTATION_FAILURE
-        )
-        cases.append(HarnessEvalCaseResult(
-            case_id=f"metric-{entry.order:02d}-{finding_code.replace('_', '-')}",
-            runner=SELF_REVIEW_STATIC_RUNNER_VERSION,
-            status=status,
-            primary_metric=entry.metric_name,
-            metric_observations=(observation,),
-            guardrails=(
-                HarnessEvalGuardrailResult(
-                    guardrail="no_model",
-                    status=EvalGuardrailStatus.PASSED,
-                ),
-                HarnessEvalGuardrailResult(
-                    guardrail="no_side_effect",
-                    status=EvalGuardrailStatus.PASSED,
-                ),
-            ),
-            message=f"RED baseline 发现 {counts[finding_code]} 项 {finding_code}。",
-            duration_ms=duration_ms,
-        ))
-    suite_status = (
-        EvalRunStatus.PASSED
-        if all(item.status is EvalCaseStatus.PASSED for item in cases)
-        else EvalRunStatus.FAILED
-    )
-    return HarnessEvalSuiteResult(
-        suite_id=request.suite_id,
-        title="Self-Review 静态 RED baseline",
-        suite_path=f"evolution:{plan.validation_plan_id}",
-        suite_sha256=configuration.suite_sha256,
-        status=suite_status,
-        cases=tuple(cases),
-        baseline_identity=identity,
-        duration_ms=duration_ms,
-    )
+        except SelfReviewEvalRuntimeError as exc:
+            raise EvolutionSelfReviewRedBaselineError(exc.code, str(exc)) from exc
+
+
+def _require_red_prefix(
+    records: tuple[HarnessStoredEvalResult, ...],
+    requested_samples: int,
+) -> None:
+    try:
+        require_continuous_eval_prefix(records, requested_samples, phase="red")
+    except SelfReviewEvalRuntimeError as exc:
+        raise EvolutionSelfReviewRedBaselineError(exc.code, str(exc)) from exc
 
 
 def _build_identity(
@@ -482,21 +317,7 @@ def _build_identity(
     binding: EvolutionMetricRunnerBinding,
     plan: EvolutionValidationPlan,
 ):
-    suite_sha256 = _sha256_payload({
-        "request_sha256": request.request_sha256,
-        "binding_sha256": binding.binding_sha256,
-        "plan_sha256": plan.validation_plan_sha256,
-    })
-    policy = HarnessEvalComparisonPolicy()
-    configuration = HarnessEvalConfigurationIdentity.create(
-        suite_id=request.suite_id,
-        suite_sha256=suite_sha256,
-        profile_sha256=request.profile_sha256,
-        policy_sha256=policy.sha256,
-        runner_version=SELF_REVIEW_STATIC_RUNNER_VERSION,
-        repetitions=request.requested_samples,
-        live=False,
-    )
+    configuration = build_self_review_eval_configuration(request, binding, plan)
     identity = build_eval_baseline_identity(
         root,
         configuration=configuration,
@@ -645,18 +466,6 @@ def _git(root: Path, *args: str) -> bytes:
             "无法只读访问 Git baseline。",
         )
     return completed.stdout
-
-
-def _require_continuous_prefix(
-    records: tuple[HarnessStoredEvalResult, ...],
-    requested_samples: int,
-) -> None:
-    indexes = [item.sample_index for item in records]
-    if indexes != list(range(len(records))) or len(records) > requested_samples:
-        raise EvolutionSelfReviewRedBaselineError(
-            "existing_cohort_non_continuous",
-            "已有 Self-Review RED cohort sample_index 不连续或越界。",
-        )
 
 
 def _build_receipt(
