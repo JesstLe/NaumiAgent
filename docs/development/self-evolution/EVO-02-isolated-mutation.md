@@ -70,5 +70,7 @@
 - EVO-02.5c2b 已实现多文件启动恢复：全组 before/after/unknown 判定、严格逆序 cursor、活动锁延后、
   单/多 journal 冲突、Engine 启动顺序，以及 TUI/新 UI 分类状态。详见
   `EVO-02-5c2b-write-set-recovery.md`。
-- EVO-02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，HAR-08 RED/GREEN 尚未串联，因此 EVO-02
-  整体保持 partial。
+- EVO-02.6b 已实现写后完整 Diff/API Guard：从精确 Git baseline 和落盘字节重建 diff、mode 与 Python
+  公共 API 事实；breaking API、不支持的源码 parser、范围或摘要漂移都会触发单文件/整组回滚，Writer
+  Receipt v2 内嵌防篡改证据并兼容历史 v1。详见 `EVO-02-6b-postflight-diff-api-guard.md`。
+- EVO-02.7 Mutation Receipt 尚未实现，HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持 partial。
