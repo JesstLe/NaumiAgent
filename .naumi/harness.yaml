@@ -77,6 +77,9 @@ checks:
       - tests/integration/test_harness_*.py
     required_for:
       - change
+    provides:
+      - contract
+      - unit
 
   - id: harness_lint
     label: Harness 静态检查
@@ -118,6 +121,68 @@ checks:
       - tests/integration/test_harness_*.py
     required_for:
       - change
+    provides:
+      - lint
+
+  - id: python_compile
+    label: Python 字节码编译检查
+    argv:
+      - uv
+      - run
+      - python
+      - -m
+      - compileall
+      - -q
+      - src/naumi_agent
+    timeout_seconds: 120
+    when_changed:
+      - src/**/*.py
+    required_for:
+      - change
+    provides:
+      - compile
+
+  - id: evolution_python
+    label: Evolution 定向测试
+    argv:
+      - uv
+      - run
+      - pytest
+      - -q
+      - tests/unit/test_evolution_candidate.py
+      - tests/unit/test_evolution_experiment_leases.py
+      - tests/unit/test_context_assembly.py
+    timeout_seconds: 180
+    when_changed:
+      - src/naumi_agent/evolution/**/*.py
+      - tests/unit/test_evolution_*.py
+      - tests/unit/test_context_assembly.py
+    required_for:
+      - change
+    provides:
+      - contract
+      - unit
+
+  - id: evolution_lint
+    label: Evolution 静态检查
+    argv:
+      - uv
+      - run
+      - ruff
+      - check
+      - src/naumi_agent/evolution
+      - tests/unit/test_evolution_candidate.py
+      - tests/unit/test_evolution_experiment_leases.py
+      - tests/unit/test_context_assembly.py
+    timeout_seconds: 120
+    when_changed:
+      - src/naumi_agent/evolution/**/*.py
+      - tests/unit/test_evolution_*.py
+      - tests/unit/test_context_assembly.py
+    required_for:
+      - change
+    provides:
+      - lint
 
   - id: harness_terminal_ui
     label: Harness 新 UI 命令元数据测试
@@ -133,6 +198,9 @@ checks:
       - frontend/terminal-ui/test/**/*.js
     required_for:
       - change
+    provides:
+      - contract
+      - unit
 
 evals:
   suites:

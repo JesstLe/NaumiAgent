@@ -8,7 +8,9 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
+from fnmatch import fnmatchcase
+from functools import lru_cache
+from pathlib import Path
 
 from naumi_agent.harness.fingerprint import (
     TreeFingerprint,
@@ -263,14 +265,30 @@ def validate_run_id(run_id: str) -> str:
 
 
 def _matches_any_pattern(path: str, patterns: Sequence[str]) -> bool:
-    candidate = PurePosixPath(path.replace("\\", "/"))
+    candidate = tuple(part for part in path.replace("\\", "/").split("/") if part)
     for pattern in patterns:
-        normalized = pattern.replace("\\", "/")
-        if candidate.match(normalized):
-            return True
-        if "**/" in normalized and candidate.match(normalized.replace("**/", "")):
+        normalized = tuple(
+            part for part in pattern.replace("\\", "/").split("/") if part
+        )
+        if _match_path_parts(candidate, normalized):
             return True
     return False
+
+
+@lru_cache(maxsize=4_096)
+def _match_path_parts(candidate: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
+    if not pattern:
+        return not candidate
+    head, *tail = pattern
+    remaining = tuple(tail)
+    if head == "**":
+        return _match_path_parts(candidate, remaining) or bool(candidate) and (
+            _match_path_parts(candidate[1:], pattern)
+        )
+    return bool(candidate) and fnmatchcase(candidate[0], head) and _match_path_parts(
+        candidate[1:],
+        remaining,
+    )
 
 
 def _map_execution_status(status: CommandExecutionStatus) -> HarnessCheckStatus:

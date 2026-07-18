@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
 
@@ -17,9 +18,17 @@ from naumi_agent.evolution.experiment_leases import (
 from naumi_agent.evolution.experiment_snapshots import EvolutionExperimentSourceSnapshot
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
 from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceipt
+from naumi_agent.harness.checks import select_required_check_ids
+from naumi_agent.harness.models import (
+    HarnessCheckSpec,
+    HarnessProfileStatus,
+)
+from naumi_agent.harness.profile import load_harness_profile
+from naumi_agent.harness.trust import HarnessTrustStore
 
 VALIDATION_PLAN_POLICY = "evolution-validation-plan-v1"
 _SHA256_RE = r"^[0-9a-f]{64}$"
+_SAFE_CODE_RE = r"^[a-z][a-z0-9_-]{0,63}$"
 
 type ValidationCheckKind = Literal["lint", "compile", "unit", "contract", "smoke"]
 type ValidationFileKind = Literal[
@@ -151,6 +160,247 @@ class EvolutionValidationPlan(_StrictModel):
         if self.validation_plan_id != f"evvplan_{expected[:24]}":
             raise ValueError("Validation Plan identity 不一致。")
         return self
+
+
+class ValidationProfileCheckBinding(_StrictModel):
+    check_id: str = Field(pattern=_SAFE_CODE_RE)
+    spec_sha256: str = Field(pattern=_SHA256_RE)
+    argv_sha256: str = Field(pattern=_SHA256_RE)
+    timeout_seconds: int = Field(ge=1, le=3_600)
+    provides: tuple[ValidationCheckKind, ...] = Field(min_length=1, max_length=5)
+
+    @field_validator("provides")
+    @classmethod
+    def _ordered_provides(
+        cls,
+        values: tuple[ValidationCheckKind, ...],
+    ) -> tuple[ValidationCheckKind, ...]:
+        if values != tuple(sorted(set(values))):
+            raise ValueError("Validation check provides 必须排序且不得重复。")
+        return values
+
+
+class ValidationCheckCoverage(_StrictModel):
+    path: str = Field(min_length=1, max_length=1_024)
+    check_kind: ValidationCheckKind
+    check_id: str = Field(pattern=_SAFE_CODE_RE)
+
+    @field_validator("path")
+    @classmethod
+    def _safe_path(cls, value: str) -> str:
+        return ValidationFileRequirement._safe_path(value)
+
+
+class EvolutionValidationProfileBinding(_StrictModel):
+    schema_version: Literal[1] = 1
+    policy_version: Literal["evolution-validation-profile-binding-v1"] = (
+        "evolution-validation-profile-binding-v1"
+    )
+    binding_id: str = Field(pattern=r"^evvbind_[0-9a-f]{24}$")
+    binding_sha256: str = Field(pattern=_SHA256_RE)
+    validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
+    validation_plan_sha256: str = Field(pattern=_SHA256_RE)
+    profile_sha256: str = Field(pattern=_SHA256_RE)
+    profile_path: str = Field(min_length=1, max_length=1_024)
+    trusted_at: str = Field(min_length=1, max_length=100)
+    trust_source: str = Field(min_length=1, max_length=64)
+    required_check_kinds: tuple[ValidationCheckKind, ...] = Field(
+        min_length=1,
+        max_length=5,
+    )
+    plan_requirements_sha256: str = Field(pattern=_SHA256_RE)
+    checks: tuple[ValidationProfileCheckBinding, ...] = Field(
+        min_length=1,
+        max_length=80,
+    )
+    coverage: tuple[ValidationCheckCoverage, ...] = Field(
+        min_length=1,
+        max_length=80,
+    )
+    profile_trusted: Literal[True] = True
+    profile_trust_must_be_revalidated: Literal[True] = True
+    binding_ready: Literal[True] = True
+    arc04_worker_required: Literal[True] = True
+    execution_ready: Literal[False] = False
+
+    @field_validator("profile_path")
+    @classmethod
+    def _safe_profile_path(cls, value: str) -> str:
+        normalized = value.strip().replace("\\", "/")
+        path = Path(normalized)
+        if not normalized or path.is_absolute() or ".." in path.parts:
+            raise ValueError("Validation Profile path 必须是工作区内相对路径。")
+        return normalized
+
+    @field_validator("trusted_at")
+    @classmethod
+    def _aware_trusted_at(cls, value: str) -> str:
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Validation Profile trusted_at 必须是 ISO-8601。") from exc
+        if parsed.utcoffset() is None:
+            raise ValueError("Validation Profile trusted_at 必须包含 UTC offset。")
+        return value
+
+    @field_validator("trust_source")
+    @classmethod
+    def _safe_trust_source(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or any(char in normalized for char in ("\x00", "\r", "\n")):
+            raise ValueError("Validation Profile trust_source 格式无效。")
+        return normalized
+
+    @model_validator(mode="after")
+    def _binding_is_complete_and_tamper_evident(self) -> Self:
+        check_ids = tuple(item.check_id for item in self.checks)
+        if check_ids != tuple(sorted(set(check_ids))):
+            raise ValueError("Validation bound checks 必须排序且不得重复。")
+        coverage_keys = tuple((item.path, item.check_kind) for item in self.coverage)
+        if coverage_keys != tuple(sorted(set(coverage_keys))):
+            raise ValueError("Validation coverage 必须排序且不得重复。")
+        coverage_kinds = tuple(sorted({item.check_kind for item in self.coverage}))
+        if coverage_kinds != self.required_check_kinds:
+            raise ValueError("Validation coverage 未完整覆盖 required check kinds。")
+        expected_requirements = _sha256_payload([
+            {"path": item.path, "check_kind": item.check_kind}
+            for item in self.coverage
+        ])
+        if not hmac.compare_digest(self.plan_requirements_sha256, expected_requirements):
+            raise ValueError("Validation coverage 与 Plan requirements 不一致。")
+        by_id = {item.check_id: item for item in self.checks}
+        if any(
+            item.check_id not in by_id
+            or item.check_kind not in by_id[item.check_id].provides
+            for item in self.coverage
+        ):
+            raise ValueError("Validation coverage 与 bound check capability 不一致。")
+        expected = _sha256_payload(
+            self.model_dump(mode="json", exclude={"binding_id", "binding_sha256"})
+        )
+        if not hmac.compare_digest(self.binding_sha256, expected):
+            raise ValueError("Validation Profile Binding 摘要不一致。")
+        if self.binding_id != f"evvbind_{expected[:24]}":
+            raise ValueError("Validation Profile Binding identity 不一致。")
+        return self
+
+
+class EvolutionValidationBindingError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class EvolutionValidationProfileBinder:
+    """Bind abstract validation requirements to one currently trusted Profile."""
+
+    def __init__(self, trust_store: HarnessTrustStore) -> None:
+        if not isinstance(trust_store, HarnessTrustStore):
+            raise TypeError("Validation Profile Binder 需要 HarnessTrustStore。")
+        self._trust_store = trust_store
+
+    async def bind(
+        self,
+        plan: EvolutionValidationPlan,
+        *,
+        workspace_root: str | Path,
+    ) -> EvolutionValidationProfileBinding:
+        if not isinstance(plan, EvolutionValidationPlan):
+            raise TypeError("Validation Profile Binder 需要 EvolutionValidationPlan。")
+        plan = EvolutionValidationPlan.model_validate(plan.model_dump(mode="json"))
+        workspace = Path(workspace_root).expanduser().resolve()
+        snapshot = load_harness_profile(workspace)
+        if (
+            snapshot.status is not HarnessProfileStatus.VALID
+            or snapshot.profile is None
+            or snapshot.digest is None
+        ):
+            raise EvolutionValidationBindingError(
+                "validation_profile_invalid",
+                "当前 Harness Profile 无效，无法绑定 Validation checks。",
+            )
+        if snapshot.digest != plan.profile_sha256:
+            raise EvolutionValidationBindingError(
+                "validation_profile_drifted",
+                "Harness Profile 已偏离 Mutation baseline，必须重新开始实验。",
+            )
+        trust = await self._trust_store.get(workspace)
+        if trust is None or trust.profile_digest != snapshot.digest:
+            raise EvolutionValidationBindingError(
+                "validation_profile_untrusted",
+                "当前 Harness Profile 尚未由用户信任，未绑定 Validation checks。",
+            )
+        coverage: list[ValidationCheckCoverage] = []
+        used_ids: set[str] = set()
+        for file in plan.files:
+            selected_ids = select_required_check_ids(
+                snapshot.profile.checks,
+                task_kind="change",
+                changed_paths=(file.path,),
+            )
+            selected = tuple(
+                check for check in snapshot.profile.checks if check.id in selected_ids
+            )
+            for kind in file.required_checks:
+                candidates = tuple(check for check in selected if kind in check.provides)
+                if not candidates:
+                    raise EvolutionValidationBindingError(
+                        "validation_check_missing",
+                        f"可信 Harness Profile 未覆盖 {file.path} 的 check kind：{kind}。",
+                    )
+                if len(candidates) != 1:
+                    raise EvolutionValidationBindingError(
+                        "validation_check_ambiguous",
+                        f"{file.path} 的 check kind {kind} 匹配多个 Profile checks。",
+                    )
+                check = candidates[0]
+                used_ids.add(check.id)
+                coverage.append(ValidationCheckCoverage(
+                    path=file.path,
+                    check_kind=kind,
+                    check_id=check.id,
+                ))
+        checks = tuple(
+            _profile_check_binding(check)
+            for check in sorted(snapshot.profile.checks, key=lambda item: item.id)
+            if check.id in used_ids
+        )
+        ordered_coverage = tuple(
+            sorted(coverage, key=lambda item: (item.path, item.check_kind))
+        )
+        requirements_sha256 = _sha256_payload([
+            {"path": item.path, "check_kind": item.check_kind}
+            for item in ordered_coverage
+        ])
+        relative_profile = snapshot.profile_path.relative_to(workspace).as_posix()
+        payload = {
+            "schema_version": 1,
+            "policy_version": "evolution-validation-profile-binding-v1",
+            "validation_plan_id": plan.validation_plan_id,
+            "validation_plan_sha256": plan.validation_plan_sha256,
+            "profile_sha256": snapshot.digest,
+            "profile_path": relative_profile,
+            "trusted_at": trust.trusted_at,
+            "trust_source": trust.source,
+            "required_check_kinds": list(plan.required_check_kinds),
+            "plan_requirements_sha256": requirements_sha256,
+            "checks": [item.model_dump(mode="json") for item in checks],
+            "coverage": [
+                item.model_dump(mode="json")
+                for item in ordered_coverage
+            ],
+            "profile_trusted": True,
+            "profile_trust_must_be_revalidated": True,
+            "binding_ready": True,
+            "arc04_worker_required": True,
+            "execution_ready": False,
+        }
+        digest = _sha256_payload(payload)
+        return EvolutionValidationProfileBinding.model_validate({
+            **payload,
+            "binding_id": f"evvbind_{digest[:24]}",
+            "binding_sha256": digest,
+        })
 
 
 class EvolutionValidationPlanner:
@@ -305,6 +555,17 @@ def validation_requirements_for_path(path: str) -> ValidationFileRequirement:
     )
 
 
+def _profile_check_binding(check: HarnessCheckSpec) -> ValidationProfileCheckBinding:
+    payload = check.model_dump(mode="json")
+    return ValidationProfileCheckBinding(
+        check_id=check.id,
+        spec_sha256=_sha256_payload(payload),
+        argv_sha256=_sha256_payload(list(check.argv)),
+        timeout_seconds=check.timeout_seconds,
+        provides=check.provides,
+    )
+
+
 def _required_checks(kind: ValidationFileKind) -> tuple[ValidationCheckKind, ...]:
     return {
         "python": ("lint", "compile", "unit", "contract"),
@@ -333,9 +594,14 @@ def _sha256_payload(payload: object) -> str:
 
 
 __all__ = [
+    "EvolutionValidationBindingError",
     "EvolutionValidationPlan",
     "EvolutionValidationPlanner",
+    "EvolutionValidationProfileBinder",
+    "EvolutionValidationProfileBinding",
+    "ValidationCheckCoverage",
     "ValidationFileRequirement",
     "ValidationMetricPair",
+    "ValidationProfileCheckBinding",
     "validation_requirements_for_path",
 ]
