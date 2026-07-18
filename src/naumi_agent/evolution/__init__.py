@@ -22,9 +22,12 @@ __all__ = [
     "EvolutionCandidateDraft",
     "EvolutionCandidateEvent",
     "EvolutionCandidateStore",
+    "EvolutionProposalPreview",
     "adapt_harness_failure_evidence",
     "adapt_self_review_static_evidence",
     "build_candidate_draft",
+    "classify_proposal_kind",
+    "generate_proposal_preview",
     "EvolutionStoredCandidate",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -42,10 +45,17 @@ def __getattr__(name: str) -> object:
         "adapt_harness_failure_evidence",
         "adapt_self_review_static_evidence",
     }
+    proposal_exports = {
+        "EvolutionProposalPreview",
+        "classify_proposal_kind",
+        "generate_proposal_preview",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
         module_name = "evidence"
+    elif name in proposal_exports:
+        module_name = "proposal"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

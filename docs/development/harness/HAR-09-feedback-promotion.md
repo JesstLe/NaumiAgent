@@ -44,5 +44,9 @@
   单次反馈、Agent-only 信号保持证据不足，authority-bearing scope 机械阻断。策略只输出版本化
   Assessment，不创建 Proposal、不写 Review Queue、不授予实验资格。详见
   `../self-evolution/EVO-01-4a-candidate-eligibility-policy.md`。
-- HAR-09 仍未实现跨 Candidate 影响范围/趋势统计、持久 review action/cooldown、Proposal 或
-  outcome tracking，因此整体继续保持 partial。
+- HAR-09.4a 已实现确定性 Proposal Preview v1：仅对 `review_ready` Candidate 生成
+  knowledge/profile/prompt/tool/test/code 六类建议、稳定 source snapshot、相对目标文件和机械验证计划；
+  `/evolution detail` 与 Agent Tool 使用同一 Preview。Preview 固定不可执行、不写 Workbench Queue，
+  详见 `HAR-09-4a-proposal-preview.md`。
+- HAR-09 仍未实现持久 review action/cooldown、Workbench Queue 适配、defer/merge 和 outcome
+  tracking，因此整体继续保持 partial。

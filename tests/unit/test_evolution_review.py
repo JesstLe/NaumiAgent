@@ -122,6 +122,11 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert "24h/7d/30d" in rendered
     assert "review_ready" in rendered
     assert "cooldown_gate" in rendered
+    assert snapshot.selected.proposal is not None
+    assert snapshot.selected.proposal.proposal_kind == "code"
+    assert "Proposal Preview" in rendered
+    assert "不可执行：否" not in rendered
+    assert "可执行：否 · 已入队：否" in rendered
     assert "实验资格" in rendered
     assert "artifact://feedback/" in rendered
     assert "r1 `created`" in rendered
@@ -176,6 +181,8 @@ async def test_tool_and_slash_share_review_service(tmp_path: Path) -> None:
     assert footer_id in tool_detail
     assert footer_id in slash_list
     assert "审计链" in slash_detail
+    assert "Proposal Preview" in tool_detail
+    assert "Proposal Preview" in slash_detail
     assert "secret-never-render" not in "\n".join(
         (tool_list, tool_detail, slash_list, slash_detail)
     )

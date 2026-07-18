@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 import {
   attachJsonlLineReader,
   createHelloPayload,
@@ -799,6 +800,19 @@ test("evolution review snapshot is strict and drops private fields", () => {
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, mode: "write" } }), /mode/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, read_only: false } }), /只读/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, items: [{ ...item, experiment_eligible: true }] } }), /实验资格/);
+  const proposalSource = {
+    candidate_id: `evc_${"a".repeat(24)}`, candidate_revision: 2,
+    candidate_sha256: "c".repeat(64), occurrence_count: 2,
+    last_observed_at: "now", aggregation_policy: "candidate-aggregation-v1",
+    trend: "insufficient",
+  };
+  const proposalId = `evp_${createHash("sha256").update(JSON.stringify({
+    candidate_id: proposalSource.candidate_id,
+    candidate_revision: proposalSource.candidate_revision,
+    candidate_sha256: proposalSource.candidate_sha256,
+    generator_version: "evolution-proposal-v1",
+    proposal_kind: "code",
+  })).digest("hex").slice(0, 24)}`;
   const detail = normalizeServerRecord({ type: "evolution/review", payload: {
     ...normalized, mode: "detail", items: [], events: [], selected: {
       ...item, status: "draft", hypothesis: "机械验证", providers: [], models: [], platforms: [],
@@ -813,12 +827,37 @@ test("evolution review snapshot is strict and drops private fields", () => {
         provider_unique_count: 1, model_counts: [], model_unique_count: 0,
         platform_counts: [], platform_unique_count: 0, representatives: [],
       },
+      proposal: {
+        schema_version: 1, proposal_id: proposalId,
+        generator_version: "evolution-proposal-v1", proposal_kind: "code",
+        classification_reason: "fallback:code", title: "代码改进建议",
+        summary: "机械验证", impact_scope: "ui:footer", intended_files: [],
+        validation_plan: [{
+          metric_name: "feedback.recurrence", direction: "decrease", target: 0,
+          verifier: "feedback_recurrence", procedure: "比较反馈复发率。",
+        }],
+        risk_level: "medium", review_notes: ["eligibility:review_ready"],
+        source: proposalSource,
+        requires_human_review: true, executable: false,
+        experiment_eligible: false, state: "preview",
+      },
     },
   } }).payload;
   assert.equal(detail.selected.aggregation.provider_counts[0].count, 2);
+  assert.equal(detail.selected.proposal.proposal_kind, "code");
+  assert.equal(detail.selected.proposal.executable, false);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
     ...detail, selected: { ...detail.selected, aggregation: { ...detail.selected.aggregation, trend: "exploding" } },
   } }), /trend/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...detail, selected: { ...detail.selected, proposal: { ...detail.selected.proposal, executable: true } },
+  } }), /authority contract/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...detail, selected: {
+      ...detail.selected,
+      proposal: { ...detail.selected.proposal, proposal_id: `evp_${"0".repeat(24)}` },
+    },
+  } }), /source snapshot/);
 });
 
 test("normalizes strict runtime inspector snapshots and updates", () => {

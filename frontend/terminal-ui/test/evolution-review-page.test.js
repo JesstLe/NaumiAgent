@@ -41,14 +41,25 @@ test("evolution review list and detail stay bounded at common widths", () => {
         provider_unique_count: 1, model_counts: [], model_unique_count: 0,
         platform_counts: [], platform_unique_count: 0, source_counts: [], source_unique_count: 0,
       },
+      proposal: {
+        proposal_id: `evp_${"b".repeat(24)}`, proposal_kind: "code",
+        title: "代码改进建议：user_reported_defect", risk_level: "medium",
+        classification_reason: "fallback:code", impact_scope: "ui:footer",
+        intended_files: [], validation_plan: [{
+          metric_name: "feedback.recurrence", direction: "decrease", target: 0,
+          verifier: "feedback_recurrence", procedure: "比较后续反馈复发率。",
+        }],
+      },
     };
-    const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 20);
+    const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 60);
     const plain = detail.map(stripAnsi).join("\n");
     assert(detail.every((line) => visibleWidth(line) <= width));
     assert(plain.includes("Eligibility Gates"));
     assert(plain.includes("聚合趋势"));
     assert(plain.includes("24h/7d/30d 1/4/6"));
     assert(plain.includes("实验资格 否"));
+    assert(plain.includes("Proposal Preview"));
+    assert(plain.includes("不可执行 · 未入队 · 必须人工审阅"));
   }
 });
 
