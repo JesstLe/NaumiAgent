@@ -12,6 +12,7 @@ from naumi_agent.config.settings import (
     SafetyConfig,
 )
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
+from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
@@ -62,6 +63,11 @@ class _FalseyExecutionGrantStore(ExecutionGrantStore):
         return False
 
 
+class _FalseyPermissionDecisionStore(PermissionDecisionReceiptStore):
+    def __bool__(self) -> bool:
+        return False
+
+
 def _config(tmp_path: Path, *, catalog_path: str | None = None) -> AppConfig:
     return AppConfig(
         workspace_root=str(tmp_path),
@@ -108,6 +114,10 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
     assert paths.worker_registry_db_path == paths.runtime_data_dir / "worker-registry.db"
     assert paths.execution_grant_db_path == paths.runtime_data_dir / "execution-grants.db"
+    assert (
+        paths.permission_decision_db_path
+        == paths.runtime_data_dir / "permission-decisions.db"
+    )
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
     assert paths.goal_storage_dir == paths.runtime_data_dir / "goals"
     assert paths.pursuit_storage_dir == paths.runtime_data_dir / "pursuit"
@@ -126,6 +136,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
         "worker_registry_db_path": absolute / "data" / "worker-registry.db",
         "execution_grant_db_path": absolute / "data" / "execution-grants.db",
+        "permission_decision_db_path": absolute / "data" / "permission-decisions.db",
         "worktree_storage_dir": absolute / "data" / "worktrees",
         "goal_storage_dir": absolute / "data" / "goals",
         "pursuit_storage_dir": absolute / "data" / "pursuit",
@@ -168,6 +179,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
                 "execution_grant_db_path": absolute / "outside" / "grants.db",
             }
         )
+    with pytest.raises(ValueError, match="permission_decision_db_path 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "permission_decision_db_path": absolute / "outside" / "decisions.db",
+            }
+        )
 
 
 def test_build_runtime_ports_rejects_invalid_paths_before_defaults(
@@ -196,6 +214,9 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
     worker_registry_store = _FalseyWorkerRegistryStore(tmp_path / "custom-workers.db")
     execution_grant_store = _FalseyExecutionGrantStore(tmp_path / "custom-grants.db")
+    permission_decision_store = _FalseyPermissionDecisionStore(
+        tmp_path / "custom-decisions.db"
+    )
     goal_store = GoalStore(tmp_path / "custom-goals")
     pursuit_store = PursuitStore(tmp_path / "custom-pursuit")
     shared_db = tmp_path / "custom-runtime.db"
@@ -207,6 +228,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
             chat_run_store=chat_run_store,
             worker_registry_store=worker_registry_store,
             execution_grant_store=execution_grant_store,
+            permission_decision_store=permission_decision_store,
             evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
@@ -221,6 +243,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
     assert defaults.worker_registry_store.db_path == paths.worker_registry_db_path
     assert defaults.execution_grant_store.db_path == paths.execution_grant_db_path
+    assert defaults.permission_decision_store.db_path == paths.permission_decision_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
     assert defaults.goal_store.base_dir == paths.goal_storage_dir
@@ -231,6 +254,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert overridden.chat_run_store is chat_run_store
     assert overridden.worker_registry_store is worker_registry_store
     assert overridden.execution_grant_store is execution_grant_store
+    assert overridden.permission_decision_store is permission_decision_store
     assert overridden.task_store is task_store
     assert overridden.workbench_store is workbench_store
     assert overridden.harness_store is falsey_store
@@ -241,6 +265,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert not paths.pursuit_storage_dir.exists()
     assert not paths.worker_registry_db_path.exists()
     assert not paths.execution_grant_db_path.exists()
+    assert not paths.permission_decision_db_path.exists()
     assert not (tmp_path / "state").exists()
 
 
@@ -278,6 +303,9 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
             chat_run_store=ChatRunStore(tmp_path / "chat-runs.db"),
             worker_registry_store=WorkerRegistryStore(tmp_path / "workers.db"),
             execution_grant_store=ExecutionGrantStore(tmp_path / "grants.db"),
+            permission_decision_store=PermissionDecisionReceiptStore(
+                tmp_path / "decisions.db"
+            ),
             evolution_candidate_store=EvolutionCandidateStore(
                 tmp_path / "evolution.db"
             ),
@@ -299,6 +327,7 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
             chat_run_store=defaults.chat_run_store,
             worker_registry_store=defaults.worker_registry_store,
             execution_grant_store=defaults.execution_grant_store,
+            permission_decision_store=defaults.permission_decision_store,
             evolution_candidate_store=defaults.evolution_candidate_store,
             harness_store=defaults.harness_store,
             harness_trust_store=defaults.harness_trust_store,
@@ -461,4 +490,9 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         is engine._resources.worker_registry_store
     )
     assert engine.execution_grant_authority._harness_store is engine._resources.harness_store
+    assert (
+        engine.execution_grant_authority._permission_decision_store
+        is engine._resources.permission_decision_store
+    )
     assert not engine._paths.execution_grant_db_path.exists()
+    assert not engine._paths.permission_decision_db_path.exists()

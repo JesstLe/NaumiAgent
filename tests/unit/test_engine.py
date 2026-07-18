@@ -16,6 +16,10 @@ import pytest
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, SafetyConfig
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionOutcome,
+    PermissionDecisionReceiptStore,
+)
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
@@ -2154,6 +2158,14 @@ class TestToolExecution:
             ("needs_confirmation", session.id),
             ("confirmed", session.id),
         ]
+        receipts = engine.list_permission_decision_receipts()
+        assert len(receipts) == 1
+        assert receipts[0].outcome is PermissionDecisionOutcome.ALLOW_ONCE
+        assert receipts[0].call_id == "x"
+        reopened = PermissionDecisionReceiptStore(
+            engine._paths.permission_decision_db_path
+        ).list_session(session.id)
+        assert reopened == receipts
 
     @pytest.mark.asyncio
     async def test_bypass_confirmation_switches_the_runtime_mode_globally(

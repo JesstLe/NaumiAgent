@@ -17,7 +17,7 @@ function snapshot() {
       policy: { source: "TOOL_PERMISSIONS:bash_run", risk: "medium", confirmation: "需要确认", bypass: "bypass 全权限放行" },
     }],
     grants: [{ grant_id: "grant-1", tool_family: "shell", expires_at: "" }],
-    history: [{ request_id: "hist-1", agent_name: "main", tool_name: "file_write", status: "allowed", reason: "用户已允许", policy: { source: "TOOL_PERMISSIONS:file_write", risk: "low" } }],
+    history: [{ request_id: "hist-1", agent_name: "main", tool_name: "file_write", status: "allow_once", reason: "用户已允许", receipt_id: "receipt-1", actor: "user", source: "user_confirmation", decided_at: "2026-07-19T08:00:00+00:00", policy: { source: "TOOL_PERMISSIONS:file_write", risk: "low" } }],
     warnings: [],
   };
 }
@@ -28,7 +28,7 @@ test("permission center renders authoritative sections at common widths", () => 
     const plain = lines.map(stripAnsi).join("\n");
     assert.equal(lines.length, 22);
     assert(lines.every((line) => visibleWidth(line) <= width));
-    for (const expected of ["权限策略中心", "bypass", "待确认", "有效授权", "最近决定", "TOOL_PERMISSIONS:bash_run"]) {
+    for (const expected of ["权限策略中心", "bypass", "待确认", "有效授权", "最近决定", "TOOL_PERMISSIONS:bash_run", "操作者 user", "决策源 user_confirmation"]) {
       assert(plain.includes(expected));
     }
   }

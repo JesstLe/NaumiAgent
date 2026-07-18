@@ -44,8 +44,17 @@ def build_permission_panel_snapshot(
 
     history: tuple[dict[str, Any], ...] = ()
     try:
-        getter = getattr(engine, "get_recent_permission_bubbles", None)
-        if callable(getter):
+        durable_getter = getattr(engine, "list_permission_decision_receipts", None)
+        if callable(durable_getter):
+            history = tuple(
+                _with_policy(_decision_receipt_item(item))
+                for item in durable_getter(limit=safe_limit)
+            )
+        else:
+            getter = getattr(engine, "get_recent_permission_bubbles", None)
+            if not callable(getter):
+                getter = None
+        if not callable(durable_getter) and getter is not None:
             history = tuple(
                 _with_policy(item)
                 for item in getter(limit=safe_limit)
@@ -167,6 +176,38 @@ def _grant_item(grant: Any) -> dict[str, Any]:
     }
 
 
+def _decision_receipt_item(receipt: Any) -> dict[str, Any]:
+    outcome = getattr(receipt, "outcome", "")
+    source = getattr(receipt, "source", "")
+    actor = getattr(receipt, "actor", "")
+    return {
+        "request_id": str(getattr(receipt, "request_id", "")),
+        "call_id": str(getattr(receipt, "call_id", "")),
+        "session_id": str(getattr(receipt, "session_id", "")),
+        "run_id": str(getattr(receipt, "run_id", "")),
+        "agent_name": str(getattr(receipt, "agent_name", "main")),
+        "tool_name": str(getattr(receipt, "tool_name", "tool")),
+        "tool_family": str(getattr(receipt, "tool_family", "")),
+        "status": str(getattr(outcome, "value", outcome)),
+        "reason": _decision_reason(str(getattr(outcome, "value", outcome))),
+        "risk_level": str(getattr(receipt, "risk_level", "")),
+        "scope": "session" if str(getattr(source, "value", source)) == "session_grant" else "call",
+        "decided_at": str(getattr(receipt, "decided_at", "")),
+        "actor": str(getattr(actor, "value", actor)),
+        "source": str(getattr(source, "value", source)),
+        "receipt_id": str(getattr(receipt, "receipt_id", "")),
+    }
+
+
+def _decision_reason(outcome: str) -> str:
+    return {
+        "allow_once": "用户已允许本次工具执行。",
+        "session_granted": "用户已授予本会话工具族权限。",
+        "bypass_enabled": "用户已启用 bypass 全权限模式。",
+        "denied": "用户拒绝执行该工具。",
+    }.get(outcome, "已记录终态权限决定。")
+
+
 def _permission_payload(item: dict[str, Any]) -> dict[str, Any]:
     policy = item.get("policy") if isinstance(item.get("policy"), dict) else {}
     choices = item.get("choices") if isinstance(item.get("choices"), list) else []
@@ -185,6 +226,10 @@ def _permission_payload(item: dict[str, Any]) -> dict[str, Any]:
         "choices": [_text(choice) for choice in choices[:10]],
         "scope": _text(item.get("scope")),
         "expires_at": _text(item.get("expires_at")),
+        "receipt_id": _text(item.get("receipt_id")),
+        "actor": _text(item.get("actor")),
+        "source": _text(item.get("source")),
+        "decided_at": _text(item.get("decided_at")),
         "policy": {
             "source": _text(policy.get("source")),
             "risk": _text(policy.get("risk")),
@@ -285,7 +330,17 @@ def _render_permission_item(item: dict[str, Any]) -> str:
         f" · 确认:{policy.get('confirmation', '-')}"
         f" · {policy.get('bypass', '-')}"
     )
-    return f"  - {request_id} {agent} -> {tool} [{status}] {policy_text} | {reason}"
+    audit = ""
+    if item.get("receipt_id"):
+        audit = (
+            f" · 操作者:{item.get('actor') or '-'}"
+            f" · 决策源:{item.get('source') or '-'}"
+            f" · 时间:{item.get('decided_at') or '-'}"
+        )
+    return (
+        f"  - {request_id} {agent} -> {tool} [{status}] "
+        f"{policy_text}{audit} | {reason}"
+    )
 
 
 def _render_grant(grant: dict[str, Any]) -> str:

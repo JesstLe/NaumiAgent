@@ -66,6 +66,7 @@ PermissionChecker 的 workspace/worktree allowlist 与 Engine 的 Harness/Browse
 - ARC-01.4b2e 已完成：GoalStore/PursuitStore 以 lazy initialization 资源对迁入；
 - ARC-01.4b2f 已完成：WorkerRegistryStore 作为 ARC-04 authority 资源迁入；
 - ARC-01.4b2g 已完成：ExecutionGrantStore 作为 ARC-04.2 authority 资源迁入；
+- ARC-01.4b2h 已完成：PermissionDecisionReceiptStore 作为 UI-12.3/ARC-04.2 共享 authority 资源迁入；
 - 后续只在能解锁用户表面或可靠性能力时迁移 Background/Scheduler、Runner/Browser；
 - ARC-01.4c：把 Harness/Workbench/Planner 等长期 Service 与 Tool bootstrap 移出 Engine；
 - ARC-01.4d：反向、幂等、失败隔离的 `RuntimeLifecycle`；

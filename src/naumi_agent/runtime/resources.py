@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
+from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
@@ -23,6 +24,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
     "execution_grant_store": (
         ExecutionGrantStore,
         "execution_grant_store 必须是 ExecutionGrantStore 实例。",
+    ),
+    "permission_decision_store": (
+        PermissionDecisionReceiptStore,
+        "permission_decision_store 必须是 PermissionDecisionReceiptStore 实例。",
     ),
     "chat_run_store": (
         ChatRunStore,
@@ -66,6 +71,7 @@ class RuntimeResources:
     chat_run_store: ChatRunStore
     worker_registry_store: WorkerRegistryStore
     execution_grant_store: ExecutionGrantStore
+    permission_decision_store: PermissionDecisionReceiptStore
     evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
@@ -90,6 +96,7 @@ class RuntimeResourceOverrides:
     chat_run_store: ChatRunStore | None = None
     worker_registry_store: WorkerRegistryStore | None = None
     execution_grant_store: ExecutionGrantStore | None = None
+    permission_decision_store: PermissionDecisionReceiptStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None

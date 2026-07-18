@@ -24,8 +24,8 @@ Session、Task、Workbench 共用 `sessions.db`，Harness 当前为 `user_versio
 首批目录覆盖：Runtime Core（Session/Task/Workbench）、Chat Runs、Goal、Pursuit、Scheduler、
 Harness Evidence、Harness Trust、Background、Browser Runtime、Browser Daemon 和 Vector Memory。
 EVO-01.3a 随后按同一契约登记 `evolution.candidates`，用于不可变 Evidence、Candidate
-materialization 和审计事件；ARC-04.1b 登记 Runtime Worker Registry，ARC-04.2a 又登记 Execution Grant
-Authority，Catalog 当前共 14 个物理 Store。
+materialization 和审计事件；ARC-04.1b 登记 Runtime Worker Registry，ARC-04.2a 登记 Execution Grant
+Authority，UI-12.3a 再登记 Permission Decision Receipt Authority；Catalog 当前共 15 个物理 Store。
 
 ## 只读探测
 

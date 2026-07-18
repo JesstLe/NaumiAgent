@@ -827,13 +827,22 @@ test("permission snapshot is strict bounded and drops private fields", () => {
       permission_mode: "moderate",
       pending,
       grants: [],
-      history: [],
+      history: [{
+        ...pending[0],
+        status: "allow_once",
+        receipt_id: "receipt-1",
+        actor: "user",
+        source: "user_confirmation",
+        decided_at: "2026-07-19T08:00:00+00:00",
+      }],
       warnings: [],
     },
   }).payload;
 
   assert.equal(normalized.pending.length, 50);
   assert.equal(normalized.pending[0].policy.source, "TOOL_PERMISSIONS:bash_run");
+  assert.equal(normalized.history[0].receipt_id, "receipt-1");
+  assert.equal(normalized.history[0].actor, "user");
   assert.equal(Object.hasOwn(normalized.pending[0], "private_payload"), false);
   assert.throws(
     () => normalizeServerRecord({

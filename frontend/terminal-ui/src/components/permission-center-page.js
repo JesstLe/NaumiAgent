@@ -57,7 +57,7 @@ function renderPermission(item) {
   const status = String(item.status || "-");
   const style = ["denied", "blocked"].includes(status)
     ? ANSI.red
-    : ["allowed", "confirmed", "granted", "bypass_enabled"].includes(status)
+    : ["allow_once", "allowed", "confirmed", "granted", "session_granted", "bypass_enabled"].includes(status)
       ? ANSI.green
       : ANSI.yellow;
   const primary = `${item.request_id || item.call_id || "-"} · ${item.agent_name || "main"} → ${item.tool_name || "tool"} · ${status}`;
@@ -68,9 +68,17 @@ function renderPermission(item) {
     policy.confirmation || "",
     policy.bypass || "",
   ].filter(Boolean).join(" · ");
+  const audit = item.receipt_id
+    ? [
+        `操作者 ${item.actor || "-"}`,
+        `决策源 ${item.source || "-"}`,
+        `时间 ${item.decided_at || "-"}`,
+      ].join(" · ")
+    : "";
   return [
     color(style, compactText(primary, 500)),
     color(ANSI.dim, compactText(detail, 500)),
+    audit ? color(ANSI.dim, compactText(audit, 500)) : "",
     item.reason ? color(ANSI.dim, `原因 · ${compactText(item.reason, 500)}`) : "",
   ].filter(Boolean);
 }
