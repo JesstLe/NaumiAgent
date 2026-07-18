@@ -95,6 +95,7 @@ async def test_collect_gathers_real_git_diff(tmp_path) -> None:
     # Make a dirty change in the worktree.
     (worktree / "README.md").write_text("# changed\n")
     (worktree / "new_file.txt").write_text("new\n")
+    _run_git(worktree, "add", "README.md")
 
     store = WorkbenchStore(str(tmp_path / "workbench.db"))
     approval_id = await _seed_approval_and_issue(store, "sess", "task-1", "wt-feature")
@@ -133,6 +134,26 @@ async def test_collect_marks_missing_worktree_when_path_absent(tmp_path) -> None
     assert evidence["diff_hunks"] == []
 
 
+@pytest.mark.asyncio
+async def test_collect_rejects_worktree_path_escape(tmp_path) -> None:
+    storage = tmp_path / "worktrees"
+    storage.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    approval_id = await _seed_approval_and_issue(store, "sess", "task-1", "../outside")
+    collector = ReviewEvidenceCollector(
+        store=store, task_store=None, worktree_storage_dir=storage
+    )
+
+    evidence = await collector.collect(session_id="sess", approval_id=approval_id)
+
+    assert evidence is not None
+    assert evidence["worktree"]["path"] == ""
+    assert evidence["worktree"]["status"] == "missing"
+    assert evidence["changed_files"] == []
+
+
 def test_git_status_label_maps_known_codes() -> None:
     assert _git_status_label("??") == "untracked"
     assert _git_status_label("A ") == "added"
@@ -157,6 +178,17 @@ def test_parse_diff_hunks_splits_by_file_and_caps_patch() -> None:
     assert [h["path"] for h in hunks] == ["one.py", "two.py"]
     assert "+new" in hunks[0]["patch"]
     assert "+y" in hunks[1]["patch"]
+
+
+def test_parse_diff_hunks_preserves_paths_starting_with_b_and_spaces() -> None:
+    diff = (
+        'diff --git "a/big file.py" "b/big file.py"\n'
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+
+    assert _parse_diff_hunks(diff)[0]["path"] == "big file.py"
 
 
 def test_parse_diff_hunks_empty_for_no_diff() -> None:

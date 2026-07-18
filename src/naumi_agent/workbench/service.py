@@ -46,6 +46,7 @@ from naumi_agent.worktree.models import WorktreeRecord
 logger = logging.getLogger(__name__)
 
 _MAX_SNAPSHOT_WORKTREES = 200
+_MAX_SNAPSHOT_REVIEWS = 100
 
 
 class WorktreeStatusProvider(Protocol):
@@ -787,7 +788,7 @@ class WorkbenchService:
             session_id, limit=50
         )
         approvals = await self._workbench_store.list_approvals(
-            session_id, state=ApprovalState.WAITING, limit=50
+            session_id, state=ApprovalState.WAITING, limit=_MAX_SNAPSHOT_REVIEWS
         )
         missions = await self._list_missions_for_snapshot(session_id)
         tasks_by_id = {task.id: task for task in tasks}

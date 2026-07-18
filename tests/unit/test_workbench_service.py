@@ -864,6 +864,28 @@ async def test_dashboard_snapshot_includes_validation_runs_context_snapshots_and
 
 
 @pytest.mark.asyncio
+async def test_dashboard_snapshot_keeps_one_hundred_waiting_reviews(tmp_path) -> None:
+    task_store = TaskStore(str(tmp_path / "tasks.db"))
+    task_store.set_session("s")
+    workbench_store = WorkbenchStore(str(tmp_path / "workbench.db"))
+    service = WorkbenchService(task_store=task_store, workbench_store=workbench_store)
+    for index in range(100):
+        await workbench_store.add_approval(
+            session_id="s",
+            mission_id="mission-1",
+            task_id=f"task-{index}",
+            title=f"待审 {index}",
+            detail="真实 Review 导航容量验证",
+            requester="Agent-A",
+        )
+
+    result = await service.dashboard_snapshot("s")
+
+    assert len(result["approvals"]) == 100
+    assert result["counts"]["reviews"] == 100
+
+
+@pytest.mark.asyncio
 async def test_list_events_returns_store_events_and_respects_limit(tmp_path) -> None:
     task_store = TaskStore(str(tmp_path / "tasks.db"))
     task_store.set_session("s")

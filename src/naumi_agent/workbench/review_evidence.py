@@ -13,6 +13,7 @@ the UI can show the approval without fabricating a diff.
 from __future__ import annotations
 
 import asyncio
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -100,7 +101,12 @@ class ReviewEvidenceCollector:
     def _worktree_path(self, worktree_name: str) -> Path | None:
         if not worktree_name or self._worktree_storage_dir is None:
             return None
-        return (self._worktree_storage_dir / worktree_name).resolve()
+        candidate = (self._worktree_storage_dir / worktree_name).resolve()
+        try:
+            candidate.relative_to(self._worktree_storage_dir)
+        except ValueError:
+            return None
+        return candidate
 
     async def _collect_git_diff(
         self, worktree_path: Path
@@ -133,7 +139,7 @@ class ReviewEvidenceCollector:
             code = line[:2]
             path = line[3:].strip().strip('"')
             files.append({"path": path, "status": _git_status_label(code)})
-        return files
+        return files[:200]
 
     async def _diff_hunks(self, worktree_path: Path) -> list[dict[str, Any]]:
         try:
@@ -142,7 +148,10 @@ class ReviewEvidenceCollector:
                 "-C",
                 str(worktree_path),
                 "diff",
+                "HEAD",
                 "--no-color",
+                "--no-ext-diff",
+                "--unified=3",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -243,9 +252,13 @@ def _parse_diff_hunks(diff_text: str) -> list[dict[str, Any]]:
                 break
             flush()
             # diff --git a/path b/path
-            parts = line.split(" ")
+            try:
+                parts = shlex.split(line)
+            except ValueError:
+                parts = line.split(" ")
             if len(parts) >= 4:
-                current_path = parts[-1].lstrip("b/").strip()
+                path = parts[-1].strip()
+                current_path = path[2:] if path.startswith("b/") else path
         elif current_path:
             current_lines.append(line)
     flush()

@@ -199,6 +199,105 @@ def format_workbench_worktrees_markdown(
     return "\n".join(lines)
 
 
+def format_workbench_reviews_markdown(
+    value: Mapping[str, Any],
+    *,
+    selected_index: int = 0,
+    detail: Mapping[str, Any] | None = None,
+    loading: bool = False,
+    error: str = "",
+) -> str:
+    """Render waiting approvals and bounded evidence from the shared service."""
+    snapshot = _validate_snapshot(value)
+    reviews = _records(snapshot.get("approvals"))
+    if not reviews:
+        return (
+            "## Reviews\n\n当前没有待审请求。\n\n"
+            "Review 页面只读；审批动作将在 UI-10.6 接入。"
+        )
+    index = min(len(reviews) - 1, max(0, int(selected_index)))
+    selected = reviews[index]
+    start = max(0, min(index - 4, len(reviews) - 8))
+    lines = [
+        "## Reviews",
+        "",
+        f"共 {len(reviews)} 项 · 当前 {index + 1}/{len(reviews)} · ↑/↓ 选择",
+        "",
+        "### 列表",
+    ]
+    for offset, item in enumerate(reviews[start : start + 8], start=start):
+        marker = "▶" if offset == index else "·"
+        lines.append(
+            f"- {marker} 待审 · {_plain(item.get('title') or item.get('id'))} · "
+            f"{_plain(item.get('requester')) or '未知发起者'}"
+        )
+    lines.extend(["", "### 审查证据"])
+    if error:
+        lines.extend([f"- 证据不可用：{_plain(error)}", "- 下一步：按 `r` 重试。"])
+        return "\n".join(lines)
+    if loading or detail is None:
+        lines.append("- 正在读取 diff、验证与阻塞证据…")
+        return "\n".join(lines)
+    evidence = _mapping(detail.get("evidence"))
+    approval = _mapping(evidence.get("approval"))
+    if _normalized(approval.get("id")) != _normalized(selected.get("id")):
+        lines.append("- 当前证据与所选审查不匹配，请刷新。")
+        return "\n".join(lines)
+    worktree = _mapping(evidence.get("worktree"))
+    runs = _records(evidence.get("validation_runs"))
+    files = _records(evidence.get("changed_files"))
+    hunks = _records(evidence.get("diff_hunks"))
+    failed = [run for run in runs if _normalized(run.get("status")) in {"failed", "error"}]
+    if _normalized(worktree.get("status")) != "present":
+        gate = "阻塞：变更载体不可用"
+    elif not runs:
+        gate = "待补证据：尚未运行验证"
+    elif failed:
+        gate = f"阻塞：{len(failed)} 项验证失败"
+    else:
+        gate = "证据就绪：可进入人工判断"
+    lines.extend(
+        [
+            f"- 标题：{_plain(approval.get('title') or selected.get('title'))}",
+            f"- 发起者：{_plain(approval.get('requester')) or '未知'}",
+            f"- 说明：{_plain(approval.get('detail')) or '未填写'}",
+            f"- 状态：{gate}",
+            f"- Worktree：{_plain(worktree.get('name')) or '未绑定'} "
+            f"({_plain(worktree.get('status')) or 'unknown'})",
+            f"- 验证：{len(runs)} 次，失败 {len(failed)} 次",
+            f"- 变更：{len(files)} 个文件",
+        ]
+    )
+    if files:
+        lines.extend(["", "### 文件"])
+        for item in files[:10]:
+            lines.append(
+                f"- {_plain(item.get('status')) or 'modified'} · "
+                f"`{_code(item.get('path') or '-')}`"
+            )
+        if len(files) > 10:
+            lines.append(f"- 另有 {len(files) - 10} 个文件")
+    if hunks:
+        first = hunks[0]
+        patch_lines = [
+            _code(line) for line in str(first.get("patch") or "").splitlines()[:20]
+        ]
+        lines.extend(
+            [
+                "",
+                f"### Diff · `{_code(first.get('path') or '-')}`",
+                "```diff",
+                *patch_lines,
+                "```",
+            ]
+        )
+        if len(hunks) > 1:
+            lines.append(f"另有 {len(hunks) - 1} 个 diff 文件。")
+    else:
+        lines.extend(["", "Diff：当前没有可展示的已跟踪文件差异。"])
+    return "\n".join(lines)
+
+
 class WorkbenchOverviewScreen(Screen[None]):
     """Full-page TUI view backed by ``WorkbenchService.dashboard_snapshot``."""
 
@@ -209,6 +308,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("shift+tab", "previous_tab", "切换页签", show=False),
         Binding("1", "overview_tab", "概览", show=False),
         Binding("2", "worktrees_tab", "Worktrees", show=False),
+        Binding("3", "reviews_tab", "Reviews", show=False),
         Binding("up", "select_previous", "上一项", show=False),
         Binding("down", "select_next", "下一项", show=False),
     ]
@@ -247,6 +347,10 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.snapshot: Mapping[str, Any] | None = None
         self.selected_tab = "overview"
         self.selected_worktree_index = 0
+        self.selected_review_index = 0
+        self.review_detail: Mapping[str, Any] | None = None
+        self.review_loading = False
+        self.review_error = ""
 
     def compose(self) -> ComposeResult:
         yield Static("", id="workbench-title")
@@ -295,7 +399,13 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.selected_worktree_index,
             max(0, len(_records(snapshot.get("worktrees"))) - 1),
         )
+        self.selected_review_index = min(
+            self.selected_review_index,
+            max(0, len(_records(snapshot.get("approvals"))) - 1),
+        )
         self._render_snapshot()
+        if self.selected_tab == "reviews":
+            self.refresh_review_detail()
 
     def action_refresh(self) -> None:
         self.refresh_snapshot()
@@ -304,13 +414,18 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.app.pop_screen()
 
     def action_next_tab(self) -> None:
-        self.selected_tab = (
-            "worktrees" if self.selected_tab == "overview" else "overview"
-        )
+        tabs = ("overview", "worktrees", "reviews")
+        self.selected_tab = tabs[(tabs.index(self.selected_tab) + 1) % len(tabs)]
         self._render_snapshot()
+        if self.selected_tab == "reviews":
+            self.refresh_review_detail()
 
     def action_previous_tab(self) -> None:
-        self.action_next_tab()
+        tabs = ("overview", "worktrees", "reviews")
+        self.selected_tab = tabs[(tabs.index(self.selected_tab) - 1) % len(tabs)]
+        self._render_snapshot()
+        if self.selected_tab == "reviews":
+            self.refresh_review_detail()
 
     def action_overview_tab(self) -> None:
         self.selected_tab = "overview"
@@ -320,24 +435,75 @@ class WorkbenchOverviewScreen(Screen[None]):
         self.selected_tab = "worktrees"
         self._render_snapshot()
 
+    def action_reviews_tab(self) -> None:
+        self.selected_tab = "reviews"
+        self._render_snapshot()
+        self.refresh_review_detail()
+
     def action_select_previous(self) -> None:
         if self.selected_tab == "worktrees":
             self.selected_worktree_index = max(0, self.selected_worktree_index - 1)
             self._render_snapshot()
+        elif self.selected_tab == "reviews":
+            self.selected_review_index = max(0, self.selected_review_index - 1)
+            self.review_detail = None
+            self._render_snapshot()
+            self.refresh_review_detail()
 
     def action_select_next(self) -> None:
         if self.selected_tab == "worktrees" and self.snapshot is not None:
             last = max(0, len(_records(self.snapshot.get("worktrees"))) - 1)
             self.selected_worktree_index = min(last, self.selected_worktree_index + 1)
             self._render_snapshot()
+        elif self.selected_tab == "reviews" and self.snapshot is not None:
+            last = max(0, len(_records(self.snapshot.get("approvals"))) - 1)
+            self.selected_review_index = min(last, self.selected_review_index + 1)
+            self.review_detail = None
+            self._render_snapshot()
+            self.refresh_review_detail()
+
+    @work(exclusive=True, group="workbench-review", exit_on_error=False)
+    async def refresh_review_detail(self) -> None:
+        if self.snapshot is None:
+            return
+        reviews = _records(self.snapshot.get("approvals"))
+        if not reviews:
+            self.review_detail = None
+            self.review_loading = False
+            self.review_error = ""
+            self._render_snapshot()
+            return
+        index = min(len(reviews) - 1, max(0, self.selected_review_index))
+        review_id = _normalized(reviews[index].get("id"))
+        self.review_loading = True
+        self.review_error = ""
+        self._render_snapshot()
+        try:
+            session_id = _normalized(self.snapshot.get("session_id"))
+            detail = await self.engine.workbench_service.get_review_evidence(
+                session_id, review_id
+            )
+            if detail is None:
+                raise WorkbenchSnapshotError("审查请求不存在")
+            approval = _mapping(detail.get("approval"))
+            if _normalized(approval.get("id")) != review_id:
+                raise WorkbenchSnapshotError("审查证据不匹配")
+        except Exception as exc:
+            logger.warning("TUI Workbench review failed (%s)", type(exc).__name__)
+            self.review_error = "审查证据加载失败；请稍后重试。"
+            self.review_detail = None
+        else:
+            self.review_detail = {"evidence": detail}
+        finally:
+            self.review_loading = False
+            self._render_snapshot()
 
     def _render_snapshot(self) -> None:
         title = self.query_one("#workbench-title", Static)
-        title.update(
-            "Workbench · 1 概览 · [2 Worktrees]"
-            if self.selected_tab == "worktrees"
-            else "Workbench · [1 概览] · 2 Worktrees"
-        )
+        tabs = (("overview", "1 概览"), ("worktrees", "2 Worktrees"), ("reviews", "3 Reviews"))
+        title.update("Workbench · " + " · ".join(
+            f"[{label}]" if self.selected_tab == name else label for name, label in tabs
+        ))
         if self.snapshot is None:
             return
         content = self.query_one("#workbench-content", Markdown)
@@ -346,6 +512,16 @@ class WorkbenchOverviewScreen(Screen[None]):
                 format_workbench_worktrees_markdown(
                     self.snapshot,
                     selected_index=self.selected_worktree_index,
+                )
+            )
+        elif self.selected_tab == "reviews":
+            content.update(
+                format_workbench_reviews_markdown(
+                    self.snapshot,
+                    selected_index=self.selected_review_index,
+                    detail=self.review_detail,
+                    loading=self.review_loading,
+                    error=self.review_error,
                 )
             )
         else:
@@ -498,5 +674,6 @@ __all__ = [
     "WorkbenchOverviewScreen",
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",
+    "format_workbench_reviews_markdown",
     "format_workbench_worktrees_markdown",
 ]

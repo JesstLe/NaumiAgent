@@ -375,6 +375,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "evolution/review") {
     return normalizeEvolutionReview(payload);
   }
+  if (type === "workbench/review") {
+    return normalizeWorkbenchReview(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -530,6 +533,12 @@ function normalizeServerPayload(type, payload) {
       missions: Array.isArray(payload.missions) ? payload.missions : [],
       tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
       issues: Array.isArray(payload.issues) ? payload.issues : [],
+      leases: normalizeObjectArray(payload.leases, 200),
+      validation_runs: normalizeObjectArray(payload.validation_runs, 200),
+      approvals: Array.isArray(payload.approvals)
+        ? payload.approvals.slice(0, 100).map(normalizeWorkbenchApproval)
+        : [],
+      proposals: normalizeObjectArray(payload.proposals, 200),
       failures: Array.isArray(payload.failures) ? payload.failures : [],
       events: Array.isArray(payload.events) ? payload.events : [],
     };
@@ -549,6 +558,147 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeWorkbenchApproval(value) {
+  const item = normalizeObject(value);
+  return {
+    id: String(item.id ?? "").slice(0, 500),
+    session_id: String(item.session_id ?? "").slice(0, 500),
+    mission_id: String(item.mission_id ?? "").slice(0, 500),
+    task_id: String(item.task_id ?? "").slice(0, 500),
+    state: item.state === "waiting" ? "waiting" : String(item.state ?? "").slice(0, 80),
+    title: String(item.title ?? "").slice(0, 2_000),
+    detail: String(item.detail ?? "").slice(0, 10_000),
+    requester: String(item.requester ?? "").slice(0, 500),
+    reviewer: String(item.reviewer ?? "").slice(0, 500),
+    decision_note: String(item.decision_note ?? "").slice(0, 10_000),
+    created_at: String(item.created_at ?? "").slice(0, 100),
+    updated_at: String(item.updated_at ?? "").slice(0, 100),
+  };
+}
+
+function normalizeWorkbenchReview(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`workbench/review schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "workbench/review status",
+    new Set(["ready", "unavailable"]),
+  );
+  const normalized = {
+    schema_version: 1,
+    session_id: harnessText(payload.session_id, "workbench/review session_id"),
+    review_id: harnessText(payload.review_id, "workbench/review review_id"),
+    status,
+    code: harnessText(payload.code, "workbench/review code"),
+    evidence: null,
+  };
+  if (status === "unavailable") return normalized;
+  const evidence = harnessObject(payload.evidence, "workbench/review evidence");
+  const rawApproval = harnessObject(evidence.approval, "workbench/review approval");
+  const approval = {
+    id: workbenchText(rawApproval.id, "workbench/review approval.id", 500),
+    session_id: workbenchText(rawApproval.session_id, "workbench/review approval.session_id", 500),
+    mission_id: workbenchText(rawApproval.mission_id, "workbench/review approval.mission_id", 500),
+    task_id: workbenchText(rawApproval.task_id, "workbench/review approval.task_id", 500),
+    state: workbenchText(rawApproval.state, "workbench/review approval.state", 80),
+    title: workbenchText(rawApproval.title, "workbench/review approval.title", 2_000),
+    detail: workbenchText(rawApproval.detail, "workbench/review approval.detail", 10_000),
+    requester: workbenchText(rawApproval.requester, "workbench/review approval.requester", 500),
+    reviewer: workbenchText(rawApproval.reviewer, "workbench/review approval.reviewer", 500),
+    decision_note: workbenchText(rawApproval.decision_note, "workbench/review approval.decision_note", 10_000),
+    created_at: workbenchText(rawApproval.created_at, "workbench/review approval.created_at", 100),
+    updated_at: workbenchText(rawApproval.updated_at, "workbench/review approval.updated_at", 100),
+  };
+  if (!approval.id || approval.id !== normalized.review_id) {
+    throw new Error("workbench/review approval id 不匹配");
+  }
+  const rawIssue = evidence.issue == null
+    ? null
+    : harnessObject(evidence.issue, "workbench/review issue");
+  const issue = rawIssue == null ? null : {
+    id: workbenchText(rawIssue.id, "workbench/review issue.id", 500),
+    session_id: workbenchText(rawIssue.session_id, "workbench/review issue.session_id", 500),
+    mission_id: workbenchText(rawIssue.mission_id, "workbench/review issue.mission_id", 500),
+    task_id: workbenchText(rawIssue.task_id, "workbench/review issue.task_id", 500),
+    risk_level: workbenchText(rawIssue.risk_level, "workbench/review issue.risk_level", 80),
+    related_branch: workbenchText(rawIssue.related_branch, "workbench/review issue.related_branch", 500),
+    related_worktree: workbenchText(rawIssue.related_worktree, "workbench/review issue.related_worktree", 500),
+    related_pr: workbenchText(rawIssue.related_pr, "workbench/review issue.related_pr", 500),
+  };
+  const worktree = harnessObject(evidence.worktree, "workbench/review worktree");
+  normalized.evidence = {
+    approval,
+    issue,
+    worktree: {
+      name: workbenchText(worktree.name, "workbench/review worktree.name", 500),
+      path: workbenchText(worktree.path, "workbench/review worktree.path", 2_000),
+      status: harnessChoice(
+        worktree.status,
+        "workbench/review worktree.status",
+        new Set(["present", "missing", "unbound"]),
+      ),
+    },
+    validation_runs: harnessObjectArray(
+      evidence.validation_runs,
+      "workbench/review validation_runs",
+      20,
+    ).map((item) => ({
+      id: workbenchText(item.id, "workbench/review validation.id", 500),
+      status: workbenchText(item.status, "workbench/review validation.status", 80),
+      command: Array.isArray(item.command)
+        ? harnessTextArray(item.command, "workbench/review validation.command", 30)
+          .map((part) => part.slice(0, 500))
+        : workbenchText(item.command, "workbench/review validation.command", 2_000),
+      exit_code: item.exit_code == null
+        ? null
+        : harnessNonnegativeInteger(item.exit_code, "workbench/review validation.exit_code"),
+      started_at: workbenchText(item.started_at, "workbench/review validation.started_at", 100),
+      completed_at: workbenchText(item.completed_at, "workbench/review validation.completed_at", 100),
+    })),
+    changed_files: harnessObjectArray(
+      evidence.changed_files,
+      "workbench/review changed_files",
+      200,
+    ).map((item) => ({
+      path: workbenchText(item.path, "workbench/review changed_file.path", 2_000),
+      status: harnessChoice(
+        item.status,
+        "workbench/review changed_file.status",
+        new Set(["modified", "added", "deleted", "untracked", "renamed"]),
+      ),
+    })),
+    diff_hunks: harnessObjectArray(
+      evidence.diff_hunks,
+      "workbench/review diff_hunks",
+      30,
+    ).map((item) => ({
+      path: workbenchText(item.path, "workbench/review diff_hunk.path", 2_000),
+      patch: workbenchText(item.patch, "workbench/review diff_hunk.patch", 4_000),
+    })),
+    agent_notes: harnessObjectArray(evidence.agent_notes, "workbench/review agent_notes", 50)
+      .map((item) => ({
+        actor: workbenchText(item.actor, "workbench/review agent_note.actor", 500),
+        note: workbenchText(item.note, "workbench/review agent_note.note", 2_000),
+        type: workbenchText(item.type, "workbench/review agent_note.type", 200),
+        timestamp: workbenchText(item.timestamp, "workbench/review agent_note.timestamp", 100),
+      })),
+    events: harnessObjectArray(evidence.events, "workbench/review events", 50)
+      .map((item) => ({
+        id: workbenchText(item.id, "workbench/review event.id", 500),
+        type: workbenchText(item.type, "workbench/review event.type", 200),
+        actor: workbenchText(item.actor, "workbench/review event.actor", 500),
+        subject_id: workbenchText(item.subject_id, "workbench/review event.subject_id", 500),
+        timestamp: workbenchText(item.timestamp, "workbench/review event.timestamp", 100),
+      })),
+  };
+  return normalized;
+}
+
+function workbenchText(value, name, limit) {
+  return harnessText(value, name).slice(0, limit);
 }
 
 function normalizeWorkbenchWorktree(value) {

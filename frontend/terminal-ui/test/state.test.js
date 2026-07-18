@@ -2429,9 +2429,18 @@ test("initial state includes empty workbench bucket", () => {
     selected_tab: "overview",
     selected_worktree_name: "",
     selected_worktree_index: 0,
+    selected_review_id: "",
+    selected_review_index: 0,
+    review_loading: false,
+    review_error: "",
+    review_detail: null,
     missions: [],
     tasks: [],
     issues: [],
+    leases: [],
+    validation_runs: [],
+    approvals: [],
+    proposals: [],
     failures: [],
     events: [],
     loading: false,
@@ -2671,6 +2680,52 @@ test("workbench tabs navigate 100 worktrees and preserve stable selection on ref
   assert.equal(state.workbench.selected_tab, "overview");
   handleWorkbenchOverviewKey(state, "2", () => {});
   assert.equal(state.workbench.selected_tab, "worktrees");
+});
+
+test("workbench Reviews tab lazily requests selected evidence and ignores stale detail", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  handleSubmitText(state, "/workbench", () => {});
+  const approvals = Array.from({ length: 100 }, (_, index) => ({
+    id: `approval-${index}`,
+    task_id: `task-${index}`,
+    state: "waiting",
+    title: `审查 ${index}`,
+  }));
+  reduceServerEvent(state, {
+    type: "workbench/snapshot",
+    payload: {
+      schema_version: 1, stream_id: "stream-a", revision: 1,
+      generated_at: "", full: true, session_id: "session-workbench",
+      counts: { tasks: 100, worktrees: 0, reviews: 100 },
+      active_selection: { review_id: "approval-0" },
+      missions: [], tasks: [], issues: [], failures: [], events: [], approvals,
+    },
+  });
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "3", send);
+  assert.equal(state.workbench.selected_review_id, "approval-0");
+  assert.deepEqual(sent.at(-1), {
+    type: "workbench/review/request",
+    payload: { session_id: "session-workbench", review_id: "approval-0" },
+  });
+  handleWorkbenchOverviewKey(state, "\x1b[F", send);
+  assert.equal(state.workbench.selected_review_id, "approval-99");
+  assert.equal(sent.at(-1).payload.review_id, "approval-99");
+
+  reduceServerEvent(state, {
+    type: "workbench/review",
+    payload: { schema_version: 1, session_id: "session-workbench", review_id: "approval-0", status: "ready", evidence: {} },
+  });
+  assert.equal(state.workbench.review_detail, null);
+  reduceServerEvent(state, {
+    type: "workbench/review",
+    payload: { schema_version: 1, session_id: "session-workbench", review_id: "approval-99", status: "ready", evidence: { approval: { id: "approval-99" } } },
+  });
+  assert.equal(state.workbench.review_loading, false);
+  assert.equal(state.workbench.review_detail.review_id, "approval-99");
 });
 
 test("session replay keeps an open Workbench route but requests new authority", () => {

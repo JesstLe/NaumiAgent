@@ -605,15 +605,27 @@ class _FakeWorkbenchService:
 
 
 class _RevisionedWorkbenchService:
-    def __init__(self, snapshots: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        snapshots: list[dict[str, Any]] | None = None,
+        review_evidence: dict[str, Any] | None = None,
+    ) -> None:
         self.snapshots = list(snapshots or [])
         self.calls: list[str] = []
+        self.review_evidence = review_evidence
+        self.review_calls: list[tuple[str, str]] = []
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
         self.calls.append(session_id)
         if not self.snapshots:
             raise RuntimeError("PRIVATE_WORKBENCH_FAILURE")
         return self.snapshots.pop(0)
+
+    async def get_review_evidence(
+        self, session_id: str, review_id: str
+    ) -> dict[str, Any] | None:
+        self.review_calls.append((session_id, review_id))
+        return self.review_evidence
 
 
 class _TaskSubmitFakeEngine(_FakeEngine):
@@ -3000,6 +3012,73 @@ async def test_bridge_workbench_request_returns_current_read_only_snapshot() -> 
     assert snapshot["payload"]["counts"]["worktrees"] == 1
     assert service.calls == ["session-task"]
     assert bridge._run_task is None
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_review_returns_current_read_only_evidence() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    evidence = {
+        "approval": {"id": "approval-1", "state": "waiting"},
+        "issue": None,
+        "worktree": {"name": "wt", "path": "/tmp/wt", "status": "present"},
+        "validation_runs": [],
+        "changed_files": [{"path": "README.md", "status": "modified"}],
+        "diff_hunks": [{"path": "README.md", "patch": "-old\n+new"}],
+        "agent_notes": [],
+        "events": [],
+    }
+    service = _RevisionedWorkbenchService(review_evidence=evidence)
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "workbench-review",
+            "type": ClientEventType.WORKBENCH_REVIEW_REQUEST,
+            "payload": {"session_id": "session-task", "review_id": "approval-1"},
+        }
+    )
+
+    record = next(
+        item for item in _records(writer) if item["type"] == "workbench/review"
+    )
+    assert record["request_id"] == "workbench-review"
+    assert record["payload"]["status"] == "ready"
+    assert record["payload"]["evidence"]["diff_hunks"][0]["patch"] == "-old\n+new"
+    assert service.review_calls == [("session-task", "approval-1")]
+    assert bridge._run_task is None
+
+
+@pytest.mark.asyncio
+async def test_bridge_workbench_review_reports_missing_without_error_details() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.workbench_service = _RevisionedWorkbenchService(review_evidence=None)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "workbench-review-missing",
+            "type": ClientEventType.WORKBENCH_REVIEW_REQUEST,
+            "payload": {"review_id": "missing"},
+        }
+    )
+
+    record = next(
+        item for item in _records(writer) if item["type"] == "workbench/review"
+    )
+    assert record["payload"] == {
+        "schema_version": 1,
+        "session_id": "session-task",
+        "review_id": "missing",
+        "status": "unavailable",
+        "code": "review_not_found",
+    }
 
 
 @pytest.mark.asyncio

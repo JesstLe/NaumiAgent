@@ -14,6 +14,7 @@ from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
+    format_workbench_reviews_markdown,
     format_workbench_worktrees_markdown,
 )
 
@@ -115,6 +116,30 @@ def test_worktree_formatter_bounds_one_hundred_items_around_selection() -> None:
     assert len(rendered.splitlines()) < 30
 
 
+def test_reviews_formatter_renders_real_checks_files_and_diff() -> None:
+    detail = {
+        "evidence": {
+            "approval": {
+                "id": "approval-1",
+                "title": "等待用户确认",
+                "detail": "审查真实变更",
+                "requester": "Workbench-Agent",
+            },
+            "worktree": {"name": "ui-10-real", "status": "present"},
+            "validation_runs": [{"status": "failed", "exit_code": 1}],
+            "changed_files": [{"path": "src/ui.py", "status": "modified"}],
+            "diff_hunks": [{"path": "src/ui.py", "patch": "@@ -1 +1 @@\n-old\n+new"}],
+        }
+    }
+
+    rendered = format_workbench_reviews_markdown(_snapshot(), detail=detail)
+
+    assert "阻塞：1 项验证失败" in rendered
+    assert "src/ui.py" in rendered
+    assert "-old" in rendered
+    assert "+new" in rendered
+
+
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
     snapshot = _snapshot()
     snapshot["missions"][0]["title"] = "# injected\n[link](file:///secret)"  # type: ignore[index]
@@ -174,6 +199,46 @@ async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot
         await pilot.press("escape")
         await pilot.pause(0.05)
         assert not isinstance(app.screen, WorkbenchOverviewScreen)
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_reviews_loads_selected_service_evidence() -> None:
+    engine = AgentEngine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        return_value=_snapshot()
+    )
+    engine.workbench_service.get_review_evidence = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "approval": {
+                "id": "approval-1",
+                "title": "等待用户确认",
+                "detail": "检查实际变更",
+                "requester": "Workbench-Agent",
+            },
+            "worktree": {"name": "ui-10-real", "status": "present"},
+            "validation_runs": [{"status": "passed", "exit_code": 0}],
+            "changed_files": [{"path": "src/ui.py", "status": "modified"}],
+            "diff_hunks": [{"path": "src/ui.py", "patch": "-old\n+new"}],
+        }
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3")
+        await pilot.pause(0.1)
+
+        screen = app.screen
+        assert isinstance(screen, WorkbenchOverviewScreen)
+        rendered = screen.query_one("#workbench-content", Markdown)._markdown
+        assert "Reviews" in rendered
+        assert "证据就绪" in rendered
+        assert "src/ui.py" in rendered
+        engine.workbench_service.get_review_evidence.assert_awaited_once_with(
+            "session-workbench-tui", "approval-1"
+        )
 
 
 @pytest.mark.asyncio
