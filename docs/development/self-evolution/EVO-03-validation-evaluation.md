@@ -60,6 +60,8 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.5a Failure Attribution Contract：已实现。把 H5c decision/statistical/policy/mechanical codes 机械映射
   为 candidate defect、runner infrastructure、environment incompatible、flaky、evidence incomplete 或 objective
   unchanged，生成防篡改 typed receipt 并幂等持久化。详见 `EVO-03-5a-failure-attribution-contract.md`。
+- HAR-08.4a/ARC-04.3a 已作为跨模块前置实现单项真实 Sandbox Profile check，但尚未成为成对的
+  baseline/candidate cohort，也未接生产权限回执委托，因此不计为 EVO-03 interventional lane 完成。
 
 Interventional Harness runner、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持
 partial。

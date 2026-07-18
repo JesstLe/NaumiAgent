@@ -594,6 +594,10 @@ class ToolJobAuthority:
         self._execution_grants = execution_grants
         self._worker_registry = worker_registry
 
+    async def get(self, job_id: str) -> StoredToolJob | None:
+        """Read one authenticated durable job without exposing Store mutation APIs."""
+        return await self._store.get(job_id)
+
     async def admit(
         self,
         request: ToolJobRequest,

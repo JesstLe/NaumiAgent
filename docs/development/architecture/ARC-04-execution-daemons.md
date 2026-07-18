@@ -30,8 +30,11 @@
   `ARC-04-2b-immutable-tool-job-admission.md`。
 - ARC-04.2c 已完成 ToolJob schema v2 单调 lifecycle receipt、dispatch-before-send、Worker incarnation fencing、
   并发终态幂等、unknown 副作用边界与 v1 migration，详见 `ARC-04-2c-tool-job-lifecycle-receipts.md`。
-- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有执行 producer 或
-  Supervisor。因此 ARC-04 仅为 partial，HAR-08.4 仍不得把本地 subprocess 当作隔离 worker。
+- ARC-04.3a 已完成认证本地 non-PTY transport、默认断网 OS sandbox、process-tree cancel、资源上限、artifact
+  digest，并由 Coordinator 消费 ARC-04.2b/2c 权威链，详见
+  `ARC-04-3a-authenticated-non-pty-shell-worker.md`。
+- 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
+  Windows 隔离后端仍未完成。因此 ARC-04 保持 partial。
 
 ## 验收标准
 
@@ -46,9 +49,9 @@
 
 - HAR-08.4 Sandbox Eval 只能消费 ARC-04 提供的显式隔离能力合同：临时 workspace/worktree、
   默认断网、环境变量 allowlist、资源上限、进程树取消、artifact digest 与可审计退出状态。
-- 现有 `ValidationExecutor` 只能提供 argv/timeout/process-group/output bound；`CodeExecuteTool`
-  在容器不可用时允许本机降级。两者都不能单独证明 Sandbox Eval 的 `no_host_side_effect`，因此
-  ARC-04 隔离后端完成前，HAR-08.4 保持 planned，禁止用“临时目录 + subprocess”冒充沙箱。
+- 现有 `ValidationExecutor` 仍不能证明 Sandbox Eval 的 `no_host_side_effect`。HAR-08.4a 已改为消费
+  ARC-04.3a 隔离合同跑一个真实 Profile check，但生产 `/harness check` 在权限回执委托接通前仍不得静默切换
+  或以硬编码 bypass 冒充 authority。
 
 ## 已完成的最小前置
 
@@ -67,4 +70,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c)。
+ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a)。

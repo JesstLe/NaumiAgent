@@ -125,6 +125,15 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
         == paths.runtime_data_dir / "permission-decisions.db"
     )
     assert paths.tool_job_db_path == paths.runtime_data_dir / "tool-jobs.db"
+    assert paths.shell_worker_runtime_dir == (
+        paths.runtime_data_dir / "shell-worker" / "transport"
+    )
+    assert paths.shell_worker_sandbox_dir == (
+        paths.runtime_data_dir / "shell-worker" / "sandboxes"
+    )
+    assert paths.shell_worker_artifact_dir == (
+        paths.runtime_data_dir / "shell-worker" / "artifacts"
+    )
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
     assert paths.goal_storage_dir == paths.runtime_data_dir / "goals"
     assert paths.pursuit_storage_dir == paths.runtime_data_dir / "pursuit"
@@ -145,6 +154,9 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "execution_grant_db_path": absolute / "data" / "execution-grants.db",
         "permission_decision_db_path": absolute / "data" / "permission-decisions.db",
         "tool_job_db_path": absolute / "data" / "tool-jobs.db",
+        "shell_worker_runtime_dir": absolute / "data" / "shell-worker" / "transport",
+        "shell_worker_sandbox_dir": absolute / "data" / "shell-worker" / "sandboxes",
+        "shell_worker_artifact_dir": absolute / "data" / "shell-worker" / "artifacts",
         "worktree_storage_dir": absolute / "data" / "worktrees",
         "goal_storage_dir": absolute / "data" / "goals",
         "pursuit_storage_dir": absolute / "data" / "pursuit",
@@ -199,6 +211,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
             **{
                 **values,
                 "tool_job_db_path": absolute / "outside" / "tool-jobs.db",
+            }
+        )
+    with pytest.raises(ValueError, match="shell_worker_sandbox_dir 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "shell_worker_sandbox_dir": absolute / "outside" / "sandboxes",
             }
         )
 
@@ -533,6 +552,31 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         engine.tool_job_lifecycle_authority._worker_registry
         is engine._resources.worker_registry_store
     )
+    assert engine.shell_worker_coordinator._jobs is engine.tool_job_authority
+    assert (
+        engine.shell_worker_coordinator._lifecycle
+        is engine.tool_job_lifecycle_authority
+    )
+    assert (
+        engine.shell_worker_coordinator._worker_registry
+        is engine._resources.worker_registry_store
+    )
+    assert engine.shell_worker_coordinator._transport is engine.shell_worker_transport
+    assert (
+        engine.shell_worker_transport._runtime_dir
+        == engine._paths.shell_worker_runtime_dir
+    )
+    assert (
+        engine.harness_sandbox_check_runner.sandbox_root
+        == engine._paths.shell_worker_sandbox_dir
+    )
+    assert (
+        engine.harness_sandbox_check_runner.artifact_root
+        == engine._paths.shell_worker_artifact_dir
+    )
     assert not engine._paths.execution_grant_db_path.exists()
     assert not engine._paths.permission_decision_db_path.exists()
     assert not engine._paths.tool_job_db_path.exists()
+    assert not engine._paths.shell_worker_runtime_dir.exists()
+    assert not engine._paths.shell_worker_sandbox_dir.exists()
+    assert not engine._paths.shell_worker_artifact_dir.exists()

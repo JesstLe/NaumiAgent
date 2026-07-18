@@ -18,6 +18,9 @@ class RuntimePaths:
     execution_grant_db_path: Path
     permission_decision_db_path: Path
     tool_job_db_path: Path
+    shell_worker_runtime_dir: Path
+    shell_worker_sandbox_dir: Path
+    shell_worker_artifact_dir: Path
     worktree_storage_dir: Path
     goal_storage_dir: Path
     pursuit_storage_dir: Path
@@ -41,6 +44,9 @@ class RuntimePaths:
             "execution_grant_db_path",
             "permission_decision_db_path",
             "tool_job_db_path",
+            "shell_worker_runtime_dir",
+            "shell_worker_sandbox_dir",
+            "shell_worker_artifact_dir",
             "worktree_storage_dir",
             "goal_storage_dir",
             "pursuit_storage_dir",
