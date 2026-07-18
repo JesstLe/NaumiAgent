@@ -16,6 +16,12 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRun,
     PursuitRunStatus,
 )
+from naumi_agent.orchestrator.pursuit_action_ledger import (
+    PursuitActionRecord,
+    PursuitActionState,
+    action_safe_text,
+    digest_result,
+)
 from naumi_agent.orchestrator.pursuit_checkpoint import PursuitCheckpoint
 
 
@@ -260,6 +266,384 @@ class PursuitStore:
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"读取 checkpoint 失败：{exc}") from exc
 
+    def prepare_action(self, record: PursuitActionRecord) -> PursuitActionRecord:
+        """Persist one immutable action identity before any external dispatch."""
+        if record.state is not PursuitActionState.PREPARED or record.sequence != 1:
+            raise ValueError("新行动必须从 prepared/sequence=1 开始。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = self._get_action_with_connection(conn, record.action_key)
+                if existing is not None:
+                    immutable_fields = (
+                        "run_id", "iteration", "action_id", "tool_name",
+                        "arguments_sha256", "arguments_size_bytes",
+                        "argument_summary", "dispatch_token",
+                    )
+                    if all(
+                        getattr(existing, field) == getattr(record, field)
+                        for field in immutable_fields
+                    ):
+                        return existing
+                    raise PursuitStoreConflictError(
+                        f"action_key 已绑定不同的行动输入：{record.action_key}"
+                    )
+                if conn.execute(
+                    "SELECT 1 FROM pursuit_runs WHERE id = ?", (record.run_id,)
+                ).fetchone() is None:
+                    raise PursuitStoreConflictError(
+                        f"行动对应的 PursuitRun 不存在：{record.run_id}"
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_actions (
+                        action_key, run_id, background_task_id, latest_sequence,
+                        payload_json, payload_sha256
+                    ) VALUES (?, ?, '', ?, ?, ?)
+                    """,
+                    (
+                        record.action_key,
+                        record.run_id,
+                        record.sequence,
+                        record.canonical_json(),
+                        record.digest(),
+                    ),
+                )
+                self._append_action_event(conn, record, previous_digest="")
+                return record
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"准备行动账本失败：{exc}") from exc
+
+    def mark_action_dispatched(
+        self,
+        action_key: str,
+        *,
+        updated_at: float,
+    ) -> PursuitActionRecord:
+        return self._transition_action(
+            action_key,
+            target=PursuitActionState.DISPATCHED,
+            allowed_from={PursuitActionState.PREPARED},
+            updated_at=updated_at,
+        )
+
+    def mark_action_waiting(
+        self,
+        action_key: str,
+        *,
+        background_task_id: str,
+        updated_at: float,
+        result_summary: str = "",
+    ) -> PursuitActionRecord:
+        task_id = action_safe_text(background_task_id, limit=256).strip()
+        if not task_id:
+            raise ValueError("background_task_id 不能为空。")
+        return self._transition_action(
+            action_key,
+            target=PursuitActionState.WAITING,
+            allowed_from={PursuitActionState.DISPATCHED},
+            updated_at=updated_at,
+            background_task_id=task_id,
+            result_status="running",
+            result_summary=result_summary,
+        )
+
+    def mark_action_terminal(
+        self,
+        action_key: str,
+        *,
+        succeeded: bool,
+        result_status: str,
+        result: object,
+        updated_at: float,
+    ) -> PursuitActionRecord:
+        return self._transition_action(
+            action_key,
+            target=(
+                PursuitActionState.COMPLETED
+                if succeeded
+                else PursuitActionState.FAILED
+            ),
+            allowed_from={
+                PursuitActionState.DISPATCHED,
+                PursuitActionState.WAITING,
+            },
+            updated_at=updated_at,
+            result_status=action_safe_text(result_status, limit=64),
+            result_summary=action_safe_text(result, limit=2_000),
+            result_sha256=digest_result(result),
+        )
+
+    def get_action(self, action_key: str) -> PursuitActionRecord | None:
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._get_action_with_connection(conn, action_key)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"行动账本结构校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取行动账本失败：{exc}") from exc
+
+    def get_action_by_background_task(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+    ) -> PursuitActionRecord | None:
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT action_key FROM pursuit_actions "
+                    "WHERE run_id = ? AND background_task_id = ?",
+                    (run_id, task_id),
+                ).fetchone()
+                if row is None:
+                    return None
+                return self._get_action_with_connection(conn, str(row["action_key"]))
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"按后台任务读取行动账本失败：{exc}") from exc
+
+    def list_action_events(self, action_key: str) -> list[PursuitActionRecord]:
+        """Return the authenticated immutable lifecycle for diagnostics/tests."""
+        if not self._db_path.exists():
+            return []
+        try:
+            with self._connect() as conn:
+                return self._verify_action_events(conn, action_key)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"行动事件结构校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取行动事件失败：{exc}") from exc
+
+    def list_actions(
+        self,
+        run_id: str,
+        *,
+        unresolved_only: bool = False,
+    ) -> list[PursuitActionRecord]:
+        """List authenticated actions for one run in deterministic lifecycle order."""
+        if not self._db_path.exists():
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT action_key FROM pursuit_actions WHERE run_id = ?",
+                    (run_id,),
+                ).fetchall()
+                records = [
+                    self._get_action_with_connection(conn, str(row["action_key"]))
+                    for row in rows
+                ]
+            result = [record for record in records if record is not None]
+            if unresolved_only:
+                result = [record for record in result if not record.is_terminal]
+            return sorted(
+                result,
+                key=lambda item: (
+                    item.iteration,
+                    item.prepared_at,
+                    item.action_id,
+                    item.action_key,
+                ),
+            )
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"列出行动账本失败：{exc}") from exc
+
+    def _transition_action(
+        self,
+        action_key: str,
+        *,
+        target: PursuitActionState,
+        allowed_from: set[PursuitActionState],
+        updated_at: float,
+        background_task_id: str | None = None,
+        result_status: str | None = None,
+        result_summary: str | None = None,
+        result_sha256: str | None = None,
+    ) -> PursuitActionRecord:
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                current = self._get_action_with_connection(conn, action_key)
+                if current is None:
+                    raise PursuitStoreConflictError(f"行动不存在：{action_key}")
+                update = {
+                    "state": target,
+                    "sequence": current.sequence + 1,
+                    "updated_at": updated_at,
+                    "background_task_id": (
+                        current.background_task_id
+                        if background_task_id is None
+                        else background_task_id
+                    ),
+                    "result_status": (
+                        current.result_status
+                        if result_status is None
+                        else result_status
+                    ),
+                    "result_summary": (
+                        current.result_summary
+                        if result_summary is None
+                        else action_safe_text(result_summary, limit=2_000)
+                    ),
+                    "result_sha256": (
+                        current.result_sha256
+                        if result_sha256 is None
+                        else result_sha256
+                    ),
+                }
+                candidate = current.model_copy(update=update)
+                candidate = PursuitActionRecord.model_validate(
+                    candidate.model_dump(mode="python")
+                )
+                if current.state is target:
+                    comparable = candidate.model_copy(update={
+                        "sequence": current.sequence,
+                        "updated_at": current.updated_at,
+                    })
+                    if comparable == current:
+                        return current
+                    raise PursuitStoreConflictError(
+                        f"行动 {action_key} 的 {target.value} 结果发生冲突。"
+                    )
+                if current.state not in allowed_from:
+                    raise PursuitStoreConflictError(
+                        f"行动状态不能从 {current.state.value} 转为 {target.value}。"
+                    )
+                self._append_action_event(
+                    conn,
+                    candidate,
+                    previous_digest=current.digest(),
+                )
+                conn.execute(
+                    """
+                    UPDATE pursuit_actions
+                    SET background_task_id = ?, latest_sequence = ?,
+                        payload_json = ?, payload_sha256 = ?
+                    WHERE action_key = ? AND latest_sequence = ?
+                    """,
+                    (
+                        candidate.background_task_id,
+                        candidate.sequence,
+                        candidate.canonical_json(),
+                        candidate.digest(),
+                        action_key,
+                        current.sequence,
+                    ),
+                )
+                if conn.total_changes < 2:
+                    raise PursuitStoreConflictError(
+                        f"行动 {action_key} 被并发更新，拒绝覆盖。"
+                    )
+                return candidate
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"行动状态校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"更新行动账本失败：{exc}") from exc
+
+    @staticmethod
+    def _append_action_event(
+        conn: sqlite3.Connection,
+        record: PursuitActionRecord,
+        *,
+        previous_digest: str,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO pursuit_action_events (
+                action_key, sequence, state, payload_json, payload_sha256,
+                previous_payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.action_key,
+                record.sequence,
+                record.state.value,
+                record.canonical_json(),
+                record.digest(),
+                previous_digest,
+                record.updated_at,
+            ),
+        )
+
+    def _get_action_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        action_key: str,
+    ) -> PursuitActionRecord | None:
+        row = conn.execute(
+            "SELECT * FROM pursuit_actions WHERE action_key = ?", (action_key,)
+        ).fetchone()
+        if row is None:
+            return None
+        events = self._verify_action_events(conn, action_key)
+        if not events:
+            raise PursuitStoreError("行动快照存在但事件链为空，拒绝读取。")
+        latest = events[-1]
+        payload = str(row["payload_json"])
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(digest, str(row["payload_sha256"])):
+            raise PursuitStoreError("行动快照摘要校验失败，拒绝读取。")
+        snapshot = PursuitActionRecord.model_validate_json(payload)
+        if (
+            snapshot != latest
+            or str(row["action_key"]) != latest.action_key
+            or str(row["run_id"]) != latest.run_id
+            or str(row["background_task_id"]) != latest.background_task_id
+            or int(row["latest_sequence"]) != latest.sequence
+        ):
+            raise PursuitStoreError("行动快照与事件链末端不一致，拒绝读取。")
+        return latest
+
+    @staticmethod
+    def _verify_action_events(
+        conn: sqlite3.Connection,
+        action_key: str,
+    ) -> list[PursuitActionRecord]:
+        rows = conn.execute(
+            "SELECT * FROM pursuit_action_events WHERE action_key = ? "
+            "ORDER BY sequence ASC",
+            (action_key,),
+        ).fetchall()
+        records: list[PursuitActionRecord] = []
+        previous_digest = ""
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = str(row["payload_json"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(row["sequence"]) != expected_sequence:
+                raise PursuitStoreError("行动事件序号不连续，拒绝读取。")
+            if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+                raise PursuitStoreError("行动事件摘要校验失败，拒绝读取。")
+            if not hmac.compare_digest(
+                previous_digest, str(row["previous_payload_sha256"])
+            ):
+                raise PursuitStoreError("行动事件哈希链断裂，拒绝读取。")
+            record = PursuitActionRecord.model_validate_json(payload)
+            if (
+                record.action_key != action_key
+                or record.sequence != expected_sequence
+                or record.state.value != str(row["state"])
+            ):
+                raise PursuitStoreError("行动事件元数据与 payload 不一致。")
+            records.append(record)
+            previous_digest = actual_digest
+        return records
+
     def _connect(self) -> sqlite3.Connection:
         self._ensure_initialized()
         return self._open_connection()
@@ -338,6 +722,47 @@ class PursuitStore:
                         created_at REAL NOT NULL,
                         PRIMARY KEY(run_id, task_id),
                         FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_actions (
+                        action_key TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL,
+                        background_task_id TEXT NOT NULL DEFAULT '',
+                        latest_sequence INTEGER NOT NULL CHECK(latest_sequence >= 1),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                    idx_pursuit_actions_background_task
+                    ON pursuit_actions(run_id, background_task_id)
+                    WHERE background_task_id != ''
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_action_events (
+                        action_key TEXT NOT NULL,
+                        sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'prepared', 'dispatched', 'waiting',
+                            'completed', 'failed'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        previous_payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(action_key, sequence),
+                        FOREIGN KEY(action_key) REFERENCES pursuit_actions(action_key)
+                            ON DELETE CASCADE
                     )
                     """
                 )

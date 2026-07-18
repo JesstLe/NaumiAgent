@@ -27,6 +27,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from naumi_agent.orchestrator.pursuit_action_ledger import (
+    PursuitActionRecord,
+    PursuitActionState,
+    action_safe_text,
+    canonical_action_arguments,
+    make_action_key,
+)
 from naumi_agent.orchestrator.pursuit_checkpoint import (
     MAX_CHECKPOINT_ACTIONS,
     MAX_CHECKPOINT_HISTORY,
@@ -1311,6 +1318,23 @@ class GoalPursuitLoop:
                 is_hard=True,
                 timestamp=time.time(),
             ))
+            if self._store is not None:
+                action_record = self._store.get_action_by_background_task(
+                    run_id=self._run.id,
+                    task_id=pending.task_id,
+                )
+                if action_record is not None and not action_record.is_terminal:
+                    succeeded = "- 状态：已完成" in status_text
+                    await self._require_run_lease(
+                        f"background-ledger-{pending.task_id}"
+                    )
+                    self._store.mark_action_terminal(
+                        action_record.action_key,
+                        succeeded=succeeded,
+                        result_status="completed" if succeeded else "failed",
+                        result=status_text + "\n" + output_text,
+                        updated_at=time.time(),
+                    )
 
         await self._require_run_lease("background-collect-result")
         self._pending_background = still_waiting
@@ -2624,6 +2648,20 @@ class GoalPursuitLoop:
                     return background
 
             bash_args = self._build_bash_args(command)
+            action_record = await self._prepare_action_dispatch(
+                action_id=action_id,
+                tool_name="bash_run",
+                arguments=bash_args,
+            )
+            replay_result = self._existing_action_result(action_record)
+            if replay_result is not None:
+                return replay_result
+            if action_record is not None:
+                await self._require_run_lease(f"action-dispatch-{action_id}")
+                self._store.mark_action_dispatched(
+                    action_record.action_key,
+                    updated_at=time.time(),
+                )
             if self._execute_tool_call is not None:
                 tool_result = await self._execute_tool_call(
                     ToolCall(
@@ -2645,6 +2683,15 @@ class GoalPursuitLoop:
                 passed = _verification_command_passed(output)
 
             status = "completed" if passed else "error"
+            if action_record is not None:
+                await self._require_run_lease(f"action-result-{action_id}")
+                self._store.mark_action_terminal(
+                    action_record.action_key,
+                    succeeded=passed,
+                    result_status=status,
+                    result=output,
+                    updated_at=time.time(),
+                )
             return {
                 "action_id": action_id,
                 "status": status,
@@ -2679,12 +2726,26 @@ class GoalPursuitLoop:
             return None
 
         cwd = self._run.worktree_path if self._run and self._run.worktree_path else ""
+        background_args = {
+            "command": command,
+            "cwd": cwd,
+            "timeout_seconds": 1800,
+        }
+        action_record = await self._prepare_action_dispatch(
+            action_id=action_id,
+            tool_name="background_run",
+            arguments=background_args,
+        )
+        replay_result = self._existing_action_result(action_record)
+        if replay_result is not None:
+            return replay_result
+        if action_record is not None:
+            await self._require_run_lease(f"background-dispatch-{action_id}")
+            self._store.mark_action_dispatched(
+                action_record.action_key,
+                updated_at=time.time(),
+            )
         try:
-            background_args = {
-                "command": command,
-                "cwd": cwd,
-                "timeout_seconds": 1800,
-            }
             if self._execute_tool_call is not None:
                 tool_result = await self._execute_tool_call(
                     ToolCall(
@@ -2695,6 +2756,17 @@ class GoalPursuitLoop:
                 )
                 output = tool_result.content
                 if tool_result.status != "success":
+                    if action_record is not None:
+                        await self._require_run_lease(
+                            f"background-failed-{action_id}"
+                        )
+                        self._store.mark_action_terminal(
+                            action_record.action_key,
+                            succeeded=False,
+                            result_status="error",
+                            result=output,
+                            updated_at=time.time(),
+                        )
                     return {
                         "action_id": action_id,
                         "status": "error",
@@ -2718,6 +2790,13 @@ class GoalPursuitLoop:
             }
 
         await self._require_run_lease(f"background-start-{action_id}")
+        if action_record is not None:
+            self._store.mark_action_waiting(
+                action_record.action_key,
+                background_task_id=task_id,
+                updated_at=time.time(),
+                result_summary=output,
+            )
         pending = PursuitBackgroundWait(
             task_id=task_id,
             action_id=action_id,
@@ -2742,6 +2821,91 @@ class GoalPursuitLoop:
             "status": "waiting",
             "background_task_id": task_id,
             "output": output[:1000],
+        }
+
+    async def _prepare_action_dispatch(
+        self,
+        *,
+        action_id: str,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> PursuitActionRecord | None:
+        """Create a stable durable action identity before external dispatch."""
+        if self._store is None or self._run is None:
+            return None
+        await self._require_run_lease(f"action-prepare-{action_id}")
+        _, arguments_sha256, arguments_size = canonical_action_arguments(arguments)
+        action_key = make_action_key(
+            run_id=self._run.id,
+            iteration=self._run.iteration,
+            action_id=action_id,
+            tool_name=tool_name,
+            arguments_sha256=arguments_sha256,
+        )
+        cwd = action_safe_text(arguments.get("cwd", ""), limit=1_000)
+        summary = (
+            f"tool={tool_name}; cwd={cwd or '.'}; "
+            f"arguments_sha256={arguments_sha256}"
+        )
+        now = time.time()
+        return self._store.prepare_action(PursuitActionRecord(
+            action_key=action_key,
+            run_id=self._run.id,
+            iteration=self._run.iteration,
+            action_id=action_safe_text(action_id, limit=256),
+            tool_name=tool_name,
+            arguments_sha256=arguments_sha256,
+            arguments_size_bytes=arguments_size,
+            argument_summary=summary,
+            state=PursuitActionState.PREPARED,
+            sequence=1,
+            dispatch_token=action_key,
+            background_task_id="",
+            result_status="",
+            result_summary="",
+            result_sha256="",
+            prepared_at=now,
+            updated_at=now,
+        ))
+
+    @staticmethod
+    def _existing_action_result(
+        record: PursuitActionRecord | None,
+    ) -> dict[str, Any] | None:
+        """Refuse ambiguous replay and reuse authenticated terminal receipts."""
+        if record is None or record.state is PursuitActionState.PREPARED:
+            return None
+        if record.state is PursuitActionState.WAITING:
+            return {
+                "action_id": record.action_id,
+                "status": "waiting",
+                "background_task_id": record.background_task_id,
+                "output": (
+                    "行动已由持久账本确认在后台运行，拒绝重复派发。"
+                    f" task_id={record.background_task_id}"
+                ),
+            }
+        if record.state is PursuitActionState.DISPATCHED:
+            return {
+                "action_id": record.action_id,
+                "status": "error",
+                "output": (
+                    "行动账本显示已派发但结果未知，拒绝盲目重跑；"
+                    f"需要 reconcile：{record.action_key}"
+                ),
+            }
+        return {
+            "action_id": record.action_id,
+            "status": (
+                "completed"
+                if record.state is PursuitActionState.COMPLETED
+                else "error"
+            ),
+            "output": (
+                "复用持久行动回执："
+                f"[{record.result_status or record.state.value}] "
+                f"{record.result_summary}"
+            )[:3000],
         }
 
     async def _schedule_background_followup(self, task_id: str) -> None:
