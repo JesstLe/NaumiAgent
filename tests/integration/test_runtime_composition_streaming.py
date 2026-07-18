@@ -11,6 +11,7 @@ from naumi_agent.config.settings import (
     ModelConfig,
     SafetyConfig,
 )
+from naumi_agent.harness.feedback import build_direct_user_feedback
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter, StreamChunk, TokenUsage
 from naumi_agent.runtime.composition import create_agent_engine
@@ -32,6 +33,7 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "user-state"))
     readable = tmp_path / "proof.txt"
     readable.write_text("composition-root-proof", encoding="utf-8")
     config = AppConfig(
@@ -61,6 +63,10 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     assert engine._paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert engine._paths.browser_data_dir == engine._paths.runtime_data_dir / "browser"
     assert engine._harness_store is engine._resources.harness_store
+    assert (
+        engine.evolution_candidate_store
+        is engine._resources.evolution_candidate_store
+    )
     assert engine.harness_service._trust_store is engine._resources.harness_trust_store
     call_count = 0
 
@@ -128,7 +134,29 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
             for event in events.events
         ) == 1
         assert engine.session_store._db is not None
+        await engine._resources.harness_store.record_profile(
+            workspace_root=tmp_path,
+            profile_digest="a" * 64,
+            schema_version=1,
+            loaded_at="2026-07-18T00:00:00+00:00",
+            trusted_at="",
+            trust_source="composition-test",
+            status="untrusted",
+        )
         assert engine._resources.harness_store.db_path.exists()
+        feedback = build_direct_user_feedback(
+            session_id=engine._session.id,
+            category="defect",
+            scope="runtime:composition",
+            topic="resource_identity",
+            summary="验证 Composition Root 共享 Evolution Store",
+            provider="test",
+            model="test/model",
+            platform="test",
+        )
+        recorded = await engine.feedback_intake_service.ingest(tmp_path, feedback)
+        assert recorded.status == "recorded"
+        assert engine._resources.evolution_candidate_store.db_path.exists()
     finally:
         await engine.shutdown()
 

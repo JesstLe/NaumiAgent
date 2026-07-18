@@ -41,7 +41,6 @@ from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
-from naumi_agent.evolution.store import EvolutionCandidateStore, resolve_evolution_db_path
 from naumi_agent.harness.completion import (
     CompletionGateResult,
     HarnessCompletionReceipt,
@@ -583,9 +582,7 @@ class AgentEngine:
             trust_store=resources.harness_trust_store,
             store=self._harness_store,
         )
-        self.evolution_candidate_store = EvolutionCandidateStore(
-            resolve_evolution_db_path()
-        )
+        self.evolution_candidate_store = resources.evolution_candidate_store
         self.feedback_intake_service = FeedbackIntakeService(
             self.evolution_candidate_store
         )

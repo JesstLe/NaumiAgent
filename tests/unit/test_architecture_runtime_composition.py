@@ -11,6 +11,7 @@ DEPENDENCIES_PATH = SOURCE_ROOT / "runtime" / "dependencies.py"
 COMPOSITION_PATH = SOURCE_ROOT / "runtime" / "composition.py"
 PATHS_PATH = SOURCE_ROOT / "runtime" / "paths.py"
 _BANNED_ENGINE_NAMES = {
+    "EvolutionCandidateStore",
     "HarnessStore",
     "HarnessTrustStore",
     "LocalToolExecutor",
@@ -107,6 +108,12 @@ def test_only_composition_root_constructs_harness_resources() -> None:
         "HarnessStore": [COMPOSITION_PATH],
         "HarnessTrustStore": [COMPOSITION_PATH],
     }
+
+
+def test_only_composition_root_constructs_evolution_candidate_store() -> None:
+    calls = _constructor_paths(SOURCE_ROOT, {"EvolutionCandidateStore"})
+
+    assert calls == {"EvolutionCandidateStore": [COMPOSITION_PATH]}
 
 
 def test_runtime_paths_contract_has_no_adapter_or_config_imports() -> None:

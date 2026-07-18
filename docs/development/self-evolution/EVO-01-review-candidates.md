@@ -42,7 +42,8 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.3a Candidate Store Core：已实现。平台原生用户状态库以 versioned SQLite 保存
   不可变 Evidence、Candidate materialization 和 digest audit chain；并发投递、100 次同根
   聚合、幂等重试、工作区隔离与篡改检测均有机械测试。设计与证据见
-  `EVO-01-3a-candidate-store-core.md`。
+  `EVO-01-3a-candidate-store-core.md`。其生产实例现由 ARC-01.4b2b Composition Root 显式装配，
+  Feedback/Evolution Review 共享同一 Store，不再由 Service 或 Engine 隐式创建。
 - EVO-01.4a Eligibility Policy v2：已实现。机械证据、重复直接反馈、Agent-only 信号、机械
   verifier 和 protected scope 由版本化纯函数给出稳定 reason codes；只判断是否可进入人工审阅，
   冷却期和 experiment contract 未完成前永不授予实验资格。详见

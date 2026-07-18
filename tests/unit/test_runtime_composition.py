@@ -11,6 +11,7 @@ from naumi_agent.config.settings import (
     ModelConfig,
     SafetyConfig,
 )
+from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.memory.session import SessionStore
@@ -84,6 +85,7 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
     assert paths.harness_db_path == state_home.resolve() / "harness.db"
     assert paths.harness_trust_db_path == state_home.resolve() / "harness-trust.db"
+    assert paths.evolution_db_path == state_home.resolve() / "evolution.db"
     assert not state_home.exists()
 
 
@@ -95,6 +97,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "worktree_storage_dir": absolute / "data" / "worktrees",
         "harness_db_path": absolute / "state" / "harness.db",
         "harness_trust_db_path": absolute / "state" / "harness-trust.db",
+        "evolution_db_path": absolute / "state" / "evolution.db",
         "browser_data_dir": absolute / "data" / "browser",
         "browser_daemon_log_dir": absolute / "data" / "browser-daemon",
     }
@@ -134,9 +137,11 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     defaults = build_runtime_resources(paths)
     falsey_store = _FalseyHarnessStore(tmp_path / "custom-harness.db")
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
+    evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
     overridden = build_runtime_resources(
         paths,
         overrides=RuntimeResourceOverrides(
+            evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
         ),
@@ -144,6 +149,8 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
 
     assert defaults.harness_store.db_path == paths.harness_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
+    assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
+    assert overridden.evolution_candidate_store is evolution_store
     assert overridden.harness_store is falsey_store
     assert overridden.harness_trust_store is trust_store
     assert not (tmp_path / "state").exists()
@@ -170,6 +177,9 @@ def test_invalid_resource_override_fails_before_default_constructor(
 def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="harness_store 必须是"):
         RuntimeResources(
+            evolution_candidate_store=EvolutionCandidateStore(
+                tmp_path / "evolution.db"
+            ),
             harness_store=object(),  # type: ignore[arg-type]
             harness_trust_store=HarnessTrustStore(tmp_path / "trust.db"),
         )

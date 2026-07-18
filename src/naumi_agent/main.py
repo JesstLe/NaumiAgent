@@ -2850,7 +2850,6 @@ def _print_help() -> None:
 async def _run_feedback(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.store import EvolutionStoreError
     from naumi_agent.harness.feedback import (
-        FeedbackIntakeService,
         build_direct_user_feedback,
         render_feedback_result,
     )
@@ -2889,7 +2888,12 @@ async def _run_feedback(engine: Any, arg: str) -> None:
         )
         service = getattr(engine, "feedback_intake_service", None)
         if service is None:
-            service = FeedbackIntakeService()
+            console.print(
+                "反馈未记录：当前 Runtime 未装配 FeedbackIntakeService。",
+                style="yellow",
+                markup=False,
+            )
+            return
         result = await service.ingest(engine.workspace_root, observation)
     except (EvolutionStoreError, OSError, ValueError):
         console.print(

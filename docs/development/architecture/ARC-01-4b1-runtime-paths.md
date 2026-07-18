@@ -17,6 +17,7 @@ Resource，不引入生命周期管理，也不开始 ARC-02/04。
 - `runtime_data_dir`：session DB 的父目录；
 - `worktree_storage_dir`：Runtime 管理的 worktree 根；
 - `harness_db_path`、`harness_trust_db_path`：工作区之外的用户状态数据库；
+- `evolution_db_path`：工作区之外的自进化 Candidate 用户状态数据库；
 - `browser_data_dir`、`browser_daemon_log_dir`：浏览器持久状态和 daemon 日志目录。
 
 worktree/browser 三个 Runtime-owned 目录必须位于 `runtime_data_dir` 内。构造只解析路径，不创建目录、
@@ -54,7 +55,8 @@ PermissionChecker 的 workspace/worktree allowlist 与 Engine 的 Harness/Browse
 ## 未完成
 
 - ARC-01.4b2a 已完成：HarnessStore/HarnessTrustStore 已迁入 typed `RuntimeResources`；
-- ARC-01.4b2b：继续迁移 ChatRun/Evolution 等无后台任务 Store，再处理 Runner/Browser；
+- ARC-01.4b2b 已完成：EvolutionCandidateStore 已迁入同一 typed `RuntimeResources`；
+- ARC-01.4b2c：继续迁移 ChatRun 等无后台任务 Store，再处理 Runner/Browser；
 - ARC-01.4c：把 Harness/Workbench/Planner 等长期 Service 与 Tool bootstrap 移出 Engine；
 - ARC-01.4d：反向、幂等、失败隔离的 `RuntimeLifecycle`；
 - ARC-01.5/1.6：删除 legacy 默认入口并启用新增 import violation gate。
