@@ -31,7 +31,7 @@
 
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| CC-01 | 源码采纳治理与映射更新 | planned | 当前 source map | `claude-source/CC-01-source-governance.md` |
+| CC-01 | 源码采纳治理与映射更新 | partial (1.1a) | 当前 source map | `claude-source/CC-01-source-governance.md` |
 | CC-02 | React/Ink Renderer 可替换性实验 | planned | ARC-03, UI-15 | `claude-source/CC-02-ink-spike.md` |
 | CC-03 | Task/Permission/Doctor 组件迁入 | planned | CC-01, UI-11..13 | `claude-source/CC-03-component-alignment.md` |
 | CC-04 | Plugin/Skill/MCP 机制对齐 | planned | ARC-01 | `claude-source/CC-04-extension-alignment.md` |

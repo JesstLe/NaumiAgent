@@ -26,3 +26,11 @@
 ## 产物
 
 `cc-source-map.v2.json`、schema、validator、审计报告；v1 保留兼容读取一个发布周期。
+
+## 实现进度
+
+- `CC-01.1a`（2026-07-18）已完成：v2 identity manifest 记录 source Git 身份、clean/dirty
+  摘要、许可证文件证据与 v1 map 摘要；严格 validator 能区分 valid/stale/invalid，并已对当前
+  本地 Claude Code checkout 做真实校验。详见 `CC-01-1a-source-identity-manifest.md`。
+- 尚未完成刷新审批历史、许可证适用范围、逐项 v2 mapping、intake classifier、provenance 和
+  review gate，因此 CC-01 保持 `partial`。

@@ -5,6 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.claude_source.governance import (
+    load_source_identity,
+    verify_source_identity,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLAUDE_CODE_ROOT = Path("/Users/lv/Workspace/claude-code")
 
@@ -63,3 +68,18 @@ def test_claude_code_audit_doc_references_machine_readable_source_map() -> None:
     assert "frontend/terminal-ui/protocol-contract.json" in text
     assert "UI Event Protocol" in text
     assert "未完成的 CC 对齐点" in text
+
+
+def test_v2_source_identity_matches_current_checkout_when_available() -> None:
+    manifest_path = (
+        PROJECT_ROOT / "frontend" / "terminal-ui" / "cc-source-map.v2.json"
+    )
+    manifest = load_source_identity(manifest_path)
+
+    assert manifest.schema_version == 2
+    assert manifest.legacy_mapping.path == "frontend/terminal-ui/cc-source-map.json"
+    if not CLAUDE_CODE_ROOT.is_dir():
+        pytest.skip(f"claude-code checkout not available at {CLAUDE_CODE_ROOT}")
+
+    result = verify_source_identity(manifest, CLAUDE_CODE_ROOT, PROJECT_ROOT)
+    assert result.status == "valid", result.findings
