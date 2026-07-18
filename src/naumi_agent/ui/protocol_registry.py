@@ -22,6 +22,7 @@ EventOwner = Literal[
     "agents",
     "safety",
     "workbench",
+    "evolution",
     "diagnostics",
     "sessions",
     "tasks",

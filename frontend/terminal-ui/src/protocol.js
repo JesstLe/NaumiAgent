@@ -203,7 +203,7 @@ export function validateEventRegistry(contract) {
     throw new Error("protocol-contract.json event_registry 只能包含 client/server");
   }
   const allowed = {
-    owner: new Set(["protocol", "runtime", "harness", "inspector", "agents", "safety", "workbench", "diagnostics", "sessions", "tasks", "ui"]),
+    owner: new Set(["protocol", "runtime", "harness", "inspector", "agents", "safety", "workbench", "evolution", "diagnostics", "sessions", "tasks", "ui"]),
     stability: new Set(["stable", "experimental", "deprecated"]),
     criticality: new Set(["informational", "control", "terminal"]),
     persistence: new Set(["never", "timeline", "snapshot", "audit"]),
@@ -371,6 +371,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
+  }
+  if (type === "evolution/review") {
+    return normalizeEvolutionReview(payload);
   }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
@@ -1517,6 +1520,85 @@ function normalizePermissionSnapshot(payload) {
       })),
     history: normalizePermissionItems(payload.history, "history", 50),
     warnings: harnessTextArray(payload.warnings, "permissions/snapshot warnings", 20),
+  };
+}
+
+function normalizeEvolutionReview(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`evolution/review schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const mode = harnessChoice(payload.mode, "evolution/review mode", new Set(["list", "detail"]));
+  const filters = harnessObject(payload.filters, "evolution/review filters");
+  const selected = payload.selected == null ? null : normalizeEvolutionItem(payload.selected, true);
+  const limit = harnessNonnegativeInteger(filters.limit, "evolution/review filters.limit");
+  const items = harnessObjectArray(payload.items, "evolution/review items", 100)
+    .map((item) => normalizeEvolutionItem(item, false));
+  const readOnly = harnessBoolean(payload.read_only, "evolution/review read_only");
+  if (limit < 1 || limit > 100) throw new Error("evolution/review filters.limit 必须在 1..100");
+  if (!readOnly) throw new Error("evolution/review 必须保持只读");
+  if (mode === "list" && selected !== null) throw new Error("evolution/review list 不得携带 selected");
+  if (mode === "detail" && items.length) throw new Error("evolution/review detail 不得携带 items");
+  return {
+    schema_version: 1,
+    mode,
+    filters: {
+      query: harnessText(filters.query, "evolution/review filters.query"),
+      risk: harnessChoice(filters.risk, "evolution/review filters.risk", new Set(["", "low", "medium", "high", "critical"])),
+      source_kind: harnessText(filters.source_kind, "evolution/review filters.source_kind"),
+      limit,
+    },
+    items,
+    selected,
+    events: harnessObjectArray(payload.events, "evolution/review events", 100).map((event) => ({
+      revision: harnessNonnegativeInteger(event.revision, "evolution/review event.revision"),
+      event_type: harnessText(event.event_type, "evolution/review event.event_type"),
+      added_evidence_count: harnessNonnegativeInteger(event.added_evidence_count, "evolution/review event.added_evidence_count"),
+      occurred_at: harnessText(event.occurred_at, "evolution/review event.occurred_at"),
+    })),
+    read_only: readOnly,
+  };
+}
+
+function normalizeEvolutionItem(value, detail) {
+  const item = harnessObject(value, "evolution/review item");
+  const candidateId = harnessText(item.candidate_id, "evolution/review item.candidate_id");
+  if (!/^evc_[0-9a-f]{24}$/.test(candidateId)) throw new Error("evolution/review candidate_id 无效");
+  const normalized = {
+    candidate_id: candidateId,
+    finding_code: harnessText(item.finding_code, "evolution/review item.finding_code"),
+    kind: harnessChoice(item.kind, "evolution/review item.kind", new Set(["correctness", "maintainability", "reliability", "safety"])),
+    scope: harnessText(item.scope, "evolution/review item.scope"),
+    risk: harnessChoice(item.risk, "evolution/review item.risk", new Set(["low", "medium", "high", "critical"])),
+    occurrence_count: harnessNonnegativeInteger(item.occurrence_count, "evolution/review item.occurrence_count"),
+    source_kinds: harnessTextArray(item.source_kinds, "evolution/review item.source_kinds", 16),
+    last_observed_at: harnessText(item.last_observed_at, "evolution/review item.last_observed_at"),
+    revision: harnessNonnegativeInteger(item.revision, "evolution/review item.revision"),
+    decision: harnessChoice(item.decision, "evolution/review item.decision", new Set(["blocked", "needs_evidence", "review_ready"])),
+    review_ready: harnessBoolean(item.review_ready, "evolution/review item.review_ready"),
+    human_review_required: harnessBoolean(item.human_review_required, "evolution/review item.human_review_required"),
+    experiment_eligible: harnessBoolean(item.experiment_eligible, "evolution/review item.experiment_eligible"),
+  };
+  if (normalized.experiment_eligible) {
+    throw new Error("evolution/review item 不得授予实验资格");
+  }
+  if (!detail) return normalized;
+  return {
+    ...normalized,
+    status: harnessText(item.status, "evolution/review item.status"),
+    hypothesis: harnessText(item.hypothesis, "evolution/review item.hypothesis"),
+    providers: harnessTextArray(item.providers, "evolution/review item.providers", 50),
+    models: harnessTextArray(item.models, "evolution/review item.models", 50),
+    platforms: harnessTextArray(item.platforms, "evolution/review item.platforms", 50),
+    first_observed_at: harnessText(item.first_observed_at, "evolution/review item.first_observed_at"),
+    expected_metrics: harnessTextArray(item.expected_metrics, "evolution/review item.expected_metrics", 8),
+    evidence_refs: harnessTextArray(item.evidence_refs, "evolution/review item.evidence_refs", 200),
+    policy_version: harnessText(item.policy_version, "evolution/review item.policy_version"),
+    checks: harnessObjectArray(item.checks, "evolution/review item.checks", 16).map((check) => ({
+      code: harnessText(check.code, "evolution/review check.code"),
+      passed: harnessBoolean(check.passed, "evolution/review check.passed"),
+      hard_block: harnessBoolean(check.hard_block, "evolution/review check.hard_block"),
+      detail: harnessText(check.detail, "evolution/review check.detail"),
+    })),
   };
 }
 

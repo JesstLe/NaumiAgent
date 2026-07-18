@@ -782,6 +782,25 @@ test("task snapshot is strict, bounded, and drops private fields", () => {
   );
 });
 
+test("evolution review snapshot is strict and drops private fields", () => {
+  const item = {
+    candidate_id: `evc_${"a".repeat(24)}`, finding_code: "user_reported_defect",
+    kind: "correctness", scope: "ui:footer", risk: "medium", occurrence_count: 2,
+    source_kinds: ["user_feedback"], last_observed_at: "now", revision: 2,
+    decision: "review_ready", review_ready: true, human_review_required: false,
+    experiment_eligible: false, private_payload: "drop-me",
+  };
+  const normalized = normalizeServerRecord({ type: "evolution/review", payload: {
+    schema_version: 1, mode: "list", filters: { query: "", risk: "", source_kind: "", limit: 50 },
+    items: [item], selected: null, events: [], read_only: true,
+  } }).payload;
+  assert.equal(normalized.items[0].decision, "review_ready");
+  assert.equal(Object.hasOwn(normalized.items[0], "private_payload"), false);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, mode: "write" } }), /mode/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, read_only: false } }), /只读/);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, items: [{ ...item, experiment_eligible: true }] } }), /实验资格/);
+});
+
 test("normalizes strict runtime inspector snapshots and updates", () => {
   const snapshot = inspectorSnapshotFixture(4);
   const normalized = normalizeServerRecord({
@@ -1213,8 +1232,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 27,
-        server_event_count: 39,
+        client_event_count: 28,
+        server_event_count: 40,
       },
     },
   });
@@ -1296,8 +1315,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 27,
-        server_event_count: 39,
+        client_event_count: 28,
+        server_event_count: 40,
       },
     },
   );
@@ -1312,8 +1331,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         protocol_registry: {
           contract_version: 1,
           registry_sha256: "not-a-digest",
-          client_event_count: 27,
-          server_event_count: 39,
+          client_event_count: 28,
+          server_event_count: 40,
         },
       },
     }),
@@ -1327,8 +1346,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         protocol_registry: {
           contract_version: 1,
           registry_sha256: "0".repeat(64),
-          client_event_count: 27,
-          server_event_count: 39,
+          client_event_count: 28,
+          server_event_count: 40,
         },
       },
     }),
