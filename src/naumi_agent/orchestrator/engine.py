@@ -28,6 +28,7 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
+from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
@@ -710,6 +711,9 @@ class AgentEngine:
         )
         self.evolution_static_guard = EvolutionStaticGuard(
             snapshot_builder=self.evolution_experiment_source_snapshot_builder,
+        )
+        self.evolution_patch_writer = EvolutionPatchWriter(
+            static_guard=self.evolution_static_guard,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
