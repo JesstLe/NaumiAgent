@@ -60,5 +60,9 @@
 - EVO-02.5b 已实现持久 intent journal 与崩溃恢复：prepared/replaced/committed/rollback CAS、backup
   digest、dead owner/orphan lock 回收、启动恢复，以及 TUI/新 UI 状态闭环。详见
   `EVO-02-5b-patch-journal-recovery.md`。
-- EVO-02.5c 多文件事务、02.6 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体保持
-  partial。
+- EVO-02.5c1 已实现不可执行多文件 write-set journal contract：一次 SQLite 事务保存全部文件事实与
+  baseline backups，按 Guard 顺序 apply、严格逆序 rollback，支持 CAS、篡改检测、预算内 revised Guard
+  重试和并发 Lease 收敛；它不写文件且不授予执行权限。详见
+  `EVO-02-5c1-write-set-journal.md`。
+- EVO-02.5c2 多文件 Writer/Recovery、02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02
+  整体保持 partial。

@@ -97,10 +97,11 @@ Recovery。结果保存在 Engine 状态，并以无源码摘要同步：
 - SQLite 与文件系统无法形成单一硬件事务；本实现依靠持久 intent + 摘要状态机消除不确定动作，而不是
   声称跨介质 ACID；
 - committed/rolled-back journal 当前保留为当前 Lease 的恢复事实，尚未接入 Lease cleanup/retention；
-- 仅支持单文件，尚无多文件 write-set、逐文件 phase、反向恢复顺序或 journal chain；
+- 单文件恢复器仍只消费单文件 journal；多文件 write-set 的持久事实、逐文件 phase 与反向 CAS 已由
+  EVO-02.5c1 建立，但尚未接入文件 Writer/Recovery；
 - Windows 文件占用、断电、磁盘满和杀进程矩阵尚未达到 A4/A5，当前证据是 macOS 真实文件系统；
 - 完整 diff/API surface postflight、HAR-08 RED/GREEN 和 EVO-02.7 Mutation Receipt 尚未实现。
 
-EVO-02.4b 已先补真实多文件 Proposal/Contract/Plan scope。下一切片应实现 EVO-02.5c 多文件 write-set
-journal contract；在定义逐文件 phase 与反向恢复证据前，不得把当前单文件 Writer 循环调用并宣称为
-多文件原子事务。
+EVO-02.4b 已补真实多文件 Proposal/Contract/Plan scope，EVO-02.5c1 已补多文件 write-set journal
+contract。下一切片是 EVO-02.5c2 Guard-bound Multi-file Writer 与 Recovery；不得把当前单文件 Writer
+循环调用并宣称为多文件原子事务。
