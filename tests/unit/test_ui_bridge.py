@@ -22,6 +22,9 @@ from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.completion import HarnessCompletionReceipt
+from naumi_agent.harness.conversation_queue_runtime import (
+    DurableConversationQueueAuthority,
+)
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBaselineView,
@@ -4889,6 +4892,246 @@ async def test_bridge_shutdown_cancels_chat_queue_without_starting_it() -> None:
     )
     assert cancelled["payload"]["target_request_id"] == "submit-queued"
     assert "界面已关闭" in cancelled["payload"]["reason"]
+
+
+class _DurableQueueEngine(_SlowFakeEngine):
+    def __init__(self, *, store: HarnessStore, workspace_root: Path) -> None:
+        super().__init__()
+        self.workspace_root = workspace_root
+        self.harness_service = SimpleNamespace(store=store)
+
+    async def get_or_create_session(self, title: str | None = None) -> Any:
+        if self._session is None:
+            self._session = SimpleNamespace(
+                id="session-queue",
+                title=title or "持久队列",
+                messages=[],
+            )
+        return self._session
+
+    async def load_session(self, session_id: str) -> bool:
+        if session_id != "session-queue":
+            return False
+        self._session = SimpleNamespace(
+            id=session_id,
+            title="持久队列",
+            messages=[],
+        )
+        return True
+
+
+@pytest.mark.asyncio
+async def test_bridge_recovers_never_dispatched_queue_after_explicit_resume(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    first_engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    first_writer = io.StringIO()
+    first_bridge = JsonlEngineBridge(first_engine, config_path="config.yaml")
+    first_bridge.bind_writer(first_writer)
+
+    await first_bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await first_bridge.submit("survives-crash", request_id="submit-queued")
+    assert len(await store.list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    )) == 1
+
+    first_bridge._closed = True
+    assert first_bridge._run_task is not None
+    first_bridge._run_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_bridge._run_task
+
+    second_engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    second_writer = io.StringIO()
+    second_bridge = JsonlEngineBridge(second_engine, config_path="config.yaml")
+    second_bridge.bind_writer(second_writer)
+    await second_bridge.resume_session(
+        {"session_id": "session-queue"},
+        request_id="resume-queue",
+    )
+    await asyncio.sleep(0)
+
+    assert second_engine.run_tasks == ["survives-crash"]
+    assert second_bridge._run_task is not None
+    second_engine.release_run.set()
+    await second_bridge._run_task
+    assert await store.list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    ) == ()
+    records = _records(second_writer)
+    assert any(
+        record["type"] == "run/queued"
+        and record.get("request_id") == "submit-queued"
+        for record in records
+    )
+    assert any(
+        record["type"] == "run/started"
+        and record.get("request_id") == "submit-queued"
+        for record in records
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_blocks_ambiguous_claim_instead_of_replaying_it(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    await engine.get_or_create_session()
+    authority = DurableConversationQueueAuthority(
+        store=store,
+        workspace_root=workspace,
+        session_id="session-queue",
+        owner_id="crashed-bridge",
+    )
+    item = await authority.enqueue(
+        request_id="submit-ambiguous",
+        text="可能已派发",
+        client_id="terminal-a",
+        now="2026-07-18T00:00:00+00:00",
+    )
+    await authority.claim(item, now="2026-07-18T00:00:00+00:00")
+
+    restarted = _DurableQueueEngine(store=store, workspace_root=workspace)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(restarted, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.resume_session(
+        {"session_id": "session-queue"},
+        request_id="resume-ambiguous",
+    )
+
+    assert restarted.run_tasks == []
+    assert len(bridge._queued_chat_submissions) == 1
+    assert any(
+        record["type"] == "error"
+        and record["payload"].get("code") == "queue_claim_ambiguous"
+        for record in _records(writer)
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_persists_promotion_and_shutdown_cancellation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("first", request_id="submit-first")
+    await bridge.submit("second", request_id="submit-second")
+    await bridge.promote_queued_chat(
+        {"target_request_id": "submit-second"},
+        request_id="promote-second",
+    )
+
+    queued = await HarnessStore(store.db_path).list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    )
+    assert [item.request_id for item in queued] == ["submit-second", "submit-first"]
+
+    await bridge.shutdown()
+    assert await store.list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    ) == ()
+
+
+@pytest.mark.asyncio
+async def test_durable_queue_publishes_receipt_only_after_fenced_terminal_commit(
+    tmp_path: Path,
+) -> None:
+    receipt = CompletionReceipt.from_dict({
+        "schema_version": 1,
+        "receipt_id": "receipt-durable-queue",
+        "run_id": "run-durable-queue",
+        "outcome": "completed",
+        "summary": "持久队列任务完成。",
+        "validations": [],
+        "risks": [],
+        "git_state": {"available": True, "branch": "main", "dirty": False},
+    })
+
+    class ReceiptQueueEngine(_DurableQueueEngine):
+        async def run_streaming(self, task: str, on_event: Any) -> AgentResult:
+            self.run_tasks.append(task)
+            callback = _fake_event_callback(on_event, run_id=receipt.run_id)
+            if len(self.run_tasks) == 1:
+                await self.release_run.wait()
+            else:
+                await callback("completion_receipt", receipt.to_dict())
+            return AgentResult(
+                status="completed",
+                response="完成",
+                usage=self.usage,
+                receipt=receipt if len(self.run_tasks) > 1 else None,
+            )
+
+    class CommitObservingBridge(JsonlEngineBridge):
+        receipt_queue_sizes: list[int]
+
+        def __init__(self, *args: Any, store: HarnessStore, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._observed_store = store
+            self.receipt_queue_sizes = []
+
+        async def emit(self, event: Any, payload=None, *, request_id=None) -> None:
+            if event == ServerEventType.COMPLETION_RECEIPT:
+                queued = await self._observed_store.list_queued_conversations(
+                    workspace_root=self.engine.workspace_root,
+                    session_id="session-queue",
+                )
+                self.receipt_queue_sizes.append(len(queued))
+            await super().emit(event, payload, request_id=request_id)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = ReceiptQueueEngine(store=store, workspace_root=workspace)
+    writer = io.StringIO()
+    bridge = CommitObservingBridge(
+        engine,
+        config_path="config.yaml",
+        store=store,
+    )
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("receipt-task", request_id="submit-receipt-task")
+    engine.release_run.set()
+    while bridge._run_task is not None and not bridge._run_task.done():
+        await bridge._run_task
+        await asyncio.sleep(0)
+
+    assert bridge.receipt_queue_sizes == [0]
+    records = _records(writer)
+    receipt_record = next(
+        record for record in records
+        if record["type"] == "completion/receipt"
+        and record.get("request_id") == "submit-receipt-task"
+    )
+    completion_record = next(
+        record for record in records
+        if record["type"] == "run/completed"
+        and record.get("request_id") == "submit-receipt-task"
+    )
+    assert records.index(receipt_record) < records.index(completion_record)
 
 
 @pytest.mark.asyncio

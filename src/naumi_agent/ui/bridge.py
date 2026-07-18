@@ -23,6 +23,11 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.harness.conversation_queue_runtime import (
+    ConversationQueueClaim,
+    ConversationQueueClaimError,
+    DurableConversationQueueAuthority,
+)
 from naumi_agent.harness.eval_promotion_flow import run_eval_promotion_flow
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
@@ -38,6 +43,11 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
+from naumi_agent.harness.store import (
+    HarnessConversationQueueItem,
+    HarnessStore,
+    HarnessStoreConflictError,
+)
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
@@ -115,6 +125,8 @@ class QueuedChatSubmission:
 
     text: str
     request_id: str
+    session_id: str = ""
+    durable_item: HarnessConversationQueueItem | None = None
 
 
 @dataclass
@@ -487,6 +499,14 @@ class JsonlEngineBridge:
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
+        self._queue_owner_id = f"queue-bridge-{uuid4().hex}"
+        self._queue_authorities: dict[str, DurableConversationQueueAuthority] = {}
+        self._active_queue_claim: ConversationQueueClaim | None = None
+        self._active_queue_authority: DurableConversationQueueAuthority | None = None
+        self._queue_claim_renew_task: asyncio.Task[None] | None = None
+        self._queue_claim_lost = False
+        self._deferred_queue_receipt_events: list[tuple[str, dict[str, Any]]] = []
+        self._recovered_queue_sessions: set[str] = set()
         self._active_run_context: dict[str, str] = {}
         self._active_completion_receipt: CompletionReceipt | None = None
         self._inspector_subscribed = False
@@ -555,6 +575,11 @@ class JsonlEngineBridge:
                 },
             )
         await self._replay_durable_interactions()
+        current_session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "") or ""
+        )
+        if current_session_id:
+            await self._recover_durable_conversation_queue(current_session_id)
 
     def _interaction_authority(
         self,
@@ -576,6 +601,41 @@ class JsonlEngineBridge:
             )
             self._interaction_authority_store = store
         return self._interaction_authority_client
+
+    def _conversation_queue_authority(
+        self,
+        session_id: str,
+    ) -> DurableConversationQueueAuthority | None:
+        """Return the current runtime's durable queue authority when available."""
+        normalized_session_id = session_id.strip()
+        if not normalized_session_id:
+            return None
+        harness_service = getattr(self.engine, "harness_service", None)
+        store = getattr(harness_service, "store", None)
+        if not isinstance(store, HarnessStore):
+            return None
+        existing = self._queue_authorities.get(normalized_session_id)
+        if existing is not None and existing.store is store:
+            return existing
+        authority = DurableConversationQueueAuthority(
+            store=store,
+            workspace_root=self.engine.workspace_root,
+            session_id=normalized_session_id,
+            owner_id=self._queue_owner_id,
+        )
+        self._queue_authorities[normalized_session_id] = authority
+        return authority
+
+    async def _ensure_chat_session_id(self, text: str) -> str:
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        if session_id:
+            return session_id
+        get_or_create = getattr(self.engine, "get_or_create_session", None)
+        if not callable(get_or_create):
+            return ""
+        session = await get_or_create(title=_task_title(text))
+        return str(getattr(session, "id", "") or "")
 
     async def _replay_durable_interactions(self) -> None:
         """Take over expired UI owners and replay recoverable pending questions."""
@@ -1219,9 +1279,43 @@ class JsonlEngineBridge:
         if normalized_text.startswith("/"):
             await self._run_cli_slash_command(normalized_text, request_id=request_id)
             return
-        submission = QueuedChatSubmission(text=text, request_id=request_id)
+        session_id = await self._ensure_chat_session_id(text)
+        submission = QueuedChatSubmission(
+            text=text,
+            request_id=request_id,
+            session_id=session_id,
+        )
         if self._run_task is not None and not self._run_task.done():
-            if len(self._queued_chat_submissions) >= _MAX_QUEUED_CONVERSATIONS:
+            authority = self._conversation_queue_authority(session_id)
+            if authority is not None:
+                try:
+                    durable_item = await authority.enqueue(
+                        request_id=request_id,
+                        text=text,
+                        client_id=self._queue_owner_id,
+                    )
+                except HarnessStoreConflictError as exc:
+                    code = "queue_full" if "20 条上限" in str(exc) else "queue_conflict"
+                    await self.emit_error(str(exc), code=code, request_id=request_id)
+                    return
+                except Exception as exc:
+                    logger.warning(
+                        "Durable conversation enqueue failed (%s)",
+                        type(exc).__name__,
+                    )
+                    await self.emit_error(
+                        "排队消息未能安全保存，请运行 /doctor 后重试。",
+                        code="queue_persist_failed",
+                        request_id=request_id,
+                    )
+                    return
+                submission = QueuedChatSubmission(
+                    text=text,
+                    request_id=request_id,
+                    session_id=session_id,
+                    durable_item=durable_item,
+                )
+            elif len(self._queued_chat_submissions) >= _MAX_QUEUED_CONVERSATIONS:
                 await self.emit_error(
                     f"对话队列已满（最多 {_MAX_QUEUED_CONVERSATIONS} 条），请稍后再发送。",
                     code="queue_full",
@@ -1250,6 +1344,8 @@ class JsonlEngineBridge:
         submission: QueuedChatSubmission,
         *,
         emit_user_message: bool,
+        queue_authority: DurableConversationQueueAuthority | None = None,
+        queue_claim: ConversationQueueClaim | None = None,
     ) -> None:
         """Start exactly one chat submission on the shared AgentEngine."""
         text = submission.text
@@ -1259,31 +1355,52 @@ class JsonlEngineBridge:
         await self.emit(ServerEventType.RUN_STARTED, {"task": text}, request_id=request_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
         self._active_completion_receipt = None
+        self._active_queue_authority = queue_authority
+        self._active_queue_claim = queue_claim
+        self._queue_claim_lost = False
+        self._deferred_queue_receipt_events = []
+        if queue_authority is not None and queue_claim is not None:
+            self._start_queue_claim_renewal(queue_authority, queue_claim)
 
         async def run() -> None:
             was_cancelled = False
+            terminal_state = "completed"
+            terminal_reason = "run_completed"
+            queue_commit_ok = True
+            deferred_completion_payload: dict[str, Any] | None = None
             try:
                 result = await self.engine.run_streaming(
                     text,
                     CallbackEventSink(self.handle_engine_event),
                 )
-                await self.emit(
-                    ServerEventType.RUN_COMPLETED,
-                    {
-                        "status": result.status,
-                        "response": result.response or "",
-                        "error": result.error or "",
-                        **_receipt_reference(
-                            getattr(result, "receipt", None)
-                            or self._active_completion_receipt
-                        ),
-                    },
-                    request_id=request_id,
-                )
+                completion_payload = {
+                    "status": result.status,
+                    "response": result.response or "",
+                    "error": result.error or "",
+                    **_receipt_reference(
+                        getattr(result, "receipt", None)
+                        or self._active_completion_receipt
+                    ),
+                }
+                if queue_claim is None:
+                    await self.emit(
+                        ServerEventType.RUN_COMPLETED,
+                        completion_payload,
+                        request_id=request_id,
+                    )
+                else:
+                    deferred_completion_payload = completion_payload
+                if result.status not in {"completed", "success"}:
+                    terminal_state = "failed"
+                    terminal_reason = f"run_{result.status or 'failed'}"
             except asyncio.CancelledError:
                 was_cancelled = True
+                terminal_state = "cancelled"
+                terminal_reason = "run_cancelled"
                 raise
             except Exception as exc:
+                terminal_state = "failed"
+                terminal_reason = "run_failed"
                 if self.debug_trace is not None:
                     self.debug_trace.exception("ui_bridge.run", exc)
                 logger.debug("UI bridge agent run failed: %s", type(exc).__name__)
@@ -1294,19 +1411,58 @@ class JsonlEngineBridge:
                     request_id=request_id,
                     details=_receipt_reference(self._active_completion_receipt),
                 )
-                await self.emit(
-                    ServerEventType.RUN_COMPLETED,
-                    {
-                        "status": "failed",
-                        "response": "",
-                        "error": message,
-                    },
-                    request_id=request_id,
-                )
+                completion_payload = {
+                    "status": "failed",
+                    "response": "",
+                    "error": message,
+                }
+                if queue_claim is None:
+                    await self.emit(
+                        ServerEventType.RUN_COMPLETED,
+                        completion_payload,
+                        request_id=request_id,
+                    )
+                else:
+                    deferred_completion_payload = completion_payload
             finally:
+                await self._stop_queue_claim_renewal()
+                if queue_authority is not None and queue_claim is not None:
+                    if self._queue_claim_lost:
+                        queue_commit_ok = False
+                    else:
+                        try:
+                            await queue_authority.finish(
+                                queue_claim,
+                                state=terminal_state,
+                                terminal_reason=terminal_reason,
+                            )
+                        except Exception as exc:
+                            queue_commit_ok = False
+                            logger.warning(
+                                "Durable conversation terminal commit failed (%s)",
+                                type(exc).__name__,
+                            )
+                            if not self._closed:
+                                await self.emit_error(
+                                    "排队消息运行结果未通过持久 claim 校验；"
+                                    "队列已停止，请恢复会话后核对。",
+                                    code="queue_commit_failed",
+                                    request_id=request_id,
+                                )
+                self._active_queue_authority = None
+                self._active_queue_claim = None
+                if queue_commit_ok and deferred_completion_payload is not None:
+                    for event, data in self._deferred_queue_receipt_events:
+                        await self._publish_engine_event(event, data)
+                    await self.emit(
+                        ServerEventType.RUN_COMPLETED,
+                        deferred_completion_payload,
+                        request_id=request_id,
+                    )
+                self._deferred_queue_receipt_events = []
                 if self._active_run_context.get("request_id") == request_id:
                     self._active_run_context = {}
-                if not self._closed and not was_cancelled:
+                if not self._closed and not was_cancelled and queue_commit_ok:
                     await self._start_next_queued_chat()
                     await self.emit(ServerEventType.STATUS, self.status_payload())
 
@@ -1315,6 +1471,53 @@ class JsonlEngineBridge:
             "intent": "chat",
         }
         self._run_task = asyncio.create_task(run())
+
+    def _start_queue_claim_renewal(
+        self,
+        authority: DurableConversationQueueAuthority,
+        claim: ConversationQueueClaim,
+    ) -> None:
+        """Keep the current queue dispatch epoch live until terminal commit."""
+        if self._queue_claim_renew_task is not None:
+            self._queue_claim_renew_task.cancel()
+
+        async def keepalive() -> None:
+            current = claim
+            try:
+                while not self._closed:
+                    await asyncio.sleep(max(1.0, authority.lease_seconds / 3))
+                    current = await authority.renew(current)
+                    self._active_queue_claim = current
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._queue_claim_lost = True
+                logger.warning(
+                    "Durable conversation claim renewal failed (%s)",
+                    type(exc).__name__,
+                )
+                if not self._closed:
+                    await self.emit_error(
+                        "排队消息 claim 续租失败，已停止当前运行以避免重复提交。",
+                        code="queue_claim_lost",
+                        request_id=claim.item.request_id,
+                    )
+                run_task = self._run_task
+                if run_task is not None and not run_task.done():
+                    run_task.cancel()
+
+        self._queue_claim_renew_task = asyncio.create_task(
+            keepalive(),
+            name=f"naumi-queue-claim-{claim.item.request_id}",
+        )
+
+    async def _stop_queue_claim_renewal(self) -> None:
+        task = self._queue_claim_renew_task
+        self._queue_claim_renew_task = None
+        if task is None or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
     async def _start_next_queued_chat(self) -> bool:
         """Advance the FIFO queue if the Bridge is open and no run is active."""
@@ -1327,9 +1530,34 @@ class JsonlEngineBridge:
             and not self._run_task.done()
         ):
             return False
-        submission = self._queued_chat_submissions.popleft()
+        submission = self._queued_chat_submissions[0]
+        authority = self._conversation_queue_authority(submission.session_id)
+        claim: ConversationQueueClaim | None = None
+        if submission.durable_item is not None:
+            if authority is None:
+                await self.emit_error(
+                    "持久队列权威暂不可用，已停止派发。",
+                    code="queue_authority_unavailable",
+                    request_id=submission.request_id,
+                )
+                return False
+            try:
+                claim = await authority.claim(submission.durable_item)
+            except ConversationQueueClaimError as exc:
+                await self.emit_error(
+                    f"{exc} 请恢复会话并核对该消息。",
+                    code="queue_recovery_required",
+                    request_id=submission.request_id,
+                )
+                return False
+        self._queued_chat_submissions.popleft()
         await self._emit_queued_chat_positions()
-        await self._start_chat_submission(submission, emit_user_message=False)
+        await self._start_chat_submission(
+            submission,
+            emit_user_message=False,
+            queue_authority=authority if claim is not None else None,
+            queue_claim=claim,
+        )
         return True
 
     async def _emit_queued_chat_positions(self) -> None:
@@ -1366,6 +1594,35 @@ class JsonlEngineBridge:
             )
             return
 
+        if selected.durable_item is not None:
+            authority = self._conversation_queue_authority(selected.session_id)
+            if authority is None:
+                await self.emit_error(
+                    "持久队列权威暂不可用，不能安全重排。",
+                    code="queue_authority_unavailable",
+                    request_id=request_id,
+                )
+                return
+            try:
+                await authority.promote(request_id=target_request_id)
+            except (ConversationQueueClaimError, HarnessStoreConflictError) as exc:
+                await self.emit_error(
+                    str(exc),
+                    code="queue_recovery_required",
+                    request_id=request_id,
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "Durable conversation promotion failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "排队消息未能安全重排，请运行 /doctor 后重试。",
+                    code="queue_persist_failed",
+                    request_id=request_id,
+                )
+                return
         self._queued_chat_submissions.remove(selected)
         self._queued_chat_submissions.appendleft(selected)
         await self._emit_queued_chat_positions()
@@ -1603,7 +1860,8 @@ class JsonlEngineBridge:
             cancelled,
             request_id=request_id,
         )
-        await self._start_next_queued_chat()
+        if not self._queue_claim_lost:
+            await self._start_next_queued_chat()
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def resend_completion_receipt(
@@ -2549,7 +2807,57 @@ class JsonlEngineBridge:
                         run.receipt.to_dict(),
                         request_id=request_id,
                     )
+        await self._recover_durable_conversation_queue(session_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def _recover_durable_conversation_queue(self, session_id: str) -> None:
+        """Replay only never-claimed queued messages after an explicit resume."""
+        if session_id in self._recovered_queue_sessions:
+            return
+        authority = self._conversation_queue_authority(session_id)
+        if authority is None:
+            return
+        try:
+            recovery = await authority.recover(limit=_MAX_QUEUED_CONVERSATIONS)
+        except Exception as exc:
+            logger.warning(
+                "Durable conversation recovery failed (%s)", type(exc).__name__,
+            )
+            await self.emit_error(
+                "持久队列恢复失败，请运行 /doctor 后重试。",
+                code="queue_recovery_failed",
+            )
+            return
+        self._recovered_queue_sessions.add(session_id)
+        known = {item.request_id for item in self._queued_chat_submissions}
+        recovered = [
+            item
+            for item in (*recovery.ready, *recovery.blocked)
+            if item.request_id not in known
+        ]
+        for item in recovered:
+            self._queued_chat_submissions.append(QueuedChatSubmission(
+                text=item.text,
+                request_id=item.request_id,
+                session_id=session_id,
+                durable_item=item,
+            ))
+            await self.emit(
+                ServerEventType.USER_MESSAGE,
+                {"content": item.text},
+                request_id=item.request_id,
+            )
+        if recovered:
+            await self._emit_queued_chat_positions()
+        if recovery.blocked:
+            await self.emit_error(
+                "检测到上次进程可能已经派发的排队消息；为避免重复副作用，"
+                "自动恢复已在该位置停止。",
+                code=recovery.blocker_code or "queue_recovery_required",
+                request_id=recovery.blocked[0].request_id,
+            )
+        if recovery.ready and (self._run_task is None or self._run_task.done()):
+            await self._start_next_queued_chat()
 
     async def _resume_harness_receipts(
         self,
@@ -3116,6 +3424,19 @@ class JsonlEngineBridge:
         if self.debug_trace is not None:
             self.debug_trace.event("engine.stream_event", {"event": event, "data": data})
 
+        if (
+            self._active_queue_claim is not None
+            and event in {"completion_receipt", "harness_completion_receipt"}
+        ):
+            if event == "completion_receipt":
+                self._active_completion_receipt = CompletionReceipt.from_dict(data)
+            self._deferred_queue_receipt_events.append((event, dict(data)))
+            return
+        await self._publish_engine_event(event, data)
+
+    async def _publish_engine_event(self, event: str, data: dict[str, Any]) -> None:
+        """Publish one engine event after any durable completion boundary."""
+
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
         if event == "harness_completion_receipt":
             await self.emit(
@@ -3644,6 +3965,19 @@ class JsonlEngineBridge:
         queued_submissions = list(self._queued_chat_submissions)
         self._queued_chat_submissions.clear()
         for submission in queued_submissions:
+            if submission.durable_item is not None:
+                authority = self._conversation_queue_authority(submission.session_id)
+                if authority is not None:
+                    try:
+                        await authority.cancel_unclaimed(
+                            submission.durable_item,
+                            reason="ui_shutdown",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Durable queued conversation shutdown failed (%s)",
+                            type(exc).__name__,
+                        )
             await self.emit(
                 ServerEventType.RUN_CANCELLED,
                 {

@@ -21,7 +21,8 @@ Textual TUI 复用相同 authority adapter；UI-18.4c 已补齐 Goal interaction
 takeover、cursor 和详情筛选仍未完成。
 HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；队列本身仍是 Bridge 内存状态，持久化、重启恢复、
 跨客户端公平和取消传播留给 HAR-10.3b。HAR-10.3b1 已把 Harness Store 升级到 v14，并交付尚未接入 Bridge 的
-持久队列 Store 核心；claim lease/fencing 与启动恢复属于下一切片。
+持久队列 Store 核心；HAR-10.3b2 已进一步接入 Bridge durable enqueue、RunLease claim/renew、fenced terminal
+和显式 Session 恢复。历史 claim 人工 resolve、TUI 运行中输入与跨客户端公平仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

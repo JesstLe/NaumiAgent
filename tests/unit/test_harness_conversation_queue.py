@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import sqlite3
 
 import pytest
@@ -50,6 +52,7 @@ async def test_queue_enqueue_is_idempotent_and_survives_reopen(tmp_path) -> None
         store,
         workspace,
         "submit-1",
+        client_id="terminal-b",
         text=" 保留空格 ",
         enqueued_at=T3,
     )
@@ -63,6 +66,42 @@ async def test_queue_enqueue_is_idempotent_and_survives_reopen(tmp_path) -> None
     assert first.text == " 保留空格 "
     with pytest.raises(HarnessStoreConflictError, match="不同排队消息"):
         await _enqueue(store, workspace, "submit-1", text="被篡改的重试")
+
+
+@pytest.mark.asyncio
+async def test_queue_reads_v14_client_bound_digest_compatibly(tmp_path) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(db_path)
+    item = await _enqueue(store, workspace, "submit-legacy", text="旧摘要")
+    legacy_payload = json.dumps(
+        {
+            "client_id": item.client_id,
+            "request_id": item.request_id,
+            "session_id": item.session_id,
+            "text": item.text,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    legacy_digest = hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest()
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE harness_conversation_queue SET payload_sha256 = ? "
+            "WHERE request_id = ?",
+            (legacy_digest, item.request_id),
+        )
+        db.commit()
+
+    recovered = await HarnessStore(db_path).list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-1",
+    )
+    assert len(recovered) == 1
+    assert recovered[0].text == "旧摘要"
 
 
 @pytest.mark.asyncio

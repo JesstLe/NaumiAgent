@@ -31,6 +31,6 @@
 
 ## 已知边界与后续
 
-当前队列仍属于单个 Bridge 进程内存；进程崩溃后排队消息不会恢复，也没有跨客户端公平性、持久优先级、
-取消传播或 cursor。HAR-10.3b 应建立 durable queue authority、幂等 enqueue identity、租约/fencing、恢复与
-容量公平策略，再让 New UI 与 TUI 复用同一权威实现。
+HAR-10.3b1/3b2 已在本切片之后交付 durable queue Store、幂等 enqueue、RunLease claim/fencing 和 New UI
+显式 Session 恢复；未 claim 的等待项不再因进程崩溃丢失。历史 claim 人工 resolve、TUI 运行中输入、跨客户端
+公平性、持久优先级、取消传播、retention 和 cursor 仍未完成。
