@@ -611,6 +611,7 @@ class JsonlEngineBridge:
             "context": context,
             "budget": budget,
             "retention_worker": self._retention_worker_status_payload(),
+            "evolution_patch_recovery": self._evolution_patch_recovery_payload(),
             "tasks": self._task_activity_payload(),
             "ui": {
                 "show_reasoning": self._show_reasoning,
@@ -621,6 +622,35 @@ class JsonlEngineBridge:
         if include_slash_commands:
             payload["slash_commands"] = _slash_command_payload()
         return payload
+
+    def _evolution_patch_recovery_payload(self) -> dict[str, object]:
+        getter = getattr(self.engine, "evolution_patch_recovery_status", None)
+        if not callable(getter):
+            return {
+                "total": 0,
+                "completed": 0,
+                "rolled_back": 0,
+                "already_baseline": 0,
+                "orphan_lock_removed": 0,
+                "deferred": 0,
+                "failed": 0,
+                "filesystem_changed": 0,
+                "failure_codes": [],
+            }
+        try:
+            return dict(getter())
+        except Exception:
+            return {
+                "total": 0,
+                "completed": 0,
+                "rolled_back": 0,
+                "already_baseline": 0,
+                "orphan_lock_removed": 0,
+                "deferred": 0,
+                "failed": 1,
+                "filesystem_changed": 0,
+                "failure_codes": ["status_unavailable"],
+            }
 
     def _retention_worker_status_payload(self) -> dict[str, object]:
         try:

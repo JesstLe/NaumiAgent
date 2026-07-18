@@ -1638,13 +1638,31 @@ class NaumiApp(App):
                 "会话协调恢复失败，周期清理未启动；请运行 /doctor 查看诊断"
             )
             return
-        if not results:
+        patch_status_getter = getattr(
+            self.engine,
+            "evolution_patch_recovery_status",
+            None,
+        )
+        patch_status = patch_status_getter() if callable(patch_status_getter) else {}
+        patch_total = int(patch_status.get("total", 0)) if patch_status else 0
+        patch_completed = int(patch_status.get("completed", 0)) if patch_status else 0
+        patch_failed = int(patch_status.get("failed", 0)) if patch_status else 0
+        patch_deferred = int(patch_status.get("deferred", 0)) if patch_status else 0
+        if not results and patch_total == 0:
             return
         completed = sum(
             result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
             for result in results
         )
-        status.status_text = f"会话协调恢复: {completed}/{len(results)} 完成"
+        parts: list[str] = []
+        if patch_total:
+            parts.append(
+                f"实验补丁恢复: {patch_completed}/{patch_total} 完成"
+                f" · 失败 {patch_failed} · 延后 {patch_deferred}"
+            )
+        if results:
+            parts.append(f"会话协调恢复: {completed}/{len(results)} 完成")
+        status.status_text = " | ".join(parts)
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         """Show a modal confirmation dialog for sensitive tools."""

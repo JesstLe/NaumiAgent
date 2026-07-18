@@ -6,7 +6,8 @@
 不运行验证命令、不写主工作树、不提交 Git，也不授予后续执行或推广权限。
 
 本切片有意只支持单文件。单个同目录 `os.replace` 可以提供清晰的原子替换语义；多文件若没有持久
-intent journal，只能做到进程内尽力回滚，不能诚实宣称崩溃原子性。多文件事务留给 EVO-02.5b。
+intent journal，只能做到进程内尽力回滚，不能诚实宣称崩溃原子性。持久恢复由 EVO-02.5b 补齐，
+多文件事务留给 EVO-02.5c。
 
 ## 权威输入
 
@@ -57,13 +58,10 @@ Git status 摘要、postflight 状态和 canonical `write_sha256`。回执固定
 
 ## 当前不足与后续
 
-- 锁文件在进程被强制终止时可能残留；当前 fail-closed，不自动猜测所有权。EVO-02.5b 需把 lock owner、
-  intent、backup digest 和恢复状态写入受管持久 journal，并由 Lease reconciliation 回收；
-- 单文件 `os.replace` 保证替换原子性，但进程在替换后、回执生成前崩溃时，worktree 会保留可被 Git
-  识别的候选变更；02.5b journal 需要把这一窗口变成可恢复状态；
+- EVO-02.5b 已补持久 intent journal、owner lock、prepared/replaced 崩溃恢复、孤儿锁清理与启动 UI 状态，
+  详见 `EVO-02-5b-patch-journal-recovery.md`；
 - 尚未实现多文件事务、完整 diff/API surface postflight、HAR-08 RED/GREEN 与 EVO-02.7 Mutation Receipt；
 - Windows 的文件占用可能让 `os.replace` 明确失败；当前不降级为非原子覆盖，后续平台测试需覆盖
   Defender、长路径和占用文件场景。
 
-下一切片应在继续扩大 Writer 前，实现 EVO-02.5b 持久单文件 intent journal + 崩溃恢复；它也是安全
-扩展到多文件事务的前置。
+下一切片可在该 journal 状态机上设计 EVO-02.5c 多文件 write-set 与反向恢复协议。

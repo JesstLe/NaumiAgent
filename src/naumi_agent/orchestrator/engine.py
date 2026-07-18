@@ -28,6 +28,11 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
+from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
+from naumi_agent.evolution.patch_recovery import (
+    EvolutionPatchRecoveryCoordinator,
+    EvolutionPatchRecoveryResult,
+)
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
@@ -712,8 +717,19 @@ class AgentEngine:
         self.evolution_static_guard = EvolutionStaticGuard(
             snapshot_builder=self.evolution_experiment_source_snapshot_builder,
         )
+        self.evolution_patch_journal_store = EvolutionPatchJournalStore(
+            config.memory.session_db_path
+        )
+        self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
+            journal_store=self.evolution_patch_journal_store,
+            worktree_storage_dir=self._worktree_storage_dir,
+        )
+        self._last_evolution_patch_recovery: tuple[
+            EvolutionPatchRecoveryResult, ...
+        ] = ()
         self.evolution_patch_writer = EvolutionPatchWriter(
             static_guard=self.evolution_static_guard,
+            journal_store=self.evolution_patch_journal_store,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
@@ -1773,10 +1789,31 @@ class AgentEngine:
     async def start_long_running_services(
         self,
     ) -> tuple[ReconciliationCoordinatorResult, ...]:
-        """Recover durable Session work before enabling background services."""
+        """Recover durable Patch/Session work before enabling background services."""
+        self._last_evolution_patch_recovery = (
+            await self.evolution_patch_recovery.recover_pending()
+        )
         recovered = await self.recover_session_reconciliations()
         self.start_session_retention_worker()
         return recovered
+
+    def evolution_patch_recovery_status(self) -> dict[str, object]:
+        """Return a content-free startup recovery summary for CLI/UI surfaces."""
+        outcomes = self._last_evolution_patch_recovery
+        failure_codes = sorted({item.failure_code for item in outcomes if item.failure_code})
+        return {
+            "total": len(outcomes),
+            "completed": sum(item.recovery_complete for item in outcomes),
+            "rolled_back": sum(item.status == "rolled_back" for item in outcomes),
+            "already_baseline": sum(item.status == "already_baseline" for item in outcomes),
+            "orphan_lock_removed": sum(
+                item.status == "orphan_lock_removed" for item in outcomes
+            ),
+            "deferred": sum(item.status == "deferred" for item in outcomes),
+            "failed": sum(item.status == "failed" for item in outcomes),
+            "filesystem_changed": sum(item.filesystem_changed for item in outcomes),
+            "failure_codes": failure_codes,
+        }
 
     def start_session_retention_worker(self) -> bool:
         """Start only when periodic retention is explicitly enabled in config."""

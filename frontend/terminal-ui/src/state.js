@@ -510,7 +510,28 @@ export function reduceServerEvent(state, record) {
     case "ready":
       state.bridgeReady = true;
       mergeStatus(state, payload);
-      if (!state.welcome.dismissed) state.welcome.phase = "ready_empty";
+      if (Number(payload.evolution_patch_recovery?.total || 0) > 0) {
+        const recovery = payload.evolution_patch_recovery;
+        const level = recovery.failed > 0
+          ? "error"
+          : (recovery.deferred > 0 ? "warning" : "info");
+        const failures = recovery.failure_codes.length
+          ? ` · 原因 ${recovery.failure_codes.join(", ")}`
+          : "";
+        pushSystemMessage(
+          state,
+          "实验补丁恢复",
+          `完成 ${recovery.completed}/${recovery.total}`
+            + ` · 回滚 ${recovery.rolled_back}`
+            + ` · 清理孤儿锁 ${recovery.orphan_lock_removed}`
+            + ` · 失败 ${recovery.failed}`
+            + ` · 延后 ${recovery.deferred}${failures}`,
+          level,
+          { dismissWelcome: true },
+        );
+      } else if (!state.welcome.dismissed) {
+        state.welcome.phase = "ready_empty";
+      }
       break;
     case "debug/trace":
       state.debugTrace = payload;

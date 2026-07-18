@@ -130,6 +130,31 @@ class TestNaumiApp:
         )
 
     @pytest.mark.asyncio
+    async def test_startup_recovery_surfaces_patch_recovery_summary(self) -> None:
+        engine = SimpleNamespace(
+            start_long_running_services=AsyncMock(return_value=()),
+            evolution_patch_recovery_status=lambda: {
+                "total": 3,
+                "completed": 1,
+                "failed": 1,
+                "deferred": 1,
+            },
+        )
+        status = SimpleNamespace(status_text="")
+
+        class _App:
+            def __init__(self) -> None:
+                self.engine = engine
+
+            def query_one(self, widget_type: type[object]) -> object:
+                assert widget_type is StatusBar
+                return status
+
+        await NaumiApp._recover_session_reconciliations.__wrapped__(_App())
+
+        assert status.status_text == "实验补丁恢复: 1/3 完成 · 失败 1 · 延后 1"
+
+    @pytest.mark.asyncio
     async def test_delete_session_surfaces_durable_retry_and_clears_active_chat(
         self,
     ) -> None:

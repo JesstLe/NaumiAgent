@@ -262,6 +262,34 @@ test("welcome becomes ready without creating a timeline message", () => {
   assert.equal(state.messages.length, 0);
 });
 
+test("ready surfaces durable patch recovery and dismisses empty welcome", () => {
+  const state = createInitialState();
+
+  reduceServerEvent(state, {
+    type: "ready",
+    payload: {
+      evolution_patch_recovery: {
+        total: 2,
+        completed: 1,
+        rolled_back: 1,
+        already_baseline: 0,
+        orphan_lock_removed: 0,
+        deferred: 0,
+        failed: 1,
+        filesystem_changed: 1,
+        failure_codes: ["journal_corrupt"],
+      },
+    },
+  });
+
+  assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].title, "实验补丁恢复");
+  assert.equal(state.messages[0].level, "error");
+  assert.match(state.messages[0].content, /回滚 1/);
+  assert.match(state.messages[0].content, /journal_corrupt/);
+});
+
 test("working animation frame resets at every run lifecycle boundary", () => {
   const state = createInitialState();
   assert.equal(state.workingAnimationFrame, 0);
