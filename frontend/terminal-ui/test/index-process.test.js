@@ -723,6 +723,34 @@ test("terminal UI process opens task panel through bridge protocol", async () =>
   }
 });
 
+test("terminal UI process opens typed Goal and Pursuit page", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/goal\n");
+    await waitForLatestScreen(output, "完成 Goal / Pursuit 可视化", 7000);
+    await waitForLatestScreen(output, "成功标准 2/4", 7000);
+    await waitForLatestScreen(output, "类型化快照已渲染", 7000);
+
+    const code = await stopTerminalUi(app);
+
+    assert.equal(code, 0);
+    const debugEvents = readDebugEvents(app.debugLogPath);
+    assert(debugEvents.some(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "goal_panel",
+    ));
+    assert(debugEvents.some(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "goals/snapshot",
+    ));
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process opens filtered task panel through bridge protocol", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

@@ -101,6 +101,11 @@ const PERMISSION_STATUSES = new Set([
 const PERMISSION_CHOICES = new Set(["allow_once", "deny", "grant_session", "bypass"]);
 const TASK_SOURCES = new Set(["todo", "subagent", "background", "browser"]);
 const TASK_STATUSES = new Set(["pending", "running", "blocked", "completed", "failed", "cancelled"]);
+const GOAL_STATUSES = new Set(["active", "paused", "blocked", "completed", "cancelled"]);
+const PURSUIT_STATUSES = new Set([
+  "running", "waiting", "blocked", "completed", "failed", "cancelled", "budget_exceeded",
+]);
+const PURSUIT_LINK_STATUSES = new Set(["not_linked", "ready", "missing"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -374,6 +379,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "evolution/review") {
     return normalizeEvolutionReview(payload);
+  }
+  if (type === "goals/snapshot") {
+    return normalizeGoalSnapshot(payload);
   }
   if (type === "workbench/review") {
     return normalizeWorkbenchReview(payload);
@@ -2168,6 +2176,151 @@ function normalizeTaskSnapshot(payload) {
     timeline: harnessObjectArray(payload.timeline, "tasks/snapshot timeline", 200)
       .map(normalizeTaskTimelineEvent),
     warnings: harnessTextArray(payload.warnings, "tasks/snapshot warnings", 20),
+  };
+}
+
+function normalizeGoalSnapshot(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`goals/snapshot schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const goals = harnessObjectArray(payload.goals, "goals/snapshot goals", 50)
+    .map(normalizeGoalItem);
+  const ids = goals.map((item) => item.goal_id);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("goals/snapshot goal_id 不得重复");
+  }
+  const currentGoalId = harnessText(payload.current_goal_id, "goals/snapshot current_goal_id");
+  validateGoalId(currentGoalId, "goals/snapshot current_goal_id", true);
+  if (currentGoalId && !goals.some((item) => item.goal_id === currentGoalId)) {
+    throw new Error("goals/snapshot current_goal_id 不在 goals 中");
+  }
+  return {
+    schema_version: 1,
+    generated_at: harnessText(payload.generated_at, "goals/snapshot generated_at"),
+    full: harnessBoolean(payload.full, "goals/snapshot full"),
+    current_goal_id: currentGoalId,
+    goals,
+    warnings: harnessTextArray(payload.warnings, "goals/snapshot warnings", 20),
+    truncated: harnessBoolean(payload.truncated, "goals/snapshot truncated"),
+    include_finished: harnessBoolean(
+      payload.include_finished,
+      "goals/snapshot include_finished",
+    ),
+  };
+}
+
+function normalizeGoalItem(item) {
+  const goalId = harnessText(item.goal_id, "goals/snapshot goal.goal_id");
+  validateGoalId(goalId, "goals/snapshot goal.goal_id");
+  const pursuitRunId = harnessText(
+    item.pursuit_run_id,
+    "goals/snapshot goal.pursuit_run_id",
+  );
+  validateGoalId(pursuitRunId, "goals/snapshot goal.pursuit_run_id", true);
+  const linkStatus = harnessChoice(
+    item.pursuit_link_status,
+    "goals/snapshot goal.pursuit_link_status",
+    PURSUIT_LINK_STATUSES,
+  );
+  const pursuit = item.pursuit == null ? null : normalizePursuitItem(item.pursuit);
+  if (linkStatus === "ready" && (!pursuit || pursuit.run_id !== pursuitRunId)) {
+    throw new Error("goals/snapshot ready Pursuit 必须与 pursuit_run_id 一致");
+  }
+  if (linkStatus !== "ready" && pursuit !== null) {
+    throw new Error("goals/snapshot 非 ready 关联不得包含 Pursuit");
+  }
+  if (linkStatus === "not_linked" && pursuitRunId) {
+    throw new Error("goals/snapshot not_linked 不得包含 pursuit_run_id");
+  }
+  if (linkStatus === "missing" && !pursuitRunId) {
+    throw new Error("goals/snapshot missing 必须包含 pursuit_run_id");
+  }
+  return {
+    goal_id: goalId,
+    objective: harnessText(item.objective, "goals/snapshot goal.objective"),
+    status: harnessChoice(item.status, "goals/snapshot goal.status", GOAL_STATUSES),
+    note: harnessText(item.note, "goals/snapshot goal.note"),
+    session_id: harnessText(item.session_id, "goals/snapshot goal.session_id"),
+    pursuit_run_id: pursuitRunId,
+    pursuit_link_status: linkStatus,
+    created_at: harnessText(item.created_at, "goals/snapshot goal.created_at"),
+    updated_at: harnessText(item.updated_at, "goals/snapshot goal.updated_at"),
+    pursuit,
+  };
+}
+
+function normalizePursuitItem(value) {
+  const item = harnessObject(value, "goals/snapshot pursuit");
+  const criteriaTotal = harnessNonnegativeInteger(
+    item.criteria_total,
+    "goals/snapshot pursuit.criteria_total",
+  );
+  const criteriaVerified = harnessNonnegativeInteger(
+    item.criteria_verified,
+    "goals/snapshot pursuit.criteria_verified",
+  );
+  if (criteriaVerified > criteriaTotal) {
+    throw new Error("goals/snapshot 已验证标准不能超过标准总数");
+  }
+  const runId = harnessText(item.run_id, "goals/snapshot pursuit.run_id");
+  validateGoalId(runId, "goals/snapshot pursuit.run_id");
+  return {
+    run_id: runId,
+    goal: harnessText(item.goal, "goals/snapshot pursuit.goal"),
+    status: harnessChoice(item.status, "goals/snapshot pursuit.status", PURSUIT_STATUSES),
+    phase: harnessText(item.phase, "goals/snapshot pursuit.phase"),
+    started_at: harnessText(item.started_at, "goals/snapshot pursuit.started_at"),
+    updated_at: harnessText(item.updated_at, "goals/snapshot pursuit.updated_at"),
+    iteration: harnessNonnegativeInteger(item.iteration, "goals/snapshot pursuit.iteration"),
+    criteria_total: criteriaTotal,
+    criteria_verified: criteriaVerified,
+    failure_count: harnessNonnegativeInteger(
+      item.failure_count,
+      "goals/snapshot pursuit.failure_count",
+    ),
+    blocked_reason: harnessText(
+      item.blocked_reason,
+      "goals/snapshot pursuit.blocked_reason",
+    ),
+    next_action: harnessText(item.next_action, "goals/snapshot pursuit.next_action"),
+    worktree_name: harnessText(
+      item.worktree_name,
+      "goals/snapshot pursuit.worktree_name",
+    ),
+    worktree_path: harnessText(
+      item.worktree_path,
+      "goals/snapshot pursuit.worktree_path",
+    ),
+    waits: harnessObjectArray(item.waits, "goals/snapshot pursuit.waits", 20)
+      .map(normalizePursuitWait),
+    evidence: harnessObjectArray(item.evidence, "goals/snapshot pursuit.evidence", 20)
+      .map(normalizePursuitEvidence),
+  };
+}
+
+function validateGoalId(value, name, optional = false) {
+  if (optional && !value) return;
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) {
+    throw new Error(`${name} 格式无效`);
+  }
+}
+
+function normalizePursuitWait(item) {
+  return {
+    task_id: harnessText(item.task_id, "goals/snapshot wait.task_id"),
+    action_id: harnessText(item.action_id, "goals/snapshot wait.action_id"),
+    command: harnessText(item.command, "goals/snapshot wait.command"),
+    created_at: harnessText(item.created_at, "goals/snapshot wait.created_at"),
+  };
+}
+
+function normalizePursuitEvidence(item) {
+  return {
+    kind: harnessText(item.kind, "goals/snapshot evidence.kind"),
+    source: harnessText(item.source, "goals/snapshot evidence.source"),
+    summary: harnessText(item.summary, "goals/snapshot evidence.summary"),
+    is_hard: harnessBoolean(item.is_hard, "goals/snapshot evidence.is_hard"),
+    timestamp: harnessText(item.timestamp, "goals/snapshot evidence.timestamp"),
   };
 }
 

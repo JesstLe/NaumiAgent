@@ -11,9 +11,13 @@ from naumi_agent.orchestrator.goal_store import (
     GoalStore,
     GoalStoreError,
     format_goal,
-    format_goal_list,
 )
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.tools.base import Tool, ToolMetadata
+from naumi_agent.ui.goal_panel import (
+    build_goal_pursuit_snapshot,
+    render_goal_pursuit_snapshot,
+)
 
 _RUN_ID_RE = re.compile(r"run_id:\s*`([A-Za-z0-9_.:-]{1,128})`")
 
@@ -65,8 +69,9 @@ class GoalCreateTool(Tool):
 
 
 class GoalStatusTool(Tool):
-    def __init__(self, store: GoalStore) -> None:
+    def __init__(self, store: GoalStore, pursuit_store: PursuitStore) -> None:
         self._store = store
+        self._pursuit_store = pursuit_store
 
     @property
     def name(self) -> str:
@@ -104,12 +109,22 @@ class GoalStatusTool(Tool):
             if goal_id:
                 return f"目标不存在：{goal_id}"
             return "当前没有未完成目标。使用 `/goal <目标>` 创建。"
-        return format_goal(goal)
+        if goal_id:
+            return format_goal(goal)
+        return render_goal_pursuit_snapshot(
+            build_goal_pursuit_snapshot(
+                self._store,
+                self._pursuit_store,
+                limit=1,
+                include_finished=False,
+            )
+        )
 
 
 class GoalListTool(Tool):
-    def __init__(self, store: GoalStore) -> None:
+    def __init__(self, store: GoalStore, pursuit_store: PursuitStore) -> None:
         self._store = store
+        self._pursuit_store = pursuit_store
 
     @property
     def name(self) -> str:
@@ -143,7 +158,14 @@ class GoalListTool(Tool):
         }
 
     async def execute(self, *, include_finished: bool = True, **kwargs: Any) -> str:
-        return format_goal_list(self._store.list(include_finished=include_finished))
+        return render_goal_pursuit_snapshot(
+            build_goal_pursuit_snapshot(
+                self._store,
+                self._pursuit_store,
+                limit=50,
+                include_finished=include_finished,
+            )
+        )
 
 
 class GoalUpdateTool(Tool):
@@ -262,14 +284,15 @@ class GoalPursueTool(Tool):
 
 def create_goal_tools(
     store: GoalStore,
+    pursuit_store: PursuitStore,
     *,
     session_id_getter: Callable[[], str],
     pursuit_tool_getter: Callable[[], Tool | None],
 ) -> list[Tool]:
     return [
         GoalCreateTool(store, session_id_getter),
-        GoalStatusTool(store),
-        GoalListTool(store),
+        GoalStatusTool(store, pursuit_store),
+        GoalListTool(store, pursuit_store),
         GoalUpdateTool(store),
         GoalPursueTool(store, pursuit_tool_getter),
     ]

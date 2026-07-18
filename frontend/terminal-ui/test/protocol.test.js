@@ -318,6 +318,7 @@ test("protocol contract drives client and server event validation", () => {
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "goal_snapshot",
       "heartbeat",
       "task_snapshot",
       "typed_ui_messages",
@@ -418,6 +419,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "goal_snapshot",
       "heartbeat",
       "task_snapshot",
       "typed_ui_messages",
@@ -792,6 +794,98 @@ test("task snapshot is strict, bounded, and drops private fields", () => {
       payload: { ...normalized, items: [{ ...item, status: "invented" }] },
     }),
     /status/,
+  );
+});
+
+test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () => {
+  const pursuit = {
+    run_id: "pursuit_1",
+    goal: "完成 Goal 页面",
+    status: "waiting",
+    phase: "waiting",
+    started_at: "2026-07-18T00:00:00+00:00",
+    updated_at: "2026-07-18T00:00:01+00:00",
+    iteration: 3,
+    criteria_total: 4,
+    criteria_verified: 2,
+    failure_count: 0,
+    blocked_reason: "",
+    next_action: "等待用户选择",
+    worktree_name: "",
+    worktree_path: "",
+    waits: Array.from({ length: 25 }, (_, index) => ({
+      task_id: `bg_${index}`,
+      action_id: `a_${index}`,
+      command: "pytest -q",
+      created_at: "2026-07-18T00:00:00+00:00",
+      private_payload: "drop",
+    })),
+    evidence: Array.from({ length: 25 }, (_, index) => ({
+      kind: "test",
+      source: `case:${index}`,
+      summary: "验证通过",
+      is_hard: true,
+      timestamp: "2026-07-18T00:00:00+00:00",
+      private_payload: "drop",
+    })),
+    private_reasoning: "drop",
+  };
+  const goal = {
+    goal_id: "goal_1",
+    objective: "完成 Goal 页面",
+    status: "active",
+    note: "",
+    session_id: "session_1",
+    pursuit_run_id: "pursuit_1",
+    pursuit_link_status: "ready",
+    created_at: "2026-07-18T00:00:00+00:00",
+    updated_at: "2026-07-18T00:00:01+00:00",
+    pursuit,
+    private_payload: "drop",
+  };
+  const normalized = normalizeServerRecord({
+    type: "goals/snapshot",
+    payload: {
+      schema_version: 1,
+      generated_at: "2026-07-18T00:00:01+00:00",
+      full: true,
+      current_goal_id: "goal_1",
+      goals: [goal, ...Array.from({ length: 54 }, (_, index) => ({
+        ...goal,
+        goal_id: `goal_${index + 2}`,
+        pursuit_run_id: "",
+        pursuit_link_status: "not_linked",
+        pursuit: null,
+      }))],
+      warnings: [],
+      truncated: true,
+      include_finished: true,
+    },
+  }).payload;
+
+  assert.equal(normalized.goals.length, 50);
+  assert.equal(normalized.goals[0].pursuit.run_id, "pursuit_1");
+  assert.equal(normalized.goals[0].pursuit.waits.length, 20);
+  assert.equal(normalized.goals[0].pursuit.evidence.length, 20);
+  assert.equal(Object.hasOwn(normalized.goals[0], "private_payload"), false);
+  assert.equal(Object.hasOwn(normalized.goals[0].pursuit, "private_reasoning"), false);
+  assert.equal(Object.hasOwn(normalized.goals[0].pursuit.waits[0], "private_payload"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: { ...normalized, goals: [{ ...goal, status: "invented" }] },
+    }),
+    /status/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{ ...goal, pursuit_run_id: "pursuit_other" }],
+      },
+    }),
+    /一致/,
   );
 });
 

@@ -18,6 +18,7 @@ import {
   handleHarnessEvalPromotionKey,
   handleDoctorHealthKey,
   handleEvolutionReviewKey,
+  handleGoalPanelKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -1711,6 +1712,74 @@ test("permissions command opens transient policy route and restores conversation
   assert.equal(state.route.name, "conversation");
   assert.equal(state.scrollOffset, 9);
   assert.equal(state.followTail, false);
+});
+
+test("goal command opens typed Goal/Pursuit route while writes stay on submit", () => {
+  const state = createInitialState();
+  state.scrollOffset = 6;
+  state.followTail = false;
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, "/goal", send);
+  assert.equal(state.route.name, "goals");
+  assert.equal(state.goalPanel.loading, true);
+  assert.deepEqual(sent, [{
+    type: "goal_panel",
+    payload: { limit: 20, include_finished: true },
+  }]);
+  reduceServerEvent(state, {
+    type: "goals/snapshot",
+    payload: {
+      schema_version: 1,
+      generated_at: "now",
+      full: true,
+      current_goal_id: "goal_1",
+      goals: [{
+        goal_id: "goal_1",
+        objective: "完成可视化 Goal 页面",
+        status: "active",
+        note: "",
+        session_id: "session_1",
+        pursuit_run_id: "pursuit_1",
+        pursuit_link_status: "ready",
+        created_at: "now",
+        updated_at: "now",
+        pursuit: {
+          run_id: "pursuit_1",
+          goal: "完成可视化 Goal 页面",
+          status: "waiting",
+          phase: "waiting",
+          iteration: 2,
+          criteria_total: 3,
+          criteria_verified: 1,
+          failure_count: 0,
+          next_action: "等待用户确认",
+          blocked_reason: "",
+          waits: [],
+          evidence: [],
+        },
+      }],
+      warnings: [],
+      truncated: false,
+      include_finished: true,
+    },
+  });
+  assert.equal(state.goalPanel.loading, false);
+  assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /完成可视化 Goal 页面/);
+
+  assert.equal(handleGoalPanelKey(state, "r", send), true);
+  assert.deepEqual(sent[1], {
+    type: "goal_panel",
+    payload: { limit: 20, include_finished: true },
+  });
+  assert.equal(handleGoalPanelKey(state, INPUT_KEYS.escape, send), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 6);
+  assert.equal(state.followTail, false);
+
+  handleSubmitText(state, "/goal create 新目标", send);
+  assert.deepEqual(sent[2], { type: "submit", payload: { text: "/goal create 新目标" } });
 });
 
 test("evolution command opens typed review route and navigates to detail", () => {

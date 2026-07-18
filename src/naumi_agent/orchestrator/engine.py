@@ -920,6 +920,7 @@ class AgentEngine:
 
         for tool in create_goal_tools(
             self.goal_store,
+            self.pursuit_store,
             session_id_getter=lambda: self._session.id if self._session else "",
             pursuit_tool_getter=lambda: self._tool_registry.get("pursue_goal"),
         ):

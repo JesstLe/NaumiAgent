@@ -11,7 +11,7 @@
 
 UIMessage、JSONL protocol、tool/activity card、semantic rendering、completion receipt、runtime
 inspector、agent control center、tasks、permissions、history、heartbeat、working animation、跨平台
-启动与 TUI fallback 已存在。后续模块不得绕开这些路径重建新状态层。
+启动、类型化 Goal/Pursuit 只读页与 TUI fallback 已存在。后续模块不得绕开这些路径重建新状态层。
 
 ## 未来顺序
 
