@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
+import naumi_agent.evolution.postflight_guards as postflight_guard_module
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -1210,6 +1211,12 @@ async def test_patch_set_writer_applies_complete_set_and_replays_receipt(
 
     assert first == second
     assert first.write_id == f"evsw_{first.write_sha256[:24]}"
+    assert first.schema_version == 2
+    assert first.postflight_guard is not None
+    assert all(
+        fact.api_change == "unchanged"
+        for fact in first.postflight_guard.facts
+    )
     assert tuple(change.path for change in first.changes) == plan.authorized_files
     transaction = store.get_by_lease(lease.lease_id)
     assert transaction is not None
@@ -1231,6 +1238,25 @@ async def test_patch_set_writer_applies_complete_set_and_replays_receipt(
     payload["worktree_status_sha256"] = "0" * 64
     with pytest.raises(ValidationError, match="write_sha256"):
         EvolutionPatchSetWriteReceipt.model_validate(payload)
+    legacy_payload = first.model_dump(mode="json")
+    for field in (
+        "postflight_guard_id",
+        "postflight_guard_sha256",
+        "postflight_guard",
+    ):
+        legacy_payload.pop(field)
+    legacy_payload["schema_version"] = 1
+    legacy_payload["policy_version"] = "evolution-multi-file-patch-writer-v1"
+    legacy_payload.pop("write_id")
+    legacy_payload.pop("write_sha256")
+    legacy_digest = patch_set_writer_module._sha256_payload(legacy_payload)
+    legacy = EvolutionPatchSetWriteReceipt.model_validate({
+        **legacy_payload,
+        "write_id": f"evsw_{legacy_digest[:24]}",
+        "write_sha256": legacy_digest,
+    })
+    assert legacy.schema_version == 1
+    assert legacy.postflight_guard is None
 
 
 @pytest.mark.asyncio
@@ -1291,6 +1317,62 @@ async def test_patch_set_writer_rolls_back_all_files_when_second_replace_fails(
         PatchSetFilePhase.ROLLED_BACK,
         PatchSetFilePhase.ROLLED_BACK,
     )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_postflight_breaking_api_rolls_back_complete_set(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        _,
+        proposed,
+        before,
+        _,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    breaking = dict(proposed)
+    breaking["src/naumi_agent/ui/header.py"] = (
+        "def render_header(width):\n    return width\n"
+    )
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=breaking,
+    )
+    writer = EvolutionPatchSetWriter(
+        static_guard=guard,
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+
+    with pytest.raises(EvolutionPatchWriteError) as error:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents=breaking,
+        )
+
+    assert error.value.code == "postflight_breaking_api"
+    assert error.value.rollback_completed is True
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes()
+        for path in plan.authorized_files
+    } == before
+    transaction = store.get_by_lease(lease.lease_id)
+    assert transaction is not None
+    assert transaction.state is PatchSetState.ROLLED_BACK
 
 
 @pytest.mark.asyncio
@@ -1820,6 +1902,261 @@ async def test_patch_writer_atomically_writes_only_isolated_worktree(tmp_path: P
         proposed_contents={plan.planned_files[0].path: proposed},
     )
     assert replay == receipt
+
+
+@pytest.mark.asyncio
+async def test_postflight_guard_allows_additive_python_api_and_binds_receipt(
+    tmp_path: Path,
+) -> None:
+    workspace, target, contract, lease, snapshot, plan, guard = await _guard_fixture(
+        tmp_path
+    )
+    proposed = (
+        "def render_footer():\n"
+        "    return 'fixed'\n\n"
+        "def render_footer_width():\n"
+        "    return 80\n"
+    )
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+
+    receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+
+    assert receipt.schema_version == 2
+    assert receipt.postflight_guard is not None
+    fact = receipt.postflight_guard.facts[0]
+    assert fact.api_change == "additive"
+    assert fact.public_symbols_after == fact.public_symbols_before + 1
+    assert fact.added_lines == guard_receipt.changes[0].added_lines
+    assert fact.deleted_lines == guard_receipt.changes[0].deleted_lines
+    assert target.read_text(encoding="utf-8").endswith("'baseline'\n")
+    serialized = receipt.model_dump_json()
+    assert "render_footer_width" not in serialized
+    assert "return 'fixed'" not in serialized
+    payload = receipt.model_dump(mode="json")
+    payload["postflight_guard"]["facts"][0]["added_lines"] += 1
+    with pytest.raises(ValidationError, match="Postflight Guard"):
+        EvolutionPatchWriteReceipt.model_validate(payload)
+    legacy_payload = receipt.model_dump(mode="json")
+    for field in (
+        "postflight_guard_id",
+        "postflight_guard_sha256",
+        "postflight_guard",
+    ):
+        legacy_payload.pop(field)
+    legacy_payload["schema_version"] = 1
+    legacy_payload["policy_version"] = "evolution-single-file-patch-writer-v1"
+    legacy_payload.pop("write_id")
+    legacy_payload.pop("write_sha256")
+    legacy_digest = patch_writer_module._sha256_payload(legacy_payload)
+    legacy = EvolutionPatchWriteReceipt.model_validate({
+        **legacy_payload,
+        "write_id": f"evw_{legacy_digest[:24]}",
+        "write_sha256": legacy_digest,
+    })
+    assert legacy.schema_version == 1
+    assert legacy.postflight_guard is None
+
+
+def test_python_api_fingerprint_honors_all_and_detects_defaults_and_class_values() -> None:
+    before = b'''__all__ = ["public"]
+def public(value=1):
+    return value
+def hidden(value=1):
+    return value
+class Exported:
+    limit = 1
+'''
+    hidden_only = before.replace(b"def hidden(value=1)", b"def hidden(value, extra=2)")
+    default_changed = before.replace(b"def public(value=1)", b"def public(value=2)")
+    class_value_changed = before.replace(b"limit = 1", b"limit = 2")
+
+    baseline = postflight_guard_module._python_public_api(before, "module.py")
+    assert postflight_guard_module._python_public_api(
+        hidden_only, "module.py"
+    ) == baseline
+    assert postflight_guard_module._python_public_api(
+        default_changed, "module.py"
+    ) != baseline
+    # Exported is not in __all__, so its class constant is intentionally private.
+    assert postflight_guard_module._python_public_api(
+        class_value_changed, "module.py"
+    ) == baseline
+
+    class_export_before = before.replace(
+        b'__all__ = ["public"]', b'__all__ = ["public", "Exported"]'
+    )
+    class_export_after = class_export_before.replace(b"limit = 1", b"limit = 2")
+    assert postflight_guard_module._python_public_api(
+        class_export_before, "module.py"
+    ) != postflight_guard_module._python_public_api(
+        class_export_after, "module.py"
+    )
+
+    added_export = before.replace(
+        b'__all__ = ["public"]', b'__all__ = ["public", "new_api"]'
+    ) + b"\ndef new_api():\n    return 1\n"
+    baseline_items = postflight_guard_module._python_public_api(before, "module.py")
+    added_items = postflight_guard_module._python_public_api(added_export, "module.py")
+    assert all(added_items.get(name) == value for name, value in baseline_items.items())
+    assert set(added_items) > set(baseline_items)
+    with pytest.raises(
+        postflight_guard_module.EvolutionPostflightGuardError,
+        match="AST 解析失败",
+    ) as invalid:
+        postflight_guard_module._python_public_api(b"def broken(:\n", "module.py")
+    assert invalid.value.code == "postflight_api_parse_failed"
+
+
+def test_postflight_regular_file_reader_never_follows_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "target.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    link = tmp_path / "link.py"
+    link.symlink_to(target.name)
+
+    with pytest.raises(
+        postflight_guard_module.EvolutionPostflightGuardError,
+        match="不是普通文件",
+    ) as error:
+        postflight_guard_module._read_regular_file(link)
+
+    assert error.value.code == "postflight_file_type"
+
+
+@pytest.mark.asyncio
+async def test_postflight_guard_rejects_breaking_python_api_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    target = Path(lease.worktree_path, plan.authorized_files[0])
+    baseline = target.read_bytes()
+    proposed = "def render_footer(width):\n    return width\n"
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+
+    with pytest.raises(EvolutionPatchWriteError) as error:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.authorized_files[0]: proposed},
+        )
+
+    assert error.value.code == "postflight_breaking_api"
+    assert error.value.rollback_completed is True
+    assert target.read_bytes() == baseline
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_postflight_guard_rejects_unsupported_source_parser_fail_closed(
+    tmp_path: Path,
+) -> None:
+    scope = "src/naumi_agent/ui/new_component.ts:render"
+    workspace, _, contract, _, _, manager, _ = await _lease_fixture(
+        tmp_path,
+        profile_text="schema_version: 1\n",
+        scope=scope,
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+    snapshot = snapshot_builder.capture(contract, lease)
+    plan = await _mutation_planner(tmp_path, workspace, lease.worktree_path).plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+    guard = EvolutionStaticGuard(snapshot_builder=snapshot_builder)
+    proposed = "export function render(): string { return 'ok'; }\n"
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+
+    with pytest.raises(EvolutionPatchWriteError) as error:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.authorized_files[0]: proposed},
+        )
+
+    assert error.value.code == "postflight_api_unsupported"
+    assert error.value.rollback_completed is True
+    assert not Path(lease.worktree_path, plan.authorized_files[0]).exists()
+
+
+@pytest.mark.asyncio
+async def test_postflight_guard_rejects_mode_change_and_restores_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, contract, lease, snapshot, plan, guard_receipt, proposed, writer = (
+        await _writer_fixture(tmp_path)
+    )
+    target = Path(lease.worktree_path, plan.authorized_files[0])
+    original_replace = patch_writer_module._atomic_replace
+    calls = 0
+
+    def replace_and_make_executable(path: Path, content: bytes, *, mode: int) -> None:
+        nonlocal calls
+        calls += 1
+        original_replace(path, content, mode=mode)
+        if calls == 1:
+            path.chmod(0o755)
+
+    monkeypatch.setattr(patch_writer_module, "_atomic_replace", replace_and_make_executable)
+
+    with pytest.raises(EvolutionPatchWriteError) as error:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.authorized_files[0]: proposed},
+        )
+
+    assert error.value.code == "postflight_mode_changed"
+    assert error.value.rollback_completed is True
+    assert target.stat().st_mode & 0o777 == 0o644
 
 
 @pytest.mark.asyncio

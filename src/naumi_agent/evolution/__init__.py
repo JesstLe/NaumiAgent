@@ -60,6 +60,12 @@ if TYPE_CHECKING:
         EvolutionPatchWriter,
         EvolutionPatchWriteReceipt,
     )
+    from naumi_agent.evolution.postflight_guards import (
+        EvolutionPostflightGuard,
+        EvolutionPostflightGuardError,
+        EvolutionPostflightGuardReceipt,
+        PostflightDiffFact,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -99,6 +105,9 @@ __all__ = [
     "EvolutionMutationPlanner",
     "EvolutionPatchJournal",
     "EvolutionPatchJournalStore",
+    "EvolutionPostflightGuard",
+    "EvolutionPostflightGuardError",
+    "EvolutionPostflightGuardReceipt",
     "EvolutionPatchSetFileFact",
     "EvolutionPatchSetStore",
     "EvolutionPatchSetTransaction",
@@ -123,6 +132,7 @@ __all__ = [
     "MutationObjective",
     "MutationPlanStage",
     "PatchJournalState",
+    "PostflightDiffFact",
     "PatchSetFilePhase",
     "PatchSetScanFailure",
     "PatchSetState",
@@ -179,6 +189,12 @@ def __getattr__(name: str) -> object:
         "EvolutionPatchJournalStore",
         "PatchJournalState",
     }
+    postflight_guard_exports = {
+        "EvolutionPostflightGuard",
+        "EvolutionPostflightGuardError",
+        "EvolutionPostflightGuardReceipt",
+        "PostflightDiffFact",
+    }
     patch_set_exports = {
         "EvolutionPatchSetFileFact",
         "EvolutionPatchSetStore",
@@ -225,6 +241,8 @@ def __getattr__(name: str) -> object:
         module_name = "mutation_plans"
     elif name in patch_journal_exports:
         module_name = "patch_journals"
+    elif name in postflight_guard_exports:
+        module_name = "postflight_guards"
     elif name in patch_set_exports:
         module_name = "patch_sets"
     elif name in patch_set_writer_exports:

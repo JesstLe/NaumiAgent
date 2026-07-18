@@ -29,13 +29,18 @@ from naumi_agent.evolution.patch_journals import (
     PatchJournalState,
 )
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
+from naumi_agent.evolution.postflight_guards import (
+    EvolutionPostflightGuard,
+    EvolutionPostflightGuardError,
+    EvolutionPostflightGuardReceipt,
+)
 from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuard,
     EvolutionStaticGuardReceipt,
     StaticGuardChangeFact,
 )
 
-PATCH_WRITER_POLICY = "evolution-single-file-patch-writer-v1"
+PATCH_WRITER_POLICY = "evolution-single-file-patch-writer-v2"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_GIT_STATUS_BYTES = 64 * 1024
 _MAX_LOCK_BYTES = 4_096
@@ -56,8 +61,11 @@ class _StrictModel(BaseModel):
 
 
 class EvolutionPatchWriteReceipt(_StrictModel):
-    schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-single-file-patch-writer-v1"] = PATCH_WRITER_POLICY
+    schema_version: Literal[1, 2] = 2
+    policy_version: Literal[
+        "evolution-single-file-patch-writer-v1",
+        "evolution-single-file-patch-writer-v2",
+    ] = PATCH_WRITER_POLICY
     write_id: str = Field(pattern=r"^evw_[0-9a-f]{24}$")
     write_sha256: str = Field(pattern=_SHA256_RE)
     contract_id: str = Field(pattern=r"^evx_[0-9a-f]{24}$")
@@ -68,6 +76,11 @@ class EvolutionPatchWriteReceipt(_StrictModel):
     guard_receipt_sha256: str = Field(pattern=_SHA256_RE)
     change: StaticGuardChangeFact
     worktree_status_sha256: str = Field(pattern=_SHA256_RE)
+    postflight_guard_id: str | None = Field(
+        default=None, pattern=r"^evpg_[0-9a-f]{24}$",
+    )
+    postflight_guard_sha256: str | None = Field(default=None, pattern=_SHA256_RE)
+    postflight_guard: EvolutionPostflightGuardReceipt | None = None
     postflight_passed: Literal[True] = True
     rollback_performed: Literal[False] = False
     write_completed: Literal[True] = True
@@ -75,9 +88,33 @@ class EvolutionPatchWriteReceipt(_StrictModel):
 
     @model_validator(mode="after")
     def _receipt_is_tamper_evident(self) -> Self:
-        expected = _sha256_payload(
-            self.model_dump(mode="json", exclude={"write_id", "write_sha256"})
-        )
+        if self.schema_version == 2 and (
+            self.policy_version != PATCH_WRITER_POLICY
+            or self.postflight_guard_id is None
+            or self.postflight_guard_sha256 is None
+            or self.postflight_guard is None
+        ):
+            raise ValueError("Patch Write Receipt v2 缺少 Postflight Guard。")
+        if self.schema_version == 2 and self.postflight_guard is not None and (
+            self.postflight_guard_id != self.postflight_guard.postflight_guard_id
+            or self.postflight_guard_sha256 != self.postflight_guard.receipt_sha256
+        ):
+            raise ValueError("Patch Write Receipt 与 Postflight Guard binding 不一致。")
+        if self.schema_version == 1 and (
+            self.policy_version != "evolution-single-file-patch-writer-v1"
+            or self.postflight_guard_id is not None
+            or self.postflight_guard_sha256 is not None
+            or self.postflight_guard is not None
+        ):
+            raise ValueError("Patch Write Receipt v1 字段不一致。")
+        excluded = {"write_id", "write_sha256"}
+        if self.schema_version == 1:
+            excluded.update({
+                "postflight_guard_id",
+                "postflight_guard_sha256",
+                "postflight_guard",
+            })
+        expected = _sha256_payload(self.model_dump(mode="json", exclude=excluded))
         if not hmac.compare_digest(self.write_sha256, expected):
             raise ValueError("write_sha256 与 Patch Write Receipt 不一致。")
         if self.write_id != f"evw_{expected[:24]}":
@@ -103,10 +140,12 @@ class EvolutionPatchWriter:
         static_guard: EvolutionStaticGuard,
         journal_store: EvolutionPatchJournalStore,
         patch_set_store: EvolutionPatchSetStore | None = None,
+        postflight_guard: EvolutionPostflightGuard | None = None,
     ) -> None:
         self._static_guard = static_guard
         self._journal_store = journal_store
         self._patch_set_store = patch_set_store
+        self._postflight_guard = postflight_guard or EvolutionPostflightGuard()
 
     async def apply(
         self,
@@ -147,6 +186,10 @@ class EvolutionPatchWriter:
                         self._load_committed_receipt,
                         root,
                         existing,
+                        contract,
+                        lease,
+                        source_snapshot,
+                        mutation_plan,
                         guard_receipt,
                     )
                 if existing.state in {
@@ -240,6 +283,13 @@ class EvolutionPatchWriter:
             replaced = True
             self._journal_store.mark_replaced(journal.journal_id)
             status = self._postflight(root, target, change)
+            postflight = self._postflight_guard.inspect(
+                contract=contract,
+                lease=lease,
+                source_snapshot=source_snapshot,
+                mutation_plan=mutation_plan,
+                static_guard=guard_receipt,
+            )
             receipt = _build_write_receipt(
                 contract=contract,
                 lease=lease,
@@ -248,6 +298,7 @@ class EvolutionPatchWriter:
                 guard_receipt=guard_receipt,
                 change=change,
                 status=status,
+                postflight=postflight,
             )
             self._journal_store.mark_committed(
                 journal.journal_id,
@@ -272,12 +323,21 @@ class EvolutionPatchWriter:
                         journal.journal_id,
                         failure_code=(
                             exc.code
-                            if isinstance(exc, EvolutionPatchWriteError)
+                            if isinstance(
+                                exc,
+                                (EvolutionPatchWriteError, EvolutionPostflightGuardError),
+                            )
                             else "write_failed"
                         ),
                     )
                 except (KeyError, RuntimeError, ValueError):
                     pass
+            if isinstance(exc, EvolutionPostflightGuardError):
+                raise EvolutionPatchWriteError(
+                    exc.code,
+                    str(exc),
+                    rollback_completed=rollback_completed,
+                ) from exc
             if isinstance(exc, EvolutionPatchWriteError):
                 raise EvolutionPatchWriteError(
                     exc.code,
@@ -294,6 +354,10 @@ class EvolutionPatchWriter:
         self,
         root: Path,
         journal: EvolutionPatchJournal,
+        contract: EvolutionExperimentContract,
+        lease: ExperimentWorktreeLease,
+        source_snapshot: EvolutionExperimentSourceSnapshot,
+        mutation_plan: EvolutionMutationPlan,
         guard_receipt: EvolutionStaticGuardReceipt,
     ) -> EvolutionPatchWriteReceipt:
         if (
@@ -318,6 +382,22 @@ class EvolutionPatchWriter:
             root / journal.target_path,
             guard_receipt.changes[0],
         )
+        if receipt.schema_version == 2:
+            postflight = self._postflight_guard.inspect(
+                contract=contract,
+                lease=lease,
+                source_snapshot=source_snapshot,
+                mutation_plan=mutation_plan,
+                static_guard=guard_receipt,
+            )
+            if (
+                receipt.postflight_guard_id != postflight.postflight_guard_id
+                or receipt.postflight_guard_sha256 != postflight.receipt_sha256
+            ):
+                raise EvolutionPatchWriteError(
+                    "committed_postflight_mismatch",
+                    "已提交 Patch Receipt 的 Postflight Guard 已漂移。",
+                )
         return receipt
 
     def _postflight(
@@ -365,9 +445,10 @@ def _build_write_receipt(
     guard_receipt: EvolutionStaticGuardReceipt,
     change: StaticGuardChangeFact,
     status: bytes,
+    postflight: EvolutionPostflightGuardReceipt,
 ) -> EvolutionPatchWriteReceipt:
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "policy_version": PATCH_WRITER_POLICY,
         "contract_id": contract.contract_id,
         "lease_id": lease.lease_id,
@@ -377,6 +458,9 @@ def _build_write_receipt(
         "guard_receipt_sha256": guard_receipt.receipt_sha256,
         "change": change.model_dump(mode="json"),
         "worktree_status_sha256": hashlib.sha256(status).hexdigest(),
+        "postflight_guard_id": postflight.postflight_guard_id,
+        "postflight_guard_sha256": postflight.receipt_sha256,
+        "postflight_guard": postflight.model_dump(mode="json"),
         "postflight_passed": True,
         "rollback_performed": False,
         "write_completed": True,
@@ -496,7 +580,10 @@ def _read_lock(path: Path) -> dict[str, object]:
         raise EvolutionPatchWriteError("lock_corrupt", "Patch Writer 锁字段不完整。")
     if (
         payload["schema_version"] != 1
-        or payload["policy_version"] != PATCH_WRITER_POLICY
+        or payload["policy_version"] not in {
+            "evolution-single-file-patch-writer-v1",
+            PATCH_WRITER_POLICY,
+        }
         or not isinstance(payload["token"], str)
         or len(payload["token"]) != 48
         or any(char not in "0123456789abcdef" for char in payload["token"])
