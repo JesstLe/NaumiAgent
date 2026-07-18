@@ -58,7 +58,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/doctor", "运行环境诊断", category="基础"),
         CommandMeta("/harness", "Harness Profile 状态、重复评测、Baseline、运行解释、知识、检查与信任", takes_arg=True, arg_hint="[status|doctor|explain|replay|eval|baseline|knowledge|check|trust|untrust]", readonly=False, category="基础"),
         CommandMeta("/feedback", "记录隐私安全的纠正或缺陷候选", takes_arg=True, arg_hint="<correction|defect|preference|cancel|praise> <scope> <topic> <摘要>", readonly=False, category="基础"),
-        CommandMeta("/evolution", "只读审查 Evolution Candidate", takes_arg=True, arg_hint="[list|detail <id>]", readonly=True, category="基础"),
+        CommandMeta("/evolution", "审查 Candidate 或加入 Workbench 队列", takes_arg=True, arg_hint="[list|detail|enqueue]", readonly=False, category="基础"),
         CommandMeta("/copy", "复制/导出完整记录、最近一轮或最近错误", takes_arg=True, arg_hint="<all|last|error>", readonly=True, category="基础"),
         CommandMeta("/debug", "显示本次结构化调试日志位置", category="基础"),
         CommandMeta("/debug-replay", "回放 debug-runs 结构化事件", takes_arg=True, arg_hint="<路径>", readonly=True, category="基础"),

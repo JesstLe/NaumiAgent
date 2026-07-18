@@ -81,13 +81,14 @@ Contract 和 HAR-08 Eval 中绑定。
 - payload 把 `executable=true`、`experiment_eligible=true`、错误 source revision/digest 或错误 ID 视为协议错误。
 - 生成前后 Candidate audit event 数量不变，Workbench Store/Git 无写入。
 
-## 后续：HAR-09.5a
+## 后续状态
 
-下一切片需为 Preview 设计持久 Workbench Queue Adapter：
+HAR-09.5a 已在 `HAR-09-5a-workbench-queue-foundation.md` 实现持久 Workbench Queue Adapter：
 
 1. 显式 enqueue，禁止 detail 自动入队；
 2. 以 proposal ID + Candidate revision 幂等；
 3. 保存 source provenance，不把它编码进 title/questions；
-4. 支持 approve/reject/defer/merge 和冷却期；
-5. 只有 approved Proposal 才能进入 EVO-02 Experiment Contract；
-6. 所有动作产生审计事件，bypass 仍不跳过记录。
+4. 首次入队产生审计事件，bypass 仍不跳过记录。
+
+approve/reject/defer/merge、冷却期及 approved 到 EVO-02 Experiment Contract 的转换仍留给
+HAR-09.5b。

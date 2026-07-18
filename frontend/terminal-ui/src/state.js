@@ -47,7 +47,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
-  { command: "/evolution", description: "只读审阅 Evolution Candidate" },
+  { command: "/evolution", description: "审阅 Candidate，并显式加入 Workbench 队列" },
   { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/harness", description: "Harness Profile 状态、离线评测、知识、检查与信任" },
@@ -915,9 +915,9 @@ export function reduceServerEvent(state, record) {
       }
     case "error": {
       dismissWelcome(state);
-      if (payload.code === "evolution_review_failed") {
+      if (["evolution_review_failed", "evolution_queue_failed"].includes(payload.code)) {
         state.evolutionReview.loading = false;
-        state.evolutionReview.error = payload.message ?? "Evolution Candidate 快照不可用。";
+        state.evolutionReview.error = payload.message ?? "Evolution Candidate 操作失败。";
         break;
       }
       if (payload.code === "workbench_review_failed") {
@@ -2600,7 +2600,12 @@ export function handleSubmitText(state, text, send) {
   if (text === "/evolution" || text.startsWith("/evolution ")) {
     const request = parseEvolutionReviewCommand(text);
     if (!request) {
-      pushSystemMessage(state, "Evolution", "用法：/evolution list [--query 词 --risk level --source kind --limit N]；/evolution detail <candidate-id>", "warning");
+      pushSystemMessage(
+        state,
+        "Evolution",
+        "用法：/evolution list [...]；/evolution detail <candidate-id>；/evolution enqueue <candidate-id> --mission <id> --task <id> [--agent <name>]",
+        "warning",
+      );
       return;
     }
     const originAnchor = {
@@ -3099,6 +3104,31 @@ function parseEvolutionReviewCommand(text) {
   if (action === "detail") {
     if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
     return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
+  }
+  if (action === "enqueue") {
+    if (values.length < 6 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
+    const request = {
+      action,
+      candidate_id: values[1],
+      mission_id: "",
+      task_id: "",
+      agent_id: "Human",
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    };
+    for (let index = 2; index < values.length; index += 2) {
+      const option = values[index];
+      const value = values[index + 1];
+      if (!value) return null;
+      if (option === "--mission") request.mission_id = value;
+      else if (option === "--task") request.task_id = value;
+      else if (option === "--agent") request.agent_id = value;
+      else return null;
+    }
+    if (!request.mission_id || !request.task_id) return null;
+    return request;
   }
   if (action !== "list") return null;
   const request = { action: "list", candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 };

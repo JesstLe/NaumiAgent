@@ -225,6 +225,13 @@ class ProposalState(StrEnum):
     CONVERTED = "converted"
 
 
+class ProposalSourceKind(StrEnum):
+    """Trusted origin of a Workbench proposal."""
+
+    MANUAL = "manual"
+    EVOLUTION_CANDIDATE = "evolution_candidate"
+
+
 @dataclass
 class WorkbenchProposal:
     """A human-governed proposal created when direct execution is unsafe.
@@ -250,6 +257,14 @@ class WorkbenchProposal:
     state: ProposalState = ProposalState.OPEN
     decision_note: str = ""
     converted_issue_id: str = ""
+    source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL
+    source_id: str = ""
+    source_revision: int = 0
+    source_sha256: str = ""
+    source_proposal_id: str = ""
+    generator_version: str = ""
+    proposal_kind: str = ""
+    idempotency_key: str = ""
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 

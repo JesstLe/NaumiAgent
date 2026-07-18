@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from naumi_agent.cli.slash_router import execute_slash_command
+from naumi_agent.evolution.queue import EvolutionProposalQueueResult
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
     EvolutionReviewService,
@@ -17,7 +18,11 @@ from naumi_agent.harness.feedback import (
     FeedbackIntakeService,
     build_direct_user_feedback,
 )
-from naumi_agent.tools.evolution_review import EvolutionCandidatesTool
+from naumi_agent.tools.evolution_review import (
+    EvolutionCandidatesTool,
+    EvolutionProposalQueueTool,
+    create_evolution_review_tools,
+)
 
 NOW = datetime(2026, 7, 18, 10, 0, tzinfo=UTC)
 
@@ -151,11 +156,44 @@ def test_review_filter_rejects_unbounded_or_unknown_values() -> None:
         EvolutionReviewFilter(query="x" * 257)
 
 
+def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> None:
+    service = EvolutionReviewService(EvolutionCandidateStore(tmp_path / "evolution.db"))
+    tools = create_evolution_review_tools(_FakeEngine(tmp_path, service), service)
+
+    assert [tool.name for tool in tools] == [
+        "evolution_candidates",
+        "evolution_proposal_queue",
+    ]
+    assert [tool.metadata.read_only for tool in tools] == [True, False]
+
+
 class _FakeEngine:
     def __init__(self, root: Path, service: EvolutionReviewService) -> None:
         self.workspace_root = root
         self.evolution_review_service = service
         self.router = SimpleNamespace(current_model="openai/test")
+        self._session = SimpleNamespace(id="session-review")
+        self.evolution_proposal_queue = _FakeQueue()
+
+
+class _FakeQueue:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def enqueue(self, workspace_root: Path, **kwargs):
+        self.calls.append({"workspace_root": workspace_root, **kwargs})
+        candidate_id = kwargs["candidate_id"]
+        return EvolutionProposalQueueResult(
+            proposal={
+                "id": "proposal-1",
+                "source_proposal_id": "evp_" + "a" * 24,
+                "source_id": candidate_id,
+                "source_revision": 2,
+                "proposal_kind": "code",
+                "state": "open",
+            },
+            created=True,
+        )
 
 
 @pytest.mark.asyncio
@@ -198,3 +236,32 @@ async def test_tool_errors_are_safe_and_non_mutating(tmp_path: Path) -> None:
     assert "仅支持" in await tool.execute(action="approve")
     assert "过滤条件无效" in await tool.execute(action="list", limit=0)
     assert not (tmp_path / "evolution.db").exists()
+
+
+@pytest.mark.asyncio
+async def test_tool_and_slash_share_explicit_queue_adapter(tmp_path: Path) -> None:
+    store = EvolutionCandidateStore(tmp_path / "evolution.db")
+    footer_id, _task_id = await _seed(tmp_path, store)
+    service = EvolutionReviewService(store)
+    engine = _FakeEngine(tmp_path, service)
+    tool = EvolutionProposalQueueTool(engine)
+
+    tool_result = await tool.execute(
+        candidate_id=footer_id,
+        mission_id="mission-1",
+        task_id="task-1",
+    )
+    slash_result = await execute_slash_command(
+        engine,
+        f"/evolution enqueue {footer_id} --mission mission-1 --task task-1",
+    )
+
+    assert "仍需人工决定，不可执行" in tool_result
+    assert "仍需人工决定，不可执行" in slash_result
+    assert len(engine.evolution_proposal_queue.calls) == 2
+    assert all(
+        call["candidate_id"] == footer_id
+        for call in engine.evolution_proposal_queue.calls
+    )
+    assert EvolutionCandidatesTool(engine, service).metadata.read_only is True
+    assert tool.metadata.read_only is False

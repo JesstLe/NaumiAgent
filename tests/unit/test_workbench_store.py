@@ -13,6 +13,7 @@ from naumi_agent.workbench.models import (
     FailureKind,
     LeaseState,
     ParallelMode,
+    ProposalSourceKind,
     ProposalState,
     RiskLevel,
 )
@@ -1471,6 +1472,92 @@ async def test_convert_proposal_records_converted_issue_id(store: WorkbenchStore
 
 
 @pytest.mark.asyncio
+async def test_evolution_proposal_idempotency_rejects_key_reuse_with_different_content(
+    store: WorkbenchStore,
+) -> None:
+    kwargs = {
+        "session_id": "s",
+        "mission_id": "m1",
+        "task_id": "t1",
+        "agent_id": "Evolution-Agent",
+        "title": "改进 footer",
+        "impact_scope": "src/ui/footer.py",
+        "source_kind": ProposalSourceKind.EVOLUTION_CANDIDATE,
+        "source_id": "evc_" + "1" * 24,
+        "source_revision": 2,
+        "source_sha256": "2" * 64,
+        "source_proposal_id": "evp_" + "3" * 24,
+        "generator_version": "evolution-proposal-v1",
+        "proposal_kind": "code",
+        "idempotency_key": "evolution:evp_" + "3" * 24,
+    }
+    first, created = await store.create_proposal_with_status(**kwargs)
+    second, created_again = await store.create_proposal_with_status(
+        **(kwargs | {"agent_id": "Human"})
+    )
+
+    assert created is True
+    assert created_again is False
+    assert second.id == first.id
+    assert second.source_revision == 2
+    with pytest.raises(ValueError, match="不同内容"):
+        await store.create_proposal_with_status(**(kwargs | {"title": "伪造覆盖"}))
+
+
+@pytest.mark.asyncio
+async def test_manual_proposal_cannot_forge_evolution_provenance(
+    store: WorkbenchStore,
+) -> None:
+    with pytest.raises(ValueError, match="不得伪造"):
+        await store.create_proposal(
+            session_id="s",
+            mission_id="m1",
+            task_id="t1",
+            agent_id="agent-a",
+            title="伪造来源",
+            impact_scope="src/ui.py",
+            source_id="evc_" + "1" * 24,
+        )
+
+
+@pytest.mark.asyncio
+async def test_existing_proposal_table_migrates_provenance_columns(tmp_path) -> None:
+    db_path = tmp_path / "legacy-workbench.db"
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """CREATE TABLE workbench_proposals (
+                id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+                mission_id TEXT NOT NULL, task_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL, title TEXT NOT NULL,
+                impact_scope TEXT NOT NULL, intended_files TEXT NOT NULL DEFAULT '[]',
+                validation_plan TEXT NOT NULL DEFAULT '[]',
+                risk_level TEXT NOT NULL DEFAULT 'medium',
+                questions TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL DEFAULT 'open',
+                decision_note TEXT NOT NULL DEFAULT '',
+                converted_issue_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
+        await db.commit()
+
+    migrated = WorkbenchStore(str(db_path))
+    assert await migrated.list_proposals("session-1") == []
+    async with aiosqlite.connect(db_path) as db:
+        columns = await (
+            await db.execute("PRAGMA table_info(workbench_proposals)")
+        ).fetchall()
+        indexes = await (
+            await db.execute("PRAGMA index_list(workbench_proposals)")
+        ).fetchall()
+
+    names = {str(column[1]) for column in columns}
+    assert {"source_kind", "source_revision", "source_sha256", "idempotency_key"} <= names
+    assert "idx_workbench_proposals_session_idempotency" in {
+        str(index[1]) for index in indexes
+    }
+
+
+@pytest.mark.asyncio
 async def test_append_event_redacts_secrets_in_payload(store: WorkbenchStore) -> None:
     from naumi_agent.workbench.store import redact_event_payload
 
@@ -1532,6 +1619,3 @@ async def test_append_event_redacts_secrets_regardless_of_severity(
             severity=severity,
         )
         assert event.payload["bearer_token"] == "[REDACTED]", severity
-
-
-

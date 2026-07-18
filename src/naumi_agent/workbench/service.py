@@ -34,6 +34,7 @@ from naumi_agent.workbench.models import (
     LeaseState,
     Mission,
     ParallelMode,
+    ProposalSourceKind,
     ProposalState,
     RiskLevel,
     WorkbenchProposal,
@@ -1113,6 +1114,14 @@ class WorkbenchService:
             "state": proposal.state.value,
             "decision_note": proposal.decision_note,
             "converted_issue_id": proposal.converted_issue_id,
+            "source_kind": proposal.source_kind.value,
+            "source_id": proposal.source_id,
+            "source_revision": proposal.source_revision,
+            "source_sha256": proposal.source_sha256,
+            "source_proposal_id": proposal.source_proposal_id,
+            "generator_version": proposal.generator_version,
+            "proposal_kind": proposal.proposal_kind,
+            "idempotency_key": proposal.idempotency_key,
             "created_at": proposal.created_at,
             "updated_at": proposal.updated_at,
         }
@@ -1130,9 +1139,17 @@ class WorkbenchService:
         validation_plan: list[str] | None = None,
         risk_level: RiskLevel = RiskLevel.MEDIUM,
         questions: list[str] | None = None,
+        source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
+        source_id: str = "",
+        source_revision: int = 0,
+        source_sha256: str = "",
+        source_proposal_id: str = "",
+        generator_version: str = "",
+        proposal_kind: str = "",
+        idempotency_key: str = "",
     ) -> dict[str, Any]:
         """Persist a new proposal and emit a ``proposal.created`` audit event."""
-        proposal = await self._workbench_store.create_proposal(
+        proposal, _ = await self.create_or_get_proposal(
             session_id=session_id,
             mission_id=mission_id,
             task_id=task_id,
@@ -1143,21 +1160,95 @@ class WorkbenchService:
             validation_plan=validation_plan,
             risk_level=risk_level,
             questions=questions,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_revision=source_revision,
+            source_sha256=source_sha256,
+            source_proposal_id=source_proposal_id,
+            generator_version=generator_version,
+            proposal_kind=proposal_kind,
+            idempotency_key=idempotency_key,
         )
-        await self._workbench_store.append_event(
+        return proposal
+
+    async def create_or_get_proposal(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+        agent_id: str,
+        title: str,
+        impact_scope: str,
+        intended_files: list[str] | None = None,
+        validation_plan: list[str] | None = None,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+        questions: list[str] | None = None,
+        source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
+        source_id: str = "",
+        source_revision: int = 0,
+        source_sha256: str = "",
+        source_proposal_id: str = "",
+        generator_version: str = "",
+        proposal_kind: str = "",
+        idempotency_key: str = "",
+    ) -> tuple[dict[str, Any], bool]:
+        """Persist once and emit one audit event for an idempotent proposal."""
+        proposal, created = await self._workbench_store.create_proposal_with_status(
             session_id=session_id,
-            type="proposal.created",
-            actor=agent_id,
-            subject_id=proposal.id,
-            payload={
-                "mission_id": mission_id,
-                "task_id": task_id,
-                "title": proposal.title,
-                "risk_level": proposal.risk_level.value,
-            },
-            severity=self._severity_for_risk(proposal.risk_level),
+            mission_id=mission_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            title=title,
+            impact_scope=impact_scope,
+            intended_files=intended_files,
+            validation_plan=validation_plan,
+            risk_level=risk_level,
+            questions=questions,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_revision=source_revision,
+            source_sha256=source_sha256,
+            source_proposal_id=source_proposal_id,
+            generator_version=generator_version,
+            proposal_kind=proposal_kind,
+            idempotency_key=idempotency_key,
         )
-        return self._proposal_to_dict(proposal)
+        if created:
+            await self._workbench_store.append_event(
+                session_id=session_id,
+                type="proposal.created",
+                actor=agent_id,
+                subject_id=proposal.id,
+                payload={
+                    "mission_id": mission_id,
+                    "task_id": task_id,
+                    "title": proposal.title,
+                    "risk_level": proposal.risk_level.value,
+                    "source_kind": proposal.source_kind.value,
+                    "source_id": proposal.source_id,
+                    "source_revision": proposal.source_revision,
+                    "source_proposal_id": proposal.source_proposal_id,
+                },
+                severity=self._severity_for_risk(proposal.risk_level),
+            )
+        return self._proposal_to_dict(proposal), created
+
+    async def require_proposal_binding(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+    ) -> None:
+        """Require a proposal to target a tracked issue in the given mission."""
+        clean_mission_id = await self._require_mission(session_id, mission_id)
+        task = await self._tasks_for_session(session_id).get_task(task_id.strip())
+        if task is None:
+            raise ValueError(f"任务 #{task_id} 不存在")
+        issue = await self._workbench_store.get_issue(session_id, task.id)
+        if issue is None or issue.mission_id != clean_mission_id:
+            raise ValueError("Proposal 必须绑定到当前 mission 下的已跟踪 issue。")
 
     async def list_proposals(
         self,

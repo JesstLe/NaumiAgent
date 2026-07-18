@@ -1702,6 +1702,40 @@ test("evolution command opens typed review route and navigates to detail", () =>
   assert.equal(state.evolutionReview.snapshot, null);
 });
 
+test("evolution enqueue sends an explicit bound queue request", () => {
+  const state = createInitialState();
+  const sent = [];
+  const candidateId = `evc_${"b".repeat(24)}`;
+
+  handleSubmitText(
+    state,
+    `/evolution enqueue ${candidateId} --mission mission-1 --task task-9 --agent Human`,
+    (type, payload) => sent.push({ type, payload }),
+  );
+
+  assert.equal(state.route.name, "evolution_review");
+  assert.deepEqual(sent, [{
+    type: "evolution/review/request",
+    payload: {
+      action: "enqueue",
+      candidate_id: candidateId,
+      mission_id: "mission-1",
+      task_id: "task-9",
+      agent_id: "Human",
+      query: "",
+      risk: "",
+      source_kind: "",
+      limit: 50,
+    },
+  }]);
+  reduceServerEvent(state, {
+    type: "error",
+    payload: { code: "evolution_queue_failed", message: "Proposal 未入队" },
+  });
+  assert.equal(state.evolutionReview.loading, false);
+  assert.equal(state.evolutionReview.error, "Proposal 未入队");
+});
+
 test("doctor command opens typed health route refreshes and restores origin", () => {
   const state = createInitialState();
   state.scrollOffset = 5;
