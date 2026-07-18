@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.evolution.proposal import workbench_validation_plan
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.workbench.models import ProposalSourceKind, ProposalState, RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
@@ -102,13 +103,7 @@ class EvolutionProposalQueueAdapter:
             mission_id=clean_mission_id,
             task_id=clean_task_id,
         )
-        validation_plan = [
-            (
-                f"{step.metric_name} {step.direction} {step.target:g} · "
-                f"{step.verifier} · {step.procedure}"
-            )
-            for step in preview.validation_plan
-        ]
+        validation_plan = list(workbench_validation_plan(preview))
         proposal, created = await self._workbench_service.create_or_get_proposal(
             session_id=clean_session_id,
             mission_id=clean_mission_id,

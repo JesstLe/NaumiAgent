@@ -29,3 +29,14 @@
 - 越界路径、symlink escape、protected module、超文件/行数变更被机械拒绝。
 - 同 baseline+candidate+seed 可重建相同 experiment manifest。
 - 失败 patch 保留证据但不进入验证/推广。
+
+## 实现进展（2026-07-18）
+
+- EVO-02.1a 已实现不可执行 Experiment Contract v1：只有来源仍可验证的 approved Evolution Proposal
+  可以签发；manifest 固化真实 Git HEAD、dirty 事实、scope、risk budget、固定工具和机械检查，并使用
+  canonical digest 生成稳定 ID。
+- Contract 固定要求 worktree lease/source snapshot/static guard，且 `execution_ready=false`；当前批准不会
+  触发代码、Git 写入或实验资格。
+- 真实 Git + Candidate SQLite + Workbench SQLite 端到端与篡改/漂移/越界预算测试已通过。详见
+  `EVO-02-1a-experiment-contract.md`。
+- EVO-02.2..02.7 尚未实现，因此 EVO-02 整体保持 partial。

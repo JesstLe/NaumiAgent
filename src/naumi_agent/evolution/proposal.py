@@ -234,6 +234,21 @@ def generate_proposal_preview(
     )
 
 
+def workbench_validation_plan(
+    preview: EvolutionProposalPreview,
+) -> tuple[str, ...]:
+    """Return the exact public validation binding persisted in Workbench."""
+    if not isinstance(preview, EvolutionProposalPreview):
+        raise TypeError("validation binding 只能处理 EvolutionProposalPreview。")
+    return tuple(
+        (
+            f"{step.metric_name} {step.direction} {step.target:g} · "
+            f"{step.verifier} · {step.procedure}"
+        )
+        for step in preview.validation_plan
+    )
+
+
 def classify_proposal_kind(finding_code: str, scope: str) -> tuple[ProposalKind, str]:
     """Classify a Candidate into exactly one of HAR-09.4's six proposal types."""
     normalized_finding = str(finding_code).strip().casefold()
@@ -317,4 +332,5 @@ __all__ = [
     "ProposalValidationStep",
     "classify_proposal_kind",
     "generate_proposal_preview",
+    "workbench_validation_plan",
 ]

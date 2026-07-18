@@ -63,3 +63,7 @@
   `../cli-ui/UI-10-6a-proposal-actions.md`。
 - HAR-09 仍未实现 defer/merge 交互、approved 到 EVO-02 的显式转换和 outcome tracking，因此整体
   继续保持 partial。
+
+EVO-02.1a 已补上 approved Proposal 到不可执行 Experiment Contract 的内部签发器；它会重新验证当前
+Candidate/Preview 与 Proposal provenance，并固定 `execution_ready=false`。由于 Contract 尚未持久化或
+暴露为用户动作，HAR-09 的“显式转换”产品闭环仍未完成。
