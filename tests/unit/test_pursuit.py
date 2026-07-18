@@ -1485,6 +1485,16 @@ class TestPursuitExecutionStrategy:
 
 
 class TestPursuitPersistence:
+    def test_store_constructor_does_not_touch_disk(self, tmp_path) -> None:
+        base_dir = tmp_path / "pursuit"
+        store = PursuitStore(base_dir)
+
+        assert store.base_dir == base_dir.resolve()
+        assert not base_dir.exists()
+
+        assert store.list_runs() == []
+        assert store.db_path.exists()
+
     def test_store_round_trips_run_evidence_and_waits(self, tmp_path) -> None:
         store = PursuitStore(tmp_path / "pursuit")
         now = time.time()

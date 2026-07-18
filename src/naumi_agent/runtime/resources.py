@@ -7,6 +7,8 @@ from dataclasses import dataclass, fields
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
+from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.store import WorkbenchStore
@@ -28,6 +30,14 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
         HarnessTrustStore,
         "harness_trust_store 必须是 HarnessTrustStore 实例。",
     ),
+    "goal_store": (
+        GoalStore,
+        "goal_store 必须是 GoalStore 实例。",
+    ),
+    "pursuit_store": (
+        PursuitStore,
+        "pursuit_store 必须是 PursuitStore 实例。",
+    ),
     "task_store": (
         TaskStore,
         "task_store 必须是 TaskStore 实例。",
@@ -47,6 +57,8 @@ class RuntimeResources:
     evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
+    goal_store: GoalStore
+    pursuit_store: PursuitStore
     task_store: TaskStore
     workbench_store: WorkbenchStore
 
@@ -67,6 +79,8 @@ class RuntimeResourceOverrides:
     evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None
+    goal_store: GoalStore | None = None
+    pursuit_store: PursuitStore | None = None
     task_store: TaskStore | None = None
     workbench_store: WorkbenchStore | None = None
 

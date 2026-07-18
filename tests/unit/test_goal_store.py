@@ -25,6 +25,17 @@ def test_goal_store_persists_current_goal_and_metadata(tmp_path) -> None:
     assert reopened.get(goal.id) == goal
 
 
+def test_goal_store_constructor_does_not_touch_disk(tmp_path) -> None:
+    base_dir = tmp_path / "goals"
+    store = GoalStore(base_dir)
+
+    assert store.base_dir == base_dir.resolve()
+    assert not base_dir.exists()
+
+    assert store.current() is None
+    assert store.db_path.exists()
+
+
 def test_goal_store_allows_only_one_unfinished_goal(tmp_path) -> None:
     store = GoalStore(tmp_path / "goals")
     first = store.create("第一个目标")

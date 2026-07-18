@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from naumi_agent.orchestrator.pursuit import (
@@ -19,7 +20,8 @@ class PursuitStore:
     def __init__(self, base_dir: str | Path) -> None:
         self._base_dir = Path(base_dir).resolve()
         self._db_path = self._base_dir / "pursuit.db"
-        self._init_db()
+        self._initialized = False
+        self._initialize_lock = threading.Lock()
 
     @property
     def base_dir(self) -> Path:
@@ -147,61 +149,71 @@ class PursuitStore:
         return runs
 
     def _connect(self) -> sqlite3.Connection:
+        self._ensure_initialized()
+        return self._open_connection()
+
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_db(self) -> None:
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS pursuit_runs (
-                    id TEXT PRIMARY KEY,
-                    goal TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    phase TEXT NOT NULL,
-                    started_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    iteration INTEGER NOT NULL DEFAULT 0,
-                    criteria_total INTEGER NOT NULL DEFAULT 0,
-                    criteria_verified INTEGER NOT NULL DEFAULT 0,
-                    failure_count INTEGER NOT NULL DEFAULT 0,
-                    blocked_reason TEXT NOT NULL DEFAULT '',
-                    next_action TEXT NOT NULL DEFAULT '',
-                    worktree_name TEXT NOT NULL DEFAULT '',
-                    worktree_path TEXT NOT NULL DEFAULT ''
+    def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+        with self._initialize_lock:
+            if self._initialized:
+                return
+            self._base_dir.mkdir(parents=True, exist_ok=True)
+            with self._open_connection() as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_runs (
+                        id TEXT PRIMARY KEY,
+                        goal TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        started_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        iteration INTEGER NOT NULL DEFAULT 0,
+                        criteria_total INTEGER NOT NULL DEFAULT 0,
+                        criteria_verified INTEGER NOT NULL DEFAULT 0,
+                        failure_count INTEGER NOT NULL DEFAULT 0,
+                        blocked_reason TEXT NOT NULL DEFAULT '',
+                        next_action TEXT NOT NULL DEFAULT '',
+                        worktree_name TEXT NOT NULL DEFAULT '',
+                        worktree_path TEXT NOT NULL DEFAULT ''
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS pursuit_evidence (
-                    run_id TEXT NOT NULL,
-                    seq INTEGER NOT NULL,
-                    kind TEXT NOT NULL,
-                    source TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    is_hard INTEGER NOT NULL,
-                    timestamp REAL NOT NULL,
-                    PRIMARY KEY(run_id, seq),
-                    FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_evidence (
+                        run_id TEXT NOT NULL,
+                        seq INTEGER NOT NULL,
+                        kind TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        is_hard INTEGER NOT NULL,
+                        timestamp REAL NOT NULL,
+                        PRIMARY KEY(run_id, seq),
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS pursuit_waits (
-                    run_id TEXT NOT NULL,
-                    task_id TEXT NOT NULL,
-                    action_id TEXT NOT NULL,
-                    command TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    PRIMARY KEY(run_id, task_id),
-                    FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_waits (
+                        run_id TEXT NOT NULL,
+                        task_id TEXT NOT NULL,
+                        action_id TEXT NOT NULL,
+                        command TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(run_id, task_id),
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                    )
+                    """
                 )
-                """
-            )
+            self._initialized = True
 
 
 def format_run(run: PursuitRun) -> str:
