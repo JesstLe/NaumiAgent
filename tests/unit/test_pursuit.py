@@ -1582,9 +1582,11 @@ class TestPursuitPersistence:
         result = await loop.resume_persisted("pursuit_wait")
         restored = store.get_run("pursuit_wait")
 
-        assert "目标追踪状态已恢复" in result
+        assert "持久状态已安全检查" in result
         assert restored is not None
-        assert restored.status == PursuitRunStatus.RUNNING
+        assert restored.status == PursuitRunStatus.BLOCKED
+        assert restored.phase == "checkpoint_required"
+        assert "不能伪装成正在运行" in restored.blocked_reason
         assert restored.waiting_on == []
         assert any(item.kind == "background" and item.is_hard for item in restored.evidence)
 
@@ -1617,6 +1619,8 @@ class TestPursueToolRegistration:
         assert hasattr(engine, "pursuit_store")
         assert pursuit_mod._global_pursuit_loop is not None
         assert pursuit_mod._global_pursuit_loop._execute_tool_call == engine.execute_tool
+        assert pursuit_mod._global_pursuit_loop._lease_port is engine._harness_store
+        assert pursuit_mod._global_pursuit_loop._workspace_root == engine.workspace_root
 
     def test_pursuit_tools_expose_permission_metadata(self) -> None:
         assert PursueTool().metadata.requires_confirmation is True
@@ -1668,6 +1672,7 @@ class TestPursueToolRegistration:
                 updated_at=now,
             )
             self._persist_run()
+            self._startup_event.set()
             await asyncio.sleep(0)
             return "报告"
 

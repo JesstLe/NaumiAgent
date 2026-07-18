@@ -10,7 +10,9 @@
 - HAR-10.1 Run lease（partial）：
   - HAR-10.1a 已实现：workspace/run-kind 隔离的 owner、单调 epoch、expires_at、幂等 acquire/renew、
     release 后 epoch 保留，以及旧 epoch 结果拒绝审计；见 [设计](HAR-10-1a-run-lease-design.md)。
-  - 未完成：Pursuit/browser/background/agent/runtime 的逐域接入和提交边界整合。
+  - HAR-10.1b 已实现：Pursuit 启动 admission、keepalive、动作/结果/终态 fencing、可靠释放和 live-owner
+    resume 拒绝；见 [设计](HAR-10-1b-pursuit-lease-integration.md)。
+  - 未完成：browser/background/agent/runtime 的逐域接入，以及跨 Store 原子提交。
 - HAR-10.2 Heartbeat：runtime/worker/browser/agent 分层心跳与健康状态。
 - HAR-10.3 Durable queue：优先级、公平性、容量、立即发送消息插队规则。
 - HAR-10.4 Checkpoint：目标、criteria、todo、budget、evidence cursor、pending interaction。
@@ -32,8 +34,8 @@ ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 
 状态，不需要解析 `/goal` 或 `/pursue` 文本。
 
 ARC-01.4b2e 只解决资源归属和稳定引用。HAR-10.1a 已在 Harness schema v11 交付通用 lease/epoch 与结果
-fencing authority，但尚未接入各执行域；跨 Store 原子性、heartbeat、checkpoint、interaction queue、
-reconcile 与 destructive action 幂等仍属于本模块后续实现。
+fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入；browser/background/agent/runtime、跨 Store
+原子性、heartbeat、checkpoint、interaction queue、reconcile 与 destructive action 幂等仍属于后续实现。
 
 ## 验收标准
 
