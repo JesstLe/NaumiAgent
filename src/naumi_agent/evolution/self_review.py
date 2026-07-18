@@ -12,6 +12,7 @@ from pathlib import Path
 
 _MAX_SELF_REVIEW_FILE_BYTES = 2_000_000
 _SECRET_NAME_RE = re.compile(r"(?:api[_-]?key|password|secret|token)", re.IGNORECASE)
+SELF_REVIEW_STATIC_RUNNER_VERSION = "self_review_static@1"
 
 
 class SelfReviewFindingCode(StrEnum):
@@ -234,6 +235,7 @@ def _is_broad_exception(node: ast.expr | None) -> bool:
 
 
 __all__ = [
+    "SELF_REVIEW_STATIC_RUNNER_VERSION",
     "SelfReviewFindingCode",
     "SelfReviewScanError",
     "SelfReviewStaticFinding",

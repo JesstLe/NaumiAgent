@@ -53,6 +53,9 @@ from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.validation_cohorts import (
     EvolutionBaselineCohortRequestBuilder,
 )
+from naumi_agent.evolution.validation_metric_bindings import (
+    EvolutionMetricRunnerBindingBuilder,
+)
 from naumi_agent.evolution.validation_plans import (
     EvolutionValidationPlanner,
     EvolutionValidationProfileBinder,
@@ -769,6 +772,9 @@ class AgentEngine:
         )
         self.evolution_baseline_cohort_request_builder = (
             EvolutionBaselineCohortRequestBuilder()
+        )
+        self.evolution_metric_runner_binding_builder = (
+            EvolutionMetricRunnerBindingBuilder()
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
