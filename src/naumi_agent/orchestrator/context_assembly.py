@@ -147,10 +147,14 @@ class HarnessContextAssembler:
         counts = Counter(task.status for task in tasks)
         interesting = [
             task for task in tasks
-            if task.status == BackgroundStatus.RUNNING or not task.notified
+            if task.status in {
+                BackgroundStatus.PREPARING,
+                BackgroundStatus.RUNNING,
+            } or not task.notified
         ][: _MAX_LINES_PER_SECTION]
         lines = [
             "- 汇总："
+            f"{counts[BackgroundStatus.PREPARING]} 准备中，"
             f"{counts[BackgroundStatus.RUNNING]} 运行中，"
             f"{counts[BackgroundStatus.COMPLETED]} 已完成，"
             f"{counts[BackgroundStatus.FAILED]} 失败，"

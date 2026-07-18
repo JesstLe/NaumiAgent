@@ -691,7 +691,7 @@ class JsonlEngineBridge:
                 for task in runner.list_tasks():
                     raw_status = getattr(task, "status", "")
                     status = str(getattr(raw_status, "value", raw_status))
-                    if status == "running":
+                    if status in {"preparing", "running"}:
                         payload["background_running"] += 1
                     elif (
                         status in {"failed", "timed_out"}

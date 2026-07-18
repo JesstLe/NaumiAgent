@@ -5,10 +5,11 @@
 H1-H3、H4.1-H4.4、HAR-05，以及 HAR-08 的离线协议 Eval、安全 Replay Eval、
 Identity/Comparator、Result Store、Baseline/Selector、Comparison receipt、HAR-10.1a 持久化 fencing lease、
 HAR-10.1b Pursuit 首个生产接入、HAR-10.4a 权威 checkpoint 核心、HAR-10.4b 安全 resume executor，以及
-HAR-10.5a shell/background 持久行动账本已实现。
+HAR-10.5a shell/background 持久行动账本和 HAR-10.5b Background caller idempotency 已实现。
 resume 支持新 lease epoch continuation，并在 in-flight 副作用不明确时进入 `reconcile_required`。
 行动账本在外部派发前记录稳定 identity，关联后台 task ID，并阻止 terminal/ambiguous 行动被重复派发；完整
-外部状态 reconcile 与 caller idempotency key 仍在后续 HAR-10.5b。
+后台任务可通过 caller key 在同 runtime 并发与正常重启后复用；类型化外部状态 reconcile 仍在后续
+HAR-10.5c。
 HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除 assessment 的隐式全量测试和 lint。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于

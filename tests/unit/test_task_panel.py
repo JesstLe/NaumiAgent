@@ -256,6 +256,24 @@ async def test_build_task_panel_snapshot_normalizes_all_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preparing_background_task_is_visible_as_pending() -> None:
+    engine = FakeEngine()
+    engine.background_runner = SimpleNamespace(list_tasks=lambda: [BackgroundTask(
+        id="bg_preparing",
+        command="echo preparing",
+        cwd="/tmp/project",
+        status=BackgroundStatus.PREPARING,
+        output_path="/tmp/bg-preparing.log",
+        idempotency_key="pact_preparing-1",
+    )])
+
+    snapshot = await build_task_panel_snapshot(engine, limit=10)
+
+    assert snapshot.background_tasks[0].task_id == "bg_preparing"
+    assert snapshot.background_tasks[0].phase is TaskPhase.PENDING
+
+
+@pytest.mark.asyncio
 async def test_render_task_panel_contains_expected_sections() -> None:
     text = await render_task_panel(FakeEngine(), limit=10)
 

@@ -1296,7 +1296,7 @@ class GoalPursuitLoop:
                 still_waiting.append(pending)
                 continue
 
-            if "运行中" in status_text:
+            if "运行中" in status_text or "准备中" in status_text:
                 still_waiting.append(pending)
                 continue
 
@@ -2736,15 +2736,23 @@ class GoalPursuitLoop:
             tool_name="background_run",
             arguments=background_args,
         )
-        replay_result = self._existing_action_result(action_record)
+        replay_result = self._existing_action_result(
+            action_record,
+            allow_dispatched_retry=True,
+        )
         if replay_result is not None:
             return replay_result
-        if action_record is not None:
+        if (
+            action_record is not None
+            and action_record.state is PursuitActionState.PREPARED
+        ):
             await self._require_run_lease(f"background-dispatch-{action_id}")
             self._store.mark_action_dispatched(
                 action_record.action_key,
                 updated_at=time.time(),
             )
+        if action_record is not None:
+            background_args["idempotency_key"] = action_record.dispatch_token
         try:
             if self._execute_tool_call is not None:
                 tool_result = await self._execute_tool_call(
@@ -2871,6 +2879,8 @@ class GoalPursuitLoop:
     @staticmethod
     def _existing_action_result(
         record: PursuitActionRecord | None,
+        *,
+        allow_dispatched_retry: bool = False,
     ) -> dict[str, Any] | None:
         """Refuse ambiguous replay and reuse authenticated terminal receipts."""
         if record is None or record.state is PursuitActionState.PREPARED:
@@ -2886,6 +2896,8 @@ class GoalPursuitLoop:
                 ),
             }
         if record.state is PursuitActionState.DISPATCHED:
+            if allow_dispatched_retry:
+                return None
             return {
                 "action_id": record.action_id,
                 "status": "error",

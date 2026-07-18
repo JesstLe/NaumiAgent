@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from naumi_agent.agents.team_protocol import execute_team_signal
+from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import SubTask
@@ -127,6 +128,27 @@ class TestRuntimeStatus:
 
         assert "浏览器队列：0/2 活跃 · 0 排队" in output
         assert engine._task_runner is None
+
+    @pytest.mark.asyncio
+    async def test_resources_reports_preparing_background_reservation(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        engine.background_runner.store.save(BackgroundTask(
+            id="bg_preparing",
+            command="echo preparing",
+            cwd=str(engine.workspace_root),
+            status=BackgroundStatus.PREPARING,
+            output_path=str(
+                engine.background_runner.store.artifacts_dir / "bg_preparing.log"
+            ),
+            idempotency_key="pact_preparing-1",
+        ))
+
+        output = await build_runtime_status(engine, sections="resources")
+
+        assert "1 准备中" in output
+        assert "bg bg_preparing [preparing]" in output
 
     @pytest.mark.asyncio
     async def test_runtime_mcp_connect_registers_discovered_tools(

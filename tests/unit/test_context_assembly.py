@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
+from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
@@ -33,6 +34,23 @@ from naumi_agent.orchestrator.context_assembly import (
 )
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+
+
+def test_background_context_reports_preparing_reservation() -> None:
+    runner = type("Runner", (), {
+        "list_tasks": lambda self: [BackgroundTask(
+            id="bg_preparing",
+            command="echo preparing",
+            cwd="/tmp",
+            status=BackgroundStatus.PREPARING,
+            output_path="/tmp/bg-preparing.log",
+        )]
+    })()
+
+    section = HarnessContextAssembler()._background_section(runner)
+
+    assert "1 准备中" in section
+    assert "bg_preparing [preparing]" in section
 
 
 @pytest.fixture

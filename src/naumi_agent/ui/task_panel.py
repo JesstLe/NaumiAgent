@@ -1021,6 +1021,7 @@ def _subagent_detail_from_execution(item: Any) -> SubagentTaskDetail:
 def _background_status_from_task(task: Any) -> BackgroundTaskStatus:
     status = getattr(task, "status", BackgroundStatus.RUNNING)
     phase = {
+        BackgroundStatus.PREPARING: TaskPhase.PENDING,
         BackgroundStatus.RUNNING: TaskPhase.RUNNING,
         BackgroundStatus.COMPLETED: TaskPhase.COMPLETED,
         BackgroundStatus.FAILED: TaskPhase.FAILED,

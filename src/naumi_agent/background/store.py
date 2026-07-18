@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
+
+_LOCKS_GUARD = threading.Lock()
+_STORE_LOCKS: dict[str, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,9 @@ class BackgroundTaskStore:
         self._base_dir = Path(base_dir).resolve()
         self._records_path = self._base_dir / "tasks.json"
         self._artifacts_dir = self._base_dir / "artifacts"
+        lock_key = str(self._records_path)
+        with _LOCKS_GUARD:
+            self._lock = _STORE_LOCKS.setdefault(lock_key, threading.RLock())
 
     @property
     def base_dir(self) -> Path:
@@ -35,39 +42,137 @@ class BackgroundTaskStore:
         return self._artifacts_dir
 
     def next_id(self) -> str:
-        records = self.list_tasks()
-        numbers: list[int] = []
-        for task in records:
-            prefix, _, suffix = task.id.partition("_")
-            if prefix == "bg" and suffix.isdigit():
-                numbers.append(int(suffix))
-        return f"bg_{(max(numbers) if numbers else 0) + 1:04d}"
+        with self._lock:
+            return _next_id(self._load_tasks(strict=True))
+
+    def reserve(
+        self,
+        *,
+        command: str,
+        cwd: str,
+        idempotency_key: str,
+        timeout_seconds: int,
+        port_hints: list[int],
+        started_at: str,
+    ) -> tuple[BackgroundTask, bool]:
+        """Atomically reserve one task identity before spawning its process."""
+        if not idempotency_key:
+            raise ValueError("reserve 需要非空幂等键")
+        if timeout_seconds <= 0:
+            raise ValueError("超时时间必须大于 0 秒")
+        with self._lock:
+            records = {item.id: item for item in self._load_tasks(strict=True)}
+            for existing in records.values():
+                if existing.idempotency_key != idempotency_key:
+                    continue
+                if (
+                    existing.command != command
+                    or existing.cwd != cwd
+                    or existing.timeout_seconds != timeout_seconds
+                ):
+                    raise ValueError(
+                        "幂等键已绑定不同的后台命令、工作目录或超时时间"
+                    )
+                return existing, False
+
+            task_id = _next_id(list(records.values()))
+            task = BackgroundTask(
+                id=task_id,
+                command=command,
+                cwd=cwd,
+                status=BackgroundStatus.PREPARING,
+                output_path=str(self._artifacts_dir / f"{task_id}.log"),
+                port_hints=list(port_hints),
+                started_at=started_at,
+                idempotency_key=idempotency_key,
+                timeout_seconds=timeout_seconds,
+            )
+            records[task.id] = task
+            self._write_records(records)
+            return task, True
+
+    def get_by_idempotency_key(self, idempotency_key: str) -> BackgroundTask | None:
+        if not idempotency_key:
+            return None
+        with self._lock:
+            return next(
+                (
+                    task
+                    for task in self._load_tasks(strict=True)
+                    if task.idempotency_key == idempotency_key
+                ),
+                None,
+            )
 
     def save(self, task: BackgroundTask) -> None:
-        records = {item.id: item for item in self.list_tasks()}
-        records[task.id] = task
-        self._write_records(records)
+        with self._lock:
+            records = {item.id: item for item in self._load_tasks(strict=True)}
+            previous = records.get(task.id)
+            if previous is not None and previous.idempotency_key:
+                if (
+                    task.idempotency_key != previous.idempotency_key
+                    or task.command != previous.command
+                    or task.cwd != previous.cwd
+                    or task.timeout_seconds != previous.timeout_seconds
+                ):
+                    raise ValueError(
+                        f"后台任务 {task.id} 的幂等身份不可修改。"
+                    )
+            if task.idempotency_key:
+                conflict = next(
+                    (
+                        item
+                        for item in records.values()
+                        if item.idempotency_key == task.idempotency_key
+                        and item.id != task.id
+                    ),
+                    None,
+                )
+                if conflict is not None:
+                    raise ValueError(
+                        f"幂等键已绑定后台任务 {conflict.id}，拒绝覆盖。"
+                    )
+            records[task.id] = task
+            self._write_records(records)
 
     def get(self, task_id: str) -> BackgroundTask | None:
         return {task.id: task for task in self.list_tasks()}.get(task_id)
 
     def list_tasks(self) -> list[BackgroundTask]:
+        with self._lock:
+            return self._load_tasks(strict=False)
+
+    def _load_tasks(self, *, strict: bool) -> list[BackgroundTask]:
         if not self._records_path.exists():
             return []
         try:
             raw = json.loads(self._records_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            if strict:
+                raise ValueError("后台任务记录损坏，拒绝覆盖或重新派发") from exc
+            return []
+        if not isinstance(raw, dict):
+            if strict:
+                raise ValueError("后台任务记录根节点不是对象，拒绝覆盖或重新派发")
             return []
         tasks: list[BackgroundTask] = []
-        for item in raw.values() if isinstance(raw, dict) else []:
+        for task_id, item in raw.items():
             if not isinstance(item, dict):
+                if strict:
+                    raise ValueError(f"后台任务 {task_id} 的记录不是对象")
                 continue
             try:
-                item["status"] = BackgroundStatus(item["status"])
-                tasks.append(BackgroundTask(**item))
-            except (TypeError, ValueError):
-                continue
-        return sorted(tasks, key=lambda task: task.started_at or task.id, reverse=True)
+                payload = dict(item)
+                payload["status"] = BackgroundStatus(payload["status"])
+                tasks.append(BackgroundTask(**payload))
+            except (KeyError, TypeError, ValueError) as exc:
+                if strict:
+                    raise ValueError(f"后台任务 {task_id} 的记录无法校验") from exc
+        return sorted(
+            tasks,
+            key=lambda task: task.started_at or task.id,
+            reverse=True,
+        )
 
     def mark_notified(self, task_id: str) -> None:
         task = self.get(task_id)
@@ -103,7 +208,21 @@ class BackgroundTaskStore:
 
         current = now or datetime.now()
         cutoff = current - timedelta(days=retention_days)
-        records = {task.id: task for task in self.list_tasks()}
+        with self._lock:
+            return self._prune_locked(
+                current=current,
+                cutoff=cutoff,
+                max_records=max_records,
+            )
+
+    def _prune_locked(
+        self,
+        *,
+        current: datetime,
+        cutoff: datetime,
+        max_records: int,
+    ) -> BackgroundPruneResult:
+        records = {task.id: task for task in self._load_tasks(strict=True)}
         terminal = sorted(
             (task for task in records.values() if task.is_finished),
             key=_task_terminal_time,
@@ -113,8 +232,11 @@ class BackgroundTaskStore:
         candidates = [
             task
             for task in terminal
-            if task.id not in retained_by_count
-            or _task_terminal_time(task) < cutoff
+            if _task_terminal_time(task) < cutoff
+            or (
+                not task.idempotency_key
+                and task.id not in retained_by_count
+            )
         ]
 
         records_deleted = 0
@@ -164,6 +286,15 @@ def _task_to_dict(task: BackgroundTask) -> dict[str, Any]:
     payload = asdict(task)
     payload["status"] = task.status.value
     return payload
+
+
+def _next_id(records: list[BackgroundTask]) -> str:
+    numbers: list[int] = []
+    for task in records:
+        prefix, _, suffix = task.id.partition("_")
+        if prefix == "bg" and suffix.isdigit():
+            numbers.append(int(suffix))
+    return f"bg_{(max(numbers) if numbers else 0) + 1:04d}"
 
 
 def _task_terminal_time(task: BackgroundTask) -> datetime:
