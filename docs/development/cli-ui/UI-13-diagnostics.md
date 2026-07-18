@@ -27,5 +27,8 @@
   runtime/model/provider/store/git/node/browser/MCP/terminal 状态，新 UI 合并真实 Bridge heartbeat 并支持
   刷新/滚动/返回；Markdown fallback 保留，且页面不会偷偷运行 live provider probe。实现与验收见
   `UI-13-1a-typed-local-health.md`。
+- UI-13.1b Worker Authority Health：已实现。Doctor 以严格只读方式组合 Worker Registry active contract 与
+  Harness heartbeat，显示 epoch、平台、合同容量和可信活性；缺失、陈旧、身份不匹配、损坏与未来 schema
+  均有 fail-closed 中文结论。新 UI 与 TUI 复用同一检查，详见 `UI-13-1b-worker-authority-health.md`。
 - provider 稳定错误码、显式 live probes、Trace viewer、脱敏导出与修复动作仍为 planned；不得把 UI-13
   整体标记为 implemented。

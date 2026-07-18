@@ -50,7 +50,8 @@ ripgrep、Docker、browser daemon、MCP、debug log 和 terminal 检查，并新
 
 ## 6. 后续
 
-- UI-13.1b/13.2：补齐 provider HTTP 401/404/429/5xx 稳定 code 与聚合摘要；
+- UI-13.1b Worker Authority Health 已实现；后续 UI-13.2 补齐 provider HTTP 401/404/429/5xx 稳定 code
+  与聚合摘要；
 - UI-13.3：用户显式启动、可取消、有预算的 live probes；
 - UI-13.4：基于 DebugTrace 的 typed trace viewer；
 - ARC-08：把相同 Health contract 接入 SLO、故障审计和恢复建议；

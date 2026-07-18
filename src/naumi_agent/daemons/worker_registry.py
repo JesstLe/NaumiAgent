@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 import stat
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -429,21 +429,43 @@ def _deserialize_contract(raw: str) -> WorkerContract:
 
 
 def _registration_from_row(row: aiosqlite.Row) -> WorkerRegistration:
-    contract = _deserialize_contract(str(row["contract_json"]))
+    return deserialize_worker_registration(dict(row))
+
+
+def deserialize_worker_registration(record: Mapping[str, object]) -> WorkerRegistration:
+    """Validate one durable registry record without trusting its index columns."""
+    required = {
+        "worker_id",
+        "epoch",
+        "instance_id",
+        "contract_sha256",
+        "contract_json",
+        "state",
+        "registered_at",
+        "terminal_at",
+        "reason_code",
+    }
+    if not isinstance(record, Mapping) or not required.issubset(record):
+        raise ValueError("Worker registry 记录字段不完整。")
+    contract = _deserialize_contract(str(record["contract_json"]))
     if (
-        contract.worker_id != str(row["worker_id"])
-        or contract.instance_id != str(row["instance_id"])
-        or contract.epoch != int(row["epoch"])
-        or contract.contract_sha256 != str(row["contract_sha256"])
+        contract.worker_id != str(record["worker_id"])
+        or contract.instance_id != str(record["instance_id"])
+        or contract.epoch != int(record["epoch"])
+        or contract.contract_sha256 != str(record["contract_sha256"])
     ):
         raise ValueError("Worker registry 索引列与合同不一致。")
-    registered_at = normalize_worker_timestamp(str(row["registered_at"]), field="registered_at")
+    registered_at = normalize_worker_timestamp(
+        str(record["registered_at"]), field="registered_at"
+    )
     terminal_at = (
-        normalize_worker_timestamp(str(row["terminal_at"]), field="terminal_at")
-        if row["terminal_at"] is not None
+        normalize_worker_timestamp(str(record["terminal_at"]), field="terminal_at")
+        if record["terminal_at"] is not None
         else None
     )
-    reason_code = str(row["reason_code"]) if row["reason_code"] is not None else None
+    reason_code = (
+        str(record["reason_code"]) if record["reason_code"] is not None else None
+    )
     if datetime.fromisoformat(contract.issued_at) > datetime.fromisoformat(registered_at):
         raise ValueError("Worker registry registered_at 早于合同 issued_at。")
     if terminal_at is not None and datetime.fromisoformat(terminal_at) < datetime.fromisoformat(
@@ -454,7 +476,7 @@ def _registration_from_row(row: aiosqlite.Row) -> WorkerRegistration:
         _validate_reason(reason_code)
     return WorkerRegistration(
         contract=contract,
-        state=WorkerRegistrationState(str(row["state"])),
+        state=WorkerRegistrationState(str(record["state"])),
         registered_at=registered_at,
         terminal_at=terminal_at,
         reason_code=reason_code,
@@ -581,4 +603,5 @@ __all__ = [
     "WorkerRegistryConflictError",
     "WorkerRegistryStore",
     "WorkerRegistryStoreError",
+    "deserialize_worker_registration",
 ]
