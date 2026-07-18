@@ -21,6 +21,7 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRun,
     PursuitRunStatus,
     SuccessCriterion,
+    _verification_scope_error,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
@@ -244,6 +245,107 @@ class TestGoalParsing:
 
 
 class TestVerification:
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pytest tests/ -q",
+            "python3 -m pytest -q",
+            "ruff check src/",
+            "ruff check .",
+            "tox -q",
+            "nox -s tests",
+            "npm test",
+            "pnpm run test:unit",
+            "cargo test",
+            "go test ./...",
+            "go test",
+            "python3 -m unittest discover",
+            "make test",
+            "just test-unit",
+            "mvn test",
+            "./gradlew test",
+            "dotnet test",
+            "bazel test //...",
+            "bash -c 'python3 -m pytest tests/ -q'",
+            "zsh -lc 'ruff check src/'",
+            "npm test --",
+            "npx vitest",
+            "jest",
+            "bundle exec rspec",
+            "phpunit",
+            "swift test",
+            "flutter test",
+            "ctest",
+            "pytest tests/unit/test_demo.py && ruff check src/",
+        ],
+    )
+    def test_verification_policy_rejects_repository_wide_commands(
+        self,
+        command: str,
+    ) -> None:
+        assert _verification_scope_error(command)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "pytest -q tests/unit/test_demo.py",
+            "pytest tests/unit/test_demo.py::test_case -q",
+            "ruff check src/naumi_agent/demo.py",
+            "npm test -- tests/demo.test.ts",
+            "npx vitest tests/demo.test.ts",
+            "bundle exec rspec spec/demo_spec.rb",
+            "phpunit tests/DemoTest.php",
+            "swift test --filter DemoTests.testCase",
+            "flutter test test/demo_test.dart",
+            "ctest -R demo_test",
+            "cargo test test_parser",
+            "go test ./internal/parser",
+            "python3 -m unittest tests.test_demo",
+            "mvn test -Dtest=DemoTest",
+            "./gradlew test --tests DemoTest",
+            "dotnet test tests/Demo.Tests.csproj",
+            "bazel test //tests:demo_test",
+            "echo ok",
+        ],
+    )
+    def test_verification_policy_allows_targeted_commands(self, command: str) -> None:
+        assert _verification_scope_error(command) == ""
+
+    @pytest.mark.asyncio
+    async def test_verify_blocks_broad_command_without_tool_execution(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        spec = _make_spec(criteria=[SuccessCriterion(
+            id="c1",
+            description="全量测试",
+            verification_command="python3 -m pytest tests/ -q",
+        )])
+        mock_bash = MagicMock()
+        mock_bash.execute = AsyncMock(return_value="should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=mock_bash)
+
+        await loop._verify_criteria(spec)
+
+        criterion = spec.success_criteria[0]
+        assert criterion.status is CriterionStatus.FAILED
+        assert "Verification policy blocked" in criterion.evidence
+        assert "明确的测试文件" in criterion.evidence
+        mock_bash.execute.assert_not_awaited()
+
+        loop._gather_state_evidence = AsyncMock(return_value="暂无")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value="GAP|需要定向验证\nCONVERGENCE|0.1"
+        )
+        await loop._assess(spec)
+        assessor_message = loop._llm_call.await_args.args[1]
+        assert "Verification policy blocked" in assessor_message
+        assert "明确的测试文件" in assessor_message
+
     @pytest.mark.asyncio
     async def test_verify_with_passing_command(self) -> None:
         engine = _make_engine()
@@ -599,13 +701,15 @@ class TestPursuitExecutionStrategy:
         )
         loop._run = PursuitRun(
             id="pursuit_test",
-            goal="运行完整测试",
+            goal="运行目标测试",
             status=PursuitRunStatus.RUNNING,
             phase="execute",
             started_at=time.time(),
             updated_at=time.time(),
         )
-        loop._llm_call = AsyncMock(return_value="python -m pytest tests/ -q")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value="python -m pytest tests/unit/test_demo.py -q"
+        )
 
         bash = MagicMock()
         bash.execute = AsyncMock(return_value="should not run synchronously")
@@ -621,7 +725,11 @@ class TestPursuitExecutionStrategy:
             }.get(name)
         )
 
-        result = await loop._execute_via_bash(bash, "Run pytest tests/ slowly", "a1")
+        result = await loop._execute_via_bash(
+            bash,
+            "Run pytest tests/unit/test_demo.py slowly",
+            "a1",
+        )
 
         assert result["status"] == "waiting"
         assert result["background_task_id"] == "bg_0001"
@@ -665,19 +773,25 @@ class TestPursuitExecutionStrategy:
         )
         loop._run = PursuitRun(
             id="pursuit_test",
-            goal="运行完整测试",
+            goal="运行目标测试",
             status=PursuitRunStatus.RUNNING,
             phase="execute",
             started_at=time.time(),
             updated_at=time.time(),
         )
-        loop._llm_call = AsyncMock(return_value="python -m pytest tests/ -q")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value="python -m pytest tests/unit/test_demo.py -q"
+        )
         loop._tools = MagicMock()
         loop._tools.get = MagicMock(return_value=None)
         bash = MagicMock()
         bash.execute = AsyncMock(return_value="direct should not run")
 
-        result = await loop._execute_via_bash(bash, "Run pytest tests/ slowly", "a1")
+        result = await loop._execute_via_bash(
+            bash,
+            "Run pytest tests/unit/test_demo.py slowly",
+            "a1",
+        )
 
         assert result["status"] == "waiting"
         assert result["background_task_id"] == "bg_0002"
@@ -690,7 +804,7 @@ class TestPursuitExecutionStrategy:
         ]
         background_args = json.loads(tool_calls[0].args[0].arguments)
         assert background_args == {
-            "command": "python -m pytest tests/ -q",
+            "command": "python -m pytest tests/unit/test_demo.py -q",
             "cwd": "",
             "timeout_seconds": 1800,
         }
@@ -703,7 +817,7 @@ class TestPursuitExecutionStrategy:
             tool_registry=engine.tool_registry,
             subagent_manager=SubAgentManager(engine),
         )
-        loop._llm_call = AsyncMock(return_value="python -m pytest")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(return_value="echo done")  # type: ignore[method-assign]
         loop._tools = MagicMock()
         loop._tools.get = MagicMock(return_value=None)
         bash = MagicMock()
@@ -712,6 +826,31 @@ class TestPursuitExecutionStrategy:
         result = await loop._execute_via_bash(bash, "Run pytest", "a1")
 
         assert result["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_bash_action_blocks_model_generated_full_suite(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=engine.tool_registry,
+            subagent_manager=SubAgentManager(engine),
+        )
+        loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+            return_value="python3 -m pytest tests/ -q"
+        )
+        background = MagicMock()
+        background.execute = AsyncMock(return_value="should not run")
+        loop._tools = MagicMock()
+        loop._tools.get = MagicMock(return_value=background)
+        bash = MagicMock()
+        bash.execute = AsyncMock(return_value="should not run")
+
+        result = await loop._execute_via_bash(bash, "运行测试", "a1")
+
+        assert result["status"] == "error"
+        assert "执行范围策略已阻止" in result["output"]
+        bash.execute.assert_not_awaited()
+        background.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_bash_action_uses_injected_tool_executor(self) -> None:
@@ -729,13 +868,13 @@ class TestPursuitExecutionStrategy:
             subagent_manager=SubAgentManager(engine),
             execute_tool_call=execute_tool_call,
         )
-        loop._llm_call = AsyncMock(return_value="python -m pytest")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(return_value="echo ok")  # type: ignore[method-assign]
         loop._tools = MagicMock()
         loop._tools.get = MagicMock(return_value=None)
         bash = MagicMock()
         bash.execute = AsyncMock(return_value="direct should not run")
 
-        result = await loop._execute_via_bash(bash, "Run pytest", "a1")
+        result = await loop._execute_via_bash(bash, "Run one command", "a1")
 
         assert result["status"] == "completed"
         bash.execute.assert_not_awaited()
@@ -743,7 +882,7 @@ class TestPursuitExecutionStrategy:
         tool_call = execute_tool_call.await_args.args[0]
         assert tool_call.id == "pursuit-a1"
         assert tool_call.name == "bash_run"
-        assert json.loads(tool_call.arguments) == {"command": "python -m pytest"}
+        assert json.loads(tool_call.arguments) == {"command": "echo ok"}
 
     @pytest.mark.asyncio
     async def test_bash_action_uses_worktree_cwd_when_available(self) -> None:
@@ -770,13 +909,13 @@ class TestPursuitExecutionStrategy:
             updated_at=time.time(),
             worktree_path="/tmp/pursue-demo",
         )
-        loop._llm_call = AsyncMock(return_value="python -m pytest")  # type: ignore[method-assign]
+        loop._llm_call = AsyncMock(return_value="echo ok")  # type: ignore[method-assign]
         loop._tools = MagicMock()
         loop._tools.get = MagicMock(return_value=None)
         bash = MagicMock()
         bash.execute = AsyncMock(return_value="direct should not run")
 
-        result = await loop._execute_via_bash(bash, "Run pytest", "a1")
+        result = await loop._execute_via_bash(bash, "Run one command", "a1")
 
         assert result["status"] == "completed"
         bash.execute.assert_not_awaited()
@@ -784,7 +923,7 @@ class TestPursuitExecutionStrategy:
         tool_call = execute_tool_call.await_args.args[0]
         assert tool_call.name == "bash_run"
         assert json.loads(tool_call.arguments) == {
-            "command": "python -m pytest",
+            "command": "echo ok",
             "cwd": "/tmp/pursue-demo",
         }
 
@@ -1274,10 +1413,6 @@ class TestPursuitExecutionStrategy:
                 content = "src/demo.py | 2 ++"
             elif "cat src/demo.py" in command:
                 content = "def demo():\n    return 1"
-            elif "pytest" in command:
-                content = "1 passed"
-            elif "ruff" in command:
-                content = "All checks passed!"
             else:
                 content = f"unexpected command: {command}"
             return ToolResult(call_id=call.id, status="success", content=content)
@@ -1309,11 +1444,17 @@ class TestPursuitExecutionStrategy:
 
         assert "Git 变更" in evidence
         assert "文件 src/demo.py" in evidence
-        assert "测试状态" in evidence
-        assert "Lint 状态" in evidence
+        assert "测试状态" not in evidence
+        assert "Lint 状态" not in evidence
         bash.execute.assert_not_awaited()
-        assert executor.await_count == 5
+        assert executor.await_count == 3
         assert all(call.args[0].name == "bash_run" for call in executor.await_args_list)
+        commands = [
+            json.loads(call.args[0].arguments)["command"]
+            for call in executor.await_args_list
+        ]
+        assert not any("pytest tests/" in command for command in commands)
+        assert not any("ruff check src/" in command for command in commands)
 
     @pytest.mark.asyncio
     async def test_gather_state_evidence_uses_worktree_cwd_when_available(self) -> None:
@@ -1359,7 +1500,7 @@ class TestPursuitExecutionStrategy:
         await loop._gather_state_evidence(spec)
 
         bash.execute.assert_not_awaited()
-        assert executor.await_count == 5
+        assert executor.await_count == 3
         for call in executor.await_args_list:
             tool_call = call.args[0]
             assert tool_call.name == "bash_run"
