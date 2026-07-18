@@ -56,10 +56,10 @@ Worker heartbeat 表示执行实例活性，两者不得合并成一个“在线
 
 ## 6. 当前不足与后续
 
-- ARC-04.2a 已持久化 execution-scoped grant 并绑定 Harness Tool lease；immutable ToolJob 与跨进程
-  completion receipt 仍未完成，因此本页不能声称 Worker 已可安全执行任务；
+- ARC-04.2b 已持久化 immutable ToolJob admission 并绑定 grant/Worker/heartbeat/lease；跨进程 lifecycle
+  completion receipt 与真实执行 producer 仍未完成，因此本页不能声称 Worker 已可安全执行任务；
 - durable `WorkerHealthReport` 尚不存在，当前无法可信显示 active jobs、accepting jobs、队列深度或资源实耗；
 - 只有 latest heartbeat，没有 jitter、丢包率、crash-loop 历史和 SLO；这些属于 ARC-08；
 - 当前真实 producer 仍以 Pursuit 为主，Tool/Browser/Agent daemon heartbeat producer 要随各 daemon 垂直切片接入；
-- 下一步应在跨文档依赖中选择最小用户交付：若 ARC-04.2 的 grant/lease authority 已就绪，再做 ToolJob；否则
-  优先推进 UI-13 稳定 provider 错误码或 HAR-10 的下一项真实 producer，不能伪造授权闭环。
+- 下一步应跨文档选择 ARC-04.2c lifecycle receipt 或能解锁真实 producer 的最小前置，不能先启动命令再补
+  unknown-side-effect 和幂等终态语义。

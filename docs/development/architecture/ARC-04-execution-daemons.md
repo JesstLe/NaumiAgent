@@ -25,7 +25,10 @@
 - ARC-04.2a 已完成 execution-scoped grant authority：绑定参数 digest、幂等键、Tool run lease、active Worker
   epoch、权限来源与短期 expiry，并可在消费前重新 fencing，详见
   `ARC-04-2a-scoped-execution-grant-authority.md`。
-- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有 immutable ToolJob、执行 producer 或
+- ARC-04.2b 已完成 immutable ToolJob admission：同时消费 execution grant、active Worker、实时
+  heartbeat/capacity、能力/隔离要求与 Tool lease，并在 dispatch 前重新 fencing，详见
+  `ARC-04-2b-immutable-tool-job-admission.md`。
+- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有 ToolJob lifecycle receipt、执行 producer 或
   Supervisor。因此 ARC-04 仅为 partial，HAR-08.4 仍不得把本地 subprocess 当作隔离 worker。
 
 ## 验收标准
@@ -62,4 +65,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a)。
+ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b)。

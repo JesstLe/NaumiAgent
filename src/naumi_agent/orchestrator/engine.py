@@ -26,6 +26,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceipt,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.tool_jobs import ToolJobAuthority
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -620,6 +621,11 @@ class AgentEngine:
             harness_store=resources.harness_store,
             permission_decision_store=resources.permission_decision_store,
             workspace_root=paths.workspace_root,
+        )
+        self.tool_job_authority = ToolJobAuthority(
+            store=resources.tool_job_store,
+            execution_grants=self.execution_grant_authority,
+            worker_registry=resources.worker_registry_store,
         )
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,

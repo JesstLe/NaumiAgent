@@ -17,6 +17,7 @@ class RuntimePaths:
     worker_registry_db_path: Path
     execution_grant_db_path: Path
     permission_decision_db_path: Path
+    tool_job_db_path: Path
     worktree_storage_dir: Path
     goal_storage_dir: Path
     pursuit_storage_dir: Path
@@ -39,6 +40,7 @@ class RuntimePaths:
             "worker_registry_db_path",
             "execution_grant_db_path",
             "permission_decision_db_path",
+            "tool_job_db_path",
             "worktree_storage_dir",
             "goal_storage_dir",
             "pursuit_storage_dir",

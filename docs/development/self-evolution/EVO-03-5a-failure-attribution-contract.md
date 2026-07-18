@@ -59,6 +59,8 @@ candidate fault、retry/rerun 和 reflection eligibility flags。canonical diges
 
 - 当前 Self-Review static lane 不会产生 runner/environment failure；相应映射使用原生 H5c 合同 fixture 验证，
   后续 ARC-04 interventional runner 必须复用同一 attribution artifact；
+- ARC-04.2b 已冻结 interventional ToolJob admission envelope；EVO-03.6 仍需等待 ToolJob lifecycle receipt 与
+  ARC-04.3 Shell worker，不能把 admission-only Store 当作真实执行结果；
 - 归因不是 EVO-04 采纳决策，也不包含 adversarial/security/platform matrix；
 - 下一最小切片应跨查 ARC-04 与 EVO-03.6：优先实现能真实运行最小 Profile check 的隔离 worker 前置，
   然后再扩展 adversarial suite，避免只在静态 lane 上堆叠更多纸面 gate。
