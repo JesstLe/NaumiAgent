@@ -213,7 +213,7 @@ class HarnessEvalCaseResult(_StrictModel):
     status: EvalCaseStatus
     expected: HarnessProtocolExpected | None = None
     actual: HarnessProtocolActual | None = None
-    primary_metric: Literal["", "protocol_outcome_match"] = ""
+    primary_metric: Literal["", "protocol_outcome_match", "replay_reproduced"] = ""
     guardrails: tuple[HarnessEvalGuardrailResult, ...] = Field(
         default=(),
         max_length=16,

@@ -73,10 +73,11 @@ def _case(
     *,
     guardrails: tuple[HarnessEvalGuardrailResult, ...] | None = None,
     primary_metric: str = "protocol_outcome_match",
+    runner: str = "protocol_hello",
 ) -> HarnessEvalCaseResult:
     return HarnessEvalCaseResult(
         case_id=case_id,
-        runner="protocol_hello",
+        runner=runner,
         status=status,
         primary_metric=primary_metric,
         guardrails=guardrails if guardrails is not None else _guardrails(),
@@ -293,6 +294,44 @@ def test_missing_guardrail_or_primary_metric_is_inconclusive() -> None:
     )
     assert evaluate_eval_policy(baseline, missing_primary).code == (
         "primary_metric_missing"
+    )
+
+
+def test_safe_replay_runner_requires_both_guardrails() -> None:
+    policy = HarnessEvalComparisonPolicy()
+    baseline = _suite(
+        commit="1",
+        policy=policy,
+        cases=(
+            _case(
+                "a",
+                EvalCaseStatus.PASSED,
+                primary_metric="replay_reproduced",
+                runner="safe_replay@1",
+            ),
+        ),
+    )
+    current = _suite(
+        commit="2",
+        policy=policy,
+        cases=(
+            _case(
+                "a",
+                EvalCaseStatus.PASSED,
+                primary_metric="replay_reproduced",
+                runner="safe_replay@1",
+                guardrails=(
+                    HarnessEvalGuardrailResult(
+                        guardrail="no_model",
+                        status=EvalGuardrailStatus.PASSED,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert evaluate_eval_policy(baseline, current).code == (
+        "guardrail_evidence_missing"
     )
 
 

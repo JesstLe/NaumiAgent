@@ -2,9 +2,10 @@
 
 ## 当前基线
 
-H1-H3、H4.1-H4.4、HAR-05，以及 HAR-08 的离线协议 Eval、Identity/Comparator、Result Store、
-Baseline/Selector 与 Comparison receipt 已实现：Profile/Trust/Knowledge、Completion Gate、Store、
-实时持久化、EvidenceCollector、确定性 Explain、安全 Replay 与可审计评测闭环。权威代码位于
+H1-H3、H4.1-H4.4、HAR-05，以及 HAR-08 的离线协议 Eval、安全 Replay Eval、
+Identity/Comparator、Result Store、Baseline/Selector 与 Comparison receipt 已实现：
+Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
+安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
 
 ## 后续顺序

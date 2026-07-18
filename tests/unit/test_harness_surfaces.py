@@ -138,6 +138,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         explain = engine.tool_registry.get("harness_explain")
         replay = engine.tool_registry.get("harness_replay")
         eval_tool = engine.tool_registry.get("harness_eval")
+        eval_replay_tool = engine.tool_registry.get("harness_eval_replay")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
@@ -152,6 +153,8 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert replay.metadata.concurrency_safe
         assert eval_tool is not None and eval_tool.metadata.read_only
         assert eval_tool.metadata.concurrency_safe
+        assert eval_replay_tool is not None and eval_replay_tool.metadata.read_only
+        assert eval_replay_tool.metadata.concurrency_safe
         assert baseline_tool is not None and baseline_tool.metadata.read_only
         assert baseline_tool.metadata.concurrency_safe
         assert batch_tool is not None and not batch_tool.metadata.read_only
@@ -235,6 +238,28 @@ async def test_harness_eval_slash_and_agent_tool_share_service_result(
         assert first.suites[0].baseline_identity_code == ""
         assert "Baseline" in slash
         assert "不可晋升" in slash
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_eval_replay_slash_and_agent_tool_share_safe_result(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        slash = _plain(
+            await execute_slash_command(engine, "/harness eval replay latest")
+        )
+        tool = engine.tool_registry.get("harness_eval_replay")
+        assert tool is not None
+        agent = await tool.execute(run_id="latest")
+
+        assert "Harness Safe Replay 回归评测" in slash
+        assert "Harness Safe Replay 回归评测" in agent
+        assert "评测错误 1" in slash
+        assert "评测错误 1" in agent
+        assert "Replay" in slash
     finally:
         await engine.shutdown()
 
