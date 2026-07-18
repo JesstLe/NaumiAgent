@@ -5,38 +5,20 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import aiosqlite
 
+from naumi_agent.config.state_paths import resolve_naumi_state_home
+
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def resolve_harness_trust_db_path() -> Path:
     """Resolve user-owned state outside any Agent-writable workspace."""
-    explicit_state_home = os.environ.get("NAUMI_STATE_HOME", "").strip()
-    if explicit_state_home:
-        state_home = Path(explicit_state_home).expanduser()
-    elif sys.platform == "darwin":
-        state_home = Path.home() / "Library" / "Application Support" / "NaumiAgent"
-    elif sys.platform == "win32":
-        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-        state_home = (
-            Path(local_app_data) / "NaumiAgent"
-            if local_app_data
-            else Path.home() / "AppData" / "Local" / "NaumiAgent"
-        )
-    else:
-        xdg_state_home = os.environ.get("XDG_STATE_HOME", "").strip()
-        state_home = (
-            Path(xdg_state_home) / "naumi-agent"
-            if xdg_state_home
-            else Path.home() / ".local" / "state" / "naumi-agent"
-        )
-    return (state_home / "harness-trust.db").resolve()
+    return resolve_naumi_state_home() / "harness-trust.db"
 
 
 @dataclass(frozen=True)
