@@ -76,5 +76,8 @@
 - EVO-02.7a 已实现不可变 Mutation Receipt Core：只从 committed Journal/Patch Set、Writer v2 与重算
   Postflight 生成，持久化 attempt、diff/API、approved rationale、required metrics 和治理工具证据；并发
   幂等、篡改/漂移/secret fail-closed。详见 `EVO-02-7a-mutation-receipt-core.md`。
-- EVO-02.7b mutation-generation tool-call trace 与 HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持
+- EVO-02.7b1 已实现隔离内存 Mutation Generation：直接执行 Plan 允许的原始 `ToolCall`，不写磁盘，
+  记录 call 顺序、失败/重试、参数/result 与逐文件 before/after digest chain，并持久化不可变 Trace。
+  详见 `EVO-02-7b1-mutation-generation-trace.md`。
+- EVO-02.7b2 Trace→Mutation Receipt v2 绑定与 HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持
   partial。

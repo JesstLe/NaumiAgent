@@ -61,7 +61,8 @@ Git status 摘要、postflight 状态和 canonical `write_sha256`。回执固定
 - EVO-02.5b 已补持久 intent journal、owner lock、prepared/replaced 崩溃恢复、孤儿锁清理与启动 UI 状态，
   详见 `EVO-02-5b-patch-journal-recovery.md`；
 - 多文件事务、完整 Diff/API Postflight 与 EVO-02.7a Mutation Receipt Core 已在后续切片实现；
-  mutation-generation trace 与 HAR-08 RED/GREEN 尚未串联；
+  EVO-02.7b1 mutation-generation trace 已实现；2.7b2 Trace→Receipt v2 绑定与 HAR-08 RED/GREEN
+  尚未串联；
 - Windows 的文件占用可能让 `os.replace` 明确失败；当前不降级为非原子覆盖，后续平台测试需覆盖
   Defender、长路径和占用文件场景。
 

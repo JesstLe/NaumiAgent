@@ -56,7 +56,7 @@
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
 | EVO-01 | 自我审查证据与改进候选 | partial (1.1a, 1.1b, 1.2a, 1.3a, 1.4a, 1.6a, 1.6a1) | Harness Evidence | `self-evolution/EVO-01-review-candidates.md` |
-| EVO-02 | 隔离变异与补丁生成 | partial (2.1a, 2.2a, 2.3a, 2.4a, 2.4b, 2.5a, 2.5b, 2.5c1, 2.5c2a, 2.5c2b, 2.6a, 2.6b, 2.7a) | EVO-01, Worktree | `self-evolution/EVO-02-isolated-mutation.md` |
+| EVO-02 | 隔离变异与补丁生成 | partial (2.1a, 2.2a, 2.3a, 2.4a, 2.4b, 2.5a, 2.5b, 2.5c1, 2.5c2a, 2.5c2b, 2.6a, 2.6b, 2.7a, 2.7b1) | EVO-01, Worktree | `self-evolution/EVO-02-isolated-mutation.md` |
 | EVO-03 | 多层验证与 Eval 对照 | planned | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
 | EVO-04 | 反思决策与防奖励投机 | planned | EVO-03 | `self-evolution/EVO-04-reflection-decision.md` |
 | EVO-05 | 提升、回滚与发布治理 | planned | EVO-04, ARC-07 | `self-evolution/EVO-05-promotion-rollback.md` |

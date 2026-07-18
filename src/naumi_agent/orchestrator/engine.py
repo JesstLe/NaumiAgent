@@ -27,6 +27,10 @@ from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.mutation_generation import (
+    EvolutionMutationGenerationService,
+    EvolutionMutationGenerationTraceStore,
+)
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
 from naumi_agent.evolution.mutation_receipts import (
     EvolutionMutationReceiptService,
@@ -740,6 +744,12 @@ class AgentEngine:
         )
         self.evolution_mutation_receipt_store = EvolutionMutationReceiptStore(
             config.memory.session_db_path
+        )
+        self.evolution_mutation_generation_trace_store = (
+            EvolutionMutationGenerationTraceStore(config.memory.session_db_path)
+        )
+        self.evolution_mutation_generation_service = EvolutionMutationGenerationService(
+            trace_store=self.evolution_mutation_generation_trace_store,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

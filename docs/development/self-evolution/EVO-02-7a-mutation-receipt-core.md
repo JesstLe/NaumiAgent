@@ -69,10 +69,11 @@ detector；疑似机密返回 `mutation_rationale_secret`，不写入 SQLite。
 Writer 调用方传入，尚未绑定生成该内容的原始模型/tool-call event、run receipt 与参数摘要。为避免把
 “治理链完整”误写成“生成来源完整”，EVO-02 继续保持 partial。
 
-EVO-02.7b 必须把 mutation-generation trace 与 Plan 的 mutation stage 对齐：
+EVO-02.7b1 已实现隔离内存虚拟 `file_edit/file_write`、真实 baseline 绑定、顺序化 digest chain 和不可变
+Trace Store，详见 `EVO-02-7b1-mutation-generation-trace.md`。EVO-02.7b2 继续完成：
 
-- 只接受 Plan 允许的 `file_edit/file_write`，路径集合必须等于 approved scope；
-- 记录 run/tool-call identity、脱敏参数 digest、结果 digest、顺序、失败与重试；
-- 实际成功 tool-call 数不得超过 Plan budget，不能由模型总结文本替代；
-- trace 必须进入 Mutation Receipt 新版本或独立不可变 artifact，并保持旧 v1 Receipt 可读；
+- trace 必须进入 Mutation Receipt v2，并保持旧 v1 Receipt 可读；
+- Trace final digest 必须与 Static Guard/Writer after digest 全集相等；
+- Trace attempt 必须等于 committed Journal/Patch Set attempt；
+- 专用 model turn runner 必须使用虚拟工具执行边界，不能回退到磁盘写工具；
 - 完成后再评估 EVO-02 是否满足进入 EVO-03.1 Validation Plan 的阶段门。
