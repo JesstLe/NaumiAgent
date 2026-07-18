@@ -46,6 +46,14 @@ from naumi_agent.harness.reconciliation import (
 )
 from naumi_agent.harness.replay_models import HarnessReplayBaselinePayload
 from naumi_agent.harness.retention import LifecycleActor, LifecyclePolicy
+from naumi_agent.harness.run_lease import (
+    HarnessRunFenceDecision,
+    HarnessRunFenceReason,
+    HarnessRunFenceReceipt,
+    HarnessRunKind,
+    HarnessRunLease,
+    HarnessRunLeaseState,
+)
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
     ReconciliationFailureStage,
@@ -56,9 +64,10 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 10
+HARNESS_STORE_SCHEMA_VERSION = 11
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -2101,6 +2110,339 @@ class HarnessStore:
         except (aiosqlite.Error, OSError) as exc:
             raise HarnessStoreError("无法释放 retention worker 租约。") from exc
 
+    async def acquire_run_lease(
+        self,
+        *,
+        workspace_root: str | Path,
+        run_kind: HarnessRunKind | str,
+        run_id: str,
+        owner_id: str,
+        now: str,
+        lease_seconds: int,
+    ) -> HarnessRunLease | None:
+        """Atomically acquire a run lease or take over an expired/released epoch."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(run_kind)
+        normalized_run_id = _normalize_run_lease_id(run_id, field="run_id")
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        if not 1 <= lease_seconds <= 86_400:
+            raise ValueError("lease_seconds 必须在 1 到 86400 之间。")
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    INSERT INTO harness_run_leases (
+                        workspace_root, run_kind, run_id, owner_id, epoch, state,
+                        acquired_at, expires_at, updated_at
+                    ) VALUES (?, ?, ?, ?, 1, 'active', ?, ?, ?)
+                    ON CONFLICT(workspace_root, run_kind, run_id) DO UPDATE SET
+                        owner_id = excluded.owner_id,
+                        epoch = CASE
+                            WHEN harness_run_leases.state = 'active'
+                             AND harness_run_leases.owner_id = excluded.owner_id
+                             AND harness_run_leases.expires_at > excluded.updated_at
+                            THEN harness_run_leases.epoch
+                            ELSE harness_run_leases.epoch + 1
+                        END,
+                        state = 'active',
+                        acquired_at = CASE
+                            WHEN harness_run_leases.state = 'active'
+                             AND harness_run_leases.owner_id = excluded.owner_id
+                             AND harness_run_leases.expires_at > excluded.updated_at
+                            THEN harness_run_leases.acquired_at
+                            ELSE excluded.acquired_at
+                        END,
+                        expires_at = CASE
+                            WHEN harness_run_leases.state = 'active'
+                             AND harness_run_leases.owner_id = excluded.owner_id
+                             AND harness_run_leases.expires_at > excluded.updated_at
+                             AND harness_run_leases.expires_at > excluded.expires_at
+                            THEN harness_run_leases.expires_at
+                            ELSE excluded.expires_at
+                        END,
+                        updated_at = excluded.updated_at
+                    WHERE excluded.updated_at >= harness_run_leases.updated_at
+                      AND (
+                          harness_run_leases.state = 'released'
+                          OR harness_run_leases.expires_at <= excluded.updated_at
+                          OR harness_run_leases.owner_id = excluded.owner_id
+                      )
+                    """,
+                    (
+                        workspace,
+                        kind.value,
+                        normalized_run_id,
+                        owner,
+                        timestamp,
+                        expires_at,
+                        timestamp,
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                )
+                await db.commit()
+                assert row is not None
+                return _run_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法获取长周期 Run 租约。") from exc
+
+    async def renew_run_lease(
+        self,
+        *,
+        workspace_root: str | Path,
+        run_kind: HarnessRunKind | str,
+        run_id: str,
+        owner_id: str,
+        epoch: int,
+        now: str,
+        lease_seconds: int,
+    ) -> HarnessRunLease | None:
+        """Renew only the live lease matching the presented owner and epoch."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(run_kind)
+        normalized_run_id = _normalize_run_lease_id(run_id, field="run_id")
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        normalized_epoch = _normalize_run_epoch(epoch)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        if not 1 <= lease_seconds <= 86_400:
+            raise ValueError("lease_seconds 必须在 1 到 86400 之间。")
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    UPDATE harness_run_leases
+                    SET expires_at = CASE
+                            WHEN expires_at > ? THEN expires_at ELSE ?
+                        END,
+                        updated_at = ?
+                    WHERE workspace_root = ? AND run_kind = ? AND run_id = ?
+                      AND state = 'active' AND owner_id = ? AND epoch = ?
+                      AND expires_at > ? AND updated_at <= ?
+                    """,
+                    (
+                        expires_at,
+                        expires_at,
+                        timestamp,
+                        workspace,
+                        kind.value,
+                        normalized_run_id,
+                        owner,
+                        normalized_epoch,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                )
+                await db.commit()
+                assert row is not None
+                return _run_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法续租长周期 Run。") from exc
+
+    async def release_run_lease(
+        self,
+        *,
+        workspace_root: str | Path,
+        run_kind: HarnessRunKind | str,
+        run_id: str,
+        owner_id: str,
+        epoch: int,
+        now: str,
+    ) -> HarnessRunLease | None:
+        """Release a live exact epoch while retaining its monotonic fence history."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(run_kind)
+        normalized_run_id = _normalize_run_lease_id(run_id, field="run_id")
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        normalized_epoch = _normalize_run_epoch(epoch)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    UPDATE harness_run_leases
+                    SET state = 'released', expires_at = ?, updated_at = ?
+                    WHERE workspace_root = ? AND run_kind = ? AND run_id = ?
+                      AND state = 'active' AND owner_id = ? AND epoch = ?
+                      AND expires_at > ? AND updated_at <= ?
+                    """,
+                    (
+                        timestamp,
+                        timestamp,
+                        workspace,
+                        kind.value,
+                        normalized_run_id,
+                        owner,
+                        normalized_epoch,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                )
+                await db.commit()
+                assert row is not None
+                return _run_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法释放长周期 Run 租约。") from exc
+
+    async def get_run_lease(
+        self,
+        *,
+        workspace_root: str | Path,
+        run_kind: HarnessRunKind | str,
+        run_id: str,
+    ) -> HarnessRunLease | None:
+        """Read the latest lease row, including a released epoch, without mutation."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(run_kind)
+        normalized_run_id = _normalize_run_lease_id(run_id, field="run_id")
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                )
+                return _run_lease_from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取长周期 Run 租约。") from exc
+
+    async def record_run_fence_decision(
+        self,
+        *,
+        workspace_root: str | Path,
+        run_kind: HarnessRunKind | str,
+        run_id: str,
+        operation_id: str,
+        owner_id: str,
+        epoch: int,
+        checked_at: str,
+    ) -> HarnessRunFenceReceipt:
+        """Atomically decide and audit whether a result owns the current epoch."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(run_kind)
+        normalized_run_id = _normalize_run_lease_id(run_id, field="run_id")
+        operation = _normalize_run_lease_id(operation_id, field="operation_id")
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        normalized_epoch = _normalize_run_epoch(epoch)
+        timestamp = _normalize_utc_timestamp(checked_at, field="checked_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing_cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_run_fence_events
+                    WHERE workspace_root = ? AND run_kind = ?
+                      AND run_id = ? AND operation_id = ?
+                    """,
+                    (workspace, kind.value, normalized_run_id, operation),
+                )
+                existing = await existing_cursor.fetchone()
+                if existing is not None:
+                    if (
+                        str(existing["presented_owner_id"]) != owner
+                        or int(existing["presented_epoch"]) != normalized_epoch
+                    ):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "operation_id 已用于不同的 Run lease fencing 输入。"
+                        )
+                    await db.commit()
+                    return _run_fence_receipt_from_row(existing)
+
+                lease_row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                )
+                decision, reason = _decide_run_fence(
+                    lease_row,
+                    owner_id=owner,
+                    epoch=normalized_epoch,
+                    checked_at=timestamp,
+                )
+                active_owner = str(lease_row["owner_id"]) if lease_row else ""
+                active_epoch = int(lease_row["epoch"]) if lease_row else 0
+                await db.execute(
+                    """
+                    INSERT INTO harness_run_fence_events (
+                        workspace_root, run_kind, run_id, operation_id,
+                        presented_owner_id, presented_epoch,
+                        active_owner_id, active_epoch,
+                        decision, reason, checked_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        kind.value,
+                        normalized_run_id,
+                        operation,
+                        owner,
+                        normalized_epoch,
+                        active_owner,
+                        active_epoch,
+                        decision.value,
+                        reason.value,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return HarnessRunFenceReceipt(
+                    workspace_root=workspace,
+                    run_kind=kind,
+                    run_id=normalized_run_id,
+                    operation_id=operation,
+                    presented_owner_id=owner,
+                    presented_epoch=normalized_epoch,
+                    active_owner_id=active_owner,
+                    active_epoch=active_epoch,
+                    decision=decision,
+                    reason=reason,
+                    checked_at=timestamp,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法记录长周期 Run fencing 决策。") from exc
+
     async def list_pending_session_reconciliations(
         self,
         *,
@@ -2916,6 +3258,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V8)
                             await db.executescript(_SCHEMA_V9)
                             await db.executescript(_SCHEMA_V10)
+                            await db.executescript(_SCHEMA_V11)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -3549,6 +3892,103 @@ def _canonical_workspace(workspace_root: str | Path) -> str:
     if isinstance(workspace_root, str) and not workspace_root.strip():
         raise ValueError("workspace_root 不能为空。")
     return str(Path(workspace_root).expanduser().resolve())
+
+
+def _coerce_run_kind(value: HarnessRunKind | str) -> HarnessRunKind:
+    if isinstance(value, HarnessRunKind):
+        return value
+    try:
+        return HarnessRunKind(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("run_kind 包含未知长周期运行类型。") from exc
+
+
+def _normalize_run_epoch(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("epoch 必须是大于或等于 1 的整数。")
+    return value
+
+
+def _normalize_run_lease_id(value: str, *, field: str) -> str:
+    normalized = _normalize_text(value, field=field, max_length=128)
+    if not _RUN_LEASE_ID_RE.fullmatch(normalized):
+        raise ValueError(
+            f"{field} 只能包含字母、数字、点、下划线、冒号和连字符。"
+        )
+    return normalized
+
+
+async def _select_run_lease_row(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    run_kind: HarnessRunKind,
+    run_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM harness_run_leases
+        WHERE workspace_root = ? AND run_kind = ? AND run_id = ?
+        """,
+        (workspace_root, run_kind.value, run_id),
+    )
+    return await cursor.fetchone()
+
+
+def _run_lease_from_row(row: aiosqlite.Row) -> HarnessRunLease:
+    return HarnessRunLease(
+        workspace_root=str(row["workspace_root"]),
+        run_kind=HarnessRunKind(str(row["run_kind"])),
+        run_id=str(row["run_id"]),
+        owner_id=str(row["owner_id"]),
+        epoch=int(row["epoch"]),
+        state=HarnessRunLeaseState(str(row["state"])),
+        acquired_at=str(row["acquired_at"]),
+        expires_at=str(row["expires_at"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _run_fence_receipt_from_row(row: aiosqlite.Row) -> HarnessRunFenceReceipt:
+    return HarnessRunFenceReceipt(
+        workspace_root=str(row["workspace_root"]),
+        run_kind=HarnessRunKind(str(row["run_kind"])),
+        run_id=str(row["run_id"]),
+        operation_id=str(row["operation_id"]),
+        presented_owner_id=str(row["presented_owner_id"]),
+        presented_epoch=int(row["presented_epoch"]),
+        active_owner_id=str(row["active_owner_id"]),
+        active_epoch=int(row["active_epoch"]),
+        decision=HarnessRunFenceDecision(str(row["decision"])),
+        reason=HarnessRunFenceReason(str(row["reason"])),
+        checked_at=str(row["checked_at"]),
+    )
+
+
+def _decide_run_fence(
+    lease_row: aiosqlite.Row | None,
+    *,
+    owner_id: str,
+    epoch: int,
+    checked_at: str,
+) -> tuple[HarnessRunFenceDecision, HarnessRunFenceReason]:
+    if lease_row is None:
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.MISSING
+    if str(lease_row["state"]) != HarnessRunLeaseState.ACTIVE.value:
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.RELEASED
+    if datetime.fromisoformat(checked_at) < datetime.fromisoformat(
+        str(lease_row["updated_at"])
+    ):
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.CLOCK_REGRESSION
+    if datetime.fromisoformat(str(lease_row["expires_at"])) <= datetime.fromisoformat(
+        checked_at
+    ):
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.EXPIRED
+    if str(lease_row["owner_id"]) != owner_id:
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.OWNER_MISMATCH
+    if int(lease_row["epoch"]) != epoch:
+        return HarnessRunFenceDecision.REJECTED, HarnessRunFenceReason.EPOCH_MISMATCH
+    return HarnessRunFenceDecision.ACCEPTED, HarnessRunFenceReason.CURRENT
 
 
 def _canonical_cwd(cwd: str | Path, *, workspace_root: str) -> str:
@@ -4193,5 +4633,52 @@ CREATE TABLE IF NOT EXISTS harness_eval_comparison_receipts (
 CREATE INDEX IF NOT EXISTS idx_harness_eval_comparison_receipts_suite
 ON harness_eval_comparison_receipts (
     workspace_root, suite_id, created_at DESC, id DESC
+);
+"""
+
+_SCHEMA_V11 = """
+CREATE TABLE IF NOT EXISTS harness_run_leases (
+    workspace_root TEXT NOT NULL,
+    run_kind TEXT NOT NULL CHECK (
+        run_kind IN ('pursuit', 'tool', 'browser', 'agent', 'runtime')
+    ),
+    run_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+    acquired_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, run_kind, run_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_run_leases_expiry
+ON harness_run_leases (state, expires_at, workspace_root, run_kind, run_id);
+
+CREATE TABLE IF NOT EXISTS harness_run_fence_events (
+    workspace_root TEXT NOT NULL,
+    run_kind TEXT NOT NULL CHECK (
+        run_kind IN ('pursuit', 'tool', 'browser', 'agent', 'runtime')
+    ),
+    run_id TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    presented_owner_id TEXT NOT NULL,
+    presented_epoch INTEGER NOT NULL CHECK (presented_epoch >= 1),
+    active_owner_id TEXT NOT NULL,
+    active_epoch INTEGER NOT NULL CHECK (active_epoch >= 0),
+    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+    reason TEXT NOT NULL CHECK (
+        reason IN (
+            'current', 'missing', 'released', 'clock_regression', 'expired',
+            'owner_mismatch', 'epoch_mismatch'
+        )
+    ),
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, run_kind, run_id, operation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_run_fence_events_checked
+ON harness_run_fence_events (
+    workspace_root, run_kind, run_id, checked_at, operation_id
 );
 """
