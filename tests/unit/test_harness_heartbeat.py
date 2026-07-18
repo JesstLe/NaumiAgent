@@ -12,7 +12,11 @@ from naumi_agent.harness.heartbeat import (
     assess_heartbeat,
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
-from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
+from naumi_agent.harness.store import (
+    HARNESS_STORE_SCHEMA_VERSION,
+    HarnessStore,
+    HarnessStoreConflictError,
+)
 
 T0 = "2026-07-18T00:00:00+00:00"
 T4 = "2026-07-18T00:00:04+00:00"
@@ -140,10 +144,8 @@ async def test_schema_v11_database_upgrades_to_current_without_reset(tmp_path) -
     with sqlite3.connect(db_path) as db:
         version = db.execute("PRAGMA user_version").fetchone()[0]
         marker = db.execute("SELECT value FROM legacy_marker").fetchone()[0]
-        heartbeat_count = db.execute(
-            "SELECT COUNT(*) FROM harness_heartbeats"
-        ).fetchone()[0]
-    assert version == 14
+        heartbeat_count = db.execute("SELECT COUNT(*) FROM harness_heartbeats").fetchone()[0]
+    assert version == HARNESS_STORE_SCHEMA_VERSION
     assert marker == "preserved"
     assert heartbeat_count == 1
 
@@ -209,11 +211,14 @@ async def test_store_validates_bounds_and_workspace_isolation(tmp_path) -> None:
         "detail_code": "booting",
     }
     await store.record_heartbeat(workspace_root=first, **base)
-    assert await store.get_heartbeat(
-        workspace_root=second,
-        subject_kind=HarnessRunKind.RUNTIME,
-        subject_id="runtime-1",
-    ) is None
+    assert (
+        await store.get_heartbeat(
+            workspace_root=second,
+            subject_kind=HarnessRunKind.RUNTIME,
+            subject_id="runtime-1",
+        )
+        is None
+    )
 
     with pytest.raises(ValueError, match="timeout_seconds"):
         await store.record_heartbeat(
