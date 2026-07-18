@@ -73,6 +73,17 @@ class CheckpointInteraction(_CheckpointModel):
     timeout_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
 
 
+class CheckpointInteractionRef(_CheckpointModel):
+    """Stable reference to the Harness interaction authority."""
+
+    authority: Literal["harness"] = "harness"
+    interaction_id: str = Field(
+        min_length=5,
+        max_length=132,
+        pattern=r"^ask-[A-Za-z0-9._:-]{1,128}$",
+    )
+
+
 class CheckpointIteration(_CheckpointModel):
     iteration: int = Field(ge=1)
     timestamp: float = Field(ge=0, allow_inf_nan=False)
@@ -103,7 +114,7 @@ class PursuitCheckpoint(_CheckpointModel):
     budget: CheckpointBudget
     evidence_cursor: int = Field(ge=0)
     waiting_on: tuple[CheckpointWait, ...] = Field(max_length=100)
-    pending_interaction: CheckpointInteraction | None = None
+    pending_interaction: CheckpointInteractionRef | CheckpointInteraction | None = None
     recent_history: tuple[CheckpointIteration, ...] = Field(
         max_length=MAX_CHECKPOINT_HISTORY,
     )

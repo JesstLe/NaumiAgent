@@ -35,6 +35,7 @@ class UserInteractionRequest:
     options: tuple[UserInteractionOption, ...]
     allow_custom: bool = True
     custom_label: str = "其他"
+    timeout_seconds: int | None = None
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +44,7 @@ class UserInteractionRequest:
             "options": [option.to_public_dict() for option in self.options],
             "allow_custom": self.allow_custom,
             "custom_label": self.custom_label,
+            "timeout_seconds": self.timeout_seconds,
         }
 
 
@@ -81,18 +83,30 @@ def normalize_interaction_request(payload: Mapping[str, Any]) -> UserInteraction
     if len({option.value for option in options}) != len(options):
         raise ValueError("选项 value 不能重复")
 
-    allow_custom = bool(payload.get("allow_custom", True))
+    raw_allow_custom = payload.get("allow_custom", True)
+    if not isinstance(raw_allow_custom, bool):
+        raise ValueError("allow_custom 必须是布尔值")
+    allow_custom = raw_allow_custom
     custom_label = _bounded_text(
         payload.get("custom_label", "其他"),
         field="自定义选项标签",
         maximum=80,
     )
+    raw_timeout = payload.get("timeout_seconds")
+    timeout_seconds: int | None = None
+    if raw_timeout is not None:
+        if isinstance(raw_timeout, bool) or not isinstance(raw_timeout, int):
+            raise ValueError("交互超时必须是整数秒")
+        if not 3 <= raw_timeout <= 604_800:
+            raise ValueError("交互超时必须在 3..604800 秒之间")
+        timeout_seconds = raw_timeout
     return UserInteractionRequest(
         header=header,
         question=question,
         options=tuple(options),
         allow_custom=allow_custom,
         custom_label=custom_label,
+        timeout_seconds=timeout_seconds,
     )
 
 

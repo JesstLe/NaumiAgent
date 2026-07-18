@@ -31,6 +31,7 @@ from naumi_agent.harness.eval_surface import (
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
+from naumi_agent.harness.interaction import new_interaction_record
 from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 from naumi_agent.harness.run_lease import HarnessRunKind
@@ -79,7 +80,10 @@ from naumi_agent.ui.protocol import (
     negotiate_hello,
     normalize_client_record,
 )
-from naumi_agent.user_interaction import UserInteractionUnavailableError
+from naumi_agent.user_interaction import (
+    UserInteractionUnavailableError,
+    normalize_interaction_request,
+)
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -5449,6 +5453,290 @@ async def test_bridge_suspends_interaction_until_matching_response() -> None:
         if record["type"] == "interaction/resolved"
     )
     assert resolved["payload"]["value"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_bridge_commits_durable_interaction_before_ui_release(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    observed: list[str] = []
+
+    async def begin(interaction_id: str, _request: dict[str, Any]) -> None:
+        record = await store.get_interaction(
+            workspace_root=workspace,
+            interaction_id=interaction_id,
+        )
+        assert record is not None
+        assert record.state == "pending"
+        observed.append("authority-created")
+
+    async def resolve(interaction_id: str, _response: dict[str, str]) -> None:
+        record = await store.get_interaction(
+            workspace_root=workspace,
+            interaction_id=interaction_id,
+        )
+        assert record is not None
+        assert record.state == "answered"
+        observed.append("authority-answered")
+
+    pending = asyncio.create_task(engine.user_interaction_handler({
+        **_interaction_payload(),
+        "timeout_seconds": 60,
+        "_interaction_id": "ask-durable-bridge",
+        "_durable_subject_kind": "pursuit",
+        "_durable_subject_id": "pursuit-bridge",
+        "_pursuit_begin": begin,
+        "_pursuit_resolve": resolve,
+    }))
+    for _ in range(50):
+        if any(
+            record["type"] == "interaction/request"
+            for record in _records(writer)
+        ):
+            break
+        assert pending.done() is False
+        await asyncio.sleep(0.01)
+    request = next(
+        record for record in _records(writer)
+        if record["type"] == "interaction/request"
+    )
+    assert observed == ["authority-created"]
+    assert request["payload"]["request_id"] == "ask-durable-bridge"
+    assert request["payload"]["timeout_seconds"] == 60
+    assert request["payload"]["expires_at"]
+
+    await bridge.handle_client_record({
+        "id": "answer-durable",
+        "type": "interaction_response",
+        "payload": {
+            "request_id": "ask-durable-bridge",
+            "kind": "option",
+            "value": "workspace",
+        },
+    })
+
+    assert (await pending)["value"] == "workspace"
+    assert observed == ["authority-created", "authority-answered"]
+    durable = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-durable-bridge",
+    )
+    assert durable is not None
+    assert durable.state == "answered"
+
+
+@pytest.mark.asyncio
+async def test_bridge_live_interaction_timeout_commits_expired_and_closes_card(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    pending_task = asyncio.create_task(engine.user_interaction_handler({
+        **_interaction_payload(),
+        "timeout_seconds": 3,
+        "_interaction_id": "ask-live-timeout",
+        "_durable_subject_kind": "runtime",
+        "_durable_subject_id": "runtime-timeout",
+    }))
+    for _ in range(50):
+        pending = bridge._pending_interactions.get("ask-live-timeout")
+        if pending is not None:
+            break
+        assert pending_task.done() is False
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("durable interaction 未进入 pending")
+    durable = pending.durable_record
+    assert durable is not None
+
+    await bridge._commit_pending_interaction_expiry(
+        "ask-live-timeout",
+        now=durable.expires_at,
+    )
+
+    with pytest.raises(UserInteractionUnavailableError, match="已超时"):
+        await pending_task
+    expired = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-live-timeout",
+    )
+    assert expired is not None
+    assert expired.state == "expired"
+    terminal = next(
+        item for item in _records(writer)
+        if item["type"] == "interaction/resolved"
+    )
+    assert terminal["payload"] == {
+        "request_id": "ask-live-timeout",
+        "status": "expired",
+        "reason": "等待用户回答超时。",
+    }
+    assert "ask-live-timeout" not in bridge._pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_bridge_replays_expired_foreign_interaction_owner(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    created_at = datetime.fromtimestamp(
+        datetime.now(UTC).timestamp() - 10,
+        tz=UTC,
+    ).isoformat()
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-replay",
+        session_id="session-replay",
+        agent_name="main",
+        owner_id="bridge-dead",
+        created_at=created_at,
+        owner_lease_seconds=3,
+        interaction_id="ask-replay-owner",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge._replay_durable_interactions()
+
+    replay = next(
+        item for item in _records(writer)
+        if item["type"] == "interaction/request"
+    )
+    assert replay["payload"]["request_id"] == "ask-replay-owner"
+    claimed = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-replay-owner",
+    )
+    assert claimed is not None
+    assert claimed.owner_id == bridge._interaction_owner_id
+    assert claimed.owner_epoch == 2
+
+    await bridge.resolve_user_interaction(
+        {
+            "request_id": "ask-replay-owner",
+            "kind": "option",
+            "value": "session",
+        },
+        request_id="answer-replay-owner",
+    )
+    answered = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-replay-owner",
+    )
+    assert answered is not None
+    assert answered.state == "answered"
+    assert "ask-replay-owner" not in bridge._pending_interactions
+
+
+@pytest.mark.asyncio
+async def test_bridge_expires_timed_out_interaction_without_replay(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    created_at = datetime.fromtimestamp(
+        datetime.now(UTC).timestamp() - 10,
+        tz=UTC,
+    ).isoformat()
+    record = new_interaction_record(
+        request=normalize_interaction_request({
+            **_interaction_payload(),
+            "timeout_seconds": 3,
+        }),
+        subject_kind="pursuit",
+        subject_id="pursuit-timeout",
+        session_id="session-timeout",
+        agent_name="main",
+        owner_id="bridge-old",
+        created_at=created_at,
+        owner_lease_seconds=30,
+        timeout_seconds=3,
+        interaction_id="ask-timeout-replay",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge._replay_durable_interactions()
+
+    expired = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-timeout-replay",
+    )
+    assert expired is not None
+    assert expired.state == "expired"
+    assert not any(
+        item["type"] == "interaction/request"
+        for item in _records(writer)
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_schedules_replay_for_live_foreign_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-live-owner",
+        session_id="session-live-owner",
+        agent_name="main",
+        owner_id="bridge-live",
+        created_at=datetime.now(UTC).isoformat(),
+        owner_lease_seconds=3,
+        interaction_id="ask-live-owner",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(io.StringIO())
+    scheduled: list[float] = []
+    monkeypatch.setattr(
+        bridge,
+        "_schedule_interaction_replay",
+        lambda delay: scheduled.append(delay),
+    )
+
+    await bridge._replay_durable_interactions()
+
+    assert len(scheduled) == 1
+    assert 0 < scheduled[0] <= 3
+    assert bridge._pending_interactions == {}
 
 
 @pytest.mark.asyncio

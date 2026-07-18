@@ -914,6 +914,7 @@ class AgentEngine:
             lease_port=self._harness_store,
             workspace_root=self.workspace_root,
             background_reconcile_source=self.background_runner,
+            interaction_port=self._harness_store,
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
         for tool in create_pursuit_tool():
@@ -1131,7 +1132,27 @@ class AgentEngine:
             from naumi_agent.user_interaction import UserInteractionUnavailableError
 
             raise UserInteractionUnavailableError("当前界面不支持结构化交互")
-        return await self._user_interaction_handler(payload)
+        from naumi_agent.orchestrator.pursuit import (
+            current_pursuit_interaction_context,
+        )
+
+        interaction_id = f"ask-{uuid.uuid4().hex}"
+        context = current_pursuit_interaction_context()
+        session_id = self._session.id if self._session else ""
+        enriched: dict[str, Any] = {
+            **payload,
+            "_interaction_id": interaction_id,
+            "_durable_subject_kind": "pursuit" if context is not None else "runtime",
+            "_durable_subject_id": (
+                context.run_id
+                if context is not None
+                else session_id or "runtime-sessionless"
+            ),
+        }
+        if context is not None:
+            enriched["_pursuit_begin"] = context.begin
+            enriched["_pursuit_resolve"] = context.resolve
+        return await self._user_interaction_handler(enriched)
 
     def list_permission_grants(self) -> tuple[PermissionGrant, ...]:
         """Return active grants for the current session only."""

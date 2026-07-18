@@ -342,6 +342,12 @@ function normalizeInteractionRequest(payload) {
   }
   const status = String(payload.status ?? "needs_input");
   if (status !== "needs_input") throw new Error("interaction/request status 无效");
+  const timeoutSeconds = payload.timeout_seconds == null
+    ? null
+    : harnessNonnegativeInteger(payload.timeout_seconds, "interaction timeout_seconds");
+  if (timeoutSeconds != null && (timeoutSeconds < 3 || timeoutSeconds > 604_800)) {
+    throw new Error("interaction/request timeout_seconds 必须在 3..604800 之间");
+  }
   return {
     request_id: interactionRequestId(payload.request_id),
     session_id: interactionText(payload.session_id, "interaction session_id", 128),
@@ -352,6 +358,8 @@ function normalizeInteractionRequest(payload) {
     options,
     allow_custom: payload.allow_custom,
     custom_label: interactionText(payload.custom_label ?? "其他", "自定义标签", 80, { required: true }),
+    timeout_seconds: timeoutSeconds,
+    expires_at: interactionText(payload.expires_at, "interaction expires_at", 64),
     status,
   };
 }
@@ -372,9 +380,19 @@ function normalizeInteractionResponse(payload) {
 }
 
 function normalizeInteractionResolved(payload) {
-  const response = normalizeInteractionResponse(payload);
   const status = String(payload.status ?? "answered");
+  if (status === "expired") {
+    if (["kind", "value", "label", "custom_text"].some((field) => Object.hasOwn(payload, field))) {
+      throw new Error("interaction/resolved expired 不能携带答案字段");
+    }
+    return {
+      request_id: interactionRequestId(payload?.request_id),
+      status,
+      reason: interactionText(payload.reason, "interaction 超时原因", 300, { required: true }),
+    };
+  }
   if (status !== "answered") throw new Error("interaction/resolved status 无效");
+  const response = normalizeInteractionResponse(payload);
   const label = interactionText(payload.label, "interaction 答案标签", 80, { required: true });
   return { ...response, status, label };
 }

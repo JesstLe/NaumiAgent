@@ -60,6 +60,14 @@ def test_interaction_record_rejects_unredacted_durable_secret() -> None:
         HarnessInteractionRecord.model_validate(payload)
 
 
+def test_interaction_record_rejects_noncanonical_timeout() -> None:
+    payload = _record().model_dump(mode="python")
+    payload["expires_at"] = "2026-07-28T00:00:01+00:00"
+
+    with pytest.raises(ValidationError, match="3..604800"):
+        HarnessInteractionRecord.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_interaction_survives_new_store_and_create_is_idempotent(
     tmp_path: Path,

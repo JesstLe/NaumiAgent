@@ -1382,6 +1382,8 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     ],
     allow_custom: true,
     custom_label: "其他",
+    timeout_seconds: null,
+    expires_at: "",
     status: "needs_input",
   });
 
@@ -1418,6 +1420,32 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     status: "answered",
     label: "其他",
   });
+  assert.deepEqual(normalizeServerRecord({
+    type: "interaction/resolved",
+    payload: {
+      request_id: "ask-8",
+      status: "expired",
+      reason: "等待用户回答超时。",
+      private_payload: "drop",
+    },
+  }).payload, {
+    request_id: "ask-8",
+    status: "expired",
+    reason: "等待用户回答超时。",
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "interaction/resolved",
+      payload: {
+        request_id: "ask-8",
+        status: "expired",
+        reason: "等待用户回答超时。",
+        kind: "option",
+        value: "safe",
+      },
+    }),
+    /不能携带答案字段/,
+  );
   assert.throws(
     () => normalizeServerRecord({
       type: "interaction/resolved",

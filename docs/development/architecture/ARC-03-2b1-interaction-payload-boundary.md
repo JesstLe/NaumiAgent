@@ -14,7 +14,8 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 - request 必须包含 2..3 个唯一选项，标题、问题、label、value、description 和自定义标签均有独立上限；
 - `allow_custom` 必须是真实布尔值，request 状态只能是 `needs_input`；
 - option response 必须且只能携带 `value`；custom response 必须且只能携带非空 `custom_text`；
-- resolved 状态只能是 `answered`，并必须有最终 label；
+- resolved 终态只能是 `answered` 或 `expired`；answered 必须有最终 label，expired 必须有有界原因且不能
+  夹带答案字段；
 - 控制字符被拒绝或清理，未知/private 字段不会进入规范化 payload；
 - Python 仍会把 option value 与原始 pending request 再次匹配，协议校验不能替代业务关联校验。
 
@@ -28,7 +29,7 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 
 ## 验收标准
 
-- option/custom 两种合法答案可完整往返；
+- option/custom 两种合法答案及 timeout expired 终态可完整往返；
 - 未知 kind、空 answer、option+custom 歧义组合、非法 request ID 在发送端或 Bridge 边界被拒绝；
 - request 少于 2 个选项、重复 value、非布尔 allow_custom 和非法状态被 Node 拒绝；
 - private 字段不会进入规范化 request/response；
@@ -39,8 +40,10 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 
 - 本切片不是 JSON Schema 注册表或自动类型生成器；
 - request/answer 尚未写入 durable append-only authority，进程关闭仍会释放当前 Future；
-- 没有 timeout、takeover、answer fencing、重开重放或审计 redaction executor；
+- HAR-10.6a/6b 已在本 payload 边界之上增加 timeout、takeover、answer fencing 与 New UI 重开重放；
+- TUI durable parity、显式 cancel 与通用审计 redaction executor 仍未完成；
 - permission 与 Harness receipt 的 ARC-03.2b 高风险 payload schema 仍未实现。
 
-HAR-10.6a 已建立单一 durable interaction authority；下一步 HAR-10.6b 让 Pursuit checkpoint 只引用稳定
-interaction ID，并由 UI-18.4 消费该 authority 的只读 pending snapshot。
+HAR-10.6a 已建立单一 durable interaction authority；HAR-10.6b 已让 Pursuit checkpoint 只引用稳定
+interaction ID，并由 New UI Bridge 消费 pending/timeout/takeover 事实。Goal 页面与 TUI parity 继续由
+UI-18.4 收口。

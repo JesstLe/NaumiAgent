@@ -91,6 +91,7 @@ checkpoint 保存的是累计活动执行时间。进程关闭期间不消耗 ac
 
 HAR-10.4b 不尝试判断 in-flight shell、browser、background 或外部 API 是否已经成功，也没有 durable action
 idempotency key。该责任属于 HAR-10.5 Resume/Reconcile。HAR-10.6a 已实现 durable interaction authority、
-超时和 takeover fencing；HAR-10.6b 仍需接入类型化问题展示、用户答案写回和 checkpoint stable ID 引用。
+超时和 takeover fencing；HAR-10.6b 已接入类型化问题展示、用户答案写回、checkpoint stable ID 引用和
+pending/answered/expired 恢复核对。TUI parity 与显式 cancel 仍未完成。
 最终报告本身会新增一次模型调用；该调用发生在 terminal checkpoint 之后，因此报告 token
 尚未计入 terminal checkpoint，需在后续 completion receipt 计量收口中修正。

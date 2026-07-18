@@ -64,6 +64,12 @@ class RequestUserInputTool(Tool):
                 },
                 "allow_custom": {"type": "boolean", "default": True},
                 "custom_label": {"type": "string", "minLength": 1, "maxLength": 80},
+                "timeout_seconds": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "maximum": 604800,
+                    "description": "可选等待时限（秒）；省略表示不自动超时",
+                },
             },
             "required": ["header", "question", "options"],
             "additionalProperties": False,
@@ -77,6 +83,7 @@ class RequestUserInputTool(Tool):
         options: list[dict[str, str]],
         allow_custom: bool = True,
         custom_label: str = "其他",
+        timeout_seconds: int | None = None,
         **kwargs: Any,
     ) -> str:
         try:
@@ -87,6 +94,7 @@ class RequestUserInputTool(Tool):
                     "options": options,
                     "allow_custom": allow_custom,
                     "custom_label": custom_label,
+                    "timeout_seconds": timeout_seconds,
                 }
             )
             raw_response = await self._engine.request_user_input(request.to_public_dict())

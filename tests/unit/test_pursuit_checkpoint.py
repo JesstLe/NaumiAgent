@@ -14,6 +14,8 @@ from pydantic import ValidationError
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.background.runner import BackgroundRunner
 from naumi_agent.background.store import BackgroundTaskStore
+from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.pursuit import (
     CriterionStatus,
     GoalPursuitLoop,
@@ -35,6 +37,7 @@ from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointCriterion,
     CheckpointGoal,
     CheckpointInteraction,
+    CheckpointInteractionRef,
     CheckpointIteration,
     PursuitCheckpoint,
     checkpoint_safe_text,
@@ -44,6 +47,7 @@ from naumi_agent.orchestrator.pursuit_store import (
     PursuitStoreConflictError,
     PursuitStoreError,
 )
+from naumi_agent.user_interaction import normalize_interaction_request
 
 
 def _checkpoint(*, sequence: int = 1, phase: str = "assess") -> PursuitCheckpoint:
@@ -644,6 +648,184 @@ async def test_resume_waiting_for_interaction_consumes_no_model_turn(tmp_path) -
     assert "安全停在恢复边界" in result
     assert restored is not None
     assert restored.phase == "interaction_required"
+    loop._assess.assert_not_awaited()
+
+
+def _durable_interaction_record(
+    *,
+    interaction_id: str,
+    created_at: str,
+    timeout_seconds: int | None = None,
+):
+    request = normalize_interaction_request({
+        "header": "目标恢复",
+        "question": "请选择恢复策略",
+        "options": [
+            {"value": "continue", "label": "继续", "description": "继续目标"},
+            {"value": "stop", "label": "停止", "description": "停止目标"},
+        ],
+        "allow_custom": True,
+        "custom_label": "其他策略",
+        "timeout_seconds": timeout_seconds,
+    })
+    return new_interaction_record(
+        request=request,
+        subject_kind="pursuit",
+        subject_id="pursuit_checkpoint",
+        session_id="session-checkpoint",
+        agent_name="main",
+        owner_id="bridge-checkpoint",
+        created_at=created_at,
+        owner_lease_seconds=30,
+        timeout_seconds=timeout_seconds,
+        interaction_id=interaction_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_pending_durable_interaction_consumes_no_model_turn(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = HarnessStore(tmp_path / "harness.db")
+    record = _durable_interaction_record(
+        interaction_id="ask-pursuit-pending",
+        created_at="2026-07-18T00:00:00+00:00",
+    )
+    await authority.create_interaction(workspace_root=workspace, record=record)
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint().model_copy(update={
+        "pending_interaction": CheckpointInteractionRef(
+            interaction_id=record.interaction_id,
+        ),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        lease_port=authority,
+        workspace_root=workspace,
+        interaction_port=authority,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "interaction_required"
+    assert record.interaction_id in restored.blocked_reason
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_expired_durable_interaction_consumes_no_model_turn(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = HarnessStore(tmp_path / "harness.db")
+    record = _durable_interaction_record(
+        interaction_id="ask-pursuit-expired",
+        created_at="2026-07-18T00:00:00+00:00",
+        timeout_seconds=3,
+    )
+    await authority.create_interaction(workspace_root=workspace, record=record)
+    expired = await authority.expire_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+        expected_sequence=record.sequence,
+        now="2026-07-18T00:00:03+00:00",
+    )
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint().model_copy(update={
+        "pending_interaction": CheckpointInteractionRef(
+            interaction_id=expired.interaction_id,
+        ),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        lease_port=authority,
+        workspace_root=workspace,
+        interaction_port=authority,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "interaction_expired"
+    assert "已超时" in restored.blocked_reason
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_answered_durable_interaction_clears_checkpoint_reference(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = HarnessStore(tmp_path / "harness.db")
+    record = _durable_interaction_record(
+        interaction_id="ask-pursuit-answered",
+        created_at="2026-07-18T00:00:00+00:00",
+    )
+    await authority.create_interaction(workspace_root=workspace, record=record)
+    answered = await authority.answer_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+        expected_sequence=record.sequence,
+        owner_id=record.owner_id,
+        owner_epoch=record.owner_epoch,
+        response={"kind": "option", "value": "continue"},
+        answered_by="user",
+        now="2026-07-18T00:00:01+00:00",
+    )
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint().model_copy(update={
+        "pending_interaction": CheckpointInteractionRef(
+            interaction_id=answered.interaction_id,
+        ),
+        "budget": _checkpoint().budget.model_copy(update={
+            "max_budget_usd": 0.02,
+        }),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        lease_port=authority,
+        workspace_root=workspace,
+        interaction_port=authority,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+    loop._generate_report = AsyncMock(return_value="预算终止报告")  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored_run = store.get_run(checkpoint.run_id)
+    restored_checkpoint = store.get_checkpoint(checkpoint.run_id)
+
+    assert result.endswith("预算终止报告")
+    assert restored_run is not None
+    assert any(
+        item.kind == "interaction" and item.source == answered.interaction_id
+        for item in restored_run.evidence
+    )
+    assert restored_checkpoint is not None
+    assert restored_checkpoint.sequence > checkpoint.sequence
+    assert restored_checkpoint.pending_interaction is None
     loop._assess.assert_not_awaited()
 
 

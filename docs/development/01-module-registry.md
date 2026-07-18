@@ -12,7 +12,7 @@
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.6a, 8.6b, 8.7a-8.7d, H5a-H5c, 8.8a-8.8e3) | HAR-05, ARC-03 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a, 9.2a, 9.3a) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
-| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a, 10.2b, 10.4a, 10.4b, 10.5a, 10.5b, 10.5c, 10.6a, 10.8a) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
+| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a, 10.2b, 10.4a, 10.4b, 10.5a, 10.5b, 10.5c, 10.6a, 10.6b, 10.8a) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
 ## CLI/TUI/New UI
 
@@ -26,7 +26,7 @@
 | UI-15 | 渲染性能、虚拟化与大输出 | planned | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | planned | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
 | UI-17 | New UI/TUI parity 与发布门 | planned | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
-| UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
+| UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
 
 ## Claude Code Source Alignment
 
