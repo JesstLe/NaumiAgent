@@ -13,19 +13,27 @@ This is NOT a demo generator. The loop runs until true success or honest failure
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from naumi_agent.orchestrator.pursuit_lease import (
+    PursuitLeaseLostError,
+    PursuitLeaseSession,
+    PursuitLeaseUnavailableError,
+)
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
+    from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_store import PursuitStore
     from naumi_agent.orchestrator.subagent_manager import SubAgentManager
     from naumi_agent.runtime.ports.model import ModelPort
@@ -340,6 +348,8 @@ class GoalPursuitLoop:
         store: PursuitStore | None = None,
         config: PursuitConfig | None = None,
         execute_tool_call: ToolExecutor | None = None,
+        lease_port: PursuitLeasePort | None = None,
+        workspace_root: str | Path | None = None,
     ) -> None:
         self._router = router
         self._tools = tool_registry
@@ -347,6 +357,14 @@ class GoalPursuitLoop:
         self._store = store
         self._config = config or PursuitConfig()
         self._execute_tool_call = execute_tool_call
+        self._lease_port = lease_port
+        self._workspace_root = (
+            Path(workspace_root).expanduser().resolve()
+            if workspace_root is not None
+            else None
+        )
+        if (self._lease_port is None) != (self._workspace_root is None):
+            raise ValueError("Pursuit lease_port 与 workspace_root 必须同时提供。")
         self._history: list[IterationCheckpoint] = []
         self._start_time = 0.0
         self._total_tokens = 0
@@ -355,20 +373,55 @@ class GoalPursuitLoop:
         self._run: PursuitRun | None = None
         self._last_stop_decision: PursuitStopDecision | None = None
         self._pending_background: list[PursuitBackgroundWait] = []
+        self._lease_session: PursuitLeaseSession | None = None
+        self._operation_lock = asyncio.Lock()
+        self._startup_event = asyncio.Event()
+        self._startup_error = ""
 
     def cancel(self) -> None:
         """Request cancellation of the running loop."""
         self._cancelled = True
-        if self._run is not None:
-            self._run.status = PursuitRunStatus.CANCELLED
-            self._run.updated_at = time.time()
-            self._persist_run()
+
+    async def wait_until_started(self, *, timeout_seconds: float = 10.0) -> str:
+        """Wait for durable lease admission; return an empty string on success."""
+        try:
+            await asyncio.wait_for(self._startup_event.wait(), timeout=timeout_seconds)
+        except TimeoutError:
+            return "目标追踪启动超时，未确认获得运行租约。"
+        return self._startup_error
 
     def _persist_run(self) -> None:
         """Persist current run state if a store is configured."""
         if self._store is None or self._run is None:
             return
+        if self._lease_session is not None and not self._lease_session.is_owned:
+            raise PursuitLeaseLostError(
+                self._lease_session.lost_reason or "目标追踪运行租约已失效。"
+            )
         self._store.save_run(self._run)
+
+    async def _open_run_lease(self, run_id: str) -> None:
+        if self._lease_port is None or self._workspace_root is None:
+            return
+        if self._lease_session is not None:
+            raise PursuitLeaseLostError("当前 PursuitLoop 已持有另一个运行租约。")
+        session = PursuitLeaseSession(
+            port=self._lease_port,
+            workspace_root=self._workspace_root,
+            run_id=run_id,
+        )
+        await session.acquire()
+        self._lease_session = session
+
+    async def _require_run_lease(self, boundary: str) -> None:
+        if self._lease_session is not None:
+            await self._lease_session.require_current(boundary)
+
+    async def _close_run_lease(self) -> None:
+        session = self._lease_session
+        self._lease_session = None
+        if session is not None:
+            await session.close()
 
     def list_persisted_runs(self, *, include_finished: bool = True) -> list[PursuitRun]:
         """List persisted pursuit runs."""
@@ -383,29 +436,60 @@ class GoalPursuitLoop:
         return self._store.get_run(run_id)
 
     async def resume_persisted(self, run_id: str) -> str:
-        """Restore a persisted run and collect finished background results."""
+        """Safely collect persisted async results under an exclusive run lease."""
+        if self._operation_lock.locked():
+            return "目标追踪正在处理另一个运行，请稍后重试。"
+        async with self._operation_lock:
+            return await self._resume_persisted_locked(run_id)
+
+    async def _resume_persisted_locked(self, run_id: str) -> str:
+        """Execute one serialized persisted-state recovery attempt."""
         if self._store is None:
             return "错误：目标追踪持久化存储未初始化。"
         run = self._store.get_run(run_id)
         if run is None:
             return f"错误：目标追踪运行不存在：{run_id}"
+        terminal = {
+            PursuitRunStatus.COMPLETED,
+            PursuitRunStatus.FAILED,
+            PursuitRunStatus.CANCELLED,
+            PursuitRunStatus.BUDGET_EXCEEDED,
+        }
+        if run.status in terminal:
+            return f"目标追踪已处于终态 {run.status.value}，无需恢复。"
 
         self._run = run
         self._pending_background = list(run.waiting_on or [])
-        if self._pending_background:
-            await self._collect_background_results()
+        try:
+            await self._open_run_lease(run.id)
+            await self._require_run_lease("resume-start")
+            if self._pending_background:
+                await self._collect_background_results()
 
-        if self._pending_background:
-            self._record_waiting("目标追踪仍在等待后台任务完成。")
-        elif self._run.status == PursuitRunStatus.WAITING:
-            self._run.status = PursuitRunStatus.RUNNING
-            self._run.phase = "assess"
-            self._run.waiting_on = []
-            self._persist_run()
+            await self._require_run_lease("resume-commit")
+            if self._pending_background:
+                self._record_waiting("目标追踪仍在等待后台任务完成。")
+            else:
+                self._run.status = PursuitRunStatus.BLOCKED
+                self._run.phase = "checkpoint_required"
+                self._run.blocked_reason = (
+                    "后台结果已回收，但当前记录不含可恢复执行 checkpoint，"
+                    "不能伪装成正在运行。"
+                )
+                self._run.next_action = "等待 HAR-10.4 checkpoint 恢复，或审查证据后重新启动追踪。"
+                self._run.waiting_on = []
+                self._run.updated_at = time.time()
+                self._persist_run()
 
-        from naumi_agent.orchestrator.pursuit_store import format_run
+            from naumi_agent.orchestrator.pursuit_store import format_run
 
-        return "目标追踪状态已恢复。\n\n" + format_run(self._run)
+            return "目标追踪持久状态已安全检查。\n\n" + format_run(self._run)
+        except PursuitLeaseUnavailableError as exc:
+            return f"目标追踪暂不能恢复：{exc}"
+        except PursuitLeaseLostError as exc:
+            return f"目标追踪恢复已停止：{exc}"
+        finally:
+            await self._close_run_lease()
 
     def _update_run(
         self,
@@ -450,6 +534,16 @@ class GoalPursuitLoop:
         )
         self._last_stop_decision = decision
         self._apply_stop_decision(decision)
+
+    async def _record_stop_owned(
+        self,
+        status: PursuitRunStatus,
+        reason: str,
+        evidence: list[PursuitEvidence] | None = None,
+    ) -> None:
+        """Fence a terminal transition before it reaches PursuitStore."""
+        await self._require_run_lease(f"terminal-{status.value}")
+        self._record_stop(status, reason, evidence)
 
     def _record_waiting(self, reason: str) -> None:
         """Mark the run as waiting for asynchronous work."""
@@ -543,6 +637,7 @@ class GoalPursuitLoop:
             else:
                 output = await tool.execute(name=name)
         except Exception as e:
+            await self._require_run_lease("worktree-error")
             self._run.add_evidence(PursuitEvidence(
                 kind="worktree",
                 source=name,
@@ -553,6 +648,7 @@ class GoalPursuitLoop:
             self._persist_run()
             return
 
+        await self._require_run_lease("worktree-result")
         path = self._extract_markdown_field(str(output), "路径")
         self._run.worktree_name = name
         self._run.worktree_path = path
@@ -616,6 +712,7 @@ class GoalPursuitLoop:
                 timestamp=time.time(),
             ))
 
+        await self._require_run_lease("background-collect-result")
         self._pending_background = still_waiting
         self._run.waiting_on = list(still_waiting)
         if not still_waiting and self._run.status == PursuitRunStatus.WAITING:
@@ -704,6 +801,13 @@ class GoalPursuitLoop:
 
         Returns a final report string in Chinese.
         """
+        if self._operation_lock.locked():
+            return "目标追踪循环已在运行，不能在同一执行器中重复启动。"
+        async with self._operation_lock:
+            return await self._pursue_locked(goal)
+
+    async def _pursue_locked(self, goal: str) -> str:
+        """Acquire one run lease before entering the autonomous loop."""
         self._start_time = time.time()
         self._history.clear()
         self._total_tokens = 0
@@ -711,19 +815,52 @@ class GoalPursuitLoop:
         self._cancelled = False
         self._last_stop_decision = None
         self._pending_background = []
+        self._startup_event.clear()
+        self._startup_error = ""
         self._run = PursuitRun(
-            id=f"pursuit_{int(self._start_time)}",
+            id=f"pursuit_{uuid.uuid4().hex[:24]}",
             goal=goal,
             status=PursuitRunStatus.RUNNING,
             phase="parse_goal",
             started_at=self._start_time,
             updated_at=self._start_time,
         )
-        self._persist_run()
+        try:
+            try:
+                await self._open_run_lease(self._run.id)
+                await self._require_run_lease("run-start")
+                self._persist_run()
+            except PursuitLeaseUnavailableError as exc:
+                self._startup_error = f"目标追踪未启动：{exc}"
+                return self._startup_error
+            except PursuitLeaseLostError as exc:
+                self._startup_error = f"目标追踪未启动：{exc}"
+                return self._startup_error
+            except Exception as exc:
+                logger.exception("Pursuit lease admission failed")
+                self._startup_error = (
+                    "目标追踪未启动：运行租约基础设施不可用（"
+                    f"{type(exc).__name__}）。"
+                )
+                return self._startup_error
+            finally:
+                self._startup_event.set()
+
+            try:
+                return await self._pursue_under_lease(goal)
+            except PursuitLeaseLostError as exc:
+                return f"目标追踪已安全停止：{exc}"
+        finally:
+            await self._close_run_lease()
+
+    async def _pursue_under_lease(self, goal: str) -> str:
+        """Run the planner/action loop while the keepalive owns the run."""
 
         # Phase 0: Parse the goal
         spec = await self._parse_goal(goal)
+        await self._require_run_lease("parse-result")
         self._update_run(phase="assess", spec=spec)
+        await self._require_run_lease("worktree-start")
         await self._ensure_worktree_for_code_goal(spec)
         logger.info(
             "Goal parsed: %d criteria, complexity=%s",
@@ -735,27 +872,40 @@ class GoalPursuitLoop:
 
         while status == GoalStatus.IN_PROGRESS:
             iteration += 1
+            await self._require_run_lease(f"iteration-{iteration}-start")
 
             # Safety checks
             if self._cancelled:
                 status = GoalStatus.CANCELLED
-                self._record_stop(PursuitRunStatus.CANCELLED, "用户取消了目标追踪")
+                await self._record_stop_owned(
+                    PursuitRunStatus.CANCELLED,
+                    "用户取消了目标追踪",
+                )
                 break
 
             elapsed = time.time() - self._start_time
             if elapsed > self._config.max_time_seconds:
                 status = GoalStatus.BUDGET_EXCEEDED
-                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过最大运行时间")
+                await self._record_stop_owned(
+                    PursuitRunStatus.BUDGET_EXCEEDED,
+                    "目标追踪超过最大运行时间",
+                )
                 break
 
             if self._total_cost >= self._config.max_budget_usd:
                 status = GoalStatus.BUDGET_EXCEEDED
-                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过预算上限")
+                await self._record_stop_owned(
+                    PursuitRunStatus.BUDGET_EXCEEDED,
+                    "目标追踪超过预算上限",
+                )
                 break
 
             if iteration > self._config.max_iterations:
                 status = GoalStatus.BUDGET_EXCEEDED
-                self._record_stop(PursuitRunStatus.BUDGET_EXCEEDED, "目标追踪超过最大迭代次数")
+                await self._record_stop_owned(
+                    PursuitRunStatus.BUDGET_EXCEEDED,
+                    "目标追踪超过最大迭代次数",
+                )
                 break
 
             await self._collect_background_results()
@@ -763,6 +913,7 @@ class GoalPursuitLoop:
             # Phase 1: Assess current state
             self._update_run(phase="assess", iteration=iteration, spec=spec)
             assessment = await self._assess(spec)
+            await self._require_run_lease(f"iteration-{iteration}-assessment")
             checkpoint = assessment["checkpoint"]
             self._history.append(checkpoint)
             self._record_checkpoint_evidence(checkpoint)
@@ -776,10 +927,11 @@ class GoalPursuitLoop:
             # Check if all criteria are verified with hard evidence.
             stop_decision = await self._completion_decision(spec)
             if stop_decision.status == PursuitRunStatus.COMPLETED:
-                self._last_stop_decision = stop_decision
-                self._apply_stop_decision(stop_decision)
+                await self._require_run_lease(
+                    f"iteration-{iteration}-final-verification"
+                )
                 if await self._final_verification(spec):
-                    self._record_stop(
+                    await self._record_stop_owned(
                         PursuitRunStatus.COMPLETED,
                         "所有成功标准已通过强制验证",
                         self._collect_hard_evidence(spec),
@@ -802,26 +954,39 @@ class GoalPursuitLoop:
                     recovery = await self._recover_from_stagnation(
                         spec, checkpoint,
                     )
+                    await self._require_run_lease(
+                        f"iteration-{iteration}-recovery-plan"
+                    )
                     if not recovery:
                         status = GoalStatus.STUCK
-                        self._record_stop(
+                        await self._record_stop_owned(
                             PursuitRunStatus.BLOCKED,
                             "检测到停滞，但没有生成可执行的恢复行动",
                         )
                         break
+                    await self._require_run_lease(
+                        f"iteration-{iteration}-recovery-execute"
+                    )
                     await self._execute_actions(spec, recovery)
+                    await self._require_run_lease(
+                        f"iteration-{iteration}-recovery-result"
+                    )
                     continue
                 else:
                     status = GoalStatus.STUCK
-                    self._record_stop(PursuitRunStatus.BLOCKED, "连续多轮没有可观测进展")
+                    await self._record_stop_owned(
+                        PursuitRunStatus.BLOCKED,
+                        "连续多轮没有可观测进展",
+                    )
                     break
 
             # Phase 2: Plan next actions
             self._update_run(phase="plan", iteration=iteration, spec=spec)
             actions = await self._plan(spec, checkpoint)
+            await self._require_run_lease(f"iteration-{iteration}-plan-result")
             if not actions:
                 status = GoalStatus.STUCK
-                self._record_stop(
+                await self._record_stop_owned(
                     PursuitRunStatus.BLOCKED,
                     "规划器没有给出下一步可执行行动",
                 )
@@ -839,7 +1004,9 @@ class GoalPursuitLoop:
             )
 
             # Phase 3: Execute actions
+            await self._require_run_lease(f"iteration-{iteration}-execute-start")
             results = await self._execute_actions(spec, actions)
+            await self._require_run_lease(f"iteration-{iteration}-execute-result")
 
             # Store results for next iteration's evidence
             checkpoint.actions_taken = [
@@ -850,13 +1017,16 @@ class GoalPursuitLoop:
             self._record_action_evidence(results)
             if any(result.get("status") == "waiting" for result in results):
                 status = GoalStatus.WAITING
+                await self._require_run_lease(f"iteration-{iteration}-waiting")
                 self._record_waiting("后台任务仍在运行，已安排后续复查")
                 break
 
             # Phase 4: Verify (if interval matches)
             if iteration % self._config.verify_interval == 0:
                 self._update_run(phase="verify", iteration=iteration, spec=spec)
+                await self._require_run_lease(f"iteration-{iteration}-verify-start")
                 await self._verify_criteria(spec)
+                await self._require_run_lease(f"iteration-{iteration}-verify-result")
 
         # Generate final report
         report = await self._generate_report(spec, status)
@@ -1180,6 +1350,8 @@ class GoalPursuitLoop:
                 return await self._execute_generic_tool(
                     tool, tool_name, description, action_id,
                 )
+        except PursuitLeaseLostError:
+            raise
         except Exception as e:
             logger.warning("Tool action %s failed: %s", action_id, e)
             return {
@@ -1805,6 +1977,8 @@ class GoalPursuitLoop:
                 "status": status,
                 "output": str(output)[:3000],
             }
+        except PursuitLeaseLostError:
+            raise
         except Exception as e:
             return {
                 "action_id": action_id,
@@ -1870,6 +2044,7 @@ class GoalPursuitLoop:
                 "output": f"后台任务启动后未返回任务 ID：{output[:500]}",
             }
 
+        await self._require_run_lease(f"background-start-{action_id}")
         pending = PursuitBackgroundWait(
             task_id=task_id,
             action_id=action_id,
@@ -1929,6 +2104,7 @@ class GoalPursuitLoop:
         except Exception as e:
             output = f"创建复查提醒失败：{type(e).__name__}: {e}"
         if self._run is not None:
+            await self._require_run_lease(f"background-followup-{task_id}")
             self._run.add_evidence(PursuitEvidence(
                 kind="schedule",
                 source=task_id,

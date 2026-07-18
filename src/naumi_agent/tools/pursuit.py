@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig, ToolExecutor
@@ -12,6 +14,7 @@ from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
+    from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,8 @@ def set_pursuit_dependencies(
     subagent_manager: Any,
     store: Any | None = None,
     execute_tool_call: ToolExecutor | None = None,
+    lease_port: PursuitLeasePort | None = None,
+    workspace_root: str | Path | None = None,
 ) -> None:
     """Inject dependencies needed by the pursuit tool."""
     global _global_pursuit_loop
@@ -37,6 +42,8 @@ def set_pursuit_dependencies(
         subagent_manager=subagent_manager,
         store=store,
         execute_tool_call=execute_tool_call,
+        lease_port=lease_port,
+        workspace_root=workspace_root,
     )
 
 
@@ -123,6 +130,8 @@ class PursueTool(Tool):
             store=loop._store,
             config=config,
             execute_tool_call=loop._execute_tool_call,
+            lease_port=loop._lease_port,
+            workspace_root=loop._workspace_root,
         )
 
         try:
@@ -133,7 +142,13 @@ class PursueTool(Tool):
             _background_pursuit_tasks.add(task)
             task.add_done_callback(_background_pursuit_tasks.discard)
             task.add_done_callback(_log_background_pursuit_result)
-            await asyncio.sleep(0)
+            startup_error = await pursuit.wait_until_started()
+            if startup_error:
+                if not task.done():
+                    task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+                return f"⚠️ {startup_error}"
             run_id = pursuit._run.id if pursuit._run is not None else "启动中"
             return (
                 "✅ 目标追踪已在后台启动，界面不会等待长循环完成。\n\n"
