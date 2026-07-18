@@ -34,5 +34,8 @@
   Proposal/Review Queue 的输入边界。
 - EVO-01.3a 已提供用户级 versioned Candidate Store、不可变 Evidence、幂等并发 merge 和
   digest audit chain；HAR-09 必须复用该 Store，不再创建第二套候选表。
-- HAR-09 仍未实现 feedback adapter、provider/model/platform 聚合策略、阈值/冷却 policy、
-  review action 或 outcome tracking，因此整体继续保持 planned。
+- HAR-09.1a 已实现可信 Feedback Intake：直接 `/feedback` 与 Agent interpretation 使用不可混淆
+  source kind；Agent Tool 必须绑定 runtime 签发的 durable Chat Run 信封；偏好、取消、赞扬不
+  形成缺陷，摘要原文不落库。详见 `HAR-09-1a-trusted-feedback-intake.md`。
+- HAR-09 仍未实现跨时间窗 provider/model/platform 聚合策略、阈值/冷却 policy、
+  review action 或 outcome tracking，因此整体继续保持 partial。

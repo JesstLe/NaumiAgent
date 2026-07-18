@@ -296,6 +296,10 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
             "description": "Harness 状态、重复评测、Baseline、运行解释、知识、检查与信任",
         },
         {
+            "command": "/feedback",
+            "description": "记录隐私安全的用户纠正或缺陷候选",
+        },
+        {
             "command": "/mode",
             "aliases": ["/mode"],
             "description": "切换 runtime 模式 default / plan / bypass",

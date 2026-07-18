@@ -51,7 +51,12 @@ class EvolutionEvidenceRef(_StrictModel):
 class EvolutionEvidence(_StrictModel):
     schema_version: Literal[1] = 1
     evidence_id: str
-    source_kind: Literal["harness_failure", "self_review_static"] = "harness_failure"
+    source_kind: Literal[
+        "harness_failure",
+        "self_review_static",
+        "user_feedback",
+        "agent_interpreted_feedback",
+    ] = "harness_failure"
     source_uri: str
     observed_at: str = Field(min_length=1, max_length=128)
     finding_code: str = ""
@@ -60,6 +65,11 @@ class EvolutionEvidence(_StrictModel):
     hard_evidence: Literal[True] = True
     root_fingerprint: str
     refs: tuple[EvolutionEvidenceRef, ...] = Field(min_length=1, max_length=128)
+    feedback_category: Literal["correction", "defect"] | None = None
+    feedback_topic: str = Field(default="", max_length=128)
+    provider: str = Field(default="", max_length=128)
+    model: str = Field(default="", max_length=256)
+    platform: str = Field(default="", max_length=64)
 
     @field_validator("observed_at")
     @classmethod
@@ -90,9 +100,23 @@ class EvolutionEvidence(_StrictModel):
             if self.failure_class is None or self.finding_code != self.failure_class.value:
                 raise ValueError("Harness evidence 的 finding_code 必须匹配 failure_class。")
         elif self.failure_class is not None:
-            raise ValueError("静态自审证据不得伪造 Harness failure_class。")
+            raise ValueError("非 Harness 证据不得伪造 Harness failure_class。")
+        feedback_source = self.source_kind in {
+            "user_feedback",
+            "agent_interpreted_feedback",
+        }
+        if feedback_source:
+            if self.feedback_category is None:
+                raise ValueError("Feedback evidence 必须声明 category。")
+            if not re.fullmatch(r"^[a-z][a-z0-9_.-]{0,127}$", self.feedback_topic):
+                raise ValueError("Feedback evidence topic 格式无效。")
+        elif self.feedback_category is not None or self.feedback_topic:
+            raise ValueError("非 Feedback evidence 不得携带 feedback 字段。")
         if any(character in self.scope for character in ("\n", "\r", "\x00")):
             raise ValueError("evidence scope 含非法控制字符。")
+        for dimension in (self.provider, self.model, self.platform):
+            if any(character in dimension for character in ("\n", "\r", "\x00")):
+                raise ValueError("evidence 聚合维度含非法控制字符。")
         return self
 
 
