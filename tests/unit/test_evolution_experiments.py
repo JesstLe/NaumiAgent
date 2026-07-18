@@ -132,6 +132,8 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
 
     assert first == second
     assert first.contract_id.startswith("evx_")
+    assert len(first.manifest_sha256) == 64
+    assert first.contract_id == f"evx_{first.manifest_sha256[:24]}"
     assert first.baseline.commit == baseline
     assert first.baseline.workspace_dirty_at_issue is False
     assert first.scope.allowed_files == ("src/naumi_agent/ui/footer.py",)
@@ -221,7 +223,7 @@ async def test_contract_identity_rejects_manifest_tampering(tmp_path: Path) -> N
     payload = contract.model_dump(mode="json")
     payload["seed"] = 8
 
-    with pytest.raises(ValidationError, match="contract_id"):
+    with pytest.raises(ValidationError, match="manifest_sha256"):
         EvolutionExperimentContract.model_validate(payload)
 
 

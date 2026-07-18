@@ -19,6 +19,11 @@ from typing import Any
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.evolution.experiment_leases import (
+    EvolutionExperimentLeaseManager,
+    EvolutionExperimentLeaseStore,
+)
+from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore, resolve_evolution_db_path
@@ -676,6 +681,17 @@ class AgentEngine:
         self.evolution_proposal_queue = EvolutionProposalQueueAdapter(
             review_service=self.evolution_review_service,
             workbench_service=self.workbench_service,
+        )
+        self.evolution_experiment_contract_issuer = EvolutionExperimentContractIssuer(
+            review_service=self.evolution_review_service,
+            workbench_service=self.workbench_service,
+        )
+        self.evolution_experiment_lease_store = EvolutionExperimentLeaseStore(
+            config.memory.session_db_path
+        )
+        self.evolution_experiment_lease_manager = EvolutionExperimentLeaseManager(
+            store=self.evolution_experiment_lease_store,
+            worktree_manager=self.worktree_manager,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")

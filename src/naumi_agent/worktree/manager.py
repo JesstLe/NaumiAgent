@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+import tempfile
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,8 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 
 _VALID_NAME = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_FULL_GIT_OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_METADATA_KEY = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_OUTPUT = 6000
 
 
@@ -56,6 +60,23 @@ class WorktreeManager:
 
     async def create(self, name: str, task_id: str = "") -> str:
         """Create a new git worktree and persist its metadata."""
+        repo_error = self._ensure_git_repo()
+        if repo_error:
+            return repo_error
+        base_ref = self._git(["rev-parse", "HEAD"], cwd=self._repo_root).output.strip()
+        if not base_ref:
+            return "错误：无法读取当前 Git HEAD，不能创建隔离 worktree"
+        return await self.create_from_ref(name, base_ref=base_ref, task_id=task_id)
+
+    async def create_from_ref(
+        self,
+        name: str,
+        *,
+        base_ref: str,
+        task_id: str = "",
+        metadata: dict[str, str] | None = None,
+    ) -> str:
+        """Create a worktree at one verified immutable Git object ID."""
         err = self.validate_name(name)
         if err:
             return f"错误：{err}"
@@ -69,6 +90,20 @@ class WorktreeManager:
         if repo_error:
             return repo_error
 
+        normalized_ref = str(base_ref).strip().lower()
+        if not _FULL_GIT_OBJECT_ID.fullmatch(normalized_ref):
+            return "错误：base_ref 必须是完整 Git object ID"
+        verified = self._git(
+            ["rev-parse", "--verify", f"{normalized_ref}^{{commit}}"],
+            cwd=self._repo_root,
+        )
+        if not verified.ok or verified.output.strip().lower() != normalized_ref:
+            return "错误：base_ref 不是当前仓库中的有效 commit"
+        try:
+            clean_metadata = _validate_metadata(metadata or {})
+        except ValueError as exc:
+            return f"错误：{exc}"
+
         records = self._load_records()
         if name in records:
             record = await self.status(name)
@@ -79,12 +114,8 @@ class WorktreeManager:
             return f"错误：目标目录已存在：{path}"
 
         branch = f"naumi/worktree-{name}"
-        base_ref = self._git(["rev-parse", "HEAD"], cwd=self._repo_root).output.strip()
-        if not base_ref:
-            return "错误：无法读取当前 Git HEAD，不能创建隔离 worktree"
-
         result = self._git(
-            ["worktree", "add", "-b", branch, str(path), "HEAD"],
+            ["worktree", "add", "-b", branch, str(path), normalized_ref],
             cwd=self._repo_root,
         )
         if not result.ok:
@@ -95,10 +126,11 @@ class WorktreeManager:
             name=name,
             path=str(path),
             branch=branch,
-            base_ref=base_ref,
+            base_ref=normalized_ref,
             task_id=task_id,
             created_at=now,
             updated_at=now,
+            metadata=clean_metadata,
         )
         records[name] = record
         self._save_records(records)
@@ -345,10 +377,24 @@ class WorktreeManager:
     def _save_records(self, records: dict[str, WorktreeRecord]) -> None:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         payload = {name: _record_to_dict(record) for name, record in records.items()}
-        self._state_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temporary = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._storage_dir,
+                prefix=".worktrees-",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = handle.name
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(temporary).replace(self._state_path)
+        finally:
+            if temporary:
+                Path(temporary).unlink(missing_ok=True)
 
     def _log_event(
         self,
@@ -399,6 +445,25 @@ def _record_to_dict(record: WorktreeRecord) -> dict[str, Any]:
     payload = asdict(record)
     payload["status"] = record.status.value
     return payload
+
+
+def _validate_metadata(metadata: dict[str, str]) -> dict[str, str]:
+    if len(metadata) > 16:
+        raise ValueError("worktree metadata 最多 16 项")
+    normalized: dict[str, str] = {}
+    for key, value in metadata.items():
+        clean_key = str(key).strip().lower()
+        clean_value = str(value).strip()
+        if not _METADATA_KEY.fullmatch(clean_key):
+            raise ValueError("worktree metadata key 格式无效")
+        if (
+            not clean_value
+            or len(clean_value) > 500
+            or any(char in clean_value for char in ("\x00", "\r", "\n"))
+        ):
+            raise ValueError("worktree metadata value 格式无效")
+        normalized[clean_key] = clean_value
+    return normalized
 
 
 def _now() -> str:

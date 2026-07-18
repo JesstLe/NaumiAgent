@@ -26,8 +26,9 @@
 
 ## Manifest
 
-- `contract_id`：`evx_` + canonical JSON SHA-256 前 24 位；相同可信输入、baseline、seed 与预算得到
-  相同 ID，字段被篡改后模型校验失败。
+- `manifest_sha256`：排除 identity 字段后的 canonical JSON 完整 SHA-256；`contract_id` 是 `evx_` 加
+  该 digest 前 24 位。相同可信输入、baseline、seed 与预算得到相同 identity，任一字段被篡改后模型
+  校验失败。
 - `source`：session/mission/task、Workbench Proposal、Preview、Candidate revision/digest、reviewer 与
   approval time。
 - `baseline`：精确仓库 HEAD 和签发时 dirty 布尔值。dirty 只记录事实，不读取或覆盖用户改动。
@@ -67,9 +68,9 @@
 ## 明确未包含
 
 - Contract 持久化、列表、UI、斜杠命令或 Agent Tool；
-- EVO-02.2 worktree lease 与崩溃 tombstone；
 - EVO-02.3 tree/config/tool source snapshot digest；
 - EVO-02.4 planner、02.5 patch writer、02.6 完整 static guard、02.7 mutation receipt；
 - EVO-03 验证执行和 HAR-09.6 outcome tracking。
 
-下一切片应实现 EVO-02.2a：Contract 绑定的唯一 worktree lease manifest，但仍不运行 mutation planner。
+EVO-02.2a 已实现 Contract 绑定的持久 worktree lease、崩溃恢复、过期回收和 dirty tombstone，详见
+`EVO-02-2a-worktree-lease.md`。下一切片应实现 EVO-02.3a Source Snapshot，仍不运行 mutation planner。

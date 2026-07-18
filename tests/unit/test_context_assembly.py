@@ -8,6 +8,11 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.experiment_leases import (
+    EvolutionExperimentLeaseManager,
+    EvolutionExperimentLeaseStore,
+)
+from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
     HarnessContextAssembler,
@@ -72,6 +77,27 @@ async def test_harness_context_snapshot_includes_live_state(engine: AgentEngine)
     assert "持续完善持久目标能力" in content
     assert "session-context" in content
     assert "预算：不限 · 已用 $0.0000" in content
+
+
+def test_engine_composes_experiment_contract_and_worktree_lease_services(
+    engine: AgentEngine,
+) -> None:
+    assert isinstance(
+        engine.evolution_experiment_contract_issuer,
+        EvolutionExperimentContractIssuer,
+    )
+    assert isinstance(
+        engine.evolution_experiment_lease_store,
+        EvolutionExperimentLeaseStore,
+    )
+    assert isinstance(
+        engine.evolution_experiment_lease_manager,
+        EvolutionExperimentLeaseManager,
+    )
+    assert (
+        engine.evolution_experiment_lease_manager._worktree_manager
+        is engine.worktree_manager
+    )
 
 
 @pytest.mark.asyncio

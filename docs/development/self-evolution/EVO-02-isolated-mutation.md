@@ -39,4 +39,8 @@
   触发代码、Git 写入或实验资格。
 - 真实 Git + Candidate SQLite + Workbench SQLite 端到端与篡改/漂移/越界预算测试已通过。详见
   `EVO-02-1a-experiment-contract.md`。
-- EVO-02.2..02.7 尚未实现，因此 EVO-02 整体保持 partial。
+- EVO-02.2a 已实现持久 Worktree Lease v1：Contract/owner/baseline/路径唯一绑定，SQLite CAS 并发仲裁，
+  精确 baseline 创建，崩溃窗口恢复、到期回收和 dirty/ahead tombstone；任何状态都不授予执行权限。
+  `AgentEngine` 已组合 Contract Issuer、Lease Store 与 Lease Manager。详见
+  `EVO-02-2a-worktree-lease.md`。
+- EVO-02.3..02.7 尚未实现，因此 EVO-02 整体保持 partial。
