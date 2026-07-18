@@ -50,7 +50,10 @@ from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.static_guards import EvolutionStaticGuard
-from naumi_agent.evolution.validation_plans import EvolutionValidationPlanner
+from naumi_agent.evolution.validation_plans import (
+    EvolutionValidationPlanner,
+    EvolutionValidationProfileBinder,
+)
 from naumi_agent.harness.completion import (
     CompletionGateResult,
     HarnessCompletionReceipt,
@@ -758,6 +761,9 @@ class AgentEngine:
             generation_service=self.evolution_mutation_generation_service,
         )
         self.evolution_validation_planner = EvolutionValidationPlanner()
+        self.evolution_validation_profile_binder = EvolutionValidationProfileBinder(
+            resources.harness_trust_store
+        )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
             patch_set_store=self.evolution_patch_set_store,

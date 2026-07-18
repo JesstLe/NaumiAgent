@@ -108,10 +108,15 @@ if TYPE_CHECKING:
         EvolutionStoreError,
     )
     from naumi_agent.evolution.validation_plans import (
+        EvolutionValidationBindingError,
         EvolutionValidationPlan,
         EvolutionValidationPlanner,
+        EvolutionValidationProfileBinder,
+        EvolutionValidationProfileBinding,
+        ValidationCheckCoverage,
         ValidationFileRequirement,
         ValidationMetricPair,
+        ValidationProfileCheckBinding,
         validation_requirements_for_path,
     )
 
@@ -172,6 +177,9 @@ __all__ = [
     "EvolutionStaticGuardReceipt",
     "EvolutionValidationPlan",
     "EvolutionValidationPlanner",
+    "EvolutionValidationBindingError",
+    "EvolutionValidationProfileBinder",
+    "EvolutionValidationProfileBinding",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
@@ -195,6 +203,8 @@ __all__ = [
     "StaticGuardViolation",
     "ValidationFileRequirement",
     "ValidationMetricPair",
+    "ValidationCheckCoverage",
+    "ValidationProfileCheckBinding",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -310,10 +320,15 @@ def __getattr__(name: str) -> object:
         "StaticGuardViolation",
     }
     validation_plan_exports = {
+        "EvolutionValidationBindingError",
         "EvolutionValidationPlan",
         "EvolutionValidationPlanner",
+        "EvolutionValidationProfileBinder",
+        "EvolutionValidationProfileBinding",
+        "ValidationCheckCoverage",
         "ValidationFileRequirement",
         "ValidationMetricPair",
+        "ValidationProfileCheckBinding",
         "validation_requirements_for_path",
     }
     if name in candidate_exports:

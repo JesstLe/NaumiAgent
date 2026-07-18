@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from naumi_agent.harness.checks import HarnessCheckStatus
+from naumi_agent.harness.checks import HarnessCheckStatus, _matches_any_pattern
 from naumi_agent.harness.fingerprint import (
     changed_paths_between,
     compute_tree_fingerprint,
@@ -26,6 +26,15 @@ def _git(workspace: Path, *args: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def test_changed_path_globstar_is_segment_aware_and_cross_platform() -> None:
+    assert _matches_any_pattern("src/example.py", ("src/**/*.py",))
+    assert _matches_any_pattern("src/a/b/example.py", ("src/**/*.py",))
+    assert _matches_any_pattern(r"src\a\b\example.py", ("src/**/*.py",))
+    assert _matches_any_pattern("src/a/example.py", ("src/*/*.py",))
+    assert not _matches_any_pattern("src/a/b/example.py", ("src/*/*.py",))
+    assert not _matches_any_pattern("other/src/example.py", ("src/**/*.py",))
 
 
 def _workspace(tmp_path: Path, *, command_code: str = "print('check ok')") -> tuple[Path, Path]:
@@ -259,6 +268,10 @@ async def test_required_checks_follow_task_kind_and_changed_patterns(
     assert await service.required_check_ids(
         task_kind="change",
         changed_paths=("src/example.py",),
+    ) == ("unit",)
+    assert await service.required_check_ids(
+        task_kind="change",
+        changed_paths=("src/naumi_agent/ui/footer.py",),
     ) == ("unit",)
     assert await service.required_check_ids(
         task_kind="change",

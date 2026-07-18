@@ -81,11 +81,15 @@ from naumi_agent.evolution.static_guards import (
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.evolution.validation_plans import (
+    EvolutionValidationBindingError,
     EvolutionValidationPlan,
     EvolutionValidationPlanner,
+    EvolutionValidationProfileBinder,
+    EvolutionValidationProfileBinding,
     validation_requirements_for_path,
 )
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
+from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType, thaw_event_data
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
@@ -1729,10 +1733,11 @@ async def _guard_fixture(
     tmp_path: Path,
     *,
     target_content: bytes | None = None,
+    profile_text: str = "schema_version: 1\n",
 ):
     workspace, target, contract, _, _, manager, _ = await _lease_fixture(
         tmp_path,
-        profile_text="schema_version: 1\n",
+        profile_text=profile_text,
         target_content=target_content,
     )
     lease = await manager.acquire(contract, owner="Evolution-Agent")
@@ -3753,8 +3758,15 @@ async def test_mutation_turn_runner_refuses_source_truncation_when_prompt_is_ove
     assert Path(lease.worktree_path, plan.authorized_files[0]).read_bytes() == large_source
 
 
-async def _validation_receipt_fixture(tmp_path: Path):
-    workspace, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+async def _validation_receipt_fixture(
+    tmp_path: Path,
+    *,
+    profile_text: str = "schema_version: 1\n",
+):
+    workspace, _, contract, lease, snapshot, plan, guard = await _guard_fixture(
+        tmp_path,
+        profile_text=profile_text,
+    )
     generation_session = EvolutionMutationGenerationService(
         trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
         clock=lambda: NOW,
@@ -3940,6 +3952,138 @@ def test_validation_requirements_cover_supported_language_groups(
 
     assert requirement.file_kind == kind
     assert requirement.required_checks == checks
+
+
+VALIDATION_BINDING_PROFILE = """\
+schema_version: 1
+checks:
+  - id: python_lint
+    argv: [python, -m, ruff, check, src]
+    timeout_seconds: 60
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    provides: [lint]
+  - id: python_compile
+    argv: [python, -m, compileall, -q, src]
+    timeout_seconds: 60
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    provides: [compile]
+  - id: python_contract
+    argv: [python, -m, pytest, -q, tests/unit/test_footer.py]
+    timeout_seconds: 120
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    provides: [unit, contract]
+"""
+
+
+@pytest.mark.asyncio
+async def test_validation_profile_binding_requires_current_trust_and_unique_coverage(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path,
+        profile_text=VALIDATION_BINDING_PROFILE,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "harness-trust.db")
+    binder = EvolutionValidationProfileBinder(trust_store)
+    with pytest.raises(EvolutionValidationBindingError) as untrusted:
+        await binder.bind(plan, workspace_root=workspace)
+    assert untrusted.value.code == "validation_profile_untrusted"
+
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+    isolated_before = _git(Path(lease.worktree_path), "status", "--porcelain")
+    first = await binder.bind(plan, workspace_root=workspace)
+    second = await binder.bind(plan, workspace_root=workspace)
+
+    assert first == second
+    assert first.binding_id == f"evvbind_{first.binding_sha256[:24]}"
+    assert first.validation_plan_sha256 == plan.validation_plan_sha256
+    assert first.profile_sha256 == snapshot.profile_sha256
+    assert first.profile_path == ".naumi/harness.yaml"
+    assert tuple(item.check_id for item in first.checks) == (
+        "python_compile",
+        "python_contract",
+        "python_lint",
+    )
+    assert tuple((item.path, item.check_kind, item.check_id) for item in first.coverage) == (
+        ("src/naumi_agent/ui/footer.py", "compile", "python_compile"),
+        ("src/naumi_agent/ui/footer.py", "contract", "python_contract"),
+        ("src/naumi_agent/ui/footer.py", "lint", "python_lint"),
+        ("src/naumi_agent/ui/footer.py", "unit", "python_contract"),
+    )
+    serialized = first.model_dump_json()
+    assert "tests/unit/test_footer.py" not in serialized
+    assert first.profile_trust_must_be_revalidated is True
+    assert first.arc04_worker_required is True
+    assert first.execution_ready is False
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == isolated_before
+
+    tampered = first.model_dump(mode="json")
+    tampered["checks"][0]["argv_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="Binding 摘要"):
+        EvolutionValidationProfileBinding.model_validate(tampered)
+
+    assert await trust_store.untrust(workspace) is True
+    with pytest.raises(EvolutionValidationBindingError) as revoked:
+        await binder.bind(plan, workspace_root=workspace)
+    assert revoked.value.code == "validation_profile_untrusted"
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+
+    profile_path = workspace / ".naumi" / "harness.yaml"
+    profile_path.write_text(
+        profile_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(EvolutionValidationBindingError) as drifted:
+        await binder.bind(plan, workspace_root=workspace)
+    assert drifted.value.code == "validation_profile_drifted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing", "ambiguous"])
+async def test_validation_profile_binding_rejects_incomplete_or_ambiguous_capability(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    if mode == "missing":
+        profile = VALIDATION_BINDING_PROFILE.replace("    provides: [compile]\n", "")
+        expected = "validation_check_missing"
+    else:
+        profile = VALIDATION_BINDING_PROFILE + """\
+  - id: second_lint
+    argv: [python, -m, ruff, check, src]
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    provides: [lint]
+"""
+        expected = "validation_check_ambiguous"
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path,
+        profile_text=profile,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "harness-trust.db")
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+
+    with pytest.raises(EvolutionValidationBindingError) as blocked:
+        await EvolutionValidationProfileBinder(trust_store).bind(
+            plan,
+            workspace_root=workspace,
+        )
+    assert blocked.value.code == expected
 
 
 @pytest.mark.asyncio

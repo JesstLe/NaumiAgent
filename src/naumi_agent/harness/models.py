@@ -166,6 +166,9 @@ class HarnessCheckSpec(_StrictModel):
     timeout_seconds: int = Field(default=180, ge=1, le=3_600)
     when_changed: tuple[str, ...] = ()
     required_for: tuple[Literal["answer", "analysis", "change", "monitor"], ...] = ()
+    provides: tuple[
+        Literal["lint", "compile", "unit", "contract", "smoke"], ...
+    ] = ()
 
     @field_validator("id")
     @classmethod
@@ -195,6 +198,16 @@ class HarnessCheckSpec(_StrictModel):
         if not all(isinstance(item, str) and item.strip() for item in value):
             raise ValueError("check argv 不能包含空值或非字符串")
         return tuple(item.strip() for item in value)
+
+    @field_validator("provides")
+    @classmethod
+    def _validate_provides(
+        cls,
+        values: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("check provides 不能重复")
+        return tuple(sorted(values))
 
 
 class HarnessEvalSpec(_StrictModel):
