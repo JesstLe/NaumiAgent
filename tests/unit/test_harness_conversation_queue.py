@@ -274,6 +274,6 @@ async def test_schema_v13_upgrades_without_resetting_existing_data(tmp_path) -> 
         queued = db.execute(
             "SELECT COUNT(*) FROM harness_conversation_queue"
         ).fetchone()[0]
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 14
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 15
     assert marker == "preserved"
     assert queued == 1

@@ -2543,6 +2543,7 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "/btemplate-list" in command_names
     assert "/models" in command_names
     assert "/harness" in command_names
+    assert "/queue" in command_names
     assert "/goal" in command_names
     harness = next(item for item in slash_commands if item["command"] == "/harness")
     assert "知识" in harness["description"]
@@ -2558,6 +2559,8 @@ def test_bridge_fallback_slash_registry_keeps_goal_available() -> None:
 
     assert "/goal" in commands
     assert "持久目标" in commands["/goal"]["description"]
+    assert "/queue" in commands
+    assert "持久排队" in commands["/queue"]["description"]
 
 
 def test_bridge_status_payload_can_omit_static_slash_commands() -> None:
@@ -4899,6 +4902,7 @@ class _DurableQueueEngine(_SlowFakeEngine):
         super().__init__()
         self.workspace_root = workspace_root
         self.harness_service = SimpleNamespace(store=store)
+        self._harness_store = store
 
     async def get_or_create_session(self, title: str | None = None) -> Any:
         if self._session is None:
@@ -4999,6 +5003,12 @@ async def test_bridge_blocks_ambiguous_claim_instead_of_replaying_it(
         now="2026-07-18T00:00:00+00:00",
     )
     await authority.claim(item, now="2026-07-18T00:00:00+00:00")
+    await authority.enqueue(
+        request_id="submit-after-blocker",
+        text="被前序阻断",
+        client_id="terminal-a",
+        now="2026-07-18T00:00:01+00:00",
+    )
 
     restarted = _DurableQueueEngine(store=store, workspace_root=workspace)
     writer = io.StringIO()
@@ -5010,12 +5020,84 @@ async def test_bridge_blocks_ambiguous_claim_instead_of_replaying_it(
     )
 
     assert restarted.run_tasks == []
-    assert len(bridge._queued_chat_submissions) == 1
+    assert len(bridge._queued_chat_submissions) == 2
     assert any(
         record["type"] == "error"
         and record["payload"].get("code") == "queue_claim_ambiguous"
         for record in _records(writer)
     )
+    await bridge.submit("/queue list", request_id="list-ambiguous")
+    notices = [
+        record["payload"].get("content", "")
+        for record in _records(writer)
+        if record["type"] == "ui/message"
+        and record["payload"].get("type") == "system_notice"
+    ]
+    assert any("submit-ambiguous" in notice for notice in notices)
+    assert any(
+        "submit-after-blocker" in notice
+        and "被前序历史 claim 阻断" in notice
+        for notice in notices
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_queue_retry_resolves_and_immediately_dispatches_new_identity(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    authority = DurableConversationQueueAuthority(
+        store=store,
+        workspace_root=workspace,
+        session_id="session-queue",
+        owner_id="crashed-bridge",
+    )
+    item = await authority.enqueue(
+        request_id="submit-ambiguous",
+        text="确认后重试",
+        client_id="terminal-a",
+        now="2026-07-18T00:00:00+00:00",
+    )
+    await authority.claim(item, now="2026-07-18T00:00:00+00:00")
+
+    engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.resume_session(
+        {"session_id": "session-queue"},
+        request_id="resume-ambiguous",
+    )
+    await bridge.submit(
+        "/queue resolve submit-ambiguous retry 用户已核对",
+        request_id="resolve-ambiguous",
+    )
+    await asyncio.sleep(0)
+
+    assert engine.run_tasks == ["确认后重试"]
+    assert bridge._run_task is not None
+    retry_ids = [
+        record["request_id"]
+        for record in _records(writer)
+        if record["type"] == "run/started"
+    ]
+    assert len(retry_ids) == 1
+    assert retry_ids[0].startswith("retry-")
+    engine.release_run.set()
+    await bridge._run_task
+    assert await store.list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    ) == ()
+    notices = [
+        record["payload"].get("content", "")
+        for record in _records(writer)
+        if record["type"] == "ui/message"
+        and record["payload"].get("type") == "system_notice"
+    ]
+    assert any("已审计并重新排队" in notice for notice in notices)
 
 
 @pytest.mark.asyncio

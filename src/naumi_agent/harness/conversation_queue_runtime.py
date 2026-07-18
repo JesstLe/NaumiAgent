@@ -10,6 +10,7 @@ from pathlib import Path
 from naumi_agent.harness.run_lease import HarnessRunLease, HarnessRunLeaseState
 from naumi_agent.harness.store import (
     HarnessConversationQueueItem,
+    HarnessConversationQueueResolution,
     HarnessStore,
     HarnessStoreConflictError,
 )
@@ -32,6 +33,14 @@ class ConversationQueueRecovery:
     ready: tuple[HarnessConversationQueueItem, ...]
     blocked: tuple[HarnessConversationQueueItem, ...]
     blocker_code: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationQueueReview:
+    item: HarnessConversationQueueItem
+    lease: HarnessRunLease
+    resolvable: bool
+    resolution_code: str
 
 
 class DurableConversationQueueAuthority:
@@ -120,6 +129,80 @@ class DurableConversationQueueAuthority:
             blocked=tuple(blocked),
             blocker_code=blocker_code,
         )
+
+    async def review(
+        self,
+        *,
+        request_id: str,
+        now: str | None = None,
+    ) -> ConversationQueueReview:
+        """Read the exact claim facts a user must inspect before resolution."""
+        request = _bounded_identity(request_id, field="request_id")
+        items = await self.store.list_queued_conversations(
+            workspace_root=self.workspace_root,
+            session_id=self.session_id,
+            limit=100,
+        )
+        item = next((candidate for candidate in items if candidate.request_id == request), None)
+        if item is None:
+            raise ConversationQueueClaimError("未找到仍在等待处置的排队消息。")
+        lease = await self.store.get_run_lease(
+            workspace_root=self.workspace_root,
+            run_kind="runtime",
+            run_id=self.claim_run_id(request),
+        )
+        if lease is None:
+            raise ConversationQueueClaimError("该消息从未派发，无需执行恢复处置。")
+        timestamp = datetime.fromisoformat(now or _utc_now())
+        if lease.state is HarnessRunLeaseState.RELEASED:
+            return ConversationQueueReview(item, lease, True, "claim_released")
+        if datetime.fromisoformat(lease.expires_at) <= timestamp:
+            return ConversationQueueReview(item, lease, True, "claim_expired")
+        return ConversationQueueReview(item, lease, False, "claim_live")
+
+    async def resolve(
+        self,
+        *,
+        request_id: str,
+        action: str,
+        reason: str,
+        now: str | None = None,
+    ) -> HarnessConversationQueueResolution:
+        """Apply one explicit user decision to an ambiguous historical claim."""
+        timestamp = now or _utc_now()
+        review = await self.review(request_id=request_id, now=timestamp)
+        if not review.resolvable:
+            raise ConversationQueueClaimError(
+                "该消息仍由活跃实例持有，不能重试或放弃。"
+            )
+        normalized_action = action.strip().lower() if isinstance(action, str) else ""
+        if normalized_action not in {"retry", "cancel"}:
+            raise ValueError("queue resolution action 必须是 retry 或 cancel。")
+        retry_request_id = ""
+        if normalized_action == "retry":
+            payload = "\x00".join((
+                self.session_id,
+                review.item.request_id,
+                review.lease.run_id,
+                str(review.lease.epoch),
+            ))
+            retry_request_id = f"retry-{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+        try:
+            return await self.store.resolve_ambiguous_queued_conversation(
+                workspace_root=self.workspace_root,
+                session_id=self.session_id,
+                request_id=review.item.request_id,
+                action=normalized_action,
+                retry_request_id=retry_request_id,
+                reviewed_run_id=review.lease.run_id,
+                reviewed_owner_id=review.lease.owner_id,
+                reviewed_epoch=review.lease.epoch,
+                actor_id=self.owner_id,
+                reason=reason,
+                resolved_at=timestamp,
+            )
+        except HarnessStoreConflictError as exc:
+            raise ConversationQueueClaimError(str(exc)) from exc
 
     async def claim(
         self,
@@ -268,5 +351,6 @@ __all__ = [
     "ConversationQueueClaim",
     "ConversationQueueClaimError",
     "ConversationQueueRecovery",
+    "ConversationQueueReview",
     "DurableConversationQueueAuthority",
 ]

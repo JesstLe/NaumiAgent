@@ -76,7 +76,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 14
+HARNESS_STORE_SCHEMA_VERSION = 15
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -270,6 +270,25 @@ class HarnessConversationQueueItem:
     enqueued_at: str
     updated_at: str
     terminal_reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessConversationQueueResolution:
+    """Audited user decision for one ambiguous queue dispatch."""
+
+    resolution_id: str
+    workspace_root: str
+    session_id: str
+    request_id: str
+    action: str
+    retry_request_id: str
+    reviewed_run_id: str
+    reviewed_owner_id: str
+    reviewed_epoch: int
+    reviewed_state: str
+    actor_id: str
+    reason: str
+    created_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -2721,6 +2740,239 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法更新排队对话终态。") from exc
 
+    async def resolve_ambiguous_queued_conversation(
+        self,
+        *,
+        workspace_root: str | Path,
+        session_id: str,
+        request_id: str,
+        action: str,
+        retry_request_id: str,
+        reviewed_run_id: str,
+        reviewed_owner_id: str,
+        reviewed_epoch: int,
+        actor_id: str,
+        reason: str,
+        resolved_at: str,
+    ) -> HarnessConversationQueueResolution:
+        """Resolve one expired/released queue claim without erasing its history."""
+        workspace = _canonical_workspace(workspace_root)
+        session = _normalize_text(session_id, field="session_id", max_length=256)
+        request = _normalize_conversation_request_id(request_id)
+        normalized_action = action.strip() if isinstance(action, str) else ""
+        if normalized_action not in {"retry", "cancel"}:
+            raise ValueError("queue resolution action 必须是 retry 或 cancel。")
+        retry_request = (
+            _normalize_conversation_request_id(retry_request_id)
+            if normalized_action == "retry"
+            else ""
+        )
+        run_id = _normalize_run_lease_id(reviewed_run_id, field="reviewed_run_id")
+        owner_id = _normalize_run_lease_id(
+            reviewed_owner_id, field="reviewed_owner_id",
+        )
+        epoch = _normalize_run_epoch(reviewed_epoch)
+        actor = _normalize_run_lease_id(actor_id, field="actor_id")
+        normalized_reason = _normalize_text(reason, field="reason", max_length=256)
+        timestamp = _normalize_utc_timestamp(resolved_at, field="resolved_at")
+        resolution_id = _stable_id(
+            "conversation_queue_resolution",
+            session,
+            request,
+            normalized_action,
+            run_id,
+            owner_id,
+            str(epoch),
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing_resolution = await (
+                    await db.execute(
+                        "SELECT * FROM harness_conversation_queue_resolutions "
+                        "WHERE resolution_id = ?",
+                        (resolution_id,),
+                    )
+                ).fetchone()
+                if existing_resolution is not None:
+                    result = _conversation_queue_resolution_from_row(
+                        existing_resolution,
+                    )
+                    if (
+                        result.workspace_root != workspace
+                        or result.session_id != session
+                        or result.request_id != request
+                        or result.action != normalized_action
+                        or result.retry_request_id != retry_request
+                        or result.reviewed_run_id != run_id
+                        or result.reviewed_owner_id != owner_id
+                        or result.reviewed_epoch != epoch
+                        or result.actor_id != actor
+                        or result.reason != normalized_reason
+                        or result.created_at != timestamp
+                    ):
+                        raise HarnessStoreConflictError(
+                            "同一队列处置 identity 已绑定不同审计内容。"
+                        )
+                    await db.rollback()
+                    return result
+
+                item_row = await _select_conversation_queue_item(
+                    db,
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                )
+                if item_row is None:
+                    raise HarnessStoreConflictError(f"排队消息不存在：{request}")
+                item = _conversation_queue_item_from_row(item_row)
+                if item.state != "queued":
+                    raise HarnessStoreConflictError(
+                        f"排队消息已经终结为 {item.state}：{request}"
+                    )
+                _ensure_queue_timestamp_forward(item.updated_at, timestamp)
+                lease_row = await _select_run_lease_row(
+                    db,
+                    workspace_root=workspace,
+                    run_kind=HarnessRunKind.RUNTIME,
+                    run_id=run_id,
+                )
+                if lease_row is None:
+                    raise HarnessStoreConflictError("历史 claim 已不存在，拒绝盲目处置。")
+                lease = _run_lease_from_row(lease_row)
+                if (
+                    lease.owner_id != owner_id
+                    or lease.epoch != epoch
+                    or lease.run_id != run_id
+                ):
+                    raise HarnessStoreConflictError(
+                        "历史 claim 在审查后已经变化，请刷新队列再决定。"
+                    )
+                if (
+                    lease.state is HarnessRunLeaseState.ACTIVE
+                    and datetime.fromisoformat(lease.expires_at)
+                    > datetime.fromisoformat(timestamp)
+                ):
+                    raise HarnessStoreConflictError(
+                        "历史 claim 仍由活跃实例持有，当前不能重试或放弃。"
+                    )
+
+                if normalized_action == "retry":
+                    existing_retry = await _select_conversation_queue_item(
+                        db,
+                        workspace_root=workspace,
+                        session_id=session,
+                        request_id=retry_request,
+                    )
+                    if existing_retry is not None:
+                        raise HarnessStoreConflictError(
+                            f"重试 request_id 已被占用：{retry_request}"
+                        )
+                    digest = _conversation_queue_digest(
+                        session_id=session,
+                        request_id=retry_request,
+                        text=item.text,
+                    )
+                    await db.execute(
+                        """
+                        INSERT INTO harness_conversation_queue (
+                            workspace_root, session_id, request_id, client_id, text,
+                            payload_sha256, state, position, enqueued_at, updated_at,
+                            terminal_reason
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, '')
+                        """,
+                        (
+                            workspace,
+                            session,
+                            retry_request,
+                            actor,
+                            item.text,
+                            digest,
+                            item.position,
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+
+                terminal_reason = (
+                    "explicit_retry" if normalized_action == "retry"
+                    else "explicit_cancel"
+                )
+                await db.execute(
+                    """
+                    UPDATE harness_conversation_queue
+                    SET state = 'cancelled', terminal_reason = ?, updated_at = ?
+                    WHERE workspace_root = ? AND session_id = ? AND request_id = ?
+                      AND state = 'queued'
+                    """,
+                    (terminal_reason, timestamp, workspace, session, request),
+                )
+                await db.execute(
+                    """
+                    UPDATE harness_run_leases
+                    SET state = 'released', expires_at = ?, updated_at = ?
+                    WHERE workspace_root = ? AND run_kind = 'runtime' AND run_id = ?
+                      AND owner_id = ? AND epoch = ?
+                    """,
+                    (timestamp, timestamp, workspace, run_id, owner_id, epoch),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_conversation_queue_resolutions (
+                        resolution_id, workspace_root, session_id, request_id,
+                        action, retry_request_id, reviewed_run_id,
+                        reviewed_owner_id, reviewed_epoch, reviewed_state,
+                        actor_id, reason, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        resolution_id,
+                        workspace,
+                        session,
+                        request,
+                        normalized_action,
+                        retry_request,
+                        run_id,
+                        owner_id,
+                        epoch,
+                        lease.state.value,
+                        actor,
+                        normalized_reason,
+                        timestamp,
+                    ),
+                )
+                remaining = await _select_queued_conversation_rows(
+                    db, workspace_root=workspace, session_id=session,
+                )
+                for position, queued_row in enumerate(remaining, start=1):
+                    await db.execute(
+                        "UPDATE harness_conversation_queue SET position = ?, "
+                        "updated_at = ? WHERE workspace_root = ? AND session_id = ? "
+                        "AND request_id = ?",
+                        (
+                            position,
+                            timestamp,
+                            workspace,
+                            session,
+                            str(queued_row["request_id"]),
+                        ),
+                    )
+                result_row = await (
+                    await db.execute(
+                        "SELECT * FROM harness_conversation_queue_resolutions "
+                        "WHERE resolution_id = ?",
+                        (resolution_id,),
+                    )
+                ).fetchone()
+                await db.commit()
+                assert result_row is not None
+                return _conversation_queue_resolution_from_row(result_row)
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法安全处置排队消息。") from exc
+
     async def create_interaction(
         self,
         *,
@@ -4198,6 +4450,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V12)
                             await db.executescript(_SCHEMA_V13)
                             await db.executescript(_SCHEMA_V14)
+                            await db.executescript(_SCHEMA_V15)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -4940,6 +5193,26 @@ def _conversation_queue_item_from_row(
     if item.position < 1:
         raise HarnessStoreError("排队消息位置无效，拒绝读取。")
     return item
+
+
+def _conversation_queue_resolution_from_row(
+    row: aiosqlite.Row,
+) -> HarnessConversationQueueResolution:
+    return HarnessConversationQueueResolution(
+        resolution_id=str(row["resolution_id"]),
+        workspace_root=str(row["workspace_root"]),
+        session_id=str(row["session_id"]),
+        request_id=str(row["request_id"]),
+        action=str(row["action"]),
+        retry_request_id=str(row["retry_request_id"]),
+        reviewed_run_id=str(row["reviewed_run_id"]),
+        reviewed_owner_id=str(row["reviewed_owner_id"]),
+        reviewed_epoch=int(row["reviewed_epoch"]),
+        reviewed_state=str(row["reviewed_state"]),
+        actor_id=str(row["actor_id"]),
+        reason=str(row["reason"]),
+        created_at=str(row["created_at"]),
+    )
 
 
 def _legacy_conversation_queue_digest(item: HarnessConversationQueueItem) -> str:
@@ -5908,5 +6181,28 @@ CREATE TABLE IF NOT EXISTS harness_conversation_queue (
 CREATE INDEX IF NOT EXISTS idx_harness_conversation_queue_ready
 ON harness_conversation_queue (
     workspace_root, session_id, state, position, enqueued_at, request_id
+);
+"""
+
+_SCHEMA_V15 = """
+CREATE TABLE IF NOT EXISTS harness_conversation_queue_resolutions (
+    resolution_id TEXT PRIMARY KEY,
+    workspace_root TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('retry', 'cancel')),
+    retry_request_id TEXT NOT NULL,
+    reviewed_run_id TEXT NOT NULL,
+    reviewed_owner_id TEXT NOT NULL,
+    reviewed_epoch INTEGER NOT NULL CHECK (reviewed_epoch >= 1),
+    reviewed_state TEXT NOT NULL CHECK (reviewed_state IN ('active', 'released')),
+    actor_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_queue_resolutions_subject
+ON harness_conversation_queue_resolutions (
+    workspace_root, session_id, request_id, created_at
 );
 """

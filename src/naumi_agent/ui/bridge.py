@@ -327,6 +327,10 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
             "description": "Harness 状态、重复评测、Baseline、运行解释、知识、检查与信任",
         },
         {
+            "command": "/queue",
+            "description": "审查并处置持久排队消息",
+        },
+        {
             "command": "/feedback",
             "description": "记录隐私安全的用户纠正或缺陷候选",
         },
@@ -2810,9 +2814,14 @@ class JsonlEngineBridge:
         await self._recover_durable_conversation_queue(session_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
-    async def _recover_durable_conversation_queue(self, session_id: str) -> None:
+    async def _recover_durable_conversation_queue(
+        self,
+        session_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
         """Replay only never-claimed queued messages after an explicit resume."""
-        if session_id in self._recovered_queue_sessions:
+        if session_id in self._recovered_queue_sessions and not force:
             return
         authority = self._conversation_queue_authority(session_id)
         if authority is None:
@@ -2829,6 +2838,16 @@ class JsonlEngineBridge:
             )
             return
         self._recovered_queue_sessions.add(session_id)
+        if force:
+            durable_ids = {
+                item.request_id for item in (*recovery.ready, *recovery.blocked)
+            }
+            self._queued_chat_submissions = deque(
+                submission
+                for submission in self._queued_chat_submissions
+                if submission.session_id != session_id
+                or submission.request_id in durable_ids
+            )
         known = {item.request_id for item in self._queued_chat_submissions}
         recovered = [
             item
@@ -2965,6 +2984,14 @@ class JsonlEngineBridge:
                 "info",
                 request_id=request_id,
             )
+        if raw.lower().startswith("/queue resolve"):
+            session = getattr(self.engine, "_session", None)
+            session_id = str(getattr(session, "id", "") or "").strip()
+            if session_id:
+                await self._recover_durable_conversation_queue(
+                    session_id,
+                    force=True,
+                )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def _load_session_command(self, arg: str, *, request_id: str) -> None:

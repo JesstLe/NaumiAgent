@@ -354,4 +354,4 @@ async def test_v3_database_migrates_additively_and_keeps_reconciliation(
         "legacy-request"
     ) is not None
     with sqlite3.connect(db_path) as db:
-        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 14
+        assert int(db.execute("PRAGMA user_version").fetchone()[0]) == 15
