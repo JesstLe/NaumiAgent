@@ -54,8 +54,9 @@ lease DB 故障、竞争失败、fencing 拒绝或 10 秒 admission 超时都返
 - cancel 只设置请求标记，由持有 lease 的循环在下一安全边界提交 `cancelled`；
 - waiting/blocked/terminal 完成后停止 keepalive，并以精确 epoch 释放 lease；释放行保留以维持 epoch 单调；
 - `/pursue resume` 先竞争同一 run lease，live owner 存在时不读取后台结果、不改写 PursuitStore；
-- 当前 PursuitRun 尚未保存 GoalSpec、完整 criteria/checkpoint。后台结果回收后不能真实恢复 planner，因此状态
-  明确进入 `blocked/checkpoint_required`，而不是错误显示为 `running`；下一步指向 HAR-10.4。
+- HAR-10.4a 已新增 GoalSpec、criteria、budget、todo、history、evidence cursor 和等待项 checkpoint。旧记录
+  仍进入 `blocked/checkpoint_required`；新记录通过完整性校验后进入 `blocked/checkpoint_ready`。HAR-10.4b
+  resume executor 接入前，两者都不会错误显示为 `running`。
 
 ## 验收证据
 
@@ -71,6 +72,6 @@ lease DB 故障、竞争失败、fencing 拒绝或 10 秒 admission 超时都返
 
 HAR-10.1b 保护执行准入、续租、状态/结果提交边界，但不能撤销租约丢失前已经发往外部系统的 in-flight
 副作用。background/browser/shell 等执行器仍需 HAR-10.3/10.5 的 durable idempotency key、取消传播和
-reconcile；Pursuit 的真正跨进程继续执行依赖 HAR-10.4 checkpoint。HarnessStore 与 PursuitStore 是两个
+reconcile；Pursuit 的真正跨进程继续执行依赖 HAR-10.4b resume executor。HarnessStore 与 PursuitStore 是两个
 SQLite DB，当前不是跨库原子事务；本切片通过提交前 fencing 和 lost-state fail closed 缩小窗口，但不声称
 已解决跨 Store 原子性。

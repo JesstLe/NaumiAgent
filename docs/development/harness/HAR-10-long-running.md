@@ -15,7 +15,11 @@
   - 未完成：browser/background/agent/runtime 的逐域接入，以及跨 Store 原子提交。
 - HAR-10.2 Heartbeat：runtime/worker/browser/agent 分层心跳与健康状态。
 - HAR-10.3 Durable queue：优先级、公平性、容量、立即发送消息插队规则。
-- HAR-10.4 Checkpoint：目标、criteria、todo、budget、evidence cursor、pending interaction。
+- HAR-10.4 Checkpoint（partial）：
+  - HAR-10.4a 已实现：严格有界 schema、单调 sequence、canonical JSON + SHA-256、篡改拒绝、Pursuit
+    安全边界写入，以及 legacy missing / verified ready 恢复判定；见
+    [设计](HAR-10-4a-pursuit-checkpoint-core.md)。
+  - 未完成：HAR-10.4b 从 checkpoint 重建内存状态并继续 planner loop。
 - HAR-10.5 Resume/reconcile：进程重启后检查外部任务真实状态，不盲目重跑。
 - HAR-10.6 Human interaction：结构化选项、自定义输入、超时、暂停和 takeover。
 - HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
@@ -34,8 +38,9 @@ ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 
 状态，不需要解析 `/goal` 或 `/pursue` 文本。
 
 ARC-01.4b2e 只解决资源归属和稳定引用。HAR-10.1a 已在 Harness schema v11 交付通用 lease/epoch 与结果
-fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入；browser/background/agent/runtime、跨 Store
-原子性、heartbeat、checkpoint、interaction queue、reconcile 与 destructive action 幂等仍属于后续实现。
+fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入，HAR-10.4a 已交付权威 checkpoint 输入与篡改
+拒绝；browser/background/agent/runtime、跨 Store 原子性、heartbeat、checkpoint resume executor、interaction
+queue、reconcile 与 destructive action 幂等仍属于后续实现。
 
 ## 验收标准
 

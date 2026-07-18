@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import time
 import uuid
@@ -25,6 +26,19 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from naumi_agent.orchestrator.pursuit_checkpoint import (
+    MAX_CHECKPOINT_ACTIONS,
+    MAX_CHECKPOINT_HISTORY,
+    CheckpointBudget,
+    CheckpointCriterion,
+    CheckpointGoal,
+    CheckpointInteraction,
+    CheckpointIteration,
+    CheckpointWait,
+    PursuitCheckpoint,
+    PursuitCheckpointPersistenceError,
+    checkpoint_safe_text,
+)
 from naumi_agent.orchestrator.pursuit_lease import (
     PursuitLeaseLostError,
     PursuitLeaseSession,
@@ -373,6 +387,10 @@ class GoalPursuitLoop:
         self._run: PursuitRun | None = None
         self._last_stop_decision: PursuitStopDecision | None = None
         self._pending_background: list[PursuitBackgroundWait] = []
+        self._current_spec: GoalSpec | None = None
+        self._checkpoint_sequence = 0
+        self._pending_actions: list[str] = []
+        self._pending_interaction: CheckpointInteraction | None = None
         self._lease_session: PursuitLeaseSession | None = None
         self._operation_lock = asyncio.Lock()
         self._startup_event = asyncio.Event()
@@ -399,6 +417,197 @@ class GoalPursuitLoop:
                 self._lease_session.lost_reason or "目标追踪运行租约已失效。"
             )
         self._store.save_run(self._run)
+
+    def _persist_checkpoint(
+        self,
+        spec: GoalSpec | None = None,
+        *,
+        pending_actions: list[str] | None = None,
+    ) -> None:
+        """Persist a bounded recovery snapshot at an already-fenced boundary."""
+        if spec is not None:
+            self._current_spec = spec
+        if pending_actions is not None:
+            self._pending_actions = list(pending_actions[:MAX_CHECKPOINT_ACTIONS])
+        if self._store is None or self._run is None or self._current_spec is None:
+            return
+        if self._lease_session is not None and not self._lease_session.is_owned:
+            raise PursuitLeaseLostError(
+                self._lease_session.lost_reason or "目标追踪运行租约已失效。"
+            )
+
+        next_sequence = self._checkpoint_sequence + 1
+        try:
+            checkpoint = self._build_checkpoint(next_sequence)
+            self._store.save_checkpoint(checkpoint)
+        except PursuitLeaseLostError:
+            raise
+        except Exception as exc:
+            raise PursuitCheckpointPersistenceError(
+                f"checkpoint {next_sequence} 持久化失败（{type(exc).__name__}）。"
+            ) from exc
+        self._checkpoint_sequence = next_sequence
+
+    def _build_checkpoint(self, sequence: int) -> PursuitCheckpoint:
+        """Build one strict checkpoint without raw tool output or unbounded history."""
+        if self._run is None or self._current_spec is None:
+            raise ValueError("当前没有可构建 checkpoint 的 Pursuit 状态。")
+        spec = self._current_spec
+        now = time.time()
+        criteria = tuple(
+            CheckpointCriterion(
+                id=checkpoint_safe_text(item.id, limit=128),
+                description=checkpoint_safe_text(item.description, limit=2_000),
+                verification_command=checkpoint_safe_text(
+                    item.verification_command, limit=4_000
+                ),
+                status=item.status.value,
+                evidence=checkpoint_safe_text(item.evidence, limit=4_000),
+                last_checked=max(0.0, item.last_checked),
+            )
+            for item in spec.success_criteria[:50]
+        )
+        if not criteria:
+            raise ValueError("checkpoint 至少需要一个成功标准。")
+        history = tuple(
+            CheckpointIteration(
+                iteration=item.iteration,
+                timestamp=max(0.0, item.timestamp),
+                assessment=checkpoint_safe_text(item.assessment, limit=4_000),
+                gaps_found=tuple(
+                    checkpoint_safe_text(value, limit=1_000)
+                    for value in item.gaps_found[:50]
+                ),
+                actions_planned=tuple(
+                    checkpoint_safe_text(value, limit=1_000)
+                    for value in item.actions_planned[:MAX_CHECKPOINT_ACTIONS]
+                ),
+                actions_taken=tuple(
+                    checkpoint_safe_text(value, limit=1_000)
+                    for value in item.actions_taken[:MAX_CHECKPOINT_ACTIONS]
+                ),
+                criteria_status=dict(list(item.criteria_status.items())[:50]),
+                convergence_score=max(0.0, min(1.0, item.convergence_score)),
+            )
+            for item in self._history[-MAX_CHECKPOINT_HISTORY:]
+        )
+        return PursuitCheckpoint(
+            run_id=self._run.id,
+            sequence=sequence,
+            created_at=now,
+            status=self._run.status.value,
+            phase=self._run.phase,
+            iteration=self._run.iteration,
+            goal=CheckpointGoal(
+                original_goal=checkpoint_safe_text(spec.original_goal, limit=8_000),
+                description=checkpoint_safe_text(spec.description, limit=8_000),
+                criteria=criteria,
+                constraints=tuple(
+                    checkpoint_safe_text(key, limit=1_000)
+                    for key in list(spec.constraints)[:50]
+                ),
+                estimated_complexity=(
+                    spec.estimated_complexity
+                    if spec.estimated_complexity in {"S", "M", "L", "XL"}
+                    else "M"
+                ),
+            ),
+            pending_actions=tuple(
+                checkpoint_safe_text(value, limit=1_000)
+                for value in self._pending_actions
+            ),
+            next_action=checkpoint_safe_text(self._run.next_action, limit=2_000),
+            budget=CheckpointBudget(
+                tokens_used=max(0, self._total_tokens),
+                cost_usd=max(0.0, self._total_cost),
+                elapsed_seconds=max(0.0, now - self._start_time),
+                max_iterations=self._config.max_iterations,
+                max_budget_usd=(
+                    self._config.max_budget_usd
+                    if math.isfinite(self._config.max_budget_usd)
+                    else None
+                ),
+                max_time_seconds=(
+                    self._config.max_time_seconds
+                    if math.isfinite(self._config.max_time_seconds)
+                    else None
+                ),
+            ),
+            evidence_cursor=len(self._run.evidence or []),
+            waiting_on=tuple(
+                CheckpointWait(
+                    task_id=checkpoint_safe_text(item.task_id, limit=256),
+                    action_id=checkpoint_safe_text(item.action_id, limit=256),
+                    command=checkpoint_safe_text(item.command, limit=4_000),
+                    created_at=max(0.0, item.created_at),
+                )
+                for item in (self._run.waiting_on or [])[:100]
+            ),
+            pending_interaction=self._pending_interaction,
+            recent_history=history,
+            worktree_name=checkpoint_safe_text(self._run.worktree_name, limit=256),
+            worktree_path=checkpoint_safe_text(self._run.worktree_path, limit=4_000),
+        )
+
+    def _persist_reconciled_checkpoint(
+        self,
+        previous: PursuitCheckpoint,
+    ) -> PursuitCheckpoint:
+        """Advance a verified checkpoint after persisted background reconciliation."""
+        if self._store is None or self._run is None:
+            raise PursuitCheckpointPersistenceError("checkpoint 存储未初始化。")
+        now = time.time()
+        try:
+            checkpoint = previous.model_copy(update={
+                "sequence": previous.sequence + 1,
+                "created_at": now,
+                "status": self._run.status.value,
+                "phase": self._run.phase,
+                "iteration": self._run.iteration,
+                "pending_actions": (),
+                "next_action": checkpoint_safe_text(
+                    self._run.next_action, limit=2_000
+                ),
+                "budget": previous.budget.model_copy(update={
+                    "elapsed_seconds": max(0.0, now - self._run.started_at),
+                }),
+                "evidence_cursor": len(self._run.evidence or []),
+                "waiting_on": tuple(
+                    CheckpointWait(
+                        task_id=checkpoint_safe_text(item.task_id, limit=256),
+                        action_id=checkpoint_safe_text(item.action_id, limit=256),
+                        command=checkpoint_safe_text(item.command, limit=4_000),
+                        created_at=max(0.0, item.created_at),
+                    )
+                    for item in (self._run.waiting_on or [])[:100]
+                ),
+            })
+            # model_copy is intentionally followed by strict validation so future
+            # field additions cannot bypass the durable contract.
+            checkpoint = PursuitCheckpoint.model_validate(
+                checkpoint.model_dump(mode="python")
+            )
+            self._store.save_checkpoint(checkpoint)
+            return checkpoint
+        except Exception as exc:
+            raise PursuitCheckpointPersistenceError(
+                "后台结果已回收，但新 checkpoint 持久化失败（"
+                f"{type(exc).__name__}）。"
+            ) from exc
+
+    def _mark_checkpoint_error(self, error: Exception) -> None:
+        """Best-effort honest run state when checkpoint durability is lost."""
+        if self._run is None:
+            return
+        self._run.status = PursuitRunStatus.BLOCKED
+        self._run.phase = "checkpoint_error"
+        self._run.blocked_reason = str(error)
+        self._run.next_action = "审查持久化错误后重新启动目标追踪。"
+        self._run.updated_at = time.time()
+        try:
+            self._persist_run()
+        except Exception:
+            logger.exception("Failed to persist checkpoint_error PursuitRun state")
 
     async def _open_run_lease(self, run_id: str) -> None:
         if self._lease_port is None or self._workspace_root is None:
@@ -449,6 +658,20 @@ class GoalPursuitLoop:
         run = self._store.get_run(run_id)
         if run is None:
             return f"错误：目标追踪运行不存在：{run_id}"
+        try:
+            checkpoint = self._store.get_checkpoint(run_id)
+        except Exception as exc:
+            return (
+                "目标追踪恢复已拒绝：checkpoint 校验失败（"
+                f"{type(exc).__name__}）。请先审查或修复持久状态。"
+            )
+        if run.phase == "checkpoint_error":
+            from naumi_agent.orchestrator.pursuit_store import format_run
+
+            return (
+                "目标追踪恢复已拒绝：上次 checkpoint 写入失败，"
+                "旧 checkpoint 不足以安全续跑。\n\n" + format_run(run)
+            )
         terminal = {
             PursuitRunStatus.COMPLETED,
             PursuitRunStatus.FAILED,
@@ -469,7 +692,7 @@ class GoalPursuitLoop:
             await self._require_run_lease("resume-commit")
             if self._pending_background:
                 self._record_waiting("目标追踪仍在等待后台任务完成。")
-            else:
+            elif checkpoint is None:
                 self._run.status = PursuitRunStatus.BLOCKED
                 self._run.phase = "checkpoint_required"
                 self._run.blocked_reason = (
@@ -480,6 +703,23 @@ class GoalPursuitLoop:
                 self._run.waiting_on = []
                 self._run.updated_at = time.time()
                 self._persist_run()
+            else:
+                self._run.status = PursuitRunStatus.BLOCKED
+                self._run.phase = "checkpoint_ready"
+                self._run.blocked_reason = "已验证 checkpoint，恢复执行器尚未接入。"
+                self._run.next_action = "由 HAR-10.4b 从权威 checkpoint 恢复规划循环。"
+                self._run.waiting_on = []
+                self._run.updated_at = time.time()
+
+            if checkpoint is not None:
+                reconciled = self._persist_reconciled_checkpoint(checkpoint)
+                if self._run.phase == "checkpoint_ready":
+                    self._run.blocked_reason = (
+                        f"已验证 checkpoint {reconciled.checkpoint_id()}，"
+                        "但恢复执行器尚未接入，不能伪装成正在运行。"
+                    )
+                    self._run.updated_at = time.time()
+                    self._persist_run()
 
             from naumi_agent.orchestrator.pursuit_store import format_run
 
@@ -488,6 +728,9 @@ class GoalPursuitLoop:
             return f"目标追踪暂不能恢复：{exc}"
         except PursuitLeaseLostError as exc:
             return f"目标追踪恢复已停止：{exc}"
+        except PursuitCheckpointPersistenceError as exc:
+            self._mark_checkpoint_error(exc)
+            return f"目标追踪恢复已安全停止：{exc}"
         finally:
             await self._close_run_lease()
 
@@ -544,6 +787,7 @@ class GoalPursuitLoop:
         """Fence a terminal transition before it reaches PursuitStore."""
         await self._require_run_lease(f"terminal-{status.value}")
         self._record_stop(status, reason, evidence)
+        self._persist_checkpoint(pending_actions=[])
 
     def _record_waiting(self, reason: str) -> None:
         """Mark the run as waiting for asynchronous work."""
@@ -815,6 +1059,10 @@ class GoalPursuitLoop:
         self._cancelled = False
         self._last_stop_decision = None
         self._pending_background = []
+        self._current_spec = None
+        self._checkpoint_sequence = 0
+        self._pending_actions = []
+        self._pending_interaction = None
         self._startup_event.clear()
         self._startup_error = ""
         self._run = PursuitRun(
@@ -850,6 +1098,10 @@ class GoalPursuitLoop:
                 return await self._pursue_under_lease(goal)
             except PursuitLeaseLostError as exc:
                 return f"目标追踪已安全停止：{exc}"
+            except PursuitCheckpointPersistenceError as exc:
+                logger.exception("Pursuit checkpoint persistence failed")
+                self._mark_checkpoint_error(exc)
+                return f"目标追踪已安全停止：{exc}"
         finally:
             await self._close_run_lease()
 
@@ -860,8 +1112,10 @@ class GoalPursuitLoop:
         spec = await self._parse_goal(goal)
         await self._require_run_lease("parse-result")
         self._update_run(phase="assess", spec=spec)
+        self._persist_checkpoint(spec, pending_actions=[])
         await self._require_run_lease("worktree-start")
         await self._ensure_worktree_for_code_goal(spec)
+        self._persist_checkpoint(spec, pending_actions=[])
         logger.info(
             "Goal parsed: %d criteria, complexity=%s",
             len(spec.success_criteria), spec.estimated_complexity,
@@ -917,6 +1171,7 @@ class GoalPursuitLoop:
             checkpoint = assessment["checkpoint"]
             self._history.append(checkpoint)
             self._record_checkpoint_evidence(checkpoint)
+            self._persist_checkpoint(spec, pending_actions=[])
 
             logger.info(
                 "Iteration %d: convergence=%.2f, gaps=%d, tokens=%d",
@@ -964,6 +1219,13 @@ class GoalPursuitLoop:
                             "检测到停滞，但没有生成可执行的恢复行动",
                         )
                         break
+                    self._persist_checkpoint(
+                        spec,
+                        pending_actions=[
+                            f"{item.get('id', '?')}: {item.get('description', '')}"
+                            for item in recovery
+                        ],
+                    )
                     await self._require_run_lease(
                         f"iteration-{iteration}-recovery-execute"
                     )
@@ -971,6 +1233,7 @@ class GoalPursuitLoop:
                     await self._require_run_lease(
                         f"iteration-{iteration}-recovery-result"
                     )
+                    self._persist_checkpoint(spec, pending_actions=[])
                     continue
                 else:
                     status = GoalStatus.STUCK
@@ -1002,6 +1265,7 @@ class GoalPursuitLoop:
                 spec=spec,
                 next_action=checkpoint.actions_planned[0],
             )
+            self._persist_checkpoint(spec, pending_actions=checkpoint.actions_planned)
 
             # Phase 3: Execute actions
             await self._require_run_lease(f"iteration-{iteration}-execute-start")
@@ -1015,10 +1279,12 @@ class GoalPursuitLoop:
                 for r in results
             ]
             self._record_action_evidence(results)
+            self._persist_checkpoint(spec, pending_actions=[])
             if any(result.get("status") == "waiting" for result in results):
                 status = GoalStatus.WAITING
                 await self._require_run_lease(f"iteration-{iteration}-waiting")
                 self._record_waiting("后台任务仍在运行，已安排后续复查")
+                self._persist_checkpoint(spec, pending_actions=[])
                 break
 
             # Phase 4: Verify (if interval matches)
@@ -1027,6 +1293,7 @@ class GoalPursuitLoop:
                 await self._require_run_lease(f"iteration-{iteration}-verify-start")
                 await self._verify_criteria(spec)
                 await self._require_run_lease(f"iteration-{iteration}-verify-result")
+                self._persist_checkpoint(spec, pending_actions=[])
 
         # Generate final report
         report = await self._generate_report(spec, status)
