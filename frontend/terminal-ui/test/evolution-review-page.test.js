@@ -32,8 +32,13 @@ test("evolution review list and detail stay bounded at common widths", () => {
       providers: ["openai"], models: ["model"], platforms: ["darwin"],
       first_observed_at: "2026-07-18T18:00:00+00:00",
       expected_metrics: ["feedback.recurrence decrease 0"], evidence_refs: [],
-      policy_version: "candidate-eligibility-v1",
+      policy_version: "candidate-eligibility-v2",
       checks: [{ code: "cooldown_gate", passed: false, hard_block: false, detail: "等待冷却记录。" }],
+      governance: {
+        policy_version: "proposal-governance-v1", allowed: false,
+        reason: "cooldown_active", proposal_state: "rejected", proposal_revision: 2,
+        cooldown_until: "2026-08-17T18:00:00+00:00", significant_new_evidence: false,
+      },
       aggregation: {
         policy_version: "candidate-aggregation-v1", trend: "increasing",
         count_24h: 1, count_7d: 4, count_30d: 6, previous_7d_count: 2,
@@ -60,6 +65,9 @@ test("evolution review list and detail stay bounded at common widths", () => {
     assert(plain.includes("实验资格 否"));
     assert(plain.includes("Proposal Preview"));
     assert(plain.includes("不可执行 · 未入队 · 必须人工审阅"));
+    assert(plain.includes("Workbench 治理"));
+    assert(plain.includes("冷却阻断 · cooldown_active"));
+    assert(plain.includes("rejected / r2"));
   }
 });
 

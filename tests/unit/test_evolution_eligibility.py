@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.evolution.candidate import build_candidate_draft
-from naumi_agent.evolution.eligibility import assess_candidate_eligibility
+from naumi_agent.evolution.eligibility import (
+    CandidateGovernanceContext,
+    assess_candidate_eligibility,
+)
 from naumi_agent.evolution.evidence import adapt_self_review_static_evidence
 from naumi_agent.evolution.self_review import scan_self_review_files
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -75,6 +78,67 @@ async def test_single_feedback_needs_more_evidence(tmp_path: Path) -> None:
     evidence = next(check for check in assessment.checks if check.code == "evidence_strength")
     assert evidence.passed is False
     assert "仅出现 1 次" in evidence.detail
+
+
+@pytest.mark.asyncio
+async def test_bound_active_cooldown_suppresses_review_ready(tmp_path: Path) -> None:
+    candidate = await _candidate(tmp_path, repeats=2)
+    assessment = assess_candidate_eligibility(
+        candidate,
+        governance=CandidateGovernanceContext(
+            allowed=False,
+            reason="cooldown_active",
+            proposal_state="rejected",
+            proposal_revision=2,
+            cooldown_until="2026-08-17T14:00:00+00:00",
+        ),
+    )
+
+    assert assessment.policy_version == "candidate-eligibility-v2"
+    assert assessment.decision == "needs_evidence"
+    assert assessment.review_ready is False
+    cooldown = next(check for check in assessment.checks if check.code == "cooldown_gate")
+    assert cooldown.passed is False
+    assert "2026-08-17" in cooldown.detail
+
+
+@pytest.mark.asyncio
+async def test_significant_evidence_context_restores_review_ready(tmp_path: Path) -> None:
+    candidate = await _candidate(tmp_path, repeats=4)
+    assessment = assess_candidate_eligibility(
+        candidate,
+        governance=CandidateGovernanceContext(
+            allowed=True,
+            reason="significant_new_evidence",
+            proposal_state="rejected",
+            proposal_revision=2,
+            cooldown_until="2026-08-17T14:00:00+00:00",
+            significant_new_evidence=True,
+        ),
+    )
+
+    assert assessment.decision == "review_ready"
+    assert assessment.review_ready is True
+    cooldown = next(check for check in assessment.checks if check.code == "cooldown_gate")
+    assert cooldown.passed is True
+    assert "显著新证据" in cooldown.detail
+
+
+@pytest.mark.asyncio
+async def test_inconsistent_governance_context_fails_closed(tmp_path: Path) -> None:
+    assessment = assess_candidate_eligibility(
+        await _candidate(tmp_path, repeats=2),
+        governance=CandidateGovernanceContext(
+            allowed=True,
+            reason="cooldown_active",
+            cooldown_until="2026-08-17T14:00:00+00:00",
+        ),
+    )
+
+    assert assessment.review_ready is False
+    cooldown = next(check for check in assessment.checks if check.code == "cooldown_gate")
+    assert cooldown.passed is False
+    assert "不一致" in cooldown.detail
 
 
 @pytest.mark.asyncio

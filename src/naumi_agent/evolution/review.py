@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
+    CandidateGovernanceContext,
     assess_candidate_eligibility,
 )
 from naumi_agent.evolution.proposal import (
@@ -19,6 +21,8 @@ from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
     EvolutionStoredCandidate,
 )
+from naumi_agent.workbench.models import RiskLevel, WorkbenchProposal
+from naumi_agent.workbench.proposal_governance import ProposalCooldownDecision
 
 _RISK_LEVELS = frozenset({"low", "medium", "high", "critical"})
 _SOURCE_KINDS = frozenset({
@@ -27,6 +31,16 @@ _SOURCE_KINDS = frozenset({
     "user_feedback",
     "agent_interpreted_feedback",
 })
+
+
+class CandidateGovernanceReader(Protocol):
+    async def evaluate_source_cooldowns(
+        self,
+        sources: list[tuple[str, int, int, RiskLevel]],
+    ) -> dict[
+        str,
+        tuple[WorkbenchProposal | None, ProposalCooldownDecision],
+    ]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +84,7 @@ class EvolutionReviewItem:
     expected_metrics: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     eligibility: CandidateEligibilityAssessment
+    governance: CandidateGovernanceContext | None
     aggregation: CandidateAggregation | None
     proposal: EvolutionProposalPreview | None
 
@@ -86,8 +101,18 @@ class EvolutionReviewSnapshot:
 class EvolutionReviewService:
     """Expose verified Candidate Store state without mutation actions."""
 
-    def __init__(self, store: EvolutionCandidateStore) -> None:
+    def __init__(
+        self,
+        store: EvolutionCandidateStore,
+        *,
+        governance_reader: CandidateGovernanceReader | None = None,
+    ) -> None:
         self._store = store
+        self._governance_reader = governance_reader
+
+    def bind_governance_reader(self, reader: CandidateGovernanceReader) -> None:
+        """Bind the durable read path after runtime services are composed."""
+        self._governance_reader = reader
 
     async def list_snapshot(
         self,
@@ -97,12 +122,18 @@ class EvolutionReviewService:
     ) -> EvolutionReviewSnapshot:
         active = filters or EvolutionReviewFilter()
         candidates = await self._store.list_candidates(workspace_root, limit=500)
+        selected = [candidate for candidate in candidates if _matches(candidate, active)][
+            : active.limit
+        ]
+        governance = await self._governance_contexts(selected)
         items = tuple(
-            item
-            for candidate in candidates
-            if _matches(candidate, active)
-            for item in (_review_item(candidate, include_refs=False),)
-        )[: active.limit]
+            _review_item(
+                candidate,
+                include_refs=False,
+                governance=governance.get(candidate.draft.candidate_id),
+            )
+            for candidate in selected
+        )
         return EvolutionReviewSnapshot(mode="list", items=items, filters=active)
 
     async def detail_snapshot(
@@ -114,11 +145,46 @@ class EvolutionReviewService:
         if stored is None:
             return EvolutionReviewSnapshot(mode="detail")
         events = await self._store.list_events(workspace_root, candidate_id)
+        governance = await self._governance_contexts([stored])
         return EvolutionReviewSnapshot(
             mode="detail",
-            selected=_review_item(stored, include_refs=True),
+            selected=_review_item(
+                stored,
+                include_refs=True,
+                governance=governance.get(candidate_id),
+            ),
             events=events[-100:],
         )
+
+    async def _governance_contexts(
+        self,
+        candidates: list[EvolutionStoredCandidate],
+    ) -> dict[str, CandidateGovernanceContext]:
+        if self._governance_reader is None or not candidates:
+            return {}
+        evaluated = await self._governance_reader.evaluate_source_cooldowns([
+            (
+                candidate.draft.candidate_id,
+                candidate.revision,
+                candidate.draft.occurrence_count,
+                RiskLevel(candidate.draft.risk.level),
+            )
+            for candidate in candidates
+        ])
+        contexts: dict[str, CandidateGovernanceContext] = {}
+        for candidate_id, (previous, decision) in evaluated.items():
+            contexts[candidate_id] = CandidateGovernanceContext(
+                allowed=decision.allowed,
+                reason=decision.reason,
+                proposal_state=previous.state.value if previous is not None else "",
+                proposal_revision=(
+                    previous.source_revision if previous is not None else 0
+                ),
+                cooldown_until=decision.cooldown_until,
+                significant_new_evidence=decision.significant_new_evidence,
+                policy_version=decision.policy_version,
+            )
+        return contexts
 
 
 def render_evolution_review(snapshot: EvolutionReviewSnapshot) -> str:
@@ -168,6 +234,19 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         f"- Provider：`{_escape(', '.join(item.providers) or '-')}`",
         f"- Model：`{_escape(', '.join(item.models) or '-')}`",
         f"- Platform：`{_escape(', '.join(item.platforms) or '-')}`",
+    ]
+    if item.governance is not None:
+        lines.extend([
+            "",
+            f"## Workbench 治理 · `{item.governance.policy_version}`",
+            "",
+            f"- 结论：`{item.governance.reason}`",
+            f"- 可重新审阅：{'是' if item.governance.allowed else '否'}",
+            f"- 最近 Proposal：`{item.governance.proposal_state or '-'}` / revision "
+            f"{item.governance.proposal_revision or '-'}",
+            f"- 冷却截止：`{_escape(item.governance.cooldown_until or '-')}`",
+        ])
+    lines.extend([
         "",
         "## 假设",
         "",
@@ -175,7 +254,7 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         "",
         "## 机械指标",
         "",
-    ]
+    ])
     lines.extend(f"- `{_escape(metric)}`" for metric in item.expected_metrics)
     if item.aggregation is not None:
         aggregate = item.aggregation
@@ -255,7 +334,10 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
     )
     lines.extend([
         "",
-        "> 当前仅供审查；完整实验 Eligibility、approve/reject/defer 尚未开放。",
+        (
+            "> Candidate 页面保持只读；治理动作由 Workbench 执行，"
+            "approved 仍不授予实验资格或执行权限。"
+        ),
     ])
     return "\n".join(lines)
 
@@ -264,6 +346,7 @@ def _review_item(
     stored: EvolutionStoredCandidate,
     *,
     include_refs: bool,
+    governance: CandidateGovernanceContext | None,
 ) -> EvolutionReviewItem:
     draft = stored.draft
     evidence = draft.evidence
@@ -300,9 +383,14 @@ def _review_item(
             if include_refs
             else ()
         ),
-        eligibility=assess_candidate_eligibility(draft),
+        eligibility=assess_candidate_eligibility(draft, governance=governance),
+        governance=governance,
         aggregation=aggregate_candidate(draft) if include_refs else None,
-        proposal=generate_proposal_preview(stored) if include_refs else None,
+        proposal=(
+            generate_proposal_preview(stored, governance=governance)
+            if include_refs
+            else None
+        ),
     )
 
 

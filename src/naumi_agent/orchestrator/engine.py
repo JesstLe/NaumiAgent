@@ -672,6 +672,7 @@ class AgentEngine:
             review_evidence_collector=self.review_evidence_collector,
             worktree_manager=self.worktree_manager,
         )
+        self.evolution_review_service.bind_governance_reader(self.workbench_service)
         self.evolution_proposal_queue = EvolutionProposalQueueAdapter(
             review_service=self.evolution_review_service,
             workbench_service=self.workbench_service,
