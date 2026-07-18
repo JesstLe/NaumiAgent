@@ -16,7 +16,8 @@ HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease wo
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
 browser/agent/runtime producer 和 Supervisor 仍未完成。
 HAR-10.6a 已把当前 Harness Store 升级到 v13，提供 durable interaction request/answer、timeout、takeover 与
-并发 fencing；Bridge/Pursuit/UI 接入属于 HAR-10.6b。
+并发 fencing；HAR-10.6b 已接入 New UI Bridge 和 Pursuit stable checkpoint/reconcile。Textual TUI durable
+parity、Goal interaction 状态页、显式 cancel 和 queue cursor 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

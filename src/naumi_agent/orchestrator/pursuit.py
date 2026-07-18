@@ -22,10 +22,11 @@ import shlex
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from naumi_agent.orchestrator.pursuit_action_ledger import (
     PursuitActionRecord,
@@ -41,6 +42,7 @@ from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointCriterion,
     CheckpointGoal,
     CheckpointInteraction,
+    CheckpointInteractionRef,
     CheckpointIteration,
     CheckpointWait,
     PursuitCheckpoint,
@@ -61,6 +63,7 @@ from naumi_agent.runtime.shell import pid_exists
 from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
+    from naumi_agent.harness.interaction import HarnessInteractionRecord
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
     from naumi_agent.orchestrator.pursuit_store import PursuitStore
@@ -71,6 +74,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ToolExecutor = Callable[[ToolCall], Awaitable[ToolResult]]
+
+
+class PursuitInteractionPort(Protocol):
+    async def get_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+    ) -> HarnessInteractionRecord | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitInteractionContext:
+    run_id: str
+    begin: Callable[[str, dict[str, Any]], Awaitable[None]]
+    resolve: Callable[[str, dict[str, str]], Awaitable[None]]
+
+
+_PURSUIT_INTERACTION_CONTEXT: ContextVar[PursuitInteractionContext | None] = (
+    ContextVar("naumi_pursuit_interaction_context", default=None)
+)
+
+
+def current_pursuit_interaction_context() -> PursuitInteractionContext | None:
+    """Return task-local durable interaction context, never process-global state."""
+    return _PURSUIT_INTERACTION_CONTEXT.get()
 
 _EXIT_CODE_RE = re.compile(r"\[exit code:\s*(-?\d+)\]", re.IGNORECASE)
 _LEGACY_FAILURE_RE = re.compile(
@@ -548,6 +577,7 @@ class GoalPursuitLoop:
         lease_port: PursuitLeasePort | None = None,
         workspace_root: str | Path | None = None,
         background_reconcile_source: BackgroundTaskLookup | None = None,
+        interaction_port: PursuitInteractionPort | None = None,
     ) -> None:
         self._router = router
         self._tools = tool_registry
@@ -562,6 +592,7 @@ class GoalPursuitLoop:
             else None
         )
         self._background_reconcile_source = background_reconcile_source
+        self._interaction_port = interaction_port
         if (self._lease_port is None) != (self._workspace_root is None):
             raise ValueError("Pursuit lease_port 与 workspace_root 必须同时提供。")
         self._history: list[IterationCheckpoint] = []
@@ -575,7 +606,9 @@ class GoalPursuitLoop:
         self._current_spec: GoalSpec | None = None
         self._checkpoint_sequence = 0
         self._pending_actions: list[str] = []
-        self._pending_interaction: CheckpointInteraction | None = None
+        self._pending_interaction: (
+            CheckpointInteractionRef | CheckpointInteraction | None
+        ) = None
         self._lease_session: PursuitLeaseSession | None = None
         self._operation_lock = asyncio.Lock()
         self._startup_event = asyncio.Event()
@@ -658,6 +691,60 @@ class GoalPursuitLoop:
                 f"checkpoint {next_sequence} 持久化失败（{type(exc).__name__}）。"
             ) from exc
         self._checkpoint_sequence = next_sequence
+
+    async def _begin_user_interaction(
+        self,
+        interaction_id: str,
+        _request: dict[str, Any],
+    ) -> None:
+        """Fence and checkpoint a stable authority reference before UI display."""
+        if self._run is None:
+            raise PursuitCheckpointPersistenceError("PursuitRun 未加载。")
+        await self._require_run_lease(f"interaction-begin-{interaction_id}")
+        self._pending_interaction = CheckpointInteractionRef(
+            interaction_id=interaction_id,
+        )
+        self._run.status = PursuitRunStatus.WAITING
+        self._run.phase = "interaction_required"
+        self._run.blocked_reason = "目标追踪正在等待用户回答。"
+        self._run.next_action = f"回答交互 {interaction_id} 后继续。"
+        self._run.updated_at = time.time()
+        self._persist_run()
+        self._persist_checkpoint()
+
+    async def _resolve_user_interaction(
+        self,
+        interaction_id: str,
+        response: dict[str, str],
+    ) -> None:
+        """Clear only the matching checkpoint reference after durable answer commit."""
+        if self._run is None:
+            raise PursuitCheckpointPersistenceError("PursuitRun 未加载。")
+        pending = self._pending_interaction
+        if (
+            pending is None
+            or pending.interaction_id != interaction_id
+        ):
+            raise PursuitCheckpointPersistenceError(
+                "interaction answer 与当前 checkpoint 引用不一致。"
+            )
+        await self._require_run_lease(f"interaction-answer-{interaction_id}")
+        summary = response.get("custom_text") or response.get("label") or "已回答"
+        self._run.add_evidence(PursuitEvidence(
+            kind="interaction",
+            source=interaction_id,
+            summary=checkpoint_safe_text(summary, limit=1_000),
+            is_hard=True,
+            timestamp=time.time(),
+        ))
+        self._pending_interaction = None
+        self._run.status = PursuitRunStatus.RUNNING
+        self._run.phase = "action_inflight"
+        self._run.blocked_reason = ""
+        self._run.next_action = "用户已回答，继续当前行动。"
+        self._run.updated_at = time.time()
+        self._persist_run()
+        self._persist_checkpoint()
 
     def _build_checkpoint(self, sequence: int) -> PursuitCheckpoint:
         """Build one strict checkpoint without raw tool output or unbounded history."""
@@ -909,6 +996,7 @@ class GoalPursuitLoop:
         checkpoint: PursuitCheckpoint,
         *,
         reconcile_blocker: str = "",
+        interaction_blocker: str = "",
     ) -> str:
         """Return a reason when resuming could duplicate or corrupt work."""
         if self._run is None:
@@ -935,6 +1023,8 @@ class GoalPursuitLoop:
         if checkpoint.worktree_path and not Path(checkpoint.worktree_path).is_dir():
             return f"checkpoint worktree 已不存在：{checkpoint.worktree_path}"
         if checkpoint.pending_interaction is not None:
+            if interaction_blocker:
+                return interaction_blocker
             return "目标正在等待用户交互，HAR-10.6 接入前不能消耗新的模型轮次。"
         if checkpoint.status in {
             "completed", "failed", "cancelled", "budget_exceeded",
@@ -947,6 +1037,89 @@ class GoalPursuitLoop:
         if checkpoint.phase == "execute" and checkpoint.pending_actions:
             return "旧版 checkpoint 无法证明计划行动是否已经发出，必须先核对外部副作用。"
         return ""
+
+    async def _reconcile_persisted_interaction(
+        self,
+        checkpoint: PursuitCheckpoint,
+    ) -> tuple[PursuitCheckpoint, str, str]:
+        """Resolve one stable authority reference before any resumed model turn."""
+        pending = checkpoint.pending_interaction
+        if pending is None:
+            return checkpoint, "", ""
+        if not isinstance(pending, CheckpointInteractionRef):
+            return (
+                checkpoint,
+                "旧版 checkpoint 仅保存了交互正文，缺少 durable authority 引用。",
+                "interaction_required",
+            )
+        if self._interaction_port is None or self._workspace_root is None:
+            return (
+                checkpoint,
+                "持久 interaction authority 未接入，拒绝猜测用户答案。",
+                "interaction_required",
+            )
+        record = await self._interaction_port.get_interaction(
+            workspace_root=self._workspace_root,
+            interaction_id=pending.interaction_id,
+        )
+        if record is None:
+            return (
+                checkpoint,
+                "checkpoint 引用的持久 interaction 不存在。",
+                "interaction_required",
+            )
+        if record.subject_kind != "pursuit" or (
+            self._run is None or record.subject_id != self._run.id
+        ):
+            return (
+                checkpoint,
+                "interaction subject 与当前 PursuitRun 不一致。",
+                "interaction_required",
+            )
+        if record.state == "pending":
+            return (
+                checkpoint,
+                f"目标仍在等待交互 {record.interaction_id} 的用户回答。",
+                "interaction_required",
+            )
+        if record.state in {"expired", "cancelled"}:
+            terminal_label = "超时" if record.state == "expired" else "取消"
+            return (
+                checkpoint,
+                f"交互 {record.interaction_id} 已{terminal_label}，"
+                "需要用户重新决定后才能继续。",
+                "interaction_expired",
+            )
+        if self._store is None or self._run is None:
+            raise PursuitCheckpointPersistenceError("Pursuit 持久存储未初始化。")
+        await self._require_run_lease(f"interaction-reconcile-{record.interaction_id}")
+        if not any(
+            item.kind == "interaction" and item.source == record.interaction_id
+            for item in (self._run.evidence or [])
+        ):
+            summary = record.custom_text or record.answer_label or "已回答"
+            self._run.add_evidence(PursuitEvidence(
+                kind="interaction",
+                source=record.interaction_id,
+                summary=checkpoint_safe_text(summary, limit=1_000),
+                is_hard=True,
+                timestamp=time.time(),
+            ))
+            self._persist_run()
+        payload = checkpoint.model_dump(mode="python")
+        payload.update({
+            "sequence": checkpoint.sequence + 1,
+            "created_at": time.time(),
+            "phase": "interaction_answered",
+            "pending_interaction": None,
+            "evidence_cursor": len(self._run.evidence or []),
+            "next_action": "用户答案已核对；恢复后重新评估当前状态。",
+        })
+        resolved = PursuitCheckpoint.model_validate(payload)
+        self._store.save_checkpoint(resolved)
+        self._checkpoint_sequence = resolved.sequence
+        self._pending_interaction = None
+        return resolved, "", ""
 
     async def _reconcile_inflight_checkpoint(
         self,
@@ -1113,6 +1286,13 @@ class GoalPursuitLoop:
 
         self._run = run
         self._pending_background = list(run.waiting_on or [])
+        interaction_token = _PURSUIT_INTERACTION_CONTEXT.set(
+            PursuitInteractionContext(
+                run_id=run.id,
+                begin=self._begin_user_interaction,
+                resolve=self._resolve_user_interaction,
+            )
+        )
         try:
             await self._open_run_lease(run.id)
             await self._require_run_lease("resume-start")
@@ -1120,9 +1300,14 @@ class GoalPursuitLoop:
                 await self._collect_background_results()
 
             reconcile_blocker = ""
+            interaction_blocker = ""
+            interaction_phase = "interaction_required"
             if checkpoint is not None:
                 checkpoint, reconcile_blocker = (
                     await self._reconcile_inflight_checkpoint(checkpoint)
+                )
+                checkpoint, interaction_blocker, interaction_phase = (
+                    await self._reconcile_persisted_interaction(checkpoint)
                 )
 
             await self._require_run_lease("resume-commit")
@@ -1143,11 +1328,12 @@ class GoalPursuitLoop:
                 blocker = self._checkpoint_resume_blocker(
                     checkpoint,
                     reconcile_blocker=reconcile_blocker,
+                    interaction_blocker=interaction_blocker,
                 )
                 if blocker:
                     self._run.status = PursuitRunStatus.BLOCKED
                     self._run.phase = (
-                        "interaction_required"
+                        interaction_phase
                         if checkpoint.pending_interaction is not None
                         else "reconcile_required"
                     )
@@ -1208,7 +1394,10 @@ class GoalPursuitLoop:
             self._mark_checkpoint_error(exc)
             return f"目标追踪恢复已安全停止：{exc}"
         finally:
-            await self._close_run_lease()
+            try:
+                await self._close_run_lease()
+            finally:
+                _PURSUIT_INTERACTION_CONTEXT.reset(interaction_token)
 
     def _update_run(
         self,
@@ -1566,6 +1755,13 @@ class GoalPursuitLoop:
             started_at=self._start_time,
             updated_at=self._start_time,
         )
+        interaction_token = _PURSUIT_INTERACTION_CONTEXT.set(
+            PursuitInteractionContext(
+                run_id=self._run.id,
+                begin=self._begin_user_interaction,
+                resolve=self._resolve_user_interaction,
+            )
+        )
         try:
             try:
                 await self._open_run_lease(self._run.id)
@@ -1596,7 +1792,10 @@ class GoalPursuitLoop:
                 self._mark_checkpoint_error(exc)
                 return f"目标追踪已安全停止：{exc}"
         finally:
-            await self._close_run_lease()
+            try:
+                await self._close_run_lease()
+            finally:
+                _PURSUIT_INTERACTION_CONTEXT.reset(interaction_token)
 
     async def _pursue_under_lease(
         self,
@@ -1748,6 +1947,9 @@ class GoalPursuitLoop:
                     )
                     self._persist_checkpoint(spec)
                     await self._execute_actions(spec, recovery)
+                    if self._pending_interaction is not None:
+                        self._persist_checkpoint(spec)
+                        return self._interaction_wait_receipt()
                     await self._require_run_lease(
                         f"iteration-{iteration}-recovery-result"
                     )
@@ -1799,6 +2001,9 @@ class GoalPursuitLoop:
             )
             self._persist_checkpoint(spec)
             results = await self._execute_actions(spec, actions)
+            if self._pending_interaction is not None:
+                self._persist_checkpoint(spec)
+                return self._interaction_wait_receipt()
             await self._require_run_lease(f"iteration-{iteration}-execute-result")
 
             # Store results for next iteration's evidence
@@ -1832,6 +2037,16 @@ class GoalPursuitLoop:
         # Generate final report
         report = await self._generate_report(spec, status)
         return report
+
+    def _interaction_wait_receipt(self) -> str:
+        pending = self._pending_interaction
+        interaction_id = pending.interaction_id if pending is not None else "未知"
+        return (
+            "目标追踪已安全暂停，正在等待用户回答。\n\n"
+            f"- interaction_id: `{interaction_id}`\n"
+            "- 等待期间不会继续消耗模型轮次。\n"
+            "- 回答后可使用 `/pursue resume` 核对并继续。"
+        )
 
     # ------------------------------------------------------------------
     #  Phase 0: Goal parsing

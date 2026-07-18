@@ -90,6 +90,14 @@ class HarnessInteractionRecord(_StrictInteractionModel):
             _aware(self.expires_at, "expires_at")
             if _parsed(self.expires_at) <= _parsed(self.created_at):
                 raise ValueError("expires_at 必须晚于 created_at。")
+            timeout_seconds = (
+                _parsed(self.expires_at) - _parsed(self.created_at)
+            ).total_seconds()
+            if (
+                not timeout_seconds.is_integer()
+                or not 3 <= timeout_seconds <= 604_800
+            ):
+                raise ValueError("interaction timeout 必须是 3..604800 的整数秒。")
         if len({option.value for option in self.options}) != len(self.options):
             raise ValueError("interaction 选项 value 不能重复。")
         durable_text = (
@@ -141,6 +149,11 @@ class HarnessInteractionRecord(_StrictInteractionModel):
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
 
     def request(self) -> UserInteractionRequest:
+        timeout_seconds = (
+            int((_parsed(self.expires_at) - _parsed(self.created_at)).total_seconds())
+            if self.expires_at
+            else None
+        )
         return UserInteractionRequest(
             header=self.header,
             question=self.question,
@@ -154,6 +167,7 @@ class HarnessInteractionRecord(_StrictInteractionModel):
             ),
             allow_custom=self.allow_custom,
             custom_label=self.custom_label,
+            timeout_seconds=timeout_seconds,
         )
 
 

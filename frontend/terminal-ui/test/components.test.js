@@ -120,6 +120,15 @@ test("interaction card and footer expose choices, custom input, and answered sta
   } }), { width: 52 }).map(stripAnsi).join("\n");
   assert.match(answered, /已回答/);
   assert.match(answered, /由配置决定/);
+
+  const expired = renderComponent(InteractionCard({ interaction: {
+    ...payload,
+    status: "expired",
+    reason: "等待用户回答超时。",
+  } }), { width: 52 }).map(stripAnsi).join("\n");
+  assert.match(expired, /已超时/);
+  assert.match(expired, /等待用户回答超时/);
+  assert.doesNotMatch(expired, /工作区.*同一仓库共享/);
 });
 
 test("completion receipt card exposes evidence, risk, and recovery in Chinese", () => {

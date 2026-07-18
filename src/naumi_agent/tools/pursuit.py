@@ -14,6 +14,7 @@ from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 if TYPE_CHECKING:
+    from naumi_agent.orchestrator.pursuit import PursuitInteractionPort
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
     from naumi_agent.runtime.ports.model import ModelPort
@@ -35,6 +36,7 @@ def set_pursuit_dependencies(
     lease_port: PursuitLeasePort | None = None,
     workspace_root: str | Path | None = None,
     background_reconcile_source: BackgroundTaskLookup | None = None,
+    interaction_port: PursuitInteractionPort | None = None,
 ) -> None:
     """Inject dependencies needed by the pursuit tool."""
     global _global_pursuit_loop
@@ -47,6 +49,7 @@ def set_pursuit_dependencies(
         lease_port=lease_port,
         workspace_root=workspace_root,
         background_reconcile_source=background_reconcile_source,
+        interaction_port=interaction_port,
     )
 
 
@@ -136,6 +139,7 @@ class PursueTool(Tool):
             lease_port=loop._lease_port,
             workspace_root=loop._workspace_root,
             background_reconcile_source=loop._background_reconcile_source,
+            interaction_port=loop._interaction_port,
         )
 
         try:

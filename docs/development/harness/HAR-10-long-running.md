@@ -44,7 +44,10 @@
   - HAR-10.6a 已实现 Harness DB v13 durable interaction authority、append-only hash chain、timeout、owner
     lease/epoch takeover 和并发 answer fencing；见
     [设计](HAR-10-6a-durable-interaction-authority.md)；
-  - 未完成：Bridge/Pursuit 写回、重开重放、checkpoint 引用、UI-18.4 与显式 cancel。
+  - HAR-10.6b 已实现 New UI Bridge create-before-display、answer-before-release、租约到期重放，以及 Pursuit
+    stable checkpoint ref 和 answered/expired resume reconcile；见
+    [设计](HAR-10-6b-interaction-runtime-integration.md)；
+  - 未完成：TUI durable parity、Goal interaction 状态页、显式 cancel、cursor/优先级与跨 Store 原子提交。
 - HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
@@ -67,8 +70,9 @@ ARC-01.4b2e 只解决资源归属和稳定引用。HAR-10.1a 已在 Harness sche
 fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入，HAR-10.4a/4b 已交付权威 checkpoint 与安全
 continuation，HAR-10.5a/5b 已让 shell/background 行动在外部派发前进入持久账本并用 caller key 复用后台
 task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting/terminal/continue，HAR-10.2a/2b 已
-交付 Pursuit worker heartbeat 与用户可见的 recovery 聚合；同步 shell、browser/agent/runtime 逐域接入、
-跨进程/跨 Store 原子性、heartbeat 多域接入和 interaction queue 仍属于后续实现。
+交付 Pursuit worker heartbeat 与用户可见的 recovery 聚合，HAR-10.6a/6b 已交付 durable interaction
+authority 与首个 New UI/Pursuit 接入；同步 shell、browser/agent/runtime 逐域接入、TUI interaction parity、
+跨进程/跨 Store 原子性、heartbeat 多域接入和 durable queue 仍属于后续实现。
 
 ## 验收标准
 

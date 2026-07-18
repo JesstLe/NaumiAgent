@@ -2042,7 +2042,7 @@ export function handleInteractionResolved(state, payload) {
   const card = state.messages.find(
     (message) => message.kind === "interaction" && message.requestId === requestId,
   );
-  if (card) card.message = { ...(card.message ?? {}), ...payload, status: "answered" };
+  if (card) card.message = { ...(card.message ?? {}), ...payload, status: payload.status };
   if (state.interaction?.requestId === requestId) {
     state.interaction = state.interactionQueue.shift() ?? null;
     if (state.interaction) {

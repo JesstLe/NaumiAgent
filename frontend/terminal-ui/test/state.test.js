@@ -382,6 +382,26 @@ test("interaction requests queue in arrival order and promote after resolution",
   );
 });
 
+test("expired interaction closes the active card and promotes the queue", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, interactionRecord("ask-expired"));
+  reduceServerEvent(state, interactionRecord("ask-after-expired", "后续问题"));
+
+  reduceServerEvent(state, {
+    type: "interaction/resolved",
+    payload: {
+      request_id: "ask-expired",
+      status: "expired",
+      reason: "等待用户回答超时。",
+    },
+  });
+
+  assert.equal(state.interaction.requestId, "ask-after-expired");
+  const expired = state.messages.find((message) => message.requestId === "ask-expired");
+  assert.equal(expired.message.status, "expired");
+  assert.equal(expired.message.reason, "等待用户回答超时。");
+});
+
 test("interaction keyboard selects options once and supports custom input editing", () => {
   const state = createInitialState();
   const sent = [];

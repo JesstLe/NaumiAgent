@@ -6,7 +6,7 @@
 答案也不能依赖“第一个写入者碰巧成功”。本切片在 Harness DB v13 建立 append-only interaction authority，
 覆盖 Pursuit、tool、browser、agent 和 runtime 五类 subject。
 
-本切片交付存储与状态迁移核心；Pursuit checkpoint 引用、Bridge 重放和 UI-18.4 页面属于 HAR-10.6b。
+本切片交付存储与状态迁移核心；HAR-10.6b 已在其上接入 Pursuit checkpoint、Bridge fenced answer 与重放。
 
 ## Typed record
 
@@ -56,14 +56,15 @@ Harness DB v13 新增：
 - v1/v2/v3/v4/v8/v11/v12 旧 Harness DB 通过 additive schema v13 初始化且原记录保留；
 - 只运行 interaction authority、schema migration 与受版本影响的精确测试节点。
 
-## 当前不足与下一切片
+## 后续接入状态与当前不足
 
-- Bridge 尚未在 request/resolve 时调用 authority，进程重开不会自动重放 pending 问题；
-- Pursuit `CheckpointInteraction` 尚未只引用 stable interaction ID，resume 仍停在 `interaction_required`；
-- 没有 answer 消费确认、Pursuit answer→checkpoint 的同库原子事务，跨 Harness/Pursuit Store 仍需 reconcile；
-- UI-18.4 尚未显示 durable pending/expired/takeover 状态；
+- HAR-10.6b 已实现 Bridge create-before-display、answer-before-release、expired-owner takeover/replay；
+- Pursuit checkpoint 已改为 stable interaction ID 引用，resume 从 authority 机械区分 pending、answered、
+  expired/cancelled，answered 可幂等补写 hard evidence；
+- Harness/Pursuit 两个 Store 仍无同库原子事务，当前以 authority-first 顺序和 resume reconcile 收敛；
+- New UI 已消费重放的 typed card 与 timeout；TUI durable parity 和 Goal 页面 pending/takeover 状态仍未完成；
 - cancelled 已保留为合法终态，但显式 cancel authority 尚未开放；
 - 当前正文是脱敏明文而非加密存储；密钥管理与 at-rest encryption 属于 ARC-08/打包安全路线。
 
-下一切片 HAR-10.6b 应把 Bridge/Pursuit 接入本 authority：问题先持久化再展示，答案先 fenced commit 再解除
-Future，checkpoint 只保存 interaction ID，resume 从 answered/expired 权威事实继续且不额外消耗模型轮次。
+运行时接入与验收证据见
+[HAR-10.6b](HAR-10-6b-interaction-runtime-integration.md)。

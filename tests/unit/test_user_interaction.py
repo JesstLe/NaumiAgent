@@ -47,6 +47,9 @@ def test_interaction_request_normalizes_public_fields_and_control_text() -> None
         ({"options": [*_options(), _options()[0]]}, "选项 value 不能重复"),
         ({"header": "x" * 41}, "标题最多 40 个字符"),
         ({"question": "x" * 2001}, "问题最多 2000 个字符"),
+        ({"allow_custom": "false"}, "allow_custom 必须是布尔值"),
+        ({"timeout_seconds": 2}, "交互超时必须在"),
+        ({"timeout_seconds": True}, "交互超时必须是整数秒"),
     ],
 )
 def test_interaction_request_rejects_invalid_boundaries(
