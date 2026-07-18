@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,9 @@ from naumi_agent.config.settings import (
 from naumi_agent.harness.feedback import build_direct_user_feedback
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter, StreamChunk, TokenUsage
+from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.dependencies import RuntimePortOverrides
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
@@ -66,6 +70,8 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     assert engine.chat_run_store is engine._resources.chat_run_store
     assert engine.task_store is engine._resources.task_store
     assert engine.workbench_store is engine._resources.workbench_store
+    assert engine.goal_store is engine._resources.goal_store
+    assert engine.pursuit_store is engine._resources.pursuit_store
     assert engine.workbench_service._task_store is engine._resources.task_store
     assert (
         engine.workbench_service._workbench_store
@@ -76,6 +82,28 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
         is engine._resources.evolution_candidate_store
     )
     assert engine.harness_service._trust_store is engine._resources.harness_trust_store
+    goal = engine.goal_store.create("验证 Goal/Pursuit 资源关联", session_id="session-link")
+    now = time.time()
+    run = PursuitRun(
+        id="pursuit_composition_link",
+        goal=goal.objective,
+        status=PursuitRunStatus.RUNNING,
+        phase="assess",
+        started_at=now,
+        updated_at=now,
+    )
+    engine.pursuit_store.save_run(run)
+    linked = engine.goal_store.attach_pursuit(goal.id, run.id)
+
+    reopened_goal = GoalStore(engine._paths.goal_storage_dir).get(goal.id)
+    reopened_run = PursuitStore(engine._paths.pursuit_storage_dir).get_run(run.id)
+    assert linked.pursuit_run_id == run.id
+    assert reopened_goal is not None
+    assert reopened_goal.pursuit_run_id == run.id
+    assert reopened_run is not None
+    assert reopened_run.id == run.id
+    assert reopened_run.goal == run.goal
+    assert reopened_run.status is PursuitRunStatus.RUNNING
     call_count = 0
 
     async def stream_response(**_: object):

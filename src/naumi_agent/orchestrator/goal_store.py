@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -80,7 +81,8 @@ class GoalStore:
     def __init__(self, base_dir: str | Path) -> None:
         self._base_dir = Path(base_dir).resolve()
         self._db_path = self._base_dir / "goals.db"
-        self._init_db()
+        self._initialized = False
+        self._initialize_lock = threading.Lock()
 
     @property
     def base_dir(self) -> Path:
@@ -234,35 +236,45 @@ class GoalStore:
         return updated
 
     def _connect(self) -> sqlite3.Connection:
+        self._ensure_initialized()
+        return self._open_connection()
+
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_db(self) -> None:
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS goals (
-                    id TEXT PRIMARY KEY,
-                    objective TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    note TEXT NOT NULL DEFAULT '',
-                    session_id TEXT NOT NULL DEFAULT '',
-                    pursuit_run_id TEXT NOT NULL DEFAULT '',
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
+    def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+        with self._initialize_lock:
+            if self._initialized:
+                return
+            self._base_dir.mkdir(parents=True, exist_ok=True)
+            with self._open_connection() as conn:
+                conn.execute("PRAGMA journal_mode = WAL")
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS goals (
+                        id TEXT PRIMARY KEY,
+                        objective TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        note TEXT NOT NULL DEFAULT '',
+                        session_id TEXT NOT NULL DEFAULT '',
+                        pursuit_run_id TEXT NOT NULL DEFAULT '',
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            conn.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS goals_one_unfinished
-                ON goals ((1))
-                WHERE status IN ('active', 'paused', 'blocked')
-                """
-            )
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS goals_one_unfinished
+                    ON goals ((1))
+                    WHERE status IN ('active', 'paused', 'blocked')
+                    """
+                )
+            self._initialized = True
 
 
 def format_goal(goal: Goal) -> str:

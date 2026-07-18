@@ -46,6 +46,7 @@ API，不是默认资源重建。
 本切片保留了现有共享 SQLite 架构，并用运行时 invariant 防止 override 拆库；没有创建第二套 Task API，
 也没有把 UI snapshot 当作状态权威。
 
-仍未完成 Goal/Pursuit、Background/Scheduler、Browser/Daemon、Worktree 资源及统一生命周期；Task 与
+ARC-01.4b2e 已完成 Goal/Pursuit 资源对。仍未完成 Background/Scheduler、Browser/Daemon、Worktree
+资源及统一生命周期；Task 与
 Workbench 的长期 Service 构造仍位于 Engine，属于 ARC-01.4c。ARC-02 command/task API、lease owner、
 cursor/resume 和 UI-11 全屏导航也尚未实现，因此相关模块继续保持 partial/planned。

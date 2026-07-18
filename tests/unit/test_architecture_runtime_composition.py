@@ -15,10 +15,12 @@ _BANNED_ENGINE_NAMES = {
     "EvolutionCandidateStore",
     "HarnessStore",
     "HarnessTrustStore",
+    "GoalStore",
     "LocalToolExecutor",
     "ModelRouter",
     "NullEventSink",
     "PermissionChecker",
+    "PursuitStore",
     "SessionStore",
     "TaskStore",
     "WorkbenchStore",
@@ -123,6 +125,15 @@ def test_only_composition_root_constructs_chat_run_store() -> None:
     calls = _constructor_paths(SOURCE_ROOT, {"ChatRunStore"})
 
     assert calls == {"ChatRunStore": [COMPOSITION_PATH]}
+
+
+def test_only_composition_root_constructs_goal_and_pursuit_stores() -> None:
+    calls = _constructor_paths(SOURCE_ROOT, {"GoalStore", "PursuitStore"})
+
+    assert calls == {
+        "GoalStore": [COMPOSITION_PATH],
+        "PursuitStore": [COMPOSITION_PATH],
+    }
 
 
 def test_task_and_workbench_default_resources_have_owned_constructors() -> None:

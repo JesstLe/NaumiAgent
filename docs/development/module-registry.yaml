@@ -1,7 +1,7 @@
 schema_version: 1
 updated_at: "2026-07-18"
 statuses: [implemented, partial, planned, blocked, superseded]
-implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, HAR-09.2a, HAR-09.3a, UI-11.1a, UI-13.1a, CC-01.1a, ARC-03.2a, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a, EVO-01.4a, EVO-01.6a, EVO-01.6a1, EVO-02.5c1, EVO-02.5c2a, EVO-02.5c2b]
+implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, HAR-09.2a, HAR-09.3a, UI-11.1a, UI-13.1a, CC-01.1a, ARC-01.4b2e, ARC-03.2a, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a, EVO-01.4a, EVO-01.6a, EVO-01.6a1, EVO-02.5c1, EVO-02.5c2a, EVO-02.5c2b]
 modules:
   - {id: HAR-05, status: implemented, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
   - {id: HAR-06, status: implemented, path: harness/HAR-06-session-lifecycle.md, depends_on: [HAR-05]}
@@ -16,13 +16,14 @@ modules:
   - {id: UI-14, status: planned, path: cli-ui/UI-14-navigation-input.md, depends_on: []}
   - {id: UI-15, status: planned, path: cli-ui/UI-15-performance.md, depends_on: []}
   - {id: UI-16, status: planned, path: cli-ui/UI-16-platform-accessibility.md, depends_on: []}
-  - {id: UI-17, status: planned, path: cli-ui/UI-17-parity-release.md, depends_on: [UI-10, UI-11, UI-12, UI-13, UI-14, UI-15, UI-16]}
+  - {id: UI-17, status: planned, path: cli-ui/UI-17-parity-release.md, depends_on: [UI-10, UI-11, UI-12, UI-13, UI-14, UI-15, UI-16, UI-18]}
+  - {id: UI-18, status: planned, path: cli-ui/UI-18-goal-pursuit.md, depends_on: [ARC-01]}
   - {id: CC-01, status: partial, path: claude-source/CC-01-source-governance.md, depends_on: []}
   - {id: CC-02, status: planned, path: claude-source/CC-02-ink-spike.md, depends_on: [CC-01, ARC-03, UI-15]}
   - {id: CC-03, status: planned, path: claude-source/CC-03-component-alignment.md, depends_on: [CC-01, UI-11, UI-12, UI-13]}
   - {id: CC-04, status: planned, path: claude-source/CC-04-extension-alignment.md, depends_on: [ARC-01]}
   - {id: CC-05, status: planned, path: claude-source/CC-05-upstream-regression.md, depends_on: [CC-01]}
-  - {id: ARC-01, status: planned, path: architecture/ARC-01-domain-boundaries.md, depends_on: []}
+  - {id: ARC-01, status: partial, path: architecture/ARC-01-domain-boundaries.md, depends_on: []}
   - {id: ARC-02, status: planned, path: architecture/ARC-02-runtime-service.md, depends_on: [ARC-01, ARC-03]}
   - {id: ARC-03, status: partial, path: architecture/ARC-03-protocol-versioning.md, depends_on: []}
   - {id: ARC-04, status: planned, path: architecture/ARC-04-execution-daemons.md, depends_on: [ARC-02, ARC-03]}

@@ -88,9 +88,7 @@ from naumi_agent.orchestrator.context_assembly import (
     HarnessContextInput,
     is_harness_context_message,
 )
-from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
-from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -767,10 +765,8 @@ class AgentEngine:
         self.scheduler_runner = SchedulerRunner(
             SchedulerStore(self._runtime_data_dir / "scheduler")
         )
-        self.goal_store = GoalStore(self._runtime_data_dir / "goals")
-        self.pursuit_store = PursuitStore(
-            self._runtime_data_dir / "pursuit"
-        )
+        self.goal_store = resources.goal_store
+        self.pursuit_store = resources.pursuit_store
         self.runtime_inspector = RuntimeInspectorService(self)
 
         self._mcp_manager: MCPClientManager | None = None

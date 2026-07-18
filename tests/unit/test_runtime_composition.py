@@ -16,6 +16,8 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter
+from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.composition import (
     build_runtime_paths,
@@ -93,6 +95,8 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
+    assert paths.goal_storage_dir == paths.runtime_data_dir / "goals"
+    assert paths.pursuit_storage_dir == paths.runtime_data_dir / "pursuit"
     assert paths.harness_db_path == state_home.resolve() / "harness.db"
     assert paths.harness_trust_db_path == state_home.resolve() / "harness-trust.db"
     assert paths.evolution_db_path == state_home.resolve() / "evolution.db"
@@ -107,6 +111,8 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "runtime_data_dir": absolute / "data",
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
         "worktree_storage_dir": absolute / "data" / "worktrees",
+        "goal_storage_dir": absolute / "data" / "goals",
+        "pursuit_storage_dir": absolute / "data" / "pursuit",
         "harness_db_path": absolute / "state" / "harness.db",
         "harness_trust_db_path": absolute / "state" / "harness-trust.db",
         "evolution_db_path": absolute / "state" / "evolution.db",
@@ -158,6 +164,8 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
+    goal_store = GoalStore(tmp_path / "custom-goals")
+    pursuit_store = PursuitStore(tmp_path / "custom-pursuit")
     shared_db = tmp_path / "custom-runtime.db"
     task_store = TaskStore(str(shared_db))
     workbench_store = WorkbenchStore(str(shared_db))
@@ -168,6 +176,8 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
             evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
+            goal_store=goal_store,
+            pursuit_store=pursuit_store,
             task_store=task_store,
             workbench_store=workbench_store,
         ),
@@ -177,6 +187,8 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
+    assert defaults.goal_store.base_dir == paths.goal_storage_dir
+    assert defaults.pursuit_store.base_dir == paths.pursuit_storage_dir
     assert defaults.task_store.db_path == paths.session_db_path
     assert defaults.workbench_store.db_path == paths.session_db_path
     assert overridden.evolution_candidate_store is evolution_store
@@ -185,6 +197,10 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert overridden.workbench_store is workbench_store
     assert overridden.harness_store is falsey_store
     assert overridden.harness_trust_store is trust_store
+    assert overridden.goal_store is goal_store
+    assert overridden.pursuit_store is pursuit_store
+    assert not paths.goal_storage_dir.exists()
+    assert not paths.pursuit_storage_dir.exists()
     assert not (tmp_path / "state").exists()
 
 
@@ -221,6 +237,8 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
             ),
             harness_store=object(),  # type: ignore[arg-type]
             harness_trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+            goal_store=GoalStore(tmp_path / "goals"),
+            pursuit_store=PursuitStore(tmp_path / "pursuit"),
             task_store=TaskStore(str(tmp_path / "runtime.db")),
             workbench_store=WorkbenchStore(str(tmp_path / "runtime.db")),
         )
@@ -236,6 +254,8 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
             evolution_candidate_store=defaults.evolution_candidate_store,
             harness_store=defaults.harness_store,
             harness_trust_store=defaults.harness_trust_store,
+            goal_store=defaults.goal_store,
+            pursuit_store=defaults.pursuit_store,
             task_store=TaskStore(str(tmp_path / "tasks.db")),
             workbench_store=WorkbenchStore(str(tmp_path / "workbench.db")),
         )

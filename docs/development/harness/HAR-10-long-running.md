@@ -22,6 +22,15 @@ Pursuit 提供目标分解/评估/行动；HAR-10 提供可靠运行控制和完
 worker lease，Harness 不重新实现 goal planner。Goal、Pursuit、Harness Run 通过稳定 ID
 关联。
 
+## 已完成前置
+
+ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 和运行时资源所有权收口，
+并验证 Goal 的 `pursuit_run_id` 在 Store 重开后仍能恢复对应 PursuitRun。下一步 UI 可以读取类型化权威
+状态，不需要解析 `/goal` 或 `/pursue` 文本。
+
+这只解决资源归属和稳定引用，不代表 HAR-10 已开始交付：跨 Store 原子性、lease/epoch、heartbeat、
+checkpoint、interaction queue、reconcile 与 destructive action 幂等仍全部属于本模块后续实现。
+
 ## 验收标准
 
 - 杀死 runtime 后在新进程恢复，不重复已经完成的 destructive action。

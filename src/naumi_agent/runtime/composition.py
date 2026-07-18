@@ -18,6 +18,8 @@ from naumi_agent.harness.trust import (
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter
+from naumi_agent.orchestrator.goal_store import GoalStore
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.dependencies import (
     RuntimePortOverrides,
@@ -106,6 +108,8 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         runtime_data_dir=runtime_data_dir,
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
         worktree_storage_dir=runtime_data_dir / "worktrees",
+        goal_storage_dir=runtime_data_dir / "goals",
+        pursuit_storage_dir=runtime_data_dir / "pursuit",
         harness_db_path=resolve_harness_db_path(),
         harness_trust_db_path=resolve_harness_trust_db_path(),
         evolution_db_path=resolve_evolution_db_path(),
@@ -119,7 +123,7 @@ def build_runtime_resources(
     *,
     overrides: RuntimeResourceOverrides | None = None,
 ) -> RuntimeResources:
-    """Build Harness resources without opening databases or creating directories."""
+    """Build typed runtime resources without opening databases or starting work."""
     if not isinstance(paths, RuntimePaths):
         raise TypeError("paths 必须是完整的 RuntimePaths。")
     resolved = RuntimeResourceOverrides() if overrides is None else overrides
@@ -143,6 +147,14 @@ def build_runtime_resources(
     if harness_trust_store is None:
         harness_trust_store = HarnessTrustStore(paths.harness_trust_db_path)
 
+    goal_store = resolved.goal_store
+    if goal_store is None:
+        goal_store = GoalStore(paths.goal_storage_dir)
+
+    pursuit_store = resolved.pursuit_store
+    if pursuit_store is None:
+        pursuit_store = PursuitStore(paths.pursuit_storage_dir)
+
     task_store = resolved.task_store
     if task_store is None:
         task_store = TaskStore(str(paths.session_db_path))
@@ -156,6 +168,8 @@ def build_runtime_resources(
         evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,
+        goal_store=goal_store,
+        pursuit_store=pursuit_store,
         task_store=task_store,
         workbench_store=workbench_store,
     )

@@ -15,4 +15,5 @@ inspector、agent control center、tasks、permissions、history、heartbeat、w
 
 ## 未来顺序
 
-UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-17 是统一发布门。
+UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-18 按 Goal/Pursuit 后端依赖分段推进；
+UI-17 是统一发布门。

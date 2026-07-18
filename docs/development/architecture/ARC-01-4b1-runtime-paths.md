@@ -18,11 +18,12 @@ Resource，不引入生命周期管理，也不开始 ARC-02/04。
 - `runtime_data_dir`：session DB 的父目录；
 - `chat_run_db_path`：UI history、timeline 与 completion receipt 的 durable run 数据库；
 - `worktree_storage_dir`：Runtime 管理的 worktree 根；
+- `goal_storage_dir`、`pursuit_storage_dir`：Goal 与 Pursuit 的工作区运行状态目录；
 - `harness_db_path`、`harness_trust_db_path`：工作区之外的用户状态数据库；
 - `evolution_db_path`：工作区之外的自进化 Candidate 用户状态数据库；
 - `browser_data_dir`、`browser_daemon_log_dir`：浏览器持久状态和 daemon 日志目录。
 
-worktree/browser 三个 Runtime-owned 目录必须位于 `runtime_data_dir` 内。构造只解析路径，不创建目录、
+worktree/goal/pursuit/browser 五个 Runtime-owned 目录必须位于 `runtime_data_dir` 内。构造只解析路径，不创建目录、
 数据库或后台任务。bypass 只影响 PermissionPort 的授权决策，不改变 `workspace_root` 或路径边界。
 
 ## 权威装配顺序
@@ -47,7 +48,7 @@ PermissionChecker 的 workspace/worktree allowlist 与 Engine 的 Harness/Browse
 
 ## 验收证据
 
-- 单元测试验证七个绝对路径、用户状态目录未被创建、relative/escape 拒绝；
+- 单元测试验证全部规范绝对路径、用户状态目录未被创建、relative/escape 拒绝；
 - Composition 测试验证 Paths 只构建一次，同一对象传给 Port builder 与 Engine；
 - AST gate 验证生产 `AgentEngine` 构造同时显式传 `ports` 与 `paths`，纯路径合同不导入 config/adapter；
 - 真实小场景从 Composition Root 创建 Engine，读取文件、执行流式工具、持久化 session/receipt，
@@ -60,7 +61,8 @@ PermissionChecker 的 workspace/worktree allowlist 与 Engine 的 Harness/Browse
 - ARC-01.4b2b 已完成：EvolutionCandidateStore 已迁入同一 typed `RuntimeResources`；
 - ARC-01.4b2c 已完成：ChatRunStore 已迁入同一 typed `RuntimeResources`；
 - ARC-01.4b2d 已完成：TaskStore/WorkbenchStore 作为共享数据库资源对迁入；
-- ARC-01.4b2e：继续迁移 Goal/Pursuit 等无后台任务 Store，再处理 Runner/Browser；
+- ARC-01.4b2e 已完成：GoalStore/PursuitStore 以 lazy initialization 资源对迁入；
+- 后续只在能解锁用户表面或可靠性能力时迁移 Background/Scheduler、Runner/Browser；
 - ARC-01.4c：把 Harness/Workbench/Planner 等长期 Service 与 Tool bootstrap 移出 Engine；
 - ARC-01.4d：反向、幂等、失败隔离的 `RuntimeLifecycle`；
 - ARC-01.5/1.6：删除 legacy 默认入口并启用新增 import violation gate。

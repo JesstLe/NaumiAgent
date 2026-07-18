@@ -49,7 +49,8 @@ Runtime 服务化后也有明确的持久化 owner。
 - ARC-02.5 cursor/revision/ack/resume 与 slow-client snapshot recovery；
 - UI-11 大 Timeline viewport/筛选/恢复体验；
 - ChatRun schema 纳入 ARC-05 migration catalog 的完整一致性审计；
-- ARC-01.4b2d 已完成 Task/Workbench；Goal/Pursuit、Background/Scheduler、Browser/Worktree 仍待迁移；
+- ARC-01.4b2d-4b2e 已完成 Task/Workbench 与 Goal/Pursuit；Background/Scheduler、Browser/Worktree
+  仍待按用户能力依赖迁移；
 - ARC-01.4d 统一生命周期与 ARC-01.4c Service ownership。
 
 因此 ARC-01、ARC-02 与 UI-11 均保持 partial/planned 的既有状态。
