@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
 import aiosqlite
@@ -100,6 +101,10 @@ class TaskStore:
         self._db_path = db_path
         self._session_id: str = ""
         self._initialized = False
+
+    @property
+    def db_path(self) -> Path:
+        return Path(self._db_path).expanduser().resolve()
 
     def set_session(self, session_id: str) -> None:
         self._session_id = session_id

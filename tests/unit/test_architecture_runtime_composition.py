@@ -20,6 +20,8 @@ _BANNED_ENGINE_NAMES = {
     "NullEventSink",
     "PermissionChecker",
     "SessionStore",
+    "TaskStore",
+    "WorkbenchStore",
     "load_provider_catalog",
 }
 
@@ -121,6 +123,17 @@ def test_only_composition_root_constructs_chat_run_store() -> None:
     calls = _constructor_paths(SOURCE_ROOT, {"ChatRunStore"})
 
     assert calls == {"ChatRunStore": [COMPOSITION_PATH]}
+
+
+def test_task_and_workbench_default_resources_have_owned_constructors() -> None:
+    calls = _constructor_paths(SOURCE_ROOT, {"TaskStore", "WorkbenchStore"})
+
+    assert calls["WorkbenchStore"] == [COMPOSITION_PATH]
+    assert set(calls["TaskStore"]) == {
+        COMPOSITION_PATH,
+        SOURCE_ROOT / "tasks" / "store.py",
+    }
+    assert len(calls["TaskStore"]) == 2
 
 
 def test_runtime_paths_contract_has_no_adapter_or_config_imports() -> None:

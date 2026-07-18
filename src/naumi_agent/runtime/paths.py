@@ -11,6 +11,7 @@ class RuntimePaths:
     """Absolute paths resolved once by the composition root."""
 
     workspace_root: Path
+    session_db_path: Path
     runtime_data_dir: Path
     chat_run_db_path: Path
     worktree_storage_dir: Path
@@ -28,6 +29,7 @@ class RuntimePaths:
             if value != value.resolve(strict=False):
                 raise ValueError(f"{item.name} 必须是已规范化的绝对路径。")
         for name in (
+            "session_db_path",
             "chat_run_db_path",
             "worktree_storage_dir",
             "browser_data_dir",

@@ -36,6 +36,9 @@
   并明确提示用户，不伪造任务终态。
 - 10,000 条任务事件的组件真实渲染只输出 viewport 行数，12 次采样 P95 受 100ms
   回归门约束；真实终端进程已验证方向键和首尾键序列。
+- ARC-01.4b2d 已完成 TaskStore/WorkbenchStore 的 Composition Root 资源所有权，两者被强制绑定到
+  同一个 session SQLite；新 UI/TUI、Worktree、TaskMarket 和 WorkbenchService 不会因不同入口装配
+  而看到分裂的任务身份。该项只是 UI-11 live/resume 的后端前置，不代表全屏详情已完成。
 
 仍未完成：`UI-11.1b` priority/parent-child 权威来源、全屏双栏/窄屏降级、详情依赖图、retry/artifact/
 takeover 能力矩阵，以及屏幕阅读器语义。`UI-11` 因此保持 `partial`。

@@ -28,7 +28,9 @@ from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.runtime.resources import RuntimeResourceOverrides, RuntimeResources
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.execution import LocalToolExecutor
+from naumi_agent.workbench.store import WorkbenchStore
 
 
 class _FalseySink(NullEventSink):
@@ -87,6 +89,7 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
         for name in paths.__slots__
     )
     assert paths.workspace_root == tmp_path.resolve()
+    assert paths.session_db_path == (tmp_path / ".naumi" / "sessions.db").resolve()
     assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
@@ -100,6 +103,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
     absolute = tmp_path.resolve()
     values = {
         "workspace_root": absolute,
+        "session_db_path": absolute / "data" / "sessions.db",
         "runtime_data_dir": absolute / "data",
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
         "worktree_storage_dir": absolute / "data" / "worktrees",
@@ -154,6 +158,9 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
+    shared_db = tmp_path / "custom-runtime.db"
+    task_store = TaskStore(str(shared_db))
+    workbench_store = WorkbenchStore(str(shared_db))
     overridden = build_runtime_resources(
         paths,
         overrides=RuntimeResourceOverrides(
@@ -161,6 +168,8 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
             evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
+            task_store=task_store,
+            workbench_store=workbench_store,
         ),
     )
 
@@ -168,8 +177,12 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
+    assert defaults.task_store.db_path == paths.session_db_path
+    assert defaults.workbench_store.db_path == paths.session_db_path
     assert overridden.evolution_candidate_store is evolution_store
     assert overridden.chat_run_store is chat_run_store
+    assert overridden.task_store is task_store
+    assert overridden.workbench_store is workbench_store
     assert overridden.harness_store is falsey_store
     assert overridden.harness_trust_store is trust_store
     assert not (tmp_path / "state").exists()
@@ -208,6 +221,23 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
             ),
             harness_store=object(),  # type: ignore[arg-type]
             harness_trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+            task_store=TaskStore(str(tmp_path / "runtime.db")),
+            workbench_store=WorkbenchStore(str(tmp_path / "runtime.db")),
+        )
+
+
+def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
+    paths = build_runtime_paths(_config(tmp_path))
+    defaults = build_runtime_resources(paths)
+
+    with pytest.raises(ValueError, match="必须共享同一个 SQLite"):
+        RuntimeResources(
+            chat_run_store=defaults.chat_run_store,
+            evolution_candidate_store=defaults.evolution_candidate_store,
+            harness_store=defaults.harness_store,
+            harness_trust_store=defaults.harness_trust_store,
+            task_store=TaskStore(str(tmp_path / "tasks.db")),
+            workbench_store=WorkbenchStore(str(tmp_path / "workbench.db")),
         )
 
 

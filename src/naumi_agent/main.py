@@ -38,7 +38,6 @@ from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 from naumi_agent.workbench.export import export_audit_events
-from naumi_agent.workbench.store import WorkbenchStore
 
 suppress_startup_import_warnings()
 
@@ -5690,7 +5689,13 @@ def export_audit(
     cfg = AppConfig.from_yaml(resolved)
 
     async def _run() -> dict[str, Any]:
-        store = WorkbenchStore(cfg.memory.session_db_path)
+        from naumi_agent.runtime.composition import (
+            build_runtime_paths,
+            build_runtime_resources,
+        )
+
+        paths = build_runtime_paths(cfg)
+        store = build_runtime_resources(paths).workbench_store
         return await export_audit_events(
             store,
             session_id,

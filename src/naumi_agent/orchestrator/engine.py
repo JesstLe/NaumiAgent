@@ -136,7 +136,6 @@ from naumi_agent.tasks.reconciliation import (
     TodoReconciliationAction,
     reconcile_todos,
 )
-from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.browser.runtime.browser_runtime import BrowserRuntime
 from naumi_agent.tools.browser.tools import create_browser_tools
@@ -145,7 +144,6 @@ from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
-from naumi_agent.workbench import WorkbenchStore
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.tools import create_workbench_tools
@@ -671,8 +669,8 @@ class AgentEngine:
         self._permission_confirmer: PermissionConfirmationCallback | None = None
         self._user_interaction_handler: UserInteractionCallback | None = None
 
-        self.task_store = TaskStore(config.memory.session_db_path)
-        self.workbench_store = WorkbenchStore(config.memory.session_db_path)
+        self.task_store = resources.task_store
+        self.workbench_store = resources.workbench_store
         self.worktree_manager = WorktreeManager(
             repo_root=self.workspace_root,
             storage_dir=self._worktree_storage_dir,
