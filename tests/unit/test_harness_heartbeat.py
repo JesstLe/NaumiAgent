@@ -143,7 +143,7 @@ async def test_schema_v11_database_upgrades_to_current_without_reset(tmp_path) -
         heartbeat_count = db.execute(
             "SELECT COUNT(*) FROM harness_heartbeats"
         ).fetchone()[0]
-    assert version == 13
+    assert version == 14
     assert marker == "preserved"
     assert heartbeat_count == 1
 
