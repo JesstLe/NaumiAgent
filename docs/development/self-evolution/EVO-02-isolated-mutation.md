@@ -46,4 +46,7 @@
 - EVO-02.3a 已实现不可变 Source Snapshot v1：精确 Git tree、Harness Profile、Contract 安全配置和
   Runtime Tool Registry identity 均进入防篡改摘要；dirty/branch/path/Profile/tool 漂移 fail-closed，且
   仍固定 `execution_ready=false`。详见 `EVO-02-3a-source-snapshot.md`。
-- EVO-02.4..02.7 尚未实现，因此 EVO-02 整体保持 partial。
+- EVO-02.4a 已实现不可执行 Mutation Plan v1：Candidate/Contract/Lease/Snapshot 四重绑定，真实
+  baseline blob 扫描，固定 inspect→RED→mutation→guard→GREEN→receipt 顺序，按文件/指标收紧预算，
+  并禁止 scope expansion、无关重构、网络与依赖安装。详见 `EVO-02-4a-mutation-plan.md`。
+- EVO-02.5..02.7 尚未实现，因此 EVO-02 整体保持 partial。

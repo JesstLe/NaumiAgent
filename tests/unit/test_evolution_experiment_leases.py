@@ -21,6 +21,10 @@ from naumi_agent.evolution.experiment_snapshots import (
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractIssuer,
 )
+from naumi_agent.evolution.mutation_plans import (
+    EvolutionMutationPlan,
+    EvolutionMutationPlanner,
+)
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -48,11 +52,25 @@ def _git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-async def _lease_fixture(tmp_path: Path, *, clock=None, profile_text: str | None = None):
+async def _lease_fixture(
+    tmp_path: Path,
+    *,
+    clock=None,
+    profile_text: str | None = None,
+    target_content: bytes | None = None,
+    target_symlink: bool = False,
+):
     workspace = tmp_path / "workspace"
     target = workspace / "src" / "naumi_agent" / "ui" / "footer.py"
     target.parent.mkdir(parents=True)
-    target.write_text("def render_footer():\n    return 'baseline'\n", encoding="utf-8")
+    if target_symlink:
+        backing = target.with_name("footer-baseline.txt")
+        backing.write_text("baseline\n", encoding="utf-8")
+        target.symlink_to(backing.name)
+    elif target_content is not None:
+        target.write_bytes(target_content)
+    else:
+        target.write_text("def render_footer():\n    return 'baseline'\n", encoding="utf-8")
     if profile_text is not None:
         profile = workspace / ".naumi" / "harness.yaml"
         profile.parent.mkdir(parents=True)
@@ -479,3 +497,160 @@ async def test_source_snapshot_rejects_invalid_profile_and_digest_tampering(
     nested["tools"][0]["schema_sha256"] = "0" * 64
     with pytest.raises(ValidationError, match="Tool identity_sha256"):
         EvolutionExperimentSourceSnapshot.model_validate(nested)
+
+
+def _mutation_planner(
+    fixture_root: Path,
+    workspace: Path,
+    lease_path: str,
+) -> EvolutionMutationPlanner:
+    return EvolutionMutationPlanner(
+        review_service=EvolutionReviewService(
+            EvolutionCandidateStore(fixture_root / "evolution.db")
+        ),
+        snapshot_builder=_snapshot_builder(workspace, Path(lease_path).parent),
+    )
+
+
+@pytest.mark.asyncio
+async def test_mutation_plan_is_deterministic_bounded_and_test_first(
+    tmp_path: Path,
+) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(tmp_path, profile_text="schema_version: 1\n")
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+    snapshot = snapshot_builder.capture(contract, lease)
+    planner = _mutation_planner(tmp_path, workspace, lease.worktree_path)
+
+    first = await planner.plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+    second = await planner.plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+
+    assert first == second
+    assert first.plan_id == f"evpplan_{first.plan_sha256[:24]}"
+    assert first.authorized_files == contract.scope.allowed_files
+    assert tuple(item.path for item in first.planned_files) == contract.scope.allowed_files
+    assert first.planned_files[0].file_kind == "python"
+    assert first.planned_files[0].change_mode == "modify"
+    assert first.planned_files[0].baseline_blob
+    assert tuple(stage.phase for stage in first.stages) == (
+        "inspect",
+        "baseline_check",
+        "mutation",
+        "static_guard",
+        "candidate_check",
+        "receipt",
+    )
+    assert first.stages[1].metric_names == first.stages[4].metric_names
+    assert first.stages[2].target_files == contract.scope.allowed_files
+    assert first.max_changed_files == len(first.planned_files)
+    assert first.max_changed_lines <= contract.budget.max_changed_lines
+    assert first.max_tool_calls < contract.budget.max_tool_calls
+    assert first.baseline_check_required is True
+    assert first.static_guard_required is True
+    assert first.unrelated_refactor_allowed is False
+    assert first.scope_expansion_allowed is False
+    assert first.execution_ready is False
+
+
+@pytest.mark.asyncio
+async def test_mutation_plan_rejects_candidate_and_source_drift(tmp_path: Path) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(tmp_path)
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot = _snapshot_builder(
+        workspace,
+        Path(lease.worktree_path).parent,
+    ).capture(contract, lease)
+    planner = _mutation_planner(tmp_path, workspace, lease.worktree_path)
+
+    intake = FeedbackIntakeService(EvolutionCandidateStore(tmp_path / "evolution.db"))
+    await intake.ingest(
+        workspace,
+        build_direct_user_feedback(
+            session_id="experiment-lease",
+            category="defect",
+            scope="src/naumi_agent/ui/footer.py:render_footer",
+            topic="footer_truncation",
+            summary="底栏截断再次出现",
+            now=NOW + timedelta(minutes=20),
+        ),
+    )
+    with pytest.raises(ValueError, match="Candidate/Proposal 已偏离"):
+        await planner.plan(
+            workspace,
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+        )
+
+    # Restore a planner view over the original DB state is impossible by design;
+    # a source drift is independently rejected before Candidate planning.
+    Path(lease.worktree_path, "dirty.txt").write_text("drift\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="已存在变更"):
+        await planner.plan(
+            workspace,
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+        )
+
+
+@pytest.mark.asyncio
+async def test_mutation_plan_rejects_binary_and_symlink_targets(tmp_path: Path) -> None:
+    for name, options, expected in (
+        ("binary", {"target_content": b"\x00binary"}, "二进制"),
+        ("symlink", {"target_symlink": True}, "符号链接"),
+    ):
+        fixture_root = tmp_path / name
+        workspace, _, contract, _, _, manager, _ = await _lease_fixture(
+            fixture_root,
+            **options,
+        )
+        lease = await manager.acquire(contract, owner="Evolution-Agent")
+        snapshot = _snapshot_builder(
+            workspace,
+            Path(lease.worktree_path).parent,
+        ).capture(contract, lease)
+        planner = _mutation_planner(fixture_root, workspace, lease.worktree_path)
+
+        with pytest.raises(ValueError, match=expected):
+            await planner.plan(
+                workspace,
+                contract=contract,
+                lease=lease,
+                source_snapshot=snapshot,
+            )
+
+
+@pytest.mark.asyncio
+async def test_mutation_plan_rejects_manifest_tampering(tmp_path: Path) -> None:
+    workspace, _, contract, _, _, manager, _ = await _lease_fixture(tmp_path)
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot = _snapshot_builder(
+        workspace,
+        Path(lease.worktree_path).parent,
+    ).capture(contract, lease)
+    plan = await _mutation_planner(tmp_path, workspace, lease.worktree_path).plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+    payload = plan.model_dump(mode="json")
+    payload["objective"]["hypothesis"] = "tampered"
+
+    with pytest.raises(ValidationError, match="plan_sha256"):
+        EvolutionMutationPlan.model_validate(payload)

@@ -68,9 +68,8 @@
 ## 明确未包含
 
 - Contract 持久化、列表、UI、斜杠命令或 Agent Tool；
-- EVO-02.3 tree/config/tool source snapshot digest；
-- EVO-02.4 planner、02.5 patch writer、02.6 完整 static guard、02.7 mutation receipt；
+- EVO-02.5 patch writer、02.6 完整 static guard、02.7 mutation receipt；
 - EVO-03 验证执行和 HAR-09.6 outcome tracking。
 
-EVO-02.2a/02.3a 已实现持久 worktree lease 与不可变 Source Snapshot，详见
-`EVO-02-2a-worktree-lease.md`、`EVO-02-3a-source-snapshot.md`。下一切片才进入不可执行 Mutation Plan。
+EVO-02.2a/02.3a/02.4a 已实现持久 worktree lease、不可变 Source Snapshot 与不可执行 Mutation
+Plan。下一门禁是 EVO-02.6a Static Guard preflight。
