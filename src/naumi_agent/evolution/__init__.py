@@ -92,6 +92,10 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.self_review_comparison import (
+        EvolutionSelfReviewComparisonError,
+        EvolutionSelfReviewComparisonExecutor,
+    )
     from naumi_agent.evolution.self_review_green_cohort import (
         EvolutionSelfReviewGreenCohortError,
         EvolutionSelfReviewGreenCohortExecutor,
@@ -255,6 +259,8 @@ __all__ = [
     "EvolutionSelfReviewGreenCohortRequest",
     "EvolutionSelfReviewGreenCohortRequestBuilder",
     "SelfReviewGreenMetricSummary",
+    "EvolutionSelfReviewComparisonError",
+    "EvolutionSelfReviewComparisonExecutor",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -410,6 +416,10 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewGreenCohortRequestBuilder",
         "SelfReviewGreenMetricSummary",
     }
+    self_review_comparison_exports = {
+        "EvolutionSelfReviewComparisonError",
+        "EvolutionSelfReviewComparisonExecutor",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -454,6 +464,8 @@ def __getattr__(name: str) -> object:
         module_name = "self_review_red_baseline"
     elif name in self_review_green_cohort_exports:
         module_name = "self_review_green_cohort"
+    elif name in self_review_comparison_exports:
+        module_name = "self_review_comparison"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

@@ -35,6 +35,9 @@ from naumi_agent.evolution.patch_recovery import (
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
+from naumi_agent.evolution.self_review_comparison import (
+    EvolutionSelfReviewComparisonExecutor,
+)
 from naumi_agent.evolution.self_review_green_cohort import (
     EvolutionSelfReviewGreenCohortExecutor,
     EvolutionSelfReviewGreenCohortRequestBuilder,
@@ -202,6 +205,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_self_review_green_cohort_executor,
         EvolutionSelfReviewGreenCohortExecutor,
+    )
+    assert isinstance(
+        engine.evolution_self_review_comparison_executor,
+        EvolutionSelfReviewComparisonExecutor,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

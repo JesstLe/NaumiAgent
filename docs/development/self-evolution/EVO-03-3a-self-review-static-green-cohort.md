@@ -66,5 +66,5 @@ GREEN 只接受一个最小、精确的脏 worktree：
 - 这里只执行无副作用静态 scanner；ruff、compile、pytest、contract、smoke 和平台矩阵仍必须经 ARC-04
   隔离 worker，不能借用本执行器绕过进程/资源治理；
 - GREEN receipt 是完整测量回执，不是 before/after 统计结论，也不授予 promotion authority；
-- 下一最小切片是 **EVO-03.4a Self-Review Quantitative Comparison Receipt**：消费已持久化 RED/GREEN H5a
-  样本，复用 HAR-08.7d/H5c 的统计和防篡改 receipt，机械冻结 improved/regressed/flaky/blocked 结论。
+- EVO-03.4a 已消费持久化 RED/GREEN H5a 样本，复用 HAR-08.H5b2/7d/H5c 冻结原生 Comparison
+  Receipt；下一切片进入 EVO-03.5a Failure Attribution Contract。
