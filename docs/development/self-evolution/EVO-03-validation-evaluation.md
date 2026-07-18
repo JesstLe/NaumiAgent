@@ -54,6 +54,9 @@ Eval 和真实 Harness 检查产生。
   校验受管 worktree 的 HEAD、branch、dirty path、operation 与 candidate after digest，在不可变临时快照
   中重复相同 AST scanner，并将连续 GREEN sample 写入独立 H5a batch。支持防漂移、断点续写、幂等重放
   与防篡改完成回执；不运行项目代码。详见 `EVO-03-3a-self-review-static-green-cohort.md`。
+- EVO-03.4a Self-Review Quantitative Comparison：已实现。完整重验 RED/GREEN/Plan/Binding authority 与 H5a
+  ordered digest，使用 H5b2 comparison reference 接入原生 H5c，保留 statistical/mechanical/Policy verdict，
+  不另造 Evolution 评分管线。详见 `EVO-03-4a-self-review-quantitative-comparison.md`。
 
-Evolution 目标 Comparator/Comparison Receipt、interventional Harness runner、failure attribution、adversarial
-suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+Interventional Harness runner、failure attribution、adversarial suite 与最终 Evaluation Receipt 仍未实现，
+因此 EVO-03 整体保持 partial。

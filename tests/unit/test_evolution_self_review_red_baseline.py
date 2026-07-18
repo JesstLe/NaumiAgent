@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +14,10 @@ from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseStore,
     ExperimentLeaseState,
     ExperimentWorktreeLease,
+)
+from naumi_agent.evolution.self_review_comparison import (
+    EvolutionSelfReviewComparisonError,
+    EvolutionSelfReviewComparisonExecutor,
 )
 from naumi_agent.evolution.self_review_green_cohort import (
     EvolutionSelfReviewGreenCohortError,
@@ -817,10 +822,21 @@ async def test_green_create_cohort_uses_candidate_after_empty_red_fixture(
         red_receipt=red,
         lease=lease,
     )
+    comparison = await EvolutionSelfReviewComparisonExecutor(store).execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        green_request=green_request,
+        green_receipt=green,
+    )
 
     assert plan.files[0].operation == "create"
     assert red.metrics[0].sample_values == (0, 0, 0, 0, 0)
     assert green.metrics[0].sample_values == (0, 0, 0, 0, 0)
+    assert comparison.receipt.statistical_verdict == "unchanged"
+    assert comparison.receipt.decision == "passed"
 
 
 @pytest.mark.asyncio
@@ -974,3 +990,180 @@ async def test_green_matching_partial_prefix_resumes_safely(tmp_path: Path) -> N
     )
 
     assert receipt.persisted_samples == 5
+
+
+@pytest.mark.asyncio
+async def test_self_review_comparison_persists_native_h5c_idempotently(
+    tmp_path: Path,
+) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    green = await EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    ).execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+    executor = EvolutionSelfReviewComparisonExecutor(store)
+
+    first = await executor.execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        green_request=green_request,
+        green_receipt=green,
+    )
+    second = await executor.execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        green_request=green_request,
+        green_receipt=green,
+    )
+    reference = await store.get_eval_baseline_by_batch(
+        root,
+        request.suite_id,
+        request.batch_id,
+    )
+
+    assert second == first
+    assert reference is not None and reference.purpose == "comparison_reference"
+    assert await store.get_active_eval_baseline(root, request.suite_id) is None
+    assert first.receipt.statistical_verdict == "improved"
+    assert first.receipt.decision == "passed"
+    assert first.receipt.baseline_batch_id == request.batch_id
+    assert first.receipt.current_batch_id == green_request.batch_id
+    assert first.receipt.baseline_samples_sha256 == reference.samples_sha256
+
+
+@pytest.mark.asyncio
+async def test_self_review_comparison_rejects_missing_green_h5a_before_reference(
+    tmp_path: Path,
+) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    green = await EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    ).execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            "DELETE FROM harness_eval_results "
+            "WHERE batch_id = ? AND sample_index = 4",
+            (green_request.batch_id,),
+        )
+        db.commit()
+
+    with pytest.raises(EvolutionSelfReviewComparisonError) as error:
+        await EvolutionSelfReviewComparisonExecutor(store).execute(
+            workspace_root=root,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+            red_receipt=red,
+            green_request=green_request,
+            green_receipt=green,
+        )
+
+    assert error.value.code == "green_cohort_evidence_mismatch"
+    assert await store.get_eval_baseline_by_batch(
+        root,
+        request.suite_id,
+        request.batch_id,
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_self_review_comparison_rejects_tampered_green_receipt(
+    tmp_path: Path,
+) -> None:
+    (
+        root,
+        _,
+        storage,
+        plan,
+        request,
+        binding,
+        red,
+        green_request,
+        lease,
+        lease_store,
+        store,
+        trust,
+    ) = await _green_authority(tmp_path)
+    green = await EvolutionSelfReviewGreenCohortExecutor(
+        store=store,
+        trust_store=trust,
+        lease_store=lease_store,
+        worktree_storage_dir=storage,
+        clock=lambda: datetime(2026, 7, 19, 1, tzinfo=UTC),
+    ).execute(
+        workspace_root=root,
+        green_request=green_request,
+        baseline_request=request,
+        metric_binding=binding,
+        validation_plan=plan,
+        red_receipt=red,
+        lease=lease,
+    )
+
+    with pytest.raises(EvolutionSelfReviewComparisonError) as error:
+        await EvolutionSelfReviewComparisonExecutor(store).execute(
+            workspace_root=root,
+            baseline_request=request,
+            metric_binding=binding,
+            validation_plan=plan,
+            red_receipt=red,
+            green_request=green_request,
+            green_receipt=green.model_copy(update={"candidate_revision": 2}),
+        )
+
+    assert error.value.code == "comparison_authority_invalid"
