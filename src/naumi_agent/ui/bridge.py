@@ -64,6 +64,10 @@ from naumi_agent.user_interaction import (
     normalize_interaction_response,
 )
 from naumi_agent.workbench.models import ParallelMode, RiskLevel
+from naumi_agent.workbench.proposal_governance import (
+    ProposalAction,
+    ProposalGovernanceConflictError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -822,6 +826,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.WORKBENCH_REVIEW_REQUEST:
             await self.show_workbench_review(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
+            await self.govern_workbench_proposal(payload, request_id=request_id)
             return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
@@ -1784,6 +1791,125 @@ class JsonlEngineBridge:
             },
             request_id=request_id,
         )
+
+    async def govern_workbench_proposal(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Apply one permission-governed human Proposal decision."""
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        proposal_id = str(payload.get("proposal_id") or "")
+        action = ProposalAction(str(payload.get("action") or ""))
+        decision_note = str(payload.get("decision_note") or "")
+        confirmed = payload.get("confirmed") is True
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Workbench 只能治理当前会话的 Proposal。",
+                code="workbench_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        if service is None:
+            await self.emit_error(
+                "Workbench 服务暂不可用。",
+                code="workbench_unavailable",
+                request_id=request_id,
+            )
+            return
+        decision = self.engine._permission_checker.check(
+            "workbench_govern_proposal",
+            {
+                "proposal_id": proposal_id,
+                "action": action.value,
+            },
+        )
+        if not decision.allowed:
+            await self.emit(
+                ServerEventType.WORKBENCH_PROPOSAL_ACTION_RESULT,
+                {
+                    "schema_version": 1,
+                    "session_id": session_id,
+                    "proposal_id": proposal_id,
+                    "action": action.value,
+                    "status": "blocked",
+                    "message": "当前权限模式不允许治理 Proposal。",
+                },
+                request_id=request_id,
+            )
+            return
+        if decision.requires_confirmation and not confirmed:
+            await self.emit(
+                ServerEventType.WORKBENCH_PROPOSAL_ACTION_RESULT,
+                {
+                    "schema_version": 1,
+                    "session_id": session_id,
+                    "proposal_id": proposal_id,
+                    "action": action.value,
+                    "status": "needs_confirmation",
+                    "message": "请确认后再次提交该 Proposal 决策。",
+                },
+                request_id=request_id,
+            )
+            return
+        try:
+            proposal = await service.govern_proposal(
+                session_id,
+                proposal_id,
+                action=action,
+                reviewer="Human",
+                decision_note=decision_note,
+            )
+            if proposal is None:
+                status = "not_found"
+                message = "Proposal 不存在或不属于当前会话。"
+                snapshot = None
+            else:
+                status = "completed"
+                message = (
+                    "Proposal 已批准。"
+                    if action is ProposalAction.APPROVE
+                    else "Proposal 已拒绝。"
+                )
+                snapshot = await service.dashboard_snapshot(session_id)
+        except ProposalGovernanceConflictError as exc:
+            status = "conflict"
+            message = str(exc)
+            proposal = None
+            snapshot = await service.dashboard_snapshot(session_id)
+        except (RuntimeError, ValueError) as exc:
+            logger.warning("Workbench Proposal action failed (%s)", type(exc).__name__)
+            status = "error"
+            message = str(exc) if isinstance(exc, ValueError) else "Proposal 决策暂时失败。"
+            proposal = None
+            snapshot = None
+        result = {
+            "schema_version": 1,
+            "session_id": session_id,
+            "proposal_id": proposal_id,
+            "action": action.value,
+            "status": status,
+            "message": message,
+            "proposal": proposal,
+            "workbench_snapshot": snapshot,
+        }
+        await self.emit(
+            ServerEventType.WORKBENCH_PROPOSAL_ACTION_RESULT,
+            result,
+            request_id=request_id,
+        )
+        if snapshot is not None:
+            await self.emit(
+                ServerEventType.WORKBENCH_SNAPSHOT,
+                snapshot,
+                request_id=request_id,
+            )
 
     async def show_agents(
         self,

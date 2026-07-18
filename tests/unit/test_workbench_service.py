@@ -89,6 +89,14 @@ async def test_dashboard_snapshot_versions_content_and_exposes_navigation_summar
         detail="确认快照边界",
         requester="Backend-Agent",
     )
+    proposal = await workbench_store.create_proposal(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        agent_id="Evolution-Agent",
+        title="优化 Workbench 导航",
+        impact_scope="frontend/terminal-ui",
+    )
 
     first = await service.dashboard_snapshot("s")
     duplicate = await service.dashboard_snapshot("s")
@@ -110,7 +118,7 @@ async def test_dashboard_snapshot_versions_content_and_exposes_navigation_summar
         "missions": 1,
         "tasks": 1,
         "worktrees": 1,
-        "reviews": 1,
+        "reviews": 2,
         "failures": 0,
     }
     assert first["active_selection"] == {
@@ -118,7 +126,9 @@ async def test_dashboard_snapshot_versions_content_and_exposes_navigation_summar
         "task_id": task.id,
         "worktree": "ui-10",
         "review_id": approval.id,
+        "review_kind": "approval",
     }
+    assert first["proposals"][0]["id"] == proposal.id
 
 
 @pytest.mark.asyncio

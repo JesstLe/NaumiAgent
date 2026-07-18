@@ -170,6 +170,48 @@ def test_protocol_normalizes_workbench_review_requests() -> None:
     }
 
 
+def test_protocol_normalizes_workbench_proposal_actions() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": " session-1 ",
+                "proposal_id": " proposal-1 ",
+                "action": " REJECT ",
+                "decision_note": " 证据不足 ",
+                "confirmed": True,
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "session_id": "session-1",
+        "proposal_id": "proposal-1",
+        "action": "reject",
+        "decision_note": "证据不足",
+        "confirmed": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"proposal_id": "proposal-1", "action": "defer"},
+        {"proposal_id": "proposal-1", "action": "reject", "decision_note": ""},
+        {"proposal_id": "", "action": "approve"},
+        {"proposal_id": "proposal-1", "action": "approve", "confirmed": "yes"},
+    ],
+)
+def test_protocol_rejects_invalid_workbench_proposal_actions(payload: dict) -> None:
+    with pytest.raises(ValueError):
+        normalize_client_record(
+            {
+                "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+                "payload": payload,
+            }
+        )
+
+
 @pytest.mark.parametrize("review_id", ["", " " * 3, "x" * 501])
 def test_protocol_rejects_invalid_workbench_review_ids(review_id: str) -> None:
     with pytest.raises(ValueError, match="review_id"):

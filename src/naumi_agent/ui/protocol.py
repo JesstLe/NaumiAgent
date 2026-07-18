@@ -27,6 +27,7 @@ PROTOCOL_CAPABILITIES = (
     "task_snapshot",
     "typed_ui_messages",
     "workbench_snapshot",
+    "workbench_proposal_actions",
 )
 PROTOCOL_REQUIRED_CAPABILITIES = ("typed_ui_messages",)
 _CAPABILITY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -58,6 +59,7 @@ class ClientEventType(StrEnum):
     AGENTS_STOP = "agents/stop"
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
+    WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
@@ -123,6 +125,7 @@ class ServerEventType(StrEnum):
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"
     WORKBENCH_REVIEW = "workbench/review"
+    WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
     EVOLUTION_REVIEW = "evolution/review"
     SHUTDOWN = "shutdown"
 
@@ -395,6 +398,36 @@ def _normalize_client_payload(
         if len(review_id) > 500:
             raise ValueError("Workbench review_id 不能超过 500 个字符。")
         return {"session_id": session_id, "review_id": review_id}
+
+    if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
+        session_id = str(payload.get("session_id") or "").strip()
+        proposal_id = str(payload.get("proposal_id") or "").strip()
+        action = str(payload.get("action") or "").strip().lower()
+        decision_note = str(payload.get("decision_note") or "").strip()
+        confirmed = payload.get("confirmed", False)
+        if len(session_id) > 500:
+            raise ValueError("Workbench session_id 不能超过 500 个字符。")
+        if not proposal_id or len(proposal_id) > 128 or any(
+            char in proposal_id for char in ("\x00", "\r", "\n")
+        ):
+            raise ValueError("Workbench proposal_id 格式无效。")
+        if action not in {"approve", "reject"}:
+            raise ValueError("Proposal UI action 仅支持 approve/reject。")
+        if len(decision_note) > 2_000 or any(
+            char in decision_note for char in ("\x00", "\r")
+        ):
+            raise ValueError("Proposal decision_note 格式无效。")
+        if action == "reject" and not decision_note:
+            raise ValueError("拒绝 Proposal 时必须填写原因。")
+        if not isinstance(confirmed, bool):
+            raise ValueError("Proposal confirmed 必须是布尔值。")
+        return {
+            "session_id": session_id,
+            "proposal_id": proposal_id,
+            "action": action,
+            "decision_note": decision_note,
+            "confirmed": confirmed,
+        }
 
     if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
         action = str(payload.get("action") or "list").strip().lower()

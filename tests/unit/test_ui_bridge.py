@@ -45,7 +45,7 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
 from naumi_agent.safety.permission_grants import PermissionGrant
-from naumi_agent.safety.permissions import PermissionMode
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
@@ -628,6 +628,44 @@ class _RevisionedWorkbenchService:
         return self.review_evidence
 
 
+class _ProposalActionWorkbenchService:
+    def __init__(self) -> None:
+        self.governed: list[dict[str, Any]] = []
+        self.revision = 1
+
+    async def govern_proposal(self, session_id: str, proposal_id: str, **kwargs: Any):
+        self.governed.append({
+            "session_id": session_id,
+            "proposal_id": proposal_id,
+            **kwargs,
+        })
+        self.revision += 1
+        return {
+            "id": proposal_id,
+            "session_id": session_id,
+            "state": "approved" if kwargs["action"].value == "approve" else "rejected",
+        }
+
+    async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "stream_id": "proposal-stream",
+            "revision": self.revision,
+            "generated_at": "2026-07-18T12:00:00+00:00",
+            "full": True,
+            "session_id": session_id,
+            "counts": {"tasks": 0, "worktrees": 0, "reviews": 0, "failures": 0},
+            "active_selection": {},
+            "missions": [],
+            "tasks": [],
+            "issues": [],
+            "approvals": [],
+            "proposals": [],
+            "failures": [],
+            "events": [],
+        }
+
+
 class _TaskSubmitFakeEngine(_FakeEngine):
     def __init__(self, missions: list[dict[str, Any]] | None = None) -> None:
         super().__init__()
@@ -839,6 +877,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "task_snapshot",
             "typed_ui_messages",
             "workbench_snapshot",
+            "workbench_proposal_actions",
         ],
         "required_capabilities": ["typed_ui_messages"],
     }
@@ -3079,6 +3118,200 @@ async def test_bridge_workbench_review_reports_missing_without_error_details() -
         "status": "unavailable",
         "code": "review_not_found",
     }
+
+
+@pytest.mark.asyncio
+async def test_bridge_proposal_action_requires_confirmation_then_audits_decision() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.MODERATE,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ProposalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    base = {
+        "session_id": "session-task",
+        "proposal_id": "proposal-1",
+        "action": "reject",
+        "decision_note": "证据不足",
+    }
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-reject-preview",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {**base, "confirmed": False},
+        }
+    )
+    assert service.governed == []
+    preview = [
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    ][-1]
+    assert preview["payload"]["status"] == "needs_confirmation"
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-reject-confirm",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {**base, "confirmed": True},
+        }
+    )
+    completed = [
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    ][-1]
+    assert completed["payload"]["status"] == "completed"
+    assert completed["payload"]["proposal"]["state"] == "rejected"
+    assert service.governed[0]["reviewer"] == "Human"
+    assert service.governed[0]["decision_note"] == "证据不足"
+    assert service.governed[0]["action"].value == "reject"
+
+
+@pytest.mark.asyncio
+async def test_bridge_bypass_executes_proposal_action_without_second_confirmation() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.permission_mode = PermissionMode.BYPASS
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.BYPASS,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ProposalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-approve-bypass",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "session-task",
+                "proposal_id": "proposal-1",
+                "action": "approve",
+                "decision_note": "",
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    assert result["payload"]["status"] == "completed"
+    assert len(service.governed) == 1
+
+
+@pytest.mark.asyncio
+async def test_bridge_proposal_action_rejects_cross_session_write() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    service = _ProposalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-cross-session",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "another-session",
+                "proposal_id": "proposal-1",
+                "action": "approve",
+                "decision_note": "",
+                "confirmed": True,
+            },
+        }
+    )
+
+    error = next(item for item in _records(writer) if item["type"] == "error")
+    assert error["payload"]["code"] == "workbench_session_mismatch"
+    assert service.governed == []
+
+
+@pytest.mark.asyncio
+async def test_real_sqlite_bridge_proposal_action_persists_state_and_audit(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(
+        AppConfig(
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+            )
+        )
+    )
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session("Proposal action real chain")
+    mission = await engine.workbench_service.create_mission(
+        session_id=session.id,
+        title="治理 Proposal",
+        goal="验证 Bridge 到 SQLite 的真实写入链路",
+    )
+    issue = await engine.workbench_service.create_issue(
+        session_id=session.id,
+        mission_id=mission.id,
+        title="审查 Harness 策略",
+        description="只改变 Proposal 状态",
+    )
+    proposal = await engine.workbench_service.create_proposal(
+        session_id=session.id,
+        mission_id=mission.id,
+        task_id=str(issue["task_id"]),
+        agent_id="Harness-Agent",
+        title="收紧无证据通过规则",
+        impact_scope="Harness judge policy",
+        intended_files=["src/naumi_agent/harness/judge.py"],
+        validation_plan=["运行 Harness judge 模块测试"],
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-real-approve",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": session.id,
+                "proposal_id": proposal["id"],
+                "action": "approve",
+                "decision_note": "",
+                "confirmed": False,
+            },
+        }
+    )
+
+    records = _records(writer)
+    result = next(
+        item
+        for item in records
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    persisted = await engine.workbench_service.get_proposal(session.id, proposal["id"])
+    events = await engine.workbench_service.list_events(session.id)
+
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["workbench_snapshot"]["counts"]["reviews"] == 0
+    assert persisted is not None
+    assert persisted["state"] == "approved"
+    assert persisted["reviewer"] == "Human"
+    assert any(
+        event["type"] == "proposal.approved" and event["subject_id"] == proposal["id"]
+        for event in events["events"]
+    )
 
 
 @pytest.mark.asyncio

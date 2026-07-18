@@ -378,6 +378,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/review") {
     return normalizeWorkbenchReview(payload);
   }
+  if (type === "workbench/proposal/action_result") {
+    return normalizeWorkbenchProposalActionResult(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -524,6 +527,9 @@ function normalizeServerPayload(type, payload) {
         task_id: String(selection.task_id ?? ""),
         worktree: String(selection.worktree ?? ""),
         review_id: String(selection.review_id ?? ""),
+        review_kind: ["approval", "proposal"].includes(selection.review_kind)
+          ? selection.review_kind
+          : "",
       },
       worktrees_status: worktreesStatus,
       worktrees_code: String(payload.worktrees_code ?? "").slice(0, 120),
@@ -538,7 +544,10 @@ function normalizeServerPayload(type, payload) {
       approvals: Array.isArray(payload.approvals)
         ? payload.approvals.slice(0, 100).map(normalizeWorkbenchApproval)
         : [],
-      proposals: normalizeObjectArray(payload.proposals, 200),
+      proposals: Array.isArray(payload.proposals)
+        ? harnessObjectArray(payload.proposals, "workbench/snapshot proposals", 200)
+          .map(normalizeWorkbenchProposal)
+        : [],
       failures: Array.isArray(payload.failures) ? payload.failures : [],
       events: Array.isArray(payload.events) ? payload.events : [],
     };
@@ -575,6 +584,88 @@ function normalizeWorkbenchApproval(value) {
     decision_note: String(item.decision_note ?? "").slice(0, 10_000),
     created_at: String(item.created_at ?? "").slice(0, 100),
     updated_at: String(item.updated_at ?? "").slice(0, 100),
+  };
+}
+
+function normalizeWorkbenchProposal(value) {
+  const item = harnessObject(value, "workbench proposal");
+  return {
+    id: workbenchText(item.id, "workbench proposal.id", 128),
+    session_id: workbenchText(item.session_id, "workbench proposal.session_id", 500),
+    mission_id: workbenchText(item.mission_id, "workbench proposal.mission_id", 500),
+    task_id: workbenchText(item.task_id, "workbench proposal.task_id", 500),
+    agent_id: workbenchText(item.agent_id, "workbench proposal.agent_id", 500),
+    title: workbenchText(item.title, "workbench proposal.title", 2_000),
+    impact_scope: workbenchText(item.impact_scope, "workbench proposal.impact_scope", 4_000),
+    intended_files: harnessTextArray(item.intended_files, "workbench proposal.intended_files", 200),
+    validation_plan: harnessTextArray(item.validation_plan, "workbench proposal.validation_plan", 100),
+    risk_level: harnessChoice(
+      item.risk_level,
+      "workbench proposal.risk_level",
+      new Set(["low", "medium", "high", "critical"]),
+    ),
+    questions: harnessTextArray(item.questions, "workbench proposal.questions", 100),
+    state: harnessChoice(
+      item.state,
+      "workbench proposal.state",
+      new Set(["open", "approved", "rejected", "deferred", "merged", "converted"]),
+    ),
+    decision_note: workbenchText(item.decision_note, "workbench proposal.decision_note", 2_000),
+    source_kind: harnessChoice(
+      item.source_kind,
+      "workbench proposal.source_kind",
+      new Set(["manual", "evolution_candidate"]),
+    ),
+    source_id: workbenchText(item.source_id, "workbench proposal.source_id", 128),
+    source_revision: harnessNonnegativeInteger(item.source_revision, "workbench proposal.source_revision"),
+    source_occurrence_count: harnessNonnegativeInteger(
+      item.source_occurrence_count,
+      "workbench proposal.source_occurrence_count",
+    ),
+    source_proposal_id: workbenchText(
+      item.source_proposal_id,
+      "workbench proposal.source_proposal_id",
+      128,
+    ),
+    proposal_kind: workbenchText(item.proposal_kind, "workbench proposal.proposal_kind", 80),
+    reviewer: workbenchText(item.reviewer, "workbench proposal.reviewer", 128),
+    decision_at: workbenchText(item.decision_at, "workbench proposal.decision_at", 100),
+    cooldown_until: workbenchText(item.cooldown_until, "workbench proposal.cooldown_until", 100),
+    merged_into_id: workbenchText(item.merged_into_id, "workbench proposal.merged_into_id", 128),
+    governance_policy_version: workbenchText(
+      item.governance_policy_version,
+      "workbench proposal.governance_policy_version",
+      80,
+    ),
+    created_at: workbenchText(item.created_at, "workbench proposal.created_at", 100),
+    updated_at: workbenchText(item.updated_at, "workbench proposal.updated_at", 100),
+  };
+}
+
+function normalizeWorkbenchProposalActionResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`workbench/proposal/action_result schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "workbench/proposal/action_result status",
+    new Set(["needs_confirmation", "completed", "blocked", "conflict", "not_found", "error"]),
+  );
+  return {
+    schema_version: 1,
+    session_id: harnessText(payload.session_id, "workbench/proposal/action_result session_id"),
+    proposal_id: harnessText(payload.proposal_id, "workbench/proposal/action_result proposal_id"),
+    action: harnessChoice(
+      payload.action,
+      "workbench/proposal/action_result action",
+      new Set(["approve", "reject"]),
+    ),
+    status,
+    message: workbenchText(payload.message, "workbench/proposal/action_result message", 2_000),
+    proposal: payload.proposal == null ? null : normalizeWorkbenchProposal(payload.proposal),
+    workbench_snapshot: payload.workbench_snapshot == null
+      ? null
+      : normalizeServerPayload("workbench/snapshot", payload.workbench_snapshot),
   };
 }
 

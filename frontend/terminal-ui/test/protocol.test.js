@@ -317,7 +317,13 @@ test("protocol contract drives client and server event validation", () => {
   assert.deepEqual(PROTOCOL_CONTRACT.negotiation, {
     minimum_version: 1,
     maximum_version: 1,
-    capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+    capabilities: [
+      "heartbeat",
+      "task_snapshot",
+      "typed_ui_messages",
+      "workbench_proposal_actions",
+      "workbench_snapshot",
+    ],
     required_capabilities: ["typed_ui_messages"],
   });
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
@@ -411,7 +417,13 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     client: "naumi-terminal-ui",
     minimum_version: 1,
     maximum_version: 1,
-    capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+    capabilities: [
+      "heartbeat",
+      "task_snapshot",
+      "typed_ui_messages",
+      "workbench_proposal_actions",
+      "workbench_snapshot",
+    ],
   });
 });
 
@@ -1299,8 +1311,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 29,
-        server_event_count: 41,
+        client_event_count: PROTOCOL_CONTRACT.client_events.length,
+        server_event_count: PROTOCOL_CONTRACT.server_events.length,
       },
     },
   });
@@ -1382,8 +1394,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 29,
-        server_event_count: 41,
+        client_event_count: PROTOCOL_CONTRACT.client_events.length,
+        server_event_count: PROTOCOL_CONTRACT.server_events.length,
       },
     },
   );
@@ -1517,6 +1529,18 @@ test("event sender accepts explicit missing-receipt recovery requests", () => {
 });
 
 test("normalizes workbench snapshot events", () => {
+  const proposal = {
+    id: "proposal-1", session_id: "s", mission_id: "m1", task_id: "7",
+    agent_id: "Evolution-Agent", title: "优化 footer", impact_scope: "ui:footer",
+    intended_files: ["frontend/footer.js"], validation_plan: ["node --test footer"],
+    risk_level: "medium", questions: [], state: "open", decision_note: "",
+    source_kind: "evolution_candidate", source_id: `evc_${"a".repeat(24)}`,
+    source_revision: 2, source_occurrence_count: 4,
+    source_proposal_id: `evp_${"b".repeat(24)}`, proposal_kind: "code",
+    reviewer: "", decision_at: "", cooldown_until: "", merged_into_id: "",
+    governance_policy_version: "", created_at: "now", updated_at: "now",
+    private_prompt: "drop-me",
+  };
   const record = normalizeServerRecord({
     type: "workbench/snapshot",
     version: 1,
@@ -1528,7 +1552,7 @@ test("normalizes workbench snapshot events", () => {
       full: true,
       session_id: "s",
       counts: { tasks: "2", worktrees: 1, reviews: 1 },
-      active_selection: { task_id: 7, mission_id: "m1" },
+      active_selection: { task_id: 7, mission_id: "m1", review_id: "proposal-1", review_kind: "proposal" },
       worktrees_status: "ready",
       worktrees_code: "",
       worktrees_total: 1,
@@ -1542,6 +1566,7 @@ test("normalizes workbench snapshot events", () => {
       missions: [{ id: "m1", title: "Mac 工作台" }],
       issues: [],
       tasks: [],
+      proposals: [proposal],
       failures: [],
       events: [],
     },
@@ -1558,6 +1583,9 @@ test("normalizes workbench snapshot events", () => {
     failures: 0,
   });
   assert.equal(record.payload.active_selection.task_id, "7");
+  assert.equal(record.payload.active_selection.review_kind, "proposal");
+  assert.equal(record.payload.proposals[0].source_revision, 2);
+  assert.equal(Object.hasOwn(record.payload.proposals[0], "private_prompt"), false);
   assert.equal(record.payload.missions[0].title, "Mac 工作台");
   assert.equal(record.payload.worktrees_status, "ready");
   assert.equal(record.payload.worktrees_total, 1);
@@ -1567,6 +1595,40 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.worktrees[0].agent_id, "Agent-1");
   assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
   assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
+});
+
+test("normalizes strict workbench proposal action results", () => {
+  const payload = normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1,
+      session_id: "s",
+      proposal_id: "proposal-1",
+      action: "reject",
+      status: "completed",
+      message: "Proposal 已拒绝。",
+      proposal: {
+        id: "proposal-1", session_id: "s", mission_id: "m1", task_id: "t1",
+        agent_id: "Evolution-Agent", title: "优化 footer", impact_scope: "ui:footer",
+        intended_files: [], validation_plan: [], risk_level: "medium", questions: [],
+        state: "rejected", decision_note: "证据不足", source_kind: "manual",
+        source_id: "", source_revision: 0, source_occurrence_count: 0,
+        source_proposal_id: "", proposal_kind: "code", reviewer: "Human",
+        decision_at: "now", cooldown_until: "later", merged_into_id: "",
+        governance_policy_version: "proposal-governance-v1", created_at: "now",
+        updated_at: "now", private_audit: "drop-me",
+      },
+      workbench_snapshot: null,
+    },
+  }).payload;
+
+  assert.equal(payload.status, "completed");
+  assert.equal(payload.proposal.state, "rejected");
+  assert.equal(Object.hasOwn(payload.proposal, "private_audit"), false);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: { ...payload, status: "invented" },
+  }), /status/);
 });
 
 test("normalizes workbench event payloads", () => {

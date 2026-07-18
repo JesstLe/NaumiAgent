@@ -6,17 +6,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from textual.widgets import Markdown, Static
+from textual.widgets import Input, Markdown, Static
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
+    ProposalDecisionScreen,
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
     format_workbench_reviews_markdown,
     format_workbench_worktrees_markdown,
 )
+from naumi_agent.workbench.proposal_governance import ProposalAction
 
 
 def test_workbench_formatter_renders_authoritative_overview_fields() -> None:
@@ -140,6 +142,18 @@ def test_reviews_formatter_renders_real_checks_files_and_diff() -> None:
     assert "+new" in rendered
 
 
+def test_reviews_formatter_renders_open_proposal_actions_and_policy_boundary() -> None:
+    snapshot = _proposal_snapshot()
+
+    rendered = format_workbench_reviews_markdown(snapshot)
+
+    assert "Proposal · 收紧 Harness 裁判" in rendered
+    assert "高风险" in rendered
+    assert "harness/judge.py" in rendered
+    assert "批准只进入下一 policy gate" in rendered
+    assert "`a` 批准 · `x` 拒绝" in rendered
+
+
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
     snapshot = _snapshot()
     snapshot["missions"][0]["title"] = "# injected\n[link](file:///secret)"  # type: ignore[index]
@@ -238,6 +252,90 @@ async def test_textual_workbench_reviews_loads_selected_service_evidence() -> No
         assert "src/ui.py" in rendered
         engine.workbench_service.get_review_evidence.assert_awaited_once_with(
             "session-workbench-tui", "approval-1"
+        )
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_rejects_proposal_with_required_reason() -> None:
+    engine = AgentEngine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _proposal_snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "proposals": [],
+        "counts": {**initial["counts"], "reviews": 0},
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.govern_proposal = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "proposal-1", "state": "rejected"}
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "x")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, ProposalDecisionScreen)
+        note = app.screen.query_one("#proposal-decision-note", Input)
+        await pilot.press("enter")
+        assert "不能为空" in str(
+            app.screen.query_one("#proposal-decision-error", Static).render()
+        )
+
+        note.value = "缺少跨平台回归证据"
+        await pilot.press("enter")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        engine.workbench_service.govern_proposal.assert_awaited_once_with(
+            "session-workbench-tui",
+            "proposal-1",
+            action=ProposalAction.REJECT,
+            reviewer="Human",
+            decision_note="缺少跨平台回归证据",
+        )
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert "Proposal 已拒绝" in rendered
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_bypass_approves_proposal_without_modal() -> None:
+    engine = AgentEngine(AppConfig())
+    engine.set_runtime_mode("bypass")
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _proposal_snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "proposals": [],
+        "counts": {**initial["counts"], "reviews": 0},
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.govern_proposal = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "proposal-1", "state": "approved"}
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "a")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        engine.workbench_service.govern_proposal.assert_awaited_once_with(
+            "session-workbench-tui",
+            "proposal-1",
+            action=ProposalAction.APPROVE,
+            reviewer="Human",
+            decision_note="",
         )
 
 
@@ -385,6 +483,7 @@ def _snapshot() -> dict[str, object]:
             "task_id": "task-1",
             "title": "等待用户确认",
         }],
+        "proposals": [],
         "events": [],
         "worktrees_status": "ready",
         "worktrees_code": "",
@@ -408,3 +507,32 @@ def _snapshot() -> dict[str, object]:
             "agent_id": "Workbench-Agent",
         }],
     }
+
+
+def _proposal_snapshot() -> dict[str, object]:
+    snapshot = _snapshot()
+    snapshot["approvals"] = []
+    snapshot["active_selection"] = {
+        **snapshot["active_selection"],  # type: ignore[arg-type]
+        "review_id": "proposal-1",
+        "review_kind": "proposal",
+    }
+    snapshot["proposals"] = [{
+        "id": "proposal-1",
+        "session_id": "session-workbench-tui",
+        "mission_id": "mission-1",
+        "task_id": "task-1",
+        "agent_id": "Harness-Agent",
+        "title": "收紧 Harness 裁判",
+        "impact_scope": "避免无证据通过",
+        "intended_files": ["src/naumi_agent/harness/judge.py"],
+        "validation_plan": ["运行裁判模块测试"],
+        "risk_level": "high",
+        "questions": [],
+        "state": "open",
+        "source_kind": "evolution_candidate",
+        "source_id": "candidate-1",
+        "source_revision": 2,
+        "proposal_kind": "harness_policy",
+    }]
+    return snapshot

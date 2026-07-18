@@ -76,6 +76,11 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     issues = list(snapshot.get("issues") or [])
     leases = list(snapshot.get("leases") or [])
     approvals = list(snapshot.get("approvals") or [])
+    proposals = [
+        proposal
+        for proposal in list(snapshot.get("proposals") or [])
+        if _status_text(proposal.get("state")) == ProposalState.OPEN.value
+    ]
     failures = list(snapshot.get("failures") or [])
 
     active_task = next(
@@ -117,6 +122,16 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
         approvals[0] if approvals else None,
     )
+    active_proposal = next(
+        (
+            proposal
+            for proposal in proposals
+            if str(proposal.get("task_id") or "") == active_task_id
+        ),
+        proposals[0] if proposals else None,
+    )
+    selected_review = active_review or active_proposal
+    selected_review_kind = "approval" if active_review else "proposal" if active_proposal else ""
     referenced_worktrees = {
         str(value)
         for value in [
@@ -138,14 +153,15 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
             "missions": len(missions),
             "tasks": len(tasks),
             "worktrees": worktree_count,
-            "reviews": len(approvals),
+            "reviews": len(approvals) + len(proposals),
             "failures": len(failures),
         },
         "active_selection": {
             "mission_id": mission_id,
             "task_id": active_task_id,
             "worktree": worktree,
-            "review_id": str((active_review or {}).get("id") or ""),
+            "review_id": str((selected_review or {}).get("id") or ""),
+            "review_kind": selected_review_kind,
         },
     }
 

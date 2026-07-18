@@ -67,10 +67,11 @@
 
 ### UI-10.7 已实现：TUI fallback parity
 
-- Textual TUI 输入 `/workbench` 会打开只读全屏 Overview，直接调用当前 Engine 的
+- Textual TUI 输入 `/workbench` 会打开全屏 Overview，直接调用当前 Engine 的
   `WorkbenchService.dashboard_snapshot(current_session)`；没有第二套 Store 查询或状态推导。
 - 页面展示与新 UI 相同的权威目标、任务、owner、branch/worktree/PR、最近验证、风险、失败和待审；
-  仅提供 `r` 刷新与 `Esc` 返回，不提前实现 UI-10.6 动作。
+  UI-10.6a 之后，Reviews 同源展示 waiting Approval 与 open Proposal，并支持受权限控制的 Proposal
+  approve/reject/cancel；其他页面仍保持只读。
 - schema/version/stream/revision/full/session 任一不匹配都会拒绝快照；刷新失败保留上一次成功快照，
   首次失败提供 `/doctor` 下一步，不泄露底层异常。
 - Store 文本先做控制字符清理、长度限制和 Markdown 转义；80/120/200 列均保留核心状态，空任务有
@@ -110,7 +111,18 @@
 - Python 协议/Bridge/真实 Git evidence、Node contract/reducer/80/120/200 renderer、Textual 交互和
   终端进程均有定向验证。完整设计和边界见 `UI-10-4a-reviews-tab.md`。
 
+### UI-10.6a 已实现：Proposal approve/reject/cancel
+
+- Reviews 复用一个列表展示 waiting Approval 与 open Proposal，权威 counts 和 selection 增加对象类型，
+  不新建第二套 Review 页面。
+- New UI 通过 typed action/result 协议调用 Python 权限层和既有 Workbench Service；normal 模式确认，
+  bypass 无二次确认，所有模式保留状态机、CAS、cooldown 与审计。
+- Proposal 详情显示来源、风险、影响、目标文件和验证计划，并持续提示批准只进入下一 policy gate，
+  不执行代码、不授予实验资格。
+- Textual fallback 使用同一 Service/PermissionChecker，支持 normal 拒绝原因与确认、bypass 直接批准。
+- 完整契约、验收证据和未完成边界见 `UI-10-6a-proposal-actions.md`。
+
 ### 尚未完成
 
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
-- UI-10.6：受权限控制的动作。
+- UI-10.6b：Proposal defer/merge 表单与 waiting Approval 动作。

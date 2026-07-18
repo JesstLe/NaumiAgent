@@ -57,5 +57,9 @@
 - HAR-09.5b2a 已实现 Eligibility v2 治理上下文接线：Review Service 批量读取最新 Proposal，
   typed New UI 和 Markdown 同步显示 cooldown 原因、状态、revision 与截止时间；活跃冷却不再显示
   `review_ready` 或生成 Preview。详见 `HAR-09-5b2a-eligibility-governance-context.md`。
-- HAR-09 仍未实现 Workbench Proposal 决策页、EVO-02 转换和
-  outcome tracking，因此整体继续保持 partial。
+- HAR-09.5b2b/UI-10.6a 已实现 Workbench Proposal 决策交互：New UI 与 TUI 在同一 Reviews 列表中
+  展示 open Proposal，normal 模式确认、bypass 无二次确认，并复用既有治理状态机和审计。当前只开放
+  approve/reject/cancel，批准不执行代码、不授予实验资格。详见
+  `../cli-ui/UI-10-6a-proposal-actions.md`。
+- HAR-09 仍未实现 defer/merge 交互、approved 到 EVO-02 的显式转换和 outcome tracking，因此整体
+  继续保持 partial。
