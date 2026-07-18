@@ -92,6 +92,14 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.self_review_green_cohort import (
+        EvolutionSelfReviewGreenCohortError,
+        EvolutionSelfReviewGreenCohortExecutor,
+        EvolutionSelfReviewGreenCohortReceipt,
+        EvolutionSelfReviewGreenCohortRequest,
+        EvolutionSelfReviewGreenCohortRequestBuilder,
+        SelfReviewGreenMetricSummary,
+    )
     from naumi_agent.evolution.self_review_red_baseline import (
         EvolutionSelfReviewRedBaselineError,
         EvolutionSelfReviewRedBaselineExecutor,
@@ -241,6 +249,12 @@ __all__ = [
     "EvolutionSelfReviewRedBaselineExecutor",
     "EvolutionSelfReviewRedCohortReceipt",
     "SelfReviewRedMetricSummary",
+    "EvolutionSelfReviewGreenCohortError",
+    "EvolutionSelfReviewGreenCohortExecutor",
+    "EvolutionSelfReviewGreenCohortReceipt",
+    "EvolutionSelfReviewGreenCohortRequest",
+    "EvolutionSelfReviewGreenCohortRequestBuilder",
+    "SelfReviewGreenMetricSummary",
     "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
@@ -388,6 +402,14 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewRedCohortReceipt",
         "SelfReviewRedMetricSummary",
     }
+    self_review_green_cohort_exports = {
+        "EvolutionSelfReviewGreenCohortError",
+        "EvolutionSelfReviewGreenCohortExecutor",
+        "EvolutionSelfReviewGreenCohortReceipt",
+        "EvolutionSelfReviewGreenCohortRequest",
+        "EvolutionSelfReviewGreenCohortRequestBuilder",
+        "SelfReviewGreenMetricSummary",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -430,6 +452,8 @@ def __getattr__(name: str) -> object:
         module_name = "validation_metric_bindings"
     elif name in self_review_red_baseline_exports:
         module_name = "self_review_red_baseline"
+    elif name in self_review_green_cohort_exports:
+        module_name = "self_review_green_cohort"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

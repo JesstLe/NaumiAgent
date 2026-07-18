@@ -100,4 +100,5 @@ Baseline cohort 尚未持久化完成前，不允许生成 GREEN request。
 - ARC-04 ephemeral worker 尚未实现，因此不能真实物化 baseline commit；
 - EVO-03.2c 已为纯 `self_review_static` Request 实现精确 Git baseline 扫描、连续 H5a sample 与防篡改
   completion receipt；执行 Profile checks 或项目代码的完整 Request 仍等待 ARC-04；
-- 下一切片应实现 EVO-03.3a Self-Review Static GREEN Cohort，并保持同 metric/seed/order/平台合同。
+- EVO-03.3a 已保持同 metric/seed/order/平台合同生成独立 GREEN H5a cohort；下一切片实现
+  EVO-03.4a Self-Review Quantitative Comparison Receipt。

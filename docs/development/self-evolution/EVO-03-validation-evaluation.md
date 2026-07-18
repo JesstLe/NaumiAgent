@@ -50,6 +50,10 @@ Eval 和真实 Harness 检查产生。
   的 modify/create、baseline before 与 candidate after digest；v1 保持只读兼容但不能执行。RED executor
   现可安全表示新建文件的空 baseline，并重验 modify blob digest。详见
   `EVO-03-2d-validation-file-operation-binding.md`。
+- EVO-03.3a Self-Review Static GREEN Cohort：已实现。重新读取 active Lease/Trust/H5a RED evidence，精确
+  校验受管 worktree 的 HEAD、branch、dirty path、operation 与 candidate after digest，在不可变临时快照
+  中重复相同 AST scanner，并将连续 GREEN sample 写入独立 H5a batch。支持防漂移、断点续写、幂等重放
+  与防篡改完成回执；不运行项目代码。详见 `EVO-03-3a-self-review-static-green-cohort.md`。
 
-Self-Review Static GREEN cohort、interventional Harness runner、Evolution 目标 Comparator、failure attribution、
-adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+Evolution 目标 Comparator/Comparison Receipt、interventional Harness runner、failure attribution、adversarial
+suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。

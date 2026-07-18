@@ -56,6 +56,6 @@ EVO-03.2c executor 按 v2 operation 读取 baseline：
 ## 当前不足与下一步
 
 - Plan v1 只读兼容，不自动升级；升级必须重新取得原始 Receipt authority；
-- candidate Lease 的 HEAD、dirty path 集合与每个 `candidate_sha256` 尚未由 GREEN executor 重验；
-- 下一切片实现 EVO-03.3a Self-Review Static GREEN Cohort，并复用 Plan v2 的 operation/digest、RED Request
-  的 seed/order 与 HAR-08 Identity。
+- EVO-03.3a 已重新验证 candidate Lease、HEAD/branch、精确 dirty path 集合和每个 `candidate_sha256`，并
+  复用 RED Request 的 metric/seed/order/平台身份生成独立 GREEN H5a cohort；
+- 下一切片实现 EVO-03.4a Self-Review Quantitative Comparison Receipt，消费真实 RED/GREEN 样本而非重算。

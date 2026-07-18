@@ -49,6 +49,10 @@ from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.self_review_green_cohort import (
+    EvolutionSelfReviewGreenCohortExecutor,
+    EvolutionSelfReviewGreenCohortRequestBuilder,
+)
 from naumi_agent.evolution.self_review_red_baseline import (
     EvolutionSelfReviewRedBaselineExecutor,
 )
@@ -783,6 +787,17 @@ class AgentEngine:
             EvolutionSelfReviewRedBaselineExecutor(
                 store=self._harness_store,
                 trust_store=resources.harness_trust_store,
+            )
+        )
+        self.evolution_self_review_green_cohort_request_builder = (
+            EvolutionSelfReviewGreenCohortRequestBuilder()
+        )
+        self.evolution_self_review_green_cohort_executor = (
+            EvolutionSelfReviewGreenCohortExecutor(
+                store=self._harness_store,
+                trust_store=resources.harness_trust_store,
+                lease_store=self.evolution_experiment_lease_store,
+                worktree_storage_dir=self._worktree_storage_dir,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

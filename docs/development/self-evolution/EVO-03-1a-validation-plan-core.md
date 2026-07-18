@@ -77,6 +77,6 @@ executor。详见 `EVO-03-2d-validation-file-operation-binding.md`。
 
 - EVO-03.1b 已把 check kind 按 changed path 绑定到可信 Harness Profile 的唯一 check ID/spec/argv digest，
   并保持不可执行；详见 `EVO-03-1b-validation-profile-binding.md`；
-- RED Self-Review cohort 已实现，candidate GREEN cohort 与 Comparison Receipt 尚未实现；
+- RED/GREEN Self-Review 静态 cohort 已实现，Comparison Receipt 尚未实现；
 - Sandbox/真实命令执行仍等待 ARC-04 authority，不能由本模块自行放宽；
-- 下一最小切片是 EVO-03.3a Self-Review Static GREEN Cohort。
+- 下一最小切片是 EVO-03.4a Self-Review Quantitative Comparison Receipt。
