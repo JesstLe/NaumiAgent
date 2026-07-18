@@ -76,11 +76,14 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 13
+HARNESS_STORE_SCHEMA_VERSION = 14
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _INTERACTION_ID_RE = re.compile(r"^ask-[A-Za-z0-9._:-]{1,128}$")
+_CONVERSATION_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_CONVERSATION_QUEUE_TERMINAL_STATES = frozenset({"completed", "cancelled", "failed"})
+_MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -250,6 +253,23 @@ class HarnessStoredEvalComparisonReceipt:
     receipt_sha256: str
     receipt: HarnessEvalComparisonReceipt
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessConversationQueueItem:
+    """One durable, workspace/session-scoped conversation submission."""
+
+    workspace_root: str
+    session_id: str
+    request_id: str
+    client_id: str
+    text: str
+    payload_sha256: str
+    state: str
+    position: int
+    enqueued_at: str
+    updated_at: str
+    terminal_reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -2332,6 +2352,289 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法读取 Harness 心跳。") from exc
 
+    async def enqueue_conversation(
+        self,
+        *,
+        workspace_root: str | Path,
+        session_id: str,
+        request_id: str,
+        client_id: str,
+        text: str,
+        enqueued_at: str,
+    ) -> HarnessConversationQueueItem:
+        """Idempotently append one conversation to a bounded durable queue."""
+        workspace = _canonical_workspace(workspace_root)
+        session = _normalize_text(session_id, field="session_id", max_length=256)
+        request = _normalize_conversation_request_id(request_id)
+        client = _normalize_text(client_id, field="client_id", max_length=128)
+        content = _normalize_conversation_text(text)
+        timestamp = _normalize_utc_timestamp(enqueued_at, field="enqueued_at")
+        digest = _conversation_queue_digest(
+            session_id=session,
+            request_id=request,
+            client_id=client,
+            text=content,
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await _select_conversation_queue_item(
+                    db,
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                )
+                if existing is not None:
+                    item = _conversation_queue_item_from_row(existing)
+                    if not hmac.compare_digest(item.payload_sha256, digest):
+                        raise HarnessStoreConflictError(
+                            f"request_id 已绑定不同排队消息：{request}"
+                        )
+                    await db.rollback()
+                    return item
+                count_row = await (
+                    await db.execute(
+                        """
+                        SELECT COUNT(*) AS item_count, COALESCE(MAX(position), 0) AS last_position
+                        FROM harness_conversation_queue
+                        WHERE workspace_root = ? AND session_id = ? AND state = 'queued'
+                        """,
+                        (workspace, session),
+                    )
+                ).fetchone()
+                assert count_row is not None
+                if int(count_row["item_count"]) >= _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS:
+                    raise HarnessStoreConflictError(
+                        "排队对话已达到 20 条上限，请等待、取消或提升已有消息。"
+                    )
+                position = int(count_row["last_position"]) + 1
+                await db.execute(
+                    """
+                    INSERT INTO harness_conversation_queue (
+                        workspace_root, session_id, request_id, client_id, text,
+                        payload_sha256, state, position, enqueued_at, updated_at,
+                        terminal_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, '')
+                    """,
+                    (
+                        workspace,
+                        session,
+                        request,
+                        client,
+                        content,
+                        digest,
+                        position,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return HarnessConversationQueueItem(
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                    client_id=client,
+                    text=content,
+                    payload_sha256=digest,
+                    state="queued",
+                    position=position,
+                    enqueued_at=timestamp,
+                    updated_at=timestamp,
+                    terminal_reason="",
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法保存排队对话。请检查用户状态目录权限。") from exc
+
+    async def list_queued_conversations(
+        self,
+        *,
+        workspace_root: str | Path,
+        session_id: str,
+        limit: int = 20,
+    ) -> tuple[HarnessConversationQueueItem, ...]:
+        """Read a stable, bounded queue without mutating delivery state."""
+        workspace = _canonical_workspace(workspace_root)
+        session = _normalize_text(session_id, field="session_id", max_length=256)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("queue limit 必须是 1 到 100 之间的整数。")
+        if not self._db_path.is_file():
+            return ()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                rows = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_conversation_queue
+                        WHERE workspace_root = ? AND session_id = ? AND state = 'queued'
+                        ORDER BY position ASC, enqueued_at ASC, request_id ASC
+                        LIMIT ?
+                        """,
+                        (workspace, session, limit),
+                    )
+                ).fetchall()
+                return tuple(_conversation_queue_item_from_row(row) for row in rows)
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取排队对话。") from exc
+
+    async def promote_queued_conversation(
+        self,
+        *,
+        workspace_root: str | Path,
+        session_id: str,
+        request_id: str,
+        updated_at: str,
+    ) -> HarnessConversationQueueItem:
+        """Move one queued item to the next position while preserving peer order."""
+        workspace = _canonical_workspace(workspace_root)
+        session = _normalize_text(session_id, field="session_id", max_length=256)
+        request = _normalize_conversation_request_id(request_id)
+        timestamp = _normalize_utc_timestamp(updated_at, field="updated_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                rows = await _select_queued_conversation_rows(
+                    db, workspace_root=workspace, session_id=session,
+                )
+                selected = next(
+                    (row for row in rows if str(row["request_id"]) == request),
+                    None,
+                )
+                if selected is None:
+                    raise HarnessStoreConflictError(
+                        f"排队消息不存在或已离开队列：{request}"
+                    )
+                current = _conversation_queue_item_from_row(selected)
+                _ensure_queue_timestamp_forward(current.updated_at, timestamp)
+                ordered = [
+                    selected,
+                    *(
+                        row
+                        for row in rows
+                        if str(row["request_id"]) != request
+                    ),
+                ]
+                for position, row in enumerate(ordered, start=1):
+                    await db.execute(
+                        """
+                        UPDATE harness_conversation_queue
+                        SET position = ?, updated_at = ?
+                        WHERE workspace_root = ? AND session_id = ? AND request_id = ?
+                        """,
+                        (
+                            position,
+                            timestamp,
+                            workspace,
+                            session,
+                            str(row["request_id"]),
+                        ),
+                    )
+                result_row = await _select_conversation_queue_item(
+                    db,
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                )
+                await db.commit()
+                assert result_row is not None
+                return _conversation_queue_item_from_row(result_row)
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法提升排队对话。") from exc
+
+    async def finish_queued_conversation(
+        self,
+        *,
+        workspace_root: str | Path,
+        session_id: str,
+        request_id: str,
+        state: str,
+        terminal_reason: str,
+        updated_at: str,
+    ) -> HarnessConversationQueueItem:
+        """Terminalize one queued item and compact remaining positions atomically."""
+        workspace = _canonical_workspace(workspace_root)
+        session = _normalize_text(session_id, field="session_id", max_length=256)
+        request = _normalize_conversation_request_id(request_id)
+        normalized_state = state.strip() if isinstance(state, str) else ""
+        if normalized_state not in _CONVERSATION_QUEUE_TERMINAL_STATES:
+            raise ValueError("queue state 必须是 completed、cancelled 或 failed。")
+        reason = _normalize_text(
+            terminal_reason, field="terminal_reason", max_length=256,
+        )
+        timestamp = _normalize_utc_timestamp(updated_at, field="updated_at")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_conversation_queue_item(
+                    db,
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                )
+                if row is None:
+                    raise HarnessStoreConflictError(f"排队消息不存在：{request}")
+                current = _conversation_queue_item_from_row(row)
+                if current.state != "queued":
+                    if (
+                        current.state == normalized_state
+                        and current.terminal_reason == reason
+                    ):
+                        await db.rollback()
+                        return current
+                    raise HarnessStoreConflictError(
+                        f"排队消息已经终结为 {current.state}：{request}"
+                    )
+                _ensure_queue_timestamp_forward(current.updated_at, timestamp)
+                await db.execute(
+                    """
+                    UPDATE harness_conversation_queue
+                    SET state = ?, terminal_reason = ?, updated_at = ?
+                    WHERE workspace_root = ? AND session_id = ? AND request_id = ?
+                      AND state = 'queued'
+                    """,
+                    (normalized_state, reason, timestamp, workspace, session, request),
+                )
+                remaining = await _select_queued_conversation_rows(
+                    db, workspace_root=workspace, session_id=session,
+                )
+                for position, queued_row in enumerate(remaining, start=1):
+                    await db.execute(
+                        """
+                        UPDATE harness_conversation_queue
+                        SET position = ?, updated_at = ?
+                        WHERE workspace_root = ? AND session_id = ? AND request_id = ?
+                        """,
+                        (
+                            position,
+                            timestamp,
+                            workspace,
+                            session,
+                            str(queued_row["request_id"]),
+                        ),
+                    )
+                result_row = await _select_conversation_queue_item(
+                    db,
+                    workspace_root=workspace,
+                    session_id=session,
+                    request_id=request,
+                )
+                await db.commit()
+                assert result_row is not None
+                return _conversation_queue_item_from_row(result_row)
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法更新排队对话终态。") from exc
+
     async def create_interaction(
         self,
         *,
@@ -3808,6 +4111,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V11)
                             await db.executescript(_SCHEMA_V12)
                             await db.executescript(_SCHEMA_V13)
+                            await db.executescript(_SCHEMA_V14)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -4441,6 +4745,114 @@ def _canonical_workspace(workspace_root: str | Path) -> str:
     if isinstance(workspace_root, str) and not workspace_root.strip():
         raise ValueError("workspace_root 不能为空。")
     return str(Path(workspace_root).expanduser().resolve())
+
+
+def _normalize_conversation_request_id(value: str) -> str:
+    normalized = _normalize_text(value, field="request_id", max_length=128)
+    if not _CONVERSATION_REQUEST_ID_RE.fullmatch(normalized):
+        raise ValueError(
+            "request_id 只能包含字母、数字、点、下划线、冒号和连字符。"
+        )
+    return normalized
+
+
+def _normalize_conversation_text(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("排队消息不能为空。")
+    if len(value) > 100_000:
+        raise ValueError("排队消息长度不能超过 100000。")
+    if "\x00" in value:
+        raise ValueError("排队消息不能包含 NUL 字符。")
+    return value
+
+
+def _conversation_queue_digest(
+    *,
+    session_id: str,
+    request_id: str,
+    client_id: str,
+    text: str,
+) -> str:
+    payload = _json_dumps({
+        "client_id": client_id,
+        "request_id": request_id,
+        "session_id": session_id,
+        "text": text,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _ensure_queue_timestamp_forward(current: str, requested: str) -> None:
+    if datetime.fromisoformat(requested) < datetime.fromisoformat(current):
+        raise HarnessStoreConflictError("排队消息 updated_at 不能早于当前记录。")
+
+
+async def _select_conversation_queue_item(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    session_id: str,
+    request_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_conversation_queue
+            WHERE workspace_root = ? AND session_id = ? AND request_id = ?
+            """,
+            (workspace_root, session_id, request_id),
+        )
+    ).fetchone()
+
+
+async def _select_queued_conversation_rows(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    session_id: str,
+) -> list[aiosqlite.Row]:
+    rows = await (
+        await db.execute(
+            """
+            SELECT * FROM harness_conversation_queue
+            WHERE workspace_root = ? AND session_id = ? AND state = 'queued'
+            ORDER BY position ASC, enqueued_at ASC, request_id ASC
+            """,
+            (workspace_root, session_id),
+        )
+    ).fetchall()
+    return list(rows)
+
+
+def _conversation_queue_item_from_row(
+    row: aiosqlite.Row,
+) -> HarnessConversationQueueItem:
+    item = HarnessConversationQueueItem(
+        workspace_root=str(row["workspace_root"]),
+        session_id=str(row["session_id"]),
+        request_id=str(row["request_id"]),
+        client_id=str(row["client_id"]),
+        text=str(row["text"]),
+        payload_sha256=str(row["payload_sha256"]),
+        state=str(row["state"]),
+        position=int(row["position"]),
+        enqueued_at=str(row["enqueued_at"]),
+        updated_at=str(row["updated_at"]),
+        terminal_reason=str(row["terminal_reason"]),
+    )
+    expected_digest = _conversation_queue_digest(
+        session_id=item.session_id,
+        request_id=item.request_id,
+        client_id=item.client_id,
+        text=item.text,
+    )
+    if not hmac.compare_digest(item.payload_sha256, expected_digest):
+        raise HarnessStoreError("排队消息摘要校验失败，拒绝读取。")
+    if item.state not in {"queued", *_CONVERSATION_QUEUE_TERMINAL_STATES}:
+        raise HarnessStoreError("排队消息状态无效，拒绝读取。")
+    if item.position < 1:
+        raise HarnessStoreError("排队消息位置无效，拒绝读取。")
+    return item
 
 
 def _coerce_run_kind(value: HarnessRunKind | str) -> HarnessRunKind:
@@ -5375,5 +5787,29 @@ CREATE TABLE IF NOT EXISTS harness_interaction_events (
     FOREIGN KEY (workspace_root, interaction_id)
         REFERENCES harness_interactions(workspace_root, interaction_id)
         ON DELETE CASCADE
+);
+"""
+
+_SCHEMA_V14 = """
+CREATE TABLE IF NOT EXISTS harness_conversation_queue (
+    workspace_root TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    payload_sha256 TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN ('queued', 'completed', 'cancelled', 'failed')
+    ),
+    position INTEGER NOT NULL CHECK (position >= 1),
+    enqueued_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    terminal_reason TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, session_id, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_conversation_queue_ready
+ON harness_conversation_queue (
+    workspace_root, session_id, state, position, enqueued_at, request_id
 );
 """

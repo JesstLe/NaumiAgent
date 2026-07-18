@@ -15,12 +15,13 @@ HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
 browser/agent/runtime producer 和 Supervisor 仍未完成。
-HAR-10.6a 已把当前 Harness Store 升级到 v13，提供 durable interaction request/answer、timeout、takeover 与
+HAR-10.6a 在 Harness Store v13 提供 durable interaction request/answer、timeout、takeover 与
 并发 fencing；HAR-10.6b 已接入 New UI Bridge 和 Pursuit stable checkpoint/reconcile，UI-18.4b 已让
 Textual TUI 复用相同 authority adapter；UI-18.4c 已补齐 Goal interaction ledger 与显式 cancel。手动
 takeover、cursor 和详情筛选仍未完成。
 HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；队列本身仍是 Bridge 内存状态，持久化、重启恢复、
-跨客户端公平和取消传播留给 HAR-10.3b。
+跨客户端公平和取消传播留给 HAR-10.3b。HAR-10.3b1 已把 Harness Store 升级到 v14，并交付尚未接入 Bridge 的
+持久队列 Store 核心；claim lease/fencing 与启动恢复属于下一切片。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
