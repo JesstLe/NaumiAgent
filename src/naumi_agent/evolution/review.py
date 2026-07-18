@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from naumi_agent.evolution.aggregation import CandidateAggregation, aggregate_candidate
 from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
     assess_candidate_eligibility,
@@ -65,6 +66,7 @@ class EvolutionReviewItem:
     expected_metrics: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     eligibility: CandidateEligibilityAssessment
+    aggregation: CandidateAggregation | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +172,28 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         "",
     ]
     lines.extend(f"- `{_escape(metric)}`" for metric in item.expected_metrics)
+    if item.aggregation is not None:
+        aggregate = item.aggregation
+        lines.extend([
+            "",
+            f"## 聚合趋势 · `{aggregate.policy_version}`",
+            "",
+            (
+                f"- 趋势：`{aggregate.trend}` · 24h/7d/30d："
+                f"{aggregate.count_24h}/{aggregate.count_7d}/{aggregate.count_30d}"
+            ),
+            f"- 前一 7d：{aggregate.previous_7d_count} · 时间跨度：{aggregate.span_seconds}s",
+            (
+                "- Provider："
+                f"{_render_dimensions(aggregate.provider_counts, aggregate.provider_unique_count)}"
+            ),
+            f"- Model：{_render_dimensions(aggregate.model_counts, aggregate.model_unique_count)}",
+            (
+                "- Platform："
+                f"{_render_dimensions(aggregate.platform_counts, aggregate.platform_unique_count)}"
+            ),
+            f"- 来源：{_render_dimensions(aggregate.source_counts, aggregate.source_unique_count)}",
+        ])
     lines.extend(["", "## Eligibility Gates", ""])
     lines.extend(
         (
@@ -239,6 +263,7 @@ def _review_item(
             else ()
         ),
         eligibility=assess_candidate_eligibility(draft),
+        aggregation=aggregate_candidate(draft) if include_refs else None,
     )
 
 
@@ -268,6 +293,15 @@ def _unique(values, *, limit: int) -> tuple[str, ...]:
 
 def _escape(value: str) -> str:
     return str(value).replace("`", "\\`").replace("\x00", "")[:2_048]
+
+
+def _render_dimensions(values, unique_count: int) -> str:
+    rendered = ", ".join(
+        f"`{_escape(item.value)}` {item.count} ({item.percentage:g}%)"
+        for item in values
+    ) or "-"
+    omitted = max(0, unique_count - len(values))
+    return f"{rendered}，另有 {omitted} 项" if omitted else rendered
 
 
 __all__ = [

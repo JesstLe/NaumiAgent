@@ -118,6 +118,8 @@ async def test_review_detail_contains_verified_evidence_and_audit_chain(
     assert len(snapshot.events) == 2
     assert "feedback_recurrence" in rendered
     assert "candidate-eligibility-v1" in rendered
+    assert "candidate-aggregation-v1" in rendered
+    assert "24h/7d/30d" in rendered
     assert "review_ready" in rendered
     assert "cooldown_gate" in rendered
     assert "实验资格" in rendered

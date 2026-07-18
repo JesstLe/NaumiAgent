@@ -34,11 +34,20 @@ test("evolution review list and detail stay bounded at common widths", () => {
       expected_metrics: ["feedback.recurrence decrease 0"], evidence_refs: [],
       policy_version: "candidate-eligibility-v1",
       checks: [{ code: "cooldown_gate", passed: false, hard_block: false, detail: "等待冷却记录。" }],
+      aggregation: {
+        policy_version: "candidate-aggregation-v1", trend: "increasing",
+        count_24h: 1, count_7d: 4, count_30d: 6, previous_7d_count: 2,
+        provider_counts: [{ value: "openai", count: 4, percentage: 66.7 }],
+        provider_unique_count: 1, model_counts: [], model_unique_count: 0,
+        platform_counts: [], platform_unique_count: 0, source_counts: [], source_unique_count: 0,
+      },
     };
     const detail = renderEvolutionReviewPage({ snapshot: { mode: "detail", filters: {}, items: [], selected, events: [] }, scrollOffset: 0 }, width, 20);
     const plain = detail.map(stripAnsi).join("\n");
     assert(detail.every((line) => visibleWidth(line) <= width));
     assert(plain.includes("Eligibility Gates"));
+    assert(plain.includes("聚合趋势"));
+    assert(plain.includes("24h/7d/30d 1/4/6"));
     assert(plain.includes("实验资格 否"));
   }
 });
