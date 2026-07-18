@@ -43,4 +43,7 @@
   精确 baseline 创建，崩溃窗口恢复、到期回收和 dirty/ahead tombstone；任何状态都不授予执行权限。
   `AgentEngine` 已组合 Contract Issuer、Lease Store 与 Lease Manager。详见
   `EVO-02-2a-worktree-lease.md`。
-- EVO-02.3..02.7 尚未实现，因此 EVO-02 整体保持 partial。
+- EVO-02.3a 已实现不可变 Source Snapshot v1：精确 Git tree、Harness Profile、Contract 安全配置和
+  Runtime Tool Registry identity 均进入防篡改摘要；dirty/branch/path/Profile/tool 漂移 fail-closed，且
+  仍固定 `execution_ready=false`。详见 `EVO-02-3a-source-snapshot.md`。
+- EVO-02.4..02.7 尚未实现，因此 EVO-02 整体保持 partial。

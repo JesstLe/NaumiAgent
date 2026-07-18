@@ -12,6 +12,9 @@ from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
 )
+from naumi_agent.evolution.experiment_snapshots import (
+    EvolutionExperimentSourceSnapshotBuilder,
+)
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
@@ -93,6 +96,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_experiment_lease_manager,
         EvolutionExperimentLeaseManager,
+    )
+    assert isinstance(
+        engine.evolution_experiment_source_snapshot_builder,
+        EvolutionExperimentSourceSnapshotBuilder,
     )
     assert (
         engine.evolution_experiment_lease_manager._worktree_manager

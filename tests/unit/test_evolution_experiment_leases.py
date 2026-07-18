@@ -6,12 +6,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
     ExperimentLeaseConflictError,
     ExperimentLeaseState,
+)
+from naumi_agent.evolution.experiment_snapshots import (
+    EvolutionExperimentSourceSnapshot,
+    EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractIssuer,
@@ -21,6 +26,8 @@ from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.tasks.store import TaskStore
+from naumi_agent.tools.base import ToolRegistry
+from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
@@ -41,11 +48,15 @@ def _git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-async def _lease_fixture(tmp_path: Path, *, clock=None):
+async def _lease_fixture(tmp_path: Path, *, clock=None, profile_text: str | None = None):
     workspace = tmp_path / "workspace"
     target = workspace / "src" / "naumi_agent" / "ui" / "footer.py"
     target.parent.mkdir(parents=True)
     target.write_text("def render_footer():\n    return 'baseline'\n", encoding="utf-8")
+    if profile_text is not None:
+        profile = workspace / ".naumi" / "harness.yaml"
+        profile.parent.mkdir(parents=True)
+        profile.write_text(profile_text, encoding="utf-8")
     _git(workspace, "init")
     _git(workspace, "config", "user.name", "Naumi Test")
     _git(workspace, "config", "user.email", "naumi@example.invalid")
@@ -340,3 +351,131 @@ async def test_existing_provision_reservation_is_not_stolen_or_released(
     assert persisted == lease
     assert persisted is not None
     assert persisted.state is ExperimentLeaseState.PROVISIONING
+
+
+def _snapshot_builder(
+    workspace: Path,
+    worktree_storage_dir: Path,
+) -> EvolutionExperimentSourceSnapshotBuilder:
+    registry = ToolRegistry()
+    for tool in create_builtin_tools(workspace):
+        registry.register(tool)
+    return EvolutionExperimentSourceSnapshotBuilder(
+        registry,
+        worktree_storage_dir=worktree_storage_dir,
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_snapshot_binds_clean_tree_profile_config_and_tools(
+    tmp_path: Path,
+) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(
+            tmp_path,
+            profile_text="schema_version: 1\n",
+        )
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+
+    first = builder.capture(contract, lease)
+    second = builder.capture(contract, lease)
+
+    assert first == second
+    assert first.snapshot_id == f"evs_{first.snapshot_sha256[:24]}"
+    assert first.contract_id == contract.contract_id
+    assert first.lease_id == lease.lease_id
+    assert first.baseline_commit == contract.baseline.commit
+    assert first.baseline_tree == _git(Path(lease.worktree_path), "rev-parse", "HEAD^{tree}")
+    assert first.profile_status == "valid"
+    assert len(first.profile_sha256) == 64
+    assert tuple(tool.name for tool in first.tools) == tuple(sorted(contract.allowed_tools))
+    assert all(tool.naumi_version for tool in first.tools)
+    assert first.source_ready is True
+    assert first.execution_ready is False
+
+
+@pytest.mark.asyncio
+async def test_source_snapshot_rejects_dirty_worktree_and_missing_tool(
+    tmp_path: Path,
+) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(tmp_path)
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    missing_profile = _snapshot_builder(
+        workspace,
+        Path(lease.worktree_path).parent,
+    ).capture(contract, lease)
+    assert missing_profile.profile_status == "missing"
+    assert len(missing_profile.profile_sha256) == 64
+
+    empty = ToolRegistry()
+    with pytest.raises(ValueError, match="未注册"):
+        EvolutionExperimentSourceSnapshotBuilder(
+            empty,
+            worktree_storage_dir=Path(lease.worktree_path).parent,
+        ).capture(contract, lease)
+
+    Path(lease.worktree_path, "unreviewed.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="已存在变更"):
+        _snapshot_builder(workspace, Path(lease.worktree_path).parent).capture(
+            contract,
+            lease,
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_snapshot_rejects_branch_binding_drift(tmp_path: Path) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(tmp_path)
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    with pytest.raises(ValueError, match="受管 Lease 存储目录"):
+        _snapshot_builder(workspace, tmp_path / "other-worktrees").capture(
+            contract,
+            lease,
+        )
+
+    _git(Path(lease.worktree_path), "checkout", "-b", "unexpected-branch")
+
+    with pytest.raises(ValueError, match="branch"):
+        _snapshot_builder(workspace, Path(lease.worktree_path).parent).capture(
+            contract,
+            lease,
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_snapshot_rejects_invalid_profile_and_digest_tampering(
+    tmp_path: Path,
+) -> None:
+    workspace, _, contract, _worktrees, _store, manager, _task_id = (
+        await _lease_fixture(tmp_path, profile_text="schema_version: nope\n")
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    with pytest.raises(ValueError, match="Profile 无效"):
+        _snapshot_builder(workspace, Path(lease.worktree_path).parent).capture(
+            contract,
+            lease,
+        )
+
+    clean_workspace, _, clean_contract, _, _, clean_manager, _ = await _lease_fixture(
+        tmp_path / "clean",
+        profile_text="schema_version: 1\n",
+    )
+    clean_lease = await clean_manager.acquire(clean_contract, owner="Evolution-Agent")
+    snapshot = _snapshot_builder(
+        clean_workspace,
+        Path(clean_lease.worktree_path).parent,
+    ).capture(clean_contract, clean_lease)
+    payload = snapshot.model_dump(mode="json")
+    payload["baseline_tree_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="snapshot_sha256"):
+        EvolutionExperimentSourceSnapshot.model_validate(payload)
+
+    nested = snapshot.model_dump(mode="json")
+    nested["tools"][0]["schema_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="Tool identity_sha256"):
+        EvolutionExperimentSourceSnapshot.model_validate(nested)

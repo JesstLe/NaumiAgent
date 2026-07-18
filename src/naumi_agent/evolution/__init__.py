@@ -15,6 +15,11 @@ if TYPE_CHECKING:
         ExperimentLeaseState,
         ExperimentWorktreeLease,
     )
+    from naumi_agent.evolution.experiment_snapshots import (
+        EvolutionExperimentSourceSnapshot,
+        EvolutionExperimentSourceSnapshotBuilder,
+        ExperimentToolIdentity,
+    )
     from naumi_agent.evolution.experiments import (
         EvolutionExperimentContract,
         EvolutionExperimentContractIssuer,
@@ -45,10 +50,13 @@ __all__ = [
     "EvolutionExperimentContractIssuer",
     "EvolutionExperimentLeaseManager",
     "EvolutionExperimentLeaseStore",
+    "EvolutionExperimentSourceSnapshot",
+    "EvolutionExperimentSourceSnapshotBuilder",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
     "ExperimentWorktreeLease",
+    "ExperimentToolIdentity",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
     "EvolutionStoreError",
@@ -82,6 +90,11 @@ def __getattr__(name: str) -> object:
         "ExperimentLeaseState",
         "ExperimentWorktreeLease",
     }
+    experiment_snapshot_exports = {
+        "EvolutionExperimentSourceSnapshot",
+        "EvolutionExperimentSourceSnapshotBuilder",
+        "ExperimentToolIdentity",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -92,6 +105,8 @@ def __getattr__(name: str) -> object:
         module_name = "experiments"
     elif name in experiment_lease_exports:
         module_name = "experiment_leases"
+    elif name in experiment_snapshot_exports:
+        module_name = "experiment_snapshots"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")
