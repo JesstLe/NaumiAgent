@@ -47,7 +47,8 @@
 
 ## 当前不足与后续
 
-- 已有历史 claim 目前只 fail closed，没有 `/queue resolve` 的证据审查、确认重试或放弃动作；这是 HAR-10.3b3。
+- HAR-10.3b3 已补齐 `/queue list` 证据审查、live-owner 拒绝、过期/released claim 的显式重试或放弃，
+  以及 New UI 处置后立即刷新；见 [HAR-10.3b3](HAR-10-3b3-ambiguous-queue-resolution.md)。
 - terminal 记录尚无 retention/cursor；跨客户端轮转公平和优先级仍未实现。
 - TUI fallback 需要先独立实现“运行中仍可输入并显示队列”的 UI 能力，再接同一个 authority；不能仅在后台接 Store。
 - 本切片保证未派发等待项的 crash recovery，不宣称正在运行的模型/工具 exactly-once；外部副作用仍由各执行域的

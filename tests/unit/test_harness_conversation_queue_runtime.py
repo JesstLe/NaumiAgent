@@ -176,3 +176,119 @@ async def test_shutdown_cancel_only_accepts_never_claimed_item(tmp_path) -> None
     await authority.claim(second, now=T1)
     with pytest.raises(ConversationQueueClaimError, match="派发边界"):
         await authority.cancel_unclaimed(second, reason="ui_shutdown", now=T10)
+
+
+@pytest.mark.asyncio
+async def test_live_claim_cannot_be_resolved(tmp_path) -> None:
+    authority = _authority(tmp_path)
+    item = await authority.enqueue(
+        request_id="live", text="仍在运行", client_id="terminal-a", now=T0,
+    )
+    await authority.claim(item, now=T0)
+
+    review = await _authority(tmp_path, owner="reviewer").review(
+        request_id="live", now=T10,
+    )
+    assert review.resolvable is False
+    assert review.resolution_code == "claim_live"
+    with pytest.raises(ConversationQueueClaimError, match="活跃实例"):
+        await _authority(tmp_path, owner="reviewer").resolve(
+            request_id="live",
+            action="retry",
+            reason="用户确认重试",
+            now=T10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_expired_claim_retry_is_atomic_audited_and_dispatchable(tmp_path) -> None:
+    first = _authority(tmp_path)
+    item = await first.enqueue(
+        request_id="expired", text="需要重试", client_id="terminal-a", now=T0,
+    )
+    old_claim = await first.claim(item, now=T0)
+    reviewer = _authority(tmp_path, owner="reviewer")
+
+    resolution = await reviewer.resolve(
+        request_id="expired",
+        action="retry",
+        reason="用户核对后重试",
+        now=T31,
+    )
+
+    assert resolution.action == "retry"
+    assert resolution.reviewed_epoch == old_claim.lease.epoch
+    assert resolution.retry_request_id.startswith("retry-")
+    queued = await reviewer.store.list_queued_conversations(
+        workspace_root=reviewer.workspace_root,
+        session_id=reviewer.session_id,
+    )
+    assert len(queued) == 1
+    assert queued[0].request_id == resolution.retry_request_id
+    assert queued[0].text == item.text
+    assert (await reviewer.recover()).ready == queued
+    new_claim = await reviewer.claim(queued[0], now=T31)
+    assert new_claim.lease.epoch == 1
+    with sqlite3.connect(reviewer.store.db_path) as db:
+        audit = db.execute(
+            "SELECT action, request_id, retry_request_id, reviewed_owner_id, "
+            "reviewed_epoch, reason FROM harness_conversation_queue_resolutions"
+        ).fetchone()
+        old_state = db.execute(
+            "SELECT state, terminal_reason FROM harness_conversation_queue "
+            "WHERE request_id = 'expired'"
+        ).fetchone()
+    assert audit == (
+        "retry",
+        "expired",
+        resolution.retry_request_id,
+        old_claim.lease.owner_id,
+        old_claim.lease.epoch,
+        "用户核对后重试",
+    )
+    assert old_state == ("cancelled", "explicit_retry")
+
+
+@pytest.mark.asyncio
+async def test_released_claim_can_be_cancelled_idempotently(tmp_path) -> None:
+    first = _authority(tmp_path)
+    item = await first.enqueue(
+        request_id="released", text="决定放弃", client_id="terminal-a", now=T0,
+    )
+    claim = await first.claim(item, now=T0)
+    released = await first.store.release_run_lease(
+        workspace_root=first.workspace_root,
+        run_kind="runtime",
+        run_id=claim.lease.run_id,
+        owner_id=claim.lease.owner_id,
+        epoch=claim.lease.epoch,
+        now=T1,
+    )
+    assert released is not None
+    reviewer = _authority(tmp_path, owner="reviewer")
+
+    first_result = await reviewer.resolve(
+        request_id="released",
+        action="cancel",
+        reason="用户确认无需执行",
+        now=T10,
+    )
+    second_result = await reviewer.store.resolve_ambiguous_queued_conversation(
+        workspace_root=reviewer.workspace_root,
+        session_id=reviewer.session_id,
+        request_id="released",
+        action="cancel",
+        retry_request_id="",
+        reviewed_run_id=claim.lease.run_id,
+        reviewed_owner_id=claim.lease.owner_id,
+        reviewed_epoch=claim.lease.epoch,
+        actor_id=reviewer.owner_id,
+        reason="用户确认无需执行",
+        resolved_at=T10,
+    )
+
+    assert second_result == first_result
+    assert await reviewer.store.list_queued_conversations(
+        workspace_root=reviewer.workspace_root,
+        session_id=reviewer.session_id,
+    ) == ()

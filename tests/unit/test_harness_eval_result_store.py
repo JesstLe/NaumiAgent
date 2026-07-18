@@ -195,7 +195,7 @@ async def test_schema_v8_migration_is_idempotent_and_tamper_evident(
         )
         db.commit()
 
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 14
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 15
     assert table == 1
     with pytest.raises(HarnessStoreError, match="损坏"):
         await HarnessStore(db_path).get_eval_result(

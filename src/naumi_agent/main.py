@@ -2187,6 +2187,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(Markdown(render_doctor_report(report)))
         case "/harness":
             await _run_harness(engine, arg)
+        case "/queue":
+            await _run_conversation_queue(engine, arg)
         case "/feedback":
             await _run_feedback(engine, arg)
         case "/evolution":
@@ -2740,6 +2742,10 @@ def _print_help() -> None:
             "管理仓库 Harness Profile、离线评测、运行解释、知识与验证检查",
         ),
         (
+            "/queue [list|resolve <request-id> <retry|cancel> [原因]]",
+            "审查并处置已跨过派发边界的持久排队消息",
+        ),
+        (
             "/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>",
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
@@ -2845,6 +2851,114 @@ def _print_help() -> None:
     for cmd, desc in commands:
         console.print(f"  [cyan]{cmd:12s}[/cyan] {desc}")
     console.print()
+
+
+async def _run_conversation_queue(engine: Any, arg: str) -> None:
+    """Inspect or explicitly resolve durable queue dispatch ambiguity."""
+    from naumi_agent.harness.conversation_queue_runtime import (
+        ConversationQueueClaimError,
+        DurableConversationQueueAuthority,
+    )
+
+    session = getattr(engine, "_session", None)
+    session_id = str(getattr(session, "id", "") or "").strip()
+    store = getattr(engine, "_harness_store", None)
+    workspace_root = getattr(engine, "workspace_root", Path.cwd())
+    if not session_id:
+        console.print("[yellow]当前没有活动会话。请先运行 /resume 或发送消息。[/yellow]")
+        return
+    if store is None:
+        console.print("[red]持久队列权威暂不可用，请运行 /doctor。[/red]")
+        return
+    authority = DurableConversationQueueAuthority(
+        store=store,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        owner_id=f"queue-command-{os.getpid()}",
+    )
+    try:
+        parts = shlex.split(arg) if arg.strip() else ["list"]
+    except ValueError as exc:
+        console.print(f"[yellow]参数引号不完整：{exc}[/yellow]")
+        return
+    action = parts[0].lower()
+    if action in {"list", "status"} and len(parts) == 1:
+        recovery = await authority.recover(limit=20)
+        items = (*recovery.ready, *recovery.blocked)
+        if not items:
+            console.print("[green]当前会话没有等待中的持久排队消息。[/green]")
+            return
+        blocked_ids = {item.request_id for item in recovery.blocked}
+        console.print(f"[bold]持久队列[/bold] · {len(items)} 条")
+        for item in items:
+            if item.request_id in blocked_ids:
+                try:
+                    review = await authority.review(request_id=item.request_id)
+                except ConversationQueueClaimError:
+                    console.print(
+                        Text(
+                            f"· {item.request_id} · 被前序历史 claim 阻断\n"
+                            f"  {item.text[:160]}",
+                            style="yellow",
+                        )
+                    )
+                    continue
+                status = "可处置" if review.resolvable else "运行实例仍活跃"
+                console.print(
+                    Text(
+                        f"! {item.request_id} · {status} · owner "
+                        f"{review.lease.owner_id} · epoch {review.lease.epoch} · "
+                        f"到期 {review.lease.expires_at}\n  {item.text[:160]}"
+                    ),
+                    style="yellow" if review.resolvable else "red",
+                )
+            else:
+                console.print(
+                    Text(
+                        f"· {item.request_id} · 未派发\n  {item.text[:160]}",
+                        style="cyan",
+                    )
+                )
+        if recovery.blocked:
+            console.print(
+                "[dim]处置：/queue resolve <request-id> retry|cancel [原因][/dim]"
+            )
+        return
+    if action != "resolve" or len(parts) < 3 or len(parts) > 4:
+        console.print(
+            "[yellow]用法：/queue list；"
+            "/queue resolve <request-id> <retry|cancel> [原因][/yellow]"
+        )
+        return
+    request_id, decision = parts[1], parts[2].lower()
+    reason = parts[3] if len(parts) == 4 else f"user_explicit_{decision}"
+    try:
+        resolution = await authority.resolve(
+            request_id=request_id,
+            action=decision,
+            reason=reason,
+        )
+    except (ConversationQueueClaimError, ValueError) as exc:
+        console.print(Text(f"处置未执行：{exc}", style="red"))
+        return
+    if resolution.action == "retry":
+        console.print(
+            Text(
+                "已审计并重新排队。\n"
+                f"旧 request: {resolution.request_id}\n"
+                f"新 request: {resolution.retry_request_id}\n"
+                f"审查 lease: {resolution.reviewed_owner_id} / epoch "
+                f"{resolution.reviewed_epoch}",
+                style="green",
+            )
+        )
+    else:
+        console.print(
+            Text(
+                f"已审计并放弃排队消息 {resolution.request_id}；后续消息可继续恢复。",
+                style="green",
+            )
+        )
 
 
 async def _run_feedback(engine: Any, arg: str) -> None:
