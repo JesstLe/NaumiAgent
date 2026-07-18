@@ -98,5 +98,5 @@ Writer Receipt 升级为 schema v2，内嵌防篡改 Postflight Receipt、ID 和
 - Python 动态导出、运行时 monkey patch 和动态构造 `__all__` 无法由静态 AST 完整证明，遇到非 literal
   `__all__` 时不会把它误当成权威导出清单；
 - 本门禁不运行测试、不比较行为指标，也不证明修改目标已经达成；
-- 下一最小前置是 EVO-02.7 Mutation Receipt，把 rationale、attempt、tool evidence 与本 Postflight
-  Receipt 汇总为可交给 HAR-08/EVO-03 的不可变实验产物。
+- EVO-02.7a 已把 rationale、attempt、治理 tool evidence 与本 Postflight Receipt 汇总为不可变实验
+  artifact；2.7b 继续绑定 proposed contents 的原始 mutation-generation tool-call trace。

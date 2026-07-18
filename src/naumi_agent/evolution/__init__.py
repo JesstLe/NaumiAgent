@@ -32,6 +32,15 @@ if TYPE_CHECKING:
         MutationObjective,
         MutationPlanStage,
     )
+    from naumi_agent.evolution.mutation_receipts import (
+        EvolutionMutationReceipt,
+        EvolutionMutationReceiptConflictError,
+        EvolutionMutationReceiptError,
+        EvolutionMutationReceiptService,
+        EvolutionMutationReceiptStore,
+        MutationReceiptFile,
+        MutationToolEvidence,
+    )
     from naumi_agent.evolution.patch_journals import (
         EvolutionPatchJournal,
         EvolutionPatchJournalStore,
@@ -103,6 +112,11 @@ __all__ = [
     "EvolutionExperimentSourceSnapshotBuilder",
     "EvolutionMutationPlan",
     "EvolutionMutationPlanner",
+    "EvolutionMutationReceipt",
+    "EvolutionMutationReceiptConflictError",
+    "EvolutionMutationReceiptError",
+    "EvolutionMutationReceiptService",
+    "EvolutionMutationReceiptStore",
     "EvolutionPatchJournal",
     "EvolutionPatchJournalStore",
     "EvolutionPostflightGuard",
@@ -131,6 +145,8 @@ __all__ = [
     "MutationFileFact",
     "MutationObjective",
     "MutationPlanStage",
+    "MutationReceiptFile",
+    "MutationToolEvidence",
     "PatchJournalState",
     "PostflightDiffFact",
     "PatchSetFilePhase",
@@ -183,6 +199,15 @@ def __getattr__(name: str) -> object:
         "MutationFileFact",
         "MutationObjective",
         "MutationPlanStage",
+    }
+    mutation_receipt_exports = {
+        "EvolutionMutationReceipt",
+        "EvolutionMutationReceiptConflictError",
+        "EvolutionMutationReceiptError",
+        "EvolutionMutationReceiptService",
+        "EvolutionMutationReceiptStore",
+        "MutationReceiptFile",
+        "MutationToolEvidence",
     }
     patch_journal_exports = {
         "EvolutionPatchJournal",
@@ -239,6 +264,8 @@ def __getattr__(name: str) -> object:
         module_name = "experiment_snapshots"
     elif name in mutation_plan_exports:
         module_name = "mutation_plans"
+    elif name in mutation_receipt_exports:
+        module_name = "mutation_receipts"
     elif name in patch_journal_exports:
         module_name = "patch_journals"
     elif name in postflight_guard_exports:
