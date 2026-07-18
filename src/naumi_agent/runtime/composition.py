@@ -18,6 +18,7 @@ from naumi_agent.harness.trust import (
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.dependencies import (
     RuntimePortOverrides,
     RuntimePorts,
@@ -99,6 +100,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
     return RuntimePaths(
         workspace_root=config.resolve_workspace_root(),
         runtime_data_dir=runtime_data_dir,
+        chat_run_db_path=runtime_data_dir / "chat-runs.db",
         worktree_storage_dir=runtime_data_dir / "worktrees",
         harness_db_path=resolve_harness_db_path(),
         harness_trust_db_path=resolve_harness_trust_db_path(),
@@ -121,6 +123,10 @@ def build_runtime_resources(
         raise TypeError("overrides 必须是 RuntimeResourceOverrides。")
     validate_runtime_resource_overrides(resolved)
 
+    chat_run_store = resolved.chat_run_store
+    if chat_run_store is None:
+        chat_run_store = ChatRunStore(paths.chat_run_db_path)
+
     evolution_candidate_store = resolved.evolution_candidate_store
     if evolution_candidate_store is None:
         evolution_candidate_store = EvolutionCandidateStore(paths.evolution_db_path)
@@ -134,6 +140,7 @@ def build_runtime_resources(
         harness_trust_store = HarnessTrustStore(paths.harness_trust_db_path)
 
     return RuntimeResources(
+        chat_run_store=chat_run_store,
         evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,

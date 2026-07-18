@@ -63,6 +63,7 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     assert engine._paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert engine._paths.browser_data_dir == engine._paths.runtime_data_dir / "browser"
     assert engine._harness_store is engine._resources.harness_store
+    assert engine.chat_run_store is engine._resources.chat_run_store
     assert (
         engine.evolution_candidate_store
         is engine._resources.evolution_candidate_store
@@ -134,6 +135,7 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
             for event in events.events
         ) == 1
         assert engine.session_store._db is not None
+        assert engine._resources.chat_run_store.db_path.exists()
         await engine._resources.harness_store.record_profile(
             workspace_root=tmp_path,
             profile_digest="a" * 64,

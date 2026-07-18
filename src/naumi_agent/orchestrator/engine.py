@@ -104,7 +104,6 @@ from naumi_agent.orchestrator.tool_batches import (
 )
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
-from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
 from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.runtime.ports.events import (
@@ -609,7 +608,7 @@ class AgentEngine:
             ),
         )
         self._session_reconciliation_worker_id = f"engine-{uuid.uuid4().hex}"
-        self.chat_run_store = ChatRunStore(self._runtime_data_dir / "chat-runs.db")
+        self.chat_run_store = resources.chat_run_store
         self._tool_registry = ToolRegistry()
         self._messages: list[dict[str, Any]] = []
         self._full_history: list[dict[str, Any]] = []  # untruncated display history
