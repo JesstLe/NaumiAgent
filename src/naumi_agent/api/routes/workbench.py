@@ -23,6 +23,10 @@ from naumi_agent.workbench.models import (
     ParallelMode,
     RiskLevel,
 )
+from naumi_agent.workbench.proposal_governance import (
+    ProposalAction,
+    ProposalGovernanceConflictError,
+)
 
 router = APIRouter(tags=["workbench"])
 LOCAL_DAEMON_BIND_HOST = "127.0.0.1"
@@ -63,6 +67,8 @@ WORKBENCH_SUPPORTED_ACTIONS = [
     "create_proposal",
     "approve_proposal",
     "reject_proposal",
+    "defer_proposal",
+    "merge_proposal",
     "convert_proposal",
     "resolve_approval",
     "review_evidence",
@@ -158,6 +164,12 @@ WORKBENCH_ROUTE_TEMPLATES = {
     ),
     "reject_proposal": (
         "/workbench/sessions/{session_id}/proposals/{proposal_id}/reject"
+    ),
+    "defer_proposal": (
+        "/workbench/sessions/{session_id}/proposals/{proposal_id}/defer"
+    ),
+    "merge_proposal": (
+        "/workbench/sessions/{session_id}/proposals/{proposal_id}/merge"
     ),
     "convert_proposal": (
         "/workbench/sessions/{session_id}/proposals/{proposal_id}/convert"
@@ -296,6 +308,18 @@ class ProposalCreate(BaseModel):
 class ProposalResolve(BaseModel):
     reviewer: str = "Human"
     decision_note: str = ""
+
+
+class ProposalDefer(BaseModel):
+    reviewer: str = "Human"
+    decision_note: str = Field(min_length=1, max_length=2_000)
+    defer_until: str = Field(min_length=1, max_length=64)
+
+
+class ProposalMerge(BaseModel):
+    reviewer: str = "Human"
+    decision_note: str = Field(default="", max_length=2_000)
+    merge_into_id: str = Field(min_length=1, max_length=128)
 
 
 
@@ -2081,6 +2105,63 @@ async def _resolve_workbench_proposal(
             reviewer=body.reviewer,
             decision_note=body.decision_note,
         )
+    except ProposalGovernanceConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if not include_snapshot:
+        return proposal
+    try:
+        snapshot = await _build_workbench_snapshot(engine, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"proposal": proposal, "snapshot": snapshot}
+
+
+async def _govern_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    request: Request,
+    *,
+    action: ProposalAction,
+    reviewer: str,
+    decision_note: str,
+    include_snapshot: bool,
+    defer_until: str = "",
+    merge_into_id: str = "",
+):
+    """Shared persistence and snapshot flow for Proposal governance actions."""
+    engine = request.app.state.engine
+    try:
+        session = await engine.session_store.load(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        session_loaded = await engine.load_session(session_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not session_loaded:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        proposal = await engine.workbench_service.govern_proposal(
+            session_id,
+            proposal_id,
+            action=action,
+            reviewer=reviewer,
+            decision_note=decision_note,
+            defer_until=defer_until,
+            merge_into_id=merge_into_id,
+        )
+    except ProposalGovernanceConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -2111,7 +2192,7 @@ async def approve_workbench_proposal(
     include_snapshot: Annotated[bool, Query()] = False,
     auth: str = AuthDep,
 ):
-    """Approve an OPEN proposal so the gated work may proceed."""
+    """Approve an OPEN proposal for its next policy gate; do not execute it."""
     return await _resolve_workbench_proposal(
         session_id,
         proposal_id,
@@ -2141,6 +2222,56 @@ async def reject_workbench_proposal(
         body,
         request,
         approved=False,
+        include_snapshot=include_snapshot,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}/defer",
+    response_model_exclude_none=True,
+)
+async def defer_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalDefer,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Defer an OPEN proposal and persist its cooldown boundary."""
+    return await _govern_workbench_proposal(
+        session_id,
+        proposal_id,
+        request,
+        action=ProposalAction.DEFER,
+        reviewer=body.reviewer,
+        decision_note=body.decision_note,
+        defer_until=body.defer_until,
+        include_snapshot=include_snapshot,
+    )
+
+
+@router.post(
+    "/workbench/sessions/{session_id}/proposals/{proposal_id}/merge",
+    response_model_exclude_none=True,
+)
+async def merge_workbench_proposal(
+    session_id: str,
+    proposal_id: str,
+    body: ProposalMerge,
+    request: Request,
+    include_snapshot: Annotated[bool, Query()] = False,
+    auth: str = AuthDep,
+):
+    """Merge an OPEN Evolution proposal into a matching open target."""
+    return await _govern_workbench_proposal(
+        session_id,
+        proposal_id,
+        request,
+        action=ProposalAction.MERGE,
+        reviewer=body.reviewer,
+        decision_note=body.decision_note,
+        merge_into_id=body.merge_into_id,
         include_snapshot=include_snapshot,
     )
 

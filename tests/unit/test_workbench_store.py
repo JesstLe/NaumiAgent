@@ -1485,6 +1485,7 @@ async def test_evolution_proposal_idempotency_rejects_key_reuse_with_different_c
         "source_kind": ProposalSourceKind.EVOLUTION_CANDIDATE,
         "source_id": "evc_" + "1" * 24,
         "source_revision": 2,
+        "source_occurrence_count": 2,
         "source_sha256": "2" * 64,
         "source_proposal_id": "evp_" + "3" * 24,
         "generator_version": "evolution-proposal-v1",
@@ -1551,7 +1552,16 @@ async def test_existing_proposal_table_migrates_provenance_columns(tmp_path) -> 
         ).fetchall()
 
     names = {str(column[1]) for column in columns}
-    assert {"source_kind", "source_revision", "source_sha256", "idempotency_key"} <= names
+    assert {
+        "source_kind",
+        "source_revision",
+        "source_occurrence_count",
+        "source_sha256",
+        "idempotency_key",
+        "cooldown_until",
+        "merged_into_id",
+        "governance_policy_version",
+    } <= names
     assert "idx_workbench_proposals_session_idempotency" in {
         str(index[1]) for index in indexes
     }

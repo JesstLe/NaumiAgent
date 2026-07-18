@@ -9,7 +9,7 @@ import logging
 import uuid
 from collections import OrderedDict
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -38,6 +38,14 @@ from naumi_agent.workbench.models import (
     ProposalState,
     RiskLevel,
     WorkbenchProposal,
+)
+from naumi_agent.workbench.proposal_governance import (
+    ProposalAction,
+    ProposalCooldownDecision,
+    ProposalGovernanceConflictError,
+    evaluate_proposal_cooldown,
+    plan_proposal_transition,
+    validate_merge_target,
 )
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.store import WorkbenchStore
@@ -1117,11 +1125,17 @@ class WorkbenchService:
             "source_kind": proposal.source_kind.value,
             "source_id": proposal.source_id,
             "source_revision": proposal.source_revision,
+            "source_occurrence_count": proposal.source_occurrence_count,
             "source_sha256": proposal.source_sha256,
             "source_proposal_id": proposal.source_proposal_id,
             "generator_version": proposal.generator_version,
             "proposal_kind": proposal.proposal_kind,
             "idempotency_key": proposal.idempotency_key,
+            "reviewer": proposal.reviewer,
+            "decision_at": proposal.decision_at,
+            "cooldown_until": proposal.cooldown_until,
+            "merged_into_id": proposal.merged_into_id,
+            "governance_policy_version": proposal.governance_policy_version,
             "created_at": proposal.created_at,
             "updated_at": proposal.updated_at,
         }
@@ -1142,6 +1156,7 @@ class WorkbenchService:
         source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
         source_id: str = "",
         source_revision: int = 0,
+        source_occurrence_count: int = 0,
         source_sha256: str = "",
         source_proposal_id: str = "",
         generator_version: str = "",
@@ -1163,6 +1178,7 @@ class WorkbenchService:
             source_kind=source_kind,
             source_id=source_id,
             source_revision=source_revision,
+            source_occurrence_count=source_occurrence_count,
             source_sha256=source_sha256,
             source_proposal_id=source_proposal_id,
             generator_version=generator_version,
@@ -1187,6 +1203,7 @@ class WorkbenchService:
         source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
         source_id: str = "",
         source_revision: int = 0,
+        source_occurrence_count: int = 0,
         source_sha256: str = "",
         source_proposal_id: str = "",
         generator_version: str = "",
@@ -1208,6 +1225,7 @@ class WorkbenchService:
             source_kind=source_kind,
             source_id=source_id,
             source_revision=source_revision,
+            source_occurrence_count=source_occurrence_count,
             source_sha256=source_sha256,
             source_proposal_id=source_proposal_id,
             generator_version=generator_version,
@@ -1295,32 +1313,186 @@ class WorkbenchService:
         exists. Resolving an already-decided proposal is idempotent: the
         existing record is returned without a new event.
         """
+        return await self.govern_proposal(
+            session_id,
+            proposal_id,
+            action=ProposalAction.APPROVE if approved else ProposalAction.REJECT,
+            reviewer=reviewer,
+            decision_note=decision_note,
+        )
+
+    async def govern_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        action: ProposalAction,
+        reviewer: str,
+        decision_note: str = "",
+        defer_until: str = "",
+        merge_into_id: str = "",
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Apply one audited Proposal governance decision with CAS semantics."""
+        clean_reviewer = reviewer.strip()
+        if not clean_reviewer or len(clean_reviewer) > 128 or any(
+            char in clean_reviewer for char in ("\x00", "\r", "\n")
+        ):
+            raise ValueError("reviewer 必须为 1..128 个无控制字符的文本。")
+        clean_note = decision_note.strip()
+        if len(clean_note) > 2_000 or any(
+            char in clean_note for char in ("\x00", "\r")
+        ):
+            raise ValueError("decision_note 最多 2000 字符且不得包含控制字符。")
         existing = await self._workbench_store.get_proposal(session_id, proposal_id)
         if existing is None:
             return None
-        target_state = ProposalState.APPROVED if approved else ProposalState.REJECTED
         if existing.state is not ProposalState.OPEN:
-            return self._proposal_to_dict(existing)
-        proposal = await self._workbench_store.update_proposal_state(
+            expected = {
+                ProposalAction.APPROVE: ProposalState.APPROVED,
+                ProposalAction.REJECT: ProposalState.REJECTED,
+                ProposalAction.DEFER: ProposalState.DEFERRED,
+                ProposalAction.MERGE: ProposalState.MERGED,
+            }.get(action)
+            if existing.state is expected:
+                return self._proposal_to_dict(existing)
+            raise ProposalGovernanceConflictError(
+                f"Proposal 已处于 {existing.state.value}，不能执行 {action.value}。"
+            )
+        if action is ProposalAction.MERGE:
+            target = await self._workbench_store.get_proposal(
+                session_id, merge_into_id.strip()
+            )
+            if target is None:
+                raise ValueError("merge 目标 Proposal 不存在。")
+            validate_merge_target(existing, target)
+        plan = plan_proposal_transition(
+            existing,
+            action=action,
+            now=now or datetime.now(UTC),
+            decision_note=clean_note,
+            defer_until=defer_until,
+            merge_into_id=merge_into_id,
+        )
+        proposal, applied = await self._workbench_store.transition_proposal_state(
             session_id,
             proposal_id,
-            state=target_state,
-            decision_note=decision_note,
+            expected_states={ProposalState.OPEN},
+            state=plan.target_state,
+            reviewer=clean_reviewer,
+            decision_note=clean_note,
+            decision_at=plan.decision_at,
+            cooldown_until=plan.cooldown_until,
+            merged_into_id=plan.merged_into_id,
+            governance_policy_version=plan.policy_version,
         )
-        event_type = "proposal.approved" if approved else "proposal.rejected"
+        if proposal is None:
+            return None
+        if not applied:
+            if proposal.state is plan.target_state:
+                return self._proposal_to_dict(proposal)
+            raise ProposalGovernanceConflictError(
+                f"Proposal 已被并发决定为 {proposal.state.value}。"
+            )
+        event_type = {
+            ProposalAction.APPROVE: "proposal.approved",
+            ProposalAction.REJECT: "proposal.rejected",
+            ProposalAction.DEFER: "proposal.deferred",
+            ProposalAction.MERGE: "proposal.merged",
+        }[action]
         await self._workbench_store.append_event(
             session_id=session_id,
             type=event_type,
-            actor=reviewer,
+            actor=clean_reviewer,
             subject_id=proposal_id,
             payload={
                 "mission_id": existing.mission_id,
                 "task_id": existing.task_id,
-                "decision_note": decision_note,
+                "decision_note": clean_note,
+                "cooldown_until": plan.cooldown_until,
+                "merged_into_id": plan.merged_into_id,
+                "policy_version": plan.policy_version,
             },
             severity=EventSeverity.WARNING,
         )
-        return self._proposal_to_dict(proposal) if proposal else None
+        return self._proposal_to_dict(proposal)
+
+    async def evaluate_source_cooldown(
+        self,
+        *,
+        source_id: str,
+        candidate_revision: int,
+        occurrence_count: int,
+        risk_level: RiskLevel,
+        now: datetime | None = None,
+    ) -> tuple[WorkbenchProposal | None, ProposalCooldownDecision]:
+        previous = await self._workbench_store.latest_proposal_for_source(
+            source_kind=ProposalSourceKind.EVOLUTION_CANDIDATE,
+            source_id=source_id,
+        )
+        return previous, evaluate_proposal_cooldown(
+            previous,
+            candidate_revision=candidate_revision,
+            occurrence_count=occurrence_count,
+            risk_level=risk_level,
+            now=now or datetime.now(UTC),
+        )
+
+    async def reopen_proposal(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        actor: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        clean_actor = actor.strip()
+        if not clean_actor or len(clean_actor) > 128 or any(
+            char in clean_actor for char in ("\x00", "\r", "\n")
+        ):
+            raise ValueError("reopen actor 必须为 1..128 个无控制字符的文本。")
+        existing = await self._workbench_store.get_proposal(session_id, proposal_id)
+        if existing is None:
+            return None
+        instant = now or datetime.now(UTC)
+        cooldown = evaluate_proposal_cooldown(
+            existing,
+            candidate_revision=existing.source_revision,
+            occurrence_count=existing.source_occurrence_count,
+            risk_level=existing.risk_level,
+            now=instant,
+        )
+        if not cooldown.allowed or cooldown.reason != "cooldown_expired":
+            raise ValueError("Proposal 冷却期尚未结束，不能重新入队。")
+        plan = plan_proposal_transition(
+            existing,
+            action=ProposalAction.REOPEN,
+            now=instant,
+        )
+        proposal, applied = await self._workbench_store.transition_proposal_state(
+            session_id,
+            proposal_id,
+            expected_states={ProposalState.REJECTED, ProposalState.DEFERRED},
+            state=plan.target_state,
+            reviewer=clean_actor,
+            decision_note="",
+            decision_at=plan.decision_at,
+            cooldown_until="",
+            merged_into_id="",
+            governance_policy_version=plan.policy_version,
+        )
+        if proposal is None:
+            return None
+        if applied:
+            await self._workbench_store.append_event(
+                session_id=session_id,
+                type="proposal.reopened",
+                actor=clean_actor,
+                subject_id=proposal_id,
+                payload={"policy_version": plan.policy_version},
+                severity=EventSeverity.INFO,
+            )
+        return self._proposal_to_dict(proposal)
 
     async def convert_proposal(
         self,

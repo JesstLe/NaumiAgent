@@ -279,11 +279,17 @@ CREATE TABLE IF NOT EXISTS workbench_proposals (
     source_kind TEXT NOT NULL DEFAULT 'manual',
     source_id TEXT NOT NULL DEFAULT '',
     source_revision INTEGER NOT NULL DEFAULT 0,
+    source_occurrence_count INTEGER NOT NULL DEFAULT 0,
     source_sha256 TEXT NOT NULL DEFAULT '',
     source_proposal_id TEXT NOT NULL DEFAULT '',
     generator_version TEXT NOT NULL DEFAULT '',
     proposal_kind TEXT NOT NULL DEFAULT '',
     idempotency_key TEXT NOT NULL DEFAULT '',
+    reviewer TEXT NOT NULL DEFAULT '',
+    decision_at TEXT NOT NULL DEFAULT '',
+    cooldown_until TEXT NOT NULL DEFAULT '',
+    merged_into_id TEXT NOT NULL DEFAULT '',
+    governance_policy_version TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -352,11 +358,17 @@ class WorkbenchStore:
             "source_kind": "TEXT NOT NULL DEFAULT 'manual'",
             "source_id": "TEXT NOT NULL DEFAULT ''",
             "source_revision": "INTEGER NOT NULL DEFAULT 0",
+            "source_occurrence_count": "INTEGER NOT NULL DEFAULT 0",
             "source_sha256": "TEXT NOT NULL DEFAULT ''",
             "source_proposal_id": "TEXT NOT NULL DEFAULT ''",
             "generator_version": "TEXT NOT NULL DEFAULT ''",
             "proposal_kind": "TEXT NOT NULL DEFAULT ''",
             "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+            "reviewer": "TEXT NOT NULL DEFAULT ''",
+            "decision_at": "TEXT NOT NULL DEFAULT ''",
+            "cooldown_until": "TEXT NOT NULL DEFAULT ''",
+            "merged_into_id": "TEXT NOT NULL DEFAULT ''",
+            "governance_policy_version": "TEXT NOT NULL DEFAULT ''",
         }
         for column, definition in proposal_columns.items():
             await self._ensure_column(db, "workbench_proposals", column, definition)
@@ -1299,6 +1311,7 @@ class WorkbenchStore:
         source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
         source_id: str = "",
         source_revision: int = 0,
+        source_occurrence_count: int = 0,
         source_sha256: str = "",
         source_proposal_id: str = "",
         generator_version: str = "",
@@ -1320,6 +1333,7 @@ class WorkbenchStore:
             source_kind=source_kind,
             source_id=source_id,
             source_revision=source_revision,
+            source_occurrence_count=source_occurrence_count,
             source_sha256=source_sha256,
             source_proposal_id=source_proposal_id,
             generator_version=generator_version,
@@ -1344,6 +1358,7 @@ class WorkbenchStore:
         source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
         source_id: str = "",
         source_revision: int = 0,
+        source_occurrence_count: int = 0,
         source_sha256: str = "",
         source_proposal_id: str = "",
         generator_version: str = "",
@@ -1355,6 +1370,7 @@ class WorkbenchStore:
             source_kind=source_kind,
             source_id=source_id,
             source_revision=source_revision,
+            source_occurrence_count=source_occurrence_count,
             source_sha256=source_sha256,
             source_proposal_id=source_proposal_id,
             generator_version=generator_version,
@@ -1376,6 +1392,7 @@ class WorkbenchStore:
             source_kind=source_kind,
             source_id=source_id,
             source_revision=source_revision,
+            source_occurrence_count=source_occurrence_count,
             source_sha256=source_sha256,
             source_proposal_id=source_proposal_id,
             generator_version=generator_version,
@@ -1389,11 +1406,13 @@ class WorkbenchStore:
                    (id, session_id, mission_id, task_id, agent_id, title,
                     impact_scope, intended_files, validation_plan, risk_level,
                     questions, state, decision_note, converted_issue_id,
-                    source_kind, source_id, source_revision, source_sha256,
+                    source_kind, source_id, source_revision, source_occurrence_count,
+                    source_sha256,
                     source_proposal_id, generator_version, proposal_kind,
-                    idempotency_key, created_at, updated_at)
+                    idempotency_key, reviewer, decision_at, cooldown_until,
+                    merged_into_id, governance_policy_version, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?, ?)
+                           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(session_id, idempotency_key)
                    WHERE idempotency_key <> '' DO NOTHING""",
                 (
@@ -1414,11 +1433,17 @@ class WorkbenchStore:
                     proposal.source_kind.value,
                     proposal.source_id,
                     proposal.source_revision,
+                    proposal.source_occurrence_count,
                     proposal.source_sha256,
                     proposal.source_proposal_id,
                     proposal.generator_version,
                     proposal.proposal_kind,
                     proposal.idempotency_key,
+                    proposal.reviewer,
+                    proposal.decision_at,
+                    proposal.cooldown_until,
+                    proposal.merged_into_id,
+                    proposal.governance_policy_version,
                     proposal.created_at,
                     proposal.updated_at,
                 ),
@@ -1531,6 +1556,71 @@ class WorkbenchStore:
             if cursor.rowcount == 0:
                 return await self.get_proposal(session_id, proposal_id)
         return await self.get_proposal(session_id, proposal_id)
+
+    async def transition_proposal_state(
+        self,
+        session_id: str,
+        proposal_id: str,
+        *,
+        expected_states: set[ProposalState],
+        state: ProposalState,
+        reviewer: str,
+        decision_note: str,
+        decision_at: str,
+        cooldown_until: str = "",
+        merged_into_id: str = "",
+        governance_policy_version: str,
+    ) -> tuple[WorkbenchProposal | None, bool]:
+        """Atomically apply one governance transition with compare-and-swap."""
+        if not expected_states:
+            raise ValueError("Proposal transition 必须声明 expected state。")
+        placeholders = ",".join("?" for _ in expected_states)
+        ordered_states = sorted(item.value for item in expected_states)
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            cursor = await db.execute(
+                f"""UPDATE workbench_proposals
+                    SET state = ?, reviewer = ?, decision_note = ?, decision_at = ?,
+                        cooldown_until = ?, merged_into_id = ?,
+                        governance_policy_version = ?, updated_at = ?
+                    WHERE session_id = ? AND id = ?
+                      AND state IN ({placeholders})""",
+                (
+                    state.value,
+                    reviewer,
+                    decision_note,
+                    decision_at,
+                    cooldown_until,
+                    merged_into_id,
+                    governance_policy_version,
+                    now_iso(),
+                    session_id,
+                    proposal_id,
+                    *ordered_states,
+                ),
+            )
+            await db.commit()
+        return await self.get_proposal(session_id, proposal_id), cursor.rowcount == 1
+
+    async def latest_proposal_for_source(
+        self,
+        *,
+        source_kind: ProposalSourceKind,
+        source_id: str,
+    ) -> WorkbenchProposal | None:
+        """Return the newest durable governance record for one source identity."""
+        async with aiosqlite.connect(self._db_path) as db:
+            await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                """SELECT * FROM workbench_proposals
+                   WHERE source_kind = ? AND source_id = ?
+                   ORDER BY source_revision DESC, updated_at DESC, rowid DESC
+                   LIMIT 1""",
+                (source_kind.value, source_id),
+            )
+            row = await cursor.fetchone()
+        return _row_to_proposal(dict(row)) if row else None
 
     async def list_proposals_for_snapshot(
         self, session_id: str
@@ -2091,11 +2181,17 @@ def _row_to_proposal(row: dict[str, Any]) -> WorkbenchProposal:
         source_kind=ProposalSourceKind(row.get("source_kind") or "manual"),
         source_id=row.get("source_id") or "",
         source_revision=int(row.get("source_revision") or 0),
+        source_occurrence_count=int(row.get("source_occurrence_count") or 0),
         source_sha256=row.get("source_sha256") or "",
         source_proposal_id=row.get("source_proposal_id") or "",
         generator_version=row.get("generator_version") or "",
         proposal_kind=row.get("proposal_kind") or "",
         idempotency_key=row.get("idempotency_key") or "",
+        reviewer=row.get("reviewer") or "",
+        decision_at=row.get("decision_at") or "",
+        cooldown_until=row.get("cooldown_until") or "",
+        merged_into_id=row.get("merged_into_id") or "",
+        governance_policy_version=row.get("governance_policy_version") or "",
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -2112,6 +2208,7 @@ def _validate_proposal_provenance(
     source_kind: ProposalSourceKind,
     source_id: str,
     source_revision: int,
+    source_occurrence_count: int,
     source_sha256: str,
     source_proposal_id: str,
     generator_version: str,
@@ -2129,12 +2226,13 @@ def _validate_proposal_provenance(
             proposal_kind,
             idempotency_key,
         )
-        if any(source_values) or source_revision != 0:
+        if any(source_values) or source_revision != 0 or source_occurrence_count != 0:
             raise ValueError("手动 Proposal 不得伪造自动来源字段。")
         return
     valid = (
         _EVOLUTION_CANDIDATE_ID_RE.fullmatch(source_id)
         and source_revision >= 1
+        and source_occurrence_count >= 1
         and _SHA256_RE.fullmatch(source_sha256)
         and _EVOLUTION_PROPOSAL_ID_RE.fullmatch(source_proposal_id)
         and generator_version == "evolution-proposal-v1"
@@ -2158,6 +2256,7 @@ def _proposal_identity(proposal: WorkbenchProposal) -> tuple[Any, ...]:
         proposal.source_kind,
         proposal.source_id,
         proposal.source_revision,
+        proposal.source_occurrence_count,
         proposal.source_sha256,
         proposal.source_proposal_id,
         proposal.generator_version,

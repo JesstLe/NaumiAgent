@@ -28,6 +28,8 @@ from naumi_agent.api.routes.workbench import (
     IssueAttach,
     MissionCreate,
     ProposalCreate,
+    ProposalDefer,
+    ProposalMerge,
     ProposalResolve,
     ValidationRunCreate,
     WorkbenchSessionCreate,
@@ -45,6 +47,7 @@ from naumi_agent.api.routes.workbench import (
     create_workbench_proposal,
     create_workbench_session,
     deactivate_intent_lock,
+    defer_workbench_proposal,
     delete_worktree,
     expire_workbench_leases,
     get_agent_profile,
@@ -80,6 +83,7 @@ from naumi_agent.api.routes.workbench import (
     keep_worktree,
     list_workbench_bids,
     list_workbench_proposals,
+    merge_workbench_proposal,
     record_agent_heartbeat,
     reject_workbench_proposal,
     release_workbench_lease,
@@ -101,6 +105,10 @@ from naumi_agent.workbench.models import (
     Mission,
     ParallelMode,
     RiskLevel,
+)
+from naumi_agent.workbench.proposal_governance import (
+    ProposalAction,
+    ProposalGovernanceConflictError,
 )
 from naumi_agent.worktree.models import WorktreeRecord, WorktreeStatus
 
@@ -169,6 +177,7 @@ class _FakeWorkbenchService:
         self.created_proposals: list[dict] = []
         self.listed_proposals: list[dict] = []
         self.resolved_proposals: list[dict] = []
+        self.governed_proposals: list[dict] = []
         self.converted_proposals: list[dict] = []
         self._get_proposal_result: dict | None = {
             "id": "prop-1",
@@ -1527,6 +1536,24 @@ class _FakeWorkbenchService:
             "session_id": session_id,
             "state": "approved" if approved else "rejected",
             "decision_note": decision_note,
+            "mission_id": "m1",
+            "task_id": "t1",
+        }
+
+    async def govern_proposal(self, session_id, proposal_id, **kwargs):
+        call = {"session_id": session_id, "proposal_id": proposal_id, **kwargs}
+        self.governed_proposals.append(call)
+        action = kwargs["action"]
+        return {
+            "id": proposal_id,
+            "session_id": session_id,
+            "state": {
+                ProposalAction.DEFER: "deferred",
+                ProposalAction.MERGE: "merged",
+            }[action],
+            "decision_note": kwargs.get("decision_note", ""),
+            "cooldown_until": kwargs.get("defer_until", ""),
+            "merged_into_id": kwargs.get("merge_into_id", ""),
             "mission_id": "m1",
             "task_id": "t1",
         }
@@ -4496,6 +4523,72 @@ async def test_reject_proposal_endpoint_delegates_to_service() -> None:
 
 
 @pytest.mark.asyncio
+async def test_defer_proposal_endpoint_persists_cooldown_request() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalDefer(
+        reviewer="Human",
+        decision_note="等待上游稳定",
+        defer_until="2026-08-01T00:00:00+00:00",
+    )
+
+    response = await defer_workbench_proposal(
+        "sess-1", "prop-1", body, _fake_request(engine), auth="test"
+    )
+
+    assert response["state"] == "deferred"
+    assert engine.workbench_service.governed_proposals[-1] == {
+        "session_id": "sess-1",
+        "proposal_id": "prop-1",
+        "action": ProposalAction.DEFER,
+        "reviewer": "Human",
+        "decision_note": "等待上游稳定",
+        "defer_until": "2026-08-01T00:00:00+00:00",
+        "merge_into_id": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_merge_proposal_endpoint_requires_explicit_target() -> None:
+    engine = _FakeEngine(exists=True)
+    body = ProposalMerge(
+        reviewer="Human",
+        decision_note="同根因重复",
+        merge_into_id="prop-new",
+    )
+
+    response = await merge_workbench_proposal(
+        "sess-1", "prop-old", body, _fake_request(engine), auth="test"
+    )
+
+    assert response["state"] == "merged"
+    assert response["merged_into_id"] == "prop-new"
+    assert engine.workbench_service.governed_proposals[-1]["action"] is ProposalAction.MERGE
+
+
+@pytest.mark.asyncio
+async def test_governance_conflict_maps_to_http_409() -> None:
+    engine = _FakeEngine(exists=True)
+
+    async def conflict(*args, **kwargs):
+        raise ProposalGovernanceConflictError("Proposal 已被并发决定。")
+
+    engine.workbench_service.govern_proposal = conflict
+    body = ProposalDefer(
+        reviewer="Human",
+        decision_note="等待上游稳定",
+        defer_until="2026-08-01T00:00:00+00:00",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await defer_workbench_proposal(
+            "sess-1", "prop-1", body, _fake_request(engine), auth="test"
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Proposal 已被并发决定。"
+
+
+@pytest.mark.asyncio
 async def test_convert_proposal_endpoint_creates_issue_and_marks_converted() -> None:
     engine = _FakeEngine(exists=True)
     body = ProposalResolve(reviewer="Human", decision_note="转为正式任务")
@@ -4543,6 +4636,8 @@ def test_proposal_routes_advertised_in_capabilities() -> None:
         "create_proposal",
         "approve_proposal",
         "reject_proposal",
+        "defer_proposal",
+        "merge_proposal",
         "convert_proposal",
     ):
         assert action in WORKBENCH_SUPPORTED_ACTIONS
@@ -4552,6 +4647,8 @@ def test_proposal_routes_advertised_in_capabilities() -> None:
         "proposal",
         "approve_proposal",
         "reject_proposal",
+        "defer_proposal",
+        "merge_proposal",
         "convert_proposal",
     ):
         assert template in WORKBENCH_ROUTE_TEMPLATES
@@ -5926,6 +6023,8 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         "create_proposal",
         "approve_proposal",
         "reject_proposal",
+        "defer_proposal",
+        "merge_proposal",
         "convert_proposal",
         "resolve_approval",
         "review_evidence",
@@ -6031,6 +6130,12 @@ async def test_workbench_capabilities_returns_expected_values() -> None:
         ),
         "reject_proposal": (
             "/workbench/sessions/{session_id}/proposals/{proposal_id}/reject"
+        ),
+        "defer_proposal": (
+            "/workbench/sessions/{session_id}/proposals/{proposal_id}/defer"
+        ),
+        "merge_proposal": (
+            "/workbench/sessions/{session_id}/proposals/{proposal_id}/merge"
         ),
         "convert_proposal": (
             "/workbench/sessions/{session_id}/proposals/{proposal_id}/convert"
