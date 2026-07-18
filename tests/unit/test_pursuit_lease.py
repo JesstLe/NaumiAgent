@@ -194,6 +194,13 @@ async def test_full_loop_commits_blocked_terminal_under_fence(tmp_path) -> None:
     restored = pursuit_store.get_run(loop._run.id)
     assert restored is not None
     assert restored.status is PursuitRunStatus.BLOCKED
+    persisted_checkpoint = pursuit_store.get_checkpoint(loop._run.id)
+    assert persisted_checkpoint is not None
+    assert persisted_checkpoint.status == "blocked"
+    assert persisted_checkpoint.goal.original_goal == "目标"
+    assert persisted_checkpoint.goal.criteria[0].id == "c1"
+    assert persisted_checkpoint.recent_history[0].iteration == 1
+    assert persisted_checkpoint.evidence_cursor == len(restored.evidence)
     lease = await harness_store.get_run_lease(
         workspace_root=tmp_path,
         run_kind=HarnessRunKind.PURSUIT,

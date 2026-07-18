@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import sqlite3
 import threading
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from naumi_agent.orchestrator.pursuit import (
     PursuitBackgroundWait,
@@ -12,6 +16,15 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRun,
     PursuitRunStatus,
 )
+from naumi_agent.orchestrator.pursuit_checkpoint import PursuitCheckpoint
+
+
+class PursuitStoreError(RuntimeError):
+    """Raised when durable Pursuit state is invalid or unavailable."""
+
+
+class PursuitStoreConflictError(PursuitStoreError):
+    """Raised when a checkpoint sequence would overwrite different history."""
 
 
 class PursuitStore:
@@ -148,6 +161,105 @@ class PursuitStore:
                 runs.append(run)
         return runs
 
+    def save_checkpoint(self, checkpoint: PursuitCheckpoint) -> None:
+        """Persist the latest monotonic checkpoint without rewriting history."""
+        payload = checkpoint.canonical_json()
+        digest = checkpoint.digest()
+        checkpoint_id = checkpoint.checkpoint_id()
+        try:
+            with self._connect() as conn:
+                # Serialize the read/compare/write sequence across processes.
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute(
+                    "SELECT 1 FROM pursuit_runs WHERE id = ?",
+                    (checkpoint.run_id,),
+                ).fetchone() is None:
+                    raise PursuitStoreConflictError(
+                        f"checkpoint 对应的 PursuitRun 不存在：{checkpoint.run_id}"
+                    )
+                current = conn.execute(
+                    "SELECT sequence, payload_sha256 FROM pursuit_checkpoints "
+                    "WHERE run_id = ?",
+                    (checkpoint.run_id,),
+                ).fetchone()
+                if current is not None:
+                    current_sequence = int(current["sequence"])
+                    if checkpoint.sequence < current_sequence:
+                        raise PursuitStoreConflictError(
+                            "checkpoint 序号倒退："
+                            f"{checkpoint.sequence} < {current_sequence}"
+                        )
+                    if checkpoint.sequence == current_sequence:
+                        if hmac.compare_digest(current["payload_sha256"], digest):
+                            return
+                        raise PursuitStoreConflictError(
+                            f"checkpoint 序号 {checkpoint.sequence} 已绑定不同内容。"
+                        )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_checkpoints (
+                        run_id, sequence, schema_version, checkpoint_id,
+                        payload_json, payload_sha256, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(run_id) DO UPDATE SET
+                        sequence=excluded.sequence,
+                        schema_version=excluded.schema_version,
+                        checkpoint_id=excluded.checkpoint_id,
+                        payload_json=excluded.payload_json,
+                        payload_sha256=excluded.payload_sha256,
+                        created_at=excluded.created_at
+                    """,
+                    (
+                        checkpoint.run_id,
+                        checkpoint.sequence,
+                        checkpoint.schema_version,
+                        checkpoint_id,
+                        payload,
+                        digest,
+                        checkpoint.created_at,
+                    ),
+                )
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"保存 checkpoint 失败：{exc}") from exc
+
+    def get_checkpoint(self, run_id: str) -> PursuitCheckpoint | None:
+        """Read and authenticate the latest checkpoint; reject corrupted state."""
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM pursuit_checkpoints WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            payload = str(row["payload_json"])
+            expected_digest = str(row["payload_sha256"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if not hmac.compare_digest(expected_digest, actual_digest):
+                raise PursuitStoreError("checkpoint 内容摘要校验失败，拒绝恢复。")
+            checkpoint = PursuitCheckpoint.model_validate_json(payload)
+            if checkpoint.run_id != run_id:
+                raise PursuitStoreError("checkpoint run_id 与存储键不一致。")
+            if checkpoint.sequence != int(row["sequence"]):
+                raise PursuitStoreError("checkpoint 序号与存储元数据不一致。")
+            if checkpoint.schema_version != int(row["schema_version"]):
+                raise PursuitStoreError("checkpoint schema 版本与存储元数据不一致。")
+            if not hmac.compare_digest(
+                checkpoint.checkpoint_id(), str(row["checkpoint_id"])
+            ):
+                raise PursuitStoreError("checkpoint ID 校验失败，拒绝恢复。")
+            return checkpoint
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"checkpoint 结构校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取 checkpoint 失败：{exc}") from exc
+
     def _connect(self) -> sqlite3.Connection:
         self._ensure_initialized()
         return self._open_connection()
@@ -155,6 +267,7 @@ class PursuitStore:
     def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _ensure_initialized(self) -> None:
@@ -182,6 +295,21 @@ class PursuitStore:
                         next_action TEXT NOT NULL DEFAULT '',
                         worktree_name TEXT NOT NULL DEFAULT '',
                         worktree_path TEXT NOT NULL DEFAULT ''
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_checkpoints (
+                        run_id TEXT PRIMARY KEY,
+                        sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                        schema_version INTEGER NOT NULL,
+                        checkpoint_id TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                            ON DELETE CASCADE
                     )
                     """
                 )
