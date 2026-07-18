@@ -19,6 +19,7 @@ from typing import Any
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.execution_grants import ExecutionGrantAuthority
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -606,6 +607,12 @@ class AgentEngine:
         self._runtime_data_dir = paths.runtime_data_dir
         self._worktree_storage_dir = paths.worktree_storage_dir
         self._harness_store = resources.harness_store
+        self.execution_grant_authority = ExecutionGrantAuthority(
+            store=resources.execution_grant_store,
+            worker_registry=resources.worker_registry_store,
+            harness_store=resources.harness_store,
+            workspace_root=paths.workspace_root,
+        )
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=resources.harness_trust_store,

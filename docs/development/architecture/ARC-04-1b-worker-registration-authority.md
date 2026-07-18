@@ -57,6 +57,6 @@ active incarnation，不能相信健康报告携带的合同选择。
 
 ## 后续
 
-ARC-04.2 应在此 authority 上增加 immutable ToolJob、permission grant id、workspace lease 和 idempotency key，
-并把 job admission 与 active worker epoch 绑定。ARC-04.3 真实 Shell daemon 与 ARC-04.6 Supervisor 尚未完成，
-HAR-08.4 和 EVO-03.6 仍不能执行项目命令。
+ARC-04.2a 已在此 authority 上增加 execution-scoped grant，并绑定 Harness Tool lease、参数 digest、
+idempotency key 与 active Worker epoch。下一步 ARC-04.2b 仍需 immutable ToolJob 与 durable completion
+receipt。ARC-04.3 真实 Shell daemon 与 ARC-04.6 Supervisor 尚未完成，HAR-08.4 和 EVO-03.6 仍不能执行项目命令。

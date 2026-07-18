@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.worker_registry import WORKER_REGISTRY_SCHEMA_VERSION
 from naumi_agent.evolution.store import EVOLUTION_STORE_SCHEMA_VERSION
 from naumi_agent.harness.store import HARNESS_STORE_SCHEMA_VERSION
@@ -49,7 +50,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
 
     definitions = build_store_catalog(_config(tmp_path))
 
-    assert len(definitions) == 13
+    assert len(definitions) == 14
     assert len({item.store_id for item in definitions}) == len(definitions)
     assert len({item.path for item in definitions}) == len(definitions)
     assert all(item.path.is_absolute() for item in definitions)
@@ -67,6 +68,12 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert workers.path == (tmp_path / "runtime" / "worker-registry.db").resolve()
     assert workers.supported_schema_version == WORKER_REGISTRY_SCHEMA_VERSION == 1
     assert workers.retention is RetentionPolicy.AUDIT_LONG_TERM
+    grants = next(
+        item for item in definitions if item.store_id == "runtime.execution_grants"
+    )
+    assert grants.path == (tmp_path / "runtime" / "execution-grants.db").resolve()
+    assert grants.supported_schema_version == EXECUTION_GRANT_SCHEMA_VERSION == 1
+    assert grants.retention is RetentionPolicy.AUDIT_LONG_TERM
     evolution = next(
         item for item in definitions if item.store_id == "evolution.candidates"
     )

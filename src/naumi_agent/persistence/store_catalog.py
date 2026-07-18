@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.worker_registry import WORKER_REGISTRY_SCHEMA_VERSION
 from naumi_agent.evolution.store import (
     EVOLUTION_STORE_SCHEMA_VERSION,
@@ -179,6 +180,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
             "Worker incarnation、能力合同、撤销与 fencing 历史",
+        ),
+        _definition(
+            "runtime.execution_grants",
+            runtime_dir / "execution-grants.db",
+            StorageKind.SQLITE,
+            ("runtime.execution_authority",),
+            VersionStrategy.SQLITE_USER_VERSION,
+            EXECUTION_GRANT_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "绑定 Tool run、参数摘要、Worker epoch 与租约的执行授权",
         ),
         _definition(
             "runtime.goals",
