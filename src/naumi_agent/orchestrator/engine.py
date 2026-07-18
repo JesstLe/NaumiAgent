@@ -27,6 +27,11 @@ from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.failure_attribution import (
+    EvolutionFailureAttributionBuilder,
+    EvolutionFailureAttributionExecutor,
+    EvolutionFailureAttributionStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
     EvolutionMutationGenerationTraceStore,
@@ -805,6 +810,19 @@ class AgentEngine:
         )
         self.evolution_self_review_comparison_executor = (
             EvolutionSelfReviewComparisonExecutor(self._harness_store)
+        )
+        self.evolution_failure_attribution_builder = (
+            EvolutionFailureAttributionBuilder()
+        )
+        self.evolution_failure_attribution_store = (
+            EvolutionFailureAttributionStore(config.memory.session_db_path)
+        )
+        self.evolution_failure_attribution_executor = (
+            EvolutionFailureAttributionExecutor(
+                harness_store=self._harness_store,
+                attribution_store=self.evolution_failure_attribution_store,
+                builder=self.evolution_failure_attribution_builder,
+            )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

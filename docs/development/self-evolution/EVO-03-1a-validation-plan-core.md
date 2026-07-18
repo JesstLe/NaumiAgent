@@ -79,4 +79,4 @@ executor。详见 `EVO-03-2d-validation-file-operation-binding.md`。
   并保持不可执行；详见 `EVO-03-1b-validation-profile-binding.md`；
 - RED/GREEN Self-Review 静态 cohort 与原生 H5c Comparison Receipt 已实现；
 - Sandbox/真实命令执行仍等待 ARC-04 authority，不能由本模块自行放宽；
-- 下一最小切片是 EVO-03.5a Failure Attribution Contract。
+- EVO-03.5a Failure Attribution Contract 已完成；下一步跨查 ARC-04 与 EVO-03.6 的真实隔离执行前置。

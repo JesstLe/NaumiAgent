@@ -57,6 +57,9 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.4a Self-Review Quantitative Comparison：已实现。完整重验 RED/GREEN/Plan/Binding authority 与 H5a
   ordered digest，使用 H5b2 comparison reference 接入原生 H5c，保留 statistical/mechanical/Policy verdict，
   不另造 Evolution 评分管线。详见 `EVO-03-4a-self-review-quantitative-comparison.md`。
+- EVO-03.5a Failure Attribution Contract：已实现。把 H5c decision/statistical/policy/mechanical codes 机械映射
+  为 candidate defect、runner infrastructure、environment incompatible、flaky、evidence incomplete 或 objective
+  unchanged，生成防篡改 typed receipt 并幂等持久化。详见 `EVO-03-5a-failure-attribution-contract.md`。
 
-Interventional Harness runner、failure attribution、adversarial suite 与最终 Evaluation Receipt 仍未实现，
-因此 EVO-03 整体保持 partial。
+Interventional Harness runner、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持
+partial。

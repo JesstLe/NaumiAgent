@@ -25,6 +25,15 @@ if TYPE_CHECKING:
         EvolutionExperimentContractIssuer,
         ExperimentBudget,
     )
+    from naumi_agent.evolution.failure_attribution import (
+        EvolutionFailureAttributionBuilder,
+        EvolutionFailureAttributionError,
+        EvolutionFailureAttributionExecutor,
+        EvolutionFailureAttributionReceipt,
+        EvolutionFailureAttributionStore,
+        FailureAttributionAction,
+        FailureAttributionCategory,
+    )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
         EvolutionMutationGenerationResult,
@@ -155,6 +164,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EvolutionEvidence",
+    "EvolutionFailureAttributionBuilder",
+    "EvolutionFailureAttributionError",
+    "EvolutionFailureAttributionExecutor",
+    "EvolutionFailureAttributionReceipt",
+    "EvolutionFailureAttributionStore",
+    "FailureAttributionAction",
+    "FailureAttributionCategory",
     "EvolutionCandidateDraft",
     "EvolutionCandidateEvent",
     "EvolutionCandidateStore",
@@ -277,6 +293,15 @@ def __getattr__(name: str) -> object:
         "EvolutionEvidence",
         "adapt_harness_failure_evidence",
         "adapt_self_review_static_evidence",
+    }
+    failure_attribution_exports = {
+        "EvolutionFailureAttributionBuilder",
+        "EvolutionFailureAttributionError",
+        "EvolutionFailureAttributionExecutor",
+        "EvolutionFailureAttributionReceipt",
+        "EvolutionFailureAttributionStore",
+        "FailureAttributionAction",
+        "FailureAttributionCategory",
     }
     proposal_exports = {
         "EvolutionProposalPreview",
@@ -424,6 +449,8 @@ def __getattr__(name: str) -> object:
         module_name = "candidate"
     elif name in evidence_exports:
         module_name = "evidence"
+    elif name in failure_attribution_exports:
+        module_name = "failure_attribution"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

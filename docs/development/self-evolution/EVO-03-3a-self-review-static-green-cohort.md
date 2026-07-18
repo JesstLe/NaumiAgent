@@ -67,4 +67,4 @@ GREEN 只接受一个最小、精确的脏 worktree：
   隔离 worker，不能借用本执行器绕过进程/资源治理；
 - GREEN receipt 是完整测量回执，不是 before/after 统计结论，也不授予 promotion authority；
 - EVO-03.4a 已消费持久化 RED/GREEN H5a 样本，复用 HAR-08.H5b2/7d/H5c 冻结原生 Comparison
-  Receipt；下一切片进入 EVO-03.5a Failure Attribution Contract。
+  Receipt，EVO-03.5a 已机械持久化 Failure Attribution；下一步跨查 ARC-04/EVO-03.6。
