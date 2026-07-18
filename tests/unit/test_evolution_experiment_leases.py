@@ -80,6 +80,7 @@ async def _lease_fixture(
     profile_text: str | None = None,
     target_content: bytes | None = None,
     target_symlink: bool = False,
+    scope: str = "src/naumi_agent/ui/footer.py:render_footer",
 ):
     workspace = tmp_path / "workspace"
     target = workspace / "src" / "naumi_agent" / "ui" / "footer.py"
@@ -92,6 +93,10 @@ async def _lease_fixture(
         target.write_bytes(target_content)
     else:
         target.write_text("def render_footer():\n    return 'baseline'\n", encoding="utf-8")
+    target.with_name("header.py").write_text(
+        "def render_header():\n    return 'baseline'\n",
+        encoding="utf-8",
+    )
     if profile_text is not None:
         profile = workspace / ".naumi" / "harness.yaml"
         profile.parent.mkdir(parents=True)
@@ -111,7 +116,7 @@ async def _lease_fixture(
             build_direct_user_feedback(
                 session_id="experiment-lease",
                 category="defect",
-                scope="src/naumi_agent/ui/footer.py:render_footer",
+                scope=scope,
                 topic="footer_truncation",
                 summary=f"底栏截断 {offset}",
                 now=NOW + timedelta(minutes=offset),
@@ -667,6 +672,52 @@ async def test_mutation_plan_rejects_manifest_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="plan_sha256"):
         EvolutionMutationPlan.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_multi_file_scope_reaches_plan_and_static_guard_without_forgery(
+    tmp_path: Path,
+) -> None:
+    scope = "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
+    workspace, _, contract, _, _, manager, _ = await _lease_fixture(
+        tmp_path,
+        scope=scope,
+        profile_text="schema_version: 1\n",
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+    snapshot = snapshot_builder.capture(contract, lease)
+    plan = await _mutation_planner(tmp_path, workspace, lease.worktree_path).plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+
+    assert plan.authorized_files == (
+        "src/naumi_agent/ui/footer.py",
+        "src/naumi_agent/ui/header.py",
+    )
+    assert len(plan.planned_files) == 2
+    assert plan.max_changed_files == 2
+    receipt = await EvolutionStaticGuard(
+        snapshot_builder=snapshot_builder,
+    ).preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={
+            "src/naumi_agent/ui/footer.py": (
+                "def render_footer():\n    return 'multi-fixed'\n"
+            ),
+            "src/naumi_agent/ui/header.py": (
+                "def render_header():\n    return 'multi-fixed'\n"
+            ),
+        },
+    )
+    assert receipt.preflight_passed is True
+    assert tuple(change.path for change in receipt.changes) == plan.authorized_files
 
 
 async def _guard_fixture(tmp_path: Path):

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from naumi_agent.evolution.proposal import (
     EvolutionProposalPreview,
     ProposalValidationStep,
+    parse_proposal_scope_files,
     workbench_validation_plan,
 )
 from naumi_agent.evolution.review import EvolutionReviewService
@@ -98,6 +99,14 @@ class ExperimentScope(_StrictModel):
             ):
                 raise ValueError("experiment allowed_files 必须是安全相对路径。")
         return normalized
+
+    @model_validator(mode="after")
+    def _explicit_multi_file_scope_matches_authority(self) -> ExperimentScope:
+        if self.impact_scope.casefold().startswith("files:"):
+            parsed = parse_proposal_scope_files(self.impact_scope)
+            if parsed != self.allowed_files:
+                raise ValueError("multi-file impact_scope 与 allowed_files 不一致。")
+        return self
 
 
 class ExperimentCheck(_StrictModel):

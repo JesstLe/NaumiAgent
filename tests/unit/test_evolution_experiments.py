@@ -11,6 +11,7 @@ from naumi_agent.evolution.experiments import (
     EvolutionExperimentContract,
     EvolutionExperimentContractIssuer,
     ExperimentBudget,
+    ExperimentScope,
     GitExperimentBaselineReader,
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
@@ -36,11 +37,20 @@ def _git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
-async def _approved_fixture(tmp_path: Path, *, approve: bool = True):
+async def _approved_fixture(
+    tmp_path: Path,
+    *,
+    approve: bool = True,
+    scope: str = "src/naumi_agent/ui/footer.py:render_footer",
+):
     workspace = tmp_path / "workspace"
     target = workspace / "src" / "naumi_agent" / "ui" / "footer.py"
     target.parent.mkdir(parents=True)
     target.write_text("def render_footer():\n    return 'ready'\n", encoding="utf-8")
+    target.with_name("header.py").write_text(
+        "def render_header():\n    return 'ready'\n",
+        encoding="utf-8",
+    )
     _git(workspace, "init")
     _git(workspace, "config", "user.name", "Naumi Test")
     _git(workspace, "config", "user.email", "naumi@example.invalid")
@@ -56,7 +66,7 @@ async def _approved_fixture(tmp_path: Path, *, approve: bool = True):
             build_direct_user_feedback(
                 session_id="experiment-contract",
                 category="defect",
-                scope="src/naumi_agent/ui/footer.py:render_footer",
+                scope=scope,
                 topic="footer_truncation",
                 summary=f"底栏截断 {offset}",
                 now=NOW + timedelta(minutes=offset),
@@ -165,7 +175,6 @@ async def test_contract_issuer_rejects_open_or_stale_proposal(tmp_path: Path) ->
             proposal_id=proposal_id,
             seed=1,
         )
-
     workspace, store, _service, issuer, proposal_id = await _approved_fixture(
         tmp_path / "stale"
     )
@@ -189,6 +198,42 @@ async def test_contract_issuer_rejects_open_or_stale_proposal(tmp_path: Path) ->
             seed=1,
         )
 
+
+@pytest.mark.asyncio
+async def test_approved_multi_file_proposal_issues_bounded_contract(tmp_path: Path) -> None:
+    scope = "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
+    workspace, _store, _service, issuer, proposal_id = await _approved_fixture(
+        tmp_path,
+        scope=scope,
+    )
+
+    contract = await issuer.issue(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+        seed=42,
+    )
+
+    assert contract.scope.impact_scope == scope
+    assert contract.scope.allowed_files == (
+        "src/naumi_agent/ui/footer.py",
+        "src/naumi_agent/ui/header.py",
+    )
+    assert 2 <= contract.budget.max_changed_files <= 6
+    assert contract.execution_ready is False
+
+
+def test_experiment_scope_rejects_multi_file_display_authority_mismatch() -> None:
+    with pytest.raises(ValidationError, match="allowed_files 不一致"):
+        ExperimentScope(
+            impact_scope=(
+                "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
+            ),
+            allowed_files=(
+                "src/naumi_agent/ui/header.py",
+                "src/naumi_agent/ui/footer.py",
+            ),
+        )
 
 @pytest.mark.asyncio
 async def test_contract_budget_cannot_expand_risk_policy(tmp_path: Path) -> None:

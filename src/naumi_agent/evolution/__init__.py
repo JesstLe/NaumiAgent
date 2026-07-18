@@ -73,6 +73,7 @@ __all__ = [
     "build_candidate_draft",
     "classify_proposal_kind",
     "generate_proposal_preview",
+    "parse_proposal_scope_files",
     "EvolutionStoredCandidate",
     "EvolutionExperimentContract",
     "EvolutionExperimentContractIssuer",
@@ -123,6 +124,7 @@ def __getattr__(name: str) -> object:
         "EvolutionProposalPreview",
         "classify_proposal_kind",
         "generate_proposal_preview",
+        "parse_proposal_scope_files",
     }
     experiment_exports = {
         "EvolutionExperimentContract",

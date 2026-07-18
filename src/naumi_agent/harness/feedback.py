@@ -79,6 +79,23 @@ class FeedbackObservation(_StrictModel):
             raise ValueError("feedback scope 必须是相对 scope。")
         if any(character in normalized for character in ("\n", "\r", "\x00")):
             raise ValueError("feedback scope 含非法控制字符。")
+        if normalized.casefold().startswith("files:"):
+            items = normalized[6:].replace("\\", "/").split(",")
+            if not 2 <= len(items) <= 16:
+                raise ValueError("多文件 feedback scope 必须包含 2..16 个文件。")
+            clean_items = tuple(item.strip() for item in items)
+            if len(set(clean_items)) != len(clean_items):
+                raise ValueError("多文件 feedback scope 不得重复。")
+            for item in clean_items:
+                item_parts = item.split("/")
+                if (
+                    not item
+                    or item.endswith("/")
+                    or _ABSOLUTE_SCOPE_RE.search(item)
+                    or ".." in item_parts
+                    or ":" in item
+                ):
+                    raise ValueError("多文件 feedback scope 包含不安全路径。")
         return normalized
 
     @field_validator("topic")

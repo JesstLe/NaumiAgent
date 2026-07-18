@@ -10,6 +10,7 @@ from naumi_agent.evolution.proposal import (
     EvolutionProposalPreview,
     classify_proposal_kind,
     generate_proposal_preview,
+    parse_proposal_scope_files,
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
@@ -54,6 +55,12 @@ async def _stored_candidate(
         ("user_reported_defect", "tool:file_read", "tool", "scope_prefix:tool"),
         ("long_function", "tests/unit/test_ui.py", "test", "scope_path:tests"),
         ("long_function", "src/naumi_agent/core.py:run", "code", "fallback:code"),
+        (
+            "user_reported_defect",
+            "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py",
+            "code",
+            "scope_prefix:files",
+        ),
     ],
 )
 def test_classifier_covers_all_six_har_09_proposal_types(
@@ -101,6 +108,42 @@ async def test_review_ready_candidate_generates_stable_non_executable_preview(
     assert first.experiment_eligible is False
     assert first.state == "preview"
     assert "never-persist" not in first.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_explicit_multi_file_scope_generates_ordered_intended_files(
+    tmp_path: Path,
+) -> None:
+    scope = "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
+    _store, stored = await _stored_candidate(tmp_path, repeats=2, scope=scope)
+
+    preview = generate_proposal_preview(stored)
+
+    assert preview is not None
+    assert preview.proposal_kind == "code"
+    assert preview.classification_reason == "scope_prefix:files"
+    assert preview.impact_scope == scope
+    assert preview.intended_files == (
+        "src/naumi_agent/ui/footer.py",
+        "src/naumi_agent/ui/header.py",
+    )
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "files:src/one.py",
+        "files:src/one.py,src/one.py",
+        "files:src/one.py,../secret.py",
+        "files:src/one.py,/tmp/two.py",
+        "files:src/one.py,src/two.py:run",
+        "files:src/one.py,",
+        "files:" + ",".join(f"src/file_{index}.py" for index in range(17)),
+    ],
+)
+def test_multi_file_scope_rejects_malformed_or_unsafe_paths(scope: str) -> None:
+    with pytest.raises(ValueError):
+        parse_proposal_scope_files(scope)
 
 
 @pytest.mark.asyncio

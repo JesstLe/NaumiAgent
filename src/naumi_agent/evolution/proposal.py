@@ -264,6 +264,9 @@ def classify_proposal_kind(finding_code: str, scope: str) -> tuple[ProposalKind,
         or any(char in normalized_scope for char in ("\x00", "\r", "\n"))
     ):
         raise ValueError("scope 必须是安全的相对范围。")
+    if normalized_scope.startswith("files:"):
+        parse_proposal_scope_files(scope)
+        return "code", "scope_prefix:files"
     scope_prefix = normalized_scope.split(":", 1)[0]
     if scope_prefix in _SCOPE_PREFIX_KIND:
         return _SCOPE_PREFIX_KIND[scope_prefix], f"scope_prefix:{scope_prefix}"
@@ -288,10 +291,38 @@ def classify_proposal_kind(finding_code: str, scope: str) -> tuple[ProposalKind,
 
 def _intended_files(scope: str) -> tuple[str, ...]:
     normalized = scope.strip().replace("\\", "/")
+    if normalized.casefold().startswith("files:"):
+        return parse_proposal_scope_files(normalized)
     candidate = normalized.split(":", 1)[0]
     if candidate.startswith(_PATH_PREFIXES) and not candidate.endswith("/"):
         return (candidate,)
     return ()
+
+
+def parse_proposal_scope_files(scope: str) -> tuple[str, ...]:
+    """Parse the explicit ``files:path-a,path-b`` multi-file scope grammar."""
+    normalized = str(scope).strip().replace("\\", "/")
+    if not normalized.casefold().startswith("files:"):
+        raise ValueError("多文件 scope 必须使用 files:path-a,path-b 语法。")
+    raw_items = normalized[6:].split(",")
+    if not 2 <= len(raw_items) <= 16:
+        raise ValueError("多文件 scope 必须包含 2..16 个文件。")
+    files = tuple(item.strip() for item in raw_items)
+    if len(set(files)) != len(files):
+        raise ValueError("多文件 scope 不得包含重复路径。")
+    for value in files:
+        parts = value.split("/")
+        if (
+            not value
+            or len(value) > 1_024
+            or value.endswith("/")
+            or _ABSOLUTE_PATH_RE.match(value)
+            or ".." in parts
+            or ":" in value
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
+        ):
+            raise ValueError("多文件 scope 只能包含安全相对文件路径。")
+    return files
 
 
 def _candidate_sha256(value: dict[str, object]) -> str:
@@ -332,5 +363,6 @@ __all__ = [
     "ProposalValidationStep",
     "classify_proposal_kind",
     "generate_proposal_preview",
+    "parse_proposal_scope_files",
     "workbench_validation_plan",
 ]
