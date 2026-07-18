@@ -107,6 +107,13 @@ if TYPE_CHECKING:
         EvolutionStoredCandidate,
         EvolutionStoreError,
     )
+    from naumi_agent.evolution.validation_plans import (
+        EvolutionValidationPlan,
+        EvolutionValidationPlanner,
+        ValidationFileRequirement,
+        ValidationMetricPair,
+        validation_requirements_for_path,
+    )
 
 __all__ = [
     "EvolutionEvidence",
@@ -163,6 +170,8 @@ __all__ = [
     "EvolutionStaticGuard",
     "EvolutionStaticGuardPolicy",
     "EvolutionStaticGuardReceipt",
+    "EvolutionValidationPlan",
+    "EvolutionValidationPlanner",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
@@ -184,6 +193,9 @@ __all__ = [
     "PatchSetState",
     "StaticGuardChangeFact",
     "StaticGuardViolation",
+    "ValidationFileRequirement",
+    "ValidationMetricPair",
+    "validation_requirements_for_path",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
     "EvolutionStoreError",
@@ -297,6 +309,13 @@ def __getattr__(name: str) -> object:
         "StaticGuardChangeFact",
         "StaticGuardViolation",
     }
+    validation_plan_exports = {
+        "EvolutionValidationPlan",
+        "EvolutionValidationPlanner",
+        "ValidationFileRequirement",
+        "ValidationMetricPair",
+        "validation_requirements_for_path",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -331,6 +350,8 @@ def __getattr__(name: str) -> object:
         module_name = "patch_writers"
     elif name in static_guard_exports:
         module_name = "static_guards"
+    elif name in validation_plan_exports:
+        module_name = "validation_plans"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")

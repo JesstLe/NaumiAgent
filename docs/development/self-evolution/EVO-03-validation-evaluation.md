@@ -23,3 +23,12 @@ Eval 和真实 Harness 检查产生。
 - flaky case 重复并报告分布，不允许挑选最好一次。
 - Eval runner 自身失败不算 candidate 失败，进入 blocked/needs_rerun。
 - A4：至少一个真实 NaumiAgent 小模块改进在 macOS/Linux 比较；平台特有变更有专属矩阵。
+
+## 已实现切片
+
+- EVO-03.1a Validation Plan Core：已实现。把 Contract、active Lease、Source Snapshot 与 Mutation Receipt
+  v2 机械绑定为防篡改、不可执行计划；固定同 fixture/seed/environment 的 RED→GREEN 指标对，并按文件
+  类型声明 lint/compile/unit/contract/smoke 要求。详见 `EVO-03-1a-validation-plan-core.md`。
+
+Profile check binding、HAR-08 baseline/candidate cohort、Comparator、failure attribution、adversarial suite 与
+Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
