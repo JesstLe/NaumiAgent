@@ -92,9 +92,18 @@ function createEmptyWorkbenchState() {
     selected_tab: "overview",
     selected_worktree_name: "",
     selected_worktree_index: 0,
+    selected_review_id: "",
+    selected_review_index: 0,
+    review_loading: false,
+    review_error: "",
+    review_detail: null,
     missions: [],
     tasks: [],
     issues: [],
+    leases: [],
+    validation_runs: [],
+    approvals: [],
+    proposals: [],
     failures: [],
     events: [],
     loading: false,
@@ -441,9 +450,12 @@ function applyWorkbenchSnapshot(state, payload) {
     0,
     previousWorktrees.findIndex((item) => String(item.name || "") === previousName),
   );
-  const selectedTab = state.workbench.selected_tab === "worktrees"
-    ? "worktrees"
+  const previousReviewId = String(state.workbench.selected_review_id || "");
+  const previousReviewIndex = Math.max(0, Number(state.workbench.selected_review_index) || 0);
+  const selectedTab = ["overview", "worktrees", "reviews"].includes(state.workbench.selected_tab)
+    ? state.workbench.selected_tab
     : "overview";
+  const previousReviewDetail = state.workbench.review_detail;
   state.workbench = {
     ...createEmptyWorkbenchState(),
     ...payload,
@@ -452,6 +464,16 @@ function applyWorkbenchSnapshot(state, payload) {
     error: "",
   };
   reconcileWorkbenchSelection(state.workbench, { previousName, previousIndex });
+  reconcileWorkbenchReviewSelection(state.workbench, {
+    previousId: previousReviewId,
+    previousIndex: previousReviewIndex,
+  });
+  if (
+    previousReviewDetail
+    && String(previousReviewDetail.review_id || "") === state.workbench.selected_review_id
+  ) {
+    state.workbench.review_detail = previousReviewDetail;
+  }
   return true;
 }
 
@@ -898,6 +920,11 @@ export function reduceServerEvent(state, record) {
         state.evolutionReview.error = payload.message ?? "Evolution Candidate 快照不可用。";
         break;
       }
+      if (payload.code === "workbench_review_failed") {
+        state.workbench.review_loading = false;
+        state.workbench.review_error = payload.message ?? "Workbench 审查证据加载失败。";
+        break;
+      }
       if (payload.code === "inspector_refresh_failed") {
         state.inspector.loading = false;
         state.inspector.error = payload.message ?? "Inspector 刷新失败，已保留上一次快照。";
@@ -991,6 +1018,16 @@ export function reduceServerEvent(state, record) {
           "info",
         );
       }
+      break;
+    }
+    case "workbench/review": {
+      if (!workbenchMatchesCurrentSession(state, payload)) break;
+      if (String(payload.review_id || "") !== String(state.workbench.selected_review_id || "")) break;
+      state.workbench.review_loading = false;
+      state.workbench.review_error = payload.status === "unavailable"
+        ? "该审查已不存在或不再可读，请刷新列表。"
+        : "";
+      state.workbench.review_detail = payload;
       break;
     }
     case "workbench/event": {
@@ -2461,7 +2498,12 @@ export function handleSubmitText(state, text, send) {
       state.workbench.selected_tab = "overview";
       state.workbench.selected_worktree_name = "";
       state.workbench.selected_worktree_index = 0;
+      state.workbench.selected_review_id = "";
+      state.workbench.selected_review_index = 0;
+      state.workbench.review_detail = null;
+      state.workbench.review_error = "";
       reconcileWorkbenchSelection(state.workbench);
+      reconcileWorkbenchReviewSelection(state.workbench);
     }
     requestWorkbenchSnapshot(state, send);
     return;
@@ -2630,6 +2672,31 @@ function requestWorkbenchSnapshot(state, send) {
   });
 }
 
+function requestWorkbenchReview(state, send, { force = false } = {}) {
+  const reviewId = String(state.workbench.selected_review_id || "");
+  if (!reviewId) {
+    state.workbench.review_loading = false;
+    state.workbench.review_error = "";
+    state.workbench.review_detail = null;
+    return;
+  }
+  if (
+    !force
+    && state.workbench.review_loading
+  ) return;
+  if (
+    !force
+    && state.workbench.review_detail?.status === "ready"
+    && String(state.workbench.review_detail.review_id || "") === reviewId
+  ) return;
+  state.workbench.review_loading = true;
+  state.workbench.review_error = "";
+  send("workbench/review/request", {
+    session_id: String(state.currentSessionId || ""),
+    review_id: reviewId,
+  });
+}
+
 export function handleWorkbenchOverviewKey(state, key, send) {
   if (state.route?.name !== "workbench") return false;
   const normalized = String(key || "").toLowerCase();
@@ -2642,6 +2709,9 @@ export function handleWorkbenchOverviewKey(state, key, send) {
   }
   if (normalized === "r") {
     requestWorkbenchSnapshot(state, send);
+    if (state.workbench.selected_tab === "reviews") {
+      requestWorkbenchReview(state, send, { force: true });
+    }
     return true;
   }
   if (normalized === "1" || normalized === "o") {
@@ -2653,18 +2723,43 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     reconcileWorkbenchSelection(state.workbench);
     return true;
   }
+  if (normalized === "3" || normalized === "v") {
+    state.workbench.selected_tab = "reviews";
+    reconcileWorkbenchReviewSelection(state.workbench);
+    requestWorkbenchReview(state, send);
+    return true;
+  }
   if ([INPUT_KEYS.tab, "]", INPUT_KEYS.right, INPUT_KEYS.rightAlt].includes(key)) {
-    state.workbench.selected_tab = state.workbench.selected_tab === "overview"
-      ? "worktrees"
-      : "overview";
+    const tabs = ["overview", "worktrees", "reviews"];
+    const index = tabs.indexOf(state.workbench.selected_tab);
+    state.workbench.selected_tab = tabs[(index + 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);
+    reconcileWorkbenchReviewSelection(state.workbench);
+    if (state.workbench.selected_tab === "reviews") requestWorkbenchReview(state, send);
     return true;
   }
   if ([INPUT_KEYS.shiftTab, "[", INPUT_KEYS.left, INPUT_KEYS.leftAlt].includes(key)) {
-    state.workbench.selected_tab = state.workbench.selected_tab === "worktrees"
-      ? "overview"
-      : "worktrees";
+    const tabs = ["overview", "worktrees", "reviews"];
+    const index = tabs.indexOf(state.workbench.selected_tab);
+    state.workbench.selected_tab = tabs[(index - 1 + tabs.length) % tabs.length];
     reconcileWorkbenchSelection(state.workbench);
+    reconcileWorkbenchReviewSelection(state.workbench);
+    if (state.workbench.selected_tab === "reviews") requestWorkbenchReview(state, send);
+    return true;
+  }
+  if (state.workbench.selected_tab === "reviews") {
+    let delta = 0;
+    if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) delta = -1;
+    else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) delta = 1;
+    else if (key === INPUT_KEYS.pageUp) delta = -10;
+    else if (key === INPUT_KEYS.pageDown) delta = 10;
+    else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) {
+      setWorkbenchReviewSelectionIndex(state.workbench, 0);
+    } else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) {
+      setWorkbenchReviewSelectionIndex(state.workbench, Number.MAX_SAFE_INTEGER);
+    }
+    if (delta) moveWorkbenchReviewSelection(state.workbench, delta);
+    requestWorkbenchReview(state, send);
     return true;
   }
   if (state.workbench.selected_tab !== "worktrees") return true;
@@ -2682,6 +2777,47 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     setWorkbenchSelectionIndex(state.workbench, Number.MAX_SAFE_INTEGER);
   }
   return true;
+}
+
+function reconcileWorkbenchReviewSelection(workbench, previous = {}) {
+  const reviews = Array.isArray(workbench.approvals) ? workbench.approvals : [];
+  if (!reviews.length) {
+    workbench.selected_review_id = "";
+    workbench.selected_review_index = 0;
+    workbench.review_detail = null;
+    return;
+  }
+  const preferred = String(previous.previousId || workbench.selected_review_id || workbench.active_selection?.review_id || "");
+  let index = preferred
+    ? reviews.findIndex((item) => String(item.id || "") === preferred)
+    : -1;
+  if (index < 0) index = Math.min(reviews.length - 1, Math.max(0, Number(previous.previousIndex) || 0));
+  setWorkbenchReviewSelectionIndex(workbench, index);
+}
+
+function moveWorkbenchReviewSelection(workbench, delta) {
+  setWorkbenchReviewSelectionIndex(
+    workbench,
+    Math.max(0, Number(workbench.selected_review_index) || 0) + delta,
+  );
+}
+
+function setWorkbenchReviewSelectionIndex(workbench, value) {
+  const reviews = Array.isArray(workbench.approvals) ? workbench.approvals : [];
+  if (!reviews.length) {
+    workbench.selected_review_index = 0;
+    workbench.selected_review_id = "";
+    return;
+  }
+  const index = Math.min(reviews.length - 1, Math.max(0, Math.trunc(Number(value) || 0)));
+  const previousId = String(workbench.selected_review_id || "");
+  workbench.selected_review_index = index;
+  workbench.selected_review_id = String(reviews[index]?.id || "");
+  if (previousId && previousId !== workbench.selected_review_id) {
+    workbench.review_loading = false;
+    workbench.review_detail = null;
+    workbench.review_error = "";
+  }
 }
 
 function reconcileWorkbenchSelection(workbench, previous = {}) {

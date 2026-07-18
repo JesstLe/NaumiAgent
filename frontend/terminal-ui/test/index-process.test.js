@@ -370,6 +370,10 @@ test("terminal UI process opens refreshes and leaves the Workbench overview", as
     await waitForLatestScreen(output, "codex/ui-10-overview", 7000);
     await waitForLatestScreen(output, "验证失败", 7000);
     await waitForLatestScreen(output, "高风险", 7000);
+    app.stdin.write("3");
+    await waitForLatestScreen(output, "Reviews", 7000);
+    await waitForLatestScreen(output, "阻塞 · 1 项验证失败", 7000);
+    await waitForLatestScreen(output, "frontend/terminal-ui/src/state.js", 7000);
     app.stdin.write("r");
     await delay(100);
     app.stdin.write("\u001b");
@@ -382,6 +386,14 @@ test("terminal UI process opens refreshes and leaves the Workbench overview", as
         && record.payload.record.type === "workbench/request",
     );
     assert.equal(requests.length, 2);
+    assert.equal(
+      events.some(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "workbench/review/request"
+          && record.payload.record.payload.review_id === "approval-fixture-1",
+      ),
+      true,
+    );
     assert.equal(
       events.some(
         (record) => record.event === "protocol.send"

@@ -370,6 +370,47 @@ test("workbench Worktrees tab renders real status and bounded 0/1/100 navigation
   assert(renderWorkbenchOverview(unavailable, 80, 12).map(stripAnsi).join("\n").includes("Worktree 状态暂不可用"));
 });
 
+test("workbench Reviews tab renders checks blockers files and semantic diff colors", () => {
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "approval-1",
+    review_loading: false,
+    review_error: "",
+    review_detail: {
+      schema_version: 1,
+      session_id: "session-workbench",
+      review_id: "approval-1",
+      status: "ready",
+      evidence: {
+        approval: {
+          id: "approval-1",
+          task_id: "task-1",
+          title: "等待 UI 审查",
+          detail: "确认真实差异与验证结果",
+          requester: "Frontend-Agent",
+        },
+        worktree: { name: "ui-10-overview", path: "/repo/wt", status: "present" },
+        validation_runs: [{ status: "failed", command: ["node", "--test"], exit_code: 1 }],
+        changed_files: [{ path: "src/ui.js", status: "modified" }],
+        diff_hunks: [{ path: "src/ui.js", patch: "@@ -1 +1 @@\n-old\n+new" }],
+      },
+    },
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("Reviews"));
+    assert(plain.includes("阻塞 · 1 项验证失败"));
+    assert(plain.includes("src/ui.js"));
+    assert(plain.includes("-old"));
+    assert(rendered.join("\n").includes(ANSI.red));
+    assert(rendered.join("\n").includes(ANSI.green));
+  }
+});
+
 test("markdown code blocks show a bounded excerpt with lightweight highlighting", () => {
   const codeLines = Array.from({ length: 45 }, (_, index) => `const value${index} = ${index};`);
   const rendered = renderMarkdownExcerpt(["```js", ...codeLines, "```"].join("\n"), 120);

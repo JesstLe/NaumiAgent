@@ -1252,8 +1252,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 28,
-        server_event_count: 40,
+        client_event_count: 29,
+        server_event_count: 41,
       },
     },
   });
@@ -1335,8 +1335,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
-        client_event_count: 28,
-        server_event_count: 40,
+        client_event_count: 29,
+        server_event_count: 41,
       },
     },
   );
@@ -1351,8 +1351,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         protocol_registry: {
           contract_version: 1,
           registry_sha256: "not-a-digest",
-          client_event_count: 28,
-          server_event_count: 40,
+          client_event_count: 29,
+          server_event_count: 41,
         },
       },
     }),
@@ -1366,8 +1366,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         protocol_registry: {
           contract_version: 1,
           registry_sha256: "0".repeat(64),
-          client_event_count: 28,
-          server_event_count: 40,
+          client_event_count: 29,
+          server_event_count: 41,
         },
       },
     }),
@@ -1546,6 +1546,57 @@ test("normalizes workbench event payloads", () => {
   assert.equal(record.payload.subject_id, "1");
   assert.equal(record.payload.payload.lease_id, "lease-1");
   assert.equal(record.payload.timestamp, "2026-06-27T10:00:00");
+});
+
+test("normalizes bounded workbench review evidence and rejects mismatches", () => {
+  const payload = {
+    schema_version: 1,
+    session_id: "s",
+    review_id: "approval-1",
+    status: "ready",
+    code: "",
+    evidence: {
+      approval: {
+        id: "approval-1", session_id: "s", mission_id: "mission-1", task_id: "task-1",
+        state: "waiting", title: "审查", detail: "检查", requester: "Agent",
+        reviewer: "", decision_note: "", created_at: "now", updated_at: "now", private: "secret",
+      },
+      issue: {
+        id: "issue-1", session_id: "s", mission_id: "mission-1", task_id: "task-1",
+        risk_level: "high", related_branch: "main", related_worktree: "wt", related_pr: "",
+        private: "drop",
+      },
+      worktree: { name: "wt", path: "/repo/wt", status: "present" },
+      validation_runs: [{
+        id: "run-1", status: "failed", command: ["node", "--test"], exit_code: 1,
+        started_at: "2026-07-18T00:00:00Z", completed_at: "2026-07-18T00:00:01Z",
+      }],
+      changed_files: [{ path: "src/ui.js", status: "modified" }],
+      diff_hunks: [{ path: "src/ui.js", patch: "-old\n+new" }],
+      agent_notes: [{ actor: "Agent", note: "检查完成", type: "review.note", timestamp: "now", secret: "drop" }],
+      events: [],
+    },
+  };
+  const record = normalizeServerRecord({ type: "workbench/review", version: 1, payload });
+
+  assert.equal(record.payload.evidence.approval.private, undefined);
+  assert.equal(record.payload.evidence.issue.private, undefined);
+  assert.equal(record.payload.evidence.diff_hunks[0].patch, "-old\n+new");
+  assert.equal(record.payload.evidence.agent_notes[0].secret, undefined);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "workbench/review",
+      version: 1,
+      payload: {
+        ...payload,
+        evidence: {
+          ...payload.evidence,
+          approval: { ...payload.evidence.approval, id: "other" },
+        },
+      },
+    }),
+    /id 不匹配/,
+  );
 });
 
 test("jsonl reader emits complete lines across chunk boundaries", () => {

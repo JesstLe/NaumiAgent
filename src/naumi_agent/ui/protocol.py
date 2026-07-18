@@ -57,6 +57,7 @@ class ClientEventType(StrEnum):
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
     WORKBENCH_REQUEST = "workbench/request"
+    WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
@@ -121,6 +122,7 @@ class ServerEventType(StrEnum):
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"
+    WORKBENCH_REVIEW = "workbench/review"
     EVOLUTION_REVIEW = "evolution/review"
     SHUTDOWN = "shutdown"
 
@@ -382,6 +384,17 @@ def _normalize_client_payload(
             "known_stream_id": stream_id,
             "known_revision": known_revision,
         }
+
+    if event_type == ClientEventType.WORKBENCH_REVIEW_REQUEST:
+        session_id = str(payload.get("session_id") or "").strip()
+        review_id = str(payload.get("review_id") or "").strip()
+        if len(session_id) > 500:
+            raise ValueError("Workbench session_id 不能超过 500 个字符。")
+        if not review_id:
+            raise ValueError("Workbench review_id 不能为空。")
+        if len(review_id) > 500:
+            raise ValueError("Workbench review_id 不能超过 500 个字符。")
+        return {"session_id": session_id, "review_id": review_id}
 
     if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
         action = str(payload.get("action") or "list").strip().lower()

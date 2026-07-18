@@ -91,8 +91,26 @@
 - 真实临时 Git 仓库创建 managed worktree 并写入未提交文件，经 SQLite Store、Service、JSONL Bridge、
   Node reducer 与 80/120/200 列 renderer 验证；重复只读刷新保持 revision 不变。
 
+### UI-10.4 已实现：只读 Reviews tab
+
+- Dashboard Snapshot 继续作为待审列表唯一事实来源；Node 协议现在保留经过有界规范化的 waiting
+  approvals，不再丢弃后端已经返回的 review 数据。列表支持 `3`、Tab/Shift+Tab、方向键、Home/End、
+  PageUp/PageDown，0/1/100 项均只渲染当前视窗。
+- 选中 Review 后通过 `workbench/review/request` 懒加载单项证据；Bridge 只允许当前会话，并调用既有
+  `WorkbenchService.get_review_evidence()`。响应严格绑定 review id，缺失项返回稳定 unavailable 状态，
+  内部异常只返回脱敏诊断码。
+- Review 详情展示审批说明、发起者、worktree 状态、验证次数和失败数、变更文件以及有界 unified diff。
+  新增/删除/修改和 hunk 使用绿/红/黄/青语义色；无 ANSI 时仍保留 `+/-/~` 与中文状态。
+- 页面把“worktree 缺失”“未运行验证”“验证失败”“证据就绪”明确区分，但不替用户做审批判断；
+  approve/reject 仍属于 UI-10.6，未在本切片提前开放。
+- Textual TUI 增加同源 Reviews 页签，直接调用同一个 Service，不复制 Store/Git 查询。Review 选择和
+  已加载详情都是进程内瞬态状态，新进程或新会话不恢复旧选择。
+- ReviewEvidenceCollector 的 changed files 限制为 200 条，并拒绝解析到配置 worktree 根目录之外的
+  名称；diff 继续限制为 30 个文件、每个 4000 字符，避免异常仓库撑爆终端协议。
+- Python 协议/Bridge/真实 Git evidence、Node contract/reducer/80/120/200 renderer、Textual 交互和
+  终端进程均有定向验证。完整设计和边界见 `UI-10-4a-reviews-tab.md`。
+
 ### 尚未完成
 
-- UI-10.4：Reviews tab。
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
 - UI-10.6：受权限控制的动作。

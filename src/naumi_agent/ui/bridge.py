@@ -820,6 +820,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.WORKBENCH_REQUEST:
             await self.show_workbench(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.WORKBENCH_REVIEW_REQUEST:
+            await self.show_workbench_review(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
             return
@@ -1706,6 +1709,79 @@ class JsonlEngineBridge:
         await self.emit(
             ServerEventType.WORKBENCH_SNAPSHOT,
             snapshot,
+            request_id=request_id,
+        )
+
+    async def show_workbench_review(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Return bounded, read-only evidence for one current-session review."""
+        session = getattr(self.engine, "_session", None)
+        if session is None:
+            session = await self.engine.get_or_create_session()
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        review_id = str(payload.get("review_id") or "")
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Workbench 只能读取当前会话。",
+                code="workbench_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "workbench_service", None)
+        if service is None:
+            await self.emit_error(
+                "Workbench 服务暂不可用。",
+                code="workbench_unavailable",
+                request_id=request_id,
+            )
+            return
+        try:
+            evidence = await service.get_review_evidence(session_id, review_id)
+            if evidence is None:
+                await self.emit(
+                    ServerEventType.WORKBENCH_REVIEW,
+                    {
+                        "schema_version": 1,
+                        "session_id": session_id,
+                        "review_id": review_id,
+                        "status": "unavailable",
+                        "code": "review_not_found",
+                    },
+                    request_id=request_id,
+                )
+                return
+            approval = evidence.get("approval") or {}
+            if str(approval.get("id") or "") != review_id:
+                raise ValueError("review evidence id mismatch")
+        except Exception as exc:
+            error_type = type(exc).__name__
+            logger.warning("Workbench review evidence failed (%s)", error_type)
+            if self.debug_trace is not None:
+                self.debug_trace.event(
+                    "workbench.review_failed",
+                    {"error_type": error_type},
+                )
+            await self.emit_error(
+                "Workbench 审查证据加载失败；请稍后重试。",
+                code="workbench_review_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.WORKBENCH_REVIEW,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "review_id": review_id,
+                "status": "ready",
+                "code": "",
+                "evidence": evidence,
+            },
             request_id=request_id,
         )
 

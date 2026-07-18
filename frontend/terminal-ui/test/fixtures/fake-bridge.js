@@ -144,6 +144,52 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "workbench/review/request") {
+    emit("workbench/review", {
+      schema_version: 1,
+      session_id: sessionId,
+      review_id: payload.review_id,
+      status: "ready",
+      code: "",
+      evidence: {
+        approval: {
+          id: payload.review_id,
+          session_id: sessionId,
+          mission_id: "mission-workbench-1",
+          task_id: "task-workbench-1",
+          state: "waiting",
+          title: "等待终端 UI 审查",
+          detail: "确认真实 diff 与验证结果",
+          requester: "Fixture-Agent",
+          reviewer: "",
+          decision_note: "",
+          created_at: "2026-07-17T14:00:00+08:00",
+          updated_at: "2026-07-17T14:00:00+08:00",
+        },
+        issue: {
+          id: "issue-fixture-1",
+          session_id: sessionId,
+          mission_id: "mission-workbench-1",
+          task_id: "task-workbench-1",
+          risk_level: "high",
+          related_branch: "codex/ui-10-overview",
+          related_worktree: "ui-10-overview",
+          related_pr: "#128",
+        },
+        worktree: { name: "ui-10-overview", path: "/tmp/ui-10-overview", status: "present" },
+        validation_runs: [{
+          id: "validation-fixture-1", status: "failed", command: ["node", "--test"],
+          exit_code: 1, started_at: "2026-07-17T14:00:00+08:00", completed_at: "2026-07-17T14:00:01+08:00",
+        }],
+        changed_files: [{ path: "frontend/terminal-ui/src/state.js", status: "modified" }],
+        diff_hunks: [{ path: "frontend/terminal-ui/src/state.js", patch: "@@ -1 +1 @@\n-old\n+new" }],
+        agent_notes: [],
+        events: [],
+      },
+    }, record.id);
+    return;
+  }
+
   if (record.type === "task_submit") {
     const text = payload.text ?? "";
     const mission = { id: "mission-1", title: "终端任务", status: "active" };

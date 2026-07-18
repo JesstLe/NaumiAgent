@@ -26,6 +26,8 @@ export function renderWorkbenchOverview(view, width, height) {
     body = [color(ANSI.cyan, "正在加载 Workbench 权威快照…")];
   } else if (snapshot.selected_tab === "worktrees") {
     body = renderWorktrees(snapshot, safeWidth, bodyHeight);
+  } else if (snapshot.selected_tab === "reviews") {
+    body = renderReviews(snapshot, safeWidth, bodyHeight);
   } else if (!array(snapshot.missions).length && !array(snapshot.tasks).length) {
     body = [
       color(ANSI.dim, "暂无 Workbench 任务。"),
@@ -44,10 +46,13 @@ export function renderWorkbenchOverview(view, width, height) {
 }
 
 function renderTabs(snapshot) {
-  const selected = snapshot.selected_tab === "worktrees" ? "worktrees" : "overview";
+  const selected = ["overview", "worktrees", "reviews"].includes(snapshot.selected_tab)
+    ? snapshot.selected_tab
+    : "overview";
   const overview = selected === "overview" ? color(ANSI.cyan, "[1 概览]") : color(ANSI.dim, "1 概览");
   const worktrees = selected === "worktrees" ? color(ANSI.cyan, "[2 Worktrees]") : color(ANSI.dim, "2 Worktrees");
-  return `Workbench Overview · ${overview} · ${worktrees}`;
+  const reviews = selected === "reviews" ? color(ANSI.cyan, "[3 Reviews]") : color(ANSI.dim, "3 Reviews");
+  return `Workbench Overview · ${overview} · ${worktrees} · ${reviews}`;
 }
 
 function renderSummary(snapshot) {
@@ -67,10 +72,157 @@ function renderPageState(snapshot) {
     return color(ANSI.yellow, `刷新警告 · ${compactText(snapshot.error, 300)} · r 重试 · Esc 返回`);
   }
   if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
-  if (snapshot.selected_tab === "worktrees") {
+  if (["worktrees", "reviews"].includes(snapshot.selected_tab)) {
     return color(ANSI.dim, "Tab/Shift+Tab 标签 · ↑/↓ 选择 · PgUp/PgDn 翻页 · r 刷新 · Esc 返回");
   }
   return color(ANSI.dim, "Tab/Shift+Tab 标签 · r 刷新 · Esc 返回对话");
+}
+
+function renderReviews(snapshot, width, height) {
+  const reviews = array(snapshot.approvals);
+  if (!reviews.length) {
+    return [
+      color(ANSI.green, "当前没有待审请求。"),
+      color(ANSI.dim, "Review 只读取权威审批与证据；审批动作将在 UI-10.6 接入。"),
+    ];
+  }
+  const selectedIndex = selectedReviewIndex(snapshot, reviews);
+  const selected = reviews[selectedIndex];
+  if (width >= 120) {
+    const leftWidth = Math.max(44, Math.min(Math.floor(width * 0.42), width - 55));
+    const rightWidth = Math.max(1, width - leftWidth - 1);
+    const left = renderReviewList(reviews, selectedIndex, leftWidth, height);
+    const right = renderReviewDetail(snapshot, selected, rightWidth);
+    return Array.from({ length: height }, (_, index) => {
+      const leftLine = padRight(fitAnsiWidth(left[index] || "", leftWidth), leftWidth);
+      const rightLine = padRight(fitAnsiWidth(right[index] || "", rightWidth), rightWidth);
+      return `${leftLine}${color(ANSI.blue, "│")}${rightLine}`;
+    });
+  }
+  const listHeight = Math.max(4, Math.min(7, Math.floor(height * 0.38)));
+  return [
+    ...renderReviewList(reviews, selectedIndex, width, listHeight),
+    ...renderReviewDetail(snapshot, selected, width),
+  ].slice(0, height);
+}
+
+function renderReviewList(reviews, selectedIndex, width, height) {
+  const rowCount = Math.max(1, height - 1);
+  const start = Math.max(
+    0,
+    Math.min(reviews.length - rowCount, selectedIndex - Math.floor(rowCount / 2)),
+  );
+  const rows = reviews.slice(start, start + rowCount).map((item, offset) => {
+    const index = start + offset;
+    const marker = index === selectedIndex ? color(ANSI.cyan, "›") : " ";
+    const title = compactText(item.title || item.id || "未命名审查", 500);
+    const requester = compactText(item.requester || "未知发起者", 160);
+    return fitAnsiWidth(`${marker} ${color(ANSI.yellow, "待审")} ${title} · ${requester}`, width);
+  });
+  return [color(ANSI.cyan, `Reviews · ${reviews.length} · 当前 ${selectedIndex + 1}`), ...rows];
+}
+
+function renderReviewDetail(snapshot, selected, width) {
+  if (!selected) return [color(ANSI.dim, "未选择审查请求")];
+  if (snapshot.review_error) {
+    return [
+      color(ANSI.red, `证据不可用 · ${compactText(snapshot.review_error, 500)}`),
+      color(ANSI.dim, "按 r 重新读取当前会话权威证据。"),
+    ];
+  }
+  const detail = snapshot.review_detail;
+  if (snapshot.review_loading || !detail || String(detail.review_id || "") !== String(selected.id || "")) {
+    return [
+      color(ANSI.cyan, `审查 · ${compactText(selected.title || selected.id, 500)}`),
+      color(ANSI.dim, "正在读取 diff、验证与阻塞证据…"),
+    ];
+  }
+  if (detail.status !== "ready" || !detail.evidence) {
+    return [color(ANSI.yellow, "该审查已不可用，请刷新 Review 列表。")];
+  }
+  const evidence = detail.evidence;
+  const approval = evidence.approval || selected;
+  const worktree = evidence.worktree || {};
+  const runs = array(evidence.validation_runs);
+  const files = array(evidence.changed_files);
+  const hunks = array(evidence.diff_hunks);
+  const failed = runs.filter((run) => ["failed", "error"].includes(String(run.status)));
+  const passed = runs.filter((run) => ["passed", "success", "completed"].includes(String(run.status)));
+  const lines = [
+    color(ANSI.cyan, `审查 · ${compactText(approval.title || approval.id, 600)}`),
+    `发起者 · ${compactText(approval.requester || "未知", 200)} · Task ${compactText(approval.task_id || "-", 120)}`,
+    `说明 · ${compactText(approval.detail || "未填写", 1_500)}`,
+    reviewGateLine(worktree, runs, failed),
+    `${worktreeLabel(worktree.status)} · ${compactText(worktree.name || "未绑定", 300)}`,
+    `${passed.length ? color(ANSI.green, `通过 ${passed.length}`) : color(ANSI.yellow, "通过 0")} · ${failed.length ? color(ANSI.red, `失败 ${failed.length}`) : color(ANSI.green, "失败 0")} · 变更 ${files.length}`,
+  ];
+  if (!runs.length) lines.push(color(ANSI.yellow, "验证 · 尚未记录真实验证命令"));
+  else {
+    const latest = runs.at(-1);
+    const command = Array.isArray(latest.command) ? latest.command.join(" ") : String(latest.command || "-");
+    lines.push(`${validationStatus(latest.status)} · ${compactText(command, 900)} · exit ${latest.exit_code ?? "-"}`);
+  }
+  if (hunks.length) {
+    lines.push(color(ANSI.cyan, `Diff · ${compactText(hunks[0].path || "-", 500)}`));
+    for (const line of String(hunks[0].patch || "").split("\n").slice(0, 12)) {
+      lines.push(renderDiffLine(line));
+    }
+    if (hunks.length > 1) lines.push(color(ANSI.dim, `另有 ${hunks.length - 1} 个 diff 文件`));
+  } else {
+    lines.push(color(ANSI.dim, "Diff · 当前没有可展示的已跟踪文件差异"));
+  }
+  if (files.length) {
+    lines.push(color(ANSI.cyan, "文件"));
+    for (const file of files.slice(0, 8)) lines.push(renderChangedFile(file));
+    if (files.length > 8) lines.push(color(ANSI.dim, `另有 ${files.length - 8} 个文件`));
+  } else {
+    lines.push(color(ANSI.yellow, "文件 · 未检测到工作区变更"));
+  }
+  return lines.flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function selectedReviewIndex(snapshot, reviews) {
+  const byId = reviews.findIndex(
+    (item) => String(item.id || "") === String(snapshot.selected_review_id || ""),
+  );
+  if (byId >= 0) return byId;
+  const byAuthority = reviews.findIndex(
+    (item) => String(item.id || "") === String(snapshot.active_selection?.review_id || ""),
+  );
+  return byAuthority >= 0 ? byAuthority : 0;
+}
+
+function reviewGateLine(worktree, runs, failed) {
+  if (worktree.status !== "present") return color(ANSI.red, "阻塞 · 变更载体不可用");
+  if (!runs.length) return color(ANSI.yellow, "待补证据 · 尚未运行验证");
+  if (failed.length) return color(ANSI.red, `阻塞 · ${failed.length} 项验证失败`);
+  return color(ANSI.green, "证据就绪 · 可进入人工判断");
+}
+
+function worktreeLabel(status) {
+  if (status === "present") return color(ANSI.green, "Worktree 可用");
+  if (status === "missing") return color(ANSI.red, "Worktree 缺失");
+  return color(ANSI.yellow, "Worktree 未绑定");
+}
+
+function renderChangedFile(file) {
+  const status = String(file.status || "modified");
+  const label = {
+    added: color(ANSI.green, "+ 新增"),
+    deleted: color(ANSI.red, "- 删除"),
+    modified: color(ANSI.yellow, "~ 修改"),
+    renamed: color(ANSI.cyan, "→ 重命名"),
+    untracked: color(ANSI.green, "+ 未跟踪"),
+  }[status] || color(ANSI.dim, status);
+  return `${label} · ${compactText(file.path || "-", 900)}`;
+}
+
+function renderDiffLine(line) {
+  if (line.startsWith("+") && !line.startsWith("+++")) return color(ANSI.green, line);
+  if (line.startsWith("-") && !line.startsWith("---")) return color(ANSI.red, line);
+  if (line.startsWith("@@")) return color(ANSI.cyan, line);
+  if (line.startsWith("diff ") || line.startsWith("index ")) return color(ANSI.dim, line);
+  return line;
 }
 
 function renderWorktrees(snapshot, width, height) {

@@ -63,6 +63,7 @@ uv run naumi-ui-bridge --config config.yaml
 - `user/message`
 - `task/created`
 - `workbench/snapshot`
+- `workbench/review`
 - `ui/message`
 - `engine/event`
 - `permission/request`
@@ -78,6 +79,8 @@ uv run naumi-ui-bridge --config config.yaml
 
 - `hello`
 - `submit`
+- `workbench/request`
+- `workbench/review/request`
 - `task_submit`
 - `run_cancel`
 - `set_mode`
