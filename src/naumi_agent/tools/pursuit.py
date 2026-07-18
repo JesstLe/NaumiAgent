@@ -276,7 +276,7 @@ class PursuitStatusTool(Tool):
 
 
 class PursuitResumeTool(Tool):
-    """恢复等待中的目标追踪状态."""
+    """从权威 checkpoint 恢复目标追踪执行."""
 
     @property
     def name(self) -> str:
@@ -284,7 +284,10 @@ class PursuitResumeTool(Tool):
 
     @property
     def description(self) -> str:
-        return "恢复一个持久化目标追踪运行，并回收已完成后台任务的输出证据。"
+        return (
+            "校验并恢复持久化目标追踪：回收后台证据，在安全 checkpoint "
+            "继续执行；存在未核对副作用时停止重放。"
+        )
 
     @property
     def metadata(self) -> ToolMetadata:
@@ -312,7 +315,42 @@ class PursuitResumeTool(Tool):
         loop = _global_pursuit_loop
         if loop is None:
             return "⚠️ 目标追踪工具尚未初始化。"
-        return await loop.resume_persisted(normalized_run_id)
+        loop.prepare_resume_admission()
+        task = asyncio.create_task(
+            loop.resume_persisted(normalized_run_id),
+            name=f"naumi-pursuit-resume-{normalized_run_id}",
+        )
+        admission = asyncio.create_task(
+            loop.wait_until_resume_admitted(),
+            name=f"naumi-pursuit-resume-admission-{normalized_run_id}",
+        )
+        _background_pursuit_tasks.add(task)
+        task.add_done_callback(_background_pursuit_tasks.discard)
+        task.add_done_callback(_log_background_pursuit_result)
+        done, _ = await asyncio.wait(
+            {task, admission},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if task in done:
+            admission.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await admission
+            return task.result()
+
+        admission_error = admission.result()
+        if admission_error:
+            if not task.done():
+                task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+            return f"⚠️ {admission_error}"
+        return (
+            "✅ 目标追踪已恢复并在后台继续，当前对话不会等待长循环完成。\n\n"
+            f"- run_id: `{normalized_run_id}`\n"
+            f"- checkpoint: `{loop._resume_checkpoint_id}`\n"
+            f"- lease epoch: {loop._resume_epoch}\n"
+            f"- 查看状态: `/pursue status {normalized_run_id}`"
+        )
 
 
 def create_pursuit_tool() -> list[Tool]:

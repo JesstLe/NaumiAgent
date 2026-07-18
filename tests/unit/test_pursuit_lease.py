@@ -177,6 +177,8 @@ async def test_full_loop_commits_blocked_terminal_under_fence(tmp_path) -> None:
         workspace_root=tmp_path,
     )
     spec = _spec()
+    spec.original_goal = "需要被 lease 保护的目标"
+    spec.description = spec.original_goal
     checkpoint = _checkpoint()
     loop._parse_goal = AsyncMock(return_value=spec)  # type: ignore[method-assign]
     loop._assess = AsyncMock(  # type: ignore[method-assign]
@@ -197,7 +199,7 @@ async def test_full_loop_commits_blocked_terminal_under_fence(tmp_path) -> None:
     persisted_checkpoint = pursuit_store.get_checkpoint(loop._run.id)
     assert persisted_checkpoint is not None
     assert persisted_checkpoint.status == "blocked"
-    assert persisted_checkpoint.goal.original_goal == "目标"
+    assert persisted_checkpoint.goal.original_goal == "需要被 lease 保护的目标"
     assert persisted_checkpoint.goal.criteria[0].id == "c1"
     assert persisted_checkpoint.recent_history[0].iteration == 1
     assert persisted_checkpoint.evidence_cursor == len(restored.evidence)
@@ -218,6 +220,25 @@ async def test_full_loop_commits_blocked_terminal_under_fence(tmp_path) -> None:
     assert any("run-start" in row[0] for row in fence_rows)
     assert any("terminal-blocked" in row[0] for row in fence_rows)
     assert all(row[1:] == ("accepted", "current") for row in fence_rows)
+
+    resumed_checkpoint = _checkpoint()
+    resumed_checkpoint.iteration = 2
+    loop._assess = AsyncMock(  # type: ignore[method-assign]
+        return_value={"checkpoint": resumed_checkpoint, "gaps": ["gap"]}
+    )
+    resumed = await loop.resume_persisted(loop._run.id)
+
+    assert "恢复执行（lease epoch 2）" in resumed
+    assert resumed.endswith("报告")
+    assert loop._parse_goal.await_count == 1
+    resumed_lease = await harness_store.get_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id=loop._run.id,
+    )
+    assert resumed_lease is not None
+    assert resumed_lease.state is HarnessRunLeaseState.RELEASED
+    assert resumed_lease.epoch == 2
 
 
 @pytest.mark.asyncio

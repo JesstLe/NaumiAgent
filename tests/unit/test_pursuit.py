@@ -101,7 +101,7 @@ class TestDataStructures:
 
     def test_pursuit_config_defaults(self) -> None:
         config = PursuitConfig()
-        assert config.max_iterations == 1000
+        assert config.max_iterations == 50
         assert config.max_budget_usd == float("inf")
         assert config.max_time_seconds == float("inf")
         assert config.stagnation_threshold == 3
@@ -1590,6 +1590,38 @@ class TestPursuitPersistence:
         assert restored.waiting_on == []
         assert any(item.kind == "background" and item.is_hard for item in restored.evidence)
 
+    @pytest.mark.asyncio
+    async def test_assessment_context_includes_collected_durable_evidence(self) -> None:
+        engine = _make_engine()
+        loop = GoalPursuitLoop(
+            router=engine.router,
+            tool_registry=MagicMock(),
+            subagent_manager=SubAgentManager(engine),
+        )
+        now = time.time()
+        loop._run = PursuitRun(
+            id="pursuit_evidence",
+            goal="读取后台证据",
+            status=PursuitRunStatus.RUNNING,
+            phase="assess",
+            started_at=now,
+            updated_at=now,
+            evidence=[PursuitEvidence(
+                kind="background",
+                source="bg_0001",
+                summary="后台测试完成：17 passed",
+                is_hard=True,
+                timestamp=now,
+            )],
+        )
+        loop._tools.get = MagicMock(return_value=None)
+
+        evidence = await loop._gather_state_evidence(_make_spec())
+
+        assert "持久运行证据" in evidence
+        assert "bg_0001" in evidence
+        assert "17 passed" in evidence
+
 
 class TestCancel:
     @pytest.mark.asyncio
@@ -1682,8 +1714,67 @@ class TestPursueToolRegistration:
 
         assert "后台启动" in result
         assert "pursuit_bg" in result
-        assert "1000 轮 / 无限 / 无限" in result
+        assert "50 轮 / 无限 / 无限" in result
         assert store.get_run("pursuit_bg") is not None
+
+    @pytest.mark.asyncio
+    async def test_resume_tool_returns_after_durable_admission(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+            store=PursuitStore(tmp_path / "pursuit"),
+        )
+        pursuit_mod._global_pursuit_loop = loop
+        release = asyncio.Event()
+
+        async def fake_resume(run_id: str) -> str:
+            loop._resume_checkpoint_id = "pchk_admitted"
+            loop._resume_epoch = 3
+            loop._resume_admitted_event.set()
+            await release.wait()
+            return f"完成 {run_id}"
+
+        monkeypatch.setattr(loop, "resume_persisted", fake_resume)
+
+        result = await PursuitResumeTool().execute(run_id="pursuit_bg")
+
+        assert "后台继续" in result
+        assert "pchk_admitted" in result
+        assert "lease epoch: 3" in result
+        tasks = [
+            task for task in pursuit_mod._background_pursuit_tasks
+            if task.get_name() == "naumi-pursuit-resume-pursuit_bg"
+        ]
+        assert len(tasks) == 1
+        release.set()
+        await tasks[0]
+
+    @pytest.mark.asyncio
+    async def test_resume_tool_returns_pre_admission_blocker(self, monkeypatch) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+        )
+        pursuit_mod._global_pursuit_loop = loop
+
+        async def fake_resume(_: str) -> str:
+            return "目标追踪未继续执行：需要 reconcile"
+
+        monkeypatch.setattr(loop, "resume_persisted", fake_resume)
+
+        result = await PursuitResumeTool().execute(run_id="pursuit_bg")
+
+        assert result == "目标追踪未继续执行：需要 reconcile"
 
     @pytest.mark.asyncio
     async def test_run_id_tools_reject_invalid_run_id(self) -> None:

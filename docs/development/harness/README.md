@@ -4,7 +4,8 @@
 
 H1-H3、H4.1-H4.4、HAR-05，以及 HAR-08 的离线协议 Eval、安全 Replay Eval、
 Identity/Comparator、Result Store、Baseline/Selector、Comparison receipt、HAR-10.1a 持久化 fencing lease、
-HAR-10.1b Pursuit 首个生产接入与 HAR-10.4a 权威 checkpoint 核心已实现：
+HAR-10.1b Pursuit 首个生产接入、HAR-10.4a 权威 checkpoint 核心与 HAR-10.4b 安全 resume executor 已实现。
+resume 支持新 lease epoch continuation，并在 in-flight 副作用不明确时进入 `reconcile_required`。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
