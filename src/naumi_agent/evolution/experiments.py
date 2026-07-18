@@ -195,6 +195,7 @@ class ExperimentSource(_StrictModel):
 class EvolutionExperimentContract(_StrictModel):
     schema_version: Literal[1] = 1
     contract_id: str
+    manifest_sha256: str
     policy_version: Literal["evolution-experiment-contract-v1"] = (
         EXPERIMENT_CONTRACT_POLICY
     )
@@ -227,9 +228,21 @@ class EvolutionExperimentContract(_StrictModel):
             raise ValueError("allowed_checks metric 不得重复。")
         if not _CONTRACT_ID_RE.fullmatch(self.contract_id):
             raise ValueError("contract_id 格式无效。")
-        if self.contract_id != _contract_id(self.model_dump(exclude={"contract_id"})):
+        payload = self.model_dump(exclude={"contract_id", "manifest_sha256"})
+        digest = _manifest_digest(payload)
+        if self.manifest_sha256 != digest:
+            raise ValueError("manifest_sha256 与 Experiment manifest 不一致。")
+        if self.contract_id != _contract_id(digest):
             raise ValueError("contract_id 与 Experiment manifest 不一致。")
         return self
+
+    @field_validator("manifest_sha256")
+    @classmethod
+    def _valid_manifest_digest(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+            raise ValueError("manifest_sha256 必须是 SHA-256。")
+        return normalized
 
 
 class ExperimentBaselineReader(Protocol):
@@ -371,7 +384,12 @@ class EvolutionExperimentContractIssuer:
             "state": "contract",
         }
         plain = _jsonable(payload)
-        return EvolutionExperimentContract(contract_id=_contract_id(plain), **plain)
+        manifest_sha256 = _manifest_digest(plain)
+        return EvolutionExperimentContract(
+            contract_id=_contract_id(manifest_sha256),
+            manifest_sha256=manifest_sha256,
+            **plain,
+        )
 
 
 _BUDGET_CAPS: dict[str, ExperimentBudget] = {
@@ -508,14 +526,18 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"无法序列化 Experiment Contract 字段: {type(value).__name__}")
 
 
-def _contract_id(payload: Mapping[str, Any]) -> str:
+def _manifest_digest(payload: Mapping[str, Any]) -> str:
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-    return f"evx_{hashlib.sha256(canonical).hexdigest()[:24]}"
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _contract_id(manifest_sha256: str) -> str:
+    return f"evx_{manifest_sha256[:24]}"
 
 
 __all__ = [

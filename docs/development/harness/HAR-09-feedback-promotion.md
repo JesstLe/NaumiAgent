@@ -67,3 +67,6 @@
 EVO-02.1a 已补上 approved Proposal 到不可执行 Experiment Contract 的内部签发器；它会重新验证当前
 Candidate/Preview 与 Proposal provenance，并固定 `execution_ready=false`。由于 Contract 尚未持久化或
 暴露为用户动作，HAR-09 的“显式转换”产品闭环仍未完成。
+
+EVO-02.2a 已进一步把 Contract 绑定到持久、可恢复的唯一 Worktree Lease；Lease 仍不授予写 patch 或
+执行检查的权限，且尚未暴露为用户动作，因此不改变 HAR-09 的 partial 结论。
