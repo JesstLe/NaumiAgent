@@ -37,9 +37,12 @@
 - HAR-09.1a 已实现可信 Feedback Intake：直接 `/feedback` 与 Agent interpretation 使用不可混淆
   source kind；Agent Tool 必须绑定 runtime 签发的 durable Chat Run 信封；偏好、取消、赞扬不
   形成缺陷，摘要原文不落库。详见 `HAR-09-1a-trusted-feedback-intake.md`。
+- HAR-09.2a 已实现 Candidate Aggregation View v1：以 Candidate 最后观测为稳定 anchor，计算
+  24h/7d/30d、前一 7d、趋势、source/provider/model/platform 分布及代表 Evidence；纯函数不写
+  Store。详见 `HAR-09-2a-candidate-aggregation-view.md`。
 - HAR-09.3a 已实现 Candidate Policy v1：单条机械证据或至少两条直接用户反馈可进入人工审阅；
   单次反馈、Agent-only 信号保持证据不足，authority-bearing scope 机械阻断。策略只输出版本化
   Assessment，不创建 Proposal、不写 Review Queue、不授予实验资格。详见
   `../self-evolution/EVO-01-4a-candidate-eligibility-policy.md`。
-- HAR-09 仍未实现跨时间窗 provider/model/platform 聚合策略、阈值/冷却 policy、
-  持久 review action/cooldown 或 outcome tracking，因此整体继续保持 partial。
+- HAR-09 仍未实现跨 Candidate 影响范围/趋势统计、持久 review action/cooldown、Proposal 或
+  outcome tracking，因此整体继续保持 partial。

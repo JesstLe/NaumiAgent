@@ -73,8 +73,51 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
                 }
                 for check in item.eligibility.checks[:16]
             ],
+            "aggregation": _aggregation_payload(item),
         })
     return payload
+
+
+def _aggregation_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
+    value = item.aggregation
+    if value is None:
+        return None
+    return {
+        "policy_version": value.policy_version,
+        "anchor_at": value.anchor_at,
+        "span_seconds": value.span_seconds,
+        "total_count": value.total_count,
+        "count_24h": value.count_24h,
+        "count_7d": value.count_7d,
+        "count_30d": value.count_30d,
+        "previous_7d_count": value.previous_7d_count,
+        "trend": value.trend,
+        "source_counts": _dimension_payload(value.source_counts),
+        "source_unique_count": value.source_unique_count,
+        "provider_counts": _dimension_payload(value.provider_counts),
+        "provider_unique_count": value.provider_unique_count,
+        "model_counts": _dimension_payload(value.model_counts),
+        "model_unique_count": value.model_unique_count,
+        "platform_counts": _dimension_payload(value.platform_counts),
+        "platform_unique_count": value.platform_unique_count,
+        "representatives": [
+            {
+                "evidence_id": entry.evidence_id,
+                "source_kind": entry.source_kind,
+                "observed_at": entry.observed_at,
+                "ref_uri": entry.ref_uri,
+                "ref_sha256_prefix": entry.ref_sha256_prefix,
+            }
+            for entry in value.representatives[:16]
+        ],
+    }
+
+
+def _dimension_payload(values) -> list[dict[str, Any]]:
+    return [
+        {"value": item.value, "count": item.count, "percentage": item.percentage}
+        for item in values[:20]
+    ]
 
 
 __all__ = ["evolution_review_payload"]

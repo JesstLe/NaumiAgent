@@ -799,6 +799,26 @@ test("evolution review snapshot is strict and drops private fields", () => {
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, mode: "write" } }), /mode/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, read_only: false } }), /只读/);
   assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: { ...normalized, items: [{ ...item, experiment_eligible: true }] } }), /实验资格/);
+  const detail = normalizeServerRecord({ type: "evolution/review", payload: {
+    ...normalized, mode: "detail", items: [], events: [], selected: {
+      ...item, status: "draft", hypothesis: "机械验证", providers: [], models: [], platforms: [],
+      first_observed_at: "before", expected_metrics: [], evidence_refs: [],
+      policy_version: "candidate-eligibility-v1", checks: [],
+      aggregation: {
+        policy_version: "candidate-aggregation-v1", anchor_at: "now", span_seconds: 10,
+        total_count: 2, count_24h: 2, count_7d: 2, count_30d: 2,
+        previous_7d_count: 0, trend: "insufficient", source_counts: [],
+        source_unique_count: 0,
+        provider_counts: [{ value: "openai", count: 2, percentage: 100 }],
+        provider_unique_count: 1, model_counts: [], model_unique_count: 0,
+        platform_counts: [], platform_unique_count: 0, representatives: [],
+      },
+    },
+  } }).payload;
+  assert.equal(detail.selected.aggregation.provider_counts[0].count, 2);
+  assert.throws(() => normalizeServerRecord({ type: "evolution/review", payload: {
+    ...detail, selected: { ...detail.selected, aggregation: { ...detail.selected.aggregation, trend: "exploding" } },
+  } }), /trend/);
 });
 
 test("normalizes strict runtime inspector snapshots and updates", () => {

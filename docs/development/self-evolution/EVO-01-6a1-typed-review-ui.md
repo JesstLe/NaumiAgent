@@ -25,6 +25,7 @@ Evidence 引用以及每个维度 50 个唯一值。
 - 上下键/Home/End 选择，Enter 打开详情，`b` 返回列表，`r` 只读刷新，Esc 恢复原对话滚动锚点。
 - 列表按 risk 与 decision 使用语义色，同时保留完整文字标签。
 - 详情显示 Eligibility Gate、硬阻断、机械指标和审计链，并始终显示“实验资格 否”。
+- 详情消费 HAR-09.2a 同一聚合对象，显示稳定时间窗、趋势和 Provider/Model/Platform/source 分布。
 - 页面状态不持久化；显式 resume 会清除旧 Candidate snapshot 并返回 conversation。
 - Bridge/Store 失败返回固定 `evolution_review_failed`，不泄露数据库路径或异常正文。
 

@@ -49,8 +49,19 @@ function detailLines(item, rawEvents) {
     `证据 ${item.occurrence_count} · Revision ${item.revision} · 人工治理 ${item.human_review_required ? "必须" : "常规"}`,
     color(ANSI.dim, `来源 · ${item.source_kinds.join(", ") || "-"}`),
     color(ANSI.dim, `Provider/Model/Platform · ${item.providers.join(", ") || "-"} / ${item.models.join(", ") || "-"} / ${item.platforms.join(", ") || "-"}`),
-    color(ANSI.cyan, `── Eligibility Gates · ${item.policy_version}`),
   ];
+  const aggregation = item.aggregation;
+  if (aggregation) {
+    lines.push(
+      color(ANSI.cyan, `── 聚合趋势 · ${aggregation.policy_version}`),
+      color(trendStyle(aggregation.trend), `${trendLabel(aggregation.trend)} · 24h/7d/30d ${aggregation.count_24h}/${aggregation.count_7d}/${aggregation.count_30d} · 前一7d ${aggregation.previous_7d_count}`),
+      color(ANSI.dim, `Provider · ${dimensionText(aggregation.provider_counts, aggregation.provider_unique_count)}`),
+      color(ANSI.dim, `Model · ${dimensionText(aggregation.model_counts, aggregation.model_unique_count)}`),
+      color(ANSI.dim, `Platform · ${dimensionText(aggregation.platform_counts, aggregation.platform_unique_count)}`),
+      color(ANSI.dim, `来源 · ${dimensionText(aggregation.source_counts, aggregation.source_unique_count)}`),
+    );
+  }
+  lines.push(color(ANSI.cyan, `── Eligibility Gates · ${item.policy_version}`));
   for (const check of item.checks || []) {
     const label = check.passed ? "通过" : check.hard_block ? "硬阻断" : "待补齐";
     const style = check.passed ? ANSI.green : check.hard_block ? ANSI.red : ANSI.yellow;
@@ -73,6 +84,21 @@ function riskStyle(value) {
   if (["high", "critical"].includes(value)) return ANSI.red;
   if (value === "medium") return ANSI.yellow;
   return ANSI.green;
+}
+
+function dimensionText(values, uniqueCount) {
+  const entries = Array.isArray(values) ? values : [];
+  const rendered = entries.map((item) => `${item.value} ${item.count} (${item.percentage}%)`).join(", ") || "-";
+  const omitted = Math.max(0, Number(uniqueCount) - entries.length);
+  return omitted ? `${rendered}，另有 ${omitted} 项` : rendered;
+}
+
+function trendLabel(value) {
+  return value === "increasing" ? "上升" : value === "decreasing" ? "下降" : value === "stable" ? "稳定" : value === "new" ? "新出现" : "数据不足";
+}
+
+function trendStyle(value) {
+  return value === "increasing" ? ANSI.red : value === "decreasing" ? ANSI.green : value === "stable" ? ANSI.cyan : ANSI.yellow;
 }
 
 function fit(line, width) {

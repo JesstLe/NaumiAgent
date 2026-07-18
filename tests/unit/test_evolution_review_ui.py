@@ -51,6 +51,8 @@ async def test_typed_payload_is_bounded_private_and_contains_policy(tmp_path: Pa
     assert payload["read_only"] is True
     assert payload["selected"]["decision"] == "review_ready"  # type: ignore[index]
     assert payload["selected"]["experiment_eligible"] is False  # type: ignore[index]
+    assert payload["selected"]["aggregation"]["policy_version"] == "candidate-aggregation-v1"  # type: ignore[index]
+    assert payload["selected"]["aggregation"]["total_count"] == 2  # type: ignore[index]
     assert len(payload["events"]) == 2
     assert "never-render" not in json.dumps(payload, ensure_ascii=False)
 

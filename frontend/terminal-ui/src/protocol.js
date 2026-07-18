@@ -1599,7 +1599,46 @@ function normalizeEvolutionItem(value, detail) {
       hard_block: harnessBoolean(check.hard_block, "evolution/review check.hard_block"),
       detail: harnessText(check.detail, "evolution/review check.detail"),
     })),
+    aggregation: normalizeEvolutionAggregation(item.aggregation),
   };
+}
+
+function normalizeEvolutionAggregation(value) {
+  const item = harnessObject(value, "evolution/review aggregation");
+  return {
+    policy_version: harnessText(item.policy_version, "evolution/review aggregation.policy_version"),
+    anchor_at: harnessText(item.anchor_at, "evolution/review aggregation.anchor_at"),
+    span_seconds: harnessNonnegativeInteger(item.span_seconds, "evolution/review aggregation.span_seconds"),
+    total_count: harnessNonnegativeInteger(item.total_count, "evolution/review aggregation.total_count"),
+    count_24h: harnessNonnegativeInteger(item.count_24h, "evolution/review aggregation.count_24h"),
+    count_7d: harnessNonnegativeInteger(item.count_7d, "evolution/review aggregation.count_7d"),
+    count_30d: harnessNonnegativeInteger(item.count_30d, "evolution/review aggregation.count_30d"),
+    previous_7d_count: harnessNonnegativeInteger(item.previous_7d_count, "evolution/review aggregation.previous_7d_count"),
+    trend: harnessChoice(item.trend, "evolution/review aggregation.trend", new Set(["new", "increasing", "stable", "decreasing", "insufficient"])),
+    source_counts: normalizeEvolutionDimensions(item.source_counts, "source_counts"),
+    source_unique_count: harnessNonnegativeInteger(item.source_unique_count, "evolution/review aggregation.source_unique_count"),
+    provider_counts: normalizeEvolutionDimensions(item.provider_counts, "provider_counts"),
+    provider_unique_count: harnessNonnegativeInteger(item.provider_unique_count, "evolution/review aggregation.provider_unique_count"),
+    model_counts: normalizeEvolutionDimensions(item.model_counts, "model_counts"),
+    model_unique_count: harnessNonnegativeInteger(item.model_unique_count, "evolution/review aggregation.model_unique_count"),
+    platform_counts: normalizeEvolutionDimensions(item.platform_counts, "platform_counts"),
+    platform_unique_count: harnessNonnegativeInteger(item.platform_unique_count, "evolution/review aggregation.platform_unique_count"),
+    representatives: harnessObjectArray(item.representatives, "evolution/review aggregation.representatives", 16).map((entry) => ({
+      evidence_id: harnessText(entry.evidence_id, "evolution/review representative.evidence_id"),
+      source_kind: harnessText(entry.source_kind, "evolution/review representative.source_kind"),
+      observed_at: harnessText(entry.observed_at, "evolution/review representative.observed_at"),
+      ref_uri: harnessText(entry.ref_uri, "evolution/review representative.ref_uri"),
+      ref_sha256_prefix: harnessText(entry.ref_sha256_prefix, "evolution/review representative.ref_sha256_prefix"),
+    })),
+  };
+}
+
+function normalizeEvolutionDimensions(value, name) {
+  return harnessObjectArray(value, `evolution/review aggregation.${name}`, 20).map((item) => ({
+    value: harnessText(item.value, `evolution/review aggregation.${name}.value`),
+    count: harnessNonnegativeInteger(item.count, `evolution/review aggregation.${name}.count`),
+    percentage: harnessNonnegativeFiniteNumber(item.percentage, `evolution/review aggregation.${name}.percentage`),
+  }));
 }
 
 function normalizeTaskSnapshot(payload) {

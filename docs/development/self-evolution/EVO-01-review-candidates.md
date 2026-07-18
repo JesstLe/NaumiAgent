@@ -55,6 +55,8 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.6a1 Typed Review UI：已实现。默认新 UI 通过 ARC-03 event registry 管理的 typed snapshot
   展示全屏列表/详情与 Eligibility Gates；TUI 使用同一 Service 的线性降级。详见
   `EVO-01-6a1-typed-review-ui.md`。
-- runtime metric/Eval adapters、provider/model/platform 时间窗聚合策略、
+- HAR-09.2a Candidate Aggregation View：已实现单 Candidate 的稳定时间窗、趋势、维度分布与代表
+  Evidence，并进入共享 Review detail；详见 `../harness/HAR-09-2a-candidate-aggregation-view.md`。
+- runtime metric/Eval adapters、跨 Candidate 影响范围分析、
   完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。
