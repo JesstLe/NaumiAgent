@@ -45,6 +45,7 @@ from naumi_agent.ui.harness_protocol import (
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.permission_confirmation import summarize_arguments
 from naumi_agent.ui.protocol import (
+    PROTOCOL_CAPABILITIES,
     ClientEventType,
     ProtocolNegotiationError,
     ServerEventType,
@@ -451,6 +452,7 @@ class JsonlEngineBridge:
         self.debug_trace = debug_trace
         self.adapter = EngineEventAdapter()
         self._sequence = 0
+        self._client_capabilities = set(PROTOCOL_CAPABILITIES)
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._protocol_event_registry = load_protocol_event_registry()
@@ -706,6 +708,7 @@ class JsonlEngineBridge:
                     request_id=request_id,
                 )
                 return
+            self._client_capabilities = set(negotiation.get("capabilities", ()))
             await self.emit(
                 ServerEventType.ACK,
                 {"event": event_type, "negotiation": negotiation},
@@ -2161,14 +2164,17 @@ class JsonlEngineBridge:
         request_id: str,
     ) -> None:
         """Render the read-only task panel through the UI protocol."""
-        from naumi_agent.ui.task_panel import render_task_panel
+        from naumi_agent.ui.task_panel import (
+            build_task_panel_snapshot,
+            render_task_panel_snapshot,
+        )
 
         raw_limit = payload.get("limit", 12)
         try:
             limit = int(raw_limit)
         except (TypeError, ValueError):
             limit = 12
-        content = await render_task_panel(
+        snapshot = await build_task_panel_snapshot(
             self.engine,
             limit=limit,
             source=str(payload.get("source") or "all"),
@@ -2176,18 +2182,25 @@ class JsonlEngineBridge:
             detail_id=str(payload.get("detail_id") or payload.get("detail") or ""),
             history=bool(payload.get("history", False)),
         )
-        await self.emit(
-            ServerEventType.UI_MESSAGE,
-            ui_message_payload(
-                SystemNoticeMessage(
-                    type=MessageType.SYSTEM_NOTICE,
-                    title="tasks",
-                    content=content,
-                    level="info",
-                )
-            ),
-            request_id=request_id,
-        )
+        if "task_snapshot" in self._client_capabilities:
+            await self.emit(
+                ServerEventType.TASKS_SNAPSHOT,
+                snapshot.to_protocol_dict(),
+                request_id=request_id,
+            )
+        else:
+            await self.emit(
+                ServerEventType.UI_MESSAGE,
+                ui_message_payload(
+                    SystemNoticeMessage(
+                        type=MessageType.SYSTEM_NOTICE,
+                        title="tasks",
+                        content=render_task_panel_snapshot(snapshot),
+                        level="info",
+                    )
+                ),
+                request_id=request_id,
+            )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def cancel_task(

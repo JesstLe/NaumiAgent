@@ -24,6 +24,7 @@ PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
     "heartbeat",
+    "task_snapshot",
     "typed_ui_messages",
     "workbench_snapshot",
 )
@@ -115,6 +116,7 @@ class ServerEventType(StrEnum):
     INTERACTION_RESOLVED = "interaction/resolved"
     PERMISSION_GRANTS_CHANGED = "permission/grants_changed"
     PERMISSION_SNAPSHOT = "permissions/snapshot"
+    TASKS_SNAPSHOT = "tasks/snapshot"
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"

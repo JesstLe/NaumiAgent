@@ -21,7 +21,7 @@ import { PermissionCard } from "../src/components/permission-card.js";
 import { InteractionCard } from "../src/components/interaction-card.js";
 import { parsePermissionPanel, PermissionPanel } from "../src/components/permission-panel.js";
 import { ToolCard } from "../src/components/tool-card.js";
-import { parseTaskPanel, renderTaskPanel, TaskPanel } from "../src/components/task-panel.js";
+import { parseTaskPanel, renderTaskPanel, renderTaskSnapshot, TaskPanel } from "../src/components/task-panel.js";
 import { createInitialState } from "../src/state.js";
 import { setInputText } from "../src/input-buffer.js";
 import {
@@ -43,6 +43,43 @@ test("component core composes nested stacks and boxes within width", () => {
   assert(lines.some((item) => stripAnsi(item).includes("group")));
   assert(lines.some((item) => stripAnsi(item).includes("第一行")));
   assert(lines.every((item) => visibleWidth(item) <= 48));
+});
+
+test("typed task snapshot renders source, owner, status, and dependencies", () => {
+  const snapshot = {
+    filters: { detail_id: "sub_1" },
+    warnings: [],
+    items: [
+      {
+        view_id: "subagent:sub_1",
+        source: "subagent",
+        task_id: "sub_1",
+        status: "running",
+        raw_status: "started",
+        title: "探索项目结构",
+        owner: "Explore",
+        age_seconds: 9,
+        dependency_ids: ["task_0"],
+        child_ids: [],
+        detail: "phase=running",
+        artifact_refs: [],
+      },
+    ],
+  };
+  const rendered = renderTaskSnapshot(snapshot, 80, {
+    width: 80,
+    taskPanel: { selectedId: "subagent:sub_1", expandedIds: { "subagent:sub_1": true } },
+  }).map(stripAnsi).join("\n");
+  assert.match(rendered, /子智能体/);
+  assert.match(rendered, /探索项目结构/);
+  assert.match(rendered, /Explore/);
+  assert.match(rendered, /depends=task_0/);
+  assert.match(rendered, /Detail/);
+  const filtered = renderTaskSnapshot(snapshot, 80, {
+    width: 80,
+    taskPanel: { searchQuery: "不存在" },
+  }).map(stripAnsi).join("\n");
+  assert.doesNotMatch(filtered, /探索项目结构/);
 });
 
 test("interaction card and footer expose choices, custom input, and answered state", () => {

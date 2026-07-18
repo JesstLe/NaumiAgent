@@ -24,7 +24,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         selected_version: 1,
         server_minimum_version: 1,
         server_maximum_version: 1,
-        capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+        capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
       },
     }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
@@ -372,39 +372,36 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "task_panel") {
-    const filterLine = (payload.source && payload.source !== "all") || payload.detail_id
-      ? [
-          `filter: source=${payload.source || "all"} status=${payload.status || "all"}${
-            payload.detail_id ? ` detail=${payload.detail_id}` : ""
-          }`,
-        ]
-      : [];
-    const detailLines = payload.detail_id
-      ? [
-          "Detail",
-          "  类型: Background",
-          `  ID: ${payload.detail_id}`,
-          "  状态: running",
-          "  命令: npm run dev",
-          "  CWD: /tmp/project",
-        ]
-      : [];
-    emitUi({
-      type: "system_notice",
-      title: "tasks",
-      content: [
-        "任务面板",
-        ...filterLine,
-        ...detailLines,
-        "Timeline",
-        "  - bg_0001 [running] npm run dev | time=2026-06-01T12:00:00; source=background; event=background:bg_0001; output=/tmp/bg.log",
-        "  - run_7 [needs_input] 打开页面 | time=2026-06-01T12:00:01; source=browser; event=browser:run_7; records=/tmp/browser-trace.zip",
-        "Todo",
-        "  - #1 [running] 写入页面 | owner=main; blocked_by=-; blocks=-",
-        "Background",
-        "  暂无后台任务",
-      ].join("\n"),
-      level: "info",
+    const allItems = [
+      taskItem("todo", "1", "running", "写入页面", { owner: "main" }),
+      taskItem("subagent", "sub_1", "running", "探索项目结构", { owner: "Explore" }),
+      taskItem("background", "bg_0001", "running", "npm run dev", {
+        artifacts: ["/tmp/bg.log"],
+        detail: "cwd=/tmp/project; pid=4242",
+      }),
+      taskItem("browser", "run_7", "blocked", "打开页面", { artifacts: ["/tmp/browser-trace.zip"] }),
+    ];
+    const items = allItems.filter((item) => {
+      const sourceMatches = !payload.source || payload.source === "all" || item.source === payload.source;
+      const statusMatches = !payload.status || payload.status === "all" || item.status === payload.status;
+      return sourceMatches && statusMatches;
+    });
+    emit("tasks/snapshot", {
+      schema_version: 1,
+      generated_at: "2026-07-18T00:00:00+00:00",
+      full: true,
+      filters: {
+        source: payload.source || "all",
+        status: payload.status || "all",
+        detail_id: payload.detail_id || "",
+        history: Boolean(payload.history),
+      },
+      items,
+      timeline: [
+        taskTimeline("background", "bg_0001", "running", "npm run dev"),
+        taskTimeline("browser", "run_7", "blocked", "打开页面"),
+      ],
+      warnings: [],
     });
     const tasks = payload.pinned
       ? { background_running: 1, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 0 }
@@ -741,5 +738,38 @@ function agentControlSnapshot(revision) {
       value_summary: "ready",
     }],
     warnings: [],
+  };
+}
+
+function taskItem(source, taskId, status, title, options = {}) {
+  return {
+    view_id: `${source}:${taskId}`,
+    source,
+    task_id: taskId,
+    status,
+    raw_status: status,
+    title,
+    owner: options.owner || "",
+    priority: null,
+    dependency_ids: [],
+    child_ids: [],
+    created_at: "2026-07-18T00:00:00+00:00",
+    updated_at: "2026-07-18T00:00:00+00:00",
+    age_seconds: 0,
+    detail: options.detail || "",
+    artifact_refs: options.artifacts || [],
+  };
+}
+
+function taskTimeline(source, taskId, status, title) {
+  return {
+    event_id: `${source}:${taskId}`,
+    source,
+    task_id: taskId,
+    status,
+    raw_status: status,
+    title,
+    detail: "",
+    timestamp: "2026-07-18T00:00:00+00:00",
   };
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -62,6 +63,21 @@ class FakeSubagentManager:
                 "task_id": "sub_1",
                 "message": "子 Agent 已开始执行。",
             }
+        ][:limit]
+
+    def list_executions(self, limit: int = 100) -> list[Any]:
+        return [
+            SimpleNamespace(
+                task_id="sub_1",
+                description="探索项目结构",
+                agent_name="coder",
+                status="running",
+                phase="running_tool",
+                started_at=1_784_332_800.0,
+                finished_at=None,
+                elapsed_ms=900,
+                current_tool="file_read",
+            )
         ][:limit]
 
 
@@ -220,6 +236,23 @@ async def test_build_task_panel_snapshot_normalizes_all_sources() -> None:
     assert background_event.timestamp == "2026-01-01T00:00:00"
     assert snapshot.warnings == ()
     assert engine.background_runner.calls == 1
+    assert {item.source for item in snapshot.view_items} == {
+        "todo",
+        "subagent",
+        "background",
+        "browser",
+    }
+    todo = next(item for item in snapshot.view_items if item.view_id == "todo:3")
+    assert todo.status == "blocked"
+    assert todo.dependency_ids == ("2",)
+    subagent = next(item for item in snapshot.view_items if item.source == "subagent")
+    assert subagent.task_id == "sub_1"
+    assert subagent.owner == "coder"
+    protocol = snapshot.to_protocol_dict()
+    assert protocol["schema_version"] == 1
+    assert protocol["full"] is True
+    assert protocol["items"][0]["view_id"]
+    assert protocol["timeline"]
 
 
 @pytest.mark.asyncio

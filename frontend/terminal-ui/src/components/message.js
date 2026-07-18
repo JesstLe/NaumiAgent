@@ -58,7 +58,11 @@ export function renderMessage(message, width, ctx = { width }) {
   }
   if (message.kind === "system") {
     if (message.title === "tasks") {
-      return renderComponent(TaskPanel({ content: message.content, taskPanel: ctx.state?.taskPanel }), ctx);
+      return renderComponent(TaskPanel({
+        content: message.content,
+        snapshot: message.taskSnapshot,
+        taskPanel: ctx.state?.taskPanel,
+      }), ctx);
     }
     if (message.title === "permissions") {
       return renderComponent(PermissionPanel({ content: message.content }), ctx);

@@ -59,6 +59,50 @@ function interactionRecord(requestId, question = "请选择方案") {
   };
 }
 
+test("typed task snapshot drives stable selection without parsing display text", () => {
+  const state = createInitialState();
+  const item = {
+    view_id: "subagent:sub_1",
+    source: "subagent",
+    task_id: "sub_1",
+    status: "running",
+    title: "探索项目结构",
+    owner: "Explore",
+    detail: "phase=running",
+    artifact_refs: [],
+  };
+  reduceServerEvent(state, {
+    type: "tasks/snapshot",
+    payload: {
+      filters: { source: "all", status: "all", detail_id: "", history: false },
+      items: [item],
+      timeline: [],
+      warnings: [],
+    },
+  });
+  assert.equal(state.taskPanel.items[0].id, "subagent:sub_1");
+  assert.equal(state.taskPanel.items[0].taskId, "sub_1");
+  assert.equal(state.taskPanel.selectedId, "subagent:sub_1");
+  const message = state.messages.find((entry) => entry.title === "tasks");
+  assert.equal(message.taskSnapshot.items[0].owner, "Explore");
+
+  reduceServerEvent(state, {
+    type: "tasks/snapshot",
+    payload: {
+      filters: { source: "all", status: "all", detail_id: "", history: false },
+      items: [
+        { ...item, view_id: "todo:1", source: "todo", task_id: "1", owner: "main" },
+        item,
+      ],
+      timeline: [],
+      warnings: [],
+    },
+  });
+  assert.equal(state.taskPanel.selectedId, "subagent:sub_1");
+  assert.equal(state.taskPanel.selectedIndex, 1);
+  assert.equal(state.messages.filter((entry) => entry.title === "tasks").length, 1);
+});
+
 test("hello ack marks protocol negotiation separately from bridge readiness", () => {
   const state = createInitialState();
   assert.equal(state.bridgeReady, false);

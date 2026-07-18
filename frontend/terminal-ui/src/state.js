@@ -309,6 +309,7 @@ export function createInitialState() {
       selectedId: "",
       selectedIndex: 0,
       items: [],
+      snapshot: null,
       expandedIds: {},
       collapsedTimelineSources: {},
       focused: false,
@@ -544,6 +545,9 @@ export function reduceServerEvent(state, record) {
       state.permissionCenter.snapshot = payload;
       state.permissionCenter.loading = false;
       state.permissionCenter.error = "";
+      break;
+    case "tasks/snapshot":
+      applyTaskSnapshot(state, payload);
       break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
@@ -3126,6 +3130,34 @@ export function pushSystemMessage(state, title, content, level, options = {}) {
   }
 }
 
+function applyTaskSnapshot(state, snapshot) {
+  dismissWelcome(state);
+  state.taskPanel.snapshot = snapshot;
+  let message = state.messages.find((item) => item.id === state.taskPanel.messageId);
+  if (!message) {
+    message = {
+      kind: "system",
+      id: nextMessageId(state, "system"),
+      title: "tasks",
+      content: "类型化任务快照",
+      level: "info",
+      taskSnapshot: snapshot,
+    };
+    state.messages.push(message);
+    state.taskPanel.messageId = message.id;
+  } else {
+    message.content = "类型化任务快照";
+    message.level = "info";
+    message.taskSnapshot = snapshot;
+  }
+  syncTaskPanelStructuredItems(state, snapshot);
+  if (state.taskPanel.items.length) {
+    state.taskPanel.focused = true;
+    state.inspector.focused = false;
+  }
+  clearRenderCache(state.renderCache);
+}
+
 export function createUiSnapshot(state) {
   return {
     folds: state.folds,
@@ -3673,6 +3705,7 @@ function closeTaskPanel(state) {
   state.taskPanel.selectedId = "";
   state.taskPanel.selectedIndex = 0;
   state.taskPanel.items = [];
+  state.taskPanel.snapshot = null;
   state.taskPanel.expandedIds = {};
   state.taskPanel.collapsedTimelineSources = {};
   state.taskPanel.focused = false;
@@ -3793,7 +3826,7 @@ export function openSelectedTaskPanelItem(state, send) {
     pushSystemMessage(state, "任务面板", "没有已选中的任务项。先打开 /tasks，再用 Tab 或 /tasks select 选择。", "info");
     return false;
   }
-  state.taskPanel.detailId = item.id;
+  state.taskPanel.detailId = item.taskId || item.id;
   sendCurrentTaskPanelRequest(state, send, { refresh: true });
   return true;
 }
@@ -3805,7 +3838,7 @@ export function cancelTaskPanelItem(state, send, selector = "") {
     pushSystemMessage(state, "任务面板", "没有已选中的任务项。先打开 /tasks，再用 Tab 或 /tasks select 选择。", "info");
     return false;
   }
-  const taskId = item?.id ?? raw;
+  const taskId = item?.taskId ?? item?.id ?? raw;
   const source = item?.source ?? state.taskPanel.source ?? "all";
   send("task_cancel", {
     task_id: taskId,
@@ -3893,7 +3926,11 @@ function setTaskPanelSearch(state, query) {
   const normalized = String(query ?? "").trim();
   state.taskPanel.searchQuery = normalized;
   const message = state.messages.find((item) => item.id === state.taskPanel.messageId);
-  if (message) syncTaskPanelItems(state, message.content);
+  if (state.taskPanel.snapshot) {
+    syncTaskPanelStructuredItems(state, state.taskPanel.snapshot);
+  } else if (message) {
+    syncTaskPanelItems(state, message.content);
+  }
   clearRenderCache(state.renderCache);
   const resultCount = state.taskPanel.items.length;
   pushSystemMessage(
@@ -3904,6 +3941,40 @@ function setTaskPanelSearch(state, query) {
       : `已清除本地搜索，当前显示 ${resultCount} 项。`,
     "info",
   );
+}
+
+function syncTaskPanelStructuredItems(state, snapshot) {
+  const previousId = state.taskPanel.selectedId;
+  const previousIndex = normalizeTaskPanelIndex(
+    state.taskPanel.selectedIndex,
+    state.taskPanel.items.length,
+  );
+  const query = String(state.taskPanel.searchQuery ?? "").trim().toLocaleLowerCase();
+  const items = (snapshot?.items ?? [])
+    .filter((item) => {
+      if (!query) return true;
+      return [item.view_id, item.task_id, item.source, item.status, item.title, item.owner, item.detail]
+        .some((value) => String(value ?? "").toLocaleLowerCase().includes(query));
+    })
+    .map((item, index) => ({
+      id: item.view_id,
+      taskId: item.task_id,
+      source: item.source,
+      status: item.status,
+      label: `${item.source} ${item.task_id} ${item.title}`,
+      recordPath: item.artifact_refs?.[0] ?? "",
+      index,
+    }));
+  state.taskPanel.items = items;
+  if (!items.length) {
+    state.taskPanel.selectedId = "";
+    state.taskPanel.selectedIndex = 0;
+    state.taskPanel.focused = false;
+    return;
+  }
+  const existingIndex = items.findIndex((item) => item.id === previousId);
+  const nextIndex = existingIndex >= 0 ? existingIndex : Math.min(previousIndex, items.length - 1);
+  setTaskPanelSelection(state, nextIndex, { notify: false });
 }
 
 function syncTaskPanelItems(state, content) {
