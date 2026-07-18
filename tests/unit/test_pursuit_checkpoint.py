@@ -1,22 +1,31 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from naumi_agent.orchestrator.pursuit import (
+    CriterionStatus,
     GoalPursuitLoop,
+    GoalSpec,
+    IterationCheckpoint,
+    PursuitConfig,
     PursuitRun,
     PursuitRunStatus,
+    SuccessCriterion,
 )
 from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointBudget,
     CheckpointCriterion,
     CheckpointGoal,
+    CheckpointInteraction,
+    CheckpointIteration,
     PursuitCheckpoint,
     checkpoint_safe_text,
 )
@@ -60,8 +69,12 @@ def _checkpoint(*, sequence: int = 1, phase: str = "assess") -> PursuitCheckpoin
             max_iterations=50,
             max_budget_usd=None,
             max_time_seconds=None,
+            stagnation_threshold=4,
+            verify_interval=2,
+            plan_depth=5,
+            replan_on_stagnation=False,
         ),
-        evidence_cursor=2,
+        evidence_cursor=0,
         waiting_on=(),
         pending_interaction=None,
         recent_history=(),
@@ -79,6 +92,8 @@ def _store_with_run(tmp_path) -> PursuitStore:
         phase="assess",
         started_at=1.0,
         updated_at=1.0,
+        iteration=1,
+        criteria_total=1,
     ))
     return store
 
@@ -95,6 +110,52 @@ def test_checkpoint_round_trips_across_store_reopen(tmp_path) -> None:
     assert restored is not None
     assert restored.checkpoint_id().startswith("pchk_")
     assert restored.canonical_json() == checkpoint.canonical_json()
+
+
+def test_checkpoint_reads_pre_4b_payload_without_changing_content_id(tmp_path) -> None:
+    payload = _checkpoint().model_dump(mode="json")
+    for field_name in (
+        "stagnation_threshold",
+        "verify_interval",
+        "plan_depth",
+        "replan_on_stagnation",
+    ):
+        payload["budget"].pop(field_name)
+    legacy_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+    digest = hashlib.sha256(legacy_json.encode("utf-8")).hexdigest()
+    store = _store_with_run(tmp_path)
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO pursuit_checkpoints (
+                run_id, sequence, schema_version, checkpoint_id,
+                payload_json, payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "pursuit_checkpoint",
+                1,
+                1,
+                f"pchk_{digest[:24]}",
+                legacy_json,
+                digest,
+                1.0,
+            ),
+        )
+
+    restored = store.get_checkpoint("pursuit_checkpoint")
+
+    assert restored is not None
+    assert restored.canonical_json() == legacy_json
+    assert restored.budget.stagnation_threshold == 3
+    assert restored.budget.verify_interval == 1
 
 
 def test_checkpoint_sequence_is_monotonic_and_idempotent(tmp_path) -> None:
@@ -191,8 +252,50 @@ def test_get_checkpoint_does_not_create_storage_when_absent(tmp_path) -> None:
     assert not store.base_dir.exists()
 
 
+def test_restore_rebuilds_goal_history_budget_and_cursor(tmp_path) -> None:
+    checkpoint = _checkpoint().model_copy(update={
+        "recent_history": (
+            CheckpointIteration(
+                iteration=1,
+                timestamp=1.5,
+                assessment="完成一半",
+                gaps_found=("gap",),
+                actions_planned=("a1",),
+                actions_taken=("[completed] a1",),
+                criteria_status={"c1": "in_progress"},
+                convergence_score=0.5,
+            ),
+        ),
+    })
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        config=PursuitConfig(stagnation_threshold=4, verify_interval=2),
+    )
+
+    spec = loop._restore_checkpoint_state(checkpoint)
+
+    assert spec.original_goal == "完成可恢复执行"
+    assert spec.success_criteria[0].status is CriterionStatus.IN_PROGRESS
+    assert spec.constraints == {"只运行小模块测试": True}
+    assert loop._history[0].actions_taken == ["[completed] a1"]
+    assert loop._history[0].tokens_used == 120
+    assert loop._total_tokens == 120
+    assert loop._total_cost == 0.02
+    assert loop._config.max_iterations == 50
+    assert loop._config.max_budget_usd == float("inf")
+    assert loop._config.stagnation_threshold == 4
+    assert loop._config.verify_interval == 2
+    assert loop._config.plan_depth == 5
+    assert loop._config.replan_on_stagnation is False
+    assert loop._checkpoint_sequence == checkpoint.sequence
+
+
 @pytest.mark.asyncio
-async def test_resume_reports_verified_checkpoint_without_fake_running(tmp_path) -> None:
+async def test_resume_continues_from_verified_checkpoint_without_reparsing(
+    tmp_path,
+) -> None:
     store = _store_with_run(tmp_path)
     checkpoint = _checkpoint()
     store.save_checkpoint(checkpoint)
@@ -202,22 +305,43 @@ async def test_resume_reports_verified_checkpoint_without_fake_running(tmp_path)
         subagent_manager=MagicMock(),
         store=store,
     )
+    loop._parse_goal = AsyncMock()  # type: ignore[method-assign]
+    loop._assess = AsyncMock(return_value={  # type: ignore[method-assign]
+        "checkpoint": IterationCheckpoint(
+            iteration=2,
+            timestamp=2.0,
+            assessment="仍需继续",
+            gaps_found=["gap"],
+            actions_planned=[],
+            actions_taken=[],
+            verification_results=[],
+            criteria_status={"c1": "in_progress"},
+            convergence_score=0.3,
+        ),
+        "gaps": ["gap"],
+    })
+    loop._plan = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    loop._generate_report = AsyncMock(  # type: ignore[method-assign]
+        return_value="恢复执行报告"
+    )
 
     result = await loop.resume_persisted(checkpoint.run_id)
     restored = store.get_run(checkpoint.run_id)
 
-    assert "持久状态已安全检查" in result
+    assert "恢复执行（lease epoch 0）" in result
+    assert result.endswith("恢复执行报告")
+    loop._parse_goal.assert_not_awaited()
     assert restored is not None
     assert restored.status is PursuitRunStatus.BLOCKED
-    assert restored.phase == "checkpoint_ready"
+    assert restored.iteration == 2
     reconciled = store.get_checkpoint(checkpoint.run_id)
     assert reconciled is not None
-    assert reconciled.sequence == checkpoint.sequence + 1
+    assert reconciled.sequence > checkpoint.sequence
     assert reconciled.status == "blocked"
-    assert reconciled.phase == "checkpoint_ready"
+    assert reconciled.iteration == 2
+    assert reconciled.goal.original_goal == checkpoint.goal.original_goal
+    assert reconciled.budget.tokens_used == checkpoint.budget.tokens_used
     assert reconciled.evidence_cursor == len(restored.evidence)
-    assert reconciled.checkpoint_id() in restored.blocked_reason
-    assert "不能伪装成正在运行" in restored.blocked_reason
 
 
 @pytest.mark.asyncio
@@ -247,3 +371,154 @@ async def test_resume_rejects_stale_checkpoint_after_checkpoint_write_error(
     assert restored is not None
     assert restored.phase == "checkpoint_error"
     assert restored.blocked_reason == "checkpoint 2 持久化失败"
+
+
+@pytest.mark.asyncio
+async def test_resume_blocks_inflight_action_without_replaying_tools(tmp_path) -> None:
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.phase = "action_inflight"
+    store.save_run(run)
+    checkpoint = _checkpoint(phase="action_inflight").model_copy(update={
+        "pending_actions": ("a1: 修改文件",),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "reconcile_required"
+    assert "核对外部副作用" in restored.blocked_reason
+    loop._assess.assert_not_awaited()
+    assert store.get_checkpoint(checkpoint.run_id) == checkpoint
+
+
+@pytest.mark.asyncio
+async def test_resume_waiting_for_interaction_consumes_no_model_turn(tmp_path) -> None:
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint().model_copy(update={
+        "pending_interaction": CheckpointInteraction(
+            interaction_id="ask-1",
+            prompt="选择发布策略",
+            options=("安全发布", "暂不发布"),
+            allow_custom_input=True,
+            created_at=1.0,
+        ),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "interaction_required"
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_enforces_cumulative_budget_before_new_assessment(tmp_path) -> None:
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint().model_copy(update={
+        "budget": CheckpointBudget(
+            tokens_used=120,
+            cost_usd=0.02,
+            elapsed_seconds=3.0,
+            max_iterations=50,
+            max_budget_usd=0.02,
+            max_time_seconds=None,
+        ),
+    })
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+    loop._generate_report = AsyncMock(return_value="预算终止报告")  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "恢复执行（lease epoch 0）" in result
+    assert result.endswith("预算终止报告")
+    assert restored is not None
+    assert restored.status is PursuitRunStatus.BUDGET_EXCEEDED
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_loop_persists_inflight_boundary_before_tool_dispatch(tmp_path) -> None:
+    store = PursuitStore(tmp_path / "pursuit")
+    original_save_checkpoint = store.save_checkpoint
+    store.save_checkpoint = MagicMock(wraps=original_save_checkpoint)  # type: ignore[method-assign]
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        config=PursuitConfig(max_iterations=1, verify_interval=99),
+    )
+    spec = GoalSpec(
+        original_goal="执行一个行动",
+        description="执行一个行动",
+        success_criteria=[SuccessCriterion(
+            id="c1",
+            description="行动完成",
+            verification_command="echo ok",
+        )],
+        constraints={},
+    )
+    assessment = IterationCheckpoint(
+        iteration=1,
+        timestamp=1.0,
+        assessment="需要行动",
+        gaps_found=["gap"],
+        actions_planned=[],
+        actions_taken=[],
+        verification_results=[],
+        criteria_status={"c1": "in_progress"},
+        convergence_score=0.2,
+    )
+    loop._parse_goal = AsyncMock(return_value=spec)  # type: ignore[method-assign]
+    loop._assess = AsyncMock(  # type: ignore[method-assign]
+        return_value={"checkpoint": assessment, "gaps": ["gap"]}
+    )
+    loop._plan = AsyncMock(return_value=[{  # type: ignore[method-assign]
+        "id": "a1",
+        "description": "执行行动",
+        "tool": "bash_run",
+        "expected": "成功",
+    }])
+    loop._execute_actions = AsyncMock(return_value=[{  # type: ignore[method-assign]
+        "action_id": "a1",
+        "status": "completed",
+        "output": "ok",
+    }])
+    loop._generate_report = AsyncMock(return_value="报告")  # type: ignore[method-assign]
+
+    assert await loop.pursue("执行一个行动") == "报告"
+
+    phases = [call.args[0].phase for call in store.save_checkpoint.call_args_list]
+    assert phases.index("planned") < phases.index("action_inflight")
+    assert phases.index("action_inflight") < phases.index("action_result")
+    loop._execute_actions.assert_awaited_once()

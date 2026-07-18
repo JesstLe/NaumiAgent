@@ -209,7 +209,7 @@ class PursuitRun:
 class PursuitConfig:
     """Configuration for the pursuit loop."""
 
-    max_iterations: int = 1000
+    max_iterations: int = 50
     max_budget_usd: float = float("inf")
     max_time_seconds: float = float("inf")
     stagnation_threshold: int = 3  # consecutive iterations with no progress
@@ -395,6 +395,10 @@ class GoalPursuitLoop:
         self._operation_lock = asyncio.Lock()
         self._startup_event = asyncio.Event()
         self._startup_error = ""
+        self._resume_admitted_event = asyncio.Event()
+        self._resume_admission_error = ""
+        self._resume_checkpoint_id = ""
+        self._resume_epoch = 0
 
     def cancel(self) -> None:
         """Request cancellation of the running loop."""
@@ -407,6 +411,28 @@ class GoalPursuitLoop:
         except TimeoutError:
             return "目标追踪启动超时，未确认获得运行租约。"
         return self._startup_error
+
+    def prepare_resume_admission(self) -> None:
+        """Reset one resume admission receipt before scheduling its task."""
+        self._resume_admitted_event.clear()
+        self._resume_admission_error = ""
+        self._resume_checkpoint_id = ""
+        self._resume_epoch = 0
+
+    async def wait_until_resume_admitted(
+        self,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> str:
+        """Wait until checkpoint restore owns a lease and can run in background."""
+        try:
+            await asyncio.wait_for(
+                self._resume_admitted_event.wait(),
+                timeout=timeout_seconds,
+            )
+        except TimeoutError:
+            return "目标追踪恢复准入超时，未确认 checkpoint 与运行租约。"
+        return self._resume_admission_error
 
     def _persist_run(self) -> None:
         """Persist current run state if a store is configured."""
@@ -532,6 +558,10 @@ class GoalPursuitLoop:
                     if math.isfinite(self._config.max_time_seconds)
                     else None
                 ),
+                stagnation_threshold=self._config.stagnation_threshold,
+                verify_interval=self._config.verify_interval,
+                plan_depth=self._config.plan_depth,
+                replan_on_stagnation=self._config.replan_on_stagnation,
             ),
             evidence_cursor=len(self._run.evidence or []),
             waiting_on=tuple(
@@ -609,6 +639,126 @@ class GoalPursuitLoop:
         except Exception:
             logger.exception("Failed to persist checkpoint_error PursuitRun state")
 
+    def _restore_checkpoint_state(self, checkpoint: PursuitCheckpoint) -> GoalSpec:
+        """Rebuild deterministic in-memory pursuit state from a verified snapshot."""
+        spec = GoalSpec(
+            original_goal=checkpoint.goal.original_goal,
+            description=checkpoint.goal.description,
+            success_criteria=[
+                SuccessCriterion(
+                    id=item.id,
+                    description=item.description,
+                    verification_command=item.verification_command,
+                    status=CriterionStatus(item.status),
+                    evidence=item.evidence,
+                    last_checked=item.last_checked,
+                )
+                for item in checkpoint.goal.criteria
+            ],
+            constraints={item: True for item in checkpoint.goal.constraints},
+            estimated_complexity=checkpoint.goal.estimated_complexity,
+        )
+        self._history = [
+            IterationCheckpoint(
+                iteration=item.iteration,
+                timestamp=item.timestamp,
+                assessment=item.assessment,
+                gaps_found=list(item.gaps_found),
+                actions_planned=list(item.actions_planned),
+                actions_taken=list(item.actions_taken),
+                verification_results=[],
+                criteria_status=dict(item.criteria_status),
+                convergence_score=item.convergence_score,
+                tokens_used=(
+                    checkpoint.budget.tokens_used
+                    if index == len(checkpoint.recent_history) - 1
+                    else 0
+                ),
+                cost_usd=(
+                    checkpoint.budget.cost_usd
+                    if index == len(checkpoint.recent_history) - 1
+                    else 0.0
+                ),
+            )
+            for index, item in enumerate(checkpoint.recent_history)
+        ]
+        self._start_time = time.time() - checkpoint.budget.elapsed_seconds
+        self._total_tokens = checkpoint.budget.tokens_used
+        self._total_cost = checkpoint.budget.cost_usd
+        self._config = PursuitConfig(
+            max_iterations=checkpoint.budget.max_iterations,
+            max_budget_usd=(
+                checkpoint.budget.max_budget_usd
+                if checkpoint.budget.max_budget_usd is not None
+                else float("inf")
+            ),
+            max_time_seconds=(
+                checkpoint.budget.max_time_seconds
+                if checkpoint.budget.max_time_seconds is not None
+                else float("inf")
+            ),
+            stagnation_threshold=checkpoint.budget.stagnation_threshold,
+            verify_interval=checkpoint.budget.verify_interval,
+            plan_depth=checkpoint.budget.plan_depth,
+            replan_on_stagnation=checkpoint.budget.replan_on_stagnation,
+        )
+        self._current_spec = spec
+        self._checkpoint_sequence = checkpoint.sequence
+        self._pending_actions = list(checkpoint.pending_actions)
+        self._pending_interaction = checkpoint.pending_interaction
+        self._pending_background = [
+            PursuitBackgroundWait(
+                task_id=item.task_id,
+                action_id=item.action_id,
+                command=item.command,
+                created_at=item.created_at,
+            )
+            for item in checkpoint.waiting_on
+        ]
+        self._cancelled = False
+        self._last_stop_decision = None
+        return spec
+
+    def _checkpoint_resume_blocker(
+        self,
+        checkpoint: PursuitCheckpoint,
+    ) -> str:
+        """Return a reason when resuming could duplicate or corrupt work."""
+        if self._run is None:
+            return "PursuitRun 未加载。"
+        if checkpoint.goal.original_goal != self._run.goal:
+            return "checkpoint 目标与运行摘要不一致。"
+        if (
+            self._run.criteria_total > 0
+            and len(checkpoint.goal.criteria) != self._run.criteria_total
+        ):
+            return "checkpoint 成功标准数量与运行摘要不一致。"
+        if checkpoint.iteration != self._run.iteration:
+            return (
+                "checkpoint 与运行摘要的轮次不一致："
+                f"{checkpoint.iteration} != {self._run.iteration}。"
+            )
+        if checkpoint.evidence_cursor > len(self._run.evidence or []):
+            return "checkpoint 证据游标超过当前持久证据数量。"
+        if (
+            checkpoint.worktree_path != self._run.worktree_path
+            or checkpoint.worktree_name != self._run.worktree_name
+        ):
+            return "checkpoint 与运行摘要的 worktree 不一致。"
+        if checkpoint.worktree_path and not Path(checkpoint.worktree_path).is_dir():
+            return f"checkpoint worktree 已不存在：{checkpoint.worktree_path}"
+        if checkpoint.pending_interaction is not None:
+            return "目标正在等待用户交互，HAR-10.6 接入前不能消耗新的模型轮次。"
+        if checkpoint.status in {
+            "completed", "failed", "cancelled", "budget_exceeded",
+        }:
+            return "checkpoint 已是终态，但运行摘要不是终态，拒绝猜测恢复。"
+        if self._run.phase == "action_inflight" or checkpoint.phase == "action_inflight":
+            return "上次进程在工具行动执行中退出，必须先核对外部副作用。"
+        if checkpoint.phase == "execute" and checkpoint.pending_actions:
+            return "旧版 checkpoint 无法证明计划行动是否已经发出，必须先核对外部副作用。"
+        return ""
+
     async def _open_run_lease(self, run_id: str) -> None:
         if self._lease_port is None or self._workspace_root is None:
             return
@@ -652,7 +802,7 @@ class GoalPursuitLoop:
             return await self._resume_persisted_locked(run_id)
 
     async def _resume_persisted_locked(self, run_id: str) -> str:
-        """Execute one serialized persisted-state recovery attempt."""
+        """Continue one persisted run from a verified safe checkpoint."""
         if self._store is None:
             return "错误：目标追踪持久化存储未初始化。"
         run = self._store.get_run(run_id)
@@ -704,22 +854,59 @@ class GoalPursuitLoop:
                 self._run.updated_at = time.time()
                 self._persist_run()
             else:
-                self._run.status = PursuitRunStatus.BLOCKED
-                self._run.phase = "checkpoint_ready"
-                self._run.blocked_reason = "已验证 checkpoint，恢复执行器尚未接入。"
-                self._run.next_action = "由 HAR-10.4b 从权威 checkpoint 恢复规划循环。"
-                self._run.waiting_on = []
-                self._run.updated_at = time.time()
-
-            if checkpoint is not None:
-                reconciled = self._persist_reconciled_checkpoint(checkpoint)
-                if self._run.phase == "checkpoint_ready":
-                    self._run.blocked_reason = (
-                        f"已验证 checkpoint {reconciled.checkpoint_id()}，"
-                        "但恢复执行器尚未接入，不能伪装成正在运行。"
+                blocker = self._checkpoint_resume_blocker(checkpoint)
+                if blocker:
+                    self._run.status = PursuitRunStatus.BLOCKED
+                    self._run.phase = (
+                        "interaction_required"
+                        if checkpoint.pending_interaction is not None
+                        else "reconcile_required"
+                    )
+                    self._run.blocked_reason = blocker
+                    self._run.next_action = (
+                        "等待用户回答后继续。"
+                        if checkpoint.pending_interaction is not None
+                        else "使用 HAR-10.5 核对外部任务状态后再恢复。"
                     )
                     self._run.updated_at = time.time()
                     self._persist_run()
+                    from naumi_agent.orchestrator.pursuit_store import format_run
+
+                    return "目标追踪未继续执行，已安全停在恢复边界。\n\n" + format_run(
+                        self._run
+                    )
+
+                spec = self._restore_checkpoint_state(checkpoint)
+                self._run.status = PursuitRunStatus.RUNNING
+                self._run.phase = "resume"
+                self._run.blocked_reason = ""
+                self._run.next_action = "从 checkpoint 恢复后重新评估当前状态。"
+                self._run.waiting_on = []
+                self._run.updated_at = time.time()
+                self._pending_background = []
+                self._persist_run()
+                self._persist_checkpoint(spec, pending_actions=[])
+                resume_epoch = self._lease_session.epoch if self._lease_session else 0
+                self._resume_checkpoint_id = checkpoint.checkpoint_id()
+                self._resume_epoch = resume_epoch
+                self._resume_admitted_event.set()
+                report = await self._pursue_under_lease(
+                    checkpoint.goal.original_goal,
+                    restored_spec=spec,
+                    resume_iteration=checkpoint.iteration,
+                )
+                return (
+                    f"目标追踪已从 checkpoint {checkpoint.checkpoint_id()} "
+                    f"恢复执行（lease epoch {resume_epoch}）。\n\n{report}"
+                )
+
+            if checkpoint is not None and self._pending_background:
+                reconciled = self._persist_reconciled_checkpoint(checkpoint)
+                self._run.next_action = (
+                    f"等待后台任务；最新 checkpoint：{reconciled.checkpoint_id()}"
+                )
+                self._run.updated_at = time.time()
+                self._persist_run()
 
             from naumi_agent.orchestrator.pursuit_store import format_run
 
@@ -1105,23 +1292,42 @@ class GoalPursuitLoop:
         finally:
             await self._close_run_lease()
 
-    async def _pursue_under_lease(self, goal: str) -> str:
+    async def _pursue_under_lease(
+        self,
+        goal: str,
+        *,
+        restored_spec: GoalSpec | None = None,
+        resume_iteration: int = 0,
+    ) -> str:
         """Run the planner/action loop while the keepalive owns the run."""
 
-        # Phase 0: Parse the goal
-        spec = await self._parse_goal(goal)
-        await self._require_run_lease("parse-result")
-        self._update_run(phase="assess", spec=spec)
-        self._persist_checkpoint(spec, pending_actions=[])
-        await self._require_run_lease("worktree-start")
-        await self._ensure_worktree_for_code_goal(spec)
-        self._persist_checkpoint(spec, pending_actions=[])
+        if restored_spec is None:
+            # Phase 0: Parse the goal
+            spec = await self._parse_goal(goal)
+            await self._require_run_lease("parse-result")
+            self._update_run(phase="assess", spec=spec)
+            self._persist_checkpoint(spec, pending_actions=[])
+            await self._require_run_lease("worktree-start")
+            await self._ensure_worktree_for_code_goal(spec)
+            self._persist_checkpoint(spec, pending_actions=[])
+        else:
+            spec = restored_spec
+            await self._require_run_lease("resume-state-restored")
+            self._update_run(
+                phase="assess",
+                iteration=resume_iteration,
+                spec=spec,
+                next_action="恢复后重新评估当前状态。",
+            )
+            self._persist_checkpoint(spec, pending_actions=[])
         logger.info(
-            "Goal parsed: %d criteria, complexity=%s",
-            len(spec.success_criteria), spec.estimated_complexity,
+            "Goal %s: %d criteria, complexity=%s",
+            "restored" if restored_spec is not None else "parsed",
+            len(spec.success_criteria),
+            spec.estimated_complexity,
         )
 
-        iteration = 0
+        iteration = resume_iteration
         status = GoalStatus.IN_PROGRESS
 
         while status == GoalStatus.IN_PROGRESS:
@@ -1229,9 +1435,20 @@ class GoalPursuitLoop:
                     await self._require_run_lease(
                         f"iteration-{iteration}-recovery-execute"
                     )
+                    self._update_run(
+                        phase="action_inflight",
+                        iteration=iteration,
+                        spec=spec,
+                    )
+                    self._persist_checkpoint(spec)
                     await self._execute_actions(spec, recovery)
                     await self._require_run_lease(
                         f"iteration-{iteration}-recovery-result"
+                    )
+                    self._update_run(
+                        phase="action_result",
+                        iteration=iteration,
+                        spec=spec,
                     )
                     self._persist_checkpoint(spec, pending_actions=[])
                     continue
@@ -1260,7 +1477,7 @@ class GoalPursuitLoop:
                 f"{a['id']}: {a['description']}" for a in actions
             ]
             self._update_run(
-                phase="execute",
+                phase="planned",
                 iteration=iteration,
                 spec=spec,
                 next_action=checkpoint.actions_planned[0],
@@ -1269,6 +1486,12 @@ class GoalPursuitLoop:
 
             # Phase 3: Execute actions
             await self._require_run_lease(f"iteration-{iteration}-execute-start")
+            self._update_run(
+                phase="action_inflight",
+                iteration=iteration,
+                spec=spec,
+            )
+            self._persist_checkpoint(spec)
             results = await self._execute_actions(spec, actions)
             await self._require_run_lease(f"iteration-{iteration}-execute-result")
 
@@ -1279,6 +1502,11 @@ class GoalPursuitLoop:
                 for r in results
             ]
             self._record_action_evidence(results)
+            self._update_run(
+                phase="action_result",
+                iteration=iteration,
+                spec=spec,
+            )
             self._persist_checkpoint(spec, pending_actions=[])
             if any(result.get("status") == "waiting" for result in results):
                 status = GoalStatus.WAITING
@@ -2625,6 +2853,13 @@ class GoalPursuitLoop:
         """Gather real evidence about current state."""
         evidence_parts: list[str] = []
 
+        if self._run is not None and self._run.evidence:
+            durable_evidence = "\n".join(
+                f"- [{item.kind}] {item.source}: {item.summary[:1_000]}"
+                for item in self._run.evidence[-10:]
+            )
+            evidence_parts.append(f"持久运行证据:\n{durable_evidence}")
+
         bash_tool = self._tools.get("bash_run")
         if bash_tool or self._execute_tool_call is not None:
             # Collect git diff since pursuit started
@@ -2827,7 +3062,10 @@ class GoalPursuitLoop:
     ) -> str:
         """Generate the final pursuit report."""
         elapsed = time.time() - self._start_time
-        iterations = len(self._history)
+        iterations = max(
+            len(self._history),
+            self._run.iteration if self._run is not None else 0,
+        )
 
         criteria_summary = "\n".join(
             f"- [{c.status.value}] {c.id}: {c.description}"

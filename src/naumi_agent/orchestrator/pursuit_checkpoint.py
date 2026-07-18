@@ -51,6 +51,10 @@ class CheckpointBudget(_CheckpointModel):
     max_iterations: int = Field(ge=1)
     max_budget_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     max_time_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    stagnation_threshold: int = Field(default=3, ge=1, le=100)
+    verify_interval: int = Field(default=1, ge=1, le=10_000)
+    plan_depth: int = Field(default=3, ge=1, le=100)
+    replan_on_stagnation: bool = True
 
 
 class CheckpointWait(_CheckpointModel):
@@ -108,8 +112,21 @@ class PursuitCheckpoint(_CheckpointModel):
 
     def canonical_json(self) -> str:
         """Return deterministic JSON used for storage and integrity checks."""
+        payload = self.model_dump(mode="json")
+        # HAR-10.4b added operational loop settings without invalidating v1
+        # payloads already written by HAR-10.4a. Missing optional fields remain
+        # absent when authenticating those historical bytes.
+        budget_payload = payload["budget"]
+        for field_name in (
+            "stagnation_threshold",
+            "verify_interval",
+            "plan_depth",
+            "replan_on_stagnation",
+        ):
+            if field_name not in self.budget.model_fields_set:
+                budget_payload.pop(field_name, None)
         return json.dumps(
-            self.model_dump(mode="json"),
+            payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
