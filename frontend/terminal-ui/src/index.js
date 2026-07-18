@@ -94,6 +94,7 @@ import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js
 import { createWorkingAnimationController } from "./working-animation.js";
 import { createScreenPainter } from "./screen-painter.js";
 import { createRedrawScheduler } from "./redraw-scheduler.js";
+import { createProtocolEventBatcher } from "./protocol-event-batcher.js";
 import { detectTerminalCapabilities } from "./terminal-capabilities.js";
 import { createTerminalSession } from "./terminal-session.js";
 import {
@@ -141,6 +142,7 @@ const screenPainter = createScreenPainter({
   write: (value) => process.stdout.write(value),
 });
 const redrawScheduler = createRedrawScheduler({ onRedraw: redraw });
+const protocolEventBatcher = createProtocolEventBatcher({ onRecord: processBridgeRecord });
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
@@ -225,6 +227,7 @@ function main() {
   bridge.on("exit", (code, signal) => {
     debugLog?.log("bridge.exit", { code, signal, quitting });
     if (!quitting) {
+      protocolEventBatcher.flush();
       failQueuedUserMessages(state, {
         code: "bridge_disconnected",
         message: "本地 Bridge 已断开，请重启后重试。",
@@ -276,6 +279,7 @@ function restoreTerminal() {
   heartbeat?.stop();
   workingAnimation.stop();
   redrawScheduler.cancel();
+  protocolEventBatcher.cancel();
   terminalSession.restore();
 }
 
@@ -283,6 +287,7 @@ function exit() {
   if (quitting) return;
   quitting = true;
   logDebug("terminal_ui.exit", {});
+  protocolEventBatcher.flush();
   persistUiSnapshot();
   try {
     send("shutdown", {});
@@ -360,6 +365,7 @@ function handleBridgeLine(line) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     debugLog?.log("protocol.receive.error", { line, error: message });
+    protocolEventBatcher.flush();
     if (rawRecord?.type === "ack" && rawRecord?.payload?.event === "hello") {
       deferredProtocolSends.length = 0;
       failQueuedUserMessages(state, {
@@ -372,6 +378,14 @@ function handleBridgeLine(line) {
     return;
   }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
+  if (record.type === "pong") {
+    processBridgeRecord(record);
+    return;
+  }
+  protocolEventBatcher.push(record);
+}
+
+function processBridgeRecord(record) {
   if (record.type === "pong") {
     heartbeat?.receivePong(record.request_id);
     return;
@@ -449,7 +463,23 @@ function handleBridgeLine(line) {
     return;
   }
   scheduleUiSnapshotPersist();
-  scheduleRedraw();
+  if (isUrgentProtocolRecord(record)) {
+    redrawScheduler.flush();
+  } else {
+    scheduleRedraw();
+  }
+}
+
+function isUrgentProtocolRecord(record) {
+  if ([
+    "error",
+    "permission/request",
+    "interaction/request",
+    "run/completed",
+    "run/cancelled",
+    "completion/receipt",
+  ].includes(record.type)) return true;
+  return record.type === "ui/message" && record.payload?.type === "tool_result";
 }
 
 function sendWithProtocolGate(type, payload, options = {}) {

@@ -18,3 +18,31 @@ test("terminal entrypoint delegates first-frame and normal redraw scheduling", (
     /function restoreTerminal\(\)[\s\S]*redrawScheduler\.cancel\(\)/,
   );
 });
+
+test("terminal entrypoint batches stream deltas before state reduction", () => {
+  assert.match(
+    source,
+    /import \{ createProtocolEventBatcher \} from "\.\/protocol-event-batcher\.js"/,
+  );
+  assert.match(
+    source,
+    /createProtocolEventBatcher\(\{ onRecord: processBridgeRecord \}\)/,
+  );
+  assert.match(source, /protocolEventBatcher\.push\(record\)/);
+  assert.match(
+    source,
+    /protocol\.receive\.error[\s\S]*protocolEventBatcher\.flush\(\)/,
+  );
+  assert.match(
+    source,
+    /function processBridgeRecord\(record\)[\s\S]*reduceServerEvent\(state, record\)/,
+  );
+  assert.match(
+    source,
+    /function exit\(\)[\s\S]*protocolEventBatcher\.flush\(\)[\s\S]*persistUiSnapshot\(\)/,
+  );
+  assert.match(
+    source,
+    /isUrgentProtocolRecord\(record\)[\s\S]*redrawScheduler\.flush\(\)/,
+  );
+});

@@ -47,6 +47,14 @@ export function createRedrawScheduler({
     markPainted() {
       painted = true;
     },
+    flush() {
+      if (timer !== null) {
+        clearTimer(timer);
+        timer = null;
+      }
+      onRedraw();
+      return true;
+    },
     cancel() {
       if (timer === null) return false;
       clearTimer(timer);
