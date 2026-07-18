@@ -25,7 +25,7 @@
 
 | 字段 | 作用 | 允许值 |
 | --- | --- | --- |
-| `owner` | 责任域 | protocol/runtime/harness/inspector/agents/safety/workbench/diagnostics/sessions/tasks/ui |
+| `owner` | 责任域 | protocol/runtime/harness/inspector/agents/safety/workbench/evolution/diagnostics/sessions/tasks/ui |
 | `stability` | 兼容承诺 | stable/experimental/deprecated |
 | `criticality` | 丢失或未知时的影响 | informational/control/terminal |
 | `persistence` | 允许进入的持久化类别 | never/timeline/snapshot/audit |

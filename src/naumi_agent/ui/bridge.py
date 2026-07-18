@@ -820,6 +820,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.WORKBENCH_REQUEST:
             await self.show_workbench(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
+            await self.show_evolution_review(payload, request_id=request_id)
+            return
 
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
@@ -2312,6 +2315,48 @@ class JsonlEngineBridge:
         await self.emit(
             ServerEventType.PERMISSION_SNAPSHOT,
             permission_panel_payload(snapshot),
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_evolution_review(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Emit a typed, read-only Candidate list or detail snapshot."""
+        from naumi_agent.evolution.review import EvolutionReviewFilter
+        from naumi_agent.evolution.store import EvolutionStoreError
+        from naumi_agent.ui.evolution_review import evolution_review_payload
+
+        try:
+            service = self.engine.evolution_review_service
+            if payload.get("action") == "detail":
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
+            else:
+                snapshot = await service.list_snapshot(
+                    self.engine.workspace_root,
+                    filters=EvolutionReviewFilter(
+                        query=str(payload.get("query") or ""),
+                        risk=str(payload.get("risk") or ""),
+                        source_kind=str(payload.get("source_kind") or ""),
+                        limit=int(payload.get("limit") or 50),
+                    ),
+                )
+        except (EvolutionStoreError, OSError, ValueError):
+            await self.emit_error(
+                "Evolution Candidate 快照不可用；请运行 /doctor 后重试。",
+                code="evolution_review_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.EVOLUTION_REVIEW,
+            evolution_review_payload(snapshot),
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())

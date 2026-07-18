@@ -57,6 +57,7 @@ class ClientEventType(StrEnum):
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
     WORKBENCH_REQUEST = "workbench/request"
+    EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -120,6 +121,7 @@ class ServerEventType(StrEnum):
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
     WORKBENCH_EVENT = "workbench/event"
+    EVOLUTION_REVIEW = "evolution/review"
     SHUTDOWN = "shutdown"
 
 
@@ -379,6 +381,34 @@ def _normalize_client_payload(
             "session_id": session_id,
             "known_stream_id": stream_id,
             "known_revision": known_revision,
+        }
+
+    if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
+        action = str(payload.get("action") or "list").strip().lower()
+        if action not in {"list", "detail"}:
+            raise ValueError("Evolution review action 仅支持 list/detail。")
+        candidate_id = str(payload.get("candidate_id") or "").strip()
+        if action == "detail" and not re.fullmatch(r"evc_[0-9a-f]{24}", candidate_id):
+            raise ValueError("Evolution detail candidate_id 格式无效。")
+        query = str(payload.get("query") or "").strip()
+        if len(query) > 256 or any(char in query for char in ("\x00", "\r", "\n")):
+            raise ValueError("Evolution query 格式无效。")
+        risk = str(payload.get("risk") or "").strip().lower()
+        if risk not in {"", "low", "medium", "high", "critical"}:
+            raise ValueError("Evolution risk 格式无效。")
+        source_kind = str(payload.get("source_kind") or "").strip().lower()
+        if source_kind not in {
+            "", "harness_failure", "self_review_static", "user_feedback",
+            "agent_interpreted_feedback",
+        }:
+            raise ValueError("Evolution source_kind 格式无效。")
+        return {
+            "action": action,
+            "candidate_id": candidate_id if action == "detail" else "",
+            "query": query,
+            "risk": risk,
+            "source_kind": source_kind,
+            "limit": _bounded_int(payload.get("limit"), 50, lower=1, upper=100),
         }
 
     if event_type == ClientEventType.AGENTS_STOP:

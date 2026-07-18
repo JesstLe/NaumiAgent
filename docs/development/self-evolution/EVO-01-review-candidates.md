@@ -52,6 +52,9 @@ Evolution Candidate，而不是直接触发 self_modify。
 - EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过
   `evolution_candidates` 读取同一服务；过滤、详情、审计链和资源上限均为确定性实现，读取不改变
   Candidate。设计与证据见 `EVO-01-6a-readonly-review-surface.md`。
+- EVO-01.6a1 Typed Review UI：已实现。默认新 UI 通过 ARC-03 event registry 管理的 typed snapshot
+  展示全屏列表/详情与 Eligibility Gates；TUI 使用同一 Service 的线性降级。详见
+  `EVO-01-6a1-typed-review-ui.md`。
 - runtime metric/Eval adapters、provider/model/platform 时间窗聚合策略、
-  完整 experiment Eligibility、Prioritization、专用全屏页和 approve/reject/defer 动作仍为 planned；不得把
+  完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。

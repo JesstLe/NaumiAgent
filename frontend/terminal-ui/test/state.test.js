@@ -17,6 +17,7 @@ import {
   handleHarnessEvalBatchKey,
   handleHarnessEvalPromotionKey,
   handleDoctorHealthKey,
+  handleEvolutionReviewKey,
   handlePermissionCenterKey,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
@@ -1679,6 +1680,26 @@ test("permissions command opens transient policy route and restores conversation
   assert.equal(state.route.name, "conversation");
   assert.equal(state.scrollOffset, 9);
   assert.equal(state.followTail, false);
+});
+
+test("evolution command opens typed review route and navigates to detail", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  const id = `evc_${"a".repeat(24)}`;
+  handleSubmitText(state, "/evolution list --risk medium --limit 20", send);
+  assert.equal(state.route.name, "evolution_review");
+  assert.equal(sent[0].type, "evolution/review/request");
+  reduceServerEvent(state, { type: "evolution/review", payload: { schema_version: 1, mode: "list", filters: {}, items: [{ candidate_id: id }], selected: null, events: [], read_only: true } });
+  assert.equal(handleEvolutionReviewKey(state, "\r", send), true);
+  assert.equal(sent[1].payload.action, "detail");
+  assert.equal(sent[1].payload.candidate_id, id);
+  assert.equal(handleEvolutionReviewKey(state, INPUT_KEYS.escape, send), true);
+  assert.equal(state.route.name, "conversation");
+  handleSubmitText(state, "/evolution", send);
+  reduceServerEvent(state, { type: "session/replayed", payload: { session_id: "session-new", title: "新会话", clear: true } });
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.evolutionReview.snapshot, null);
 });
 
 test("doctor command opens typed health route refreshes and restores origin", () => {

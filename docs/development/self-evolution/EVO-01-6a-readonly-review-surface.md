@@ -31,8 +31,9 @@ Eligibility、Prioritization 和完整审阅页提供稳定的查询边界。
 /evolution detail evo_<id>
 ```
 
-新 UI 与 TUI 通过共享斜杠命令结果展示 Markdown；legacy CLI 保留兼容能力，但不再形成独立实现。
-专用全屏候选页、排序解释控件和实时刷新不属于本切片。
+EVO-01.6a1 已在默认新 UI 上增加 typed 全屏列表/详情；TUI 与 legacy CLI 继续使用共享 Markdown
+线性降级。协议与视觉验收见 `EVO-01-6a1-typed-review-ui.md`。排序解释控件和实时增量更新仍不属于
+当前切片。
 
 ## 验收标准
 
@@ -49,4 +50,4 @@ Eligibility、Prioritization 和完整审阅页提供稳定的查询边界。
 - EVO-01.4 Eligibility 必须先提供可审计的确定性资格结果，才能在详情中显示资格原因。
 - EVO-01.5 Prioritization 必须提供版本化权重和逐因子解释，才能开放排序。
 - EVO-01.6b 才可加入 approve experiment/reject/defer；所有动作必须写入 audit chain 并实现冷却规则。
-- UI 专用全屏页应消费同一 Review Service/typed payload，不得直接访问 SQLite。
+- UI 全屏页已经消费同一 Review Service/typed payload；未来动作仍不得让前端直接访问 SQLite。

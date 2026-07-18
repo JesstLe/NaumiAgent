@@ -47,6 +47,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
+  { command: "/evolution", description: "只读审阅 Evolution Candidate" },
   { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "运行环境诊断" },
   { command: "/harness", description: "Harness Profile 状态、离线评测、知识、检查与信任" },
@@ -290,6 +291,14 @@ export function createInitialState() {
       snapshot: null,
       error: "",
       limit: 12,
+      scrollOffset: 0,
+    },
+    evolutionReview: {
+      loading: false,
+      snapshot: null,
+      error: "",
+      request: { action: "list", candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 },
+      selectedIndex: 0,
       scrollOffset: 0,
     },
     tools: [],
@@ -546,6 +555,15 @@ export function reduceServerEvent(state, record) {
       state.permissionCenter.loading = false;
       state.permissionCenter.error = "";
       break;
+    case "evolution/review":
+      state.evolutionReview.snapshot = payload;
+      state.evolutionReview.loading = false;
+      state.evolutionReview.error = "";
+      if (payload.mode === "list") {
+        const maximum = Math.max(0, (payload.items?.length || 1) - 1);
+        state.evolutionReview.selectedIndex = Math.min(state.evolutionReview.selectedIndex, maximum);
+      }
+      break;
     case "tasks/snapshot":
       applyTaskSnapshot(state, payload);
       break;
@@ -780,6 +798,7 @@ export function reduceServerEvent(state, record) {
       const wasHarnessEvalPromotionRoute = state.route?.name === "harness_eval_promotion";
       const wasDoctorHealthRoute = state.route?.name === "doctor_health";
       const wasPermissionRoute = state.route?.name === "permissions";
+      const wasEvolutionReviewRoute = state.route?.name === "evolution_review";
       state.harnessDetail = {
         runId: "",
         explainLoading: false,
@@ -828,6 +847,17 @@ export function reduceServerEvent(state, record) {
       if (wasPermissionRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
+      state.evolutionReview = {
+        loading: false,
+        snapshot: null,
+        error: "",
+        request: { action: "list", candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 },
+        selectedIndex: 0,
+        scrollOffset: 0,
+      };
+      if (wasEvolutionReviewRoute) {
+        state.route = { name: "conversation", originAnchor: null };
+      }
       if (payload.clear !== false) {
         state.messages = [];
         state.tools = [];
@@ -863,6 +893,11 @@ export function reduceServerEvent(state, record) {
       }
     case "error": {
       dismissWelcome(state);
+      if (payload.code === "evolution_review_failed") {
+        state.evolutionReview.loading = false;
+        state.evolutionReview.error = payload.message ?? "Evolution Candidate 快照不可用。";
+        break;
+      }
       if (payload.code === "inspector_refresh_failed") {
         state.inspector.loading = false;
         state.inspector.error = payload.message ?? "Inspector 刷新失败，已保留上一次快照。";
@@ -2520,6 +2555,25 @@ export function handleSubmitText(state, text, send) {
     }
     return;
   }
+  if (text === "/evolution" || text.startsWith("/evolution ")) {
+    const request = parseEvolutionReviewCommand(text);
+    if (!request) {
+      pushSystemMessage(state, "Evolution", "用法：/evolution list [--query 词 --risk level --source kind --limit N]；/evolution detail <candidate-id>", "warning");
+      return;
+    }
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "evolution_review", originAnchor };
+    state.evolutionReview.loading = true;
+    state.evolutionReview.error = "";
+    state.evolutionReview.request = request;
+    state.evolutionReview.selectedIndex = 0;
+    state.evolutionReview.scrollOffset = 0;
+    send("evolution/review/request", request);
+    return;
+  }
   if (text === "/doctor") {
     const originAnchor = {
       scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
@@ -2849,6 +2903,80 @@ export function handlePermissionCenterKey(state, key, send) {
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.permissionCenter.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.permissionCenter.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
+}
+
+export function handleEvolutionReviewKey(state, key, send) {
+  if (state.route?.name !== "evolution_review") return false;
+  const view = state.evolutionReview;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (String(key || "").toLowerCase() === "r") {
+    view.loading = true;
+    send("evolution/review/request", view.request);
+    return true;
+  }
+  if (String(key || "").toLowerCase() === "b" && view.snapshot?.mode === "detail") {
+    view.request = { ...view.request, action: "list", candidate_id: "" };
+    view.loading = true;
+    view.scrollOffset = 0;
+    send("evolution/review/request", view.request);
+    return true;
+  }
+  if (view.snapshot?.mode === "list") {
+    const count = view.snapshot.items?.length || 0;
+    if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) view.selectedIndex = Math.max(0, view.selectedIndex - 1);
+    else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) view.selectedIndex = Math.min(Math.max(0, count - 1), view.selectedIndex + 1);
+    else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) view.selectedIndex = 0;
+    else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) view.selectedIndex = Math.max(0, count - 1);
+    else if (key === "\r" && count) {
+      const candidate = view.snapshot.items[view.selectedIndex];
+      view.request = { ...view.request, action: "detail", candidate_id: candidate.candidate_id };
+      view.loading = true;
+      view.scrollOffset = 0;
+      send("evolution/review/request", view.request);
+    }
+    return true;
+  }
+  const current = Math.max(0, Number(view.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) view.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) view.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) view.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) view.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) view.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) view.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+function parseEvolutionReviewCommand(text) {
+  const raw = String(text || "").slice("/evolution".length).trim();
+  const tokens = raw.match(/"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g) || [];
+  const values = tokens.map((token) => {
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) return token.slice(1, -1);
+    return token;
+  });
+  const action = values[0] || "list";
+  if (action === "detail") {
+    if (values.length !== 2 || !/^evc_[0-9a-f]{24}$/.test(values[1])) return null;
+    return { action, candidate_id: values[1], query: "", risk: "", source_kind: "", limit: 50 };
+  }
+  if (action !== "list") return null;
+  const request = { action: "list", candidate_id: "", query: "", risk: "", source_kind: "", limit: 50 };
+  for (let index = 1; index < values.length; index += 2) {
+    const option = values[index];
+    const value = values[index + 1];
+    if (!value) return null;
+    if (option === "--query") request.query = value;
+    else if (option === "--risk" && ["low", "medium", "high", "critical"].includes(value)) request.risk = value;
+    else if (option === "--source" && ["harness_failure", "self_review_static", "user_feedback", "agent_interpreted_feedback"].includes(value)) request.source_kind = value;
+    else if (option === "--limit" && /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 100) request.limit = Number(value);
+    else return null;
+  }
+  return request.query.length <= 256 ? request : null;
 }
 
 function latestHarnessRunId(state) {

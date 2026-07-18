@@ -29,6 +29,7 @@
     "agents/request",
     "agents/stop",
     "workbench/request",
+    "evolution/review/request",
     "set_mode",
     "cycle_mode",
     "set_reasoning",
@@ -82,6 +83,7 @@
     "debug/trace",
     "workbench/snapshot",
     "workbench/event",
+    "evolution/review",
     "shutdown"
   ],
   "event_registry": {
@@ -100,6 +102,7 @@
       "agents/request": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "agents/stop": {"owner":"agents","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "workbench/request": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
+      "evolution/review/request": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "set_mode": {"owner":"runtime","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "cycle_mode": {"owner":"runtime","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "set_reasoning": {"owner":"runtime","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
@@ -153,6 +156,7 @@
       "debug/trace": {"owner":"diagnostics","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":["payload.events_path","payload.transcript_path"],"redaction":"required"},
       "workbench/snapshot": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.tasks","payload.events"],"redaction":"required"},
       "workbench/event": {"owner":"workbench","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":["payload.payload"],"redaction":"required"},
+      "evolution/review": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items","payload.selected"],"redaction":"required"},
       "shutdown": {"owner":"protocol","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"}
     }
   },
