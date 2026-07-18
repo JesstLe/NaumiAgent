@@ -63,17 +63,19 @@ detector；疑似机密返回 `mutation_rationale_secret`，不写入 SQLite。
 - 两线程并发写同一 Receipt 只形成一行，不同 Receipt 不得占用同一 Lease/Plan；
 - 原单/多文件 Writer 成功路径和 `AgentEngine` composition 聚焦回归通过。
 
-## 当前不足与 2.7b
+## 后续实现状态与剩余边界
 
-本切片的 `tool_evidence` 证明 Static Guard、Writer 和 Postflight 三段机械治理，但 proposed contents 目前由
-Writer 调用方传入，尚未绑定生成该内容的原始模型/tool-call event、run receipt 与参数摘要。为避免把
-“治理链完整”误写成“生成来源完整”，EVO-02 继续保持 partial。
+EVO-02.7a 交付时的 `tool_evidence` 只证明 Static Guard、Writer 和 Postflight 三段机械治理，尚未绑定
+生成 proposed contents 的原始虚拟工具轨迹。EVO-02.7b1/2 已补齐该来源 Trace 与四段 tool evidence；
+专用模型 turn runner 和验证评测仍未完成，因此 EVO-02 继续保持 partial。
 
 EVO-02.7b1 已实现隔离内存虚拟 `file_edit/file_write`、真实 baseline 绑定、顺序化 digest chain 和不可变
-Trace Store，详见 `EVO-02-7b1-mutation-generation-trace.md`。EVO-02.7b2 继续完成：
+Trace Store；EVO-02.7b2 已完成以下强绑定，详见 `EVO-02-7b2-trace-receipt-binding.md`：
 
 - trace 必须进入 Mutation Receipt v2，并保持旧 v1 Receipt 可读；
 - Trace final digest 必须与 Static Guard/Writer after digest 全集相等；
 - Trace attempt 必须等于 committed Journal/Patch Set attempt；
-- 专用 model turn runner 必须使用虚拟工具执行边界，不能回退到磁盘写工具；
-- 完成后再评估 EVO-02 是否满足进入 EVO-03.1 Validation Plan 的阶段门。
+- 历史 v1 Receipt 继续可读，历史 Writer 回执不得生成新的 validation-ready Receipt。
+
+专用 model turn runner 与 HAR-08 RED/GREEN 仍未实现；完成这两个边界后再评估 EVO-02 是否满足进入
+EVO-03.1 Validation Plan 的阶段门。

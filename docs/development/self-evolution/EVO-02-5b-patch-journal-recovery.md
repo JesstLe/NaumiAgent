@@ -100,8 +100,8 @@ Recovery。结果保存在 Engine 状态，并以无源码摘要同步：
 - 单文件恢复器仍只消费单文件 journal；多文件 write-set 的持久事实、逐文件 phase 与反向 CAS 已由
   EVO-02.5c1 建立，但尚未接入文件 Writer/Recovery；
 - Windows 文件占用、断电、磁盘满和杀进程矩阵尚未达到 A4/A5，当前证据是 macOS 真实文件系统；
-- 完整 Diff/API Postflight、EVO-02.7a Mutation Receipt Core 与 EVO-02.7b1 Mutation Generation Trace
-  已在后续切片实现；2.7b2 Trace→Receipt v2 绑定和 HAR-08 RED/GREEN 尚未串联。
+- 完整 Diff/API Postflight、EVO-02.7a Mutation Receipt Core、EVO-02.7b1 Generation Trace 与 2.7b2
+  Trace→Receipt v2 绑定已在后续切片实现；专用 Mutation Turn Runner 和 HAR-08 RED/GREEN 尚未串联。
 
 EVO-02.4b 已补真实多文件 Proposal/Contract/Plan scope，EVO-02.5c1 已补多文件 write-set journal，
 EVO-02.5c2a/2.5c2b 已补 Guard-bound Multi-file Writer、普通异常逆序回滚、启动恢复与双 UI 状态。多文件
