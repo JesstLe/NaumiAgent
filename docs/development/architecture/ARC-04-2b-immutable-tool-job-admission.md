@@ -40,7 +40,8 @@ takeover、lease release、heartbeat unhealthy、capacity exhausted、capability
 
 ## 4. Store 与 Composition
 
-- `runtime_data_dir/tool-jobs.db`，SQLite `user_version=1`，惰性创建；POSIX 目录/文件为 0700/0600；
+- `runtime_data_dir/tool-jobs.db`；ARC-04.2c 已将 SQLite 升至 `user_version=2`，v1 contract 可原子迁移；
+  Store 仍惰性创建，POSIX 目录/文件为 0700/0600；
 - 未版本化非空库、未来 schema、wrong-type path、contract/index 篡改均拒绝；
 - Runtime Composition Root 注入唯一 `ToolJobStore` 和 `ToolJobAuthority`；
 - Store Catalog 登记 `runtime.tool_jobs`，restricted、audit-long-term；Doctor 只读检查不物化数据库。
@@ -59,7 +60,8 @@ takeover、lease release、heartbeat unhealthy、capacity exhausted、capability
 
 - durable contract 只保存执行 envelope，不保存 raw payload；未来 authenticated daemon transport 必须携带原始
   arguments，并在 dispatch 时用 digest 复核。Runtime 在 transport 前崩溃时不能从本 Store 还原 secret payload；
-- 尚无 queued/running/completed/failed/unknown 状态机、completion receipt、cancel 或 crash recovery；
+- ARC-04.2c 已补齐单调 lifecycle receipt、dispatch 前持久化、幂等终态、unknown 副作用边界和恢复查询，详见
+  `ARC-04-2c-tool-job-lifecycle-receipts.md`；
 - 尚无真实 Shell worker、process tree、artifact writer 或 OS sandbox，因此 HAR-08.4 仍为 planned；
-- 下一最小跨文档切片应实现 ARC-04.2c ToolJob lifecycle receipt：先冻结 dispatch/running/terminal/unknown
-  单调状态和副作用分类，再让 ARC-04.3a non-PTY Shell worker 消费，避免先执行后补幂等语义。
+- 下一最小跨文档切片应让 ARC-04.3a non-PTY Shell worker 通过 authenticated local transport 消费既有
+  admission/lifecycle authority，再用一个真实 Profile check 解锁 HAR-08.4，而不是继续扩展纸面合同。

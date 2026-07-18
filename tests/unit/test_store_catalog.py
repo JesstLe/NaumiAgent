@@ -88,7 +88,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
         item for item in definitions if item.store_id == "runtime.tool_jobs"
     )
     assert tool_jobs.path == (tmp_path / "runtime" / "tool-jobs.db").resolve()
-    assert tool_jobs.supported_schema_version == TOOL_JOB_SCHEMA_VERSION == 1
+    assert tool_jobs.supported_schema_version == TOOL_JOB_SCHEMA_VERSION == 2
     assert tool_jobs.retention is RetentionPolicy.AUDIT_LONG_TERM
     evolution = next(
         item for item in definitions if item.store_id == "evolution.candidates"

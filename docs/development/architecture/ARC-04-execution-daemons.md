@@ -28,7 +28,9 @@
 - ARC-04.2b 已完成 immutable ToolJob admission：同时消费 execution grant、active Worker、实时
   heartbeat/capacity、能力/隔离要求与 Tool lease，并在 dispatch 前重新 fencing，详见
   `ARC-04-2b-immutable-tool-job-admission.md`。
-- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有 ToolJob lifecycle receipt、执行 producer 或
+- ARC-04.2c 已完成 ToolJob schema v2 单调 lifecycle receipt、dispatch-before-send、Worker incarnation fencing、
+  并发终态幂等、unknown 副作用边界与 v1 migration，详见 `ARC-04-2c-tool-job-lifecycle-receipts.md`。
+- 当前摘要与本机 authority 仍不认证 daemon OS 进程；没有执行 producer 或
   Supervisor。因此 ARC-04 仅为 partial，HAR-08.4 仍不得把本地 subprocess 当作隔离 worker。
 
 ## 验收标准
@@ -51,9 +53,9 @@
 ## 已完成的最小前置
 
 HAR-10.5b 已在本地 BackgroundRunner 接通 caller idempotency key、pre-spawn reservation、同 runtime 并发
-去重和重启回执复用。这验证了 ARC-04.2 的 job identity/immutable input 形状，但 `tasks.json` 没有跨进程事务、
-permission grant、workspace lease 或 daemon authority，因此 ARC-04.2 仍是 planned，禁止把该前置标记为
-Tool daemon 已完成。
+去重和重启回执复用。这一早期前置只验证了 identity 形状；ARC-04.2a-2c 现已补齐 grant、lease、immutable
+admission 与 lifecycle receipt，但 `tasks.json` 仍不是 daemon authority，禁止把 BackgroundRunner 标记为
+Tool daemon。
 
 HAR-10.5c 又验证了本地 reconcile contract：只有当前 Runner 同时持有活进程与 watcher 才能报告 managed
 active；PID 存在但所有权丢失必须报告 orphan 并 fail closed。该合同可作为 ARC-04.6 Supervisor 的输入形状，
@@ -65,4 +67,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b)。
+ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c)。

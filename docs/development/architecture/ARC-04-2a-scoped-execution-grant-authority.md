@@ -74,12 +74,12 @@ daemon 接收 ToolJob 前必须用 grant id 与实际 request 再验证：
 
 ## 7. 当前不足与下一切片
 
-- ARC-04.2b 已让 `ImmutableToolJob` admission 消费本 grant；尚缺 durable lifecycle/idempotent completion
-  receipt 与真正执行的 daemon；
+- ARC-04.2b 已让 `ImmutableToolJob` admission 消费本 grant，ARC-04.2c 已补齐 durable lifecycle 与
+  idempotent terminal receipt；尚缺真正执行的 daemon；
 - UI-12.3a 已提供跨重启 confirmation decision receipt；policy 直接允许的 durable taxonomy 仍待 UI-12.3b，
   在此之前 policy execution grant 明确 fail closed；
 - Worker admission 的能力/隔离/heartbeat/capacity 仍需与 grant validation 同时通过，二者不可互相替代；
 - grant、Worker Registry、Harness lease 位于三个 SQLite Store，签发不是跨库原子事务；每次消费重读三个
   authority，以 fencing 抵御签发后的 takeover；未来 ARC-02 可用 Runtime Service 单写者减少竞态窗口；
-- 下一最小切片应实现 ARC-04.2c ToolJob lifecycle receipt，冻结 dispatch/running/terminal/unknown 单调状态，
-  再让 ARC-04.3a non-PTY Shell worker 消费。
+- 下一最小切片应让 ARC-04.3a non-PTY Shell worker 消费已有 admission/lifecycle authority，并解锁
+  HAR-08.4 的一个真实 Profile check。

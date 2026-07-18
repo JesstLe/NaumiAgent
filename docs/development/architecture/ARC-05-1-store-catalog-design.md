@@ -25,7 +25,8 @@ Session、Task、Workbench 共用 `sessions.db`，Harness 当前为 `user_versio
 Harness Evidence、Harness Trust、Background、Browser Runtime、Browser Daemon 和 Vector Memory。
 EVO-01.3a 随后按同一契约登记 `evolution.candidates`，用于不可变 Evidence、Candidate
 materialization 和审计事件；ARC-04.1b 登记 Runtime Worker Registry，ARC-04.2a 登记 Execution Grant
-Authority，UI-12.3a 登记 Permission Decision Receipt Authority，ARC-04.2b 再登记 ToolJob Authority；
+Authority，UI-12.3a 登记 Permission Decision Receipt Authority，ARC-04.2b/2c 再登记 ToolJob admission 与
+lifecycle Authority；
 Catalog 当前共 16 个物理 Store。
 
 ## 只读探测

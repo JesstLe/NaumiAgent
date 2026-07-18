@@ -54,6 +54,6 @@ call、tool、参数摘要、permission mode、source 与 outcome。缺失、拒
 - UI-12.2 pending queue、UI-12.6 断线恢复尚未实现；
 - 非交互 policy allow/block、Hook block、plan-mode block 尚未形成同一 durable decision taxonomy；
 - session grant 本体仍是 Engine 内存对象，UI-12.5 workspace grant 未实现；
-- ARC-04.2b 已实现 ImmutableToolJob admission 并消费本回执；daemon transport、ToolJob lifecycle completion
-  receipt 和真实 Shell worker 尚未实现；
-- 下一最小跨文档切片应做 ARC-04.2c lifecycle receipt，先冻结副作用未知态和终态幂等，再接 Shell worker。
+- ARC-04.2b/2c 已实现 ImmutableToolJob admission、lifecycle completion receipt 并消费本回执；daemon
+  transport 和真实 Shell worker 尚未实现；
+- 下一最小跨文档切片应接 ARC-04.3a non-PTY Shell worker，并复用既有权限、grant、Job 与 lifecycle authority。

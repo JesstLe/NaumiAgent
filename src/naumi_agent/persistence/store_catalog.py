@@ -209,12 +209,15 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             "runtime.tool_jobs",
             runtime_dir / "tool-jobs.db",
             StorageKind.SQLITE,
-            ("runtime.tool_job_authority",),
+            (
+                "runtime.tool_job_authority",
+                "runtime.tool_job_lifecycle_authority",
+            ),
             VersionStrategy.SQLITE_USER_VERSION,
             TOOL_JOB_SCHEMA_VERSION,
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
-            "绑定 Execution grant、Worker epoch、Tool lease 与能力要求的不可变 Job",
+            "不可变 ToolJob admission、单调生命周期与防篡改终态回执",
         ),
         _definition(
             "runtime.goals",
