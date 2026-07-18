@@ -18,6 +18,8 @@ browser/agent/runtime producer 和 Supervisor 仍未完成。
 HAR-10.6a 已把当前 Harness Store 升级到 v13，提供 durable interaction request/answer、timeout、takeover 与
 并发 fencing；HAR-10.6b 已接入 New UI Bridge 和 Pursuit stable checkpoint/reconcile，UI-18.4b 已让
 Textual TUI 复用相同 authority adapter。Goal interaction 状态页、显式 cancel 和 queue cursor 仍未完成。
+HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；队列本身仍是 Bridge 内存状态，持久化、重启恢复、
+跨客户端公平和取消传播留给 HAR-10.3b。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

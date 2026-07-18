@@ -79,6 +79,28 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_queue_promotion_target() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.QUEUE_PROMOTE,
+            "payload": {"target_request_id": "  submit-later  ", "private": "drop"},
+        }
+    )
+
+    assert record["payload"] == {"target_request_id": "submit-later"}
+
+
+@pytest.mark.parametrize("target", [None, "", " ", "x" * 201])
+def test_protocol_rejects_invalid_queue_promotion_target(target: object) -> None:
+    with pytest.raises(ValueError, match="target_request_id"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.QUEUE_PROMOTE,
+                "payload": {"target_request_id": target},
+            }
+        )
+
+
 def test_protocol_normalizes_harness_eval_batch_request() -> None:
     record = normalize_client_record(
         {

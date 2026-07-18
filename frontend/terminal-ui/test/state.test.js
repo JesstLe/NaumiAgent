@@ -27,6 +27,7 @@ import {
   hasTaskPanelFocus,
   getSlashCommandCompletions,
   pushSystemMessage,
+  promoteQueuedUserMessage,
   reduceServerEvent,
   requestRunCancel,
   selectTaskPanelBoundary,
@@ -838,6 +839,56 @@ test("run queued marks a Bridge-confirmed message as scheduled until it starts",
   });
   assert.equal(pending.deliveryStatus, "accepted");
   assert.equal(pending.queuePosition, 0);
+});
+
+test("send-now promotes the latest queued message and renders the safe-boundary receipt", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "promote-1";
+  };
+  for (const text of ["第一条", "第二条"]) {
+    handleSubmitText(state, text, (_type, _payload, options = {}) => options.id);
+    const message = state.messages.at(-1);
+    reduceServerEvent(state, {
+      type: "run/queued",
+      request_id: message.requestId,
+      payload: { task: text, position: state.messages.length, queued: 2 },
+    });
+  }
+  const queued = state.messages.filter((item) => item.kind === "user");
+
+  handleSubmitText(state, "/send-now", send);
+
+  assert.deepEqual(sent, [{
+    type: "queue_promote",
+    payload: { target_request_id: queued[1].requestId },
+  }]);
+  reduceServerEvent(state, {
+    type: "run/queue_promoted",
+    request_id: "promote-1",
+    payload: {
+      target_request_id: queued[1].requestId,
+      position: 1,
+      queued: 2,
+      boundary: "after_current_run",
+      message: "已提升，将在当前运行结束后的下一安全边界执行。",
+    },
+  });
+  assert.equal(queued[1].queuePosition, 1);
+  assert.match(state.messages.at(-1).content, /下一安全边界/);
+});
+
+test("send-now supports an explicit queued request and warns when none matches", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  promoteQueuedUserMessage(state, send, "missing");
+
+  assert.equal(sent.length, 0);
+  assert.match(state.messages.at(-1).content, /没有找到排队消息/);
 });
 
 test("bridge heartbeat warns once on stale and reports recovery", () => {

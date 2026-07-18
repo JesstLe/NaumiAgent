@@ -69,4 +69,5 @@ Heartbeat 与 lease 是顺序事务，短暂可见性窗口不会被伪装成原
 - orphaned/inconsistent 不自动改变 PursuitRun 状态，避免只读页面产生副作用。
 
 下一最小切片应回到跨文档依赖表，优先评估 HAR-10.6a 结构化人工交互 authority 与 UI-18.4，或
-HAR-10.3a durable immediate-message queue；不要继续线性扩张 recovery UI。
+HAR-10.3a 已交付内存队列的安全边界提升；后续应在 HAR-10.3b durable queue authority 与其他路线的最小
+用户闭环之间重新比较依赖，不要继续线性扩张 recovery UI。

@@ -56,6 +56,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/reasoning", description: "显示/切换思考文本" },
   { command: "/effort", description: "查看或切换模型思考强度" },
   { command: "/retry", description: "重试最近一条发送失败或状态待确认的消息" },
+  { command: "/send-now", description: "将排队消息提升到下一安全执行位置" },
   { command: "/folds", description: "显示可折叠代码片段列表" },
   { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
   { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
@@ -572,6 +573,15 @@ export function reduceServerEvent(state, record) {
       break;
     case "run/queued":
       scheduleUserMessage(state, record.request_id, payload.position);
+      break;
+    case "run/queue_promoted":
+      scheduleUserMessage(state, payload.target_request_id, payload.position);
+      pushSystemMessage(
+        state,
+        "立即发送",
+        payload.message || "已提升到下一安全执行位置。",
+        "success",
+      );
       break;
     case "task/created":
       {
@@ -2615,6 +2625,9 @@ export function handleSubmitText(state, text, send) {
   if (text === "/retry" || text.startsWith("/retry ")) {
     return retryUserMessage(state, send, text.slice("/retry".length).trim());
   }
+  if (text === "/send-now" || text.startsWith("/send-now ")) {
+    return promoteQueuedUserMessage(state, send, text.slice("/send-now".length).trim());
+  }
   if (text.startsWith("/load ")) {
     send("resume", { session_id: text.slice(6).trim() });
     return;
@@ -3576,6 +3589,27 @@ export function retryUserMessage(state, send, requestId = "") {
     return submitTaskMessage(state, message.content, send, message.taskDraft ?? {}, message);
   }
   return submitUserMessage(state, message.content, send, message);
+}
+
+export function promoteQueuedUserMessage(state, send, requestId = "") {
+  const normalizedRequestId = String(requestId ?? "").trim();
+  const message = [...state.messages].reverse().find(
+    (item) => item.kind === "user"
+      && item.deliveryStatus === "scheduled"
+      && (!normalizedRequestId || item.requestId === normalizedRequestId),
+  );
+  if (!message) {
+    pushSystemMessage(
+      state,
+      "立即发送",
+      normalizedRequestId
+        ? `没有找到排队消息: ${normalizedRequestId}`
+        : "当前没有可提升的排队消息。",
+      "warning",
+    );
+    return null;
+  }
+  return send("queue_promote", { target_request_id: message.requestId });
 }
 
 export function acceptUserMessage(state, requestId, content = "") {

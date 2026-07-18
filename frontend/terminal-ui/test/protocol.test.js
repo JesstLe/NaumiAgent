@@ -312,6 +312,38 @@ test("event sender accepts a caller supplied request id", () => {
   assert.equal(send("ping", {}), "ui-1");
 });
 
+test("event sender publishes an explicit queue promotion target", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("queue_promote", { target_request_id: "submit-later" });
+
+  assert.deepEqual(JSON.parse(chunks[0]).payload, {
+    target_request_id: "submit-later",
+  });
+});
+
+test("queue promotion receipt normalizes boundary metadata", () => {
+  const normalized = normalizeServerRecord({
+    type: "run/queue_promoted",
+    payload: {
+      target_request_id: 42,
+      position: "1",
+      queued: "3",
+      boundary: "after_current_run",
+      message: "已提升",
+    },
+  });
+
+  assert.deepEqual(normalized.payload, {
+    target_request_id: "42",
+    position: 1,
+    queued: 3,
+    boundary: "after_current_run",
+    message: "已提升",
+  });
+});
+
 test("interaction sender rejects ambiguous answers and drops private fields", () => {
   const chunks = [];
   const send = createEventSender({ write: (chunk) => chunks.push(chunk) });

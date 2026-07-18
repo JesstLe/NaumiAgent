@@ -21,7 +21,10 @@
     Goal 新 UI、CLI/TUI fallback 和 Doctor health；见
     [设计](HAR-10-2b-pursuit-recovery-snapshot.md)。
   - 未完成：browser/agent/runtime producer、heartbeat 历史统计、批量查询与 Supervisor 动作。
-- HAR-10.3 Durable queue：优先级、公平性、容量、立即发送消息插队规则。
+- HAR-10.3 Durable queue（partial）：
+  - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
+    [设计](HAR-10-3a-safe-boundary-queue-promotion.md)。
+  - 未完成：队列持久化、重启恢复、跨客户端公平性、优先级、cursor、租约/fencing 与取消传播。
 - HAR-10.4 Checkpoint（partial）：
   - HAR-10.4a 已实现：严格有界 schema、单调 sequence、canonical JSON + SHA-256、篡改拒绝、Pursuit
     安全边界写入，以及 legacy missing / verified ready 恢复判定；见
@@ -72,9 +75,10 @@ fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入，HAR-10.4a/4
 continuation，HAR-10.5a/5b 已让 shell/background 行动在外部派发前进入持久账本并用 caller key 复用后台
 task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting/terminal/continue，HAR-10.2a/2b 已
 交付 Pursuit worker heartbeat 与用户可见的 recovery 聚合，HAR-10.6a/6b 已交付 durable interaction
-authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime parity；同步
+authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime parity，HAR-10.3a 已交付不打断
+当前事务的 New UI 队列提升；同步
 shell、browser/agent/runtime 逐域接入、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
-接入和 durable queue 仍属于后续实现。
+接入和 durable queue authority 仍属于后续实现。
 
 ## 验收标准
 

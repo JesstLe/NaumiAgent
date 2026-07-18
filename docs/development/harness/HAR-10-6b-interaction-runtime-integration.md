@@ -74,4 +74,5 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
 
 下一最小切片应跨文档比较 `UI-18.4c Goal interaction state/actions` 与
-`HAR-10.3a immediate-message queue`，选择能直接改善用户闭环且不提前实现完整 ARC-06 的前置。
+HAR-10.3a immediate-message queue 已交付；下一步在 Goal interaction actions、HAR-10.3b durable queue
+authority 与其他路线间重新选择能直接改善用户闭环且不提前实现完整 ARC-06 的最小前置。

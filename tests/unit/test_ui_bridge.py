@@ -4709,6 +4709,93 @@ async def test_bridge_refreshes_remaining_chat_queue_positions_after_advancing()
 
 
 @pytest.mark.asyncio
+async def test_bridge_promotes_queued_chat_to_next_safe_boundary() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("first", request_id="submit-first")
+    await bridge.submit("second", request_id="submit-second")
+    await bridge.submit("third", request_id="submit-third")
+
+    await bridge.handle_client_record(
+        {
+            "id": "promote-third",
+            "type": ClientEventType.QUEUE_PROMOTE,
+            "payload": {"target_request_id": "submit-third"},
+        }
+    )
+
+    assert [item.request_id for item in bridge._queued_chat_submissions] == [
+        "submit-third",
+        "submit-first",
+        "submit-second",
+    ]
+    await bridge.promote_queued_chat(
+        {"target_request_id": "submit-third"},
+        request_id="promote-third-again",
+    )
+    assert [item.request_id for item in bridge._queued_chat_submissions] == [
+        "submit-third",
+        "submit-first",
+        "submit-second",
+    ]
+    assert len(bridge._queued_chat_submissions) == 3
+    receipt = next(
+        record
+        for record in _records(writer)
+        if record["type"] == "run/queue_promoted"
+    )
+    assert receipt["request_id"] == "promote-third"
+    assert receipt["payload"] == {
+        "target_request_id": "submit-third",
+        "position": 1,
+        "queued": 3,
+        "boundary": "after_current_run",
+        "message": "已提升，将在当前运行结束后的下一安全边界执行。",
+    }
+    assert engine.run_tasks == ["active"]
+
+    engine.release_run.set()
+    while bridge._run_task is not None and not bridge._run_task.done():
+        await bridge._run_task
+        await asyncio.sleep(0)
+    assert engine.run_tasks == ["active", "third", "first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_unknown_queue_promotion_without_reordering() -> None:
+    engine = _SlowFakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("first", request_id="submit-first")
+    await bridge.submit("second", request_id="submit-second")
+    await bridge.promote_queued_chat(
+        {"target_request_id": "missing"},
+        request_id="promote-missing",
+    )
+
+    assert [item.request_id for item in bridge._queued_chat_submissions] == [
+        "submit-first",
+        "submit-second",
+    ]
+    error = next(
+        record
+        for record in _records(writer)
+        if record["type"] == "error" and record.get("request_id") == "promote-missing"
+    )
+    assert error["payload"]["code"] == "queue_item_not_found"
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_bridge_advances_queued_chat_after_active_run_failure() -> None:
     class _FailFirstEngine(_FakeEngine):
         def __init__(self) -> None:
