@@ -57,6 +57,9 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
         ),
     )
     assert isinstance(engine.session_store, SessionStore)
+    assert engine._paths.workspace_root == tmp_path.resolve()
+    assert engine._paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
+    assert engine._paths.browser_data_dir == engine._paths.runtime_data_dir / "browser"
     call_count = 0
 
     async def stream_response(**_: object):

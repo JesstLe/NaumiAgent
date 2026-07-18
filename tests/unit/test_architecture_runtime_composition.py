@@ -9,6 +9,7 @@ TEST_ROOT = PROJECT_ROOT / "tests"
 ENGINE_PATH = SOURCE_ROOT / "orchestrator" / "engine.py"
 DEPENDENCIES_PATH = SOURCE_ROOT / "runtime" / "dependencies.py"
 COMPOSITION_PATH = SOURCE_ROOT / "runtime" / "composition.py"
+PATHS_PATH = SOURCE_ROOT / "runtime" / "paths.py"
 _BANNED_ENGINE_NAMES = {
     "LocalToolExecutor",
     "ModelRouter",
@@ -79,9 +80,20 @@ def test_only_composition_root_constructs_agent_engine_in_product_source() -> No
 
     assert [path for path, _ in calls] == [COMPOSITION_PATH]
     assert all(
-        any(keyword.arg == "ports" for keyword in call.keywords)
+        {keyword.arg for keyword in call.keywords} >= {"ports", "paths"}
         for _, call in calls
     )
+
+
+def test_runtime_paths_contract_has_no_adapter_or_config_imports() -> None:
+    allowed = {"__future__", "dataclasses", "pathlib"}
+    modules = {
+        node.module
+        for node in ast.walk(_tree(PATHS_PATH))
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+
+    assert modules <= allowed
 
 
 def test_bridge_default_factory_does_not_assign_agent_engine() -> None:
