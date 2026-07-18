@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 import subprocess
@@ -26,6 +27,12 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractIssuer,
+)
+from naumi_agent.evolution.mutation_generation import (
+    EvolutionMutationGenerationError,
+    EvolutionMutationGenerationService,
+    EvolutionMutationGenerationTrace,
+    EvolutionMutationGenerationTraceStore,
 )
 from naumi_agent.evolution.mutation_plans import (
     EvolutionMutationPlan,
@@ -69,7 +76,7 @@ from naumi_agent.evolution.static_guards import (
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.tools.base import ToolRegistry
+from naumi_agent.tools.base import ToolCall, ToolRegistry
 from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
@@ -2479,6 +2486,425 @@ async def test_mutation_receipt_store_rejects_persisted_tampering(tmp_path: Path
     with pytest.raises(EvolutionMutationReceiptError) as corrupted:
         store.get(receipt.mutation_receipt_id)
     assert corrupted.value.code == "mutation_receipt_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_mutation_generation_trace_executes_virtual_edit_without_disk_write(
+    tmp_path: Path,
+) -> None:
+    workspace, target, contract, lease, snapshot, plan, guard = await _guard_fixture(
+        tmp_path
+    )
+    isolated = Path(lease.worktree_path, plan.authorized_files[0])
+    isolated_before = isolated.read_bytes()
+    main_before = target.read_bytes()
+    trace_store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    generation_service = EvolutionMutationGenerationService(
+        trace_store=trace_store,
+        clock=lambda: NOW,
+    )
+    session = generation_service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-run-1",
+        attempt=1,
+    )
+    call = ToolCall(
+        id="mutation-call-1",
+        name="file_edit",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "old_text": "return 'baseline'",
+            "new_text": "return 'generated'",
+        }),
+    )
+
+    first_result, replay_result = await asyncio.gather(
+        session.execute(call),
+        session.execute(call),
+    )
+    generated = await session.finalize()
+    replayed_generation = await session.finalize()
+
+    assert first_result == replay_result
+    assert replayed_generation == generated
+    assert first_result.status == "success"
+    assert len(generated.trace.calls) == 1
+    assert generated.trace.total_tool_calls == 1
+    assert generated.trace.successful_tool_calls == 1
+    assert generated.trace.failed_tool_calls == 0
+    assert generated.trace.final_files[0].after_sha256 == hashlib.sha256(
+        generated.proposed_contents[plan.authorized_files[0]].encode("utf-8")
+    ).hexdigest()
+    assert isolated.read_bytes() == isolated_before
+    assert target.read_bytes() == main_before
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    serialized = generated.trace.model_dump_json()
+    assert "mutation-call-1" not in serialized
+    assert "return 'generated'" not in serialized
+    assert str(Path(lease.worktree_path)) not in serialized
+    assert trace_store.get(generated.trace.trace_id) == generated.trace
+    assert trace_store.get_for_attempt(plan.plan_id, 1) == generated.trace
+    copy_store = EvolutionMutationGenerationTraceStore(tmp_path / "trace-copy.db")
+    copies = await asyncio.gather(
+        asyncio.to_thread(copy_store.put, generated.trace),
+        asyncio.to_thread(copy_store.put, generated.trace),
+    )
+    assert copies == [generated.trace, generated.trace]
+    with sqlite3.connect(tmp_path / "trace-copy.db") as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM evolution_mutation_generation_traces"
+        ).fetchone()[0] == 1
+    with pytest.raises(EvolutionMutationGenerationError) as duplicate_attempt:
+        generation_service.begin(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-run-replacement",
+            attempt=1,
+        )
+    assert duplicate_attempt.value.code == "mutation_trace_attempt_exists"
+
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=generated.proposed_contents,
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    write_receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents=generated.proposed_contents,
+    )
+    assert write_receipt.change.after_sha256 == (
+        generated.trace.final_files[0].after_sha256
+    )
+    assert target.read_bytes() == main_before
+
+
+@pytest.mark.asyncio
+async def test_mutation_generation_trace_records_failed_retry_and_detects_tampering(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    session = EvolutionMutationGenerationService(
+        trace_store=store,
+        clock=lambda: NOW,
+    ).begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-retry",
+        attempt=1,
+    )
+    failed = await session.execute(ToolCall(
+        id="retry-1",
+        name="file_edit",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "old_text": "not present",
+            "new_text": "ignored",
+        }),
+    ))
+    succeeded = await session.execute(ToolCall(
+        id="retry-2",
+        name="file_edit",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "old_text": "return 'baseline'",
+            "new_text": "return 'retry-fixed'",
+        }),
+    ))
+    generated = await session.finalize()
+
+    assert failed.status == "error"
+    assert succeeded.status == "success"
+    assert generated.trace.failed_tool_calls == 1
+    assert generated.trace.successful_tool_calls == 1
+    assert tuple(item.error_code for item in generated.trace.calls) == (
+        "mutation_edit_target_missing",
+        "",
+    )
+    assert generated.trace.calls[0].before_sha256 == (
+        generated.trace.calls[0].after_sha256
+    )
+    assert generated.trace.calls[1].before_sha256 == (
+        generated.trace.calls[0].after_sha256
+    )
+    payload = generated.trace.model_dump(mode="json")
+    payload["calls"][1]["after_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="call fact"):
+        EvolutionMutationGenerationTrace.model_validate(payload)
+
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        stored = json.loads(db.execute(
+            """SELECT trace_json FROM evolution_mutation_generation_traces
+               WHERE trace_id = ?""",
+            (generated.trace.trace_id,),
+        ).fetchone()[0])
+        stored["total_tool_calls"] = 3
+        db.execute(
+            """UPDATE evolution_mutation_generation_traces SET trace_json = ?
+               WHERE trace_id = ?""",
+            (json.dumps(stored), generated.trace.trace_id),
+        )
+    with pytest.raises(EvolutionMutationGenerationError) as corrupted:
+        store.get(generated.trace.trace_id)
+    assert corrupted.value.code == "mutation_trace_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_mutation_generation_trace_requires_complete_scope_and_blocks_escape(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = await _patch_set_fixture(tmp_path)
+    service = EvolutionMutationGenerationService(
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        clock=lambda: NOW,
+    )
+    incomplete = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-incomplete",
+        attempt=1,
+    )
+    first_path = plan.authorized_files[0]
+    result = await incomplete.execute(ToolCall(
+        id="multi-1",
+        name="file_write",
+        arguments=json.dumps({
+            "path": first_path,
+            "content": "def generated():\n    return 1\n",
+        }),
+    ))
+    assert result.status == "success"
+    with pytest.raises(EvolutionMutationGenerationError) as missing:
+        await incomplete.finalize()
+    assert missing.value.code == "mutation_scope_incomplete"
+
+    escaped = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-escape",
+        attempt=2,
+    )
+    blocked = await escaped.execute(ToolCall(
+        id="escape-1",
+        name="file_write",
+        arguments=json.dumps({
+            "path": "../outside.py",
+            "content": "value = 1\n",
+        }),
+    ))
+    assert blocked.status == "error"
+    with pytest.raises(EvolutionMutationGenerationError) as escaped_error:
+        await escaped.finalize()
+    assert escaped_error.value.code == "mutation_path_invalid"
+
+
+@pytest.mark.asyncio
+async def test_mutation_generation_trace_finalizes_multi_file_proposal(tmp_path: Path) -> None:
+    (
+        workspace,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        _,
+        _,
+        before,
+        _,
+        _,
+    ) = await _patch_set_fixture(tmp_path)
+    session = EvolutionMutationGenerationService(
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        clock=lambda: NOW,
+    ).begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-multi",
+        attempt=1,
+    )
+    calls = tuple(
+        ToolCall(
+            id=f"multi-{index}",
+            name="file_write",
+            arguments=json.dumps({
+                "path": path,
+                "content": f"def generated_{index}():\n    return {index}\n",
+            }),
+        )
+        for index, path in enumerate(plan.authorized_files, start=1)
+    )
+
+    results = await asyncio.gather(*(session.execute(call) for call in calls))
+    generated = await session.finalize()
+
+    assert all(result.status == "success" for result in results)
+    assert tuple(item.order for item in generated.trace.calls) == (1, 2)
+    assert tuple(item.path for item in generated.trace.final_files) == tuple(
+        sorted(plan.authorized_files)
+    )
+    assert set(generated.proposed_contents) == set(plan.authorized_files)
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes()
+        for path in plan.authorized_files
+    } == before
+    assert _git(workspace, "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_mutation_generation_trace_fails_closed_on_tool_call_protocol(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    service = EvolutionMutationGenerationService(
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        clock=lambda: NOW,
+    )
+    unknown = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-unknown-tool",
+        attempt=1,
+    )
+    unknown_result = await unknown.execute(ToolCall(
+        id="unknown-1",
+        name="bash_run",
+        arguments=json.dumps({"command": "true"}),
+    ))
+    assert unknown_result.status == "error"
+    with pytest.raises(EvolutionMutationGenerationError) as unknown_error:
+        await unknown.finalize()
+    assert unknown_error.value.code == "mutation_tool_not_allowed"
+
+    collision = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-call-collision",
+        attempt=1,
+    )
+    first = ToolCall(
+        id="same-call",
+        name="file_edit",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "old_text": "return 'baseline'",
+            "new_text": "return 'first'",
+        }),
+    )
+    changed = ToolCall(
+        id="same-call",
+        name="file_edit",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "old_text": "return 'first'",
+            "new_text": "return 'second'",
+        }),
+    )
+    assert (await collision.execute(first)).status == "success"
+    assert (await collision.execute(changed)).status == "error"
+    with pytest.raises(EvolutionMutationGenerationError) as collision_error:
+        await collision.finalize()
+    assert collision_error.value.code == "mutation_call_id_collision"
+
+    tool_collision = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-tool-collision",
+        attempt=1,
+    )
+    shared_arguments = json.dumps({
+        "path": plan.authorized_files[0],
+        "content": "value = 2\n",
+    })
+    assert (
+        await tool_collision.execute(ToolCall(
+            id="same-tool-call",
+            name="file_write",
+            arguments=shared_arguments,
+        ))
+    ).status == "success"
+    changed_tool = await tool_collision.execute(ToolCall(
+        id="same-tool-call",
+        name="file_edit",
+        arguments=shared_arguments,
+    ))
+    assert changed_tool.status == "error"
+    assert "mutation_call_id_collision" in changed_tool.content
+
+    budget = service.begin(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-budget",
+        attempt=1,
+    )
+    for index in range(plan.max_tool_calls):
+        result = await budget.execute(ToolCall(
+            id=f"budget-{index}",
+            name="file_edit",
+            arguments=json.dumps({
+                "path": plan.authorized_files[0],
+                "old_text": f"missing-{index}",
+                "new_text": "ignored",
+            }),
+        ))
+        assert result.status == "error"
+    overflow = await budget.execute(ToolCall(
+        id="budget-overflow",
+        name="file_write",
+        arguments=json.dumps({
+            "path": plan.authorized_files[0],
+            "content": "value = 1\n",
+        }),
+    ))
+    assert overflow.status == "error"
+    with pytest.raises(EvolutionMutationGenerationError) as budget_error:
+        await budget.finalize()
+    assert budget_error.value.code == "mutation_tool_budget_exceeded"
 
 
 @pytest.mark.asyncio

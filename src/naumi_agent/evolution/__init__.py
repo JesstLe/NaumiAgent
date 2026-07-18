@@ -25,6 +25,16 @@ if TYPE_CHECKING:
         EvolutionExperimentContractIssuer,
         ExperimentBudget,
     )
+    from naumi_agent.evolution.mutation_generation import (
+        EvolutionMutationGenerationError,
+        EvolutionMutationGenerationResult,
+        EvolutionMutationGenerationService,
+        EvolutionMutationGenerationSession,
+        EvolutionMutationGenerationTrace,
+        EvolutionMutationGenerationTraceStore,
+        MutationGenerationCallFact,
+        MutationGenerationFileFact,
+    )
     from naumi_agent.evolution.mutation_plans import (
         EvolutionMutationPlan,
         EvolutionMutationPlanner,
@@ -112,6 +122,12 @@ __all__ = [
     "EvolutionExperimentSourceSnapshotBuilder",
     "EvolutionMutationPlan",
     "EvolutionMutationPlanner",
+    "EvolutionMutationGenerationError",
+    "EvolutionMutationGenerationResult",
+    "EvolutionMutationGenerationService",
+    "EvolutionMutationGenerationSession",
+    "EvolutionMutationGenerationTrace",
+    "EvolutionMutationGenerationTraceStore",
     "EvolutionMutationReceipt",
     "EvolutionMutationReceiptConflictError",
     "EvolutionMutationReceiptError",
@@ -143,6 +159,8 @@ __all__ = [
     "ExperimentWorktreeLease",
     "ExperimentToolIdentity",
     "MutationFileFact",
+    "MutationGenerationCallFact",
+    "MutationGenerationFileFact",
     "MutationObjective",
     "MutationPlanStage",
     "MutationReceiptFile",
@@ -199,6 +217,16 @@ def __getattr__(name: str) -> object:
         "MutationFileFact",
         "MutationObjective",
         "MutationPlanStage",
+    }
+    mutation_generation_exports = {
+        "EvolutionMutationGenerationError",
+        "EvolutionMutationGenerationResult",
+        "EvolutionMutationGenerationService",
+        "EvolutionMutationGenerationSession",
+        "EvolutionMutationGenerationTrace",
+        "EvolutionMutationGenerationTraceStore",
+        "MutationGenerationCallFact",
+        "MutationGenerationFileFact",
     }
     mutation_receipt_exports = {
         "EvolutionMutationReceipt",
@@ -264,6 +292,8 @@ def __getattr__(name: str) -> object:
         module_name = "experiment_snapshots"
     elif name in mutation_plan_exports:
         module_name = "mutation_plans"
+    elif name in mutation_generation_exports:
+        module_name = "mutation_generation"
     elif name in mutation_receipt_exports:
         module_name = "mutation_receipts"
     elif name in patch_journal_exports:
