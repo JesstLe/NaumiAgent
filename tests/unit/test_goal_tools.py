@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
 
 from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStore
+from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.tools.goal import create_goal_tools
 
 
@@ -20,9 +23,14 @@ class _FakePursueTool:
         return self.result
 
 
-def _tool_map(store: GoalStore, pursuit: _FakePursueTool | None = None):
+def _tool_map(
+    store: GoalStore,
+    pursuit: _FakePursueTool | None = None,
+    pursuit_store: PursuitStore | None = None,
+):
     tools = create_goal_tools(
         store,
+        pursuit_store or PursuitStore(store.base_dir.parent / "pursuit"),
         session_id_getter=lambda: "session-7",
         pursuit_tool_getter=lambda: pursuit,
     )
@@ -59,6 +67,36 @@ async def test_goal_tools_report_validation_and_missing_current_goal(tmp_path) -
     assert "当前没有未完成目标" in await tools["goal_update"].execute(status="paused")
     assert "输入无效" in await tools["goal_create"].execute(objective="")
     assert "不支持的目标状态" in await tools["goal_update"].execute(status="unknown")
+
+
+@pytest.mark.asyncio
+async def test_goal_status_uses_shared_typed_projection_for_pursuit(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    goal = goal_store.create("展示追踪进度")
+    now = time.time()
+    run = PursuitRun(
+        id="pursuit_tool_view",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=now,
+        updated_at=now,
+        iteration=2,
+        criteria_total=5,
+        criteria_verified=3,
+        next_action="等待验证",
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    tools = _tool_map(goal_store, pursuit_store=pursuit_store)
+
+    output = await tools["goal_status"].execute()
+
+    assert "Goal / Pursuit" in output
+    assert "pursuit_tool_view" in output
+    assert "成功标准：3/5" in output
+    assert "等待验证" in output
 
 
 @pytest.mark.asyncio

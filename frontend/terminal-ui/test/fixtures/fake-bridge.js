@@ -24,7 +24,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         selected_version: 1,
         server_minimum_version: 1,
         server_maximum_version: 1,
-        capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+        capabilities: ["goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
       },
     }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
@@ -453,6 +453,54 @@ attachJsonlLineReader(process.stdin, (line) => {
       ? { background_running: 1, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 0 }
       : { background_running: 0, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 0 };
     emit("runtime/status", statusPayload({ tasks }));
+    return;
+  }
+
+  if (record.type === "goal_panel") {
+    emit("goals/snapshot", {
+      schema_version: 1,
+      generated_at: "2026-07-18T00:00:00+00:00",
+      full: true,
+      current_goal_id: "goal_ui_1",
+      goals: [{
+        goal_id: "goal_ui_1",
+        objective: "完成 Goal / Pursuit 可视化",
+        status: "active",
+        note: "",
+        session_id: sessionId,
+        pursuit_run_id: "pursuit_ui_1",
+        pursuit_link_status: "ready",
+        created_at: "2026-07-18T00:00:00+00:00",
+        updated_at: "2026-07-18T00:01:00+00:00",
+        pursuit: {
+          run_id: "pursuit_ui_1",
+          goal: "完成 Goal / Pursuit 可视化",
+          status: "waiting",
+          phase: "waiting",
+          started_at: "2026-07-18T00:00:00+00:00",
+          updated_at: "2026-07-18T00:01:00+00:00",
+          iteration: 3,
+          criteria_total: 4,
+          criteria_verified: 2,
+          failure_count: 0,
+          blocked_reason: "",
+          next_action: "等待用户确认",
+          worktree_name: "",
+          worktree_path: "",
+          waits: [],
+          evidence: [{
+            kind: "test",
+            source: "frontend",
+            summary: "类型化快照已渲染",
+            is_hard: true,
+            timestamp: "2026-07-18T00:01:00+00:00",
+          }],
+        },
+      }],
+      warnings: [],
+      truncated: false,
+      include_finished: Boolean(payload.include_finished),
+    }, record.id);
     return;
   }
 

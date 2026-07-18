@@ -44,6 +44,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/resume", aliases: ["/r"], description: "继续最近一次对话" },
   { command: "/task", description: "创建任务、切换任务输入，或按 ID 打开任务" },
   { command: "/tasks", description: "任务面板（筛选、搜索、键盘导航、详情与取消）" },
+  { command: "/goal", description: "Goal / Pursuit 状态页；子命令可创建或更新目标" },
   { command: "/workbench", description: "刷新 Workbench 权威快照" },
   { command: "/chat", description: "切换为普通对话输入" },
   { command: "/permissions", description: "显示待确认权限面板" },
@@ -306,6 +307,14 @@ export function createInitialState() {
       snapshot: null,
       error: "",
       limit: 12,
+      scrollOffset: 0,
+    },
+    goalPanel: {
+      loading: false,
+      snapshot: null,
+      error: "",
+      limit: 20,
+      includeFinished: true,
       scrollOffset: 0,
     },
     evolutionReview: {
@@ -616,6 +625,11 @@ export function reduceServerEvent(state, record) {
       state.permissionCenter.loading = false;
       state.permissionCenter.error = "";
       break;
+    case "goals/snapshot":
+      state.goalPanel.snapshot = payload;
+      state.goalPanel.loading = false;
+      state.goalPanel.error = "";
+      break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
       state.evolutionReview.loading = false;
@@ -859,6 +873,7 @@ export function reduceServerEvent(state, record) {
       const wasHarnessEvalPromotionRoute = state.route?.name === "harness_eval_promotion";
       const wasDoctorHealthRoute = state.route?.name === "doctor_health";
       const wasPermissionRoute = state.route?.name === "permissions";
+      const wasGoalRoute = state.route?.name === "goals";
       const wasEvolutionReviewRoute = state.route?.name === "evolution_review";
       state.harnessDetail = {
         runId: "",
@@ -906,6 +921,17 @@ export function reduceServerEvent(state, record) {
         scrollOffset: 0,
       };
       if (wasPermissionRoute) {
+        state.route = { name: "conversation", originAnchor: null };
+      }
+      state.goalPanel = {
+        loading: false,
+        snapshot: null,
+        error: "",
+        limit: 20,
+        includeFinished: true,
+        scrollOffset: 0,
+      };
+      if (wasGoalRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
       state.evolutionReview = {
@@ -2423,6 +2449,17 @@ export function handleTodoPrepare(state, message) {
   };
 }
 
+function parseGoalPanelCommand(commandText) {
+  const normalized = String(commandText || "").trim().toLowerCase();
+  if (["/goal", "/goal status", "/goal list"].includes(normalized)) {
+    return { limit: 20, include_finished: true };
+  }
+  if (normalized === "/goal list --active") {
+    return { limit: 20, include_finished: false };
+  }
+  return null;
+}
+
 export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
@@ -2607,6 +2644,21 @@ export function handleSubmitText(state, text, send) {
   }
   if (text === "/tasks" || text.startsWith("/tasks ")) {
     handleTasksCommand(state, text, send);
+    return;
+  }
+  const goalPanelRequest = parseGoalPanelCommand(commandText);
+  if (goalPanelRequest) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "goals", originAnchor };
+    state.goalPanel.loading = true;
+    state.goalPanel.error = "";
+    state.goalPanel.limit = goalPanelRequest.limit;
+    state.goalPanel.includeFinished = goalPanelRequest.include_finished;
+    state.goalPanel.scrollOffset = 0;
+    send("goal_panel", goalPanelRequest);
     return;
   }
   if (text === "/permissions" || text.startsWith("/permissions ")) {
@@ -3256,6 +3308,41 @@ export function handlePermissionCenterKey(state, key, send) {
   else if (key === INPUT_KEYS.pageDown) state.permissionCenter.scrollOffset = current + 10;
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.permissionCenter.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.permissionCenter.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+export function handleGoalPanelKey(state, key, send) {
+  if (state.route?.name !== "goals") return false;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (String(key || "").toLowerCase() === "r") {
+    state.goalPanel.loading = true;
+    state.goalPanel.error = "";
+    send("goal_panel", {
+      limit: state.goalPanel.limit,
+      include_finished: state.goalPanel.includeFinished,
+    });
+    return true;
+  }
+  const current = Math.max(0, Number(state.goalPanel.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) {
+    state.goalPanel.scrollOffset = Math.max(0, current - 1);
+  } else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) {
+    state.goalPanel.scrollOffset = current + 1;
+  } else if (key === INPUT_KEYS.pageUp) {
+    state.goalPanel.scrollOffset = Math.max(0, current - 10);
+  } else if (key === INPUT_KEYS.pageDown) {
+    state.goalPanel.scrollOffset = current + 10;
+  } else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) {
+    state.goalPanel.scrollOffset = 0;
+  } else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) {
+    state.goalPanel.scrollOffset = Number.MAX_SAFE_INTEGER;
+  }
   return true;
 }
 

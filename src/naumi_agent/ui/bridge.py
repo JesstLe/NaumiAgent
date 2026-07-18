@@ -868,6 +868,10 @@ class JsonlEngineBridge:
             await self.resume_session(payload, request_id=request_id)
             return
 
+        if event_type == ClientEventType.GOAL_PANEL:
+            await self.show_goal_panel(payload, request_id=request_id)
+            return
+
         if event_type == ClientEventType.TASK_PANEL:
             await self.show_task_panel(payload, request_id=request_id)
             return
@@ -2439,6 +2443,45 @@ class JsonlEngineBridge:
                         type=MessageType.SYSTEM_NOTICE,
                         title="tasks",
                         content=render_task_panel_snapshot(snapshot),
+                        level="info",
+                    )
+                ),
+                request_id=request_id,
+            )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_goal_panel(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Emit one read-only typed Goal/Pursuit snapshot."""
+        from naumi_agent.ui.goal_panel import (
+            build_goal_pursuit_snapshot,
+            render_goal_pursuit_snapshot,
+        )
+
+        snapshot = build_goal_pursuit_snapshot(
+            self.engine.goal_store,
+            self.engine.pursuit_store,
+            limit=int(payload.get("limit", 20)),
+            include_finished=bool(payload.get("include_finished", True)),
+        )
+        if "goal_snapshot" in self._client_capabilities:
+            await self.emit(
+                ServerEventType.GOALS_SNAPSHOT,
+                snapshot.to_protocol_dict(),
+                request_id=request_id,
+            )
+        else:
+            await self.emit(
+                ServerEventType.UI_MESSAGE,
+                ui_message_payload(
+                    SystemNoticeMessage(
+                        type=MessageType.SYSTEM_NOTICE,
+                        title="goal",
+                        content=render_goal_pursuit_snapshot(snapshot),
                         level="info",
                     )
                 ),

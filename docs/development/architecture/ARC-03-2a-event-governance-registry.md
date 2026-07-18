@@ -18,6 +18,8 @@
 - 新 UI `/debug` 显示缩短后的摘要，便于定位前后端是否读取同一份注册表。
 - UI-11.1a 新增的 `tasks/snapshot` 同样登记 owner、敏感字段与 snapshot 持久化边界；新增后
   Python/Node 事件数量和注册表摘要同步变化，旧前端会在握手或事件校验阶段明确拒绝漂移。
+- UI-18.1 新增 `goal_panel` / `goals/snapshot` 和 `goal_snapshot` capability；Goal 目标、说明及 Pursuit
+  投影声明 required redaction，Python/Node 继续要求事件枚举与治理注册表精确覆盖。
 
 ## 每事件治理字段
 

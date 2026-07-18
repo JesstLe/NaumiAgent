@@ -873,6 +873,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "minimum_version": 1,
         "maximum_version": 1,
         "capabilities": [
+            "goal_snapshot",
             "heartbeat",
             "task_snapshot",
             "typed_ui_messages",
@@ -5045,6 +5046,75 @@ async def test_bridge_emits_typed_task_snapshot(
     assert fallback["title"] == "tasks"
     assert "暂无任务" in fallback["content"]
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _FakeEngine()
+    engine.goal_store = object()
+    engine.pursuit_store = object()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"goal_snapshot", "typed_ui_messages"}
+    snapshot = SimpleNamespace(
+        to_protocol_dict=lambda: {
+            "schema_version": 1,
+            "generated_at": "2026-07-18T00:00:00+00:00",
+            "full": True,
+            "current_goal_id": "goal_1",
+            "goals": [],
+            "warnings": [],
+            "truncated": False,
+            "include_finished": True,
+        }
+    )
+
+    build_calls: list[dict[str, Any]] = []
+
+    def fake_build(goal_store: Any, pursuit_store: Any, **kwargs: Any) -> Any:
+        assert goal_store is engine.goal_store
+        assert pursuit_store is engine.pursuit_store
+        build_calls.append(kwargs)
+        return snapshot
+
+    monkeypatch.setattr(
+        "naumi_agent.ui.goal_panel.build_goal_pursuit_snapshot",
+        fake_build,
+    )
+    await bridge.handle_client_record({
+        "id": "goal-open",
+        "type": ClientEventType.GOAL_PANEL,
+        "payload": {"limit": 7, "include_finished": False},
+    })
+
+    records = _records(writer)
+    typed = next(record for record in records if record["type"] == "goals/snapshot")
+    assert typed["request_id"] == "goal-open"
+    assert typed["payload"]["current_goal_id"] == "goal_1"
+    assert build_calls == [{"limit": 7, "include_finished": False}]
+
+    writer.seek(0)
+    writer.truncate(0)
+    bridge._client_capabilities = {"typed_ui_messages"}
+    monkeypatch.setattr(
+        "naumi_agent.ui.goal_panel.render_goal_pursuit_snapshot",
+        lambda _: "### 持久目标\n\n当前没有未完成目标。",
+    )
+    await bridge.handle_client_record({
+        "id": "goal-legacy",
+        "type": ClientEventType.GOAL_PANEL,
+        "payload": {},
+    })
+
+    fallback = next(
+        record for record in _records(writer) if record["type"] == "ui/message"
+    )
+    assert fallback["payload"]["title"] == "goal"
+    assert "当前没有未完成目标" in fallback["payload"]["content"]
+    assert build_calls[-1] == {"limit": 20, "include_finished": True}
 
 
 @pytest.mark.asyncio

@@ -263,6 +263,28 @@ def test_protocol_normalizes_harness_eval_baseline_request() -> None:
     assert record["payload"] == {"suite_id": "surface-protocol"}
 
 
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({}, {"limit": 20, "include_finished": True}),
+        (
+            {"limit": 500, "include_finished": False},
+            {"limit": 50, "include_finished": False},
+        ),
+        (
+            {"limit": "7", "include_finished": "false"},
+            {"limit": 7, "include_finished": False},
+        ),
+    ],
+)
+def test_protocol_normalizes_goal_panel_request(payload, expected) -> None:
+    record = normalize_client_record(
+        {"type": ClientEventType.GOAL_PANEL, "payload": payload}
+    )
+
+    assert record["payload"] == expected
+
+
 @pytest.mark.parametrize("suite_id", ["", "Upper", "../other", "x" * 65])
 def test_protocol_rejects_invalid_harness_eval_suite_id(suite_id: str) -> None:
     with pytest.raises(ValueError, match="suite_id"):

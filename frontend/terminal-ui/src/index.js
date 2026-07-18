@@ -56,6 +56,7 @@ import {
   handleHarnessEvalPromotionKey,
   handleDoctorHealthKey,
   handleEvolutionReviewKey,
+  handleGoalPanelKey,
   handlePermissionCenterKey,
   handleInteractionKey,
   handleSubmitText,
@@ -591,6 +592,10 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (state.route?.name === "permissions" && handlePermissionCenterKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.route?.name === "goals" && handleGoalPanelKey(state, chunk, send)) {
     scheduleRedraw();
     return;
   }

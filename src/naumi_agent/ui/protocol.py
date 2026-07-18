@@ -23,6 +23,7 @@ PROTOCOL_VERSION = 1
 PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
+    "goal_snapshot",
     "heartbeat",
     "task_snapshot",
     "typed_ui_messages",
@@ -68,6 +69,7 @@ class ClientEventType(StrEnum):
     INTERACTION_RESPONSE = "interaction_response"
     PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
+    GOAL_PANEL = "goal_panel"
     TASK_PANEL = "task_panel"
     TASK_CANCEL = "task_cancel"
     PERMISSIONS_PANEL = "permissions_panel"
@@ -78,6 +80,7 @@ class ClientEventType(StrEnum):
 
 _CLIENT_EVENT_NAMES = {str(event) for event in ClientEventType}
 _PAYLOAD_LIMIT_DEFAULTS = {
+    ClientEventType.GOAL_PANEL: 20,
     ClientEventType.TASK_PANEL: 12,
     ClientEventType.PERMISSIONS_PANEL: 12,
 }
@@ -120,6 +123,7 @@ class ServerEventType(StrEnum):
     INTERACTION_RESOLVED = "interaction/resolved"
     PERMISSION_GRANTS_CHANGED = "permission/grants_changed"
     PERMISSION_SNAPSHOT = "permissions/snapshot"
+    GOALS_SNAPSHOT = "goals/snapshot"
     TASKS_SNAPSHOT = "tasks/snapshot"
     DEBUG_TRACE = "debug/trace"
     WORKBENCH_SNAPSHOT = "workbench/snapshot"
@@ -509,6 +513,19 @@ def _normalize_client_payload(
         if "clear" in payload:
             normalized["clear"] = _to_bool(payload.get("clear"))
         return normalized
+
+    if event_type == ClientEventType.GOAL_PANEL:
+        return {
+            "limit": _bounded_int(
+                payload.get("limit"),
+                _PAYLOAD_LIMIT_DEFAULTS[event_type],
+                lower=1,
+                upper=50,
+            ),
+            "include_finished": _to_bool(
+                payload.get("include_finished", True)
+            ),
+        }
 
     if event_type == ClientEventType.TASK_PANEL:
         detail_id = str(
