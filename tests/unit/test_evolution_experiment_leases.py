@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import naumi_agent.evolution.mutation_receipts as mutation_receipt_module
 import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
@@ -29,6 +30,12 @@ from naumi_agent.evolution.experiments import (
 from naumi_agent.evolution.mutation_plans import (
     EvolutionMutationPlan,
     EvolutionMutationPlanner,
+)
+from naumi_agent.evolution.mutation_receipts import (
+    EvolutionMutationReceipt,
+    EvolutionMutationReceiptError,
+    EvolutionMutationReceiptService,
+    EvolutionMutationReceiptStore,
 )
 from naumi_agent.evolution.patch_journals import (
     EvolutionPatchJournalStore,
@@ -2157,6 +2164,321 @@ async def test_postflight_guard_rejects_mode_change_and_restores_mode(
     assert error.value.code == "postflight_mode_changed"
     assert error.value.rollback_completed is True
     assert target.stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.asyncio
+async def test_mutation_receipt_finalizes_committed_single_write_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    main_before = target.read_bytes()
+    write_receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    store = EvolutionMutationReceiptStore(tmp_path / "runtime.db")
+    service = EvolutionMutationReceiptService(
+        journal_store=writer._journal_store,
+        patch_set_store=EvolutionPatchSetStore(tmp_path / "runtime.db"),
+        receipt_store=store,
+    )
+
+    first = service.finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=guard_receipt,
+    )
+    second = service.finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=guard_receipt,
+    )
+
+    assert first == second
+    assert first.writer_kind == "single_file"
+    assert first.write_receipt_id == write_receipt.write_id
+    assert first.attempt == 1
+    assert first.max_attempts == plan.max_attempts
+    assert first.validation_status == "pending"
+    assert first.validation_ready is True
+    assert first.promotion_ready is False
+    assert first.execution_ready is False
+    assert tuple(item.path for item in first.files) == plan.authorized_files
+    assert tuple(item.phase for item in first.tool_evidence) == (
+        "static_guard",
+        "patch_write",
+        "postflight_guard",
+    )
+    assert store.get(first.mutation_receipt_id) == first
+    assert store.get_by_lease(lease.lease_id) == first
+    assert store.list_recent(limit=1) == (first,)
+    assert target.read_bytes() == main_before
+    assert _git(workspace, "status", "--porcelain") == ""
+    serialized = first.model_dump_json()
+    assert proposed not in serialized
+    assert str(Path(lease.worktree_path)) not in serialized
+
+    payload = first.model_dump(mode="json")
+    payload["files"][0]["added_lines"] += 1
+    with pytest.raises(ValidationError, match="file fact"):
+        EvolutionMutationReceipt.model_validate(payload)
+    evidence_payload = first.model_dump(mode="json")
+    evidence_payload["tool_evidence"][1]["tool_name"] = (
+        "evolution_patch_set_writer"
+    )
+    with pytest.raises(ValidationError, match="tool evidence"):
+        EvolutionMutationReceipt.model_validate(evidence_payload)
+
+
+@pytest.mark.asyncio
+async def test_mutation_receipt_rejects_uncommitted_write_and_post_commit_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    service = EvolutionMutationReceiptService(
+        journal_store=writer._journal_store,
+        patch_set_store=EvolutionPatchSetStore(tmp_path / "runtime.db"),
+        receipt_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+    )
+
+    with pytest.raises(EvolutionMutationReceiptError) as unsafe:
+        mutation_receipt_module._require_safe_rationale(
+            "api_key = " + "sk-" + ("x" * 24)
+        )
+    assert unsafe.value.code == "mutation_rationale_secret"
+
+    unsafe_plan = plan.model_copy(update={
+        "objective": plan.objective.model_copy(update={"hypothesis": "unbound"}),
+    })
+    with pytest.raises(EvolutionMutationReceiptError) as invalid_authority:
+        service.finalize(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=unsafe_plan,
+            static_guard=guard_receipt,
+        )
+    assert invalid_authority.value.code == "mutation_authority_invalid"
+
+    with pytest.raises(EvolutionMutationReceiptError) as missing:
+        service.finalize(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            static_guard=guard_receipt,
+        )
+    assert missing.value.code == "mutation_write_not_committed"
+
+    write_receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    legacy_payload = write_receipt.model_dump(mode="json")
+    for field in (
+        "postflight_guard_id",
+        "postflight_guard_sha256",
+        "postflight_guard",
+    ):
+        legacy_payload.pop(field)
+    legacy_payload["schema_version"] = 1
+    legacy_payload["policy_version"] = "evolution-single-file-patch-writer-v1"
+    legacy_payload.pop("write_id")
+    legacy_payload.pop("write_sha256")
+    legacy_digest = patch_writer_module._sha256_payload(legacy_payload)
+    legacy = EvolutionPatchWriteReceipt.model_validate({
+        **legacy_payload,
+        "write_id": f"evw_{legacy_digest[:24]}",
+        "write_sha256": legacy_digest,
+    })
+    load_receipt = writer._journal_store.load_receipt_json
+    monkeypatch.setattr(
+        writer._journal_store,
+        "load_receipt_json",
+        lambda _journal_id: legacy.model_dump_json(),
+    )
+    with pytest.raises(EvolutionMutationReceiptError) as legacy_error:
+        service.finalize(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            static_guard=guard_receipt,
+        )
+    assert legacy_error.value.code == "mutation_write_receipt_legacy"
+    monkeypatch.setattr(writer._journal_store, "load_receipt_json", load_receipt)
+
+    Path(lease.worktree_path, plan.authorized_files[0]).write_text(
+        "def render_footer():\n    return 'drifted'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(EvolutionMutationReceiptError) as drifted:
+        service.finalize(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            static_guard=guard_receipt,
+        )
+    assert drifted.value.code == "postflight_digest_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_mutation_receipt_finalizes_multi_file_write_and_store_is_concurrent(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        guard_receipt,
+        proposed,
+        _,
+        _,
+        patch_set_store,
+    ) = await _patch_set_fixture(tmp_path)
+    journal_store = EvolutionPatchJournalStore(tmp_path / "runtime.db")
+    writer = EvolutionPatchSetWriter(
+        static_guard=guard,
+        patch_set_store=patch_set_store,
+        journal_store=journal_store,
+    )
+    write_receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents=proposed,
+    )
+    store = EvolutionMutationReceiptStore(tmp_path / "runtime.db")
+    service = EvolutionMutationReceiptService(
+        journal_store=journal_store,
+        patch_set_store=patch_set_store,
+        receipt_store=store,
+    )
+    receipt = service.finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=guard_receipt,
+    )
+
+    assert receipt.writer_kind == "multi_file"
+    assert receipt.write_receipt_id == write_receipt.write_id
+    assert len(receipt.files) == 2
+    assert receipt.files_sha256 == postflight_guard_module._sha256_payload(
+        [item.model_dump(mode="json") for item in receipt.files]
+    )
+    copy_store = EvolutionMutationReceiptStore(tmp_path / "receipt-copy.db")
+    copies = await asyncio.gather(
+        asyncio.to_thread(copy_store.put, receipt),
+        asyncio.to_thread(copy_store.put, receipt),
+    )
+    assert copies == [receipt, receipt]
+    with sqlite3.connect(tmp_path / "receipt-copy.db") as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM evolution_mutation_receipts"
+        ).fetchone()[0] == 1
+    alternate_payload = receipt.model_dump(
+        mode="json",
+        exclude={"mutation_receipt_id", "receipt_sha256"},
+    )
+    alternate_payload["created_at"] = (NOW + timedelta(seconds=1)).isoformat()
+    alternate_digest = mutation_receipt_module._sha256_payload(alternate_payload)
+    alternate = EvolutionMutationReceipt.model_validate({
+        **alternate_payload,
+        "mutation_receipt_id": f"evmr_{alternate_digest[:24]}",
+        "receipt_sha256": alternate_digest,
+    })
+    with pytest.raises(EvolutionMutationReceiptError) as conflict:
+        copy_store.put(alternate)
+    assert conflict.value.code == "mutation_receipt_conflict"
+
+
+@pytest.mark.asyncio
+async def test_mutation_receipt_store_rejects_persisted_tampering(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.authorized_files[0]: proposed},
+    )
+    store = EvolutionMutationReceiptStore(tmp_path / "runtime.db")
+    receipt = EvolutionMutationReceiptService(
+        journal_store=writer._journal_store,
+        patch_set_store=EvolutionPatchSetStore(tmp_path / "runtime.db"),
+        receipt_store=store,
+    ).finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=guard_receipt,
+    )
+    payload = receipt.model_dump(mode="json")
+    payload["attempt"] = 2
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        db.execute(
+            """UPDATE evolution_mutation_receipts SET receipt_json = ?
+               WHERE mutation_receipt_id = ?""",
+            (json.dumps(payload), receipt.mutation_receipt_id),
+        )
+
+    with pytest.raises(EvolutionMutationReceiptError) as corrupted:
+        store.get(receipt.mutation_receipt_id)
+    assert corrupted.value.code == "mutation_receipt_corrupt"
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,10 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
+from naumi_agent.evolution.mutation_receipts import (
+    EvolutionMutationReceiptService,
+    EvolutionMutationReceiptStore,
+)
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
@@ -734,6 +738,9 @@ class AgentEngine:
         self.evolution_patch_set_store = EvolutionPatchSetStore(
             config.memory.session_db_path
         )
+        self.evolution_mutation_receipt_store = EvolutionMutationReceiptStore(
+            config.memory.session_db_path
+        )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
             patch_set_store=self.evolution_patch_set_store,
@@ -758,6 +765,11 @@ class AgentEngine:
             static_guard=self.evolution_static_guard,
             patch_set_store=self.evolution_patch_set_store,
             journal_store=self.evolution_patch_journal_store,
+        )
+        self.evolution_mutation_receipt_service = EvolutionMutationReceiptService(
+            journal_store=self.evolution_patch_journal_store,
+            patch_set_store=self.evolution_patch_set_store,
+            receipt_store=self.evolution_mutation_receipt_store,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")

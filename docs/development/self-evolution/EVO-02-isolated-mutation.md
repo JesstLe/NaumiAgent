@@ -73,4 +73,8 @@
 - EVO-02.6b 已实现写后完整 Diff/API Guard：从精确 Git baseline 和落盘字节重建 diff、mode 与 Python
   公共 API 事实；breaking API、不支持的源码 parser、范围或摘要漂移都会触发单文件/整组回滚，Writer
   Receipt v2 内嵌防篡改证据并兼容历史 v1。详见 `EVO-02-6b-postflight-diff-api-guard.md`。
-- EVO-02.7 Mutation Receipt 尚未实现，HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持 partial。
+- EVO-02.7a 已实现不可变 Mutation Receipt Core：只从 committed Journal/Patch Set、Writer v2 与重算
+  Postflight 生成，持久化 attempt、diff/API、approved rationale、required metrics 和治理工具证据；并发
+  幂等、篡改/漂移/secret fail-closed。详见 `EVO-02-7a-mutation-receipt-core.md`。
+- EVO-02.7b mutation-generation tool-call trace 与 HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持
+  partial。
