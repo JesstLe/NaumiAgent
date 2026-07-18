@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -27,6 +28,10 @@ from naumi_agent.harness.coordinator import (
     ReconciliationCoordinatorOutcome,
     ReconciliationCoordinatorResult,
     SessionReconciliationCoordinator,
+)
+from naumi_agent.harness.feedback import (
+    FeedbackIntakeService,
+    FeedbackSourceEnvelope,
 )
 from naumi_agent.harness.retention import LifecycleActor
 from naumi_agent.harness.retention_executor import (
@@ -540,6 +545,7 @@ class AgentEngine:
             ),
             store=self._harness_store,
         )
+        self.feedback_intake_service = FeedbackIntakeService()
         self._session_reconciliation_coordinator = SessionReconciliationCoordinator(
             session_port=self._session_port,
             harness_store=self._harness_store,
@@ -595,6 +601,7 @@ class AgentEngine:
         self.emitter = EventEmitter()
         self.hooks = HookManager()
         self._session: Session | None = None
+        self._active_feedback_turn: FeedbackSourceEnvelope | None = None
         self._session_authorization_generation = 0
         self._session_transition_epochs: dict[str, set[int]] = {}
         self._session_transition_tokens: dict[int, str] = {}
@@ -741,6 +748,7 @@ class AgentEngine:
 
         # Runtime status tools
         from naumi_agent.tools.doctor import DoctorDiagnosticsTool
+        from naumi_agent.tools.feedback import create_feedback_tools
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
         from naumi_agent.tools.session import create_session_tools
@@ -748,6 +756,8 @@ class AgentEngine:
 
         self._tool_registry.register(DoctorDiagnosticsTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
+        for tool in create_feedback_tools(self, self.feedback_intake_service):
+            self._tool_registry.register(tool)
         for tool in create_session_tools(self):
             self._tool_registry.register(tool)
         for tool in create_runtime_tools(self):
@@ -924,6 +934,10 @@ class AgentEngine:
     @property
     def tool_registry(self) -> ToolRegistry:
         return self._tool_registry
+
+    def current_feedback_turn(self) -> FeedbackSourceEnvelope | None:
+        """Return the runtime-minted durable user turn active in this engine."""
+        return self._active_feedback_turn
 
     @property
     def config(self) -> AppConfig:
@@ -2888,13 +2902,23 @@ class AgentEngine:
             run_id=recorder.run_id,
         )
 
+        previous_feedback_turn = self._active_feedback_turn
+        self._active_feedback_turn = FeedbackSourceEnvelope(
+            run_id=recorder.run_id,
+            user_message_id=recorder.record.user_message_id,
+            content_sha256=hashlib.sha256(task.encode("utf-8")).hexdigest(),
+            observed_at=recorder.record.started_at,
+        )
         try:
-            result = await self._run_streaming_core(
-                task,
-                publisher,
-                turn_context=turn_context,
-                harness_run_id=recorder.run_id,
-            )
+            try:
+                result = await self._run_streaming_core(
+                    task,
+                    publisher,
+                    turn_context=turn_context,
+                    harness_run_id=recorder.run_id,
+                )
+            finally:
+                self._active_feedback_turn = previous_feedback_turn
         except asyncio.CancelledError as exc:
             await self._finish_streaming_run(
                 recorder=recorder,

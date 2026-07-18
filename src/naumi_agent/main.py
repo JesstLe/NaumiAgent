@@ -2187,6 +2187,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(Markdown(render_doctor_report(report)))
         case "/harness":
             await _run_harness(engine, arg)
+        case "/feedback":
+            await _run_feedback(engine, arg)
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -2735,6 +2737,10 @@ def _print_help() -> None:
             "knowledge|check|trust|untrust]",
             "管理仓库 Harness Profile、离线评测、运行解释、知识与验证检查",
         ),
+        (
+            "/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>",
+            "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
+        ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -2836,6 +2842,60 @@ def _print_help() -> None:
     for cmd, desc in commands:
         console.print(f"  [cyan]{cmd:12s}[/cyan] {desc}")
     console.print()
+
+
+async def _run_feedback(engine: Any, arg: str) -> None:
+    from naumi_agent.evolution.store import EvolutionStoreError
+    from naumi_agent.harness.feedback import (
+        FeedbackIntakeService,
+        build_direct_user_feedback,
+        render_feedback_result,
+    )
+    from naumi_agent.tools.feedback import feedback_model_dimensions
+
+    usage = (
+        "用法：/feedback <correction|defect|preference|cancel|praise> "
+        "<scope> <topic> <摘要>"
+    )
+    try:
+        parts = shlex.split(arg)
+    except ValueError:
+        console.print(usage, style="yellow", markup=False)
+        return
+    if len(parts) < 4:
+        console.print(usage, style="yellow", markup=False)
+        return
+    category, scope, topic = parts[:3]
+    summary = " ".join(parts[3:])
+    if category not in {"correction", "defect", "preference", "cancel", "praise"}:
+        console.print(usage, style="yellow", markup=False)
+        return
+
+    session = await engine.get_or_create_session()
+    provider, model = feedback_model_dimensions(engine)
+    try:
+        observation = build_direct_user_feedback(
+            session_id=session.id,
+            category=category,
+            scope=scope,
+            topic=topic,
+            summary=summary,
+            provider=provider,
+            model=model,
+            platform=sys.platform,
+        )
+        service = getattr(engine, "feedback_intake_service", None)
+        if service is None:
+            service = FeedbackIntakeService()
+        result = await service.ingest(engine.workspace_root, observation)
+    except (EvolutionStoreError, OSError, ValueError):
+        console.print(
+            "反馈未记录：输入不符合稳定分类规则，或用户状态库不可用。",
+            style="yellow",
+            markup=False,
+        )
+        return
+    console.print(Markdown(render_feedback_result(result)))
 
 
 async def _run_harness(engine: Any, arg: str) -> None:

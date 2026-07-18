@@ -15,7 +15,7 @@
 | Session 生命周期 | 未完成 | HAR-06 | 删除/归档/保留与派生数据一致 |
 | Completion 产品闭环 | 部分完成 | HAR-07 | New UI/TUI/恢复使用同一权威回执 |
 | Eval 与 baseline | 未完成 | HAR-08 | 可重复、可比较、有 guardrail |
-| 反馈提升 | 未完成 | HAR-09 | 重复信号只产生可审查 Proposal |
+| 反馈提升 | 部分完成（可信 intake） | HAR-09 | 重复信号只产生可审查 Proposal |
 | 长周期编排 | 未完成 | HAR-10 | lease、心跳、恢复、接管、分片达到 A5 |
 
 ## 2. `13-cli-tui` 覆盖

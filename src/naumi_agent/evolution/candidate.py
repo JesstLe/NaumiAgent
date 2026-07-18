@@ -59,6 +59,8 @@ _FINDING_LABELS = MappingProxyType({
     "syntax_error": "语法错误",
     "tool_contract_error": "工具契约错误",
     "untyped_public_return": "公开函数返回类型缺失",
+    "user_correction": "用户纠正信号",
+    "user_reported_defect": "用户报告缺陷",
     "verification_failure": "机械验证失败",
 })
 
@@ -102,7 +104,11 @@ class CandidateExpectedMetric(_StrictModel):
     name: str
     direction: Literal["decrease", "increase"]
     target: float
-    verifier: Literal["harness_replay", "self_review_static"]
+    verifier: Literal[
+        "harness_replay",
+        "self_review_static",
+        "feedback_recurrence",
+    ]
 
     @model_validator(mode="after")
     def _metric_is_mechanical(self) -> CandidateExpectedMetric:
@@ -316,20 +322,30 @@ def _expected_metrics(
     by_source: dict[str, CandidateExpectedMetric] = {}
     for item in evidence:
         if item.source_kind == "self_review_static":
+            source_key = item.source_kind
             metric = CandidateExpectedMetric(
                 name=f"self_review.{item.finding_code}.count",
                 direction="decrease",
                 target=0,
                 verifier="self_review_static",
             )
+        elif item.source_kind in {"user_feedback", "agent_interpreted_feedback"}:
+            source_key = "feedback"
+            metric = CandidateExpectedMetric(
+                name=f"feedback.{item.finding_code}.recurrence",
+                direction="decrease",
+                target=0,
+                verifier="feedback_recurrence",
+            )
         else:
+            source_key = item.source_kind
             metric = CandidateExpectedMetric(
                 name=f"harness.{item.finding_code}.rate",
                 direction="decrease",
                 target=0,
                 verifier="harness_replay",
             )
-        by_source[item.source_kind] = metric
+        by_source[source_key] = metric
     return tuple(by_source[source] for source in sorted(by_source))
 
 
