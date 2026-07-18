@@ -49,4 +49,8 @@
 - EVO-02.4a 已实现不可执行 Mutation Plan v1：Candidate/Contract/Lease/Snapshot 四重绑定，真实
   baseline blob 扫描，固定 inspect→RED→mutation→guard→GREEN→receipt 顺序，按文件/指标收紧预算，
   并禁止 scope expansion、无关重构、网络与依赖安装。详见 `EVO-02-4a-mutation-plan.md`。
-- EVO-02.5..02.7 尚未实现，因此 EVO-02 整体保持 partial。
+- EVO-02.6a 已前置实现 Static Guard Preflight v1：具体提议内容在写入前经过 protected、dependency、
+  path/symlink、generated/binary、hardcoded secret 与收紧预算门禁；Receipt 与内容摘要绑定，bypass
+  不可覆盖且仍不授权写入。详见 `EVO-02-6a-static-guard-preflight.md`。
+- EVO-02.5 Patch Writer、02.6 postflight/完整 diff guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体
+  保持 partial。

@@ -27,6 +27,11 @@ from naumi_agent.evolution.mutation_plans import (
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.static_guards import (
+    EvolutionStaticGuard,
+    EvolutionStaticGuardPolicy,
+    EvolutionStaticGuardReceipt,
+)
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.tasks.store import TaskStore
@@ -388,11 +393,9 @@ def _snapshot_builder(
 async def test_source_snapshot_binds_clean_tree_profile_config_and_tools(
     tmp_path: Path,
 ) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(
-            tmp_path,
-            profile_text="schema_version: 1\n",
-        )
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(
+        tmp_path,
+        profile_text="schema_version: 1\n",
     )
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
@@ -418,9 +421,7 @@ async def test_source_snapshot_binds_clean_tree_profile_config_and_tools(
 async def test_source_snapshot_rejects_dirty_worktree_and_missing_tool(
     tmp_path: Path,
 ) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(tmp_path)
-    )
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(tmp_path)
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     missing_profile = _snapshot_builder(
         workspace,
@@ -446,9 +447,7 @@ async def test_source_snapshot_rejects_dirty_worktree_and_missing_tool(
 
 @pytest.mark.asyncio
 async def test_source_snapshot_rejects_branch_binding_drift(tmp_path: Path) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(tmp_path)
-    )
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(tmp_path)
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     with pytest.raises(ValueError, match="受管 Lease 存储目录"):
         _snapshot_builder(workspace, tmp_path / "other-worktrees").capture(
@@ -469,8 +468,8 @@ async def test_source_snapshot_rejects_branch_binding_drift(tmp_path: Path) -> N
 async def test_source_snapshot_rejects_invalid_profile_and_digest_tampering(
     tmp_path: Path,
 ) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(tmp_path, profile_text="schema_version: nope\n")
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(
+        tmp_path, profile_text="schema_version: nope\n"
     )
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     with pytest.raises(ValueError, match="Profile 无效"):
@@ -516,8 +515,8 @@ def _mutation_planner(
 async def test_mutation_plan_is_deterministic_bounded_and_test_first(
     tmp_path: Path,
 ) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(tmp_path, profile_text="schema_version: 1\n")
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(
+        tmp_path, profile_text="schema_version: 1\n"
     )
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
@@ -566,9 +565,7 @@ async def test_mutation_plan_is_deterministic_bounded_and_test_first(
 
 @pytest.mark.asyncio
 async def test_mutation_plan_rejects_candidate_and_source_drift(tmp_path: Path) -> None:
-    workspace, _, contract, _worktrees, _store, manager, _task_id = (
-        await _lease_fixture(tmp_path)
-    )
+    workspace, _, contract, _worktrees, _store, manager, _task_id = await _lease_fixture(tmp_path)
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     snapshot = _snapshot_builder(
         workspace,
@@ -654,3 +651,213 @@ async def test_mutation_plan_rejects_manifest_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="plan_sha256"):
         EvolutionMutationPlan.model_validate(payload)
+
+
+async def _guard_fixture(tmp_path: Path):
+    workspace, target, contract, _, _, manager, _ = await _lease_fixture(
+        tmp_path,
+        profile_text="schema_version: 1\n",
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+    snapshot = snapshot_builder.capture(contract, lease)
+    plan = await _mutation_planner(tmp_path, workspace, lease.worktree_path).plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+    guard = EvolutionStaticGuard(snapshot_builder=snapshot_builder)
+    return workspace, target, contract, lease, snapshot, plan, guard
+
+
+@pytest.mark.asyncio
+async def test_static_guard_passes_exact_safe_change_without_writing(
+    tmp_path: Path,
+) -> None:
+    workspace, target, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    before_main = target.read_bytes()
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before_isolated = isolated.read_bytes()
+    proposed = "def render_footer():\n    return 'fixed'\n"
+
+    first, second = await asyncio.gather(
+        *(
+            guard.preflight(
+                contract=contract,
+                lease=lease,
+                source_snapshot=snapshot,
+                mutation_plan=plan,
+                proposed_contents={plan.planned_files[0].path: proposed},
+            )
+            for _ in range(2)
+        )
+    )
+
+    assert first == second
+    assert first.preflight_passed is True
+    assert first.violations == ()
+    assert first.guard_id == f"evg_{first.receipt_sha256[:24]}"
+    assert first.changes[0].operation == "modify"
+    assert first.changes[0].changed_lines > 0
+    assert first.total_changed_files == 1
+    assert first.total_changed_lines <= plan.max_changed_lines
+    assert first.bypass_can_override is False
+    assert first.write_authorized is False
+    assert first.execution_ready is False
+    assert target.read_bytes() == before_main
+    assert isolated.read_bytes() == before_isolated
+    assert _git(workspace, "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "code"),
+    [
+        ('api_key = "Q7vN2pL9xK4mR8sT6wY1"\n', "hardcoded_secret"),
+        ("# @generated - DO NOT EDIT\nvalue = 1\n", "generated_file"),
+        (b"\x00binary", "binary_content"),
+    ],
+)
+async def test_static_guard_blocks_secret_generated_and_binary_content(
+    tmp_path: Path,
+    content: str | bytes,
+    code: str,
+) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: content},
+    )
+
+    assert receipt.preflight_passed is False
+    assert code in {item.code for item in receipt.violations}
+    serialized = receipt.model_dump_json()
+    assert "Q7vN2pL9xK4mR8sT6wY1" not in serialized
+    assert "@generated" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_static_guard_rejects_oversized_content_without_diffing(tmp_path: Path) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={
+            plan.planned_files[0].path: b"x" * (2 * 1024 * 1024 + 1),
+        },
+    )
+
+    assert receipt.preflight_passed is False
+    assert "file_too_large" in {item.code for item in receipt.violations}
+    assert receipt.changes[0].size_bytes == 2 * 1024 * 1024 + 1
+    assert receipt.changes[0].changed_lines == 0
+
+
+@pytest.mark.asyncio
+async def test_static_guard_blocks_scope_and_line_budget_expansion(tmp_path: Path) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    oversized = "\n".join(f"line_{index} = {index}" for index in range(260)) + "\n"
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={
+            plan.planned_files[0].path: oversized,
+            "src/naumi_agent/ui/unapproved.py": "value = 1\n",
+        },
+    )
+
+    codes = {item.code for item in receipt.violations}
+    assert receipt.preflight_passed is False
+    assert "scope_expansion" in codes
+    assert "file_budget_exceeded" in codes
+    assert "line_budget_exceeded" in codes
+
+
+def test_static_guard_policy_blocks_protected_dependency_and_generated_paths(
+    tmp_path: Path,
+) -> None:
+    policy = EvolutionStaticGuardPolicy()
+    protected = policy.inspect_path(tmp_path, "src/naumi_agent/safety/permissions.py")
+    dependency = policy.inspect_path(tmp_path, "pyproject.toml")
+    generated = policy.inspect_path(tmp_path, "frontend/terminal-ui/dist/app.min.js")
+
+    assert "protected_path" in {item.code for item in protected}
+    assert "dependency_change" in {item.code for item in dependency}
+    assert "generated_file" in {item.code for item in generated}
+    env_reference = policy.inspect_content(
+        "src/naumi_agent/config/example.py",
+        b'api_key_ref = "{env:BRAVE_SEARCH_API_KEY}"\n',
+    )
+    assert "hardcoded_secret" not in {item.code for item in env_reference}
+    assert len(policy.digest) == 64
+
+
+@pytest.mark.asyncio
+async def test_static_guard_reports_symlink_and_source_drift(tmp_path: Path) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    target = Path(lease.worktree_path, plan.planned_files[0].path)
+    target.unlink()
+    outside = tmp_path / "outside.py"
+    outside.write_text("value = 1\n", encoding="utf-8")
+    target.symlink_to(outside)
+
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: "value = 2\n"},
+    )
+
+    codes = {item.code for item in receipt.violations}
+    assert receipt.preflight_passed is False
+    assert "source_drift" in codes
+    assert "path_escape" in codes
+    assert "symlink" in codes
+    assert "baseline_mismatch" in codes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsafe_path", ["../outside.py", "/tmp/outside.py", "C:\\outside.py"])
+async def test_static_guard_returns_typed_receipt_for_unsafe_paths(
+    tmp_path: Path,
+    unsafe_path: str,
+) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={unsafe_path: "value = 2\n"},
+    )
+
+    assert receipt.preflight_passed is False
+    assert "path_escape" in {item.code for item in receipt.violations}
+    assert receipt.changes[0].path.startswith("<invalid-path:")
+    assert unsafe_path not in receipt.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_static_guard_receipt_rejects_tampering(tmp_path: Path) -> None:
+    _, _, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: "value = 2\n"},
+    )
+    payload = receipt.model_dump(mode="json")
+    payload["changes"][0]["after_sha256"] = "0" * 64
+
+    with pytest.raises(ValidationError, match="changes_sha256"):
+        EvolutionStaticGuardReceipt.model_validate(payload)

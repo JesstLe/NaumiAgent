@@ -32,6 +32,13 @@ if TYPE_CHECKING:
         MutationObjective,
         MutationPlanStage,
     )
+    from naumi_agent.evolution.static_guards import (
+        EvolutionStaticGuard,
+        EvolutionStaticGuardPolicy,
+        EvolutionStaticGuardReceipt,
+        StaticGuardChangeFact,
+        StaticGuardViolation,
+    )
     from naumi_agent.evolution.store import (
         EvolutionCandidateEvent,
         EvolutionCandidateStore,
@@ -61,6 +68,9 @@ __all__ = [
     "EvolutionExperimentSourceSnapshotBuilder",
     "EvolutionMutationPlan",
     "EvolutionMutationPlanner",
+    "EvolutionStaticGuard",
+    "EvolutionStaticGuardPolicy",
+    "EvolutionStaticGuardReceipt",
     "ExperimentBudget",
     "ExperimentLeaseConflictError",
     "ExperimentLeaseState",
@@ -69,6 +79,8 @@ __all__ = [
     "MutationFileFact",
     "MutationObjective",
     "MutationPlanStage",
+    "StaticGuardChangeFact",
+    "StaticGuardViolation",
     "EvolutionStoreConflictError",
     "EvolutionStoreCorruptionError",
     "EvolutionStoreError",
@@ -114,6 +126,13 @@ def __getattr__(name: str) -> object:
         "MutationObjective",
         "MutationPlanStage",
     }
+    static_guard_exports = {
+        "EvolutionStaticGuard",
+        "EvolutionStaticGuardPolicy",
+        "EvolutionStaticGuardReceipt",
+        "StaticGuardChangeFact",
+        "StaticGuardViolation",
+    }
     if name in candidate_exports:
         module_name = "candidate"
     elif name in evidence_exports:
@@ -128,6 +147,8 @@ def __getattr__(name: str) -> object:
         module_name = "experiment_snapshots"
     elif name in mutation_plan_exports:
         module_name = "mutation_plans"
+    elif name in static_guard_exports:
+        module_name = "static_guards"
     else:
         module_name = "store"
     module = import_module(f"naumi_agent.evolution.{module_name}")
