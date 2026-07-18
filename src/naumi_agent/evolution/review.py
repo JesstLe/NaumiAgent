@@ -10,6 +10,10 @@ from naumi_agent.evolution.eligibility import (
     CandidateEligibilityAssessment,
     assess_candidate_eligibility,
 )
+from naumi_agent.evolution.proposal import (
+    EvolutionProposalPreview,
+    generate_proposal_preview,
+)
 from naumi_agent.evolution.store import (
     EvolutionCandidateEvent,
     EvolutionCandidateStore,
@@ -67,6 +71,7 @@ class EvolutionReviewItem:
     evidence_refs: tuple[str, ...]
     eligibility: CandidateEligibilityAssessment
     aggregation: CandidateAggregation | None
+    proposal: EvolutionProposalPreview | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +208,39 @@ def _render_detail(snapshot: EvolutionReviewSnapshot) -> str:
         )
         for check in item.eligibility.checks
     )
+    if item.proposal is not None:
+        proposal = item.proposal
+        lines.extend([
+            "",
+            f"## Proposal Preview · `{proposal.proposal_kind}`",
+            "",
+            f"- ID：`{proposal.proposal_id}`",
+            f"- 标题：{_escape(proposal.title)}",
+            f"- 分类依据：`{proposal.classification_reason}`",
+            f"- 影响范围：`{_escape(proposal.impact_scope)}`",
+            f"- 风险：`{proposal.risk_level}`",
+            "- 可执行：否 · 已入队：否 · 必须人工审阅：是",
+        ])
+        if proposal.intended_files:
+            lines.append(
+                "- 目标文件："
+                + ", ".join(f"`{_escape(path)}`" for path in proposal.intended_files)
+            )
+        lines.extend(["", "### Proposal 验证计划", ""])
+        lines.extend(
+            (
+                f"- `{step.metric_name}` {step.direction} {step.target:g} "
+                f"via `{step.verifier}`：{_escape(step.procedure)}"
+            )
+            for step in proposal.validation_plan
+        )
+    elif item.eligibility.decision != "review_ready":
+        lines.extend([
+            "",
+            "## Proposal Preview",
+            "",
+            "当前 Candidate 未达到 review_ready，未生成 Proposal。",
+        ])
     lines.extend(["", "## Evidence 引用", ""])
     lines.extend(f"- `{_escape(ref)}`" for ref in item.evidence_refs[:20])
     if len(item.evidence_refs) > 20:
@@ -264,6 +302,7 @@ def _review_item(
         ),
         eligibility=assess_candidate_eligibility(draft),
         aggregation=aggregate_candidate(draft) if include_refs else None,
+        proposal=generate_proposal_preview(stored) if include_refs else None,
     )
 
 

@@ -1732,6 +1732,22 @@ function normalizeEvolutionItem(value, detail) {
     throw new Error("evolution/review item 不得授予实验资格");
   }
   if (!detail) return normalized;
+  const proposal = item.proposal == null ? null : normalizeEvolutionProposal(item.proposal);
+  if (normalized.review_ready && proposal === null) {
+    throw new Error("evolution/review review_ready detail 必须包含 Proposal Preview");
+  }
+  if (!normalized.review_ready && proposal !== null) {
+    throw new Error("evolution/review 未就绪 Candidate 不得包含 Proposal Preview");
+  }
+  if (proposal && (
+    proposal.source.candidate_id !== candidateId
+    || proposal.source.candidate_revision !== normalized.revision
+    || proposal.source.occurrence_count !== normalized.occurrence_count
+    || proposal.impact_scope !== normalized.scope
+    || proposal.risk_level !== normalized.risk
+  )) {
+    throw new Error("evolution/review Proposal Preview 与 Candidate 不一致");
+  }
   return {
     ...normalized,
     status: harnessText(item.status, "evolution/review item.status"),
@@ -1750,6 +1766,160 @@ function normalizeEvolutionItem(value, detail) {
       detail: harnessText(check.detail, "evolution/review check.detail"),
     })),
     aggregation: normalizeEvolutionAggregation(item.aggregation),
+    proposal,
+  };
+}
+
+function normalizeEvolutionProposal(value) {
+  const item = harnessObject(value, "evolution/review proposal");
+  const source = harnessObject(item.source, "evolution/review proposal.source");
+  const executable = harnessBoolean(item.executable, "evolution/review proposal.executable");
+  const experimentEligible = harnessBoolean(
+    item.experiment_eligible,
+    "evolution/review proposal.experiment_eligible",
+  );
+  const humanReview = harnessBoolean(
+    item.requires_human_review,
+    "evolution/review proposal.requires_human_review",
+  );
+  if (executable || experimentEligible || !humanReview || item.state !== "preview") {
+    throw new Error("evolution/review Proposal Preview authority contract 无效");
+  }
+  const proposalId = harnessText(item.proposal_id, "evolution/review proposal.proposal_id");
+  if (!/^evp_[0-9a-f]{24}$/.test(proposalId)) {
+    throw new Error("evolution/review proposal_id 无效");
+  }
+  const schemaVersion = harnessNonnegativeInteger(
+      item.schema_version,
+      "evolution/review proposal.schema_version",
+  );
+  if (schemaVersion !== 1) throw new Error("evolution/review Proposal schema_version 不兼容");
+  const generatorVersion = harnessChoice(
+    item.generator_version,
+    "evolution/review proposal.generator_version",
+    new Set(["evolution-proposal-v1"]),
+  );
+  const proposalKind = harnessChoice(
+    item.proposal_kind,
+    "evolution/review proposal.proposal_kind",
+    new Set(["knowledge", "profile", "prompt", "tool", "test", "code"]),
+  );
+  const candidateId = harnessText(
+    source.candidate_id,
+    "evolution/review proposal.source.candidate_id",
+  );
+  const candidateRevision = harnessNonnegativeInteger(
+    source.candidate_revision,
+    "evolution/review proposal.source.candidate_revision",
+  );
+  const candidateSha256 = harnessText(
+    source.candidate_sha256,
+    "evolution/review proposal.source.candidate_sha256",
+  );
+  const occurrenceCount = harnessNonnegativeInteger(
+    source.occurrence_count,
+    "evolution/review proposal.source.occurrence_count",
+  );
+  if (!/^evc_[0-9a-f]{24}$/.test(candidateId) || !/^[0-9a-f]{64}$/.test(candidateSha256)) {
+    throw new Error("evolution/review Proposal source identity 无效");
+  }
+  if (candidateRevision < 1 || occurrenceCount < 1) {
+    throw new Error("evolution/review Proposal source revision/count 无效");
+  }
+  const expectedProposalId = `evp_${createHash("sha256").update(JSON.stringify({
+    candidate_id: candidateId,
+    candidate_revision: candidateRevision,
+    candidate_sha256: candidateSha256,
+    generator_version: generatorVersion,
+    proposal_kind: proposalKind,
+  })).digest("hex").slice(0, 24)}`;
+  if (proposalId !== expectedProposalId) {
+    throw new Error("evolution/review proposal_id 与 source snapshot 不一致");
+  }
+  const validationPlan = harnessObjectArray(
+    item.validation_plan,
+    "evolution/review proposal.validation_plan",
+    8,
+  ).map((step) => ({
+    metric_name: evolutionProposalText(step.metric_name, "evolution/review proposal.metric_name", 128),
+    direction: harnessChoice(
+      step.direction,
+      "evolution/review proposal.direction",
+      new Set(["decrease", "increase"]),
+    ),
+    target: harnessFiniteNumber(
+      step.target,
+      "evolution/review proposal.target",
+    ),
+    verifier: harnessChoice(
+      step.verifier,
+      "evolution/review proposal.verifier",
+      new Set(["harness_replay", "self_review_static", "feedback_recurrence"]),
+    ),
+    procedure: evolutionProposalText(step.procedure, "evolution/review proposal.procedure", 1_000),
+  }));
+  const reviewNotes = harnessTextArray(
+    item.review_notes,
+    "evolution/review proposal.review_notes",
+    8,
+  );
+  if (!validationPlan.length || !reviewNotes.length) {
+    throw new Error("evolution/review Proposal validation/review notes 不能为空");
+  }
+  return {
+    schema_version: schemaVersion,
+    proposal_id: proposalId,
+    generator_version: generatorVersion,
+    proposal_kind: proposalKind,
+    classification_reason: evolutionProposalText(
+      item.classification_reason,
+      "evolution/review proposal.classification_reason",
+      128,
+    ),
+    title: evolutionProposalText(item.title, "evolution/review proposal.title", 300),
+    summary: evolutionProposalText(item.summary, "evolution/review proposal.summary", 2_000),
+    impact_scope: evolutionProposalText(
+      item.impact_scope,
+      "evolution/review proposal.impact_scope",
+      1_024,
+    ),
+    intended_files: evolutionProposalTextArray(
+      item.intended_files,
+      "evolution/review proposal.intended_files",
+      16,
+      1_024,
+    ),
+    validation_plan: validationPlan,
+    risk_level: harnessChoice(
+      item.risk_level,
+      "evolution/review proposal.risk_level",
+      new Set(["low", "medium", "high", "critical"]),
+    ),
+    review_notes: reviewNotes,
+    source: {
+      candidate_id: candidateId,
+      candidate_revision: candidateRevision,
+      candidate_sha256: candidateSha256,
+      occurrence_count: occurrenceCount,
+      last_observed_at: harnessText(
+        source.last_observed_at,
+        "evolution/review proposal.source.last_observed_at",
+      ),
+      aggregation_policy: harnessChoice(
+        source.aggregation_policy,
+        "evolution/review proposal.source.aggregation_policy",
+        new Set(["candidate-aggregation-v1"]),
+      ),
+      trend: harnessChoice(
+        source.trend,
+        "evolution/review proposal.source.trend",
+        new Set(["new", "increasing", "stable", "decreasing", "insufficient"]),
+      ),
+    },
+    requires_human_review: humanReview,
+    executable,
+    experiment_eligible: experimentEligible,
+    state: "preview",
   };
 }
 
@@ -1964,6 +2134,25 @@ function harnessNonnegativeFiniteNumber(value, name) {
     throw new Error(`${name} 必须是非负有限数值`);
   }
   return value;
+}
+
+function harnessFiniteNumber(value, name) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${name} 必须是有限数值`);
+  }
+  return value;
+}
+
+function evolutionProposalText(value, name, limit) {
+  if (typeof value !== "string") throw new Error(`${name} 必须是字符串`);
+  return value.trim().slice(0, limit);
+}
+
+function evolutionProposalTextArray(value, name, countLimit, textLimit) {
+  if (!Array.isArray(value)) throw new Error(`${name} 必须是数组`);
+  return value.slice(0, countLimit).map((entry) => (
+    evolutionProposalText(entry, name, textLimit)
+  ));
 }
 
 function harnessPositiveInteger(value, name) {

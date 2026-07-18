@@ -50,6 +50,26 @@ function detailLines(item, rawEvents) {
     color(ANSI.dim, `来源 · ${item.source_kinds.join(", ") || "-"}`),
     color(ANSI.dim, `Provider/Model/Platform · ${item.providers.join(", ") || "-"} / ${item.models.join(", ") || "-"} / ${item.platforms.join(", ") || "-"}`),
   ];
+  if (item.proposal) {
+    const proposal = item.proposal;
+    lines.push(
+      color(ANSI.cyan, `── Proposal Preview · ${proposal.proposal_kind}`),
+      color(ANSI.yellow, `${proposal.title} · ${proposal.risk_level}`),
+      color(ANSI.dim, `${proposal.proposal_id} · ${proposal.classification_reason}`),
+      `Scope · ${compactText(proposal.impact_scope, 1000)}`,
+      color(ANSI.dim, `目标文件 · ${proposal.intended_files.join(", ") || "尚未确定"}`),
+      color(ANSI.yellow, "不可执行 · 未入队 · 必须人工审阅"),
+      color(ANSI.cyan, `验证计划 · ${proposal.validation_plan.length}`),
+    );
+    for (const step of proposal.validation_plan) {
+      lines.push(
+        color(ANSI.dim, `• ${step.metric_name} ${step.direction} ${step.target} via ${step.verifier}`),
+        color(ANSI.dim, `  ${compactText(step.procedure, 1000)}`),
+      );
+    }
+  } else {
+    lines.push(color(ANSI.yellow, "── Proposal Preview · 当前证据或安全 Gate 不允许生成"));
+  }
   const aggregation = item.aggregation;
   if (aggregation) {
     lines.push(

@@ -74,6 +74,7 @@ def _item_payload(item: EvolutionReviewItem, *, detail: bool) -> dict[str, Any]:
                 for check in item.eligibility.checks[:16]
             ],
             "aggregation": _aggregation_payload(item),
+            "proposal": _proposal_payload(item),
         })
     return payload
 
@@ -118,6 +119,31 @@ def _dimension_payload(values) -> list[dict[str, Any]]:
         {"value": item.value, "count": item.count, "percentage": item.percentage}
         for item in values[:20]
     ]
+
+
+def _proposal_payload(item: EvolutionReviewItem) -> dict[str, Any] | None:
+    value = item.proposal
+    if value is None:
+        return None
+    return {
+        "schema_version": value.schema_version,
+        "proposal_id": value.proposal_id,
+        "generator_version": value.generator_version,
+        "proposal_kind": value.proposal_kind,
+        "classification_reason": value.classification_reason,
+        "title": value.title,
+        "summary": value.summary,
+        "impact_scope": value.impact_scope,
+        "intended_files": list(value.intended_files),
+        "validation_plan": [step.model_dump(mode="json") for step in value.validation_plan],
+        "risk_level": value.risk_level,
+        "review_notes": list(value.review_notes),
+        "source": value.source.model_dump(mode="json"),
+        "requires_human_review": True,
+        "executable": False,
+        "experiment_eligible": False,
+        "state": value.state,
+    }
 
 
 __all__ = ["evolution_review_payload"]

@@ -53,6 +53,9 @@ async def test_typed_payload_is_bounded_private_and_contains_policy(tmp_path: Pa
     assert payload["selected"]["experiment_eligible"] is False  # type: ignore[index]
     assert payload["selected"]["aggregation"]["policy_version"] == "candidate-aggregation-v1"  # type: ignore[index]
     assert payload["selected"]["aggregation"]["total_count"] == 2  # type: ignore[index]
+    assert payload["selected"]["proposal"]["proposal_kind"] == "code"  # type: ignore[index]
+    assert payload["selected"]["proposal"]["executable"] is False  # type: ignore[index]
+    assert payload["selected"]["proposal"]["state"] == "preview"  # type: ignore[index]
     assert len(payload["events"]) == 2
     assert "never-render" not in json.dumps(payload, ensure_ascii=False)
 
@@ -119,6 +122,7 @@ async def test_real_bridge_emits_typed_read_only_detail(tmp_path: Path) -> None:
         )
         assert payload["selected"]["candidate_id"] == candidate_id
         assert payload["selected"]["decision"] == "review_ready"
+        assert payload["selected"]["proposal"]["proposal_id"].startswith("evp_")
         assert payload["read_only"] is True
         assert await store.list_events(tmp_path, candidate_id) == before
     finally:
