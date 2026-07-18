@@ -63,6 +63,5 @@ TUI mount 后启动非阻塞 recovery worker：
   `/send-now` 不改变 interaction authority 的排序；
 - TUI Modal 只显示问题 deadline 结果，尚未显示倒计时；跨平台窄终端布局由 UI-16 继续验证。
 
-UI-18.4 仍保持 partial。HAR-10.3a 已交付 New UI 普通对话的安全边界提升；下一步应在
-`UI-18.4c Goal interaction state/actions` 与 `HAR-10.3b durable queue authority` 之间按用户价值和依赖
-选择一个最小切片。
+UI-18.4 仍保持 partial。HAR-10.3a 与 UI-18.4c 已交付；下一步应在 UI-18.4d takeover/details、
+`HAR-10.3b durable queue authority` 与其他路线之间按用户价值和依赖选择一个最小切片。

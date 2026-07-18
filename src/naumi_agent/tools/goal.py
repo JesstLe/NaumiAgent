@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -263,6 +264,89 @@ class GoalUpdateTool(Tool):
         return f"✅ 目标{label}。\n\n{format_goal(updated)}"
 
 
+class GoalInteractionCancelTool(Tool):
+    """Cancel one pending Pursuit interaction through Harness authority."""
+
+    def __init__(
+        self,
+        store: GoalStore,
+        interaction_authority: Any,
+        *,
+        workspace_root: str | Path,
+    ) -> None:
+        self._store = store
+        self._authority = interaction_authority
+        self._workspace_root = Path(workspace_root).expanduser().resolve()
+
+    @property
+    def name(self) -> str:
+        return "goal_interaction_cancel"
+
+    @property
+    def description(self) -> str:
+        return "取消 Goal/Pursuit 正在等待的持久用户交互。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            user_facing_name="取消 Goal 用户交互",
+            search_hint="goal pursuit interaction cancel pending user request",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "interaction_id": {
+                    "type": "string",
+                    "pattern": r"^ask-[A-Za-z0-9._:-]{1,128}$",
+                    "description": "Goal 页面展示的持久交互 ID",
+                },
+            },
+            "required": ["interaction_id"],
+        }
+
+    async def execute(self, *, interaction_id: str, **kwargs: Any) -> str:
+        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
+            return "⚠️ interaction_id 格式无效。"
+        if self._authority is None:
+            return "⚠️ 持久交互 authority 不可用，取消未提交。"
+        try:
+            record = await self._authority.get_interaction(
+                workspace_root=self._workspace_root,
+                interaction_id=interaction_id,
+            )
+        except Exception:
+            return "⚠️ 持久交互读取失败，请运行 `/doctor`。"
+        if record is None:
+            return f"⚠️ 用户交互不存在：`{interaction_id}`。"
+        try:
+            linked_runs = {
+                goal.pursuit_run_id
+                for goal in self._store.list(include_finished=True, limit=50)
+                if goal.pursuit_run_id
+            }
+        except GoalStoreError:
+            return "⚠️ Goal 状态读取失败，请运行 `/doctor`。"
+        if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
+            return "⚠️ 该交互不属于当前 Goal 页面中的 Pursuit，拒绝取消。"
+        if record.state != "pending":
+            return f"ℹ️ 用户交互已是终态：{record.state}。"
+        try:
+            cancelled = await self._authority.cancel_interaction(
+                workspace_root=self._workspace_root,
+                interaction_id=record.interaction_id,
+                expected_sequence=record.sequence,
+                now=datetime.now(UTC).isoformat(),
+            )
+        except Exception:
+            return "⚠️ 用户交互在取消前已变化，请刷新 Goal 页面重试。"
+        return f"✅ 已取消用户交互 `{cancelled.interaction_id}`。"
+
+
 class GoalPursueTool(Tool):
     def __init__(
         self,
@@ -334,5 +418,10 @@ def create_goal_tools(
             workspace_root=workspace_root,
         ),
         GoalUpdateTool(store),
+        GoalInteractionCancelTool(
+            store,
+            recovery_authority,
+            workspace_root=workspace_root or store.base_dir.parent,
+        ),
         GoalPursueTool(store, pursuit_tool_getter),
     ]

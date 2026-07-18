@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -3979,6 +3980,17 @@ async def _run_goal(engine: Any, arg: str) -> None:
             return
         tool_name = "goal_pursue"
         kwargs = {}
+    elif subcommand == "interaction":
+        action, _, interaction_id = remainder.partition(" ")
+        if action.lower() != "cancel" or not re.fullmatch(
+            r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id.strip()
+        ):
+            console.print(
+                "[yellow]用法: /goal interaction cancel <interaction-id>[/yellow]"
+            )
+            return
+        tool_name = "goal_interaction_cancel"
+        kwargs = {"interaction_id": interaction_id.strip()}
     else:
         tool_name = "goal_create"
         kwargs = {"objective": normalized}

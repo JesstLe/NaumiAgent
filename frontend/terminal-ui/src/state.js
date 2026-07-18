@@ -621,6 +621,18 @@ export function reduceServerEvent(state, record) {
       break;
     case "interaction/resolved":
       handleInteractionResolved(state, payload);
+      if (state.goalPanel.snapshot?.interactions) {
+        const historical = state.goalPanel.snapshot.interactions.find(
+          (item) => item.interaction_id === String(payload.request_id ?? ""),
+        );
+        if (historical) {
+          historical.state = String(payload.status ?? historical.state);
+          historical.can_cancel = false;
+        }
+      }
+      if (payload.status === "cancelled") {
+        pushSystemMessage(state, "Goal 交互", payload.reason || "用户交互已取消。", "info");
+      }
       break;
     case "permission/grants_changed":
       pushSystemMessage(
@@ -2474,6 +2486,12 @@ export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
+  }
+  const interactionCancel = commandText.match(
+    /^\/goal\s+interaction\s+cancel\s+(ask-[A-Za-z0-9._:-]{1,128})$/i,
+  );
+  if (interactionCancel) {
+    return send("interaction_cancel", { interaction_id: interactionCancel[1] });
   }
   const harnessBatch = parseHarnessEvalBatchCommand(commandText);
   if (harnessBatch) {

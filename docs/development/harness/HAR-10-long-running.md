@@ -51,7 +51,8 @@
     stable checkpoint ref 和 answered/expired resume reconcile；见
     [设计](HAR-10-6b-interaction-runtime-integration.md)；
   - UI-18.4b 已让 Textual TUI 复用相同 durable adapter、实时 timeout 与启动 takeover/replay；
-  - 未完成：Goal interaction 状态页、显式 cancel、cursor/优先级与跨 Store 原子提交。
+  - UI-18.4c 已交付 Goal interaction ledger、sequence-fenced 显式 cancel 和 New UI/CLI/TUI 动作闭环；
+  - 未完成：手动 takeover、cursor/优先级与跨 Store 原子提交。
 - HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域

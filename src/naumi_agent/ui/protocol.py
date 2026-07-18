@@ -68,6 +68,7 @@ class ClientEventType(StrEnum):
     SET_REASONING = "set_reasoning"
     PERMISSION_RESPONSE = "permission_response"
     INTERACTION_RESPONSE = "interaction_response"
+    INTERACTION_CANCEL = "interaction_cancel"
     PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
     GOAL_PANEL = "goal_panel"
@@ -509,6 +510,12 @@ def _normalize_client_payload(
 
     if event_type == ClientEventType.INTERACTION_RESPONSE:
         return _normalize_interaction_response_payload(payload)
+
+    if event_type == ClientEventType.INTERACTION_CANCEL:
+        interaction_id = str(payload.get("interaction_id") or "").strip()
+        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
+            raise ValueError("取消交互必须提供合法 interaction_id。")
+        return {"interaction_id": interaction_id}
 
     if event_type == ClientEventType.PERMISSION_REVOKE:
         grant_id = str(payload.get("grant_id") or "").strip()

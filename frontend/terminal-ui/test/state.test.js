@@ -1856,15 +1856,45 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
       warnings: [],
       truncated: false,
       include_finished: true,
+      interactions: [{
+        interaction_id: "ask-goal-1",
+        pursuit_run_id: "pursuit_1",
+        state: "pending",
+        sequence: 1,
+        header: "继续方式",
+        question: "是否继续执行？",
+        created_at: "now",
+        expires_at: "later",
+        updated_at: "now",
+        can_cancel: true,
+      }],
     },
   });
   assert.equal(state.goalPanel.loading, false);
   assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /完成可视化 Goal 页面/);
   assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /恢复健康 · 需要核对/);
   assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /stale_preparing/);
+  assert.match(stripAnsi(renderScreen(state, 100, 30).join("\n")), /ask-goal-1 · 等待回答/);
+
+  handleSubmitText(state, "/goal interaction cancel ask-goal-1", send);
+  assert.deepEqual(sent[1], {
+    type: "interaction_cancel",
+    payload: { interaction_id: "ask-goal-1" },
+  });
+  reduceServerEvent(state, {
+    type: "interaction/resolved",
+    request_id: "cancel-goal-1",
+    payload: {
+      request_id: "ask-goal-1",
+      status: "cancelled",
+      reason: "用户已取消。",
+    },
+  });
+  assert.equal(state.goalPanel.snapshot.interactions[0].state, "cancelled");
+  assert.equal(state.goalPanel.snapshot.interactions[0].can_cancel, false);
 
   assert.equal(handleGoalPanelKey(state, "r", send), true);
-  assert.deepEqual(sent[1], {
+  assert.deepEqual(sent[2], {
     type: "goal_panel",
     payload: { limit: 20, include_finished: true },
   });
@@ -1874,7 +1904,7 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   assert.equal(state.followTail, false);
 
   handleSubmitText(state, "/goal create 新目标", send);
-  assert.deepEqual(sent[2], { type: "submit", payload: { text: "/goal create 新目标" } });
+  assert.deepEqual(sent[3], { type: "submit", payload: { text: "/goal create 新目标" } });
 });
 
 test("evolution command opens typed review route and navigates to detail", () => {

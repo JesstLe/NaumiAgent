@@ -41,6 +41,7 @@ from naumi_agent.harness.heartbeat import (
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
     answer_interaction,
+    cancel_interaction,
     expire_interaction,
     takeover_interaction,
 )
@@ -2451,6 +2452,59 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法列出待回答用户交互。") from exc
 
+    async def list_interactions(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str | None = None,
+        subject_ids: Sequence[str] = (),
+        limit: int = 50,
+    ) -> tuple[HarnessInteractionRecord, ...]:
+        """Return a bounded newest-first interaction history without mutation."""
+        workspace = _canonical_workspace(workspace_root)
+        if not 1 <= limit <= 100:
+            raise ValueError("interaction limit 必须在 1..100 之间。")
+        kind = _coerce_run_kind(subject_kind) if subject_kind is not None else None
+        if len(subject_ids) > 50:
+            raise ValueError("interaction subject_ids 最多 50 项。")
+        subjects = tuple(dict.fromkeys(
+            _normalize_run_lease_id(value, field="subject_id")
+            for value in subject_ids
+        ))
+        if subjects and kind is None:
+            raise ValueError("按 subject_ids 查询时必须同时提供 subject_kind。")
+        if not self._db_path.is_file():
+            return ()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                query = (
+                    "SELECT interaction_id FROM harness_interactions "
+                    "WHERE workspace_root = ?"
+                )
+                params: list[object] = [workspace]
+                if kind is not None:
+                    query += " AND subject_kind = ?"
+                    params.append(kind.value)
+                if subjects:
+                    query += f" AND subject_id IN ({','.join('?' for _ in subjects)})"
+                    params.extend(subjects)
+                query += " ORDER BY rowid DESC LIMIT ?"
+                params.append(limit)
+                rows = await (await db.execute(query, tuple(params))).fetchall()
+                records = []
+                for row in rows:
+                    record = await self._get_interaction_with_connection(
+                        db, workspace, str(row["interaction_id"]),
+                    )
+                    if record is not None:
+                        records.append(record)
+                return tuple(records)
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法列出持久用户交互历史。") from exc
+
     async def takeover_interaction(
         self,
         *,
@@ -2512,6 +2566,21 @@ class HarnessStore:
             interaction_id=interaction_id,
             expected_sequence=expected_sequence,
             transition=lambda record: expire_interaction(record, now=now),
+        )
+
+    async def cancel_interaction(
+        self,
+        *,
+        workspace_root: str | Path,
+        interaction_id: str,
+        expected_sequence: int,
+        now: str,
+    ) -> HarnessInteractionRecord:
+        return await self._transition_interaction(
+            workspace_root=workspace_root,
+            interaction_id=interaction_id,
+            expected_sequence=expected_sequence,
+            transition=lambda record: cancel_interaction(record, now=now),
         )
 
     async def _transition_interaction(

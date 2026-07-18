@@ -16,7 +16,7 @@ export function renderGoalPursuitPage(view, width, height) {
     : null;
   const logical = [
     color(ANSI.cyan, "Goal / Pursuit"),
-    color(ANSI.dim, "r 刷新 · ↑/↓ 滚动 · Esc 返回 · 写操作继续使用 /goal 子命令"),
+    color(ANSI.dim, "r 刷新 · ↑/↓ 滚动 · Esc 返回 · /goal interaction cancel <id> 取消等待"),
   ];
   if (value.loading && !snapshot) {
     logical.push(color(ANSI.cyan, "正在读取 Goal / Pursuit 权威状态…"));
@@ -33,7 +33,7 @@ export function renderGoalPursuitPage(view, width, height) {
     );
   } else {
     for (const goal of snapshot.goals) {
-      logical.push(...renderGoal(goal, snapshot.current_goal_id));
+      logical.push(...renderGoal(goal, snapshot.current_goal_id, snapshot.interactions ?? []));
     }
     if (snapshot.truncated) {
       logical.push(color(ANSI.yellow, "目标历史已按当前视图上限截断。"));
@@ -53,7 +53,7 @@ export function renderGoalPursuitPage(view, width, height) {
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
 }
 
-function renderGoal(goal, currentGoalId) {
+function renderGoal(goal, currentGoalId, interactions) {
   const current = goal.goal_id === currentGoalId;
   const lines = [
     color(
@@ -69,10 +69,36 @@ function renderGoal(goal, currentGoalId) {
   if (goal.note) lines.push(color(ANSI.dim, `说明 · ${compactText(goal.note, 2_000)}`));
   if (goal.pursuit) {
     lines.push(...renderPursuit(goal.pursuit));
+    lines.push(...renderInteractions(
+      interactions.filter((item) => item.pursuit_run_id === goal.pursuit.run_id),
+    ));
   } else if (goal.pursuit_link_status === "missing") {
     lines.push(color(ANSI.red, `Pursuit ${goal.pursuit_run_id} · 追踪记录不可用`));
   } else {
     lines.push(color(ANSI.dim, "Pursuit · 未启动"));
+  }
+  return lines;
+}
+
+function renderInteractions(interactions) {
+  if (!interactions.length) return [];
+  const lines = [color(ANSI.cyan, `用户交互 · ${interactions.length}`)];
+  for (const item of interactions) {
+    const style = item.state === "pending"
+      ? ANSI.yellow
+      : item.state === "answered"
+        ? ANSI.green
+        : ANSI.dim;
+    const label = {
+      pending: "等待回答", answered: "已回答", expired: "已超时", cancelled: "已取消",
+    }[item.state] || item.state;
+    lines.push(color(
+      style,
+      `  ${item.interaction_id} · ${label} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`,
+    ));
+    if (item.can_cancel) {
+      lines.push(color(ANSI.dim, `    取消 · /goal interaction cancel ${item.interaction_id}`));
+    }
   }
   return lines;
 }

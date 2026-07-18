@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.harness.interaction import HarnessInteractionRecord
 from naumi_agent.orchestrator.goal_store import Goal, GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import PursuitRun
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
@@ -20,6 +21,7 @@ GOAL_PANEL_SCHEMA_VERSION = 1
 MAX_GOAL_PANEL_ITEMS = 50
 MAX_GOAL_PANEL_EVIDENCE = 20
 MAX_GOAL_PANEL_WAITS = 20
+MAX_GOAL_PANEL_INTERACTIONS = 50
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 
@@ -32,6 +34,7 @@ class GoalPursuitSnapshot:
     warnings: tuple[str, ...] = ()
     truncated: bool = False
     include_finished: bool = True
+    interactions: tuple[dict[str, Any], ...] = ()
 
     def to_protocol_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +46,9 @@ class GoalPursuitSnapshot:
             "warnings": [_bounded_text(item, 500) for item in self.warnings[:20]],
             "truncated": bool(self.truncated),
             "include_finished": bool(self.include_finished),
+            "interactions": [
+                dict(item) for item in self.interactions[:MAX_GOAL_PANEL_INTERACTIONS]
+            ],
         }
 
 
@@ -145,12 +151,36 @@ async def build_goal_pursuit_snapshot_with_recovery(
                 )
             projected["pursuit"] = pursuit
         items.append(projected)
+    interactions: tuple[dict[str, Any], ...] = ()
+    list_interactions = getattr(authority, "list_interactions", None)
+    if callable(list_interactions):
+        visible_run_ids = {
+            str(item.get("pursuit_run_id") or "")
+            for item in items
+            if item.get("pursuit_run_id")
+        }
+        try:
+            records = await list_interactions(
+                workspace_root=workspace_root,
+                subject_kind="pursuit",
+                subject_ids=tuple(sorted(visible_run_ids)),
+                limit=MAX_GOAL_PANEL_INTERACTIONS,
+            )
+            interactions = tuple(
+                _interaction_projection(record)
+                for record in records
+                if record.subject_kind == "pursuit"
+                and record.subject_id in visible_run_ids
+            )
+        except Exception:
+            warnings.append("Goal 用户交互历史读取失败，请运行 `/doctor`。")
     return GoalPursuitSnapshot(
         current_goal_id=base.current_goal_id,
         goals=tuple(items),
         warnings=tuple(dict.fromkeys(warnings))[:20],
         truncated=base.truncated,
         include_finished=base.include_finished,
+        interactions=interactions,
     )
 
 
@@ -202,7 +232,42 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
         lines.append("> 目标记录较多，当前视图已按上限截断。")
     if snapshot.warnings:
         lines.extend(["", "#### 警告", *[f"- {item}" for item in snapshot.warnings]])
+    if snapshot.interactions:
+        lines.extend(["", "#### 用户交互"])
+        for item in snapshot.interactions:
+            lines.append(
+                f"- `{item['interaction_id']}` · {_interaction_status_label(item['state'])} · "
+                f"{item['header']}：{item['question']}"
+            )
+            if item["can_cancel"]:
+                lines.append(
+                    f"  - 可执行：`/goal interaction cancel {item['interaction_id']}`"
+                )
     return "\n".join(lines).rstrip()
+
+
+def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
+    return {
+        "interaction_id": _bounded_text(record.interaction_id, 132),
+        "pursuit_run_id": _bounded_text(record.subject_id, 128),
+        "state": record.state,
+        "sequence": record.sequence,
+        "header": _bounded_text(record.header, 40),
+        "question": _bounded_text(record.question, 2_000),
+        "created_at": _bounded_text(record.created_at, 64),
+        "expires_at": _bounded_text(record.expires_at, 64),
+        "updated_at": _bounded_text(record.updated_at, 64),
+        "can_cancel": record.state == "pending",
+    }
+
+
+def _interaction_status_label(state: str) -> str:
+    return {
+        "pending": "等待回答",
+        "answered": "已回答",
+        "expired": "已超时",
+        "cancelled": "已取消",
+    }.get(state, state)
 
 
 def _goal_projection(

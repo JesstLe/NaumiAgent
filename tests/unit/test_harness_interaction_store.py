@@ -282,6 +282,50 @@ async def test_timeout_is_explicit_transition_and_removes_pending(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_cancel_is_sequence_fenced_and_visible_in_bounded_history(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    first = await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(interaction_id="ask-cancel-first"),
+    )
+    second = await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(interaction_id="ask-cancel-second"),
+    )
+
+    cancelled = await store.cancel_interaction(
+        workspace_root=workspace,
+        interaction_id=first.interaction_id,
+        expected_sequence=first.sequence,
+        now=T4,
+    )
+
+    assert cancelled.state == "cancelled"
+    assert cancelled.sequence == 2
+    assert await store.list_pending_interactions(workspace_root=workspace) == (second,)
+    assert await store.list_interactions(
+        workspace_root=workspace,
+        subject_kind="pursuit",
+        subject_ids=("pursuit-1",),
+        limit=2,
+    ) == (
+        second,
+        cancelled,
+    )
+    with pytest.raises(HarnessStoreConflictError, match="sequence"):
+        await store.cancel_interaction(
+            workspace_root=workspace,
+            interaction_id=first.interaction_id,
+            expected_sequence=first.sequence,
+            now=T11,
+        )
+
+
+@pytest.mark.asyncio
 async def test_tampered_event_chain_is_rejected_without_payload_leak(
     tmp_path: Path,
 ) -> None:

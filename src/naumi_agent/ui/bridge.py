@@ -1091,6 +1091,10 @@ class JsonlEngineBridge:
             await self.resolve_user_interaction(payload, request_id=request_id)
             return
 
+        if event_type == ClientEventType.INTERACTION_CANCEL:
+            await self.cancel_user_interaction(payload, request_id=request_id)
+            return
+
         if event_type == ClientEventType.PERMISSION_REVOKE:
             await self.revoke_permission_grant(payload, request_id=request_id)
             return
@@ -3411,6 +3415,113 @@ class JsonlEngineBridge:
         )
         if pending.replay_only:
             self._pending_interactions.pop(interaction_id, None)
+
+    async def cancel_user_interaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel one durable interaction through sequence-fenced authority."""
+        interaction_id = str(payload.get("interaction_id") or "")
+        authority = self._interaction_authority()
+        if authority is None:
+            await self.emit_error(
+                "持久交互 authority 不可用，取消未提交。",
+                code="interaction_authority_unavailable",
+                request_id=request_id,
+            )
+            return
+        try:
+            record = await authority.store.get_interaction(
+                workspace_root=self.engine.workspace_root,
+                interaction_id=interaction_id,
+            )
+        except Exception:
+            await self.emit_error(
+                "持久交互读取失败，请运行 `/doctor` 后重试。",
+                code="interaction_authority_read_failed",
+                request_id=request_id,
+            )
+            return
+        if record is None:
+            await self.emit_error(
+                f"未找到持久用户交互: {interaction_id}",
+                code="unknown_interaction_request",
+                request_id=request_id,
+            )
+            return
+        if record.state != "pending":
+            await self.emit_error(
+                f"用户交互已是终态：{record.state}，不能取消。",
+                code="interaction_not_pending",
+                request_id=request_id,
+            )
+            return
+        try:
+            linked_runs = {
+                goal.pursuit_run_id
+                for goal in self.engine.goal_store.list(
+                    include_finished=True,
+                    limit=50,
+                )
+                if goal.pursuit_run_id
+            }
+        except Exception:
+            await self.emit_error(
+                "Goal 状态读取失败，请运行 `/doctor` 后重试。",
+                code="goal_state_unavailable",
+                request_id=request_id,
+            )
+            return
+        if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
+            await self.emit_error(
+                "该交互不属于当前 Goal 页面中的 Pursuit，拒绝取消。",
+                code="interaction_scope_mismatch",
+                request_id=request_id,
+            )
+            return
+        pending = self._pending_interactions.get(interaction_id)
+        if pending is not None:
+            await self._stop_pending_interaction_owner_renewal(pending)
+            if pending.durable_record is not None:
+                record = pending.durable_record
+        try:
+            cancelled = await authority.cancel(record=record)
+        except Exception as exc:
+            logger.warning("Durable interaction cancel failed (%s)", type(exc).__name__)
+            if pending is not None and not pending.future.done():
+                self._schedule_pending_interaction_owner_renewal(interaction_id)
+            await self.emit_error(
+                "用户交互在取消前已发生变化，请刷新 Goal 页面重试。",
+                code="interaction_cancel_conflict",
+                request_id=request_id,
+            )
+            return
+        if pending is not None:
+            pending.durable_record = cancelled
+            if pending.timeout_task is not None:
+                pending.timeout_task.cancel()
+                await asyncio.gather(pending.timeout_task, return_exceptions=True)
+                pending.timeout_task = None
+            if not pending.future.done():
+                if pending.replay_only:
+                    pending.future.cancel()
+                else:
+                    pending.future.set_exception(
+                        UserInteractionUnavailableError("用户已取消本次交互")
+                    )
+            self._pending_interactions.pop(interaction_id, None)
+        await self.emit(
+            ServerEventType.INTERACTION_RESOLVED,
+            {
+                "request_id": interaction_id,
+                "status": "cancelled",
+                "reason": "用户已从 Goal 页面取消本次交互。",
+            },
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
 
     def _next_permission_request_id(self) -> str:
         while True:

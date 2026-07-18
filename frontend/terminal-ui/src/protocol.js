@@ -116,6 +116,7 @@ const PURSUIT_HEARTBEAT_HEALTH = new Set([
 ]);
 const PURSUIT_LEASE_STATUSES = new Set(["active", "released", "missing", "error"]);
 const PURSUIT_CHECKPOINT_STATUSES = new Set(["ready", "missing", "error"]);
+const INTERACTION_STATES = new Set(["pending", "answered", "expired", "cancelled"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -381,14 +382,14 @@ function normalizeInteractionResponse(payload) {
 
 function normalizeInteractionResolved(payload) {
   const status = String(payload.status ?? "answered");
-  if (status === "expired") {
+  if (["expired", "cancelled"].includes(status)) {
     if (["kind", "value", "label", "custom_text"].some((field) => Object.hasOwn(payload, field))) {
-      throw new Error("interaction/resolved expired 不能携带答案字段");
+      throw new Error(`interaction/resolved ${status} 不能携带答案字段`);
     }
     return {
       request_id: interactionRequestId(payload?.request_id),
       status,
-      reason: interactionText(payload.reason, "interaction 超时原因", 300, { required: true }),
+      reason: interactionText(payload.reason, "interaction 终止原因", 300, { required: true }),
     };
   }
   if (status !== "answered") throw new Error("interaction/resolved status 无效");
@@ -2291,6 +2292,19 @@ function normalizeGoalSnapshot(payload) {
   if (currentGoalId && !goals.some((item) => item.goal_id === currentGoalId)) {
     throw new Error("goals/snapshot current_goal_id 不在 goals 中");
   }
+  const interactions = harnessObjectArray(
+    payload.interactions ?? [],
+    "goals/snapshot interactions",
+    50,
+  ).map(normalizeGoalInteraction);
+  const interactionIds = interactions.map((item) => item.interaction_id);
+  if (new Set(interactionIds).size !== interactionIds.length) {
+    throw new Error("goals/snapshot interaction_id 不得重复");
+  }
+  const visibleRunIds = new Set(goals.map((item) => item.pursuit_run_id).filter(Boolean));
+  if (interactions.some((item) => !visibleRunIds.has(item.pursuit_run_id))) {
+    throw new Error("goals/snapshot interaction 必须关联当前快照中的 Pursuit");
+  }
   return {
     schema_version: 1,
     generated_at: harnessText(payload.generated_at, "goals/snapshot generated_at"),
@@ -2303,6 +2317,51 @@ function normalizeGoalSnapshot(payload) {
       payload.include_finished,
       "goals/snapshot include_finished",
     ),
+    interactions,
+  };
+}
+
+function normalizeGoalInteraction(item) {
+  const interactionId = harnessText(
+    item.interaction_id,
+    "goals/snapshot interaction.interaction_id",
+  );
+  if (!/^ask-[A-Za-z0-9._:-]{1,128}$/.test(interactionId)) {
+    throw new Error("goals/snapshot interaction_id 格式无效");
+  }
+  const pursuitRunId = harnessText(
+    item.pursuit_run_id,
+    "goals/snapshot interaction.pursuit_run_id",
+  );
+  validateGoalId(pursuitRunId, "goals/snapshot interaction.pursuit_run_id");
+  const state = harnessChoice(
+    item.state,
+    "goals/snapshot interaction.state",
+    INTERACTION_STATES,
+  );
+  const sequence = harnessNonnegativeInteger(
+    item.sequence,
+    "goals/snapshot interaction.sequence",
+  );
+  if (sequence < 1) throw new Error("goals/snapshot interaction.sequence 必须大于 0");
+  const canCancel = harnessBoolean(
+    item.can_cancel,
+    "goals/snapshot interaction.can_cancel",
+  );
+  if (canCancel !== (state === "pending")) {
+    throw new Error("goals/snapshot interaction.can_cancel 与状态不一致");
+  }
+  return {
+    interaction_id: interactionId,
+    pursuit_run_id: pursuitRunId,
+    state,
+    sequence,
+    header: harnessText(item.header, "goals/snapshot interaction.header"),
+    question: harnessText(item.question, "goals/snapshot interaction.question"),
+    created_at: harnessText(item.created_at, "goals/snapshot interaction.created_at"),
+    expires_at: harnessText(item.expires_at, "goals/snapshot interaction.expires_at"),
+    updated_at: harnessText(item.updated_at, "goals/snapshot interaction.updated_at"),
+    can_cancel: canCancel,
   };
 }
 
