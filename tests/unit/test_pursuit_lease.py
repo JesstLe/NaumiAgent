@@ -329,7 +329,9 @@ async def test_execution_adapter_does_not_swallow_lease_loss() -> None:
         tool_registry=MagicMock(),
         subagent_manager=MagicMock(),
     )
-    loop._llm_call = AsyncMock(return_value="pytest -q")  # type: ignore[method-assign]
+    loop._llm_call = AsyncMock(  # type: ignore[method-assign]
+        return_value="pytest -q tests/unit/test_demo.py"
+    )
     loop._should_run_in_background = MagicMock(return_value=True)  # type: ignore[method-assign]
     loop._start_background_action = AsyncMock(  # type: ignore[method-assign]
         side_effect=PursuitLeaseLostError("epoch changed")

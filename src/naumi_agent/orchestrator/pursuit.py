@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import re
+import shlex
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -63,6 +64,10 @@ _LEGACY_FAILURE_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SOURCE_FILE_SUFFIXES = (
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".rs", ".go",
+)
+
 
 def _verification_command_passed(output: Any) -> bool:
     """Return whether a shell verification output represents success."""
@@ -71,6 +76,166 @@ def _verification_command_passed(output: Any) -> bool:
     if matches:
         return int(matches[-1]) == 0
     return _LEGACY_FAILURE_RE.search(text) is None
+
+
+def _verification_scope_error(command: str, *, _depth: int = 0) -> str:
+    """Reject implicit repository-wide verification from model-authored criteria."""
+    if _depth > 3:
+        return "验证命令包含过深的 shell 包装，无法确认执行范围。"
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return "验证命令无法安全解析。"
+
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token and set(token) <= {";", "&", "|"}:
+            if segments[-1]:
+                segments.append([])
+            continue
+        segments[-1].append(token)
+
+    for segment in (item for item in segments if item):
+        lowered = [token.lower() for token in segment]
+        for shell_name in ("sh", "bash", "zsh"):
+            if shell_name in lowered:
+                shell_index = lowered.index(shell_name)
+                if (
+                    shell_index + 2 < len(segment)
+                    and segment[shell_index + 1].startswith("-")
+                    and "c" in segment[shell_index + 1]
+                ):
+                    nested_error = _verification_scope_error(
+                        segment[shell_index + 2],
+                        _depth=_depth + 1,
+                    )
+                    if nested_error:
+                        return nested_error
+        pytest_index = next(
+            (
+                index for index, token in enumerate(lowered)
+                if token in {"pytest", "py.test"}
+            ),
+            None,
+        )
+        if pytest_index is not None:
+            targets = segment[pytest_index + 1:]
+            if not any(
+                ("::" in token or token.lower().endswith(".py"))
+                and not any(char in token for char in "*?[]")
+                for token in targets
+            ):
+                return (
+                    "pytest 必须指向明确的测试文件或 test node，"
+                    "不能隐式运行整个 tests 目录。"
+                )
+
+        if "ruff" in lowered:
+            ruff_index = lowered.index("ruff")
+            if "check" in lowered[ruff_index + 1:]:
+                check_index = lowered.index("check", ruff_index + 1)
+                targets = segment[check_index + 1:]
+                if not any(
+                    token.lower().endswith(_SOURCE_FILE_SUFFIXES)
+                    and not any(char in token for char in "*?[]")
+                    for token in targets
+                ):
+                    return (
+                        "ruff check 必须指向明确文件，不能隐式扫描 src 或整个仓库。"
+                    )
+
+        if any(token in {"tox", "nox"} for token in lowered):
+            return "tox/nox 属于阶段门验证，Pursuit 每轮不能自动运行。"
+        if len(lowered) >= 2 and lowered[0] in {"npm", "pnpm", "yarn"}:
+            is_test_script = lowered[1] == "test" or (
+                lowered[1] == "run"
+                and len(lowered) >= 3
+                and "test" in lowered[2]
+            )
+            if is_test_script:
+                separator = lowered.index("--") if "--" in lowered else -1
+                targets = segment[separator + 1:] if separator >= 0 else []
+                if not any(
+                    token.lower().endswith((".js", ".jsx", ".ts", ".tsx"))
+                    and not any(char in token for char in "*?[]")
+                    for token in targets
+                ):
+                    return "JavaScript 测试必须在 `--` 后指定目标文件。"
+        js_runner_index = next(
+            (
+                index for index, token in enumerate(lowered)
+                if token in {"jest", "vitest", "mocha", "ava"}
+            ),
+            None,
+        )
+        if js_runner_index is not None and not any(
+            token.lower().endswith((".js", ".jsx", ".ts", ".tsx"))
+            and not any(char in token for char in "*?[]")
+            for token in segment[js_runner_index + 1:]
+        ):
+            return "JavaScript test runner 必须指定目标测试文件。"
+        if len(lowered) >= 2 and lowered[0] == "cargo" and lowered[1] == "test":
+            filters = [token for token in segment[2:] if not token.startswith("-")]
+            if not filters:
+                return "cargo test 必须指定测试过滤器，不能运行整个 workspace。"
+        if len(lowered) >= 2 and lowered[0] == "go" and lowered[1] == "test":
+            targets = [token for token in segment[2:] if not token.startswith("-")]
+            if not targets or any(token in {".", "./...", "..."} for token in targets):
+                return "go test 必须指定单个包，不能使用仓库级 `.` 或 `./...`。"
+        if "unittest" in lowered:
+            unittest_index = lowered.index("unittest")
+            if (
+                unittest_index + 1 < len(lowered)
+                and lowered[unittest_index + 1] == "discover"
+            ):
+                return "unittest discover 属于广域发现，必须指定测试模块。"
+        if len(lowered) >= 2 and lowered[0] in {"make", "just", "task"}:
+            if "test" in lowered[1]:
+                return f"{lowered[0]} test 未声明具体测试文件，不能每轮运行。"
+        if lowered and lowered[0] in {"mvn", "mvnw", "./mvnw"} and "test" in lowered:
+            if not any(token.startswith("-Dtest=") for token in segment):
+                return "Maven test 必须通过 -Dtest 指定测试类。"
+        if lowered and lowered[0] in {"gradle", "gradlew", "./gradlew"}:
+            if "test" in lowered and "--tests" not in lowered:
+                return "Gradle test 必须通过 --tests 指定测试类。"
+        if lowered[:2] == ["dotnet", "test"]:
+            if not any(
+                token.lower().endswith((".csproj", ".fsproj"))
+                or token == "--filter"
+                for token in segment[2:]
+            ):
+                return "dotnet test 必须指定项目文件或 --filter。"
+        if lowered[:2] == ["bazel", "test"]:
+            targets = [token for token in segment[2:] if not token.startswith("-")]
+            if not targets or any("..." in token for token in targets):
+                return "Bazel test 必须指定具体 target，不能使用 ...。"
+        if "rspec" in lowered:
+            rspec_index = lowered.index("rspec")
+            if not any(
+                token.lower().endswith("_spec.rb")
+                for token in segment[rspec_index + 1:]
+            ):
+                return "RSpec 必须指定目标 spec 文件。"
+        if "phpunit" in lowered:
+            phpunit_index = lowered.index("phpunit")
+            if not any(
+                token.lower().endswith(".php")
+                for token in segment[phpunit_index + 1:]
+            ):
+                return "PHPUnit 必须指定目标测试文件。"
+        if lowered[:2] == ["swift", "test"] and "--filter" not in lowered:
+            return "swift test 必须通过 --filter 指定测试。"
+        if lowered[:2] in (["dart", "test"], ["flutter", "test"]):
+            if not any(
+                token.lower().endswith(".dart")
+                for token in segment[2:]
+            ):
+                return "Dart/Flutter test 必须指定目标测试文件。"
+        if lowered and lowered[0] == "ctest" and "-r" not in lowered:
+            return "ctest 必须通过 -R 指定测试。"
+    return ""
 
 # ---------------------------------------------------------------------------
 #  Data structures
@@ -228,6 +393,10 @@ You are a goal decomposition specialist. Given a natural language goal, you prod
 1. A clear, precise description of what "done" looks like
 2. 3-7 measurable success criteria, each with a verification command
 3. Constraints (scope, time, resources)
+
+Verification commands must target the smallest named file, test node, or module.
+Never emit repository-wide commands such as `pytest tests/`, `ruff check src/`,
+`npm test`, `tox`, or `nox`; full-suite gates are outside the per-iteration loop.
 
 ## Output Format (STRICT — follow exactly)
 
@@ -1604,6 +1773,7 @@ class GoalPursuitLoop:
 
         criteria_text = "\n".join(
             f"- [{c.status.value}] {c.id}: {c.description}"
+            + (f"\n  上次证据: {c.evidence[:500]}" if c.evidence else "")
             for c in spec.success_criteria
         )
 
@@ -2436,6 +2606,14 @@ class GoalPursuitLoop:
                 command = command.split("\n", 1)[-1].rsplit("```", 1)[0]
             command = command.strip()
 
+            scope_error = _verification_scope_error(command)
+            if scope_error:
+                return {
+                    "action_id": action_id,
+                    "status": "error",
+                    "output": f"执行范围策略已阻止命令：{scope_error}",
+                }
+
             if self._should_run_in_background(command, description):
                 background = await self._start_background_action(
                     command=command,
@@ -2665,6 +2843,13 @@ class GoalPursuitLoop:
 
             cmd = criterion.verification_command
             if not cmd:
+                continue
+
+            scope_error = _verification_scope_error(cmd)
+            if scope_error:
+                criterion.status = CriterionStatus.FAILED
+                criterion.evidence = f"Verification policy blocked: {scope_error}"
+                criterion.last_checked = time.time()
                 continue
 
             # Try to run the verification command
@@ -2909,24 +3094,6 @@ class GoalPursuitLoop:
                                 evidence_parts.append(f"文件 {path}:\n{file_result}")
                         except Exception:
                             pass
-
-            try:
-                test_result = await self._run_bash_evidence_command(
-                    command="python3 -m pytest tests/ -q --tb=no 2>&1 | tail -5",
-                    evidence_id="pytest",
-                )
-                evidence_parts.append(f"测试状态:\n{test_result}")
-            except Exception:
-                pass
-
-            try:
-                lint_result = await self._run_bash_evidence_command(
-                    command="ruff check src/ 2>&1 | tail -5",
-                    evidence_id="ruff",
-                )
-                evidence_parts.append(f"Lint 状态:\n{lint_result}")
-            except Exception:
-                pass
 
         # Include previous action results
         if self._history:
