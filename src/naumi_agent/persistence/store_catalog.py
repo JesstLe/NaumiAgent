@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
+from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
 from naumi_agent.daemons.worker_registry import WORKER_REGISTRY_SCHEMA_VERSION
 from naumi_agent.evolution.store import (
     EVOLUTION_STORE_SCHEMA_VERSION,
@@ -191,6 +192,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
             "绑定 Tool run、参数摘要、Worker epoch 与租约的执行授权",
+        ),
+        _definition(
+            "runtime.permission_decisions",
+            runtime_dir / "permission-decisions.db",
+            StorageKind.SQLITE,
+            ("runtime.permission_authority", "ui.permission_center"),
+            VersionStrategy.SQLITE_USER_VERSION,
+            PERMISSION_DECISION_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "绑定会话、调用、参数摘要、操作者与来源的终态权限决定回执",
         ),
         _definition(
             "runtime.goals",

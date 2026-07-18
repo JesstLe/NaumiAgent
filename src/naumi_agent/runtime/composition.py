@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
+from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
@@ -111,6 +112,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
         worker_registry_db_path=runtime_data_dir / "worker-registry.db",
         execution_grant_db_path=runtime_data_dir / "execution-grants.db",
+        permission_decision_db_path=runtime_data_dir / "permission-decisions.db",
         worktree_storage_dir=runtime_data_dir / "worktrees",
         goal_storage_dir=runtime_data_dir / "goals",
         pursuit_storage_dir=runtime_data_dir / "pursuit",
@@ -147,6 +149,12 @@ def build_runtime_resources(
     if execution_grant_store is None:
         execution_grant_store = ExecutionGrantStore(paths.execution_grant_db_path)
 
+    permission_decision_store = resolved.permission_decision_store
+    if permission_decision_store is None:
+        permission_decision_store = PermissionDecisionReceiptStore(
+            paths.permission_decision_db_path
+        )
+
     evolution_candidate_store = resolved.evolution_candidate_store
     if evolution_candidate_store is None:
         evolution_candidate_store = EvolutionCandidateStore(paths.evolution_db_path)
@@ -179,6 +187,7 @@ def build_runtime_resources(
         chat_run_store=chat_run_store,
         worker_registry_store=worker_registry_store,
         execution_grant_store=execution_grant_store,
+        permission_decision_store=permission_decision_store,
         evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,

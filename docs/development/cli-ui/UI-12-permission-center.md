@@ -22,7 +22,7 @@
 - 新 UI、TUI、无交互模式分别有明确确认或拒绝策略。
 - 权限拒绝能被 Harness Explain 分类，用户有下一步。
 
-## 实现进展（2026-07-18）
+## 实现进展（2026-07-19）
 
 ### UI-12.1a 已实现：类型化策略快照与只读中心页
 
@@ -36,10 +36,18 @@
 - 真实 AgentEngine、会话 grant、pending Future、Bridge 和 Node 页面在 80/120/200 列通过验证。
 - 详细协议与非目标见 `UI-12-1a-policy-snapshot-design.md`。
 
+### UI-12.3a 已实现：用户终态决定持久回执
+
+- allow once、session grant、bypass 与 deny 形成独立 SQLite 回执，绑定 actor/source/session/run/call/tool 和
+  参数摘要；不持久化原始参数与私密 reason。
+- 新 UI/TUI 的共享 Permission Panel 优先读取当前 session 的 durable history，并显示操作者、来源与时间。
+- execution grant 必须消费匹配的真实回执引用，任意字符串、denied 或绑定不一致均 fail closed。
+- 详细合同、验收和剩余边界见 `UI-12-3a-durable-decision-receipts.md`。
+
 ### 尚未完成
 
 - UI-12.2：可操作的 pending queue 与等待顺序。
-- UI-12.3：持久化 decision history 与 actor/call/run 审计。
+- UI-12.3b：补齐 policy/Hook/plan block taxonomy、跨会话查询与 retention/export policy。
 - UI-12.4：针对单次检查结果的完整规则解释链。
 - UI-12.5：workspace scope 持久授权。
 - UI-12.6：断线后的 pending 恢复和已决定 request 幂等。

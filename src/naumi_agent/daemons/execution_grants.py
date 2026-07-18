@@ -21,6 +21,12 @@ from uuid import uuid4
 
 import aiosqlite
 
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionOutcome,
+    PermissionDecisionReceiptStore,
+    PermissionDecisionSource,
+    permission_arguments_sha256,
+)
 from naumi_agent.daemons.worker_contract import WorkerKind
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
@@ -348,11 +354,13 @@ class ExecutionGrantAuthority:
         store: ExecutionGrantStore,
         worker_registry: WorkerRegistryStore,
         harness_store: HarnessStore,
+        permission_decision_store: PermissionDecisionReceiptStore,
         workspace_root: str | Path,
     ) -> None:
         self._store = store
         self._worker_registry = worker_registry
         self._harness_store = harness_store
+        self._permission_decision_store = permission_decision_store
         self._workspace_root = Path(workspace_root).expanduser().resolve(strict=False)
 
     async def issue(
@@ -367,6 +375,43 @@ class ExecutionGrantAuthority:
     ) -> StoredExecutionGrant:
         _validate_request(request)
         _validate_authorization(decision, permission_mode=permission_mode, source=source)
+        issued_at = _canonical_time(now, field="now")
+        issued = datetime.fromisoformat(issued_at)
+        receipt = await self._permission_decision_store.get(request.authorization_reference)
+        if receipt is None:
+            raise ExecutionGrantConflictError("权限决定回执不存在。")
+        expected_receipt_source = {
+            ExecutionGrantSource.USER_CONFIRMATION: (
+                PermissionDecisionSource.USER_CONFIRMATION,
+                PermissionDecisionOutcome.ALLOW_ONCE,
+            ),
+            ExecutionGrantSource.SESSION_GRANT: (
+                PermissionDecisionSource.SESSION_GRANT,
+                PermissionDecisionOutcome.SESSION_GRANTED,
+            ),
+            ExecutionGrantSource.BYPASS: (
+                PermissionDecisionSource.BYPASS,
+                PermissionDecisionOutcome.BYPASS_ENABLED,
+            ),
+        }.get(source)
+        if expected_receipt_source is None:
+            raise ExecutionGrantConflictError(
+                "policy execution grant 尚未绑定可验证的权限决定回执。"
+            )
+        if (
+            not receipt.authorizes_execution
+            or (receipt.source, receipt.outcome) != expected_receipt_source
+            or receipt.session_id != request.session_id
+            or receipt.run_id != request.run_id
+            or receipt.call_id != request.call_id
+            or receipt.tool_name != request.tool_name
+            or receipt.permission_mode is not permission_mode
+            or receipt.arguments_sha256 != permission_arguments_sha256(request.arguments)
+        ):
+            raise ExecutionGrantConflictError("权限决定回执与执行请求不匹配。")
+        receipt_age = issued - datetime.fromisoformat(receipt.decided_at)
+        if receipt_age < timedelta(0) or receipt_age > timedelta(seconds=300):
+            raise ExecutionGrantConflictError("权限决定回执已过期或来自未来时间。")
         if not decision.tool_family:
             raise ValueError("Permission decision 缺少 tool_family。")
         tool_family = decision.tool_family or request.tool_name
@@ -375,9 +420,6 @@ class ExecutionGrantAuthority:
             raise TypeError("ttl_seconds 必须是整数。")
         if not 1 <= ttl_seconds <= 300:
             raise ValueError("ttl_seconds 必须在 1 到 300 之间。")
-        issued_at = _canonical_time(now, field="now")
-        issued = datetime.fromisoformat(issued_at)
-
         registration = await self._worker_registry.get_active(request.worker_id)
         if registration is None:
             raise ExecutionGrantConflictError("Worker registration 不存在。")

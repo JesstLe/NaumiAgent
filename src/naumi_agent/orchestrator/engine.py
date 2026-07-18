@@ -20,6 +20,12 @@ from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.execution_grants import ExecutionGrantAuthority
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionReceipt,
+    PermissionDecisionSource,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -607,10 +613,12 @@ class AgentEngine:
         self._runtime_data_dir = paths.runtime_data_dir
         self._worktree_storage_dir = paths.worktree_storage_dir
         self._harness_store = resources.harness_store
+        self._permission_decision_store = resources.permission_decision_store
         self.execution_grant_authority = ExecutionGrantAuthority(
             store=resources.execution_grant_store,
             worker_registry=resources.worker_registry_store,
             harness_store=resources.harness_store,
+            permission_decision_store=resources.permission_decision_store,
             workspace_root=paths.workspace_root,
         )
         self.harness_service = HarnessService(
@@ -4861,6 +4869,18 @@ class AgentEngine:
 
         choice = self._normalize_permission_confirmation(raw_choice)
         if choice == "bypass":
+            receipt = await self._record_terminal_permission_decision(
+                tool_call=tool_call,
+                arguments=arguments,
+                decision=decision,
+                session_id=session_id,
+                agent_name=agent_name,
+                outcome=PermissionDecisionOutcome.BYPASS_ENABLED,
+                source=PermissionDecisionSource.BYPASS,
+                permission_mode=PermissionMode.BYPASS,
+            )
+            if receipt is None:
+                return "error"
             self.set_runtime_mode(AgentRuntimeMode.BYPASS)
             await self._emit_permission_bubble(
                 events,
@@ -4918,7 +4938,7 @@ class AgentEngine:
                 )
                 return "grant_rejected_session_changed"
             try:
-                self._permission_grant_store.create(
+                grant = self._permission_grant_store.create(
                     session_id,
                     decision.tool_family,
                     tool_call.id,
@@ -4936,6 +4956,19 @@ class AgentEngine:
                     session_id=session_id,
                 )
                 return "grant_rejected_no_session"
+            receipt = await self._record_terminal_permission_decision(
+                tool_call=tool_call,
+                arguments=arguments,
+                decision=decision,
+                session_id=session_id,
+                agent_name=agent_name,
+                outcome=PermissionDecisionOutcome.SESSION_GRANTED,
+                source=PermissionDecisionSource.SESSION_GRANT,
+                source_grant_id=grant.grant_id,
+            )
+            if receipt is None:
+                self._permission_grant_store.revoke(grant.grant_id, session_id)
+                return "error"
             await self._emit_permission_bubble(
                 events,
                 agent_name=agent_name,
@@ -4949,6 +4982,17 @@ class AgentEngine:
             )
             return "allow_once"
         if choice == "allow_once":
+            receipt = await self._record_terminal_permission_decision(
+                tool_call=tool_call,
+                arguments=arguments,
+                decision=decision,
+                session_id=session_id,
+                agent_name=agent_name,
+                outcome=PermissionDecisionOutcome.ALLOW_ONCE,
+                source=PermissionDecisionSource.USER_CONFIRMATION,
+            )
+            if receipt is None:
+                return "error"
             await self._emit_permission_bubble(
                 events,
                 agent_name=agent_name,
@@ -4962,6 +5006,15 @@ class AgentEngine:
             )
             return "allow_once"
 
+        await self._record_terminal_permission_decision(
+            tool_call=tool_call,
+            arguments=arguments,
+            decision=decision,
+            session_id=session_id,
+            agent_name=agent_name,
+            outcome=PermissionDecisionOutcome.DENIED,
+            source=PermissionDecisionSource.USER_CONFIRMATION,
+        )
         await self._emit_permission_bubble(
             events,
             agent_name=agent_name,
@@ -4974,6 +5027,54 @@ class AgentEngine:
             session_id=session_id,
         )
         return "deny"
+
+    async def _record_terminal_permission_decision(
+        self,
+        *,
+        tool_call: ToolCall,
+        arguments: dict[str, Any],
+        decision: Any,
+        session_id: str,
+        agent_name: str | None,
+        outcome: PermissionDecisionOutcome,
+        source: PermissionDecisionSource,
+        permission_mode: PermissionMode | None = None,
+        source_grant_id: str = "",
+    ) -> PermissionDecisionReceipt | None:
+        """Persist one terminal decision before an allowed call can proceed."""
+        if not session_id:
+            logger.error("Cannot persist permission decision without a session")
+            return None
+        state = self._active_harness_run
+        run_id = str(state.contract.run_id if state is not None else "")
+        try:
+            return await self._permission_decision_store.issue(
+                request_id=tool_call.id,
+                session_id=session_id,
+                run_id=run_id,
+                call_id=tool_call.id,
+                agent_name=agent_name or "main",
+                tool_name=tool_call.name,
+                tool_family=decision.tool_family or tool_call.name,
+                arguments=arguments,
+                outcome=outcome,
+                actor=PermissionDecisionActor.USER,
+                source=source,
+                permission_mode=permission_mode or self._permission_port.mode,
+                risk_level=(
+                    getattr(decision.risk_level, "value", str(decision.risk_level))
+                    or "unknown"
+                ),
+                source_grant_id=source_grant_id,
+                decided_at=datetime.now().astimezone().isoformat(),
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to persist terminal permission decision [%s]: %s",
+                tool_call.id,
+                exc,
+            )
+            return None
 
     @staticmethod
     def _normalize_permission_confirmation(choice: str | bool) -> str:
@@ -5054,6 +5155,19 @@ class AgentEngine:
         """Return recent subagent permission decisions that bubbled to parent."""
         safe_limit = max(1, min(limit, 50))
         return list(self._permission_bubble_history[-safe_limit:])
+
+    def list_permission_decision_receipts(
+        self,
+        limit: int = 12,
+    ) -> tuple[PermissionDecisionReceipt, ...]:
+        """Return durable terminal decisions for the active session only."""
+        if self._session is None:
+            return ()
+        safe_limit = max(1, min(limit, 50))
+        return self._permission_decision_store.list_session(
+            self._session.id,
+            limit=safe_limit,
+        )
 
     def _parse_tool_call(self, raw: dict[str, Any]) -> ToolCall | None:
         """从 LLM 响应中提取 ToolCall."""

@@ -20,6 +20,12 @@ from naumi_agent.daemons.execution_grants import (
     ExecutionGrantValidationReason,
     execution_arguments_sha256,
 )
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionReceiptStore,
+    PermissionDecisionSource,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
     WorkerIsolationContract,
@@ -93,6 +99,9 @@ async def _authority(tmp_path: Path):
     registry = WorkerRegistryStore(tmp_path / "runtime" / "worker-registry.db")
     harness = HarnessStore(tmp_path / "state" / "harness.db")
     store = ExecutionGrantStore(tmp_path / "runtime" / "execution-grants.db")
+    decision_store = PermissionDecisionReceiptStore(
+        tmp_path / "runtime" / "permission-decisions.db"
+    )
     contract = _contract()
     await registry.register(contract, registered_at=T1)
     lease = await harness.acquire_run_lease(
@@ -108,9 +117,53 @@ async def _authority(tmp_path: Path):
         store=store,
         worker_registry=registry,
         harness_store=harness,
+        permission_decision_store=decision_store,
         workspace_root=tmp_path / "workspace",
     )
-    return authority, store, registry, harness, contract, lease
+    return authority, store, registry, harness, contract, lease, decision_store
+
+
+async def _authorize(
+    store: PermissionDecisionReceiptStore,
+    request: ExecutionGrantRequest,
+    *,
+    source: ExecutionGrantSource = ExecutionGrantSource.BYPASS,
+) -> ExecutionGrantRequest:
+    receipt_source, outcome, mode = {
+        ExecutionGrantSource.BYPASS: (
+            PermissionDecisionSource.BYPASS,
+            PermissionDecisionOutcome.BYPASS_ENABLED,
+            PermissionMode.BYPASS,
+        ),
+        ExecutionGrantSource.USER_CONFIRMATION: (
+            PermissionDecisionSource.USER_CONFIRMATION,
+            PermissionDecisionOutcome.ALLOW_ONCE,
+            PermissionMode.MODERATE,
+        ),
+        ExecutionGrantSource.SESSION_GRANT: (
+            PermissionDecisionSource.SESSION_GRANT,
+            PermissionDecisionOutcome.SESSION_GRANTED,
+            PermissionMode.MODERATE,
+        ),
+    }[source]
+    receipt = await store.issue(
+        request_id=request.call_id,
+        session_id=request.session_id,
+        run_id=request.run_id,
+        call_id=request.call_id,
+        agent_name="main",
+        tool_name=request.tool_name,
+        tool_family="shell",
+        arguments=request.arguments,
+        outcome=outcome,
+        actor=PermissionDecisionActor.USER,
+        source=receipt_source,
+        permission_mode=mode,
+        risk_level="high",
+        source_grant_id="grant-session-a" if source is ExecutionGrantSource.SESSION_GRANT else "",
+        decided_at=T2,
+    )
+    return replace(request, authorization_reference=receipt.receipt_id)
 
 
 def _bypass_decision() -> PermissionDecision:
@@ -121,8 +174,13 @@ def _bypass_decision() -> PermissionDecision:
 async def test_issue_reopen_and_validate_without_persisting_raw_arguments(
     tmp_path: Path,
 ) -> None:
-    authority, store, registry, harness, contract, lease = await _authority(tmp_path)
-    request = _request(arguments={"command": "printf super-secret-token"})
+    authority, store, registry, harness, contract, lease, decision_store = await _authority(
+        tmp_path
+    )
+    request = await _authorize(
+        decision_store,
+        _request(arguments={"command": "printf super-secret-token"}),
+    )
 
     issued = await authority.issue(
         request,
@@ -138,6 +196,7 @@ async def test_issue_reopen_and_validate_without_persisting_raw_arguments(
         store=reopened_store,
         worker_registry=WorkerRegistryStore(registry.db_path),
         harness_store=HarnessStore(harness.db_path),
+        permission_decision_store=PermissionDecisionReceiptStore(decision_store.db_path),
         workspace_root=tmp_path / "workspace",
     )
     validation = await reopened_authority.validate(
@@ -168,10 +227,10 @@ async def test_issue_reopen_and_validate_without_persisting_raw_arguments(
 async def test_idempotent_retry_reuses_first_grant_and_conflicting_args_fail(
     tmp_path: Path,
 ) -> None:
-    authority, *_ = await _authority(tmp_path)
-    first_request = _request(arguments={"b": 2, "a": 1})
-    reordered = _request(arguments={"a": 1, "b": 2})
-    changed = _request(arguments={"a": 1, "b": 3})
+    authority, *_, decision_store = await _authority(tmp_path)
+    first_request = await _authorize(decision_store, _request(arguments={"b": 2, "a": 1}))
+    reordered = replace(first_request, arguments={"a": 1, "b": 2})
+    changed = replace(first_request, arguments={"a": 1, "b": 3})
 
     first = await authority.issue(
         first_request,
@@ -192,7 +251,7 @@ async def test_idempotent_retry_reuses_first_grant_and_conflicting_args_fail(
     assert execution_arguments_sha256(first_request.arguments) == execution_arguments_sha256(
         reordered.arguments
     )
-    with pytest.raises(ExecutionGrantConflictError, match="已绑定其他请求"):
+    with pytest.raises(ExecutionGrantConflictError, match="回执与执行请求不匹配"):
         await authority.issue(
             changed,
             decision=_bypass_decision(),
@@ -204,8 +263,8 @@ async def test_idempotent_retry_reuses_first_grant_and_conflicting_args_fail(
 
 @pytest.mark.asyncio
 async def test_concurrent_same_key_converges_on_one_durable_grant(tmp_path: Path) -> None:
-    authority, store, *_ = await _authority(tmp_path)
-    request = _request()
+    authority, store, *_, decision_store = await _authority(tmp_path)
+    request = await _authorize(decision_store, _request())
 
     issued = await asyncio.gather(
         *(
@@ -229,8 +288,8 @@ async def test_concurrent_same_key_converges_on_one_durable_grant(tmp_path: Path
 async def test_validation_detects_argument_change_expiry_and_revocation(
     tmp_path: Path,
 ) -> None:
-    authority, store, *_ = await _authority(tmp_path)
-    request = _request()
+    authority, store, *_, decision_store = await _authority(tmp_path)
+    request = await _authorize(decision_store, _request())
     issued = await authority.issue(
         request,
         decision=_bypass_decision(),
@@ -270,8 +329,8 @@ async def test_validation_detects_argument_change_expiry_and_revocation(
 async def test_worker_takeover_and_lease_release_fence_existing_grant(
     tmp_path: Path,
 ) -> None:
-    authority, _, registry, harness, _, lease = await _authority(tmp_path)
-    request = _request()
+    authority, _, registry, harness, _, lease, decision_store = await _authority(tmp_path)
+    request = await _authorize(decision_store, _request())
     issued = await authority.issue(
         request,
         decision=_bypass_decision(),
@@ -307,7 +366,7 @@ async def test_worker_takeover_and_lease_release_fence_existing_grant(
 async def test_authorization_source_rules_reject_unproven_bypass_or_confirmation(
     tmp_path: Path,
 ) -> None:
-    authority, *_ = await _authority(tmp_path)
+    authority, *_, decision_store = await _authority(tmp_path)
     confirm = PermissionDecision(
         allowed=True,
         requires_confirmation=True,
@@ -332,21 +391,28 @@ async def test_authorization_source_rules_reject_unproven_bypass_or_confirmation
             now=T2,
         )
 
-    user_confirmed = await authority.issue(
+    user_request = await _authorize(
+        decision_store,
+        _request(idempotency_key="confirmed-key"),
+        source=ExecutionGrantSource.USER_CONFIRMATION,
+    )
+    session_request = await _authorize(
+        decision_store,
         replace(
-            _request(idempotency_key="confirmed-key"),
-            authorization_reference="call-a",
+            _request(idempotency_key="session-key"),
+            call_id="call-session",
         ),
+        source=ExecutionGrantSource.SESSION_GRANT,
+    )
+    user_confirmed = await authority.issue(
+        user_request,
         decision=confirm,
         permission_mode=PermissionMode.MODERATE,
         source=ExecutionGrantSource.USER_CONFIRMATION,
         now=T2,
     )
     session_confirmed = await authority.issue(
-        replace(
-            _request(idempotency_key="session-key"),
-            authorization_reference="grant-session-a",
-        ),
+        session_request,
         decision=confirm,
         permission_mode=PermissionMode.MODERATE,
         source=ExecutionGrantSource.SESSION_GRANT,
@@ -354,6 +420,92 @@ async def test_authorization_source_rules_reject_unproven_bypass_or_confirmation
     )
     assert user_confirmed.contract.source is ExecutionGrantSource.USER_CONFIRMATION
     assert session_confirmed.contract.source is ExecutionGrantSource.SESSION_GRANT
+
+
+@pytest.mark.asyncio
+async def test_issue_rejects_missing_denied_or_mismatched_decision_receipt(
+    tmp_path: Path,
+) -> None:
+    authority, *_, decision_store = await _authority(tmp_path)
+    request = _request()
+    with pytest.raises(ExecutionGrantConflictError, match="回执不存在"):
+        await authority.issue(
+            request,
+            decision=_bypass_decision(),
+            permission_mode=PermissionMode.BYPASS,
+            source=ExecutionGrantSource.BYPASS,
+            now=T2,
+        )
+
+    denied = await decision_store.issue(
+        request_id="denied-call",
+        session_id=request.session_id,
+        run_id=request.run_id,
+        call_id="denied-call",
+        agent_name="main",
+        tool_name=request.tool_name,
+        tool_family="shell",
+        arguments=request.arguments,
+        outcome=PermissionDecisionOutcome.DENIED,
+        actor=PermissionDecisionActor.USER,
+        source=PermissionDecisionSource.USER_CONFIRMATION,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        decided_at=T2,
+    )
+    with pytest.raises(ExecutionGrantConflictError, match="回执与执行请求不匹配"):
+        await authority.issue(
+            replace(
+                request,
+                call_id="denied-call",
+                authorization_reference=denied.receipt_id,
+            ),
+            decision=PermissionDecision(
+                allowed=True,
+                requires_confirmation=True,
+                outcome=PermissionOutcome.CONFIRM,
+                tool_family="shell",
+            ),
+            permission_mode=PermissionMode.MODERATE,
+            source=ExecutionGrantSource.USER_CONFIRMATION,
+            now=T2,
+        )
+
+    authorized = await _authorize(decision_store, replace(request, call_id="other-call"))
+    with pytest.raises(ExecutionGrantConflictError, match="回执与执行请求不匹配"):
+        await authority.issue(
+            replace(authorized, call_id="tampered-call"),
+            decision=_bypass_decision(),
+            permission_mode=PermissionMode.BYPASS,
+            source=ExecutionGrantSource.BYPASS,
+            now=T2,
+        )
+
+    stale_request = replace(request, call_id="stale-call")
+    stale = await decision_store.issue(
+        request_id=stale_request.call_id,
+        session_id=stale_request.session_id,
+        run_id=stale_request.run_id,
+        call_id=stale_request.call_id,
+        agent_name="main",
+        tool_name=stale_request.tool_name,
+        tool_family="shell",
+        arguments=stale_request.arguments,
+        outcome=PermissionDecisionOutcome.BYPASS_ENABLED,
+        actor=PermissionDecisionActor.USER,
+        source=PermissionDecisionSource.BYPASS,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="high",
+        decided_at=T0,
+    )
+    with pytest.raises(ExecutionGrantConflictError, match="已过期"):
+        await authority.issue(
+            replace(stale_request, authorization_reference=stale.receipt_id),
+            decision=_bypass_decision(),
+            permission_mode=PermissionMode.BYPASS,
+            source=ExecutionGrantSource.BYPASS,
+            now="2026-07-19T00:10:00+00:00",
+        )
 
 
 @pytest.mark.asyncio
@@ -376,12 +528,16 @@ async def test_issue_rejects_non_tool_worker_even_with_matching_lease_owner(
         store=ExecutionGrantStore(tmp_path / "execution-grants.db"),
         worker_registry=registry,
         harness_store=harness,
+        permission_decision_store=PermissionDecisionReceiptStore(
+            tmp_path / "permission-decisions.db"
+        ),
         workspace_root=tmp_path,
     )
+    request = await _authorize(authority._permission_decision_store, _request())
 
     with pytest.raises(ExecutionGrantConflictError, match="Tool Worker"):
         await authority.issue(
-            _request(),
+            request,
             decision=_bypass_decision(),
             permission_mode=PermissionMode.BYPASS,
             source=ExecutionGrantSource.BYPASS,
@@ -399,11 +555,15 @@ async def test_issue_requires_live_lease_owned_by_active_worker(tmp_path: Path) 
         store=ExecutionGrantStore(tmp_path / "execution-grants.db"),
         worker_registry=registry,
         harness_store=harness,
+        permission_decision_store=PermissionDecisionReceiptStore(
+            tmp_path / "permission-decisions.db"
+        ),
         workspace_root=tmp_path,
     )
+    request = await _authorize(authority._permission_decision_store, _request())
     with pytest.raises(ExecutionGrantConflictError, match="lease 不存在"):
         await authority.issue(
-            _request(),
+            request,
             decision=_bypass_decision(),
             permission_mode=PermissionMode.BYPASS,
             source=ExecutionGrantSource.BYPASS,
@@ -420,7 +580,7 @@ async def test_issue_requires_live_lease_owned_by_active_worker(tmp_path: Path) 
     )
     with pytest.raises(ExecutionGrantConflictError, match="owner"):
         await authority.issue(
-            _request(),
+            request,
             decision=_bypass_decision(),
             permission_mode=PermissionMode.BYPASS,
             source=ExecutionGrantSource.BYPASS,
@@ -430,9 +590,10 @@ async def test_issue_requires_live_lease_owned_by_active_worker(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_store_rejects_tamper_future_schema_and_wrong_type(tmp_path: Path) -> None:
-    authority, store, *_ = await _authority(tmp_path)
+    authority, store, *_, decision_store = await _authority(tmp_path)
+    request = await _authorize(decision_store, _request())
     issued = await authority.issue(
-        _request(),
+        request,
         decision=_bypass_decision(),
         permission_mode=PermissionMode.BYPASS,
         source=ExecutionGrantSource.BYPASS,

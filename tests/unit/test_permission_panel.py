@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionSource,
+)
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.ui.permission_panel import (
     build_permission_panel_snapshot,
@@ -103,6 +108,39 @@ def test_permission_panel_includes_active_session_grants() -> None:
     assert "grant-browser browser [有效至 2026-07-13T01:00:00+00:00]" in rendered
     assert "[session]" not in rendered
     assert "[until" not in rendered
+
+
+def test_permission_panel_prefers_durable_terminal_decision_history() -> None:
+    engine = _Engine()
+    engine.list_permission_decision_receipts = lambda limit=12: (
+        SimpleNamespace(
+            receipt_id="receipt-1",
+            request_id="call-1",
+            session_id="session-1",
+            run_id="run-1",
+            call_id="call-1",
+            agent_name="main",
+            tool_name="bash_run",
+            tool_family="shell",
+            outcome=PermissionDecisionOutcome.ALLOW_ONCE,
+            actor=PermissionDecisionActor.USER,
+            source=PermissionDecisionSource.USER_CONFIRMATION,
+            risk_level="high",
+            decided_at="2026-07-19T08:00:00+00:00",
+        ),
+    )
+
+    snapshot = build_permission_panel_snapshot(engine)
+
+    assert len(snapshot.history) == 1
+    assert snapshot.history[0]["status"] == "allow_once"
+    assert snapshot.history[0]["receipt_id"] == "receipt-1"
+    assert "用户已允许本次工具执行" in snapshot.history[0]["reason"]
+    payload = permission_panel_payload(snapshot)
+    assert payload["history"][0]["actor"] == "user"
+    assert payload["history"][0]["source"] == "user_confirmation"
+    assert payload["history"][0]["decided_at"] == "2026-07-19T08:00:00+00:00"
+    assert "操作者:user" in render_permission_panel_snapshot(snapshot)
 
 
 def test_permission_panel_payload_is_typed_bounded_and_private_field_free() -> None:

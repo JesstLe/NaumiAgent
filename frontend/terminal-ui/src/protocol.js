@@ -89,11 +89,13 @@ const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", 
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
 const PERMISSION_STATUSES = new Set([
   "needs_confirmation",
+  "allow_once",
   "allowed",
   "confirmed",
   "denied",
   "blocked",
   "bypass_enabled",
+  "session_granted",
   "granted",
   "cancelled",
   "expired",
@@ -2644,6 +2646,10 @@ function normalizePermissionItems(value, section, limit) {
       .map((choice) => harnessChoice(choice, `${prefix}.choice`, PERMISSION_CHOICES)),
     scope: harnessText(item.scope, `${prefix}.scope`),
     expires_at: harnessText(item.expires_at, `${prefix}.expires_at`),
+    receipt_id: harnessText(item.receipt_id ?? "", `${prefix}.receipt_id`),
+    actor: harnessText(item.actor ?? "", `${prefix}.actor`),
+    source: harnessText(item.source ?? "", `${prefix}.source`),
+    decided_at: harnessText(item.decided_at ?? "", `${prefix}.decided_at`),
     policy: normalizePermissionPolicy(item.policy, prefix),
   }));
 }
