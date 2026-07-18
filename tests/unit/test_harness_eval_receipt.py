@@ -393,7 +393,7 @@ async def test_receipt_store_is_immutable_scoped_and_tamper_evident(
             "UPDATE harness_eval_comparison_receipts SET decision = 'failed'"
         )
         db.commit()
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 11
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 13
     with pytest.raises(HarnessStoreError, match="损坏"):
         await HarnessStore(store.db_path).get_eval_comparison_receipt(
             workspace,

@@ -42,5 +42,5 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 - 没有 timeout、takeover、answer fencing、重开重放或审计 redaction executor；
 - permission 与 Harness receipt 的 ARC-03.2b 高风险 payload schema 仍未实现。
 
-下一切片可安全进入 HAR-10.6a：建立单一 durable interaction authority，并让 Pursuit checkpoint 只引用稳定
-interaction ID；UI-18.4 再消费该 authority 的只读 pending snapshot。
+HAR-10.6a 已建立单一 durable interaction authority；下一步 HAR-10.6b 让 Pursuit checkpoint 只引用稳定
+interaction ID，并由 UI-18.4 消费该 authority 的只读 pending snapshot。

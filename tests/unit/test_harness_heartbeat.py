@@ -114,7 +114,7 @@ async def test_store_round_trip_is_idempotent_and_survives_reopen(tmp_path) -> N
 
 
 @pytest.mark.asyncio
-async def test_schema_v11_database_upgrades_to_v12_without_reset(tmp_path) -> None:
+async def test_schema_v11_database_upgrades_to_current_without_reset(tmp_path) -> None:
     db_path = tmp_path / "harness.db"
     with sqlite3.connect(db_path) as db:
         db.execute("CREATE TABLE legacy_marker (value TEXT NOT NULL)")
@@ -143,7 +143,7 @@ async def test_schema_v11_database_upgrades_to_v12_without_reset(tmp_path) -> No
         heartbeat_count = db.execute(
             "SELECT COUNT(*) FROM harness_heartbeats"
         ).fetchone()[0]
-    assert version == 12
+    assert version == 13
     assert marker == "preserved"
     assert heartbeat_count == 1
 
