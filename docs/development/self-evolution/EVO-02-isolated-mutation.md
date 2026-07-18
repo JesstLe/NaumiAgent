@@ -64,5 +64,8 @@
   baseline backups，按 Guard 顺序 apply、严格逆序 rollback，支持 CAS、篡改检测、预算内 revised Guard
   重试和并发 Lease 收敛；它不写文件且不授予执行权限。详见
   `EVO-02-5c1-write-set-journal.md`。
-- EVO-02.5c2 多文件 Writer/Recovery、02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02
-  整体保持 partial。
+- EVO-02.5c2a 已实现 Guard-bound 多文件 Writer：完整 preflight 复核、首写前全集 intent、逐文件 CAS、
+  精确 Git scope postflight、普通异常严格逆序回滚、持久回执 replay，以及单/多事务双向互斥。详见
+  `EVO-02-5c2a-multi-file-patch-writer.md`。
+- EVO-02.5c2b 多文件启动恢复、02.6b 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体
+  保持 partial。

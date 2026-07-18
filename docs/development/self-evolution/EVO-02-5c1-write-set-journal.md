@@ -98,6 +98,6 @@ SQLite 更新以旧的完整 `transaction_json` 作为 compare-and-swap token；
 - SQLite 与文件系统仍依赖 intent + digest 恢复语义，不宣称跨介质 ACID；
 - Windows 文件占用/断电/磁盘满矩阵仍待平台验证。
 
-下一切片 `EVO-02.5c2` 实现 Guard-bound Multi-file Writer 与 Recovery Coordinator：复用现有锁语义，在首个
-replace 前 prepare 全集，每次 replace 后推进 CAS；任何失败或启动恢复都按逆序验证/恢复全部文件。完成
-2.5c2 后再进入 EVO-02.6b 完整 diff/API surface postflight，不能在 Writer 内另造一套 Guard。
+EVO-02.5c2a 已实现 Guard-bound Multi-file Writer、普通异常逆序回滚和单/多事务互斥。下一切片
+`EVO-02.5c2b` 实现启动 Recovery Coordinator 与 UI 状态；它必须复用本 write-set contract，不能另造状态
+机。完成 2.5c2b 后再进入 EVO-02.6b 完整 diff/API surface postflight。

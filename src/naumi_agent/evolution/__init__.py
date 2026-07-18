@@ -41,6 +41,10 @@ if TYPE_CHECKING:
         EvolutionPatchRecoveryCoordinator,
         EvolutionPatchRecoveryResult,
     )
+    from naumi_agent.evolution.patch_set_writers import (
+        EvolutionPatchSetWriter,
+        EvolutionPatchSetWriteReceipt,
+    )
     from naumi_agent.evolution.patch_sets import (
         EvolutionPatchSetFileFact,
         EvolutionPatchSetStore,
@@ -96,6 +100,8 @@ __all__ = [
     "EvolutionPatchSetFileFact",
     "EvolutionPatchSetStore",
     "EvolutionPatchSetTransaction",
+    "EvolutionPatchSetWriteReceipt",
+    "EvolutionPatchSetWriter",
     "EvolutionPatchRecoveryCoordinator",
     "EvolutionPatchRecoveryResult",
     "EvolutionPatchWriteError",
@@ -177,6 +183,10 @@ def __getattr__(name: str) -> object:
         "PatchSetScanFailure",
         "PatchSetState",
     }
+    patch_set_writer_exports = {
+        "EvolutionPatchSetWriteReceipt",
+        "EvolutionPatchSetWriter",
+    }
     patch_recovery_exports = {
         "EvolutionPatchRecoveryCoordinator",
         "EvolutionPatchRecoveryResult",
@@ -211,6 +221,8 @@ def __getattr__(name: str) -> object:
         module_name = "patch_journals"
     elif name in patch_set_exports:
         module_name = "patch_sets"
+    elif name in patch_set_writer_exports:
+        module_name = "patch_set_writers"
     elif name in patch_recovery_exports:
         module_name = "patch_recovery"
     elif name in patch_writer_exports:

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
@@ -33,6 +34,10 @@ from naumi_agent.evolution.patch_journals import (
     PatchJournalState,
 )
 from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
+from naumi_agent.evolution.patch_set_writers import (
+    EvolutionPatchSetWriter,
+    EvolutionPatchSetWriteReceipt,
+)
 from naumi_agent.evolution.patch_sets import (
     EvolutionPatchSetStore,
     PatchSetFilePhase,
@@ -1155,6 +1160,194 @@ async def test_patch_set_concurrent_prepare_is_idempotent_per_lease(tmp_path: Pa
             db.execute("SELECT COUNT(*) FROM evolution_patch_set_backups").fetchone()[0]
             == 2
         )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_writer_applies_complete_set_and_replays_receipt(
+    tmp_path: Path,
+) -> None:
+    (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        receipt,
+        proposed,
+        before,
+        _,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    writer = EvolutionPatchSetWriter(
+        static_guard=guard,
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    main_footer = target.read_bytes()
+    main_header = target.with_name("header.py").read_bytes()
+
+    first = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        proposed_contents=proposed,
+    )
+    second = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        proposed_contents=proposed,
+    )
+
+    assert first == second
+    assert first.write_id == f"evsw_{first.write_sha256[:24]}"
+    assert tuple(change.path for change in first.changes) == plan.authorized_files
+    transaction = store.get_by_lease(lease.lease_id)
+    assert transaction is not None
+    assert transaction.state is PatchSetState.COMMITTED
+    assert store.load_backups(transaction.transaction_id) == (None, None)
+    assert EvolutionPatchSetWriteReceipt.model_validate_json(
+        store.load_receipt_json(transaction.transaction_id)
+    ) == first
+    for path, content in proposed.items():
+        assert Path(lease.worktree_path, path).read_text(encoding="utf-8") == content
+    assert target.read_bytes() == main_footer
+    assert target.with_name("header.py").read_bytes() == main_header
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain").splitlines() == [
+        "M src/naumi_agent/ui/footer.py",
+        " M src/naumi_agent/ui/header.py",
+    ]
+    payload = first.model_dump(mode="json")
+    payload["worktree_status_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="write_sha256"):
+        EvolutionPatchSetWriteReceipt.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_patch_set_writer_rolls_back_all_files_when_second_replace_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        receipt,
+        proposed,
+        before,
+        _,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    writer = EvolutionPatchSetWriter(
+        static_guard=guard,
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    original_replace = patch_set_writer_module._atomic_replace
+    calls = 0
+
+    def fail_second(target: Path, content: bytes, *, mode: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated second replace failure")
+        original_replace(target, content, mode=mode)
+
+    monkeypatch.setattr(patch_set_writer_module, "_atomic_replace", fail_second)
+
+    with pytest.raises(EvolutionPatchWriteError, match="多文件原子写入") as error:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=receipt,
+            proposed_contents=proposed,
+        )
+
+    assert error.value.rollback_completed is True
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes() for path in plan.authorized_files
+    } == before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    transaction = store.get_by_lease(lease.lease_id)
+    assert transaction is not None
+    assert transaction.state is PatchSetState.ROLLED_BACK
+    assert tuple(item.phase for item in transaction.files) == (
+        PatchSetFilePhase.ROLLED_BACK,
+        PatchSetFilePhase.ROLLED_BACK,
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_writer_crash_leaves_ordered_recoverable_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        receipt,
+        proposed,
+        _before,
+        _,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    writer = EvolutionPatchSetWriter(
+        static_guard=guard,
+        patch_set_store=store,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    original_mark = store.mark_file_replaced
+
+    def crash_before_second_cas(transaction_id: str, *, file_index: int):
+        if file_index == 1:
+            raise _SimulatedProcessCrash()
+        return original_mark(transaction_id, file_index=file_index)
+
+    monkeypatch.setattr(store, "mark_file_replaced", crash_before_second_cas)
+
+    with pytest.raises(_SimulatedProcessCrash):
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=receipt,
+            proposed_contents=proposed,
+        )
+
+    transaction = store.get_by_lease(lease.lease_id)
+    assert transaction is not None
+    assert transaction.state is PatchSetState.APPLYING
+    assert transaction.applied_count == 1
+    assert tuple(item.phase for item in transaction.files) == (
+        PatchSetFilePhase.REPLACED,
+        PatchSetFilePhase.PREPARED,
+    )
+    assert all(
+        Path(lease.worktree_path, path).read_text(encoding="utf-8") == content
+        for path, content in proposed.items()
+    )
+    recoverable, failures = store.scan_recoverable()
+    assert recoverable == (transaction,)
+    assert failures == ()
 
 
 async def _guard_fixture(tmp_path: Path):

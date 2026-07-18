@@ -33,6 +33,8 @@ from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
     EvolutionPatchRecoveryResult,
 )
+from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
+from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
@@ -720,6 +722,9 @@ class AgentEngine:
         self.evolution_patch_journal_store = EvolutionPatchJournalStore(
             config.memory.session_db_path
         )
+        self.evolution_patch_set_store = EvolutionPatchSetStore(
+            config.memory.session_db_path
+        )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
             worktree_storage_dir=self._worktree_storage_dir,
@@ -729,6 +734,12 @@ class AgentEngine:
         ] = ()
         self.evolution_patch_writer = EvolutionPatchWriter(
             static_guard=self.evolution_static_guard,
+            journal_store=self.evolution_patch_journal_store,
+            patch_set_store=self.evolution_patch_set_store,
+        )
+        self.evolution_patch_set_writer = EvolutionPatchSetWriter(
+            static_guard=self.evolution_static_guard,
+            patch_set_store=self.evolution_patch_set_store,
             journal_store=self.evolution_patch_journal_store,
         )
         self.background_runner = BackgroundRunner(

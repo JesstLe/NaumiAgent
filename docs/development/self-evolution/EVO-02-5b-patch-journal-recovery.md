@@ -102,6 +102,6 @@ Recovery。结果保存在 Engine 状态，并以无源码摘要同步：
 - Windows 文件占用、断电、磁盘满和杀进程矩阵尚未达到 A4/A5，当前证据是 macOS 真实文件系统；
 - 完整 diff/API surface postflight、HAR-08 RED/GREEN 和 EVO-02.7 Mutation Receipt 尚未实现。
 
-EVO-02.4b 已补真实多文件 Proposal/Contract/Plan scope，EVO-02.5c1 已补多文件 write-set journal
-contract。下一切片是 EVO-02.5c2 Guard-bound Multi-file Writer 与 Recovery；不得把当前单文件 Writer
-循环调用并宣称为多文件原子事务。
+EVO-02.4b 已补真实多文件 Proposal/Contract/Plan scope，EVO-02.5c1 已补多文件 write-set journal，
+EVO-02.5c2a 已补 Guard-bound Multi-file Writer 与普通异常逆序回滚。下一切片是 EVO-02.5c2b 启动恢复与
+UI 状态；不得把当前单文件 Recovery 循环调用并宣称为多文件恢复事务。
