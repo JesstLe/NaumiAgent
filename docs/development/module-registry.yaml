@@ -1,7 +1,7 @@
 schema_version: 1
 updated_at: "2026-07-18"
 statuses: [implemented, partial, planned, blocked, superseded]
-implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, UI-11.1a, UI-13.1a, CC-01.1a, ARC-03.2a, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a]
+implemented_baselines: [HAR-H4.4, HAR-05, HAR-06, HAR-08-H5c, HAR-08.8a, HAR-08.8b, HAR-08.8c, HAR-08.8d, HAR-08.8e1, HAR-08.8e2, HAR-08.8e3, HAR-09.1a, UI-11.1a, UI-13.1a, CC-01.1a, ARC-03.2a, EVO-01.1a, EVO-01.1b, EVO-01.2a, EVO-01.3a, EVO-01.6a]
 modules:
   - {id: HAR-05, status: implemented, path: harness/HAR-05-safe-replay.md, depends_on: [HAR-H4.4]}
   - {id: HAR-06, status: implemented, path: harness/HAR-06-session-lifecycle.md, depends_on: [HAR-05]}

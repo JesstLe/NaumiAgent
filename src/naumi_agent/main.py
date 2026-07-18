@@ -2189,6 +2189,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_harness(engine, arg)
         case "/feedback":
             await _run_feedback(engine, arg)
+        case "/evolution":
+            await _run_evolution_review(engine, arg)
         case "/debug":
             if _active_cli and hasattr(_active_cli, "debug_info"):
                 console.print(_active_cli.debug_info())
@@ -2741,6 +2743,7 @@ def _print_help() -> None:
             "/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>",
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
+        ("/evolution [list|detail <id>]", "只读审查 Evolution Candidate"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -2896,6 +2899,56 @@ async def _run_feedback(engine: Any, arg: str) -> None:
         )
         return
     console.print(Markdown(render_feedback_result(result)))
+
+
+async def _run_evolution_review(engine: Any, arg: str) -> None:
+    from naumi_agent.evolution.review import (
+        EvolutionReviewFilter,
+        render_evolution_review,
+    )
+    from naumi_agent.evolution.store import EvolutionStoreError
+
+    try:
+        parts = shlex.split(arg)
+        action = parts[0].lower() if parts else "list"
+        service = engine.evolution_review_service
+        if action == "detail":
+            if len(parts) != 2:
+                raise ValueError("detail 需要一个 Candidate ID。")
+            snapshot = await service.detail_snapshot(engine.workspace_root, parts[1])
+        elif action == "list":
+            options = _parse_evolution_list_options(parts[1:])
+            snapshot = await service.list_snapshot(
+                engine.workspace_root,
+                filters=EvolutionReviewFilter(**options),
+            )
+        else:
+            raise ValueError("仅支持 list 或 detail。")
+    except (EvolutionStoreError, OSError, ValueError):
+        console.print(
+            "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
+            "/evolution detail <candidate-id>",
+            style="yellow",
+            markup=False,
+        )
+        return
+    console.print(Markdown(render_evolution_review(snapshot)))
+
+
+def _parse_evolution_list_options(parts: list[str]) -> dict[str, Any]:
+    options: dict[str, Any] = {"query": "", "risk": "", "source_kind": "", "limit": 50}
+    names = {"--query": "query", "--risk": "risk", "--source": "source_kind", "--limit": "limit"}
+    index = 0
+    while index < len(parts):
+        name = parts[index]
+        if name not in names or index + 1 >= len(parts):
+            raise ValueError("Evolution list 参数无效。")
+        value: Any = parts[index + 1]
+        if name == "--limit":
+            value = int(value)
+        options[names[name]] = value
+        index += 2
+    return options
 
 
 async def _run_harness(engine: Any, arg: str) -> None:

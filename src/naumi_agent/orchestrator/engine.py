@@ -19,6 +19,8 @@ from typing import Any
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.store import EvolutionCandidateStore, resolve_evolution_db_path
 from naumi_agent.harness.completion import (
     CompletionGateResult,
     HarnessCompletionReceipt,
@@ -545,7 +547,15 @@ class AgentEngine:
             ),
             store=self._harness_store,
         )
-        self.feedback_intake_service = FeedbackIntakeService()
+        self.evolution_candidate_store = EvolutionCandidateStore(
+            resolve_evolution_db_path()
+        )
+        self.feedback_intake_service = FeedbackIntakeService(
+            self.evolution_candidate_store
+        )
+        self.evolution_review_service = EvolutionReviewService(
+            self.evolution_candidate_store
+        )
         self._session_reconciliation_coordinator = SessionReconciliationCoordinator(
             session_port=self._session_port,
             harness_store=self._harness_store,
@@ -748,6 +758,7 @@ class AgentEngine:
 
         # Runtime status tools
         from naumi_agent.tools.doctor import DoctorDiagnosticsTool
+        from naumi_agent.tools.evolution_review import create_evolution_review_tools
         from naumi_agent.tools.feedback import create_feedback_tools
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
@@ -757,6 +768,8 @@ class AgentEngine:
         self._tool_registry.register(DoctorDiagnosticsTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
         for tool in create_feedback_tools(self, self.feedback_intake_service):
+            self._tool_registry.register(tool)
+        for tool in create_evolution_review_tools(self, self.evolution_review_service):
             self._tool_registry.register(tool)
         for tool in create_session_tools(self):
             self._tool_registry.register(tool)

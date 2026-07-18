@@ -300,6 +300,10 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
             "description": "记录隐私安全的用户纠正或缺陷候选",
         },
         {
+            "command": "/evolution",
+            "description": "只读审查 Evolution Candidate",
+        },
+        {
             "command": "/mode",
             "aliases": ["/mode"],
             "description": "切换 runtime 模式 default / plan / bypass",
