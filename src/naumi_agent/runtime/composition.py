@@ -32,7 +32,9 @@ from naumi_agent.runtime.resources import (
 )
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
+from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.execution import LocalToolExecutor
+from naumi_agent.workbench.store import WorkbenchStore
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -96,9 +98,11 @@ def build_runtime_ports(
 
 def build_runtime_paths(config: AppConfig) -> RuntimePaths:
     """Resolve the complete runtime path snapshot without creating directories."""
-    runtime_data_dir = Path(config.memory.session_db_path).expanduser().resolve().parent
+    session_db_path = Path(config.memory.session_db_path).expanduser().resolve()
+    runtime_data_dir = session_db_path.parent
     return RuntimePaths(
         workspace_root=config.resolve_workspace_root(),
+        session_db_path=session_db_path,
         runtime_data_dir=runtime_data_dir,
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
         worktree_storage_dir=runtime_data_dir / "worktrees",
@@ -139,11 +143,21 @@ def build_runtime_resources(
     if harness_trust_store is None:
         harness_trust_store = HarnessTrustStore(paths.harness_trust_db_path)
 
+    task_store = resolved.task_store
+    if task_store is None:
+        task_store = TaskStore(str(paths.session_db_path))
+
+    workbench_store = resolved.workbench_store
+    if workbench_store is None:
+        workbench_store = WorkbenchStore(str(paths.session_db_path))
+
     return RuntimeResources(
         chat_run_store=chat_run_store,
         evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,
+        task_store=task_store,
+        workbench_store=workbench_store,
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from pathlib import Path
 from typing import Any, cast
 
 import aiosqlite
@@ -302,6 +303,10 @@ class WorkbenchStore:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._initialized = False
+
+    @property
+    def db_path(self) -> Path:
+        return Path(self._db_path).expanduser().resolve()
 
     async def _ensure_tables(self, db: aiosqlite.Connection) -> None:
         if self._initialized:

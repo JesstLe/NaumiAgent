@@ -64,6 +64,13 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
     assert engine._paths.browser_data_dir == engine._paths.runtime_data_dir / "browser"
     assert engine._harness_store is engine._resources.harness_store
     assert engine.chat_run_store is engine._resources.chat_run_store
+    assert engine.task_store is engine._resources.task_store
+    assert engine.workbench_store is engine._resources.workbench_store
+    assert engine.workbench_service._task_store is engine._resources.task_store
+    assert (
+        engine.workbench_service._workbench_store
+        is engine._resources.workbench_store
+    )
     assert (
         engine.evolution_candidate_store
         is engine._resources.evolution_candidate_store
@@ -159,6 +166,15 @@ async def test_root_composed_engine_runs_tool_persists_receipt_and_closes_sessio
         recorded = await engine.feedback_intake_service.ingest(tmp_path, feedback)
         assert recorded.status == "recorded"
         assert engine._resources.evolution_candidate_store.db_path.exists()
+        task = await engine.task_store.create_task("验证共享任务数据库")
+        mission = await engine.workbench_service.create_mission(
+            session_id=engine._session.id,
+            title="Composition Resource 验证",
+            goal="证明 Task 与 Workbench 使用同一注入数据库",
+        )
+        assert task.session_id == engine._session.id
+        assert mission.session_id == engine._session.id
+        assert engine.task_store.db_path == engine.workbench_store.db_path
     finally:
         await engine.shutdown()
 

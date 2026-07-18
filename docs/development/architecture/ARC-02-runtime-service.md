@@ -31,7 +31,7 @@
 
 ## 已完成前置
 
-- ARC-01.4b1-4b2c 已将规范 RuntimePaths、Harness/Evolution/ChatRun Store 交由 Composition Root
+- ARC-01.4b1-4b2d 已将规范 RuntimePaths、Harness/Evolution/ChatRun/Task/Workbench Store 交由 Composition Root
   显式装配。现有 durable run、step、artifact 与 completion receipt 已在成功、失败、取消和终端断连
   场景验证。
 - 这只解决 ARC-02.5 的持久化 owner 前置，不等于 cursor/revision/ack/resume 已实现。ARC-02 仍需先
