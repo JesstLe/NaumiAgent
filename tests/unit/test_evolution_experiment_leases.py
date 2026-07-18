@@ -3876,6 +3876,10 @@ async def test_validation_plan_binds_real_receipt_to_symmetric_red_green(
     assert first.metrics[0].same_seed_required is True
     assert first.files[0].file_kind == "python"
     assert first.files[0].required_checks == ("lint", "compile", "unit", "contract")
+    assert first.schema_version == 2
+    assert first.files[0].operation == receipt.files[0].operation == "modify"
+    assert first.files[0].baseline_sha256 == receipt.files[0].before_sha256
+    assert first.files[0].candidate_sha256 == receipt.files[0].after_sha256
     assert first.required_check_kinds == ("compile", "contract", "lint", "unit")
     assert first.har08_comparison_receipt_required is True
     assert first.runner_binding_status == "required"
