@@ -28,6 +28,7 @@ from naumi_agent.evolution.patch_journals import (
     EvolutionPatchJournalStore,
     PatchJournalState,
 )
+from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.static_guards import (
     EvolutionStaticGuard,
     EvolutionStaticGuardReceipt,
@@ -101,9 +102,11 @@ class EvolutionPatchWriter:
         *,
         static_guard: EvolutionStaticGuard,
         journal_store: EvolutionPatchJournalStore,
+        patch_set_store: EvolutionPatchSetStore | None = None,
     ) -> None:
         self._static_guard = static_guard
         self._journal_store = journal_store
+        self._patch_set_store = patch_set_store
 
     async def apply(
         self,
@@ -124,6 +127,16 @@ class EvolutionPatchWriter:
         lock_path = root.parent / f".{lease.worktree_name}.{lease.lease_id}.patch.lock"
         lock_token = await asyncio.to_thread(_acquire_lock, lock_path, lease)
         try:
+            if self._patch_set_store is not None:
+                write_set = await asyncio.to_thread(
+                    self._patch_set_store.get_by_lease,
+                    lease.lease_id,
+                )
+                if write_set is not None:
+                    raise EvolutionPatchWriteError(
+                        "write_set_conflict",
+                        "该 Lease 已绑定多文件 Patch Set，拒绝建立平行事务。",
+                    )
             existing = await asyncio.to_thread(
                 self._journal_store.get_by_lease,
                 lease.lease_id,
