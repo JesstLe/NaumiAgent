@@ -67,9 +67,9 @@ worktree storage。Builder 在工具注册前构造但持有同一可变 registr
 ## 明确未包含
 
 - Snapshot 持久化、UI、斜杠命令或 Agent Tool；
-- EVO-02.4 mutation planner、02.5 patch writer、02.6 static guard、02.7 receipt；
+- EVO-02.5 patch writer、02.6 static guard、02.7 receipt；
 - EVO-03 baseline/candidate checks 与比较；
 - Profile trust 状态和模型 capability identity；它们属于 Harness Eval baseline，不应被本源码快照复制。
 
-下一切片应跨文档核对后实现 EVO-02.4a 的确定性 Mutation Plan，但 Plan 仍必须不可执行，且在
-EVO-02.6 static guard 完成前不得交给 patch writer。
+EVO-02.4a 已实现确定性不可执行 Mutation Plan，详见 `EVO-02-4a-mutation-plan.md`。下一切片应先补
+EVO-02.6a Static Guard preflight，再进入受 Guard 约束的 Patch Writer。

@@ -27,6 +27,7 @@ from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore, resolve_evolution_db_path
@@ -701,6 +702,10 @@ class AgentEngine:
                 self._tool_registry,
                 worktree_storage_dir=self._worktree_storage_dir,
             )
+        )
+        self.evolution_mutation_planner = EvolutionMutationPlanner(
+            review_service=self.evolution_review_service,
+            snapshot_builder=self.evolution_experiment_source_snapshot_builder,
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")

@@ -79,10 +79,10 @@ Lease Store 与当前会话/Workbench 使用同一 runtime SQLite 路径；Lease
 
 ## 明确未包含
 
-- EVO-02.4 mutation planner、02.5 patch writer、02.6 完整 static guard、02.7 receipt；
+- EVO-02.5 patch writer、02.6 完整 static guard、02.7 receipt；
 - 用户可见的实验创建按钮、斜杠命令或 Agent Tool；
 - EVO-03 检查执行、before/after 评测与推广资格。
 
 EVO-02.3a 已实现 Contract baseline tree、Harness Profile、实验配置和允许工具身份的不可变 Source
-Snapshot，详见 `EVO-02-3a-source-snapshot.md`。下一切片应实现不可执行 Mutation Plan，仍不得提前开放
-patch 写入。
+Snapshot，详见 `EVO-02-3a-source-snapshot.md`；EVO-02.4a 不可执行 Mutation Plan 也已完成。下一切片
+应先实现 Static Guard preflight，仍不得提前开放 patch 写入。
