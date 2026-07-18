@@ -26,6 +26,7 @@ from naumi_agent.evolution.mutation_receipts import (
     EvolutionMutationReceiptService,
     EvolutionMutationReceiptStore,
 )
+from naumi_agent.evolution.mutation_turns import EvolutionMutationTurnRunner
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
@@ -152,6 +153,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_mutation_generation_service,
         EvolutionMutationGenerationService,
+    )
+    assert isinstance(
+        engine.evolution_mutation_turn_runner,
+        EvolutionMutationTurnRunner,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

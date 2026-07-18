@@ -51,6 +51,13 @@ if TYPE_CHECKING:
         MutationReceiptFile,
         MutationToolEvidence,
     )
+    from naumi_agent.evolution.mutation_turns import (
+        EvolutionMutationTurnError,
+        EvolutionMutationTurnResult,
+        EvolutionMutationTurnRunner,
+        MutationTurnBudget,
+        MutationTurnEventPublisher,
+    )
     from naumi_agent.evolution.patch_journals import (
         EvolutionPatchJournal,
         EvolutionPatchJournalStore,
@@ -133,6 +140,9 @@ __all__ = [
     "EvolutionMutationReceiptError",
     "EvolutionMutationReceiptService",
     "EvolutionMutationReceiptStore",
+    "EvolutionMutationTurnError",
+    "EvolutionMutationTurnResult",
+    "EvolutionMutationTurnRunner",
     "EvolutionPatchJournal",
     "EvolutionPatchJournalStore",
     "EvolutionPostflightGuard",
@@ -165,6 +175,8 @@ __all__ = [
     "MutationPlanStage",
     "MutationReceiptFile",
     "MutationToolEvidence",
+    "MutationTurnBudget",
+    "MutationTurnEventPublisher",
     "PatchJournalState",
     "PostflightDiffFact",
     "PatchSetFilePhase",
@@ -237,6 +249,13 @@ def __getattr__(name: str) -> object:
         "MutationReceiptFile",
         "MutationToolEvidence",
     }
+    mutation_turn_exports = {
+        "EvolutionMutationTurnError",
+        "EvolutionMutationTurnResult",
+        "EvolutionMutationTurnRunner",
+        "MutationTurnBudget",
+        "MutationTurnEventPublisher",
+    }
     patch_journal_exports = {
         "EvolutionPatchJournal",
         "EvolutionPatchJournalStore",
@@ -296,6 +315,8 @@ def __getattr__(name: str) -> object:
         module_name = "mutation_generation"
     elif name in mutation_receipt_exports:
         module_name = "mutation_receipts"
+    elif name in mutation_turn_exports:
+        module_name = "mutation_turns"
     elif name in patch_journal_exports:
         module_name = "patch_journals"
     elif name in postflight_guard_exports:

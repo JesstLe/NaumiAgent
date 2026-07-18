@@ -45,6 +45,11 @@ from naumi_agent.evolution.mutation_receipts import (
     EvolutionMutationReceiptService,
     EvolutionMutationReceiptStore,
 )
+from naumi_agent.evolution.mutation_turns import (
+    EvolutionMutationTurnError,
+    EvolutionMutationTurnRunner,
+    MutationTurnBudget,
+)
 from naumi_agent.evolution.patch_journals import (
     EvolutionPatchJournalStore,
     PatchJournalState,
@@ -76,6 +81,9 @@ from naumi_agent.evolution.static_guards import (
 )
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
+from naumi_agent.model.router import ModelResponse, TokenUsage
+from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType, thaw_event_data
+from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry
 from naumi_agent.tools.builtin import create_builtin_tools
@@ -92,6 +100,70 @@ class _SimulatedProcessCrash(BaseException):
     pass
 
 
+class _MutationEventSink:
+    def __init__(self, *, fail_on: RuntimeEventType | None = None) -> None:
+        self.events: list[RuntimeEvent] = []
+        self.fail_on = fail_on
+
+    async def emit(self, event: RuntimeEvent) -> None:
+        if event.type is self.fail_on:
+            raise RuntimeError("simulated event sink failure")
+        self.events.append(event)
+
+
+class _ScriptedMutationModel:
+    def __init__(
+        self,
+        responses: list[ModelResponse],
+        *,
+        context_window: int = 124_000,
+        max_output: int = 16_384,
+    ) -> None:
+        self.responses = list(responses)
+        self.context_window = context_window
+        self.max_output = max_output
+        self.calls: list[dict[str, object]] = []
+
+    def resolve_model(self, _tier) -> str:
+        return "scripted/mutation"
+
+    def get_context_window(self, _model: str) -> int:
+        return self.context_window
+
+    def get_max_output(self, _model: str) -> int:
+        return self.max_output
+
+    async def call(self, messages, **kwargs) -> ModelResponse:
+        self.calls.append({
+            "messages": json.loads(json.dumps(messages)),
+            "tools": json.loads(json.dumps(kwargs.get("tools"))),
+            "model": kwargs.get("model"),
+            "max_tokens": kwargs.get("max_tokens"),
+            "temperature": kwargs.get("temperature"),
+        })
+        if not self.responses:
+            raise RuntimeError("script exhausted")
+        return self.responses.pop(0)
+
+
+class _BlockingMutationModel(_ScriptedMutationModel):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def call(self, messages, **kwargs) -> ModelResponse:
+        self.calls.append({
+            "messages": json.loads(json.dumps(messages)),
+            "tools": json.loads(json.dumps(kwargs.get("tools"))),
+        })
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.cancelled.set()
+
+
 def _git(root: Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", "-C", str(root), *args],
@@ -101,6 +173,21 @@ def _git(root: Path, *args: str) -> str:
         timeout=5,
     )
     return completed.stdout.strip()
+
+
+def _model_tool_call(
+    call_id: str,
+    name: str,
+    arguments: dict[str, str],
+) -> dict[str, object]:
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": name,
+            "arguments": json.dumps(arguments),
+        },
+    }
 
 
 async def _lease_fixture(
@@ -1633,10 +1720,15 @@ async def test_patch_set_recovery_defers_live_writer_lock_without_touching_files
     assert current == transaction
 
 
-async def _guard_fixture(tmp_path: Path):
+async def _guard_fixture(
+    tmp_path: Path,
+    *,
+    target_content: bytes | None = None,
+):
     workspace, target, contract, _, _, manager, _ = await _lease_fixture(
         tmp_path,
         profile_text="schema_version: 1\n",
+        target_content=target_content,
     )
     lease = await manager.acquire(contract, owner="Evolution-Agent")
     snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
@@ -3227,6 +3319,433 @@ async def test_mutation_generation_binding_rejects_wrong_digest_and_attempt(
     assert journal is not None
     assert journal.attempt == second.trace.attempt == 2
     assert journal.state is PatchJournalState.COMMITTED
+
+
+@pytest.mark.asyncio
+async def test_mutation_turn_runner_generates_real_trace_and_typed_events(
+    tmp_path: Path,
+) -> None:
+    workspace, target, contract, lease, snapshot, plan, guard = await _guard_fixture(
+        tmp_path
+    )
+    proposed = "def render_footer():\n    return 'turn-runner'\n"
+    model = _ScriptedMutationModel([
+        ModelResponse(
+            content="",
+            tool_calls=[_model_tool_call(
+                "turn-call-raw-id",
+                "file_write",
+                {"path": plan.authorized_files[0], "content": proposed},
+            )],
+            usage=TokenUsage(
+                input_tokens=120,
+                output_tokens=40,
+                total_tokens=160,
+                cost_usd=0.001,
+            ),
+            model="scripted/mutation",
+            finish_reason="tool_calls",
+        )
+    ])
+    trace_store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    runner = EvolutionMutationTurnRunner(
+        model_port=model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=trace_store,
+            clock=lambda: NOW,
+        ),
+    )
+    sink = _MutationEventSink()
+    publisher = RuntimeEventPublisher(
+        sink,
+        session_id="mutation-session",
+        run_id="mutation-turn-run",
+    )
+    main_before = target.read_bytes()
+    isolated = Path(lease.worktree_path, plan.authorized_files[0])
+    isolated_before = isolated.read_bytes()
+
+    result = await runner.run(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-turn-run",
+        attempt=1,
+        events=publisher,
+    )
+
+    assert result.turns == result.model_calls == result.tool_calls == 1
+    assert result.usage.total_tokens == 160
+    assert result.models == ("scripted/mutation",)
+    assert result.event_delivery_failed is False
+    assert result.generation.proposed_contents[plan.authorized_files[0]] == proposed
+    assert trace_store.get(result.generation.trace.trace_id) == result.generation.trace
+    assert target.read_bytes() == main_before
+    assert isolated.read_bytes() == isolated_before
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+    assert [event.type for event in sink.events] == [
+        RuntimeEventType.TURN_START,
+        RuntimeEventType.TOOL_START,
+        RuntimeEventType.TOOL_END,
+        RuntimeEventType.RESPONSE_END,
+    ]
+    assert [event.sequence for event in sink.events] == [1, 2, 3, 4]
+    event_json = json.dumps([
+        thaw_event_data(event.data) for event in sink.events
+    ])
+    assert "turn-call-raw-id" not in event_json
+    assert "return 'turn-runner'" not in event_json
+    first_messages = model.calls[0]["messages"]
+    assert isinstance(first_messages, list)
+    assert "return 'baseline'" in first_messages[1]["content"]
+    tool_schemas = model.calls[0]["tools"]
+    assert isinstance(tool_schemas, list)
+    assert tool_schemas[0]["function"]["parameters"]["properties"]["path"][
+        "enum"
+    ] == [plan.authorized_files[0]]
+
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=result.generation.proposed_contents,
+        generation_trace=result.generation.trace,
+    )
+    writer = EvolutionPatchWriter(
+        static_guard=guard,
+        journal_store=EvolutionPatchJournalStore(tmp_path / "runtime.db"),
+    )
+    write_receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents=result.generation.proposed_contents,
+        generation_trace=result.generation.trace,
+    )
+    mutation_receipt = EvolutionMutationReceiptService(
+        journal_store=writer._journal_store,
+        patch_set_store=EvolutionPatchSetStore(tmp_path / "runtime.db"),
+        receipt_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+    ).finalize(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        static_guard=guard_receipt,
+        generation_trace=result.generation.trace,
+    )
+    assert write_receipt.schema_version == 3
+    assert mutation_receipt.schema_version == 2
+    assert mutation_receipt.mutation_generation_trace_id == (
+        result.generation.trace.trace_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_mutation_turn_runner_retries_recoverable_edit_and_bounds_usage(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    path = plan.authorized_files[0]
+    model = _ScriptedMutationModel([
+        ModelResponse(
+            content="",
+            tool_calls=[_model_tool_call(
+                "turn-retry-1",
+                "file_edit",
+                {"path": path, "old_text": "missing", "new_text": "ignored"},
+            )],
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            model="scripted/mutation",
+            finish_reason="tool_calls",
+            reasoning_content="bounded mutation reasoning",
+        ),
+        ModelResponse(
+            content="",
+            tool_calls=[_model_tool_call(
+                "turn-retry-2",
+                "file_edit",
+                {
+                    "path": path,
+                    "old_text": "return 'baseline'",
+                    "new_text": "return 'recovered'",
+                },
+            )],
+            usage=TokenUsage(input_tokens=20, output_tokens=5, total_tokens=25),
+            model="scripted/mutation",
+            finish_reason="tool_calls",
+        ),
+    ])
+    runner = EvolutionMutationTurnRunner(
+        model_port=model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=EvolutionMutationGenerationTraceStore(
+                tmp_path / "runtime.db"
+            ),
+            clock=lambda: NOW,
+        ),
+    )
+
+    result = await runner.run(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-turn-retry",
+        attempt=1,
+        budget=MutationTurnBudget(max_turns=2, max_total_tokens=1_024),
+    )
+
+    assert result.turns == result.model_calls == result.tool_calls == 2
+    assert result.usage.total_tokens == 40
+    assert tuple(item.status for item in result.generation.trace.calls) == (
+        "error",
+        "success",
+    )
+    second_messages = model.calls[1]["messages"]
+    assert isinstance(second_messages, list)
+    assert second_messages[-1]["role"] == "tool"
+    assert "mutation_edit_target_missing" in second_messages[-1]["content"]
+    assert second_messages[-2]["reasoning_content"] == "bounded mutation reasoning"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["event", "timeout", "caller"])
+async def test_mutation_turn_runner_stops_blocked_model_on_all_cancellation_paths(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    _, target, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    model = _BlockingMutationModel()
+    store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    runner = EvolutionMutationTurnRunner(
+        model_port=model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=store,
+            clock=lambda: NOW,
+        ),
+    )
+    cancel_event = asyncio.Event()
+    task = asyncio.create_task(runner.run(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id=f"mutation-turn-{mode}",
+        attempt=1,
+        cancel_event=cancel_event,
+        budget=MutationTurnBudget(timeout_seconds=0.05),
+    ))
+    await asyncio.wait_for(model.started.wait(), timeout=1)
+    if mode == "event":
+        cancel_event.set()
+    elif mode == "caller":
+        task.cancel()
+
+    if mode == "caller":
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        with pytest.raises(EvolutionMutationTurnError) as stopped:
+            await task
+        assert stopped.value.code == (
+            "mutation_turn_cancelled" if mode == "event" else "mutation_turn_timeout"
+        )
+    await asyncio.wait_for(model.cancelled.wait(), timeout=1)
+    assert store.get_for_attempt(plan.plan_id, 1) is None
+    assert target.read_text(encoding="utf-8").endswith("'baseline'\n")
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_mutation_turn_runner_fails_closed_on_protocol_budget_and_final_event(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    malformed = _ScriptedMutationModel([
+        ModelResponse(
+            content="",
+            tool_calls=[{"id": "bad", "type": "function"}],
+            model="scripted/mutation",
+        )
+    ])
+    malformed_runner = EvolutionMutationTurnRunner(
+        model_port=malformed,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=EvolutionMutationGenerationTraceStore(
+                tmp_path / "malformed.db"
+            ),
+            clock=lambda: NOW,
+        ),
+    )
+    with pytest.raises(EvolutionMutationTurnError) as protocol_error:
+        await malformed_runner.run(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-turn-malformed",
+            attempt=1,
+        )
+    assert protocol_error.value.code == "mutation_turn_tool_protocol_invalid"
+
+    over_budget = _ScriptedMutationModel([
+        ModelResponse(
+            content="",
+            tool_calls=[_model_tool_call(
+                "not-executed",
+                "file_write",
+                {"path": plan.authorized_files[0], "content": "value = 1\n"},
+            )],
+            usage=TokenUsage(
+                input_tokens=1_024,
+                output_tokens=1,
+                total_tokens=1_025,
+            ),
+            model="scripted/mutation",
+        )
+    ])
+    budget_runner = EvolutionMutationTurnRunner(
+        model_port=over_budget,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "budget.db"),
+            clock=lambda: NOW,
+        ),
+    )
+    with pytest.raises(EvolutionMutationTurnError) as budget_error:
+        await budget_runner.run(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-turn-budget",
+            attempt=1,
+            budget=MutationTurnBudget(max_total_tokens=1_024),
+        )
+    assert budget_error.value.code == "mutation_turn_token_budget_exceeded"
+
+    failed_call = _model_tool_call(
+        "limit-call",
+        "file_edit",
+        {
+            "path": plan.authorized_files[0],
+            "old_text": "never-present",
+            "new_text": "ignored",
+        },
+    )
+    turn_limited_model = _ScriptedMutationModel([
+        ModelResponse(content="", tool_calls=[failed_call], model="scripted/mutation"),
+        ModelResponse(
+            content="",
+            tool_calls=[{
+                **failed_call,
+                "id": "limit-call-2",
+            }],
+            model="scripted/mutation",
+        ),
+    ])
+    turn_limited_runner = EvolutionMutationTurnRunner(
+        model_port=turn_limited_model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "limit.db"),
+            clock=lambda: NOW,
+        ),
+    )
+    with pytest.raises(EvolutionMutationTurnError) as turn_limit_error:
+        await turn_limited_runner.run(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-turn-limit",
+            attempt=1,
+            budget=MutationTurnBudget(max_turns=2),
+        )
+    assert turn_limit_error.value.code == "mutation_turn_limit_exceeded"
+    assert len(turn_limited_model.calls) == 2
+
+    proposed = "def render_footer():\n    return 'event-safe'\n"
+    completed_model = _ScriptedMutationModel([
+        ModelResponse(
+            content="",
+            tool_calls=[_model_tool_call(
+                "event-call",
+                "file_write",
+                {"path": plan.authorized_files[0], "content": proposed},
+            )],
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            model="scripted/mutation",
+        )
+    ])
+    completed_runner = EvolutionMutationTurnRunner(
+        model_port=completed_model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=EvolutionMutationGenerationTraceStore(
+                tmp_path / "event.db"
+            ),
+            clock=lambda: NOW,
+        ),
+    )
+    failing_sink = _MutationEventSink(fail_on=RuntimeEventType.RESPONSE_END)
+    completed = await completed_runner.run(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        run_id="mutation-turn-event-safe",
+        attempt=1,
+        events=RuntimeEventPublisher(
+            failing_sink,
+            session_id="mutation-session",
+            run_id="mutation-turn-event-safe",
+        ),
+    )
+    assert completed.event_delivery_failed is True
+    assert completed.generation.proposed_contents[plan.authorized_files[0]] == proposed
+
+
+@pytest.mark.asyncio
+async def test_mutation_turn_runner_refuses_source_truncation_when_prompt_is_oversized(
+    tmp_path: Path,
+) -> None:
+    large_source = (
+        b"def render_footer():\n    return 'baseline'\n"
+        + (b"# approved source context\n" * 1_000)
+    )
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(
+        tmp_path,
+        target_content=large_source,
+    )
+    model = _ScriptedMutationModel([])
+    store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    runner = EvolutionMutationTurnRunner(
+        model_port=model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=store,
+            clock=lambda: NOW,
+        ),
+    )
+
+    with pytest.raises(EvolutionMutationTurnError) as oversized:
+        await runner.run(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-turn-prompt-budget",
+            attempt=1,
+            budget=MutationTurnBudget(max_prompt_bytes=16_384),
+        )
+
+    assert oversized.value.code == "mutation_turn_prompt_oversized"
+    assert model.calls == []
+    assert store.get_for_attempt(plan.plan_id, 1) is None
+    assert Path(lease.worktree_path, plan.authorized_files[0]).read_bytes() == large_source
 
 
 @pytest.mark.asyncio

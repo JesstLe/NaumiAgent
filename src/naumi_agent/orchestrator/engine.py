@@ -36,6 +36,7 @@ from naumi_agent.evolution.mutation_receipts import (
     EvolutionMutationReceiptService,
     EvolutionMutationReceiptStore,
 )
+from naumi_agent.evolution.mutation_turns import EvolutionMutationTurnRunner
 from naumi_agent.evolution.patch_journals import EvolutionPatchJournalStore
 from naumi_agent.evolution.patch_recovery import (
     EvolutionPatchRecoveryCoordinator,
@@ -750,6 +751,10 @@ class AgentEngine:
         )
         self.evolution_mutation_generation_service = EvolutionMutationGenerationService(
             trace_store=self.evolution_mutation_generation_trace_store,
+        )
+        self.evolution_mutation_turn_runner = EvolutionMutationTurnRunner(
+            model_port=self._model_port,
+            generation_service=self.evolution_mutation_generation_service,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
