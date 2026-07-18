@@ -429,6 +429,26 @@ def test_default_policy_assigns_execution_grants_to_runtime() -> None:
     assert {item.rule_id for item in report.assignments} == {"runtime-daemons"}
 
 
+def test_default_policy_assigns_tool_jobs_to_runtime() -> None:
+    report = analyze_domain_ownership(
+        ImportGraphReport(
+            source_root="src/naumi_agent",
+            modules=(
+                ModuleRecord(
+                    "naumi_agent.daemons.tool_jobs",
+                    "src/naumi_agent/daemons/tool_jobs.py",
+                ),
+            ),
+            digest="tool-job-graph",
+        ),
+        source_base="test-base",
+    )
+
+    assert report.issues == ()
+    assert {item.owner for item in report.assignments} == {DomainOwner.RUNTIME}
+    assert {item.rule_id for item in report.assignments} == {"runtime-daemons"}
+
+
 def test_default_policy_rejects_unknown_future_top_level_package() -> None:
     import_report = ImportGraphReport(
         source_root="src/naumi_agent",

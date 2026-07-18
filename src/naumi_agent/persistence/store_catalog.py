@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
+from naumi_agent.daemons.tool_jobs import TOOL_JOB_SCHEMA_VERSION
 from naumi_agent.daemons.worker_registry import WORKER_REGISTRY_SCHEMA_VERSION
 from naumi_agent.evolution.store import (
     EVOLUTION_STORE_SCHEMA_VERSION,
@@ -203,6 +204,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
             "绑定会话、调用、参数摘要、操作者与来源的终态权限决定回执",
+        ),
+        _definition(
+            "runtime.tool_jobs",
+            runtime_dir / "tool-jobs.db",
+            StorageKind.SQLITE,
+            ("runtime.tool_job_authority",),
+            VersionStrategy.SQLITE_USER_VERSION,
+            TOOL_JOB_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "绑定 Execution grant、Worker epoch、Tool lease 与能力要求的不可变 Job",
         ),
         _definition(
             "runtime.goals",
