@@ -72,5 +72,5 @@
 - EVO-02.4 planner、02.5 patch writer、02.6 完整 static guard、02.7 mutation receipt；
 - EVO-03 验证执行和 HAR-09.6 outcome tracking。
 
-EVO-02.2a 已实现 Contract 绑定的持久 worktree lease、崩溃恢复、过期回收和 dirty tombstone，详见
-`EVO-02-2a-worktree-lease.md`。下一切片应实现 EVO-02.3a Source Snapshot，仍不运行 mutation planner。
+EVO-02.2a/02.3a 已实现持久 worktree lease 与不可变 Source Snapshot，详见
+`EVO-02-2a-worktree-lease.md`、`EVO-02-3a-source-snapshot.md`。下一切片才进入不可执行 Mutation Plan。

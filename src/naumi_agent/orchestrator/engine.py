@@ -23,6 +23,9 @@ from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
 )
+from naumi_agent.evolution.experiment_snapshots import (
+    EvolutionExperimentSourceSnapshotBuilder,
+)
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
@@ -692,6 +695,12 @@ class AgentEngine:
         self.evolution_experiment_lease_manager = EvolutionExperimentLeaseManager(
             store=self.evolution_experiment_lease_store,
             worktree_manager=self.worktree_manager,
+        )
+        self.evolution_experiment_source_snapshot_builder = (
+            EvolutionExperimentSourceSnapshotBuilder(
+                self._tool_registry,
+                worktree_storage_dir=self._worktree_storage_dir,
+            )
         )
         self.background_runner = BackgroundRunner(
             BackgroundTaskStore(self._runtime_data_dir / "background")
