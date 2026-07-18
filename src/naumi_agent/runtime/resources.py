@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 
 _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
+    "evolution_candidate_store": (
+        EvolutionCandidateStore,
+        "evolution_candidate_store 必须是 EvolutionCandidateStore 实例。",
+    ),
     "harness_store": (
         HarnessStore,
         "harness_store 必须是 HarnessStore 实例。",
@@ -23,6 +28,7 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
 class RuntimeResources:
     """Current complete set of externally owned runtime resources."""
 
+    evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
 
@@ -35,6 +41,7 @@ class RuntimeResources:
 class RuntimeResourceOverrides:
     """Optional resource instances; None alone requests a default resource."""
 
+    evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None
 

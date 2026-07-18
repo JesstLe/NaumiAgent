@@ -26,6 +26,11 @@ def _service(tmp_path: Path) -> tuple[FeedbackIntakeService, EvolutionCandidateS
     return FeedbackIntakeService(store), store
 
 
+def test_feedback_intake_requires_explicit_evolution_store() -> None:
+    with pytest.raises(TypeError, match="store 必须是 EvolutionCandidateStore"):
+        FeedbackIntakeService(object())  # type: ignore[arg-type]
+
+
 def _direct(*, now: datetime = NOW, summary: str = "子智能体状态显示错误"):
     return build_direct_user_feedback(
         session_id="session-1",
@@ -242,6 +247,23 @@ async def test_agent_tool_and_direct_slash_share_intake_service(tmp_path: Path) 
     candidates = await store.list_candidates(tmp_path)
     assert len(candidates) == 1
     assert candidates[0].draft.occurrence_count == 2
+
+
+@pytest.mark.asyncio
+async def test_direct_feedback_fails_closed_without_composed_service(
+    tmp_path: Path,
+) -> None:
+    service, _store = _service(tmp_path)
+    engine = _FakeEngine(tmp_path, service, None)
+    del engine.feedback_intake_service
+
+    output = await execute_slash_command(
+        engine,
+        '/feedback defect ui:footer truncation "底栏内容被省略"',
+    )
+
+    assert "未装配 FeedbackIntakeService" in output
+    assert not (tmp_path / "evolution.db").exists()
 
 
 @pytest.mark.asyncio

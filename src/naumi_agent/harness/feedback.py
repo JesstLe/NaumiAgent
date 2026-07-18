@@ -15,10 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from naumi_agent.evolution.candidate import build_candidate_draft
 from naumi_agent.evolution.evidence import EvolutionEvidence, EvolutionEvidenceRef
-from naumi_agent.evolution.store import (
-    EvolutionCandidateStore,
-    resolve_evolution_db_path,
-)
+from naumi_agent.evolution.store import EvolutionCandidateStore
 
 FeedbackCategory = Literal["correction", "defect", "preference", "cancel", "praise"]
 FeedbackOrigin = Literal["direct_user", "agent_interpretation"]
@@ -152,8 +149,10 @@ class FeedbackIntakeResult:
 class FeedbackIntakeService:
     """Convert trusted feedback observations into non-executable Candidates."""
 
-    def __init__(self, store: EvolutionCandidateStore | None = None) -> None:
-        self._store = store or EvolutionCandidateStore(resolve_evolution_db_path())
+    def __init__(self, store: EvolutionCandidateStore) -> None:
+        if not isinstance(store, EvolutionCandidateStore):
+            raise TypeError("store 必须是 EvolutionCandidateStore 实例。")
+        self._store = store
 
     async def ingest(
         self,

@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.evolution.store import (
+    EvolutionCandidateStore,
+    resolve_evolution_db_path,
+)
 from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
 from naumi_agent.harness.trust import (
     HarnessTrustStore,
@@ -98,6 +102,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         worktree_storage_dir=runtime_data_dir / "worktrees",
         harness_db_path=resolve_harness_db_path(),
         harness_trust_db_path=resolve_harness_trust_db_path(),
+        evolution_db_path=resolve_evolution_db_path(),
         browser_data_dir=runtime_data_dir / "browser",
         browser_daemon_log_dir=runtime_data_dir / "browser-daemon",
     )
@@ -116,6 +121,10 @@ def build_runtime_resources(
         raise TypeError("overrides 必须是 RuntimeResourceOverrides。")
     validate_runtime_resource_overrides(resolved)
 
+    evolution_candidate_store = resolved.evolution_candidate_store
+    if evolution_candidate_store is None:
+        evolution_candidate_store = EvolutionCandidateStore(paths.evolution_db_path)
+
     harness_store = resolved.harness_store
     if harness_store is None:
         harness_store = HarnessStore(paths.harness_db_path)
@@ -125,6 +134,7 @@ def build_runtime_resources(
         harness_trust_store = HarnessTrustStore(paths.harness_trust_db_path)
 
     return RuntimeResources(
+        evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,
     )

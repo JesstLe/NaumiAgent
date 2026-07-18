@@ -15,6 +15,7 @@ class RuntimePaths:
     worktree_storage_dir: Path
     harness_db_path: Path
     harness_trust_db_path: Path
+    evolution_db_path: Path
     browser_data_dir: Path
     browser_daemon_log_dir: Path
 
