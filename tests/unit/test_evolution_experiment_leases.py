@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -32,6 +33,11 @@ from naumi_agent.evolution.patch_journals import (
     PatchJournalState,
 )
 from naumi_agent.evolution.patch_recovery import EvolutionPatchRecoveryCoordinator
+from naumi_agent.evolution.patch_sets import (
+    EvolutionPatchSetStore,
+    PatchSetFilePhase,
+    PatchSetState,
+)
 from naumi_agent.evolution.patch_writers import (
     EvolutionPatchWriteError,
     EvolutionPatchWriter,
@@ -718,6 +724,437 @@ async def test_multi_file_scope_reaches_plan_and_static_guard_without_forgery(
     )
     assert receipt.preflight_passed is True
     assert tuple(change.path for change in receipt.changes) == plan.authorized_files
+
+
+async def _patch_set_fixture(tmp_path: Path):
+    scope = "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
+    workspace, target, contract, _, _, manager, _ = await _lease_fixture(
+        tmp_path,
+        scope=scope,
+        profile_text="schema_version: 1\n",
+    )
+    lease = await manager.acquire(contract, owner="Evolution-Agent")
+    snapshot_builder = _snapshot_builder(workspace, Path(lease.worktree_path).parent)
+    snapshot = snapshot_builder.capture(contract, lease)
+    plan = await _mutation_planner(tmp_path, workspace, lease.worktree_path).plan(
+        workspace,
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+    )
+    proposed = {
+        "src/naumi_agent/ui/footer.py": (
+            "def render_footer():\n    return 'write-set-fixed'\n"
+        ),
+        "src/naumi_agent/ui/header.py": (
+            "def render_header():\n    return 'write-set-fixed'\n"
+        ),
+    }
+    guard = EvolutionStaticGuard(snapshot_builder=snapshot_builder)
+    receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=proposed,
+    )
+    assert receipt.preflight_passed is True
+    isolated_root = Path(lease.worktree_path)
+    before = {
+        path: (isolated_root / path).read_bytes() for path in plan.authorized_files
+    }
+    modes = {
+        path: (isolated_root / path).stat().st_mode & 0o777
+        for path in plan.authorized_files
+    }
+    return (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        receipt,
+        proposed,
+        before,
+        modes,
+        EvolutionPatchSetStore(tmp_path / "runtime.db", clock=lambda: NOW),
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_prepare_persists_whole_set_before_any_write(
+    tmp_path: Path,
+) -> None:
+    (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _guard,
+        receipt,
+        _proposed,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    isolated_before = {
+        path: Path(lease.worktree_path, path).read_bytes() for path in plan.authorized_files
+    }
+    main_before = target.read_bytes()
+
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+
+    assert transaction.state is PatchSetState.PREPARED
+    assert transaction.applied_count == 0
+    assert transaction.rollback_cursor == -1
+    assert tuple(item.path for item in transaction.files) == tuple(sorted(before))
+    assert all(item.phase is PatchSetFilePhase.PREPARED for item in transaction.files)
+    assert store.load_backups(transaction.transaction_id) == tuple(
+        before[item.path] for item in transaction.files
+    )
+    assert transaction.write_authorized is False
+    assert transaction.execution_ready is False
+    assert {
+        path: Path(lease.worktree_path, path).read_bytes() for path in plan.authorized_files
+    } == isolated_before
+    assert target.read_bytes() == main_before
+    assert _git(workspace, "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_patch_set_enforces_forward_order_and_commits_only_after_all_files(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+
+    with pytest.raises(ValueError, match="Guard 顺序"):
+        store.mark_file_replaced(transaction.transaction_id, file_index=1)
+    with pytest.raises(ValueError, match="不允许 commit"):
+        store.mark_committed(transaction.transaction_id, receipt_json='{"ok":true}')
+
+    applying = store.mark_file_replaced(transaction.transaction_id, file_index=0)
+    assert applying.state is PatchSetState.APPLYING
+    assert applying.applied_count == 1
+    assert tuple(item.phase for item in applying.files) == (
+        PatchSetFilePhase.REPLACED,
+        PatchSetFilePhase.PREPARED,
+    )
+    applied = store.mark_file_replaced(transaction.transaction_id, file_index=1)
+    assert applied.state is PatchSetState.APPLIED
+    committed = store.mark_committed(
+        transaction.transaction_id,
+        receipt_json='{"write_set":"verified"}',
+    )
+    assert committed.state is PatchSetState.COMMITTED
+    assert all(not item.backup_retained for item in committed.files)
+    assert store.load_backups(transaction.transaction_id) == (None, None)
+    assert store.load_receipt_json(transaction.transaction_id) == (
+        '{"write_set":"verified"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_set_requires_complete_reverse_rollback_proof(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    store.mark_file_replaced(transaction.transaction_id, file_index=0)
+    rolling = store.begin_rollback(transaction.transaction_id)
+    assert rolling.rollback_cursor == 1
+
+    with pytest.raises(ValueError, match="逆序"):
+        store.mark_file_rolled_back(transaction.transaction_id, file_index=0)
+    with pytest.raises(ValueError, match="尚未逐文件完成"):
+        store.mark_rolled_back(transaction.transaction_id, failure_code="postflight_failed")
+    store.mark_file_rolled_back(transaction.transaction_id, file_index=1)
+    final_step = store.mark_file_rolled_back(transaction.transaction_id, file_index=0)
+    assert final_step.rollback_cursor == -1
+    rolled_back = store.mark_rolled_back(
+        transaction.transaction_id,
+        failure_code="postflight_failed",
+    )
+    assert rolled_back.state is PatchSetState.ROLLED_BACK
+    assert all(item.phase is PatchSetFilePhase.ROLLED_BACK for item in rolled_back.files)
+    assert store.load_backups(transaction.transaction_id) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_set_detects_transaction_and_backup_tampering(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    transaction = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    database = tmp_path / "runtime.db"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """UPDATE evolution_patch_set_backups SET backup = ?
+               WHERE transaction_id = ? AND file_index = 0""",
+            (b"tampered-secret-content", transaction.transaction_id),
+        )
+    with pytest.raises(ValueError, match="backup 摘要") as backup_error:
+        store.load_backups(transaction.transaction_id)
+    assert "tampered-secret-content" not in str(backup_error.value)
+    transactions, failures = store.scan_recoverable()
+    assert transactions == ()
+    assert len(failures) == 1
+    assert failures[0].transaction_id == transaction.transaction_id
+    assert failures[0].failure_code == "patch_set_corrupt"
+
+    # Restore the backup, then corrupt only the signed transaction body.
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """UPDATE evolution_patch_set_backups SET backup = ?
+               WHERE transaction_id = ? AND file_index = 0""",
+            (before[transaction.files[0].path], transaction.transaction_id),
+        )
+        raw = db.execute(
+            "SELECT transaction_json FROM evolution_patch_sets WHERE transaction_id = ?",
+            (transaction.transaction_id,),
+        ).fetchone()[0]
+        payload = json.loads(raw)
+        payload["files"][0]["after_sha256"] = "0" * 64
+        db.execute(
+            "UPDATE evolution_patch_sets SET transaction_json = ? WHERE transaction_id = ?",
+            (json.dumps(payload), transaction.transaction_id),
+        )
+    with pytest.raises(ValidationError, match="fact_sha256"):
+        store.get_by_lease(lease.lease_id)
+
+
+@pytest.mark.asyncio
+async def test_patch_set_retry_accepts_revised_guard_within_plan_attempt_budget(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard,
+        receipt,
+        _,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+    first = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=receipt,
+        before_contents=before,
+        file_modes=modes,
+    )
+    store.begin_rollback(first.transaction_id)
+    for index in reversed(range(len(first.files))):
+        store.mark_file_rolled_back(first.transaction_id, file_index=index)
+    store.mark_rolled_back(first.transaction_id, failure_code="candidate_check_failed")
+
+    revised_contents = {
+        path: f"# revised {index}\nvalue = {index}\n"
+        for index, path in enumerate(plan.authorized_files)
+    }
+    revised_guard = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents=revised_contents,
+    )
+    assert revised_guard.preflight_passed is True
+    retried = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=revised_guard,
+        before_contents=before,
+        file_modes=modes,
+    )
+    assert retried.transaction_id == first.transaction_id
+    assert retried.attempt == 2
+    assert retried.guard_id == revised_guard.guard_id
+    assert tuple(item.after_sha256 for item in retried.files) != tuple(
+        item.after_sha256 for item in first.files
+    )
+    assert store.load_backups(retried.transaction_id) == tuple(
+        before[item.path] for item in retried.files
+    )
+
+    current = retried
+    while current.attempt < current.max_attempts:
+        store.begin_rollback(current.transaction_id)
+        for index in reversed(range(len(current.files))):
+            store.mark_file_rolled_back(current.transaction_id, file_index=index)
+        store.mark_rolled_back(current.transaction_id, failure_code="retry_failed")
+        next_guard = await guard.preflight(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            proposed_contents={
+                path: f"# attempt {current.attempt + 1}\nvalue = {index + 10}\n"
+                for index, path in enumerate(plan.authorized_files)
+            },
+        )
+        current = store.prepare(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=next_guard,
+            before_contents=before,
+            file_modes=modes,
+        )
+
+    store.begin_rollback(current.transaction_id)
+    for index in reversed(range(len(current.files))):
+        store.mark_file_rolled_back(current.transaction_id, file_index=index)
+    exhausted = store.mark_rolled_back(
+        current.transaction_id,
+        failure_code="attempt_budget_exhausted",
+    )
+    final_guard = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={
+            path: f"# forbidden retry\nvalue = {index + 100}\n"
+            for index, path in enumerate(plan.authorized_files)
+        },
+    )
+    unchanged = store.prepare(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=final_guard,
+        before_contents=before,
+        file_modes=modes,
+    )
+    assert unchanged == exhausted
+    assert unchanged.attempt == unchanged.max_attempts
+    assert unchanged.state is PatchSetState.ROLLED_BACK
+
+
+@pytest.mark.asyncio
+async def test_patch_set_concurrent_prepare_is_idempotent_per_lease(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        _,
+        receipt,
+        _,
+        before,
+        modes,
+        store,
+    ) = await _patch_set_fixture(tmp_path)
+
+    def prepare():
+        return store.prepare(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=receipt,
+            before_contents=before,
+            file_modes=modes,
+        )
+
+    first, second = await asyncio.gather(
+        asyncio.to_thread(prepare),
+        asyncio.to_thread(prepare),
+    )
+
+    assert first == second
+    assert first.state is PatchSetState.PREPARED
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        assert db.execute("SELECT COUNT(*) FROM evolution_patch_sets").fetchone()[0] == 1
+        assert (
+            db.execute("SELECT COUNT(*) FROM evolution_patch_set_backups").fetchone()[0]
+            == 2
+        )
 
 
 async def _guard_fixture(tmp_path: Path):

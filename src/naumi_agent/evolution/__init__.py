@@ -41,6 +41,14 @@ if TYPE_CHECKING:
         EvolutionPatchRecoveryCoordinator,
         EvolutionPatchRecoveryResult,
     )
+    from naumi_agent.evolution.patch_sets import (
+        EvolutionPatchSetFileFact,
+        EvolutionPatchSetStore,
+        EvolutionPatchSetTransaction,
+        PatchSetFilePhase,
+        PatchSetScanFailure,
+        PatchSetState,
+    )
     from naumi_agent.evolution.patch_writers import (
         EvolutionPatchWriteError,
         EvolutionPatchWriter,
@@ -85,6 +93,9 @@ __all__ = [
     "EvolutionMutationPlanner",
     "EvolutionPatchJournal",
     "EvolutionPatchJournalStore",
+    "EvolutionPatchSetFileFact",
+    "EvolutionPatchSetStore",
+    "EvolutionPatchSetTransaction",
     "EvolutionPatchRecoveryCoordinator",
     "EvolutionPatchRecoveryResult",
     "EvolutionPatchWriteError",
@@ -102,6 +113,9 @@ __all__ = [
     "MutationObjective",
     "MutationPlanStage",
     "PatchJournalState",
+    "PatchSetFilePhase",
+    "PatchSetScanFailure",
+    "PatchSetState",
     "StaticGuardChangeFact",
     "StaticGuardViolation",
     "EvolutionStoreConflictError",
@@ -155,6 +169,14 @@ def __getattr__(name: str) -> object:
         "EvolutionPatchJournalStore",
         "PatchJournalState",
     }
+    patch_set_exports = {
+        "EvolutionPatchSetFileFact",
+        "EvolutionPatchSetStore",
+        "EvolutionPatchSetTransaction",
+        "PatchSetFilePhase",
+        "PatchSetScanFailure",
+        "PatchSetState",
+    }
     patch_recovery_exports = {
         "EvolutionPatchRecoveryCoordinator",
         "EvolutionPatchRecoveryResult",
@@ -187,6 +209,8 @@ def __getattr__(name: str) -> object:
         module_name = "mutation_plans"
     elif name in patch_journal_exports:
         module_name = "patch_journals"
+    elif name in patch_set_exports:
+        module_name = "patch_sets"
     elif name in patch_recovery_exports:
         module_name = "patch_recovery"
     elif name in patch_writer_exports:
