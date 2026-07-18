@@ -59,8 +59,10 @@ TUI mount 后启动非阻塞 recovery worker：
 
 - Goal 页面尚未汇总 pending/expired interaction 历史，也没有显式 takeover/cancel 按钮；
 - TUI recovered answer 不自动执行 `/pursue resume`，这是避免隐藏 owner 竞争的刻意边界；
-- pending recovery 仍是 50 项有界批次，没有 cursor、优先级或 immediate-message 插队；
+- interaction pending recovery 仍是 50 项有界批次，没有 cursor 或优先级；HAR-10.3a 的普通对话
+  `/send-now` 不改变 interaction authority 的排序；
 - TUI Modal 只显示问题 deadline 结果，尚未显示倒计时；跨平台窄终端布局由 UI-16 继续验证。
 
-UI-18.4 仍保持 partial。下一步应在 `UI-18.4c Goal interaction state/actions` 与
-`HAR-10.3a durable immediate-message queue` 之间按用户价值和依赖选择一个最小切片。
+UI-18.4 仍保持 partial。HAR-10.3a 已交付 New UI 普通对话的安全边界提升；下一步应在
+`UI-18.4c Goal interaction state/actions` 与 `HAR-10.3b durable queue authority` 之间按用户价值和依赖
+选择一个最小切片。

@@ -1106,6 +1106,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.RUN_CANCEL:
             await self.cancel_run(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.QUEUE_PROMOTE:
+            await self.promote_queued_chat(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.RECEIPT_REQUEST:
             await self.resend_completion_receipt(payload, request_id=request_id)
             return
@@ -1334,6 +1337,46 @@ class JsonlEngineBridge:
                 {"task": submission.text, "position": position, "queued": queued},
                 request_id=submission.request_id,
             )
+
+    async def promote_queued_chat(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Promote one queued chat to the next safe run boundary."""
+        target_request_id = str(payload.get("target_request_id") or "")
+        selected = next(
+            (
+                submission
+                for submission in self._queued_chat_submissions
+                if submission.request_id == target_request_id
+            ),
+            None,
+        )
+        if selected is None:
+            await self.emit_error(
+                "未找到可立即发送的排队消息；它可能已经开始、完成或被取消。",
+                code="queue_item_not_found",
+                request_id=request_id,
+            )
+            return
+
+        self._queued_chat_submissions.remove(selected)
+        self._queued_chat_submissions.appendleft(selected)
+        await self._emit_queued_chat_positions()
+        await self.emit(
+            ServerEventType.RUN_QUEUE_PROMOTED,
+            {
+                "target_request_id": target_request_id,
+                "position": 1,
+                "queued": len(self._queued_chat_submissions),
+                "boundary": "after_current_run",
+                "message": "已提升，将在当前运行结束后的下一安全边界执行。",
+            },
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
 
     async def submit_task(self, payload: dict[str, Any], *, request_id: str) -> None:
         """Create one Workbench issue and execute it in the active conversation."""

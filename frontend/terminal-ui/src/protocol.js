@@ -459,6 +459,16 @@ function normalizeServerPayload(type, payload) {
       run_id: String(payload.run_id ?? ""),
     };
   }
+  if (type === "run/queue_promoted") {
+    return {
+      ...payload,
+      target_request_id: String(payload.target_request_id ?? ""),
+      position: Math.max(1, Math.floor(Number(payload.position) || 1)),
+      queued: Math.max(0, Math.floor(Number(payload.queued) || 0)),
+      boundary: payload.boundary === "after_current_run" ? "after_current_run" : "",
+      message: String(payload.message ?? ""),
+    };
+  }
   if (type === "completion/receipt") {
     return normalizeCompletionReceipt(payload);
   }
