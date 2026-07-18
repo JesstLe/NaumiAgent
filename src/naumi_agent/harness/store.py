@@ -33,6 +33,10 @@ from naumi_agent.harness.eval_models import (
     HarnessEvalSuiteResult,
 )
 from naumi_agent.harness.eval_receipt import HarnessEvalComparisonReceipt
+from naumi_agent.harness.heartbeat import (
+    HarnessHeartbeat,
+    HarnessHeartbeatPhase,
+)
 from naumi_agent.harness.models import HarnessCompletionContract
 from naumi_agent.harness.reconciliation import (
     ReconciliationArtifactGcStatus,
@@ -64,7 +68,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 11
+HARNESS_STORE_SCHEMA_VERSION = 12
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -2197,6 +2201,128 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法获取长周期 Run 租约。") from exc
 
+    async def record_heartbeat(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str,
+        subject_id: str,
+        instance_id: str,
+        epoch: int,
+        sequence: int,
+        phase: HarnessHeartbeatPhase | str,
+        observed_at: str,
+        timeout_seconds: int,
+        detail_code: str = "ok",
+    ) -> HarnessHeartbeat:
+        """Persist a monotonic heartbeat snapshot or reject stale ownership."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(subject_kind)
+        subject = _normalize_run_lease_id(subject_id, field="subject_id")
+        instance = _normalize_run_lease_id(instance_id, field="instance_id")
+        normalized_epoch = _normalize_run_epoch(epoch)
+        normalized_sequence = _normalize_heartbeat_sequence(sequence)
+        normalized_phase = _coerce_heartbeat_phase(phase)
+        timestamp = _normalize_utc_timestamp(observed_at, field="observed_at")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not 3 <= timeout_seconds <= 86_400
+        ):
+            raise ValueError("timeout_seconds 必须是 3 到 86400 之间的整数。")
+        detail = _normalize_run_lease_id(detail_code, field="detail_code")
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_heartbeat_row(
+                    db,
+                    workspace_root=workspace,
+                    subject_kind=kind,
+                    subject_id=subject,
+                )
+                incoming = HarnessHeartbeat(
+                    workspace_root=workspace,
+                    subject_kind=kind,
+                    subject_id=subject,
+                    instance_id=instance,
+                    epoch=normalized_epoch,
+                    sequence=normalized_sequence,
+                    phase=normalized_phase,
+                    observed_at=timestamp,
+                    timeout_seconds=timeout_seconds,
+                    detail_code=detail,
+                )
+                if row is not None:
+                    current = _heartbeat_from_row(row)
+                    if incoming == current:
+                        await db.commit()
+                        return current
+                    _validate_heartbeat_advance(current, incoming)
+                await db.execute(
+                    """
+                    INSERT INTO harness_heartbeats (
+                        workspace_root, subject_kind, subject_id, instance_id,
+                        epoch, sequence, phase, observed_at, timeout_seconds,
+                        detail_code
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(workspace_root, subject_kind, subject_id)
+                    DO UPDATE SET
+                        instance_id = excluded.instance_id,
+                        epoch = excluded.epoch,
+                        sequence = excluded.sequence,
+                        phase = excluded.phase,
+                        observed_at = excluded.observed_at,
+                        timeout_seconds = excluded.timeout_seconds,
+                        detail_code = excluded.detail_code
+                    """,
+                    (
+                        workspace,
+                        kind.value,
+                        subject,
+                        instance,
+                        normalized_epoch,
+                        normalized_sequence,
+                        normalized_phase.value,
+                        timestamp,
+                        timeout_seconds,
+                        detail,
+                    ),
+                )
+                await db.commit()
+                return incoming
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法保存 Harness 心跳。") from exc
+
+    async def get_heartbeat(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str,
+        subject_id: str,
+    ) -> HarnessHeartbeat | None:
+        """Read the latest typed heartbeat for one workspace-scoped subject."""
+        workspace = _canonical_workspace(workspace_root)
+        kind = _coerce_run_kind(subject_kind)
+        subject = _normalize_run_lease_id(subject_id, field="subject_id")
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                row = await _select_heartbeat_row(
+                    db,
+                    workspace_root=workspace,
+                    subject_kind=kind,
+                    subject_id=subject,
+                )
+                return _heartbeat_from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取 Harness 心跳。") from exc
+
     async def renew_run_lease(
         self,
         *,
@@ -3259,6 +3385,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V9)
                             await db.executescript(_SCHEMA_V10)
                             await db.executescript(_SCHEMA_V11)
+                            await db.executescript(_SCHEMA_V12)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -3909,6 +4036,23 @@ def _normalize_run_epoch(value: int) -> int:
     return value
 
 
+def _normalize_heartbeat_sequence(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("sequence 必须是大于或等于 1 的整数。")
+    return value
+
+
+def _coerce_heartbeat_phase(
+    value: HarnessHeartbeatPhase | str,
+) -> HarnessHeartbeatPhase:
+    if isinstance(value, HarnessHeartbeatPhase):
+        return value
+    try:
+        return HarnessHeartbeatPhase(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("phase 包含未知 Heartbeat 阶段。") from exc
+
+
 def _normalize_run_lease_id(value: str, *, field: str) -> str:
     normalized = _normalize_text(value, field=field, max_length=128)
     if not _RUN_LEASE_ID_RE.fullmatch(normalized):
@@ -3933,6 +4077,55 @@ async def _select_run_lease_row(
         (workspace_root, run_kind.value, run_id),
     )
     return await cursor.fetchone()
+
+
+async def _select_heartbeat_row(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    subject_kind: HarnessRunKind,
+    subject_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM harness_heartbeats
+        WHERE workspace_root = ? AND subject_kind = ? AND subject_id = ?
+        """,
+        (workspace_root, subject_kind.value, subject_id),
+    )
+    return await cursor.fetchone()
+
+
+def _heartbeat_from_row(row: aiosqlite.Row) -> HarnessHeartbeat:
+    return HarnessHeartbeat(
+        workspace_root=str(row["workspace_root"]),
+        subject_kind=HarnessRunKind(str(row["subject_kind"])),
+        subject_id=str(row["subject_id"]),
+        instance_id=str(row["instance_id"]),
+        epoch=int(row["epoch"]),
+        sequence=int(row["sequence"]),
+        phase=HarnessHeartbeatPhase(str(row["phase"])),
+        observed_at=str(row["observed_at"]),
+        timeout_seconds=int(row["timeout_seconds"]),
+        detail_code=str(row["detail_code"]),
+    )
+
+
+def _validate_heartbeat_advance(
+    current: HarnessHeartbeat,
+    incoming: HarnessHeartbeat,
+) -> None:
+    if incoming.epoch < current.epoch:
+        raise HarnessStoreConflictError("Heartbeat epoch 已落后，拒绝覆盖新 owner。")
+    if incoming.epoch == current.epoch:
+        if incoming.instance_id != current.instance_id:
+            raise HarnessStoreConflictError("相同 Heartbeat epoch 不能更换 instance。")
+        if incoming.sequence <= current.sequence:
+            raise HarnessStoreConflictError("Heartbeat sequence 必须单调递增。")
+    if datetime.fromisoformat(incoming.observed_at) < datetime.fromisoformat(
+        current.observed_at
+    ):
+        raise HarnessStoreConflictError("Heartbeat observed_at 不能倒退。")
 
 
 def _run_lease_from_row(row: aiosqlite.Row) -> HarnessRunLease:
@@ -4681,4 +4874,29 @@ CREATE INDEX IF NOT EXISTS idx_harness_run_fence_events_checked
 ON harness_run_fence_events (
     workspace_root, run_kind, run_id, checked_at, operation_id
 );
+"""
+
+_SCHEMA_V12 = """
+CREATE TABLE IF NOT EXISTS harness_heartbeats (
+    workspace_root TEXT NOT NULL,
+    subject_kind TEXT NOT NULL CHECK (
+        subject_kind IN ('pursuit', 'tool', 'browser', 'agent', 'runtime')
+    ),
+    subject_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    phase TEXT NOT NULL CHECK (
+        phase IN ('starting', 'running', 'waiting', 'draining', 'stopped', 'failed')
+    ),
+    observed_at TEXT NOT NULL,
+    timeout_seconds INTEGER NOT NULL CHECK (
+        timeout_seconds BETWEEN 3 AND 86400
+    ),
+    detail_code TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, subject_kind, subject_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_heartbeats_observed
+ON harness_heartbeats (workspace_root, subject_kind, observed_at, subject_id);
 """

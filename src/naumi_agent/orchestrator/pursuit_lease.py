@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import (
     HarnessRunFenceReceipt,
     HarnessRunKind,
@@ -77,6 +79,29 @@ class PursuitLeasePort(Protocol):
         checked_at: str,
     ) -> HarnessRunFenceReceipt: ...
 
+    async def record_heartbeat(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str,
+        subject_id: str,
+        instance_id: str,
+        epoch: int,
+        sequence: int,
+        phase: HarnessHeartbeatPhase | str,
+        observed_at: str,
+        timeout_seconds: int,
+        detail_code: str = "ok",
+    ) -> HarnessHeartbeat: ...
+
+    async def get_heartbeat(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str,
+        subject_id: str,
+    ) -> HarnessHeartbeat | None: ...
+
 
 class PursuitLeaseError(RuntimeError):
     """Base failure for safe Pursuit execution ownership."""
@@ -139,6 +164,7 @@ class PursuitLeaseSession:
         self._renew_task: asyncio.Task[None] | None = None
         self._lost_reason = ""
         self._fence_sequence = 0
+        self._heartbeat_sequence = 0
         self._closed = False
 
     @property
@@ -161,12 +187,13 @@ class PursuitLeaseSession:
         """Acquire once and start the keepalive only after durable ownership."""
         if self._lease is not None or self._closed:
             raise PursuitLeaseError("Pursuit lease session 不能重复获取。")
+        timestamp = self._now()
         lease = await self._port.acquire_run_lease(
             workspace_root=self.workspace_root,
             run_kind=HarnessRunKind.PURSUIT,
             run_id=self.run_id,
             owner_id=self.owner_id,
-            now=self._now(),
+            now=timestamp,
             lease_seconds=self.lease_seconds,
         )
         if lease is None:
@@ -177,6 +204,35 @@ class PursuitLeaseSession:
             )
             raise PursuitLeaseUnavailableError(current)
         self._lease = lease
+        try:
+            existing_heartbeat = await self._port.get_heartbeat(
+                workspace_root=self.workspace_root,
+                subject_kind=HarnessRunKind.PURSUIT,
+                subject_id=self.run_id,
+            )
+            if (
+                existing_heartbeat is not None
+                and existing_heartbeat.epoch == lease.epoch
+                and existing_heartbeat.instance_id == self.owner_id
+            ):
+                self._heartbeat_sequence = existing_heartbeat.sequence
+            await self._record_heartbeat(
+                HarnessHeartbeatPhase.RUNNING,
+                observed_at=timestamp,
+            )
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await self._port.release_run_lease(
+                    workspace_root=self.workspace_root,
+                    run_kind=HarnessRunKind.PURSUIT,
+                    run_id=self.run_id,
+                    owner_id=self.owner_id,
+                    epoch=lease.epoch,
+                    now=timestamp,
+                )
+            self._lease = None
+            self._mark_lost(f"Worker 心跳初始化失败：{type(exc).__name__}")
+            raise PursuitLeaseError(self._lost_reason) from exc
         if self._auto_renew:
             self._renew_task = asyncio.create_task(
                 self._renew_loop(),
@@ -187,6 +243,7 @@ class PursuitLeaseSession:
     async def renew_now(self) -> HarnessRunLease:
         """Renew the exact current epoch or fail closed."""
         lease = self._require_local_ownership()
+        timestamp = self._now()
         try:
             renewed = await self._port.renew_run_lease(
                 workspace_root=self.workspace_root,
@@ -194,7 +251,7 @@ class PursuitLeaseSession:
                 run_id=self.run_id,
                 owner_id=self.owner_id,
                 epoch=lease.epoch,
-                now=self._now(),
+                now=timestamp,
                 lease_seconds=self.lease_seconds,
             )
         except Exception as exc:
@@ -204,6 +261,14 @@ class PursuitLeaseSession:
             self._mark_lost("租约已过期、被接管或 epoch 已变化。")
             raise PursuitLeaseLostError(self._lost_reason)
         self._lease = renewed
+        try:
+            await self._record_heartbeat(
+                HarnessHeartbeatPhase.RUNNING,
+                observed_at=timestamp,
+            )
+        except Exception as exc:
+            self._mark_lost(f"Worker 心跳写入失败：{type(exc).__name__}")
+            raise PursuitLeaseLostError(self._lost_reason) from exc
         return renewed
 
     async def require_current(self, boundary: str) -> HarnessRunFenceReceipt:
@@ -246,6 +311,7 @@ class PursuitLeaseSession:
         lease = self._lease
         if lease is None or self._lost_reason:
             return False
+        timestamp = self._now()
         try:
             released = await self._port.release_run_lease(
                 workspace_root=self.workspace_root,
@@ -253,11 +319,18 @@ class PursuitLeaseSession:
                 run_id=self.run_id,
                 owner_id=self.owner_id,
                 epoch=lease.epoch,
-                now=self._now(),
+                now=timestamp,
             )
         except Exception:
             return False
-        return released is not None
+        if released is None:
+            return False
+        with contextlib.suppress(Exception):
+            await self._record_heartbeat(
+                HarnessHeartbeatPhase.STOPPED,
+                observed_at=timestamp,
+            )
+        return True
 
     async def _renew_loop(self) -> None:
         while not self._closed and not self._lost_reason:
@@ -275,6 +348,36 @@ class PursuitLeaseSession:
         if self._lease is None or self._closed:
             raise PursuitLeaseLostError("目标追踪没有有效运行租约。")
         return self._lease
+
+    async def _record_heartbeat(
+        self,
+        phase: HarnessHeartbeatPhase,
+        *,
+        observed_at: str,
+    ) -> HarnessHeartbeat:
+        lease = self._lease
+        if lease is None:
+            raise PursuitLeaseLostError("目标追踪没有可记录心跳的租约。")
+        self._heartbeat_sequence += 1
+        return await self._port.record_heartbeat(
+            workspace_root=self.workspace_root,
+            subject_kind=HarnessRunKind.PURSUIT,
+            subject_id=self.run_id,
+            instance_id=self.owner_id,
+            epoch=lease.epoch,
+            sequence=self._heartbeat_sequence,
+            phase=phase,
+            observed_at=observed_at,
+            timeout_seconds=max(
+                3,
+                min(
+                    self.lease_seconds,
+                    math.ceil(self.renew_interval_seconds * 2.5),
+                ),
+            ),
+            detail_code="lease_active" if phase is not HarnessHeartbeatPhase.STOPPED
+            else "lease_released",
+        )
 
     def _mark_lost(self, reason: str) -> None:
         if not self._lost_reason:

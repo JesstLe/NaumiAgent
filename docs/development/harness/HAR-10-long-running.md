@@ -13,7 +13,11 @@
   - HAR-10.1b 已实现：Pursuit 启动 admission、keepalive、动作/结果/终态 fencing、可靠释放和 live-owner
     resume 拒绝；见 [设计](HAR-10-1b-pursuit-lease-integration.md)。
   - 未完成：browser/background/agent/runtime 的逐域接入，以及跨 Store 原子提交。
-- HAR-10.2 Heartbeat：runtime/worker/browser/agent 分层心跳与健康状态。
+- HAR-10.2 Heartbeat（partial）：
+  - HAR-10.2a 已实现：Harness DB v12 typed heartbeat、instance/epoch/sequence 单调写入、确定性健康分类，
+    以及 Pursuit lease worker acquire/renew/release 生产接入；见
+    [设计](HAR-10-2a-typed-heartbeat.md)。
+  - 未完成：只读聚合健康 snapshot、browser/agent/runtime producer、历史统计与 Supervisor 动作。
 - HAR-10.3 Durable queue：优先级、公平性、容量、立即发送消息插队规则。
 - HAR-10.4 Checkpoint（partial）：
   - HAR-10.4a 已实现：严格有界 schema、单调 sequence、canonical JSON + SHA-256、篡改拒绝、Pursuit
@@ -55,7 +59,8 @@ ARC-01.4b2e 只解决资源归属和稳定引用。HAR-10.1a 已在 Harness sche
 fencing authority，HAR-10.1b 已完成 Pursuit 首个生产接入，HAR-10.4a/4b 已交付权威 checkpoint 与安全
 continuation，HAR-10.5a/5b 已让 shell/background 行动在外部派发前进入持久账本并用 caller key 复用后台
 task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting/terminal/continue；同步 shell、
-browser/agent/runtime 逐域接入、跨进程/跨 Store 原子性、heartbeat 和 interaction queue 仍属于后续实现。
+browser/agent/runtime 逐域接入、跨进程/跨 Store 原子性、heartbeat 聚合/多域接入和 interaction queue 仍属于
+后续实现。
 
 ## 验收标准
 

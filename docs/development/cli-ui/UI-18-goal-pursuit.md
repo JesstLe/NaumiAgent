@@ -65,3 +65,6 @@ implemented。
 UI-18.1 是只读状态页，不包含 Goal/Pursuit 写按钮、可展开完整证据时间线或 HAR-10 恢复健康；这些分别
 属于 UI-18.2/18.3/18.5。Pursuit wait/evidence 当前按快照显示最近有界集合，尚无 cursor 分页。页面也
 不会伪造 lease、heartbeat 或 checkpoint。UI-18 因此保持 partial，不能标记整体完成。
+
+HAR-10.2a 已提供 Pursuit lease worker 的持久 typed heartbeat，HAR-10.5c 已提供 background reconcile reason；
+UI-18.5 仍需组合并渲染这些权威事实，不能因为后端前置存在就标记 Recovery UX 已完成。
