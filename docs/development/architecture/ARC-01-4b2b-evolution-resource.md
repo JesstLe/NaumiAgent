@@ -43,6 +43,7 @@ Architecture、Harness 与 Self-Evolution，不新增 Candidate 业务规则。
 这是实际生产消费者迁移：Feedback 和 Review 都依赖注入 Store，命令 fallback 也已删除，不是只把
 已有默认构造包一层。
 
-当前仍未迁移 ChatRun、Task/Workbench、Background/Scheduler、Goal/Pursuit、Browser 与 Worktree；
+ARC-01.4b2c 已完成 ChatRunStore；当前仍未迁移 Task/Workbench、Background/Scheduler、Goal/Pursuit、
+Browser 与 Worktree；
 其中带连接、Runner 或 daemon 的资源必须与 ARC-01.4d 生命周期合同一起推进。ARC-01.4c 还需迁移
 FeedbackIntakeService、EvolutionReviewService 本身的 Service 构造权；因此 ARC-01.4 仍为 partial。

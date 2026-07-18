@@ -28,3 +28,11 @@
 - 慢客户端不拖住 Agent；超出 buffer 提示 full snapshot recovery。
 - macOS/Linux socket、Windows named pipe、embedded 三模式 contract tests 相同。
 - A4：binary/wheel clean install 后服务可启动、升级、回滚。
+
+## 已完成前置
+
+- ARC-01.4b1-4b2c 已将规范 RuntimePaths、Harness/Evolution/ChatRun Store 交由 Composition Root
+  显式装配。现有 durable run、step、artifact 与 completion receipt 已在成功、失败、取消和终端断连
+  场景验证。
+- 这只解决 ARC-02.5 的持久化 owner 前置，不等于 cursor/revision/ack/resume 已实现。ARC-02 仍需先
+  完成其余 Runtime Resource/Service 边界，再定义不会重复投递 tool result/receipt 的 Event Store 合同。

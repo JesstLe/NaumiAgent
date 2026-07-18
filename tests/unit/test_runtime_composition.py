@@ -16,6 +16,7 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.memory.session import SessionStore
 from naumi_agent.model.router import ModelRouter
+from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.composition import (
     build_runtime_paths,
     build_runtime_ports,
@@ -36,6 +37,11 @@ class _FalseySink(NullEventSink):
 
 
 class _FalseyHarnessStore(HarnessStore):
+    def __bool__(self) -> bool:
+        return False
+
+
+class _FalseyChatRunStore(ChatRunStore):
     def __bool__(self) -> bool:
         return False
 
@@ -82,6 +88,7 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     )
     assert paths.workspace_root == tmp_path.resolve()
     assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
+    assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
     assert paths.harness_db_path == state_home.resolve() / "harness.db"
     assert paths.harness_trust_db_path == state_home.resolve() / "harness-trust.db"
@@ -94,6 +101,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
     values = {
         "workspace_root": absolute,
         "runtime_data_dir": absolute / "data",
+        "chat_run_db_path": absolute / "data" / "chat-runs.db",
         "worktree_storage_dir": absolute / "data" / "worktrees",
         "harness_db_path": absolute / "state" / "harness.db",
         "harness_trust_db_path": absolute / "state" / "harness-trust.db",
@@ -113,6 +121,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         )
     with pytest.raises(ValueError, match="browser_data_dir 必须位于"):
         RuntimePaths(**{**values, "browser_data_dir": absolute / "outside"})
+    with pytest.raises(ValueError, match="chat_run_db_path 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "chat_run_db_path": absolute / "outside" / "chat-runs.db",
+            }
+        )
 
 
 def test_build_runtime_ports_rejects_invalid_paths_before_defaults(
@@ -138,9 +153,11 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     falsey_store = _FalseyHarnessStore(tmp_path / "custom-harness.db")
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
+    chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
     overridden = build_runtime_resources(
         paths,
         overrides=RuntimeResourceOverrides(
+            chat_run_store=chat_run_store,
             evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
@@ -148,9 +165,11 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     )
 
     assert defaults.harness_store.db_path == paths.harness_db_path
+    assert defaults.chat_run_store.db_path == paths.chat_run_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
     assert overridden.evolution_candidate_store is evolution_store
+    assert overridden.chat_run_store is chat_run_store
     assert overridden.harness_store is falsey_store
     assert overridden.harness_trust_store is trust_store
     assert not (tmp_path / "state").exists()
@@ -161,6 +180,10 @@ def test_invalid_resource_override_fails_before_default_constructor(
 ) -> None:
     paths = build_runtime_paths(_config(tmp_path))
     with (
+        patch("naumi_agent.runtime.composition.ChatRunStore") as chat_run_store,
+        patch(
+            "naumi_agent.runtime.composition.EvolutionCandidateStore"
+        ) as evolution_store,
         patch("naumi_agent.runtime.composition.HarnessStore") as harness_store,
         pytest.raises(TypeError, match="harness_trust_store 必须是"),
     ):
@@ -171,12 +194,15 @@ def test_invalid_resource_override_fails_before_default_constructor(
             ),
         )
 
+    chat_run_store.assert_not_called()
+    evolution_store.assert_not_called()
     harness_store.assert_not_called()
 
 
 def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="harness_store 必须是"):
         RuntimeResources(
+            chat_run_store=ChatRunStore(tmp_path / "chat-runs.db"),
             evolution_candidate_store=EvolutionCandidateStore(
                 tmp_path / "evolution.db"
             ),
