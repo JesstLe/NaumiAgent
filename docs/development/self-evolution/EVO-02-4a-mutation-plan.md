@@ -81,6 +81,5 @@ Plan 必须严格包含连续六阶段：
 - EVO-02.5 Patch Writer、EVO-02.6 Static Guard、EVO-02.7 Mutation Receipt；
 - HAR-08 Sandbox runner 与 EVO-03 baseline/candidate comparison。
 
-下一切片不应直接开放写入。应先实现 EVO-02.6a Static Guard 的 preflight contract，使 protected path、
-symlink escape、secret/binary/generated file 与预算规则能在 Patch Writer 之前被机械评估；随后再实现
-EVO-02.5a 的受 Guard 约束原子 Patch Writer。
+EVO-02.6a Static Guard Preflight 已实现，详见 `EVO-02-6a-static-guard-preflight.md`。下一切片可实现
+EVO-02.5a 受 Guard Receipt 约束的原子 Patch Writer，但写后仍必须执行 postflight 并支持隔离回滚。

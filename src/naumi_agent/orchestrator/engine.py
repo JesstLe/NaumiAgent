@@ -30,6 +30,7 @@ from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.evolution.store import EvolutionCandidateStore, resolve_evolution_db_path
 from naumi_agent.harness.completion import (
     CompletionGateResult,
@@ -705,6 +706,9 @@ class AgentEngine:
         )
         self.evolution_mutation_planner = EvolutionMutationPlanner(
             review_service=self.evolution_review_service,
+            snapshot_builder=self.evolution_experiment_source_snapshot_builder,
+        )
+        self.evolution_static_guard = EvolutionStaticGuard(
             snapshot_builder=self.evolution_experiment_source_snapshot_builder,
         )
         self.background_runner = BackgroundRunner(

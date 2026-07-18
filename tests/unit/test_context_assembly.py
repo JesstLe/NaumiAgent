@@ -17,6 +17,7 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlanner
+from naumi_agent.evolution.static_guards import EvolutionStaticGuard
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
     HarnessContextAssembler,
@@ -103,6 +104,7 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
         EvolutionExperimentSourceSnapshotBuilder,
     )
     assert isinstance(engine.evolution_mutation_planner, EvolutionMutationPlanner)
+    assert isinstance(engine.evolution_static_guard, EvolutionStaticGuard)
     assert (
         engine.evolution_experiment_lease_manager._worktree_manager
         is engine.worktree_manager
