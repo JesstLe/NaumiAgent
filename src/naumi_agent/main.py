@@ -2743,7 +2743,7 @@ def _print_help() -> None:
             "/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>",
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
-        ("/evolution [list|detail <id>]", "只读审查 Evolution Candidate"),
+        ("/evolution [list|detail|enqueue]", "审查 Candidate 或加入 Workbench 队列"),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -2902,12 +2902,14 @@ async def _run_feedback(engine: Any, arg: str) -> None:
 
 
 async def _run_evolution_review(engine: Any, arg: str) -> None:
+    from naumi_agent.evolution.queue import render_queue_result
     from naumi_agent.evolution.review import (
         EvolutionReviewFilter,
         render_evolution_review,
     )
     from naumi_agent.evolution.store import EvolutionStoreError
 
+    action = "list"
     try:
         parts = shlex.split(arg)
         action = parts[0].lower() if parts else "list"
@@ -2916,6 +2918,18 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             if len(parts) != 2:
                 raise ValueError("detail 需要一个 Candidate ID。")
             snapshot = await service.detail_snapshot(engine.workspace_root, parts[1])
+        elif action == "enqueue":
+            options = _parse_evolution_enqueue_options(parts[1:])
+            session = getattr(engine, "_session", None)
+            if session is None:
+                raise ValueError("当前没有活动会话。")
+            result = await engine.evolution_proposal_queue.enqueue(
+                engine.workspace_root,
+                session_id=session.id,
+                **options,
+            )
+            console.print(Markdown(render_queue_result(result)))
+            return
         elif action == "list":
             options = _parse_evolution_list_options(parts[1:])
             snapshot = await service.list_snapshot(
@@ -2923,11 +2937,23 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 filters=EvolutionReviewFilter(**options),
             )
         else:
-            raise ValueError("仅支持 list 或 detail。")
-    except (EvolutionStoreError, OSError, ValueError):
+            raise ValueError("仅支持 list、detail 或 enqueue。")
+    except ValueError as exc:
+        if action == "enqueue":
+            console.print(f"Proposal 未入队：{exc}", style="yellow", markup=False)
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
-            "/evolution detail <candidate-id>",
+            "/evolution detail <candidate-id>；"
+            "/evolution enqueue <candidate-id> --mission <id> --task <id> "
+            "[--agent <name>]",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except (EvolutionStoreError, OSError):
+        console.print(
+            "Evolution 用户状态库不可用；请运行 /doctor 后重试。",
             style="yellow",
             markup=False,
         )
@@ -2948,6 +2974,28 @@ def _parse_evolution_list_options(parts: list[str]) -> dict[str, Any]:
             value = int(value)
         options[names[name]] = value
         index += 2
+    return options
+
+
+def _parse_evolution_enqueue_options(parts: list[str]) -> dict[str, str]:
+    if not parts:
+        raise ValueError("enqueue 需要 Candidate ID。")
+    options = {
+        "candidate_id": parts[0],
+        "mission_id": "",
+        "task_id": "",
+        "agent_id": "Human",
+    }
+    names = {"--mission": "mission_id", "--task": "task_id", "--agent": "agent_id"}
+    index = 1
+    while index < len(parts):
+        name = parts[index]
+        if name not in names or index + 1 >= len(parts):
+            raise ValueError("Evolution enqueue 参数无效。")
+        options[names[name]] = parts[index + 1]
+        index += 2
+    if not options["mission_id"] or not options["task_id"]:
+        raise ValueError("enqueue 必须指定 mission 与 task。")
     return options
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, cast
 
@@ -25,6 +26,7 @@ from naumi_agent.workbench.models import (
     LeaseState,
     Mission,
     ParallelMode,
+    ProposalSourceKind,
     ProposalState,
     RiskLevel,
     WorkbenchEvent,
@@ -274,6 +276,14 @@ CREATE TABLE IF NOT EXISTS workbench_proposals (
     state TEXT NOT NULL DEFAULT 'open',
     decision_note TEXT NOT NULL DEFAULT '',
     converted_issue_id TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL DEFAULT 'manual',
+    source_id TEXT NOT NULL DEFAULT '',
+    source_revision INTEGER NOT NULL DEFAULT 0,
+    source_sha256 TEXT NOT NULL DEFAULT '',
+    source_proposal_id TEXT NOT NULL DEFAULT '',
+    generator_version TEXT NOT NULL DEFAULT '',
+    proposal_kind TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -337,6 +347,24 @@ class WorkbenchStore:
         )
         await self._ensure_column(
             db, "workbench_audit_events", "severity", "TEXT NOT NULL DEFAULT 'info'"
+        )
+        proposal_columns = {
+            "source_kind": "TEXT NOT NULL DEFAULT 'manual'",
+            "source_id": "TEXT NOT NULL DEFAULT ''",
+            "source_revision": "INTEGER NOT NULL DEFAULT 0",
+            "source_sha256": "TEXT NOT NULL DEFAULT ''",
+            "source_proposal_id": "TEXT NOT NULL DEFAULT ''",
+            "generator_version": "TEXT NOT NULL DEFAULT ''",
+            "proposal_kind": "TEXT NOT NULL DEFAULT ''",
+            "idempotency_key": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column, definition in proposal_columns.items():
+            await self._ensure_column(db, "workbench_proposals", column, definition)
+        await db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS
+               idx_workbench_proposals_session_idempotency
+               ON workbench_proposals(session_id, idempotency_key)
+               WHERE idempotency_key <> ''"""
         )
 
     async def _ensure_column(
@@ -1268,8 +1296,71 @@ class WorkbenchStore:
         validation_plan: list[str] | None = None,
         risk_level: RiskLevel = RiskLevel.MEDIUM,
         questions: list[str] | None = None,
+        source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
+        source_id: str = "",
+        source_revision: int = 0,
+        source_sha256: str = "",
+        source_proposal_id: str = "",
+        generator_version: str = "",
+        proposal_kind: str = "",
+        idempotency_key: str = "",
     ) -> WorkbenchProposal:
         """Persist a new human-governed proposal."""
+        proposal, _ = await self.create_proposal_with_status(
+            session_id=session_id,
+            mission_id=mission_id,
+            task_id=task_id,
+            agent_id=agent_id,
+            title=title,
+            impact_scope=impact_scope,
+            intended_files=intended_files,
+            validation_plan=validation_plan,
+            risk_level=risk_level,
+            questions=questions,
+            source_kind=source_kind,
+            source_id=source_id,
+            source_revision=source_revision,
+            source_sha256=source_sha256,
+            source_proposal_id=source_proposal_id,
+            generator_version=generator_version,
+            proposal_kind=proposal_kind,
+            idempotency_key=idempotency_key,
+        )
+        return proposal
+
+    async def create_proposal_with_status(
+        self,
+        *,
+        session_id: str,
+        mission_id: str,
+        task_id: str,
+        agent_id: str,
+        title: str,
+        impact_scope: str,
+        intended_files: list[str] | None = None,
+        validation_plan: list[str] | None = None,
+        risk_level: RiskLevel = RiskLevel.MEDIUM,
+        questions: list[str] | None = None,
+        source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL,
+        source_id: str = "",
+        source_revision: int = 0,
+        source_sha256: str = "",
+        source_proposal_id: str = "",
+        generator_version: str = "",
+        proposal_kind: str = "",
+        idempotency_key: str = "",
+    ) -> tuple[WorkbenchProposal, bool]:
+        """Create a proposal once, returning whether this call inserted it."""
+        _validate_proposal_provenance(
+            source_kind=source_kind,
+            source_id=source_id,
+            source_revision=source_revision,
+            source_sha256=source_sha256,
+            source_proposal_id=source_proposal_id,
+            generator_version=generator_version,
+            proposal_kind=proposal_kind,
+            idempotency_key=idempotency_key,
+        )
         proposal = WorkbenchProposal(
             id=uuid.uuid4().hex[:12],
             session_id=session_id,
@@ -1282,16 +1373,29 @@ class WorkbenchStore:
             validation_plan=list(validation_plan or []),
             risk_level=risk_level,
             questions=list(questions or []),
+            source_kind=source_kind,
+            source_id=source_id,
+            source_revision=source_revision,
+            source_sha256=source_sha256,
+            source_proposal_id=source_proposal_id,
+            generator_version=generator_version,
+            proposal_kind=proposal_kind,
+            idempotency_key=idempotency_key,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
-            await db.execute(
+            cursor = await db.execute(
                 """INSERT INTO workbench_proposals
                    (id, session_id, mission_id, task_id, agent_id, title,
                     impact_scope, intended_files, validation_plan, risk_level,
                     questions, state, decision_note, converted_issue_id,
-                    created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    source_kind, source_id, source_revision, source_sha256,
+                    source_proposal_id, generator_version, proposal_kind,
+                    idempotency_key, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(session_id, idempotency_key)
+                   WHERE idempotency_key <> '' DO NOTHING""",
                 (
                     proposal.id,
                     proposal.session_id,
@@ -1307,12 +1411,34 @@ class WorkbenchStore:
                     proposal.state.value,
                     proposal.decision_note,
                     proposal.converted_issue_id,
+                    proposal.source_kind.value,
+                    proposal.source_id,
+                    proposal.source_revision,
+                    proposal.source_sha256,
+                    proposal.source_proposal_id,
+                    proposal.generator_version,
+                    proposal.proposal_kind,
+                    proposal.idempotency_key,
                     proposal.created_at,
                     proposal.updated_at,
                 ),
             )
             await db.commit()
-        return proposal
+            if cursor.rowcount == 1:
+                return proposal, True
+            db.row_factory = aiosqlite.Row
+            existing_cursor = await db.execute(
+                """SELECT * FROM workbench_proposals
+                   WHERE session_id = ? AND idempotency_key = ?""",
+                (session_id, idempotency_key),
+            )
+            row = await existing_cursor.fetchone()
+        if row is None:
+            raise RuntimeError("Proposal 幂等写入失败，且无法读取已有记录。")
+        existing = _row_to_proposal(dict(row))
+        if _proposal_identity(existing) != _proposal_identity(proposal):
+            raise ValueError("Proposal 幂等键已绑定到不同内容，拒绝覆盖。")
+        return existing, False
 
     async def list_proposals(
         self,
@@ -1962,8 +2088,81 @@ def _row_to_proposal(row: dict[str, Any]) -> WorkbenchProposal:
         state=ProposalState(row.get("state") or "open"),
         decision_note=row.get("decision_note") or "",
         converted_issue_id=row.get("converted_issue_id") or "",
+        source_kind=ProposalSourceKind(row.get("source_kind") or "manual"),
+        source_id=row.get("source_id") or "",
+        source_revision=int(row.get("source_revision") or 0),
+        source_sha256=row.get("source_sha256") or "",
+        source_proposal_id=row.get("source_proposal_id") or "",
+        generator_version=row.get("generator_version") or "",
+        proposal_kind=row.get("proposal_kind") or "",
+        idempotency_key=row.get("idempotency_key") or "",
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_EVOLUTION_CANDIDATE_ID_RE = re.compile(r"^evc_[0-9a-f]{24}$")
+_EVOLUTION_PROPOSAL_ID_RE = re.compile(r"^evp_[0-9a-f]{24}$")
+_PROPOSAL_KINDS = frozenset({"knowledge", "profile", "prompt", "tool", "test", "code"})
+
+
+def _validate_proposal_provenance(
+    *,
+    source_kind: ProposalSourceKind,
+    source_id: str,
+    source_revision: int,
+    source_sha256: str,
+    source_proposal_id: str,
+    generator_version: str,
+    proposal_kind: str,
+    idempotency_key: str,
+) -> None:
+    if not isinstance(source_kind, ProposalSourceKind):
+        raise ValueError("Proposal source_kind 必须使用已注册枚举。")
+    if source_kind is ProposalSourceKind.MANUAL:
+        source_values = (
+            source_id,
+            source_sha256,
+            source_proposal_id,
+            generator_version,
+            proposal_kind,
+            idempotency_key,
+        )
+        if any(source_values) or source_revision != 0:
+            raise ValueError("手动 Proposal 不得伪造自动来源字段。")
+        return
+    valid = (
+        _EVOLUTION_CANDIDATE_ID_RE.fullmatch(source_id)
+        and source_revision >= 1
+        and _SHA256_RE.fullmatch(source_sha256)
+        and _EVOLUTION_PROPOSAL_ID_RE.fullmatch(source_proposal_id)
+        and generator_version == "evolution-proposal-v1"
+        and proposal_kind in _PROPOSAL_KINDS
+        and idempotency_key == f"evolution:{source_proposal_id}"
+    )
+    if not valid:
+        raise ValueError("Evolution Proposal 来源字段不完整或不可信。")
+
+
+def _proposal_identity(proposal: WorkbenchProposal) -> tuple[Any, ...]:
+    return (
+        proposal.mission_id,
+        proposal.task_id,
+        proposal.title,
+        proposal.impact_scope,
+        tuple(proposal.intended_files),
+        tuple(proposal.validation_plan),
+        proposal.risk_level,
+        tuple(proposal.questions),
+        proposal.source_kind,
+        proposal.source_id,
+        proposal.source_revision,
+        proposal.source_sha256,
+        proposal.source_proposal_id,
+        proposal.generator_version,
+        proposal.proposal_kind,
+        proposal.idempotency_key,
     )
 
 

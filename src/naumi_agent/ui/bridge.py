@@ -301,7 +301,7 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         },
         {
             "command": "/evolution",
-            "description": "只读审查 Evolution Candidate",
+            "description": "审查 Candidate 或加入 Workbench 队列",
         },
         {
             "command": "/mode",
@@ -2401,19 +2401,42 @@ class JsonlEngineBridge:
         *,
         request_id: str,
     ) -> None:
-        """Emit a typed, read-only Candidate list or detail snapshot."""
+        """Emit Candidate review state or explicitly enqueue one Proposal."""
+        from naumi_agent.evolution.queue import render_queue_result
         from naumi_agent.evolution.review import EvolutionReviewFilter
         from naumi_agent.evolution.store import EvolutionStoreError
         from naumi_agent.ui.evolution_review import evolution_review_payload
 
+        action = str(payload.get("action") or "list")
         try:
             service = self.engine.evolution_review_service
-            if payload.get("action") == "detail":
+            if action == "enqueue":
+                session = getattr(self.engine, "_session", None)
+                if session is None:
+                    raise ValueError("当前没有活动会话。")
+                result = await self.engine.evolution_proposal_queue.enqueue(
+                    self.engine.workspace_root,
+                    session_id=session.id,
+                    mission_id=str(payload.get("mission_id") or ""),
+                    task_id=str(payload.get("task_id") or ""),
+                    agent_id=str(payload.get("agent_id") or "Human"),
+                    candidate_id=str(payload.get("candidate_id") or ""),
+                )
+                await self._emit_system_notice(
+                    "Evolution Proposal",
+                    render_queue_result(result),
+                    request_id=request_id,
+                )
                 snapshot = await service.detail_snapshot(
                     self.engine.workspace_root,
                     str(payload.get("candidate_id") or ""),
                 )
-            else:
+            elif action == "detail":
+                snapshot = await service.detail_snapshot(
+                    self.engine.workspace_root,
+                    str(payload.get("candidate_id") or ""),
+                )
+            elif action == "list":
                 snapshot = await service.list_snapshot(
                     self.engine.workspace_root,
                     filters=EvolutionReviewFilter(
@@ -2423,7 +2446,16 @@ class JsonlEngineBridge:
                         limit=int(payload.get("limit") or 50),
                     ),
                 )
+            else:
+                raise ValueError("Evolution action 未注册。")
         except (EvolutionStoreError, OSError, ValueError):
+            if action == "enqueue":
+                await self.emit_error(
+                    "Proposal 未入队：Candidate 未就绪或 mission/task 绑定无效。未执行任何变更。",
+                    code="evolution_queue_failed",
+                    request_id=request_id,
+                )
+                return
             await self.emit_error(
                 "Evolution Candidate 快照不可用；请运行 /doctor 后重试。",
                 code="evolution_review_failed",

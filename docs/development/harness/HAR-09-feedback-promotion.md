@@ -48,5 +48,8 @@
   knowledge/profile/prompt/tool/test/code 六类建议、稳定 source snapshot、相对目标文件和机械验证计划；
   `/evolution detail` 与 Agent Tool 使用同一 Preview。Preview 固定不可执行、不写 Workbench Queue，
   详见 `HAR-09-4a-proposal-preview.md`。
-- HAR-09 仍未实现持久 review action/cooldown、Workbench Queue 适配、defer/merge 和 outcome
-  tracking，因此整体继续保持 partial。
+- HAR-09.5a 已实现显式、幂等的 Workbench Queue Foundation：保存 Candidate revision/digest 与
+  Preview provenance，校验 mission/issue 绑定，8 路并发只产生一条 Proposal 和一条审计事件；slash、
+  Agent Tool 与 New UI 复用同一 Adapter。详见 `HAR-09-5a-workbench-queue-foundation.md`。
+- HAR-09 仍未实现 approve/reject/defer/merge 统一状态机、冷却期、Workbench Proposal 决策页和
+  outcome tracking，因此整体继续保持 partial。
