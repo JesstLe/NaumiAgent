@@ -11,7 +11,7 @@
 | HAR-06 | Session 生命周期与派生数据清理 | implemented | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.6a, 8.6b, 8.7a-8.7d, H5a-H5c, 8.8a-8.8e3) | HAR-05, ARC-03 | `harness/HAR-08-eval-baseline.md` |
-| HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
+| HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a, 9.3a) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
 | HAR-10 | 长周期 Harness Orchestration | planned | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
 ## CLI/TUI/New UI
@@ -54,7 +54,7 @@
 
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| EVO-01 | 自我审查证据与改进候选 | partial (1.1a, 1.1b, 1.2a, 1.3a, 1.6a) | Harness Evidence | `self-evolution/EVO-01-review-candidates.md` |
+| EVO-01 | 自我审查证据与改进候选 | partial (1.1a, 1.1b, 1.2a, 1.3a, 1.4a, 1.6a) | Harness Evidence | `self-evolution/EVO-01-review-candidates.md` |
 | EVO-02 | 隔离变异与补丁生成 | planned | EVO-01, Worktree | `self-evolution/EVO-02-isolated-mutation.md` |
 | EVO-03 | 多层验证与 Eval 对照 | planned | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
 | EVO-04 | 反思决策与防奖励投机 | planned | EVO-03 | `self-evolution/EVO-04-reflection-decision.md` |

@@ -43,11 +43,15 @@ Evolution Candidate，而不是直接触发 self_modify。
   不可变 Evidence、Candidate materialization 和 digest audit chain；并发投递、100 次同根
   聚合、幂等重试、工作区隔离与篡改检测均有机械测试。设计与证据见
   `EVO-01-3a-candidate-store-core.md`。
+- EVO-01.4a Eligibility Policy v1：已实现。机械证据、重复直接反馈、Agent-only 信号、机械
+  verifier 和 protected scope 由版本化纯函数给出稳定 reason codes；只判断是否可进入人工审阅，
+  冷却期和 experiment contract 未完成前永不授予实验资格。详见
+  `EVO-01-4a-candidate-eligibility-policy.md`。
 - HAR-09.1a Feedback adapter：已实现。直接用户反馈和 Agent 对 durable user turn 的解释使用
   不同 source kind，摘要不落库，非缺陷反馈不生成 Candidate；所有结果仍固定不可执行。
 - EVO-01.6a Candidate 只读审阅面：已实现。用户通过 `/evolution list/detail`、Agent 通过
   `evolution_candidates` 读取同一服务；过滤、详情、审计链和资源上限均为确定性实现，读取不改变
   Candidate。设计与证据见 `EVO-01-6a-readonly-review-surface.md`。
 - runtime metric/Eval adapters、provider/model/platform 时间窗聚合策略、
-  Eligibility、Prioritization、专用全屏页和 approve/reject/defer 动作仍为 planned；不得把
+  完整 experiment Eligibility、Prioritization、专用全屏页和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。
