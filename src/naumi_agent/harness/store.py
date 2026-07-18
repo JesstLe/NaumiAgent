@@ -2372,7 +2372,6 @@ class HarnessStore:
         digest = _conversation_queue_digest(
             session_id=session,
             request_id=request,
-            client_id=client,
             text=content,
         )
         await self._ensure_schema()
@@ -2387,7 +2386,7 @@ class HarnessStore:
                 )
                 if existing is not None:
                     item = _conversation_queue_item_from_row(existing)
-                    if not hmac.compare_digest(item.payload_sha256, digest):
+                    if item.text != content:
                         raise HarnessStoreConflictError(
                             f"request_id 已绑定不同排队消息：{request}"
                         )
@@ -2558,8 +2557,11 @@ class HarnessStore:
         state: str,
         terminal_reason: str,
         updated_at: str,
+        claim_run_id: str = "",
+        claim_owner_id: str = "",
+        claim_epoch: int | None = None,
     ) -> HarnessConversationQueueItem:
-        """Terminalize one queued item and compact remaining positions atomically."""
+        """Terminalize one item, optionally fencing and releasing its claim."""
         workspace = _canonical_workspace(workspace_root)
         session = _normalize_text(session_id, field="session_id", max_length=256)
         request = _normalize_conversation_request_id(request_id)
@@ -2570,6 +2572,22 @@ class HarnessStore:
             terminal_reason, field="terminal_reason", max_length=256,
         )
         timestamp = _normalize_utc_timestamp(updated_at, field="updated_at")
+        claim_values = (claim_run_id, claim_owner_id, claim_epoch)
+        has_claim = any(value not in {"", None} for value in claim_values)
+        if has_claim and not all(value not in {"", None} for value in claim_values):
+            raise ValueError("queue claim 必须同时提供 run_id、owner_id 和 epoch。")
+        normalized_claim_run_id = (
+            _normalize_run_lease_id(claim_run_id, field="claim_run_id")
+            if has_claim else ""
+        )
+        normalized_claim_owner_id = (
+            _normalize_run_lease_id(claim_owner_id, field="claim_owner_id")
+            if has_claim else ""
+        )
+        normalized_claim_epoch = (
+            _normalize_run_epoch(claim_epoch)
+            if has_claim and claim_epoch is not None else 0
+        )
         await self._ensure_schema()
         try:
             async with self._write_lock, self._connection() as db:
@@ -2594,6 +2612,51 @@ class HarnessStore:
                         f"排队消息已经终结为 {current.state}：{request}"
                     )
                 _ensure_queue_timestamp_forward(current.updated_at, timestamp)
+                if has_claim:
+                    lease_row = await _select_run_lease_row(
+                        db,
+                        workspace_root=workspace,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        run_id=normalized_claim_run_id,
+                    )
+                    decision, fence_reason = _decide_run_fence(
+                        lease_row,
+                        owner_id=normalized_claim_owner_id,
+                        epoch=normalized_claim_epoch,
+                        checked_at=timestamp,
+                    )
+                    if decision is not HarnessRunFenceDecision.ACCEPTED:
+                        raise HarnessStoreConflictError(
+                            "排队消息 claim 已失效，拒绝提交终态："
+                            f"{fence_reason.value}"
+                        )
+                    operation_id = _stable_id(
+                        "conversation_queue_finish",
+                        session,
+                        request,
+                        normalized_state,
+                        str(normalized_claim_epoch),
+                    )
+                    await db.execute(
+                        """
+                        INSERT INTO harness_run_fence_events (
+                            workspace_root, run_kind, run_id, operation_id,
+                            presented_owner_id, presented_epoch,
+                            active_owner_id, active_epoch,
+                            decision, reason, checked_at
+                        ) VALUES (?, 'runtime', ?, ?, ?, ?, ?, ?, 'accepted', 'current', ?)
+                        """,
+                        (
+                            workspace,
+                            normalized_claim_run_id,
+                            operation_id,
+                            normalized_claim_owner_id,
+                            normalized_claim_epoch,
+                            normalized_claim_owner_id,
+                            normalized_claim_epoch,
+                            timestamp,
+                        ),
+                    )
                 await db.execute(
                     """
                     UPDATE harness_conversation_queue
@@ -2603,6 +2666,29 @@ class HarnessStore:
                     """,
                     (normalized_state, reason, timestamp, workspace, session, request),
                 )
+                if has_claim:
+                    release_cursor = await db.execute(
+                        """
+                        UPDATE harness_run_leases
+                        SET state = 'released', expires_at = ?, updated_at = ?
+                        WHERE workspace_root = ? AND run_kind = 'runtime'
+                          AND run_id = ? AND state = 'active'
+                          AND owner_id = ? AND epoch = ? AND expires_at > ?
+                        """,
+                        (
+                            timestamp,
+                            timestamp,
+                            workspace,
+                            normalized_claim_run_id,
+                            normalized_claim_owner_id,
+                            normalized_claim_epoch,
+                            timestamp,
+                        ),
+                    )
+                    if release_cursor.rowcount != 1:
+                        raise HarnessStoreConflictError(
+                            "排队消息 claim 在提交终态时发生并发变化。"
+                        )
                 remaining = await _select_queued_conversation_rows(
                     db, workspace_root=workspace, session_id=session,
                 )
@@ -4770,11 +4856,9 @@ def _conversation_queue_digest(
     *,
     session_id: str,
     request_id: str,
-    client_id: str,
     text: str,
 ) -> str:
     payload = _json_dumps({
-        "client_id": client_id,
         "request_id": request_id,
         "session_id": session_id,
         "text": text,
@@ -4843,16 +4927,29 @@ def _conversation_queue_item_from_row(
     expected_digest = _conversation_queue_digest(
         session_id=item.session_id,
         request_id=item.request_id,
-        client_id=item.client_id,
         text=item.text,
     )
-    if not hmac.compare_digest(item.payload_sha256, expected_digest):
+    legacy_digest = _legacy_conversation_queue_digest(item)
+    if not (
+        hmac.compare_digest(item.payload_sha256, expected_digest)
+        or hmac.compare_digest(item.payload_sha256, legacy_digest)
+    ):
         raise HarnessStoreError("排队消息摘要校验失败，拒绝读取。")
     if item.state not in {"queued", *_CONVERSATION_QUEUE_TERMINAL_STATES}:
         raise HarnessStoreError("排队消息状态无效，拒绝读取。")
     if item.position < 1:
         raise HarnessStoreError("排队消息位置无效，拒绝读取。")
     return item
+
+
+def _legacy_conversation_queue_digest(item: HarnessConversationQueueItem) -> str:
+    payload = _json_dumps({
+        "client_id": item.client_id,
+        "request_id": item.request_id,
+        "session_id": item.session_id,
+        "text": item.text,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _coerce_run_kind(value: HarnessRunKind | str) -> HarnessRunKind:
