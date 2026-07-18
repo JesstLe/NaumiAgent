@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import naumi_agent.evolution.patch_writers as patch_writer_module
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -24,6 +25,11 @@ from naumi_agent.evolution.experiments import (
 from naumi_agent.evolution.mutation_plans import (
     EvolutionMutationPlan,
     EvolutionMutationPlanner,
+)
+from naumi_agent.evolution.patch_writers import (
+    EvolutionPatchWriteError,
+    EvolutionPatchWriter,
+    EvolutionPatchWriteReceipt,
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
@@ -861,3 +867,243 @@ async def test_static_guard_receipt_rejects_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="changes_sha256"):
         EvolutionStaticGuardReceipt.model_validate(payload)
+
+
+async def _writer_fixture(tmp_path: Path):
+    workspace, target, contract, lease, snapshot, plan, guard = await _guard_fixture(tmp_path)
+    proposed = "def render_footer():\n    return 'atomic-fixed'\n"
+    guard_receipt = await guard.preflight(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        proposed_contents={plan.planned_files[0].path: proposed},
+    )
+    assert guard_receipt.preflight_passed is True
+    return (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        EvolutionPatchWriter(static_guard=guard),
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_atomically_writes_only_isolated_worktree(tmp_path: Path) -> None:
+    (
+        workspace,
+        target,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    main_before = target.read_bytes()
+
+    receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.planned_files[0].path: proposed},
+    )
+
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    assert isolated.read_text(encoding="utf-8") == proposed
+    assert target.read_bytes() == main_before
+    assert _git(workspace, "status", "--porcelain") == ""
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == (
+        f"M {plan.planned_files[0].path}"
+    )
+    assert receipt.guard_id == guard_receipt.guard_id
+    assert receipt.change.after_sha256 == guard_receipt.changes[0].after_sha256
+    assert receipt.postflight_passed is True
+    assert receipt.rollback_performed is False
+    assert receipt.execution_ready is False
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_rejects_content_not_bound_to_guard_receipt(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        _,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before = isolated.read_bytes()
+
+    with pytest.raises(EvolutionPatchWriteError) as captured:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: "value = 'different'\n"},
+        )
+
+    assert captured.value.code == "guard_receipt_mismatch"
+    assert isolated.read_bytes() == before
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_rolls_back_real_bytes_when_postflight_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before = isolated.read_bytes()
+
+    def fail_postflight(*_args) -> bytes:
+        raise EvolutionPatchWriteError("injected_postflight", "测试故障注入。")
+
+    monkeypatch.setattr(writer, "_postflight", fail_postflight)
+    with pytest.raises(EvolutionPatchWriteError) as captured:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+
+    assert captured.value.code == "injected_postflight"
+    assert captured.value.rollback_completed is True
+    assert isolated.read_bytes() == before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_rolls_back_when_directory_fsync_fails_after_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    isolated = Path(lease.worktree_path, plan.planned_files[0].path)
+    before = isolated.read_bytes()
+    real_fsync_directory = patch_writer_module._fsync_directory
+    calls = 0
+
+    def fail_once(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("injected directory fsync failure")
+        real_fsync_directory(path)
+
+    monkeypatch.setattr(patch_writer_module, "_fsync_directory", fail_once)
+    with pytest.raises(EvolutionPatchWriteError) as captured:
+        await writer.apply(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            guard_receipt=guard_receipt,
+            proposed_contents={plan.planned_files[0].path: proposed},
+        )
+
+    assert captured.value.code == "write_failed"
+    assert captured.value.rollback_completed is True
+    assert calls == 2
+    assert isolated.read_bytes() == before
+    assert _git(Path(lease.worktree_path), "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_patch_writer_serializes_concurrent_replay(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+
+    results = await asyncio.gather(
+        *(
+            writer.apply(
+                contract=contract,
+                lease=lease,
+                source_snapshot=snapshot,
+                mutation_plan=plan,
+                guard_receipt=guard_receipt,
+                proposed_contents={plan.planned_files[0].path: proposed},
+            )
+            for _ in range(2)
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(isinstance(item, EvolutionPatchWriteReceipt) for item in results) == 1
+    errors = [item for item in results if isinstance(item, EvolutionPatchWriteError)]
+    assert len(errors) == 1
+    assert errors[0].code in {"writer_locked", "guard_rejected"}
+
+
+@pytest.mark.asyncio
+async def test_patch_write_receipt_rejects_tampering(tmp_path: Path) -> None:
+    (
+        _,
+        _,
+        contract,
+        lease,
+        snapshot,
+        plan,
+        guard_receipt,
+        proposed,
+        writer,
+    ) = await _writer_fixture(tmp_path)
+    receipt = await writer.apply(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_plan=plan,
+        guard_receipt=guard_receipt,
+        proposed_contents={plan.planned_files[0].path: proposed},
+    )
+    payload = receipt.model_dump(mode="json")
+    payload["worktree_status_sha256"] = "0" * 64
+
+    with pytest.raises(ValidationError, match="write_sha256"):
+        EvolutionPatchWriteReceipt.model_validate(payload)

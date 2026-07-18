@@ -32,6 +32,11 @@ if TYPE_CHECKING:
         MutationObjective,
         MutationPlanStage,
     )
+    from naumi_agent.evolution.patch_writers import (
+        EvolutionPatchWriteError,
+        EvolutionPatchWriter,
+        EvolutionPatchWriteReceipt,
+    )
     from naumi_agent.evolution.static_guards import (
         EvolutionStaticGuard,
         EvolutionStaticGuardPolicy,
@@ -68,6 +73,9 @@ __all__ = [
     "EvolutionExperimentSourceSnapshotBuilder",
     "EvolutionMutationPlan",
     "EvolutionMutationPlanner",
+    "EvolutionPatchWriteError",
+    "EvolutionPatchWriteReceipt",
+    "EvolutionPatchWriter",
     "EvolutionStaticGuard",
     "EvolutionStaticGuardPolicy",
     "EvolutionStaticGuardReceipt",
@@ -126,6 +134,11 @@ def __getattr__(name: str) -> object:
         "MutationObjective",
         "MutationPlanStage",
     }
+    patch_writer_exports = {
+        "EvolutionPatchWriteError",
+        "EvolutionPatchWriteReceipt",
+        "EvolutionPatchWriter",
+    }
     static_guard_exports = {
         "EvolutionStaticGuard",
         "EvolutionStaticGuardPolicy",
@@ -147,6 +160,8 @@ def __getattr__(name: str) -> object:
         module_name = "experiment_snapshots"
     elif name in mutation_plan_exports:
         module_name = "mutation_plans"
+    elif name in patch_writer_exports:
+        module_name = "patch_writers"
     elif name in static_guard_exports:
         module_name = "static_guards"
     else:

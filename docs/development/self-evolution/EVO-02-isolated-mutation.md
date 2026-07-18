@@ -52,5 +52,8 @@
 - EVO-02.6a 已前置实现 Static Guard Preflight v1：具体提议内容在写入前经过 protected、dependency、
   path/symlink、generated/binary、hardcoded secret 与收紧预算门禁；Receipt 与内容摘要绑定，bypass
   不可覆盖且仍不授权写入。详见 `EVO-02-6a-static-guard-preflight.md`。
-- EVO-02.5 Patch Writer、02.6 postflight/完整 diff guard 与 02.7 Receipt 尚未实现，因此 EVO-02 整体
-  保持 partial。
+- EVO-02.5a 已实现 Guard-bound 单文件原子 Patch Writer：Lease 互斥、fresh Receipt 等值复核、同目录
+  原子替换、摘要/Git scope postflight 和失败字节回滚；仍固定 `execution_ready=false`。详见
+  `EVO-02-5a-single-file-patch-writer.md`。
+- EVO-02.5b 持久 journal/多文件事务、02.6 完整 diff/API guard 与 02.7 Receipt 尚未实现，因此 EVO-02
+  整体保持 partial。
