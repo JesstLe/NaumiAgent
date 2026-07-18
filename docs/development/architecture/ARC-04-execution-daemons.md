@@ -42,3 +42,7 @@ Tool daemon 已完成。
 HAR-10.5c 又验证了本地 reconcile contract：只有当前 Runner 同时持有活进程与 watcher 才能报告 managed
 active；PID 存在但所有权丢失必须报告 orphan 并 fail closed。该合同可作为 ARC-04.6 Supervisor 的输入形状，
 但尚不具备 daemon 接管、心跳、跨进程 fencing 或孤儿清理能力。
+
+HAR-10.2a 已提供可复用的 heartbeat snapshot（instance/epoch/sequence/phase/timeout）与机械健康分类，并接入
+Pursuit lease worker。这是 ARC-04.1/04.6 的最小协议前置，但还没有 daemon producer、历史丢包统计、
+crash-loop/quarantine/drain 或 supervisor 动作，因此 ARC-04 仍保持 planned。

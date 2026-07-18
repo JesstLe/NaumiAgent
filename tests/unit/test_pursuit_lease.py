@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.pursuit import (
@@ -22,6 +23,7 @@ from naumi_agent.orchestrator.pursuit import (
     SuccessCriterion,
 )
 from naumi_agent.orchestrator.pursuit_lease import (
+    PursuitLeaseError,
     PursuitLeaseLostError,
     PursuitLeaseSession,
     PursuitLeaseUnavailableError,
@@ -160,7 +162,59 @@ async def test_keepalive_renews_exact_epoch_and_stops_on_close(tmp_path) -> None
 
     assert renewed.epoch == acquired.epoch
     assert renewed.updated_at == T4
+    heartbeat = None
+    for _ in range(20):
+        heartbeat = await store.get_heartbeat(
+            workspace_root=tmp_path,
+            subject_kind=HarnessRunKind.PURSUIT,
+            subject_id="pursuit-keepalive",
+        )
+        if heartbeat is not None and heartbeat.sequence == 2:
+            break
+        await asyncio.sleep(0)
+    assert heartbeat is not None
+    assert heartbeat.instance_id == "worker-a"
+    assert heartbeat.epoch == acquired.epoch
+    assert heartbeat.sequence == 2
+    assert heartbeat.phase is HarnessHeartbeatPhase.RUNNING
     assert await session.close() is True
+    assert session.is_owned is False
+    stopped = await store.get_heartbeat(
+        workspace_root=tmp_path,
+        subject_kind=HarnessRunKind.PURSUIT,
+        subject_id="pursuit-keepalive",
+    )
+    assert stopped is not None
+    assert stopped.sequence == 3
+    assert stopped.phase is HarnessHeartbeatPhase.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_admission_failure_releases_new_lease(tmp_path) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    store.record_heartbeat = AsyncMock(  # type: ignore[method-assign]
+        side_effect=OSError("heartbeat unavailable")
+    )
+    session = PursuitLeaseSession(
+        port=store,
+        workspace_root=tmp_path,
+        run_id="pursuit-heartbeat-failure",
+        owner_id="worker-a",
+        lease_seconds=30,
+        now_provider=_Clock(T0),
+        auto_renew=False,
+    )
+
+    with pytest.raises(PursuitLeaseError, match="心跳初始化失败"):
+        await session.acquire()
+
+    lease = await HarnessStore(store.db_path).get_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id="pursuit-heartbeat-failure",
+    )
+    assert lease is not None
+    assert lease.state is HarnessRunLeaseState.RELEASED
     assert session.is_owned is False
 
 

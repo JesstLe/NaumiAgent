@@ -4,6 +4,13 @@ from naumi_agent.harness.context import (
     HarnessKnowledgeContextComposer,
     KnowledgeContextBundle,
 )
+from naumi_agent.harness.heartbeat import (
+    HarnessHeartbeat,
+    HarnessHeartbeatHealth,
+    HarnessHeartbeatPhase,
+    HarnessHeartbeatSnapshot,
+    assess_heartbeat,
+)
 from naumi_agent.harness.knowledge import (
     KnowledgeBudget,
     KnowledgeCandidate,
@@ -31,6 +38,10 @@ from naumi_agent.harness.run_lease import (
 
 __all__ = [
     "HarnessKnowledgeContextComposer",
+    "HarnessHeartbeat",
+    "HarnessHeartbeatHealth",
+    "HarnessHeartbeatPhase",
+    "HarnessHeartbeatSnapshot",
     "HarnessCheckSpec",
     "HarnessProfile",
     "HarnessProfileError",
@@ -49,5 +60,6 @@ __all__ = [
     "KnowledgeReadResult",
     "KnowledgeSelection",
     "RepositoryKnowledgeIndex",
+    "assess_heartbeat",
     "load_harness_profile",
 ]

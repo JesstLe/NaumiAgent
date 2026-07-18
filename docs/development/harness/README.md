@@ -12,6 +12,8 @@ background reconcile 已实现。resume 支持新 lease epoch continuation，在
 后台任务可通过 caller key 在同 runtime 并发与正常重启后复用；stale/orphan/identity/store error 均有
 明确 blocker，不会被盲目重试。
 HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除 assessment 的隐式全量测试和 lint。
+HAR-10.2a 已建立 Harness DB v12 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
+聚合健康视图和 browser/agent/runtime producer 尚未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
