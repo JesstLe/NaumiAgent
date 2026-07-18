@@ -80,5 +80,8 @@
   记录 call 顺序、失败/重试、参数/result 与逐文件 before/after digest chain，并持久化不可变 Trace。
   详见 `EVO-02-7b1-mutation-generation-trace.md`。
 - EVO-02.7b2 已把同 attempt Trace 强绑定到 Static Guard v2、Writer v3 和 Mutation Receipt v2，并保留
-  历史 artifact 读取边界，详见 `EVO-02-7b2-trace-receipt-binding.md`；专用 Mutation Turn Runner 与
-  HAR-08 RED/GREEN 尚未串联，因此 EVO-02 整体保持 partial。
+  历史 artifact 读取边界，详见 `EVO-02-7b2-trace-receipt-binding.md`。
+- EVO-02.7c1 已实现受控 Mutation Turn Runner：生产 `ModelPort` 读取完整 approved baseline，只能调用严格
+  schema 的虚拟 `file_edit/file_write`，并受 50 轮上限、总超时、Token/prompt 预算、取消回收和 typed
+  Runtime Event 约束；生成阶段仍不写磁盘。详见 `EVO-02-7c1-mutation-turn-runner.md`。
+- HAR-08 RED/GREEN 尚未消费 Mutation Receipt v2，因此 EVO-02 整体保持 partial。

@@ -428,6 +428,17 @@ class EvolutionMutationGenerationSession:
         self._finalized: EvolutionMutationGenerationResult | None = None
         self._lock = asyncio.Lock()
 
+    def prompt_baseline_contents(self) -> Mapping[str, str | None]:
+        """Return an immutable exact baseline view for the dedicated model turn."""
+        return MappingProxyType({
+            path: (
+                _decode_source(content, path)
+                if content is not None
+                else None
+            )
+            for path, content in self._baseline.items()
+        })
+
     async def execute(self, call: ToolCall) -> ToolResult:
         async with self._lock:
             if not (
