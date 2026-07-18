@@ -18,13 +18,14 @@ from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_use
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ServerEventType
+from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
 NOW = datetime(2026, 7, 18, 21, 0, tzinfo=UTC)
 
 
-async def _fixture(tmp_path: Path, *, repeats: int = 2):
+async def _fixture(tmp_path: Path, *, repeats: int = 2, clock=None):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     evolution_store = EvolutionCandidateStore(tmp_path / "evolution.db")
@@ -64,6 +65,7 @@ async def _fixture(tmp_path: Path, *, repeats: int = 2):
     adapter = EvolutionProposalQueueAdapter(
         review_service=EvolutionReviewService(evolution_store),
         workbench_service=service,
+        clock=clock,
     )
     return (
         workspace,
@@ -242,3 +244,119 @@ async def test_new_ui_bridge_enqueues_then_returns_current_detail(tmp_path: Path
     detail_payload = bridge.emit.await_args_list[0].args[1]
     assert detail_payload["mode"] == "detail"
     assert detail_payload["selected"]["candidate_id"] == candidate_id
+
+
+@pytest.mark.asyncio
+async def test_reject_cooldown_blocks_noise_but_significant_growth_reopens(tmp_path: Path) -> None:
+    current = [NOW]
+    workspace, evolution, store, adapter, mission_id, task_id, candidate_id = await _fixture(
+        tmp_path,
+        clock=lambda: current[0],
+    )
+    first = await adapter.enqueue(
+        workspace,
+        session_id="session-1",
+        mission_id=mission_id,
+        task_id=task_id,
+        agent_id="Human",
+        candidate_id=candidate_id,
+    )
+    service = adapter._workbench_service
+    rejected = await service.govern_proposal(
+        "session-1",
+        first.proposal["id"],
+        action=ProposalAction.REJECT,
+        reviewer="Human",
+        decision_note="证据暂不足以改变实现",
+        now=NOW,
+    )
+    assert rejected["state"] == "rejected"
+
+    intake = FeedbackIntakeService(evolution)
+    current[0] = NOW + timedelta(days=1)
+    await intake.ingest(
+        workspace,
+        build_direct_user_feedback(
+            session_id="queue-test",
+            category="defect",
+            scope="src/naumi_agent/ui/footer.py:render_footer",
+            topic="footer_truncation",
+            summary="第三次反馈仍不足以提前重开",
+            now=NOW + timedelta(minutes=3),
+        ),
+    )
+    with pytest.raises(ValueError, match="冷却期"):
+        await adapter.enqueue(
+            workspace,
+            session_id="session-1",
+            mission_id=mission_id,
+            task_id=task_id,
+            agent_id="Human",
+            candidate_id=candidate_id,
+        )
+
+    await intake.ingest(
+        workspace,
+        build_direct_user_feedback(
+            session_id="queue-test",
+            category="defect",
+            scope="src/naumi_agent/ui/footer.py:render_footer",
+            topic="footer_truncation",
+            summary="第四次反馈达到显著增长阈值",
+            now=NOW + timedelta(minutes=4),
+        ),
+    )
+    reopened_revision = await adapter.enqueue(
+        workspace,
+        session_id="session-1",
+        mission_id=mission_id,
+        task_id=task_id,
+        agent_id="Human",
+        candidate_id=candidate_id,
+    )
+    assert reopened_revision.created is True
+    assert reopened_revision.proposal["source_revision"] == 4
+    assert reopened_revision.proposal["source_occurrence_count"] == 4
+    assert len(await store.list_proposals("session-1")) == 2
+
+
+@pytest.mark.asyncio
+async def test_deferred_same_revision_reopens_after_cooldown_expiry(tmp_path: Path) -> None:
+    current = [NOW]
+    workspace, _evolution, store, adapter, mission_id, task_id, candidate_id = await _fixture(
+        tmp_path,
+        clock=lambda: current[0],
+    )
+    first = await adapter.enqueue(
+        workspace,
+        session_id="session-1",
+        mission_id=mission_id,
+        task_id=task_id,
+        agent_id="Human",
+        candidate_id=candidate_id,
+    )
+    await adapter._workbench_service.govern_proposal(
+        "session-1",
+        first.proposal["id"],
+        action=ProposalAction.DEFER,
+        reviewer="Human",
+        decision_note="等待一周后复核",
+        defer_until=(NOW + timedelta(days=7)).isoformat(),
+        now=NOW,
+    )
+    current[0] = NOW + timedelta(days=8)
+
+    reopened = await adapter.enqueue(
+        workspace,
+        session_id="session-1",
+        mission_id=mission_id,
+        task_id=task_id,
+        agent_id="Human",
+        candidate_id=candidate_id,
+    )
+
+    assert reopened.created is False
+    assert reopened.reopened is True
+    assert reopened.proposal["state"] == "open"
+    events = await store.list_events("session-1", event_type="proposal.reopened")
+    assert len(events) == 1

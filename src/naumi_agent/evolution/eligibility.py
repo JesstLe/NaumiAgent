@@ -99,7 +99,10 @@ def assess_candidate_eligibility(
             code="cooldown_gate",
             passed=False,
             hard_block=False,
-            detail="reject/defer 冷却记录尚未实现，因此不能授予实验资格。",
+            detail=(
+                "Workbench 已强制执行持久 reject/defer 冷却；当前纯 Assessment 尚未绑定"
+                "治理记录，因此本页不把该 Gate 标为通过。"
+            ),
         ),
         EligibilityCheck(
             code="experiment_contract",

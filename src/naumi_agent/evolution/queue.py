@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from naumi_agent.evolution.review import EvolutionReviewService
-from naumi_agent.workbench.models import ProposalSourceKind, RiskLevel
+from naumi_agent.workbench.models import ProposalSourceKind, ProposalState, RiskLevel
 from naumi_agent.workbench.service import WorkbenchService
 
 _BINDING_ID_RE = re.compile(r"^[^\x00\r\n]{1,128}$")
@@ -18,6 +20,7 @@ _BINDING_ID_RE = re.compile(r"^[^\x00\r\n]{1,128}$")
 class EvolutionProposalQueueResult:
     proposal: dict[str, Any]
     created: bool
+    reopened: bool = False
 
 
 class EvolutionProposalQueueAdapter:
@@ -28,9 +31,11 @@ class EvolutionProposalQueueAdapter:
         *,
         review_service: EvolutionReviewService,
         workbench_service: WorkbenchService,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._review_service = review_service
         self._workbench_service = workbench_service
+        self._clock = clock or (lambda: datetime.now(UTC))
 
     async def enqueue(
         self,
@@ -58,6 +63,40 @@ class EvolutionProposalQueueAdapter:
         if preview is None:
             raise ValueError("Candidate 尚未达到人工审阅入队条件。")
 
+        now = self._clock()
+        previous, cooldown = await self._workbench_service.evaluate_source_cooldown(
+            source_id=preview.source.candidate_id,
+            candidate_revision=preview.source.candidate_revision,
+            occurrence_count=preview.source.occurrence_count,
+            risk_level=RiskLevel(preview.risk_level),
+            now=now,
+        )
+        if not cooldown.allowed:
+            if cooldown.reason == "cooldown_record_missing":
+                raise ValueError("Candidate 的历史冷却记录不完整，需要在 Workbench 人工复核。")
+            raise ValueError(
+                f"Candidate 仍在审阅冷却期内（至 {cooldown.cooldown_until}）。"
+            )
+        if (
+            previous is not None
+            and previous.session_id == clean_session_id
+            and previous.source_proposal_id == preview.proposal_id
+            and previous.state in {ProposalState.REJECTED, ProposalState.DEFERRED}
+        ):
+            reopened = await self._workbench_service.reopen_proposal(
+                clean_session_id,
+                previous.id,
+                actor=clean_agent_id,
+                now=now,
+            )
+            if reopened is None:
+                raise RuntimeError("Proposal 重新入队后无法读取。")
+            return EvolutionProposalQueueResult(
+                proposal=reopened,
+                created=False,
+                reopened=True,
+            )
+
         await self._workbench_service.require_proposal_binding(
             session_id=clean_session_id,
             mission_id=clean_mission_id,
@@ -84,6 +123,7 @@ class EvolutionProposalQueueAdapter:
             source_kind=ProposalSourceKind.EVOLUTION_CANDIDATE,
             source_id=preview.source.candidate_id,
             source_revision=preview.source.candidate_revision,
+            source_occurrence_count=preview.source.occurrence_count,
             source_sha256=preview.source.candidate_sha256,
             source_proposal_id=preview.proposal_id,
             generator_version=preview.generator_version,
@@ -102,7 +142,7 @@ def _binding_id(value: str, label: str) -> str:
 
 def render_queue_result(result: EvolutionProposalQueueResult) -> str:
     proposal = result.proposal
-    status = "已加入" if result.created else "已在"
+    status = "已重新加入" if result.reopened else "已加入" if result.created else "已在"
     return "\n".join(
         [
             f"# Evolution Proposal {status} Workbench 审阅队列",

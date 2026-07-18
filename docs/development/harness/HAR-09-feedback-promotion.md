@@ -51,5 +51,8 @@
 - HAR-09.5a 已实现显式、幂等的 Workbench Queue Foundation：保存 Candidate revision/digest 与
   Preview provenance，校验 mission/issue 绑定，8 路并发只产生一条 Proposal 和一条审计事件；slash、
   Agent Tool 与 New UI 复用同一 Adapter。详见 `HAR-09-5a-workbench-queue-foundation.md`。
-- HAR-09 仍未实现 approve/reject/defer/merge 统一状态机、冷却期、Workbench Proposal 决策页和
+- HAR-09.5b1 已实现版本化 approve/reject/defer/merge 状态机、CAS 并发决策、30 天 reject 冷却、
+  有界 defer、同 Candidate 高 revision merge，以及“风险升级或至少 max(2, 50%) 新证据”提前重开；
+  Evolution 再入队已强制执行该策略。详见 `HAR-09-5b1-governance-cooldown.md`。
+- HAR-09 仍未实现 Workbench Proposal 决策页、Eligibility Gate 治理上下文展示、EVO-02 转换和
   outcome tracking，因此整体继续保持 partial。

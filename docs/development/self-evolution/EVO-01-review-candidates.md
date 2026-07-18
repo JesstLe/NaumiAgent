@@ -57,6 +57,9 @@ Evolution Candidate，而不是直接触发 self_modify。
   `EVO-01-6a1-typed-review-ui.md`。
 - HAR-09.2a Candidate Aggregation View：已实现单 Candidate 的稳定时间窗、趋势、维度分布与代表
   Evidence，并进入共享 Review detail；详见 `../harness/HAR-09-2a-candidate-aggregation-view.md`。
+- HAR-09.5a/5b1 已实现 Proposal 显式入队、持久来源、approve/reject/defer/merge 状态机和有效冷却；
+  单条噪声不能越过 reject/defer，显著新证据规则有版本和审计。Workbench 决策 UI 与 Eligibility
+  展示接线仍未完成。
 - runtime metric/Eval adapters、跨 Candidate 影响范围分析、
   完整 experiment Eligibility、Prioritization、排序解释和 approve/reject/defer 动作仍为 planned；不得把
   EVO-01 整体标记为完成。

@@ -39,7 +39,8 @@ v1 明确保护安全/权限、凭据、迁移与更新相关 authority scope，
 4. `cooldown_gate`
 5. `experiment_contract`
 
-后两个 Gate 在本切片明确未通过：reject/defer 历史和隔离 experiment contract 尚未实现。因此
+后两个 Gate 在本切片明确未通过：当前纯 Assessment 尚未绑定 HAR-09.5b1 已落库的 reject/defer
+治理上下文，隔离 experiment contract 也尚未实现。因此
 `review_ready` 只表示可进入未来 Review Queue，不等于允许修改代码。
 每个 Gate 另有 `hard_block`；只有 protected scope 与 verifier 缺失属于不可继续的硬阻断，证据
 不足、冷却记录和 experiment contract 缺失仍可通过后续证据或治理步骤补齐。
@@ -55,6 +56,7 @@ v1 明确保护安全/权限、凭据、迁移与更新相关 authority scope，
 ## 后续
 
 - HAR-09.2 补齐时间窗趋势与 provider/model/platform 聚合视图。
-- HAR-09.5/EVO-01.6b 实现持久 review actions 和冷却期，届时 `cooldown_gate` 才能真实通过。
+- HAR-09.5b1 已实现持久 review actions 和强制冷却；HAR-09.5b2/EVO-01.6b 需把治理状态注入
+  Review Assessment，届时 `cooldown_gate` 才能按 Candidate 真实显示通过或阻断。
 - EVO-02.1/02.6 提供隔离 experiment contract 与完整 protected-scope guard，届时才允许计算真正的
   `experiment_eligible`。

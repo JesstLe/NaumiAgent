@@ -45,7 +45,7 @@ Adapter 每次重新从用户状态库读取 Candidate，并调用 HAR-09.4a gen
 - 相同幂等键若携带不同 mission、task、标题、验证计划或来源，拒绝覆盖；
 - 只有首次插入产生 `proposal.created`，审计 payload 保存非敏感来源身份；
 - Candidate 新 revision 会生成新的 Preview ID，因此允许形成新的审阅项；其重复提醒与冷却规则由
-  HAR-09.5b 管理。
+  HAR-09.5b1 管理，详见 `HAR-09-5b1-governance-cooldown.md`。
 
 ## 安全与权限
 
@@ -66,10 +66,9 @@ Adapter 每次重新从用户状态库读取 Candidate，并调用 HAR-09.4a gen
 
 ## 明确未包含
 
-- approve、reject、defer、merge 的统一状态机；
-- reject/defer 后冷却期和显著新证据重开策略；
 - Workbench Reviews 页面中的 Proposal 列表和键盘决策操作；
 - approved Proposal 到 EVO-02 Experiment Contract 的转换；
 - HAR-09.6 before/after outcome tracking。
 
-以上属于 HAR-09.5b 及后续切片，不能由本切片的 `open` 状态推断为已完成。
+状态机与冷却已由 HAR-09.5b1 补齐；其余属于 HAR-09.5b2 及后续切片，不能由本切片的 `open`
+状态推断为已完成。

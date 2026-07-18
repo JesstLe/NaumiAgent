@@ -214,14 +214,18 @@ class ProposalState(StrEnum):
     """Lifecycle state of a human-governed proposal.
 
     OPEN: awaiting human decision.
-    APPROVED: human approved; the work may proceed.
+    APPROVED: human accepted the proposal for its next policy gate; no execution implied.
     REJECTED: human rejected the proposal.
+    DEFERRED: human postponed review until a durable cooldown expires.
+    MERGED: proposal was consolidated into another review item.
     CONVERTED: proposal was converted into a tracked issue.
     """
 
     OPEN = "open"
     APPROVED = "approved"
     REJECTED = "rejected"
+    DEFERRED = "deferred"
+    MERGED = "merged"
     CONVERTED = "converted"
 
 
@@ -260,11 +264,17 @@ class WorkbenchProposal:
     source_kind: ProposalSourceKind = ProposalSourceKind.MANUAL
     source_id: str = ""
     source_revision: int = 0
+    source_occurrence_count: int = 0
     source_sha256: str = ""
     source_proposal_id: str = ""
     generator_version: str = ""
     proposal_kind: str = ""
     idempotency_key: str = ""
+    reviewer: str = ""
+    decision_at: str = ""
+    cooldown_until: str = ""
+    merged_into_id: str = ""
+    governance_policy_version: str = ""
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
 
