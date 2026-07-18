@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from naumi_agent.background.models import BackgroundStatus
@@ -30,6 +30,7 @@ class TodoTaskDetail:
     owner: str = ""
     blocked_by: tuple[str, ...] = ()
     blocks: tuple[str, ...] = ()
+    created_at: str = ""
     updated_at: str = ""
 
 
@@ -66,6 +67,63 @@ class BrowserTaskStatus:
 
 
 @dataclass(frozen=True)
+class SubagentTaskDetail:
+    """One delegated execution, distinct from an Agent preset."""
+
+    task_id: str = ""
+    title: str = ""
+    owner: str = ""
+    status: str = ""
+    phase: str = ""
+    started_at: str = ""
+    updated_at: str = ""
+    current_tool: str = ""
+    elapsed_ms: int = 0
+
+
+@dataclass(frozen=True)
+class TaskViewItem:
+    """Strict cross-source task row consumed by every terminal frontend."""
+
+    view_id: str
+    source: str
+    task_id: str
+    status: str
+    raw_status: str
+    title: str
+    owner: str = ""
+    priority: int | None = None
+    dependency_ids: tuple[str, ...] = ()
+    child_ids: tuple[str, ...] = ()
+    created_at: str = ""
+    updated_at: str = ""
+    age_seconds: int | None = None
+    detail: str = ""
+    artifact_refs: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "view_id": _bounded_text(self.view_id, 256),
+            "source": self.source,
+            "task_id": _bounded_text(self.task_id, 256),
+            "status": self.status,
+            "raw_status": _bounded_text(self.raw_status, 64),
+            "title": _bounded_text(self.title, 500),
+            "owner": _bounded_text(self.owner, 128),
+            "priority": self.priority,
+            "dependency_ids": [_bounded_text(item, 256) for item in self.dependency_ids[:100]],
+            "child_ids": [_bounded_text(item, 256) for item in self.child_ids[:100]],
+            "created_at": _bounded_text(self.created_at, 128),
+            "updated_at": _bounded_text(self.updated_at, 128),
+            "age_seconds": self.age_seconds,
+            "detail": _bounded_text(self.detail, 500),
+            "artifact_refs": [
+                _bounded_text(item, 2_048) for item in self.artifact_refs[:50]
+            ],
+        }
+
+
+@dataclass(frozen=True)
 class TaskPanelFilter:
     """Read-only filters applied to a task panel snapshot."""
 
@@ -95,14 +153,44 @@ class TaskPanelSnapshot:
     todo_items: tuple[TodoItem, ...] = ()
     todo_details: tuple[TodoTaskDetail, ...] = ()
     agents: tuple[AgentStatus, ...] = ()
+    subagent_details: tuple[SubagentTaskDetail, ...] = ()
     subagent_events: tuple[dict[str, Any], ...] = ()
     permission_bubbles: tuple[dict[str, Any], ...] = ()
     background_tasks: tuple[BackgroundTaskStatus, ...] = ()
     background_details: tuple[BackgroundTaskDetail, ...] = ()
     browser_tasks: tuple[BrowserTaskStatus, ...] = ()
     timeline_events: tuple[TaskTimelineEvent, ...] = ()
+    view_items: tuple[TaskViewItem, ...] = ()
     filters: TaskPanelFilter = TaskPanelFilter()
     warnings: tuple[str, ...] = ()
+
+    def to_protocol_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "full": True,
+            "filters": {
+                "source": self.filters.source,
+                "status": self.filters.status,
+                "detail_id": self.filters.detail_id,
+                "history": self.filters.history,
+            },
+            "items": [item.to_dict() for item in self.view_items],
+            "timeline": [
+                {
+                    "event_id": _bounded_text(event.event_id, 256),
+                    "source": event.source,
+                    "task_id": _bounded_text(event.task_id, 256),
+                    "status": _canonical_status(event.status),
+                    "raw_status": _bounded_text(event.status, 64),
+                    "title": _bounded_text(event.title, 500),
+                    "detail": _bounded_text(event.detail, 500),
+                    "timestamp": _bounded_text(event.timestamp, 128),
+                }
+                for event in self.timeline_events
+            ],
+            "warnings": [_bounded_text(item, 500) for item in self.warnings[:20]],
+        }
 
 
 async def build_task_panel_snapshot(
@@ -142,10 +230,11 @@ async def build_task_panel_snapshot(
                 _todo_detail_from_task(task)
                 for task in tasks[:safe_limit]
             )
-    except Exception as exc:
-        warnings.append(f"todo 读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("todo 读取失败，请刷新或运行 /doctor。")
 
     agents: tuple[AgentStatus, ...] = ()
+    subagent_details: tuple[SubagentTaskDetail, ...] = ()
     subagent_events: tuple[dict[str, Any], ...] = ()
     permission_bubbles: tuple[dict[str, Any], ...] = ()
     try:
@@ -156,11 +245,17 @@ async def build_task_panel_snapshot(
                 for item in manager.list_agents()[:safe_limit]
             )
             subagent_events = tuple(manager.get_recent_events(limit=safe_limit))
+            executions = getattr(manager, "list_executions", None)
+            if callable(executions):
+                subagent_details = tuple(
+                    _subagent_detail_from_execution(item)
+                    for item in executions(limit=safe_limit)
+                )
         bubbles_getter = getattr(engine, "get_recent_permission_bubbles", None)
         if callable(bubbles_getter):
             permission_bubbles = tuple(bubbles_getter(limit=safe_limit))
-    except Exception as exc:
-        warnings.append(f"subagent 读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("subagent 读取失败，请刷新或运行 /doctor。")
 
     background_tasks: tuple[BackgroundTaskStatus, ...] = ()
     background_details: tuple[BackgroundTaskDetail, ...] = ()
@@ -183,8 +278,8 @@ async def build_task_panel_snapshot(
                 _background_detail_from_task(task)
                 for task in tasks
             )
-    except Exception as exc:
-        warnings.append(f"后台任务读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("后台任务读取失败，请刷新或运行 /doctor。")
 
     browser_tasks: tuple[BrowserTaskStatus, ...] = ()
     try:
@@ -194,13 +289,14 @@ async def build_task_panel_snapshot(
                 _browser_status_from_run(run)
                 for run in task_runner.list_runs(limit=safe_limit)
             )
-    except Exception as exc:
-        warnings.append(f"浏览器任务读取失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        warnings.append("浏览器任务读取失败，请刷新或运行 /doctor。")
 
     snapshot = TaskPanelSnapshot(
         todo_items=todo_items,
         todo_details=todo_details,
         agents=agents,
+        subagent_details=subagent_details,
         subagent_events=subagent_events,
         permission_bubbles=permission_bubbles,
         background_tasks=background_tasks,
@@ -210,16 +306,19 @@ async def build_task_panel_snapshot(
         warnings=tuple(warnings),
     )
     timeline_events = _build_timeline_events(snapshot, limit=safe_limit)
+    view_items = _build_task_view_items(snapshot)
     return _filter_snapshot(TaskPanelSnapshot(
         todo_items=snapshot.todo_items,
         todo_details=snapshot.todo_details,
         agents=snapshot.agents,
+        subagent_details=snapshot.subagent_details,
         subagent_events=snapshot.subagent_events,
         permission_bubbles=snapshot.permission_bubbles,
         background_tasks=snapshot.background_tasks,
         background_details=snapshot.background_details,
         browser_tasks=snapshot.browser_tasks,
         timeline_events=timeline_events,
+        view_items=view_items,
         filters=snapshot.filters,
         warnings=snapshot.warnings,
     ))
@@ -421,6 +520,10 @@ def _filter_snapshot(snapshot: TaskPanelSnapshot) -> TaskPanelSnapshot:
             event for event in snapshot.subagent_events
             if _matches_filter("subagent", str(event.get("status") or ""), source, status)
         ),
+        subagent_details=tuple(
+            item for item in snapshot.subagent_details
+            if _matches_filter("subagent", item.status, source, status)
+        ),
         permission_bubbles=tuple(
             bubble for bubble in snapshot.permission_bubbles
             if _matches_filter("permissions", str(bubble.get("status") or ""), source, status)
@@ -446,6 +549,10 @@ def _filter_snapshot(snapshot: TaskPanelSnapshot) -> TaskPanelSnapshot:
         timeline_events=tuple(
             event for event in snapshot.timeline_events
             if _matches_filter(event.source, event.status, source, status)
+        ),
+        view_items=tuple(
+            item for item in snapshot.view_items
+            if _matches_filter(item.source, item.raw_status, source, status)
         ),
         filters=snapshot.filters,
         warnings=snapshot.warnings,
@@ -555,6 +662,152 @@ def _build_timeline_events(
         return (1 if event.timestamp else 0, event.timestamp)
 
     return tuple(sorted(events, key=sort_key, reverse=True)[:limit])
+
+
+def _build_task_view_items(snapshot: TaskPanelSnapshot) -> tuple[TaskViewItem, ...]:
+    subagents = _subagent_view_items(snapshot.subagent_details)
+    if not subagents:
+        subagents = _subagent_event_view_items(snapshot.subagent_events)
+    items = (
+        *_todo_view_items(snapshot.todo_details),
+        *subagents,
+        *_background_view_items(snapshot.background_details),
+        *_browser_view_items(snapshot.browser_tasks),
+    )
+    return tuple(sorted(items, key=_task_view_sort_key))
+
+
+def _task_view_sort_key(item: TaskViewItem) -> tuple[int, str]:
+    source_order = {"todo": 0, "subagent": 1, "background": 2, "browser": 3}
+    return (source_order[item.source], item.task_id)
+
+
+def _todo_view_items(details: tuple[TodoTaskDetail, ...]) -> tuple[TaskViewItem, ...]:
+    return tuple(
+        TaskViewItem(
+            view_id=f"todo:{detail.task_id}",
+            source="todo",
+            task_id=detail.task_id,
+            status=_canonical_status(detail.status),
+            raw_status=detail.status,
+            title=detail.subject,
+            owner=detail.owner,
+            dependency_ids=detail.blocked_by,
+            child_ids=detail.blocks,
+            created_at=detail.created_at,
+            updated_at=detail.updated_at,
+            age_seconds=_age_seconds(detail.updated_at or detail.created_at),
+            detail=_join_attrs(
+                blocked_by=",".join(detail.blocked_by) or "-",
+                blocks=",".join(detail.blocks) or "-",
+            ),
+        )
+        for detail in details
+    )
+
+
+def _subagent_view_items(
+    details: tuple[SubagentTaskDetail, ...],
+) -> tuple[TaskViewItem, ...]:
+    return tuple(
+        TaskViewItem(
+            view_id=f"subagent:{detail.task_id}",
+            source="subagent",
+            task_id=detail.task_id,
+            status=_canonical_status(detail.status),
+            raw_status=detail.status,
+            title=detail.title,
+            owner=detail.owner,
+            created_at=detail.started_at,
+            updated_at=detail.updated_at,
+            age_seconds=_age_seconds(detail.updated_at or detail.started_at),
+            detail=_join_attrs(
+                phase=detail.phase or "-",
+                tool=detail.current_tool or "-",
+                elapsed_ms=str(detail.elapsed_ms),
+            ),
+        )
+        for detail in details
+    )
+
+
+def _background_view_items(
+    details: tuple[BackgroundTaskDetail, ...],
+) -> tuple[TaskViewItem, ...]:
+    return tuple(
+        TaskViewItem(
+            view_id=f"background:{detail.task_id}",
+            source="background",
+            task_id=detail.task_id,
+            status=_canonical_status(detail.status),
+            raw_status=detail.status,
+            title=detail.command,
+            created_at=detail.started_at,
+            updated_at=detail.completed_at or detail.started_at,
+            age_seconds=_age_seconds(detail.completed_at or detail.started_at),
+            detail=_join_attrs(
+                cwd=detail.cwd or "-",
+                pid=str(detail.pid) if detail.pid is not None else "-",
+                exit=str(detail.exit_code) if detail.exit_code is not None else "-",
+            ),
+            artifact_refs=(detail.output_path,) if detail.output_path else (),
+        )
+        for detail in details
+    )
+
+
+def _browser_view_items(
+    runs: tuple[BrowserTaskStatus, ...],
+) -> tuple[TaskViewItem, ...]:
+    return tuple(
+        TaskViewItem(
+            view_id=f"browser:{run.run_id}",
+            source="browser",
+            task_id=run.run_id,
+            status=_canonical_status(run.status),
+            raw_status=run.status,
+            title=run.instruction,
+            created_at=run.created_at,
+            updated_at=run.created_at,
+            age_seconds=_age_seconds(run.created_at),
+            detail=_join_attrs(
+                steps=str(run.step_count),
+                current=run.current_step or "-",
+            ),
+            artifact_refs=run.record_paths,
+        )
+        for run in runs
+    )
+
+
+def _subagent_event_view_items(
+    events: tuple[dict[str, Any], ...],
+) -> tuple[TaskViewItem, ...]:
+    by_task: dict[str, TaskViewItem] = {}
+    for event in events:
+        task_id = str(event.get("task_id") or event.get("agent_name") or "").strip()
+        if not task_id:
+            continue
+        raw_status = str(event.get("status") or "")
+        timestamp = str(
+            event.get("timestamp")
+            or event.get("created_at")
+            or event.get("createdAt")
+            or ""
+        )
+        by_task[task_id] = TaskViewItem(
+            view_id=f"subagent:{task_id}",
+            source="subagent",
+            task_id=task_id,
+            status=_canonical_status(raw_status),
+            raw_status=raw_status,
+            title=str(event.get("message") or event.get("description") or "子 Agent 任务"),
+            owner=str(event.get("agent_name") or ""),
+            created_at=timestamp,
+            updated_at=timestamp,
+            age_seconds=_age_seconds(timestamp),
+        )
+    return tuple(by_task.values())
 
 
 def _render_timeline_section(snapshot: TaskPanelSnapshot) -> list[str]:
@@ -708,6 +961,7 @@ def _todo_detail_from_task(task: Any) -> TodoTaskDetail:
         owner=str(getattr(task, "owner", "") or ""),
         blocked_by=tuple(str(item) for item in getattr(task, "blocked_by", []) or []),
         blocks=tuple(str(item) for item in getattr(task, "blocks", []) or []),
+        created_at=str(getattr(task, "created_at", "") or ""),
         updated_at=str(getattr(task, "updated_at", "") or ""),
     )
 
@@ -745,6 +999,22 @@ def _agent_status_from_dict(item: dict[str, Any]) -> AgentStatus:
         task_id=str(item.get("task_id") or item.get("current_task_id") or ""),
         phase=phase,
         description=description,
+    )
+
+
+def _subagent_detail_from_execution(item: Any) -> SubagentTaskDetail:
+    started_at = _iso_from_epoch(getattr(item, "started_at", 0.0))
+    finished_at = _iso_from_epoch(getattr(item, "finished_at", 0.0))
+    return SubagentTaskDetail(
+        task_id=str(getattr(item, "task_id", "")),
+        title=str(getattr(item, "description", "")),
+        owner=str(getattr(item, "agent_name", "")),
+        status=str(getattr(item, "status", "")),
+        phase=str(getattr(item, "phase", "")),
+        started_at=started_at,
+        updated_at=finished_at or started_at,
+        current_tool=str(getattr(item, "current_tool", "")),
+        elapsed_ms=max(0, int(getattr(item, "elapsed_ms", 0) or 0)),
     )
 
 
@@ -883,9 +1153,49 @@ def _elapsed_seconds(started_at: str) -> float:
     return max(0.0, (datetime.now() - started).total_seconds())
 
 
+def _canonical_status(raw_status: str) -> str:
+    status = str(raw_status or "").strip().lower().replace("-", "_")
+    if status in {"running", "in_progress", "started", "spawned", "ready"}:
+        return "running"
+    if status in {"completed", "succeeded", "success", "idle", "destroyed"}:
+        return "completed"
+    if status in {"failed", "error", "timed_out"}:
+        return "failed"
+    if status in {"cancelled", "canceled", "killed", "stopped"}:
+        return "cancelled"
+    if status in {"blocked", "needs_input", "needs_confirmation", "waiting"}:
+        return "blocked"
+    return "pending"
+
+
+def _age_seconds(timestamp: str) -> int | None:
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    now = datetime.now(parsed.tzinfo) if parsed.tzinfo is not None else datetime.now()
+    return max(0, int((now - parsed).total_seconds()))
+
+
+def _iso_from_epoch(value: Any) -> str:
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if timestamp <= 0:
+        return ""
+    return datetime.fromtimestamp(timestamp, tz=UTC).isoformat()
+
+
 def _last_non_empty_line(text: str) -> str:
     for line in reversed(text.splitlines()):
         stripped = line.strip()
         if stripped:
             return stripped
     return ""
+
+
+def _bounded_text(value: Any, limit: int) -> str:
+    return str(value or "").replace("\x00", "").strip()[:limit]

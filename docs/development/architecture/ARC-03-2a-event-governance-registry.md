@@ -16,6 +16,8 @@
 - Python Bridge 启动时计算注册表规范化 SHA-256；
 - `ready` 与 `runtime/status` 发布 contract 版本、摘要和双向事件数量；
 - 新 UI `/debug` 显示缩短后的摘要，便于定位前后端是否读取同一份注册表。
+- UI-11.1a 新增的 `tasks/snapshot` 同样登记 owner、敏感字段与 snapshot 持久化边界；新增后
+  Python/Node 事件数量和注册表摘要同步变化，旧前端会在握手或事件校验阶段明确拒绝漂移。
 
 ## 每事件治理字段
 

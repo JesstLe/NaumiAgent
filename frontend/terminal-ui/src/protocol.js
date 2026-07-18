@@ -99,6 +99,8 @@ const PERMISSION_STATUSES = new Set([
   "expired",
 ]);
 const PERMISSION_CHOICES = new Set(["allow_once", "deny", "grant_session", "bypass"]);
+const TASK_SOURCES = new Set(["todo", "subagent", "background", "browser"]);
+const TASK_STATUSES = new Set(["pending", "running", "blocked", "completed", "failed", "cancelled"]);
 
 export function parseArgs(argv) {
   const parsed = { config: ".naumi/config.yaml", bridgeCommand: "", bridgeCommandJson: "", selfTest: false };
@@ -369,6 +371,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
+  }
+  if (type === "tasks/snapshot") {
+    return normalizeTaskSnapshot(payload);
   }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
@@ -1512,6 +1517,78 @@ function normalizePermissionSnapshot(payload) {
       })),
     history: normalizePermissionItems(payload.history, "history", 50),
     warnings: harnessTextArray(payload.warnings, "permissions/snapshot warnings", 20),
+  };
+}
+
+function normalizeTaskSnapshot(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`tasks/snapshot schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const filters = harnessObject(payload.filters, "tasks/snapshot filters");
+  return {
+    schema_version: 1,
+    generated_at: harnessText(payload.generated_at, "tasks/snapshot generated_at"),
+    full: harnessBoolean(payload.full, "tasks/snapshot full"),
+    filters: {
+      source: harnessText(filters.source, "tasks/snapshot filters.source"),
+      status: harnessText(filters.status, "tasks/snapshot filters.status"),
+      detail_id: harnessText(filters.detail_id, "tasks/snapshot filters.detail_id"),
+      history: harnessBoolean(filters.history, "tasks/snapshot filters.history"),
+    },
+    items: harnessObjectArray(payload.items, "tasks/snapshot items", 200)
+      .map(normalizeTaskItem),
+    timeline: harnessObjectArray(payload.timeline, "tasks/snapshot timeline", 200)
+      .map(normalizeTaskTimelineEvent),
+    warnings: harnessTextArray(payload.warnings, "tasks/snapshot warnings", 20),
+  };
+}
+
+function normalizeTaskItem(item) {
+  const source = harnessChoice(item.source, "tasks/snapshot item.source", TASK_SOURCES);
+  const status = harnessChoice(item.status, "tasks/snapshot item.status", TASK_STATUSES);
+  const priority = item.priority == null
+    ? null
+    : harnessNonnegativeInteger(item.priority, "tasks/snapshot item.priority");
+  const ageSeconds = item.age_seconds == null
+    ? null
+    : harnessNonnegativeInteger(item.age_seconds, "tasks/snapshot item.age_seconds");
+  return {
+    view_id: harnessText(item.view_id, "tasks/snapshot item.view_id"),
+    source,
+    task_id: harnessText(item.task_id, "tasks/snapshot item.task_id"),
+    status,
+    raw_status: harnessText(item.raw_status, "tasks/snapshot item.raw_status"),
+    title: harnessText(item.title, "tasks/snapshot item.title"),
+    owner: harnessText(item.owner, "tasks/snapshot item.owner"),
+    priority,
+    dependency_ids: harnessTextArray(
+      item.dependency_ids,
+      "tasks/snapshot item.dependency_ids",
+      100,
+    ),
+    child_ids: harnessTextArray(item.child_ids, "tasks/snapshot item.child_ids", 100),
+    created_at: harnessText(item.created_at, "tasks/snapshot item.created_at"),
+    updated_at: harnessText(item.updated_at, "tasks/snapshot item.updated_at"),
+    age_seconds: ageSeconds,
+    detail: harnessText(item.detail, "tasks/snapshot item.detail"),
+    artifact_refs: harnessTextArray(
+      item.artifact_refs,
+      "tasks/snapshot item.artifact_refs",
+      50,
+    ),
+  };
+}
+
+function normalizeTaskTimelineEvent(item) {
+  return {
+    event_id: harnessText(item.event_id, "tasks/snapshot timeline.event_id"),
+    source: harnessText(item.source, "tasks/snapshot timeline.source"),
+    task_id: harnessText(item.task_id, "tasks/snapshot timeline.task_id"),
+    status: harnessChoice(item.status, "tasks/snapshot timeline.status", TASK_STATUSES),
+    raw_status: harnessText(item.raw_status, "tasks/snapshot timeline.raw_status"),
+    title: harnessText(item.title, "tasks/snapshot timeline.title"),
+    detail: harnessText(item.detail, "tasks/snapshot timeline.detail"),
+    timestamp: harnessText(item.timestamp, "tasks/snapshot timeline.timestamp"),
   };
 }
 

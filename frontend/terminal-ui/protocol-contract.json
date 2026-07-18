@@ -6,6 +6,7 @@
     "maximum_version": 1,
     "capabilities": [
       "heartbeat",
+      "task_snapshot",
       "typed_ui_messages",
       "workbench_snapshot"
     ],
@@ -77,6 +78,7 @@
     "interaction/resolved",
     "permission/grants_changed",
     "permissions/snapshot",
+    "tasks/snapshot",
     "debug/trace",
     "workbench/snapshot",
     "workbench/event",
@@ -147,6 +149,7 @@
       "interaction/resolved": {"owner":"safety","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.custom_text"],"redaction":"required"},
       "permission/grants_changed": {"owner":"safety","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "permissions/snapshot": {"owner":"safety","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
+      "tasks/snapshot": {"owner":"tasks","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items.title","payload.items.detail","payload.items.artifact_refs"],"redaction":"required"},
       "debug/trace": {"owner":"diagnostics","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":["payload.events_path","payload.transcript_path"],"redaction":"required"},
       "workbench/snapshot": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.tasks","payload.events"],"redaction":"required"},
       "workbench/event": {"owner":"workbench","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":["payload.payload"],"redaction":"required"},

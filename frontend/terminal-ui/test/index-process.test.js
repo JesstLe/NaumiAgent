@@ -691,9 +691,9 @@ test("terminal UI process opens task panel through bridge protocol", async () =>
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
-    await waitForOutput(output, "tasks todo 1");
-    await waitForOutput(output, "#1 [running] 写入页面");
-    await waitForOutput(output, "暂无后台任务");
+    await waitForOutput(output, "tasks 4 项 · 活动 4");
+    await waitForOutput(output, "[running] 写入页面");
+    await waitForOutput(output, "子智能体");
 
     const code = await stopTerminalUi(app);
 
@@ -718,7 +718,8 @@ test("terminal UI process opens filtered task panel through bridge protocol", as
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks background running 6\n");
-    await waitForOutput(output, "filter source=background status=running");
+    await waitForOutput(output, "tasks 1 项 · 活动 1");
+    await waitForOutput(output, "后台任务");
 
     const code = await stopTerminalUi(app);
 
@@ -743,9 +744,9 @@ test("terminal UI process opens task detail through bridge protocol", async () =
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks detail bg_0001\n");
-    await waitForOutput(output, "detail=bg_0001");
-    await waitForOutput(output, "类型: Background");
-    await waitForOutput(output, "CWD: /tmp/project");
+    await waitForOutput(output, "Detail");
+    await waitForOutput(output, "id=bg_0001");
+    await waitForOutput(output, "cwd=/tmp/project");
 
     const code = await stopTerminalUi(app);
 
@@ -768,9 +769,9 @@ test("terminal UI process opens selected task detail with keyboard", async () =>
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
-    await waitForOutput(output, "task: 1/3 1");
+    await waitForOutput(output, "task: 1/4 todo:1");
     app.stdin.write("\n");
-    await waitForOutput(output, "detail=1");
+    await waitForOutput(output, "id=1 · source=todo");
 
     const code = await stopTerminalUi(app);
 
@@ -847,13 +848,13 @@ test("terminal UI process navigates focused tasks with arrows and boundaries", a
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
-    await waitForOutput(output, "task: 1/3 1");
+    await waitForOutput(output, "task: 1/4 todo:1");
     app.stdin.write("\x1b[B");
-    await waitForOutput(output, "task: 2/3 bg_0001");
+    await waitForOutput(output, "task: 2/4 subagent:sub_1");
     app.stdin.write("\x1b[F");
-    await waitForOutput(output, "task: 3/3 run_7");
+    await waitForOutput(output, "task: 4/4 browser:run_7");
     app.stdin.write("\x1b[H");
-    await waitForOutput(output, "task: 1/3 1");
+    await waitForOutput(output, "task: 1/4 todo:1");
 
     const code = await stopTerminalUi(app);
     assert.equal(code, 0);
@@ -869,13 +870,13 @@ test("terminal UI process searches the current task view without a bridge reques
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks\n");
-    await waitForOutput(output, "task: 1/3 1");
+    await waitForOutput(output, "task: 1/4 todo:1");
     const sendsBeforeSearch = readDebugEvents(app.debugLogPath).filter(
       (record) => record.event === "protocol.send" && record.payload.record.type === "task_panel",
     ).length;
 
     app.stdin.write("/tasks search browser\n");
-    await waitForOutput(output, "task: 1/1 run_7");
+    await waitForOutput(output, "task: 1/1 browser:run_7");
 
     const sendsAfterSearch = readDebugEvents(app.debugLogPath).filter(
       (record) => record.event === "protocol.send" && record.payload.record.type === "task_panel",
@@ -922,7 +923,7 @@ test("terminal UI process refreshes pinned task panel on task status changes", a
   try {
     await waitForReadyWelcome(output, 7000);
     app.stdin.write("/tasks pin\n");
-    await waitForOutput(output, "tasks todo 1");
+    await waitForOutput(output, "tasks 4 项 · 活动 4");
     await waitForOutput(output, "tasks: bg 1");
 
     const code = await stopTerminalUi(app);

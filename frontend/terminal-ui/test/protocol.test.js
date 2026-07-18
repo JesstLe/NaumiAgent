@@ -316,7 +316,7 @@ test("protocol contract drives client and server event validation", () => {
   assert.deepEqual(PROTOCOL_CONTRACT.negotiation, {
     minimum_version: 1,
     maximum_version: 1,
-    capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+    capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
     required_capabilities: ["typed_ui_messages"],
   });
   assert(PROTOCOL_CONTRACT.client_events.includes("submit"));
@@ -342,6 +342,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-batch"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-promotion"));
   assert(PROTOCOL_CONTRACT.server_events.includes("doctor/health"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("tasks/snapshot"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
     "completed_unverified",
@@ -409,7 +410,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     client: "naumi-terminal-ui",
     minimum_version: 1,
     maximum_version: 1,
-    capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+    capabilities: ["heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
   });
 });
 
@@ -735,6 +736,49 @@ test("permission snapshot is strict bounded and drops private fields", () => {
       payload: { ...normalized, permission_mode: "invented" },
     }),
     /permission_mode/,
+  );
+});
+
+test("task snapshot is strict, bounded, and drops private fields", () => {
+  const item = {
+    view_id: "subagent:sub_1",
+    source: "subagent",
+    task_id: "sub_1",
+    status: "running",
+    raw_status: "started",
+    title: "探索项目结构",
+    owner: "Explore",
+    priority: null,
+    dependency_ids: [],
+    child_ids: [],
+    created_at: "2026-07-18T00:00:00+00:00",
+    updated_at: "2026-07-18T00:00:01+00:00",
+    age_seconds: 1,
+    detail: "phase=running",
+    artifact_refs: [],
+    private_reasoning: "must-drop",
+  };
+  const normalized = normalizeServerRecord({
+    type: "tasks/snapshot",
+    payload: {
+      schema_version: 1,
+      generated_at: "2026-07-18T00:00:01+00:00",
+      full: true,
+      filters: { source: "all", status: "all", detail_id: "", history: false },
+      items: Array.from({ length: 205 }, () => item),
+      timeline: [],
+      warnings: [],
+    },
+  }).payload;
+  assert.equal(normalized.items.length, 200);
+  assert.equal(normalized.items[0].owner, "Explore");
+  assert.equal(Object.hasOwn(normalized.items[0], "private_reasoning"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "tasks/snapshot",
+      payload: { ...normalized, items: [{ ...item, status: "invented" }] },
+    }),
+    /status/,
   );
 });
 
@@ -1170,7 +1214,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
         client_event_count: 27,
-        server_event_count: 38,
+        server_event_count: 39,
       },
     },
   });
@@ -1253,7 +1297,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
         client_event_count: 27,
-        server_event_count: 38,
+        server_event_count: 39,
       },
     },
   );
@@ -1269,7 +1313,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
           contract_version: 1,
           registry_sha256: "not-a-digest",
           client_event_count: 27,
-          server_event_count: 38,
+          server_event_count: 39,
         },
       },
     }),
@@ -1284,7 +1328,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
           contract_version: 1,
           registry_sha256: "0".repeat(64),
           client_event_count: 27,
-          server_event_count: 38,
+          server_event_count: 39,
         },
       },
     }),

@@ -4,12 +4,134 @@ import { boxComponent, line, renderComponent } from "./core.js";
 const SECTION_NAMES = new Set(["Timeline", "Detail", "Todo", "Subagent", "Background", "Browser Runs", "面板警告"]);
 const DEFAULT_MAX_RENDER_LINES = 48;
 
-export function TaskPanel({ content, taskPanel = null }) {
+export function TaskPanel({ content, snapshot = null, taskPanel = null }) {
   return {
     render(ctx) {
-      return renderTaskPanel(content, ctx.width, { ...ctx, taskPanel });
+      return snapshot
+        ? renderTaskSnapshot(snapshot, ctx.width, { ...ctx, taskPanel })
+        : renderTaskPanel(content, ctx.width, { ...ctx, taskPanel });
     },
   };
+}
+
+export function renderTaskSnapshot(snapshot, width, ctx = { width }) {
+  const taskPanel = ctx.taskPanel ?? ctx.state?.taskPanel ?? {};
+  const selectedId = String(taskPanel.selectedId ?? "");
+  const query = String(taskPanel.searchQuery ?? "").trim().toLocaleLowerCase();
+  const visibleItems = (snapshot.items ?? []).filter((item) => structuredTaskMatches(item, query));
+  const grouped = new Map();
+  for (const item of visibleItems) {
+    if (!grouped.has(item.source)) grouped.set(item.source, []);
+    grouped.get(item.source).push(item);
+  }
+  const children = [
+    line(`${color(ANSI.cyan, "tasks")} ${taskSnapshotSummary(visibleItems)}`),
+  ];
+  for (const source of ["todo", "subagent", "background", "browser"]) {
+    const items = grouped.get(source) ?? [];
+    if (!items.length) continue;
+    children.push(line(color(taskSourceColor(source), taskSourceLabel(source))));
+    for (const item of items.slice(0, 8)) {
+      children.push(...renderStructuredTaskItem(item, selectedId, taskPanel));
+    }
+    if (items.length > 8) children.push(line(color(ANSI.dim, `  ... 还有 ${items.length - 8} 项`)));
+  }
+  children.push(...renderStructuredTimeline(snapshot.timeline ?? [], taskPanel));
+  const detailId = String(snapshot.filters?.detail_id ?? "");
+  if (detailId) {
+    const detail = (snapshot.items ?? []).find((item) => item.task_id === detailId);
+    children.push(line(color(ANSI.green, "Detail")));
+    children.push(line(color(ANSI.dim, detail ? structuredDetail(detail) : `  未找到 ID: ${detailId}`)));
+  }
+  for (const warning of snapshot.warnings ?? []) {
+    children.push(line(color(ANSI.yellow, `警告: ${compactText(warning, 180)}`)));
+  }
+  const rendered = renderComponent(boxComponent("tasks", children), ctx);
+  const maxRenderLines = taskPanel.maxRenderLines ?? ctx.bodyHeight ?? DEFAULT_MAX_RENDER_LINES;
+  return clampTaskPanelLines(rendered, width, maxRenderLines);
+}
+
+function structuredTaskMatches(item, query) {
+  if (!query) return true;
+  return [item.view_id, item.task_id, item.source, item.status, item.title, item.owner, item.detail]
+    .some((value) => String(value ?? "").toLocaleLowerCase().includes(query));
+}
+
+function renderStructuredTimeline(events, taskPanel) {
+  if (!events.length) return [];
+  const collapsed = taskPanel.collapsedTimelineSources ?? {};
+  const counts = new Map();
+  for (const event of events) counts.set(event.source, (counts.get(event.source) ?? 0) + 1);
+  const summary = Array.from(counts.entries())
+    .map(([source, count]) => `${source} ${count}${collapsed[source] ? " folded" : ""}`)
+    .join(" · ");
+  const visible = events.filter((event) => !collapsed[event.source]);
+  return [
+    line(color(ANSI.green, "Timeline")),
+    line(color(ANSI.dim, `  sources: ${summary}`)),
+    ...visible.slice(0, 6).map((event) => line(color(
+      taskStatusColor(event.status),
+      `  - ${event.task_id || "?"} [${event.status}] ${compactText(event.title, 120)}`,
+    ))),
+    visible.length < events.length
+      ? line(color(ANSI.dim, `  ... 已折叠 ${events.length - visible.length} 项来源事件`))
+      : null,
+  ].filter(Boolean);
+}
+
+function renderStructuredTaskItem(item, selectedId, taskPanel) {
+  const selected = item.view_id === selectedId;
+  const prefix = selected ? color(ANSI.green, "> ") : "  ";
+  const owner = item.owner ? ` · ${item.owner}` : "";
+  const age = item.age_seconds == null ? "" : ` · ${formatAge(item.age_seconds)}`;
+  const first = `${prefix}${color(taskStatusColor(item.status), `[${item.status}]`)} ${compactText(item.title || item.task_id, 120)}${owner}${age}`;
+  const rows = [line(first)];
+  if (taskPanel.expandedIds?.[item.view_id]) {
+    rows.push(line(color(ANSI.dim, `    ${structuredDetail(item)}`)));
+  }
+  return rows;
+}
+
+function structuredDetail(item) {
+  const fields = [
+    `id=${item.task_id}`,
+    `source=${item.source}`,
+    item.raw_status && item.raw_status !== item.status ? `raw=${item.raw_status}` : "",
+    item.dependency_ids?.length ? `depends=${item.dependency_ids.join(",")}` : "",
+    item.child_ids?.length ? `children=${item.child_ids.join(",")}` : "",
+    item.detail,
+    item.artifact_refs?.length ? `artifacts=${item.artifact_refs.slice(0, 3).join(", ")}` : "",
+  ].filter(Boolean);
+  return compactText(fields.join(" · "), 220);
+}
+
+function taskSnapshotSummary(items) {
+  const active = items.filter((item) => ["pending", "running", "blocked"].includes(item.status)).length;
+  return `${items.length} 项 · 活动 ${active}`;
+}
+
+function taskSourceLabel(source) {
+  return ({ todo: "Todo", subagent: "子智能体", background: "后台任务", browser: "浏览器" })[source] ?? source;
+}
+
+function taskSourceColor(source) {
+  return ({ todo: ANSI.cyan, subagent: ANSI.magenta, background: ANSI.yellow, browser: ANSI.blue })[source] ?? ANSI.dim;
+}
+
+function taskStatusColor(status) {
+  if (status === "completed") return ANSI.green;
+  if (status === "running") return ANSI.cyan;
+  if (["failed", "cancelled"].includes(status)) return ANSI.red;
+  if (status === "blocked") return ANSI.yellow;
+  return ANSI.dim;
+}
+
+function formatAge(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 60) return `${value}s`;
+  if (value < 3_600) return `${Math.floor(value / 60)}m`;
+  if (value < 86_400) return `${Math.floor(value / 3_600)}h`;
+  return `${Math.floor(value / 86_400)}d`;
 }
 
 export function renderTaskPanel(content, width, ctx = { width }) {

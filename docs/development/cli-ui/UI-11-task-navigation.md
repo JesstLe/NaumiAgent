@@ -24,6 +24,10 @@
 
 ## 实现进度
 
+- `UI-11.1a`（2026-07-18）已完成：Todo、子智能体执行、后台命令和浏览器任务统一为类型化
+  `TaskViewItem`；Python Bridge 使用受 ARC-03 治理的 `tasks/snapshot`，新 UI 不再从 ANSI
+  展示文本反向解析生产任务状态。新 UI 按来源和状态语义渲染，TUI 复用同一 snapshot builder。
+  详细契约见 `UI-11-1a-typed-task-view-model.md`。
 - `UI-11.2a`（2026-07-17）已完成：现有嵌入式任务面板支持方向键逐项导航、
   `PageUp/PageDown` 有界翻页、`Home/End` 首尾定位和 `/tasks search <关键词>` 本地搜索。
 - 搜索覆盖任务行的 ID、标题和 owner/cwd 等详情字段，不修改 Bridge 协议或后端权威数据；
@@ -33,5 +37,5 @@
 - 10,000 条任务事件的组件真实渲染只输出 viewport 行数，12 次采样 P95 受 100ms
   回归门约束；真实终端进程已验证方向键和首尾键序列。
 
-仍未完成：`UI-11.1` 完整统一字段、全屏双栏/窄屏降级、详情依赖图、retry/artifact/
+仍未完成：`UI-11.1b` priority/parent-child 权威来源、全屏双栏/窄屏降级、详情依赖图、retry/artifact/
 takeover 能力矩阵，以及屏幕阅读器语义。`UI-11` 因此保持 `partial`。

@@ -824,6 +824,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "maximum_version": 1,
         "capabilities": [
             "heartbeat",
+            "task_snapshot",
             "typed_ui_messages",
             "workbench_snapshot",
         ],
@@ -4602,7 +4603,7 @@ async def test_bridge_cancel_blocks_active_workbench_task_and_returns_identity()
 
 
 @pytest.mark.asyncio
-async def test_bridge_renders_task_panel_as_system_notice(
+async def test_bridge_emits_typed_task_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _FakeEngine()
@@ -4610,7 +4611,7 @@ async def test_bridge_renders_task_panel_as_system_notice(
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
 
-    async def fake_render_task_panel(
+    async def fake_build_task_panel_snapshot(
         target_engine: Any,
         *,
         limit: int = 12,
@@ -4618,25 +4619,31 @@ async def test_bridge_renders_task_panel_as_system_notice(
         status: str = "all",
         detail_id: str = "",
         history: bool = False,
-    ) -> str:
+    ) -> Any:
         assert target_engine is engine
         assert limit == 5
         assert source == "background"
         assert status == "running"
         assert detail_id == "bg_1"
         assert history is False
-        return (
-            "任务面板\n"
-            "filter: source=background status=running detail=bg_1\n"
-            "Detail\n"
-            "  类型: Background\n"
-            "Background\n"
-            "  - bg_1 正在验证\n"
-        )
+        return SimpleNamespace(to_protocol_dict=lambda: {
+            "schema_version": 1,
+            "generated_at": "2026-07-18T00:00:00+00:00",
+            "full": True,
+            "filters": {
+                "source": "background",
+                "status": "running",
+                "detail_id": "bg_1",
+                "history": False,
+            },
+            "items": [],
+            "timeline": [],
+            "warnings": [],
+        })
 
     monkeypatch.setattr(
-        "naumi_agent.ui.task_panel.render_task_panel",
-        fake_render_task_panel,
+        "naumi_agent.ui.task_panel.build_task_panel_snapshot",
+        fake_build_task_panel_snapshot,
     )
 
     await bridge.handle_client_record(
@@ -4653,16 +4660,43 @@ async def test_bridge_renders_task_panel_as_system_notice(
     )
 
     records = _records(writer)
-    message = next(
-        record["payload"]
-        for record in records
-        if record["type"] == "ui/message"
-        and record["payload"].get("type") == "system_notice"
+    snapshot = next(
+        record["payload"] for record in records if record["type"] == "tasks/snapshot"
     )
-    assert message["title"] == "tasks"
-    assert "filter: source=background status=running detail=bg_1" in message["content"]
-    assert "类型: Background" in message["content"]
-    assert "正在验证" in message["content"]
+    assert snapshot["schema_version"] == 1
+    assert snapshot["filters"] == {
+        "source": "background",
+        "status": "running",
+        "detail_id": "bg_1",
+        "history": False,
+    }
+
+    writer.seek(0)
+    writer.truncate(0)
+    bridge._client_capabilities = {"typed_ui_messages"}
+    monkeypatch.setattr(
+        "naumi_agent.ui.task_panel.render_task_panel_snapshot",
+        lambda target: "任务面板\nTodo\n  暂无任务\n",
+    )
+    await bridge.handle_client_record(
+        {
+                "id": "tasks-legacy",
+                "type": ClientEventType.TASK_PANEL,
+                "payload": {
+                    "limit": 5,
+                    "source": "background",
+                    "status": "running",
+                    "detail_id": "bg_1",
+                },
+        }
+    )
+    fallback = next(
+        record["payload"]
+        for record in _records(writer)
+        if record["type"] == "ui/message"
+    )
+    assert fallback["title"] == "tasks"
+    assert "暂无任务" in fallback["content"]
     assert any(record["type"] == "runtime/status" for record in records)
 
 
