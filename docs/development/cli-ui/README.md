@@ -11,7 +11,8 @@
 
 UIMessage、JSONL protocol、tool/activity card、semantic rendering、completion receipt、runtime
 inspector、agent control center、tasks、permissions、history、heartbeat、working animation、跨平台
-启动、类型化 Goal/Pursuit 只读页，以及 New UI/Textual TUI 共用的 durable interaction authority 已存在。
+启动、类型化 Goal/Pursuit 只读页、New UI/Textual TUI 共用的 durable interaction authority，以及
+UI-15.1a 的 New UI 有界 stream delta 合并与控制事件绘制屏障已存在。
 后续模块不得绕开这些路径重建新状态层。
 
 ## 未来顺序

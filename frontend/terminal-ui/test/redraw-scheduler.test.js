@@ -84,6 +84,25 @@ test("redraw scheduler cancellation is idempotent", () => {
   assert.equal(scheduler.pending, false);
 });
 
+test("redraw scheduler flushes an armed frame immediately", () => {
+  const clock = createFakeTimers();
+  let redraws = 0;
+  const scheduler = createRedrawScheduler({
+    onRedraw: () => { redraws += 1; },
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+  });
+
+  scheduler.schedule();
+  const timer = clock.lastId;
+  assert.equal(scheduler.flush(), true);
+
+  assert.equal(redraws, 1);
+  assert.deepEqual(clock.cleared, [timer]);
+  assert.equal(clock.activeCount, 0);
+  assert.equal(scheduler.pending, false);
+});
+
 test("redraw scheduler does not mark a failed callback as painted", () => {
   const clock = createFakeTimers();
   const scheduler = createRedrawScheduler({
