@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
@@ -14,6 +15,10 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.store import WorkbenchStore
 
 _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
+    "worker_registry_store": (
+        WorkerRegistryStore,
+        "worker_registry_store 必须是 WorkerRegistryStore 实例。",
+    ),
     "chat_run_store": (
         ChatRunStore,
         "chat_run_store 必须是 ChatRunStore 实例。",
@@ -54,6 +59,7 @@ class RuntimeResources:
     """Current complete set of externally owned runtime resources."""
 
     chat_run_store: ChatRunStore
+    worker_registry_store: WorkerRegistryStore
     evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
@@ -76,6 +82,7 @@ class RuntimeResourceOverrides:
     """Optional resource instances; None alone requests a default resource."""
 
     chat_run_store: ChatRunStore | None = None
+    worker_registry_store: WorkerRegistryStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None

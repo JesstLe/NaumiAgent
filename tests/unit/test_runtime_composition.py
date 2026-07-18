@@ -11,6 +11,7 @@ from naumi_agent.config.settings import (
     ModelConfig,
     SafetyConfig,
 )
+from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
@@ -46,6 +47,11 @@ class _FalseyHarnessStore(HarnessStore):
 
 
 class _FalseyChatRunStore(ChatRunStore):
+    def __bool__(self) -> bool:
+        return False
+
+
+class _FalseyWorkerRegistryStore(WorkerRegistryStore):
     def __bool__(self) -> bool:
         return False
 
@@ -94,6 +100,7 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.session_db_path == (tmp_path / ".naumi" / "sessions.db").resolve()
     assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
+    assert paths.worker_registry_db_path == paths.runtime_data_dir / "worker-registry.db"
     assert paths.worktree_storage_dir == paths.runtime_data_dir / "worktrees"
     assert paths.goal_storage_dir == paths.runtime_data_dir / "goals"
     assert paths.pursuit_storage_dir == paths.runtime_data_dir / "pursuit"
@@ -110,6 +117,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "session_db_path": absolute / "data" / "sessions.db",
         "runtime_data_dir": absolute / "data",
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
+        "worker_registry_db_path": absolute / "data" / "worker-registry.db",
         "worktree_storage_dir": absolute / "data" / "worktrees",
         "goal_storage_dir": absolute / "data" / "goals",
         "pursuit_storage_dir": absolute / "data" / "pursuit",
@@ -138,6 +146,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
                 "chat_run_db_path": absolute / "outside" / "chat-runs.db",
             }
         )
+    with pytest.raises(ValueError, match="worker_registry_db_path 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "worker_registry_db_path": absolute / "outside" / "workers.db",
+            }
+        )
 
 
 def test_build_runtime_ports_rejects_invalid_paths_before_defaults(
@@ -164,6 +179,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
+    worker_registry_store = _FalseyWorkerRegistryStore(tmp_path / "custom-workers.db")
     goal_store = GoalStore(tmp_path / "custom-goals")
     pursuit_store = PursuitStore(tmp_path / "custom-pursuit")
     shared_db = tmp_path / "custom-runtime.db"
@@ -173,6 +189,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
         paths,
         overrides=RuntimeResourceOverrides(
             chat_run_store=chat_run_store,
+            worker_registry_store=worker_registry_store,
             evolution_candidate_store=evolution_store,
             harness_store=falsey_store,
             harness_trust_store=trust_store,
@@ -185,6 +202,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
 
     assert defaults.harness_store.db_path == paths.harness_db_path
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
+    assert defaults.worker_registry_store.db_path == paths.worker_registry_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
     assert defaults.evolution_candidate_store.db_path == paths.evolution_db_path
     assert defaults.goal_store.base_dir == paths.goal_storage_dir
@@ -193,6 +211,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.workbench_store.db_path == paths.session_db_path
     assert overridden.evolution_candidate_store is evolution_store
     assert overridden.chat_run_store is chat_run_store
+    assert overridden.worker_registry_store is worker_registry_store
     assert overridden.task_store is task_store
     assert overridden.workbench_store is workbench_store
     assert overridden.harness_store is falsey_store
@@ -201,6 +220,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert overridden.pursuit_store is pursuit_store
     assert not paths.goal_storage_dir.exists()
     assert not paths.pursuit_storage_dir.exists()
+    assert not paths.worker_registry_db_path.exists()
     assert not (tmp_path / "state").exists()
 
 
@@ -210,6 +230,9 @@ def test_invalid_resource_override_fails_before_default_constructor(
     paths = build_runtime_paths(_config(tmp_path))
     with (
         patch("naumi_agent.runtime.composition.ChatRunStore") as chat_run_store,
+        patch(
+            "naumi_agent.runtime.composition.WorkerRegistryStore"
+        ) as worker_registry_store,
         patch(
             "naumi_agent.runtime.composition.EvolutionCandidateStore"
         ) as evolution_store,
@@ -224,6 +247,7 @@ def test_invalid_resource_override_fails_before_default_constructor(
         )
 
     chat_run_store.assert_not_called()
+    worker_registry_store.assert_not_called()
     evolution_store.assert_not_called()
     harness_store.assert_not_called()
 
@@ -232,6 +256,7 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="harness_store 必须是"):
         RuntimeResources(
             chat_run_store=ChatRunStore(tmp_path / "chat-runs.db"),
+            worker_registry_store=WorkerRegistryStore(tmp_path / "workers.db"),
             evolution_candidate_store=EvolutionCandidateStore(
                 tmp_path / "evolution.db"
             ),
@@ -251,6 +276,7 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="必须共享同一个 SQLite"):
         RuntimeResources(
             chat_run_store=defaults.chat_run_store,
+            worker_registry_store=defaults.worker_registry_store,
             evolution_candidate_store=defaults.evolution_candidate_store,
             harness_store=defaults.harness_store,
             harness_trust_store=defaults.harness_trust_store,

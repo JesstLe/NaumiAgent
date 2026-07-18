@@ -28,9 +28,9 @@
 
 ### ARC-05.1 Store Catalog（已实现，2026-07-17）
 
-- `src/naumi_agent/persistence/store_catalog.py` 登记 12 个物理 Store，覆盖共享
+- `src/naumi_agent/persistence/store_catalog.py` 登记 13 个物理 Store，覆盖共享
   Runtime Core、Run、Goal、Pursuit、Scheduler、Harness、Harness Trust、Background、
-  Browser Runtime、Browser Daemon、Vector Memory 和 Evolution Candidates。
+  Browser Runtime、Browser Daemon、Vector Memory、Evolution Candidates 和 Worker Registry。
 - 每项包含稳定 ID、绝对路径、一个或多个 owner、存储类型、version strategy、支持的
   schema version、敏感级别、retention policy 和惰性创建语义。
 - SQLite 使用只读 URI 读取 `PRAGMA user_version`；JSON 有 8 MiB 有界解析；目录只读探测。

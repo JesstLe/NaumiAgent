@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from naumi_agent.daemons.worker_registry import WORKER_REGISTRY_SCHEMA_VERSION
 from naumi_agent.evolution.store import (
     EVOLUTION_STORE_SCHEMA_VERSION,
     resolve_evolution_db_path,
@@ -167,6 +168,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.SESSION_COUPLED,
             "会话执行记录、步骤、artifact 引用和来源",
+        ),
+        _definition(
+            "runtime.worker_registry",
+            runtime_dir / "worker-registry.db",
+            StorageKind.SQLITE,
+            ("runtime.worker_authority",),
+            VersionStrategy.SQLITE_USER_VERSION,
+            WORKER_REGISTRY_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "Worker incarnation、能力合同、撤销与 fencing 历史",
         ),
         _definition(
             "runtime.goals",

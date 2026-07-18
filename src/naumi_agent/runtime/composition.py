@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import (
     EvolutionCandidateStore,
     resolve_evolution_db_path,
@@ -107,6 +108,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         session_db_path=session_db_path,
         runtime_data_dir=runtime_data_dir,
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
+        worker_registry_db_path=runtime_data_dir / "worker-registry.db",
         worktree_storage_dir=runtime_data_dir / "worktrees",
         goal_storage_dir=runtime_data_dir / "goals",
         pursuit_storage_dir=runtime_data_dir / "pursuit",
@@ -134,6 +136,10 @@ def build_runtime_resources(
     chat_run_store = resolved.chat_run_store
     if chat_run_store is None:
         chat_run_store = ChatRunStore(paths.chat_run_db_path)
+
+    worker_registry_store = resolved.worker_registry_store
+    if worker_registry_store is None:
+        worker_registry_store = WorkerRegistryStore(paths.worker_registry_db_path)
 
     evolution_candidate_store = resolved.evolution_candidate_store
     if evolution_candidate_store is None:
@@ -165,6 +171,7 @@ def build_runtime_resources(
 
     return RuntimeResources(
         chat_run_store=chat_run_store,
+        worker_registry_store=worker_registry_store,
         evolution_candidate_store=evolution_candidate_store,
         harness_store=harness_store,
         harness_trust_store=harness_trust_store,
