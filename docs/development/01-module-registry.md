@@ -22,7 +22,7 @@
 | UI-11 | 全屏任务与 Timeline 导航 | partial (11.1a, 11.2a) | Agent Control Center | `cli-ui/UI-11-task-navigation.md` |
 | UI-12 | 权限策略中心 | partial (12.1a, 12.3a, 12.3b1, 12.3b2) | permission bubbles | `cli-ui/UI-12-permission-center.md` |
 | UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1c) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |
-| UI-14 | QuickOpen、Vim 与完整键位层 | planned | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
+| UI-14 | QuickOpen、Vim 与完整键位层 | partial (14.1a) | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
 | UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a) | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | partial (16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
 | UI-17 | New UI/TUI parity 与发布门 | partial (17.1, 17.2a, 17.2b) | UI-10..16 | `cli-ui/UI-17-parity-release.md` |

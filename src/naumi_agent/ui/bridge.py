@@ -58,6 +58,7 @@ from naumi_agent.runtime.terminal_runtime import (
 )
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
+from naumi_agent.ui.command_index import build_terminal_command_index
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
     harness_eval_batch_payload,
@@ -356,20 +357,12 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
 
 def _load_cli_slash_commands() -> list[dict[str, Any]]:
     try:
-        from naumi_agent.cli.completer import COMMANDS
+        return [
+            item.to_public_dict()
+            for item in build_terminal_command_index("new_ui")
+        ]
     except Exception:
         return []
-
-    commands = []
-    for item in COMMANDS:
-        if not item or len(item) < 2:
-            continue
-        command = str(item[0]).strip()
-        if not command.startswith("/"):
-            continue
-        description = str(item[1]).strip()
-        commands.append({"command": command, "description": description})
-    return commands
 
 
 def _load_cli_slash_commands_with_alias() -> list[str]:
@@ -431,6 +424,8 @@ def _normalize_slash_commands(commands: list[dict[str, Any]]) -> list[dict[str, 
 
 def _slash_command_payload() -> list[dict[str, Any]]:
     cli_commands = _load_cli_slash_commands()
+    if cli_commands and all(item.get("schema_version") == 1 for item in cli_commands):
+        return cli_commands
     return _normalize_slash_commands(
         cli_commands if cli_commands else _fallback_slash_command_registry()
     )

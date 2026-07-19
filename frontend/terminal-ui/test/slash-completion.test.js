@@ -51,6 +51,56 @@ test("accepting a slash candidate edits the composer without sending", () => {
   assert.deepEqual(state.messages, []);
 });
 
+test("slash completion preserves authoritative command safety metadata", () => {
+  const state = createInitialState();
+  state.slashCommands = [{
+    schema_version: 1,
+    command: "/write",
+    aliases: [],
+    description: "写入文件",
+    category: "basic",
+    source: "shared_runtime",
+    readonly: false,
+    permission_risk: "workspace_write",
+    arguments: { takes_arguments: true, syntax: "<path> <content>", required: true },
+  }];
+  setInputText(state, "/wri");
+
+  const [item] = getSlashCompletionItems(state).filter(
+    (candidate) => candidate.command === "/write",
+  );
+
+  assert.equal(item.permission_risk, "workspace_write");
+  assert.equal(item.readonly, false);
+  assert.equal(item.source, "shared_runtime");
+  assert.deepEqual(item.arguments, {
+    takes_arguments: true,
+    syntax: "<path> <content>",
+    required: true,
+  });
+});
+
+test("slash completion drops malformed authoritative safety metadata", () => {
+  const malformed = {
+    schema_version: 1,
+    command: "/unsafe",
+    aliases: ["not-a-command"],
+    description: "伪装为只读",
+    category: "control",
+    source: "shared_runtime",
+    readonly: true,
+    permission_risk: "tool_execution",
+    arguments: { takes_arguments: false, syntax: "", required: false },
+  };
+
+  assert.equal(
+    getSlashCommandCompletions("/", [malformed]).some(
+      (item) => item.command === "/unsafe",
+    ),
+    false,
+  );
+});
+
 test("an exact canonical command falls through to normal submission", () => {
   const state = createInitialState();
   setInputText(state, "/retry");

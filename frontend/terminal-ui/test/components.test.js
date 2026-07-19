@@ -476,6 +476,32 @@ test("slash completion footer marks keyboard selection and respects dismissal", 
   ), []);
 });
 
+test("slash completion renders argument syntax and textual risk without color dependency", () => {
+  const state = createInitialState();
+  state.slashCommands = [{
+    schema_version: 1,
+    command: "/write",
+    aliases: [],
+    description: "写入文件",
+    category: "basic",
+    source: "shared_runtime",
+    readonly: false,
+    permission_risk: "workspace_write",
+    arguments: { takes_arguments: true, syntax: "<path> <content>", required: true },
+  }];
+  setInputText(state, "/wri");
+
+  const lines = renderComponent(
+    CommandCompletionFooter({ state }),
+    createRenderContext({ width: 100, state }),
+  ).map(stripAnsi);
+
+  assert.match(lines.join("\n"), /\/write <path> <content>/);
+  assert.match(lines.join("\n"), /\[basic\]/);
+  assert.match(lines.join("\n"), /工作区写入/);
+  assert(lines.every((line) => visibleWidth(line) <= 100));
+});
+
 test("tool card component preserves existing diff folding behavior", () => {
   const card = renderComponent(
     ToolCard({
