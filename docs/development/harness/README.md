@@ -14,17 +14,18 @@ background reconcile 已实现。resume 支持新 lease epoch continuation，在
 HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除 assessment 的隐式全量测试和 lint。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
-browser/agent/runtime producer 和 Supervisor 仍未完成。
+HAR-10.2c-10.2e 已进一步交付默认 New UI runtime producer、安全 retention authority 和 typed worker catalog；
+browser/agent producer、周期 retention 调度和 Supervisor 仍未完成。
 HAR-10.6a 在 Harness Store v13 提供 durable interaction request/answer、timeout、takeover 与
 并发 fencing；HAR-10.6b 已接入 New UI Bridge 和 Pursuit stable checkpoint/reconcile，UI-18.4b 已让
 Textual TUI 复用相同 authority adapter；UI-18.4c 已补齐 Goal interaction ledger 与显式 cancel。手动
 takeover、cursor 和详情筛选仍未完成。
-HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；队列本身仍是 Bridge 内存状态，持久化、重启恢复、
-跨客户端公平和取消传播留给 HAR-10.3b。HAR-10.3b1 已把 Harness Store 升级到 v14，并交付尚未接入 Bridge 的
-持久队列 Store 核心；HAR-10.3b2 已进一步接入 Bridge durable enqueue、RunLease claim/renew、fenced terminal
+HAR-10.3a 已为 New UI 增加 `/send-now` 与安全边界队列提升；HAR-10.3b1 已把 Harness Store 升级到 v14，
+交付持久队列 Store 核心；HAR-10.3b2 已进一步接入 Bridge durable enqueue、RunLease claim/renew、fenced terminal
 和显式 Session 恢复；HAR-10.3b3 已升级 Harness Store v15，交付 `/queue` 历史 claim 审查、审计
 retry/cancel 和 New UI 即时恢复。HAR-10.2c 已把默认 New UI Bridge 接入 typed runtime heartbeat lifecycle，
 HAR-10.2d 已建立 old offline/terminal runtime 的有界 retention authority；
+HAR-10.2e 已建立可跨 Store 翻页的 typed runtime worker catalog；
 HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/terminal 与
 `/send-now`，并修复两端在本 owner live claim 期间无法重排后缀的问题。HAR-10.3b5 又补齐未 claim 普通消息的
 精确取消和双端回执。跨客户端公平与 active worker 取消传播仍未完成。

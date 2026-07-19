@@ -24,7 +24,9 @@
     terminal 与单次降级提醒；见 [设计](HAR-10-2c-terminal-ui-runtime-heartbeat.md)。
   - HAR-10.2d 已实现：只删除 old offline/terminal runtime 的有界、受保护、并发安全 Store authority；见
     [设计](HAR-10-2d-runtime-heartbeat-retention-authority.md)。
-  - 未完成：browser/agent producer、runtime worker 列表与 retention 调度、heartbeat 历史统计、批量查询与
+  - HAR-10.2e 已实现：workspace/assessment 绑定 opaque cursor、有界 typed runtime worker catalog 与覆盖索引；见
+    [设计](HAR-10-2e-runtime-worker-catalog.md)。
+  - 未完成：browser/agent producer、runtime retention 调度、heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见

@@ -67,6 +67,18 @@ class RuntimeHeartbeatPruneReceipt:
         return len(self.deleted_subject_ids)
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeHeartbeatCatalogPage:
+    workspace_root: str
+    assessed_at: str
+    items: tuple[HarnessHeartbeatSnapshot, ...]
+    next_cursor: str
+
+    @property
+    def has_more(self) -> bool:
+        return bool(self.next_cursor)
+
+
 def assess_heartbeat(
     heartbeat: HarnessHeartbeat,
     *,
@@ -126,5 +138,6 @@ __all__ = [
     "HarnessHeartbeatPhase",
     "HarnessHeartbeatSnapshot",
     "RuntimeHeartbeatPruneReceipt",
+    "RuntimeHeartbeatCatalogPage",
     "assess_heartbeat",
 ]
