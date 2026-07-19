@@ -15,7 +15,7 @@ New UI 使用 Bridge 已有的 `runtime_heartbeat_retention` 状态：configured
 - `running/waiting/standby`：`ok`；standby 表示另一实例持有独立租约，不是故障；
 - configured 但 `stopped`：`degraded`；
 - `failed`：`degraded`，因为诊断清理受限但模型执行仍可继续；
-- TUI fallback 无 Bridge 进程内快照：`unknown`，明确引导到默认 New UI 查看实时证据；
+- TUI fallback 尚未创建共享 lifecycle：`unknown`，明确引导到默认 New UI 查看实时证据；
 - 未知或非法状态：`unknown`，不猜测健康。
 
 计数机械转为非负整数；错误码只允许有界小写标识符。raw exception、Store 路径、secret、heartbeat detail、用户正文
@@ -25,8 +25,8 @@ New UI 使用 Bridge 已有的 `runtime_heartbeat_retention` 状态：configured
 
 - New UI 将该 item 与本地 Doctor、Bridge heartbeat、Worker authority、Pursuit recovery 放入同一 typed 页面；
 - 现有 severity 颜色继续区分正常、受限、错误和未知，同时保留完整文字标签，不依赖颜色表达；
-- TUI fallback 复用同一个 `DoctorHealthItem` 与 Markdown renderer，但诚实显示 `UNKNOWN`，因为 retention worker
-  当前由默认 New UI Bridge 托管；
+- TUI fallback 复用同一个 `DoctorHealthItem` 与 Markdown renderer，但诚实显示 `UNKNOWN`，因为它尚未消费
+  Composition Root 提供的 terminal lifecycle factory；
 - TUI 不会为了让界面“变绿”而创建第二个调度器，也不会读取或修改 Bridge 私有内存状态；
 - Doctor 失败 fallback 仍保留 retention item，且底层异常正文不外泄。
 
@@ -41,6 +41,6 @@ New UI 使用 Bridge 已有的 `runtime_heartbeat_retention` 状态：configured
 
 ## 5. 当前不足与下一步
 
-TUI 目前不生产 durable runtime heartbeat，也不托管 retention worker，因此只能提供配置事实和未知调度状态；若要达到
-完整运行时 parity，应先在 HAR-10 中设计共享 terminal runtime lifecycle authority，而不是在 TUI 内复制 Bridge
+ARC-01.4c1-4c2 已建立共享 terminal lifecycle 并迁移 New UI；TUI 仍未消费该 factory，因此只能提供配置事实和未知
+调度状态。下一独立 UI-17 切片应接入同一 lifecycle、补真实 heartbeat/retention 状态与关闭语义，不能复制 Bridge
 producer。手动 wake、历史清理详情和 SLO 趋势仍未实现，分别属于控制面与 ARC-08，不应塞入只读 Doctor 投影。

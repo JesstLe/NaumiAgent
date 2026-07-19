@@ -20,7 +20,11 @@ from naumi_agent import __version__
 from naumi_agent.agents.base import AgentResult as SubAgentResult
 from naumi_agent.background.models import BackgroundStatus
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH
-from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.config.settings import (
+    AppConfig,
+    MemoryConfig,
+    RuntimeHeartbeatRetentionConfig,
+)
 from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.conversation_queue_runtime import (
     DurableConversationQueueAuthority,
@@ -54,7 +58,12 @@ from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycleFactory,
+    TerminalRuntimeState,
+)
 from naumi_agent.safety.permission_grants import PermissionGrant
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
@@ -780,6 +789,19 @@ def _records(writer: io.StringIO) -> list[dict[str, Any]]:
     ]
 
 
+def _attach_terminal_runtime_factory(
+    engine: Any,
+    store: HarnessStore,
+    *,
+    retention: RuntimeHeartbeatRetentionConfig | None = None,
+) -> None:
+    engine.terminal_runtime_lifecycle_factory = TerminalRuntimeLifecycleFactory(
+        store=store,
+        workspace_root=engine.workspace_root,
+        retention_config=retention or RuntimeHeartbeatRetentionConfig(enabled=False),
+    )
+
+
 @pytest.mark.asyncio
 async def test_bridge_ping_emits_current_retention_worker_status() -> None:
     writer = io.StringIO()
@@ -1476,6 +1498,7 @@ async def test_bridge_persists_runtime_heartbeat_until_graceful_shutdown(tmp_pat
     engine.workspace_root.mkdir()
     store = HarnessStore(tmp_path / "harness.db")
     engine.harness_service = SimpleNamespace(store=store)
+    _attach_terminal_runtime_factory(engine, store)
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
@@ -1506,28 +1529,106 @@ async def test_bridge_persists_runtime_heartbeat_until_graceful_shutdown(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_composition_owned_terminal_lifecycle_reaches_real_bridge(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = AppConfig(
+        workspace_root=str(workspace),
+        memory={
+            "session_db_path": str(tmp_path / "runtime" / "sessions.db"),
+            "vector_db_path": str(tmp_path / "runtime" / "chroma"),
+            "long_term_enabled": False,
+        },
+        harness={
+            "runtime_heartbeat_retention": {"enabled": False}
+        },
+    )
+    engine = create_agent_engine(config)
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(io.StringIO())
+
+    await bridge.emit_ready()
+    lifecycle = bridge._terminal_runtime_lifecycle
+    assert lifecycle is not None
+    assert lifecycle.subject_id == bridge._runtime_heartbeat_subject_id
+    assert (
+        engine.terminal_runtime_lifecycle_factory
+        is engine._services.terminal_runtime_lifecycle_factory
+    )
+    heartbeat = await engine._harness_store.get_heartbeat(
+        workspace_root=workspace,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id=lifecycle.subject_id,
+    )
+    assert heartbeat is not None
+    assert heartbeat.phase is HarnessHeartbeatPhase.RUNNING
+
+    await bridge.shutdown()
+    assert lifecycle.snapshot().state is TerminalRuntimeState.STOPPED
+
+
+def test_bridge_does_not_construct_terminal_runtime_components() -> None:
+    source = inspect.getsource(JsonlEngineBridge)
+    assert "RuntimeHeartbeatProducer(" not in source
+    assert "RuntimeHeartbeatRetentionService(" not in source
+    assert "RuntimeHeartbeatRetentionPolicy(" not in source
+
+
+def test_bridge_reports_composition_owned_retention_policy_snapshot(tmp_path) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path / "workspace"
+    engine.workspace_root.mkdir()
+    retention_config = RuntimeHeartbeatRetentionConfig(enabled=True)
+    engine._config = SimpleNamespace(
+        ui=SimpleNamespace(show_reasoning=False),
+        harness=SimpleNamespace(
+            runtime_heartbeat_retention=retention_config,
+        ),
+    )
+    store = HarnessStore(tmp_path / "harness.db")
+    _attach_terminal_runtime_factory(engine, store, retention=retention_config)
+    engine._config.harness.runtime_heartbeat_retention = (
+        RuntimeHeartbeatRetentionConfig(enabled=False)
+    )
+
+    status = JsonlEngineBridge(
+        engine,
+        config_path="config.yaml",
+    ).status_payload()["runtime_heartbeat_retention"]
+
+    assert status["configured_enabled"] is True
+    assert status["state"] == "stopped"
+
+
+@pytest.mark.asyncio
 async def test_bridge_runs_bounded_runtime_heartbeat_retention_and_stops_it(
     tmp_path,
 ) -> None:
     engine = _FakeEngine()
     engine.workspace_root = tmp_path / "workspace"
     engine.workspace_root.mkdir()
+    retention_config = RuntimeHeartbeatRetentionConfig(
+        enabled=True,
+        retention_days=3,
+        interval_seconds=60,
+        standby_retry_seconds=1,
+        lease_seconds=30,
+        scan_limit=10,
+        catalog_limit=10,
+    )
     engine._config = SimpleNamespace(
         ui=SimpleNamespace(show_reasoning=False),
         harness=SimpleNamespace(
-            runtime_heartbeat_retention=SimpleNamespace(
-                enabled=True,
-                retention_days=3,
-                interval_seconds=60,
-                standby_retry_seconds=1,
-                lease_seconds=30,
-                scan_limit=10,
-                catalog_limit=10,
-            )
+            runtime_heartbeat_retention=retention_config
         ),
     )
     store = HarnessStore(tmp_path / "harness.db")
     engine.harness_service = SimpleNamespace(store=store)
+    _attach_terminal_runtime_factory(engine, store, retention=retention_config)
     await store.record_heartbeat(
         workspace_root=engine.workspace_root,
         subject_kind=HarnessRunKind.RUNTIME,
@@ -1545,14 +1646,17 @@ async def test_bridge_runs_bounded_runtime_heartbeat_retention_and_stops_it(
 
     await bridge.emit_ready()
     for _ in range(50):
-        service = bridge._runtime_heartbeat_retention
-        if service is not None and service.snapshot().cycle_count == 1:
+        lifecycle = bridge._terminal_runtime_lifecycle
+        retention = lifecycle.snapshot().retention if lifecycle is not None else None
+        if retention is not None and retention.cycle_count == 1:
             break
         await asyncio.sleep(0.01)
 
-    service = bridge._runtime_heartbeat_retention
-    assert service is not None
-    assert service.snapshot().deleted_count == 1
+    lifecycle = bridge._terminal_runtime_lifecycle
+    assert lifecycle is not None
+    retention = lifecycle.snapshot().retention
+    assert retention is not None
+    assert retention.deleted_count == 1
     assert (
         await store.get_heartbeat(
             workspace_root=engine.workspace_root,
@@ -1566,7 +1670,9 @@ async def test_bridge_runs_bounded_runtime_heartbeat_retention_and_stops_it(
     assert status["state"] == "waiting"
 
     await bridge.shutdown()
-    assert service.snapshot().state.value == "stopped"
+    assert lifecycle.snapshot().state.value == "stopped"
+    assert lifecycle.snapshot().retention is not None
+    assert lifecycle.snapshot().retention.state.value == "stopped"
 
 
 @pytest.mark.asyncio
@@ -1581,6 +1687,7 @@ async def test_bridge_reports_runtime_heartbeat_startup_degradation_once(tmp_pat
     engine.harness_service = SimpleNamespace(
         store=FailingHeartbeatStore(tmp_path / "harness.db")
     )
+    _attach_terminal_runtime_factory(engine, engine.harness_service.store)
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
@@ -1597,7 +1704,8 @@ async def test_bridge_reports_runtime_heartbeat_startup_degradation_once(tmp_pat
     assert len(notices) == 1
     assert notices[0]["payload"]["title"] == "运行时心跳降级"
     assert "当前运行仍可继续" in notices[0]["payload"]["content"]
-    assert bridge._runtime_heartbeat_retention is None
+    assert bridge._terminal_runtime_lifecycle is not None
+    assert bridge._terminal_runtime_lifecycle.snapshot().retention is None
     await bridge.shutdown()
 
 
@@ -1608,6 +1716,7 @@ async def test_bridge_marks_runtime_heartbeat_failed_when_engine_shutdown_fails(
     engine.workspace_root.mkdir()
     store = HarnessStore(tmp_path / "harness.db")
     engine.harness_service = SimpleNamespace(store=store)
+    _attach_terminal_runtime_factory(engine, store)
     engine.shutdown = AsyncMock(side_effect=RuntimeError("simulated shutdown failure"))
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(io.StringIO())
@@ -1627,13 +1736,15 @@ async def test_bridge_marks_runtime_heartbeat_failed_when_engine_shutdown_fails(
 
 
 @pytest.mark.asyncio
-async def test_retention_stop_failure_does_not_block_bridge_shutdown() -> None:
+async def test_terminal_runtime_draining_failure_does_not_block_bridge_shutdown() -> None:
     engine = _FakeEngine()
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
     bridge.bind_writer(writer)
-    bridge._runtime_heartbeat_retention = SimpleNamespace(
-        stop=AsyncMock(side_effect=RuntimeError("private store path"))
+    bridge._terminal_runtime_lifecycle = SimpleNamespace(
+        begin_draining=AsyncMock(side_effect=RuntimeError("private store path")),
+        close=AsyncMock(return_value=True),
+        snapshot=lambda: SimpleNamespace(state=TerminalRuntimeState.FAILED),
     )
 
     await bridge.shutdown()
