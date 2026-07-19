@@ -34,6 +34,11 @@ if TYPE_CHECKING:
         FailureAttributionAction,
         FailureAttributionCategory,
     )
+    from naumi_agent.evolution.interventional_red_sample import (
+        EvolutionInterventionalRedCheckSampleError,
+        EvolutionInterventionalRedCheckSampleExecutor,
+        EvolutionInterventionalRedCheckSampleReceipt,
+    )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
         EvolutionMutationGenerationResult,
@@ -268,6 +273,9 @@ __all__ = [
     "EvolutionSelfReviewRedBaselineError",
     "EvolutionSelfReviewRedBaselineExecutor",
     "EvolutionSelfReviewRedCohortReceipt",
+    "EvolutionInterventionalRedCheckSampleError",
+    "EvolutionInterventionalRedCheckSampleExecutor",
+    "EvolutionInterventionalRedCheckSampleReceipt",
     "SelfReviewRedMetricSummary",
     "EvolutionSelfReviewGreenCohortError",
     "EvolutionSelfReviewGreenCohortExecutor",
@@ -433,6 +441,11 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewRedCohortReceipt",
         "SelfReviewRedMetricSummary",
     }
+    interventional_red_sample_exports = {
+        "EvolutionInterventionalRedCheckSampleError",
+        "EvolutionInterventionalRedCheckSampleExecutor",
+        "EvolutionInterventionalRedCheckSampleReceipt",
+    }
     self_review_green_cohort_exports = {
         "EvolutionSelfReviewGreenCohortError",
         "EvolutionSelfReviewGreenCohortExecutor",
@@ -489,6 +502,8 @@ def __getattr__(name: str) -> object:
         module_name = "validation_metric_bindings"
     elif name in self_review_red_baseline_exports:
         module_name = "self_review_red_baseline"
+    elif name in interventional_red_sample_exports:
+        module_name = "interventional_red_sample"
     elif name in self_review_green_cohort_exports:
         module_name = "self_review_green_cohort"
     elif name in self_review_comparison_exports:

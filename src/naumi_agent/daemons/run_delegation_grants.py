@@ -484,6 +484,20 @@ class RunDelegationGrantAuthority:
             contract=contract,
         )
 
+    async def revoke(
+        self,
+        *,
+        grant_id: str,
+        reason: str,
+        revoked_at: str,
+    ) -> StoredRunDelegationGrant:
+        """Revoke a grant through the same authority used for issuance."""
+        return await self._store.revoke(
+            grant_id=grant_id,
+            reason=reason,
+            revoked_at=revoked_at,
+        )
+
 
 def verify_run_delegation_grant(contract: RunDelegationGrantContract) -> bool:
     return hmac.compare_digest(contract.grant_sha256, _grant_digest(contract))

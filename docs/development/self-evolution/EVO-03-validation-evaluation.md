@@ -60,10 +60,13 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.5a Failure Attribution Contract：已实现。把 H5c decision/statistical/policy/mechanical codes 机械映射
   为 candidate defect、runner infrastructure、environment incompatible、flaky、evidence incomplete 或 objective
   unchanged，生成防篡改 typed receipt 并幂等持久化。详见 `EVO-03-5a-failure-attribution-contract.md`。
+- EVO-03.2e Interventional RED Check Sample：已实现。重新验证 Plan/Profile/Request/Metric authority 与当前
+  Profile trust，在精确 baseline commit/tree 上通过可撤销 Run Grant 和 ARC-04 Worker 执行单个 sample 的
+  全部 Profile checks，写入既有 H5a，并绑定每项 lifecycle receipt digest；明确不执行 metric、不冒充完整
+  cohort。详见 `EVO-03-2e-interventional-red-check-sample.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
-UI-12.3b3/3b4 与 ARC-04.3c 已交付最长 3600 秒、绑定 Harness Run Lease fence 的可撤销运行委托
-authority，并接入短期 delegated receipt、ExecutionGrant 与 Shell admission 的签发/dispatch 复验；
-cohort executor 尚未接入。Interventional Harness runner、adversarial suite 与最终 Evaluation Receipt 仍未
+UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e 接入单 sample interventional check。完整 RED cohort、
+同环境 metric observation、candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未
 实现，因此 EVO-03 整体保持 partial。
