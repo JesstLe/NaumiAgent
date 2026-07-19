@@ -41,6 +41,9 @@ from naumi_agent.daemons.tool_jobs import (
     ToolJobAuthority,
     ToolJobLifecycleAuthority,
 )
+from naumi_agent.evolution.adversarial_batch_requests import (
+    EvolutionAdversarialBatchRequestBuilder,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -886,6 +889,9 @@ class AgentEngine:
         )
         self.evolution_adversarial_probe_contract_builder = (
             EvolutionAdversarialProbeContractBuilder(resources.harness_trust_store)
+        )
+        self.evolution_adversarial_batch_request_builder = (
+            EvolutionAdversarialBatchRequestBuilder()
         )
         self.evolution_baseline_cohort_request_builder = (
             EvolutionBaselineCohortRequestBuilder()

@@ -16,6 +16,11 @@ import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
 import naumi_agent.evolution.validation_metric_bindings as metric_binding_module
+from naumi_agent.evolution.adversarial_batch_requests import (
+    EvolutionAdversarialBatchRequest,
+    EvolutionAdversarialBatchRequestBuilder,
+    EvolutionAdversarialBatchRequestError,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContract,
     EvolutionAdversarialProbeContractBuilder,
@@ -4006,13 +4011,13 @@ checks:
 ADVERSARIAL_BINDING_PROFILE = VALIDATION_BINDING_PROFILE + """\
   - id: adversarial_boundary
     argv: [python, -m, pytest, -q, tests/adversarial/test_footer_boundary.py]
-    timeout_seconds: 120
+    timeout_seconds: 10
     when_changed: ['src/**/*.py']
     required_for: [change]
     adversarial_probes: [boundary]
   - id: adversarial_platform
     argv: [python, -m, pytest, -q, tests/adversarial/test_footer_platform.py]
-    timeout_seconds: 120
+    timeout_seconds: 10
     when_changed: ['src/**/ui/**/*.py']
     required_for: [change]
     adversarial_probes: [cross_platform]
@@ -4312,6 +4317,146 @@ async def test_adversarial_probe_contract_reports_missing_and_ambiguous_checks(
             workspace_root=workspace,
         )
     assert drifted.value.code == "probe_profile_drifted"
+
+
+async def _adversarial_probe_fixture(
+    tmp_path: Path,
+    *,
+    profile_text: str = ADVERSARIAL_BINDING_PROFILE,
+):
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path,
+        profile_text=profile_text,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "harness-trust.db")
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+    binding = await EvolutionValidationProfileBinder(trust_store).bind(
+        plan,
+        workspace_root=workspace,
+    )
+    probe_contract = await EvolutionAdversarialProbeContractBuilder(
+        trust_store
+    ).build(
+        validation_plan=plan,
+        profile_binding=binding,
+        workspace_root=workspace,
+    )
+    return workspace, contract, plan, probe_contract
+
+
+@pytest.mark.asyncio
+async def test_adversarial_batch_request_freezes_real_red_green_platform_matrix(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, plan, probe_contract = await _adversarial_probe_fixture(
+        tmp_path
+    )
+    builder = EvolutionAdversarialBatchRequestBuilder()
+
+    first = builder.build(
+        experiment_contract=contract,
+        validation_plan=plan,
+        probe_contract=probe_contract,
+    )
+    second = builder.build(
+        experiment_contract=contract,
+        validation_plan=plan,
+        probe_contract=probe_contract,
+    )
+
+    assert first == second
+    assert first.request_id == f"evadvreq_{first.request_sha256[:24]}"
+    assert first.probe_contract_sha256 == probe_contract.probe_contract_sha256
+    assert first.lease_id == plan.lease_id
+    assert first.probe_platform_sha256 == probe_contract.platform_sha256
+    assert first.origin_platform == probe_contract.platform_identity.system
+    assert first.required_platforms == ("linux", "macos", "windows")
+    assert first.phases == ("red", "green")
+    assert tuple((item.platform, item.phase) for item in first.lanes) == (
+        ("linux", "red"),
+        ("linux", "green"),
+        ("macos", "red"),
+        ("macos", "green"),
+        ("windows", "red"),
+        ("windows", "green"),
+    )
+    assert tuple(item.order for item in first.probes) == (1, 2)
+    assert tuple(item.check_id for item in first.checks) == (
+        "adversarial_boundary",
+        "adversarial_platform",
+    )
+    assert first.requested_samples == 5
+    assert len(set(first.sample_seeds)) == 5
+    assert first.check_timeout_seconds_per_sample == 20
+    assert first.lane_budget_seconds == 100
+    assert first.matrix_budget_seconds == 600
+    assert first.matrix_budget_seconds <= contract.budget.max_duration_seconds
+    assert first.project_code_execution_allowed is True
+    assert first.request_ready is True
+    assert first.execution_ready is False
+    assert "tests/adversarial" not in first.model_dump_json()
+    assert _git(workspace, "status", "--porcelain") == ""
+
+    tampered = first.model_dump(mode="json")
+    tampered["lanes"][0]["phase"] = "green"
+    with pytest.raises(ValidationError, match="lanes|摘要"):
+        EvolutionAdversarialBatchRequest.model_validate(tampered)
+
+    tampered_platforms = first.model_dump(mode="json")
+    tampered_platforms["required_platforms"] = ["macos"]
+    with pytest.raises(ValidationError, match="三平台"):
+        EvolutionAdversarialBatchRequest.model_validate(tampered_platforms)
+
+    tampered_path = first.model_dump(mode="json")
+    tampered_path["probes"][0]["path"] = "/etc/passwd"
+    with pytest.raises(ValidationError, match="安全相对路径"):
+        EvolutionAdversarialBatchRequest.model_validate(tampered_path)
+
+
+@pytest.mark.asyncio
+async def test_adversarial_batch_request_rejects_incomplete_coverage_and_budget(
+    tmp_path: Path,
+) -> None:
+    _, contract, plan, incomplete = await _adversarial_probe_fixture(
+        tmp_path / "incomplete",
+        profile_text=VALIDATION_BINDING_PROFILE,
+    )
+    builder = EvolutionAdversarialBatchRequestBuilder()
+
+    with pytest.raises(EvolutionAdversarialBatchRequestError) as blocked:
+        builder.build(
+            experiment_contract=contract,
+            validation_plan=plan,
+            probe_contract=incomplete,
+        )
+    assert blocked.value.code == "adversarial_probe_coverage_incomplete"
+
+    _, contract, plan, complete = await _adversarial_probe_fixture(
+        tmp_path / "budget"
+    )
+    with pytest.raises(EvolutionAdversarialBatchRequestError) as exceeded:
+        builder.build(
+            experiment_contract=contract,
+            validation_plan=plan,
+            probe_contract=complete,
+            requested_samples=100,
+        )
+    assert exceeded.value.code == "adversarial_duration_budget_exceeded"
+
+    with pytest.raises(EvolutionAdversarialBatchRequestError) as invalid_count:
+        builder.build(
+            experiment_contract=contract,
+            validation_plan=plan,
+            probe_contract=complete,
+            requested_samples=True,
+        )
+    assert invalid_count.value.code == "adversarial_sample_count_invalid"
 
 
 @pytest.mark.asyncio

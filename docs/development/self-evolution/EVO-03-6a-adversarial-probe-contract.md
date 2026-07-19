@@ -58,8 +58,9 @@ check spec/argv digest。它不保存 argv 明文。缺少 check 产生 `probe_c
 - `cross_platform` 的 `matrix` 还没有多平台 receipts；
 - probe metric、guardrail 和 repeated cohort 尚未生成 H5a/H5c evidence。
 
-下一切片必须把完整 Contract 转换为不可执行 Adversarial Batch Request，然后复用 HAR-08.4e/4f 获取权限、
-执行与恢复；不得让 `coverage_complete=false` 的 Contract 进入 runner。
+EVO-03.6b 已把完整 Contract 转换为不可执行 Adversarial Batch Request：冻结 RED/GREEN、平台矩阵、samples、
+checks 和最坏预算；`coverage_complete=false` 的 Contract 会在 Request Builder 阻断。后续执行仍须复用
+HAR-08.4e/4f。
 
 ## 验收标准与证据
 
@@ -74,6 +75,5 @@ check spec/argv digest。它不保存 argv 明文。缺少 check 产生 `probe_c
 ## 当前不足与下一步
 
 当前没有执行 probe、没有跨平台 CI matrix receipt、没有 adversarial H5a/H5c，也没有最终 Evaluation Receipt。
-`path_patterns` 是显式保守规则，但仍需随着真实风险目录新增版本化定义。下一步实现 EVO-03.6b
-Adversarial Batch Request：冻结 ordered requirements/checks、RED/GREEN target、repetitions、预算和平台矩阵，随后
-由 HAR-08.4e/4f 执行；本模块不得新增 runner。
+`path_patterns` 是显式保守规则，但仍需随着真实风险目录新增版本化定义。EVO-03.6b Batch Request 已完成；
+下一步实现单 lane/sample authority adapter，再由 HAR-08.4e/4f 执行，本模块不得新增 runner。

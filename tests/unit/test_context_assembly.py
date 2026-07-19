@@ -9,6 +9,9 @@ import pytest
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.adversarial_batch_requests import (
+    EvolutionAdversarialBatchRequestBuilder,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -197,6 +200,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_adversarial_probe_contract_builder,
         EvolutionAdversarialProbeContractBuilder,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_batch_request_builder,
+        EvolutionAdversarialBatchRequestBuilder,
     )
     assert isinstance(
         engine.evolution_baseline_cohort_request_builder,

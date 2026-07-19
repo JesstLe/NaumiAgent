@@ -16,6 +16,9 @@ Eval 和真实 Harness 检查产生。
   - EVO-03.6a Probe Contract 已实现：版本化 Registry 按 changed path 机械选择 probe，并只绑定当前可信
     Profile 显式声明的 `adversarial_probes`；缺失/歧义形成 blocker，Contract 保持不可执行。详见
     `EVO-03-6a-adversarial-probe-contract.md`。
+  - EVO-03.6b Batch Request 已实现：coverage-complete Contract 被编译为固定 RED→GREEN、5..100 samples、
+    Linux/macOS/Windows matrix 和全矩阵最坏预算的不可执行请求；缺口与超预算机械阻断。详见
+    `EVO-03-6b-adversarial-batch-request.md`。
 - EVO-03.7 Evaluation receipt：before/after、sample、成本、失败、artifact digest。
 
 ## 验收标准
@@ -100,11 +103,11 @@ Eval 和真实 Harness 检查产生。
   `EVO-03-5b-interventional-failure-attribution.md`。
 - HAR-08.4a..4f 与 ARC-04.3a..3c 已实现精确 revision/overlay、成组 Check execution、连续 Batch
   lease/grant/恢复/partial checkpoint；Interventional RED/GREEN 已完整消费这些共享前置。EVO-03.6a 已冻结
-  adversarial Registry/Profile/check authority 和缺口，下一步只补 Batch Request 与 probe/metric/guardrail
-  evidence，不得复制 worker 或 Batch 状态机。
+  adversarial Registry/Profile/check authority、缺口和 Batch Request，下一步只补单 lane/sample adapter 与
+  probe/metric/guardrail evidence，不得复制 worker 或 Batch 状态机。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
-Interventional Failure Attribution adapter 与 Adversarial Probe Contract 已完成；adversarial 执行、比较与最终
-Evaluation Receipt 仍未实现，
+Interventional Failure Attribution adapter、Adversarial Probe Contract 与 Batch Request 已完成；adversarial
+执行、比较与最终 Evaluation Receipt 仍未实现，
 因此 EVO-03 整体保持 partial。

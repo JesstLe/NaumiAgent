@@ -61,5 +61,6 @@ adapter 保留既有 `evo-*-cohort` identity、`cohort_*` error code 与 `cohort
 
 Coordinator 当前按序执行 sample；尚未接入通用 `/harness eval sandbox` Service/Tool/UI surface，也未实现跨
 Batch admission/backpressure 或 Linux/Windows CI。EVO-03.6a `Adversarial Probe Contract` 已完成显式 Profile
-能力、机械 Registry、唯一 check coverage 和 missing/ambiguous blocker；它仍固定不可执行。下一步应构建
-Adversarial Batch Request 并直接消费 HAR-08.4e/4f，不得新建 Evolution worker/cohort 状态机。
+能力、机械 Registry、唯一 check coverage 和 missing/ambiguous blocker；EVO-03.6b 又冻结 RED/GREEN
+平台矩阵、samples、lanes 和最坏预算。二者仍固定不可执行。下一步应实现单 lane/sample adapter 并直接消费
+HAR-08.4e/4f，不得新建 Evolution worker/cohort 状态机。
