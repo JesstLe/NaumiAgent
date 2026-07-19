@@ -34,13 +34,22 @@ if TYPE_CHECKING:
         FailureAttributionAction,
         FailureAttributionCategory,
     )
+    from naumi_agent.evolution.interventional_red_cohort import (
+        EvolutionInterventionalRedCohortError,
+        EvolutionInterventionalRedCohortExecutor,
+        EvolutionInterventionalRedCohortReceipt,
+        InterventionalRedCheckSummary,
+        InterventionalRedMetricSummary,
+    )
     from naumi_agent.evolution.interventional_red_sample import (
         EvolutionInterventionalRedCheckSampleError,
         EvolutionInterventionalRedCheckSampleExecutor,
         EvolutionInterventionalRedCheckSampleReceipt,
+        EvolutionInterventionalRedRunAuthority,
         EvolutionInterventionalRedSampleError,
         EvolutionInterventionalRedSampleExecutor,
         EvolutionInterventionalRedSampleReceipt,
+        validate_interventional_red_authority,
     )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
@@ -279,9 +288,16 @@ __all__ = [
     "EvolutionInterventionalRedCheckSampleError",
     "EvolutionInterventionalRedCheckSampleExecutor",
     "EvolutionInterventionalRedCheckSampleReceipt",
+    "EvolutionInterventionalRedRunAuthority",
     "EvolutionInterventionalRedSampleError",
     "EvolutionInterventionalRedSampleExecutor",
     "EvolutionInterventionalRedSampleReceipt",
+    "validate_interventional_red_authority",
+    "EvolutionInterventionalRedCohortError",
+    "EvolutionInterventionalRedCohortExecutor",
+    "EvolutionInterventionalRedCohortReceipt",
+    "InterventionalRedCheckSummary",
+    "InterventionalRedMetricSummary",
     "SelfReviewRedMetricSummary",
     "EvolutionSelfReviewGreenCohortError",
     "EvolutionSelfReviewGreenCohortExecutor",
@@ -451,9 +467,18 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalRedCheckSampleError",
         "EvolutionInterventionalRedCheckSampleExecutor",
         "EvolutionInterventionalRedCheckSampleReceipt",
+        "EvolutionInterventionalRedRunAuthority",
         "EvolutionInterventionalRedSampleError",
         "EvolutionInterventionalRedSampleExecutor",
         "EvolutionInterventionalRedSampleReceipt",
+        "validate_interventional_red_authority",
+    }
+    interventional_red_cohort_exports = {
+        "EvolutionInterventionalRedCohortError",
+        "EvolutionInterventionalRedCohortExecutor",
+        "EvolutionInterventionalRedCohortReceipt",
+        "InterventionalRedCheckSummary",
+        "InterventionalRedMetricSummary",
     }
     self_review_green_cohort_exports = {
         "EvolutionSelfReviewGreenCohortError",
@@ -511,6 +536,8 @@ def __getattr__(name: str) -> object:
         module_name = "validation_metric_bindings"
     elif name in self_review_red_baseline_exports:
         module_name = "self_review_red_baseline"
+    elif name in interventional_red_cohort_exports:
+        module_name = "interventional_red_cohort"
     elif name in interventional_red_sample_exports:
         module_name = "interventional_red_sample"
     elif name in self_review_green_cohort_exports:

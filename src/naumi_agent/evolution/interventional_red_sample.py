@@ -137,6 +137,13 @@ class EvolutionInterventionalRedCheckSampleError(RuntimeError):
         self.code = code
 
 
+class EvolutionInterventionalRedRunAuthority(_StrictModel):
+    parent_receipt_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    grant_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    grant_sha256: str = Field(pattern=_SHA256_RE)
+
+
 class EvolutionInterventionalRedCheckSampleExecutor:
     """Run and persist exactly one Profile-check sample, not a whole cohort."""
 
@@ -170,6 +177,7 @@ class EvolutionInterventionalRedCheckSampleExecutor:
         metric_binding: EvolutionMetricRunnerBinding,
         validation_plan: EvolutionValidationPlan,
         profile_binding: EvolutionValidationProfileBinding,
+        run_authority: EvolutionInterventionalRedRunAuthority | None = None,
     ) -> EvolutionInterventionalRedCheckSampleReceipt:
         request, metrics, plan, profile = _validate_authority(
             baseline_request,
@@ -218,40 +226,90 @@ class EvolutionInterventionalRedCheckSampleExecutor:
                 "parent_delegation_scope_missing",
                 "父权限回执未授权 bash_run 运行委托。",
             )
-        owner_id = f"evo-red-{request.request_sha256[:16]}-{sample_index}"
-        started_at = self._now()
-        lease_seconds = min(3_600, max(30, request.check_timeout_seconds_per_sample + 30))
-        lease = await self._store.acquire_run_lease(
-            workspace_root=self._workspace_root,
-            run_kind=HarnessRunKind.RUNTIME,
-            run_id=parent.run_id,
-            owner_id=owner_id,
-            now=started_at,
-            lease_seconds=lease_seconds,
-        )
-        if lease is None:
-            raise EvolutionInterventionalRedCheckSampleError(
-                "runtime_lease_unavailable",
-                "Interventional RED 无法取得独占 Runtime lease。",
-            )
+        owned_lease = None
         grant_id: str | None = None
+        grant_sha256: str | None = None
+        if run_authority is not None:
+            authority = EvolutionInterventionalRedRunAuthority.model_validate(
+                run_authority.model_dump(mode="json")
+            )
+            validation = await self._run_grant_authority.validate(
+                grant_id=authority.grant_id,
+                now=self._now(),
+            )
+            contract = validation.contract
+            if not (
+                validation.allowed
+                and contract is not None
+                and authority.parent_receipt_id == parent_receipt_id
+                and authority.run_id == parent.run_id == contract.run_id
+                and authority.grant_id == contract.grant_id
+                and authority.grant_sha256 == contract.grant_sha256
+                and contract.parent_receipt_id == parent_receipt_id
+                and "bash_run" in contract.delegated_tool_names
+            ):
+                raise EvolutionInterventionalRedCheckSampleError(
+                    "cohort_run_authority_invalid",
+                    "Interventional RED cohort Run authority 已失效或不匹配。",
+                )
+            grant_id = authority.grant_id
+            grant_sha256 = authority.grant_sha256
+        else:
+            owner_id = f"evo-red-{request.request_sha256[:16]}-{sample_index}"
+            started_at = self._now()
+            lease_seconds = min(
+                3_600,
+                max(30, request.check_timeout_seconds_per_sample + 30),
+            )
+            owned_lease = await self._store.acquire_run_lease(
+                workspace_root=self._workspace_root,
+                run_kind=HarnessRunKind.RUNTIME,
+                run_id=parent.run_id,
+                owner_id=owner_id,
+                now=started_at,
+                lease_seconds=lease_seconds,
+            )
+            if owned_lease is None:
+                raise EvolutionInterventionalRedCheckSampleError(
+                    "runtime_lease_unavailable",
+                    "Interventional RED 无法取得独占 Runtime lease。",
+                )
+            try:
+                grant = await self._run_grant_authority.issue(
+                    RunDelegationGrantRequest(
+                        idempotency_key=(
+                            f"evo-red-{request.request_sha256[:24]}-{sample_index}"
+                        ),
+                        parent_receipt_id=parent_receipt_id,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        lease_owner_id=owner_id,
+                        lease_epoch=owned_lease.epoch,
+                        delegated_tool_names=("bash_run",),
+                    ),
+                    now=self._now(),
+                    ttl_seconds=lease_seconds,
+                )
+            except BaseException as exc:
+                try:
+                    released = await self._store.release_run_lease(
+                        workspace_root=self._workspace_root,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        run_id=parent.run_id,
+                        owner_id=owned_lease.owner_id,
+                        epoch=owned_lease.epoch,
+                        now=self._now(),
+                    )
+                    if released is None:
+                        exc.add_note("Run Grant 签发失败后 Runtime lease 未能释放。")
+                except BaseException as cleanup_exc:
+                    exc.add_note(f"Runtime lease 清理失败：{cleanup_exc}")
+                raise
+            grant_id = grant.contract.grant_id
+            grant_sha256 = grant.contract.grant_sha256
         results: list[HarnessSandboxCheckResult] = []
         try:
-            grant = await self._run_grant_authority.issue(
-                RunDelegationGrantRequest(
-                    idempotency_key=(
-                        f"evo-red-{request.request_sha256[:24]}-{sample_index}"
-                    ),
-                    parent_receipt_id=parent_receipt_id,
-                    run_kind=HarnessRunKind.RUNTIME,
-                    lease_owner_id=owner_id,
-                    lease_epoch=lease.epoch,
-                    delegated_tool_names=("bash_run",),
-                ),
-                now=self._now(),
-                ttl_seconds=lease_seconds,
-            )
-            grant_id = grant.contract.grant_id
+            assert grant_id is not None
+            assert grant_sha256 is not None
             for check in checks:
                 composed = None
 
@@ -305,6 +363,8 @@ class EvolutionInterventionalRedCheckSampleExecutor:
                 metric_result=metric_result,
                 configuration=configuration,
                 identity=identity,
+                run_scope=("cohort" if run_authority is not None else "sample"),
+                run_grant_sha256=grant_sha256,
             )
             stored = await self._store.record_eval_result(
                 workspace_root=self._workspace_root,
@@ -324,7 +384,7 @@ class EvolutionInterventionalRedCheckSampleExecutor:
         finally:
             cleanup_at = self._now()
             cleanup_errors: list[BaseException] = []
-            if grant_id is not None:
+            if owned_lease is not None and grant_id is not None:
                 try:
                     await self._run_grant_authority.revoke(
                         grant_id=grant_id,
@@ -333,19 +393,20 @@ class EvolutionInterventionalRedCheckSampleExecutor:
                     )
                 except BaseException as exc:
                     cleanup_errors.append(exc)
-            try:
-                released = await self._store.release_run_lease(
-                    workspace_root=self._workspace_root,
-                    run_kind=HarnessRunKind.RUNTIME,
-                    run_id=parent.run_id,
-                    owner_id=owner_id,
-                    epoch=lease.epoch,
-                    now=cleanup_at,
-                )
-                if released is None:
-                    cleanup_errors.append(RuntimeError("Runtime lease 清理失败。"))
-            except BaseException as exc:
-                cleanup_errors.append(exc)
+            if owned_lease is not None:
+                try:
+                    released = await self._store.release_run_lease(
+                        workspace_root=self._workspace_root,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        run_id=parent.run_id,
+                        owner_id=owned_lease.owner_id,
+                        epoch=owned_lease.epoch,
+                        now=cleanup_at,
+                    )
+                    if released is None:
+                        cleanup_errors.append(RuntimeError("Runtime lease 清理失败。"))
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
             if cleanup_errors:
                 detail = "; ".join(str(item) for item in cleanup_errors)
                 raise EvolutionInterventionalRedCheckSampleError(
@@ -437,6 +498,26 @@ def _validate_authority(baseline_request, metric_binding, validation_plan, profi
     return request, metrics, plan, profile
 
 
+def validate_interventional_red_authority(
+    baseline_request: EvolutionBaselineCohortRequest,
+    metric_binding: EvolutionMetricRunnerBinding,
+    validation_plan: EvolutionValidationPlan,
+    profile_binding: EvolutionValidationProfileBinding,
+) -> tuple[
+    EvolutionBaselineCohortRequest,
+    EvolutionMetricRunnerBinding,
+    EvolutionValidationPlan,
+    EvolutionValidationProfileBinding,
+]:
+    """Revalidate the complete immutable authority chain before execution."""
+    return _validate_authority(
+        baseline_request,
+        metric_binding,
+        validation_plan,
+        profile_binding,
+    )
+
+
 def _check_matches(check, expected, bound) -> bool:
     return (
         _sha256_payload(check.model_dump(mode="json")) == expected.spec_sha256 == bound.spec_sha256
@@ -457,10 +538,19 @@ def _build_suite_result(
     metric_result: HarnessEvalSuiteResult,
     configuration: HarnessEvalConfigurationIdentity,
     identity,
+    run_scope: Literal["sample", "cohort"],
+    run_grant_sha256: str | None,
 ) -> HarnessEvalSuiteResult:
     policy = HarnessEvalComparisonPolicy()
     cases = (
-        tuple(_case_from_result(item) for item in results)
+        tuple(
+            _case_from_result(
+                item,
+                run_scope=run_scope,
+                run_grant_sha256=run_grant_sha256,
+            )
+            for item in results
+        )
         + metric_result.cases
     )
     status = (
@@ -549,7 +639,12 @@ async def _run_metric_sample(
         ) from exc
 
 
-def _case_from_result(result: HarnessSandboxCheckResult) -> HarnessEvalCaseResult:
+def _case_from_result(
+    result: HarnessSandboxCheckResult,
+    *,
+    run_scope: Literal["sample", "cohort"],
+    run_grant_sha256: str | None,
+) -> HarnessEvalCaseResult:
     if result.status is HarnessSandboxCheckStatus.PASSED:
         status = EvalCaseStatus.PASSED
     elif result.status is HarnessSandboxCheckStatus.FAILED:
@@ -563,7 +658,9 @@ def _case_from_result(result: HarnessSandboxCheckResult) -> HarnessEvalCaseResul
         code=result.status.value,
         message=(
             f"{result.message} lifecycle_sha256="
-            f"{result.lifecycle_receipt_sha256 or 'missing'}"
+            f"{result.lifecycle_receipt_sha256 or 'missing'} "
+            f"run_scope={run_scope} "
+            f"run_grant_sha256={run_grant_sha256 or 'missing'}"
         ),
         duration_ms=result.duration_ms,
     )
@@ -609,6 +706,8 @@ def _validate_existing(
         and result.suite_sha256 == identity.configuration.suite_sha256
         and tuple(item.case_id for item in check_cases) == tuple(item.id for item in checks)
         and all(_lifecycle_digest(item.message) is not None for item in check_cases)
+        and all(_run_scope(item.message) is not None for item in check_cases)
+        and all(_run_grant_digest(item.message) is not None for item in check_cases)
         and len(metric_cases) == len(request.metrics)
         and all(item.metric_observations for item in metric_cases)
         and observed_metrics == tuple(item.metric_name for item in request.metrics)
@@ -689,6 +788,16 @@ def _lifecycle_digest(message: str) -> str | None:
     return match.group(1) if match is not None else None
 
 
+def _run_scope(message: str) -> str | None:
+    match = re.search(r"(?:^| )run_scope=(sample|cohort)(?:$| )", message)
+    return match.group(1) if match is not None else None
+
+
+def _run_grant_digest(message: str) -> str | None:
+    match = re.search(r"(?:^| )run_grant_sha256=([0-9a-f]{64})(?:$| )", message)
+    return match.group(1) if match is not None else None
+
+
 def _require_lifecycle_digest(message: str) -> str:
     digest = _lifecycle_digest(message)
     if digest is None:
@@ -712,8 +821,10 @@ __all__ = [
     "EvolutionInterventionalRedSampleError",
     "EvolutionInterventionalRedSampleExecutor",
     "EvolutionInterventionalRedSampleReceipt",
+    "EvolutionInterventionalRedRunAuthority",
     "INTERVENTIONAL_RED_CHECK_POLICY",
     "INTERVENTIONAL_RED_CHECK_RUNNER",
     "INTERVENTIONAL_RED_SAMPLE_POLICY",
     "INTERVENTIONAL_RED_SAMPLE_RUNNER",
+    "validate_interventional_red_authority",
 ]
