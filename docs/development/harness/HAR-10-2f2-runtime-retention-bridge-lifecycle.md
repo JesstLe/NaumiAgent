@@ -44,6 +44,6 @@ AppConfig 的嵌套规则，例如 `NAUMI_HARNESS__RUNTIME_HEARTBEAT_RETENTION__
 
 ## 未完成
 
-UI-13.1c 已把 typed `runtime/status` 投影到 New UI Doctor，并为 TUI fallback 明确不可观测边界；历史清理详情与
-手动 wake 控件仍未实现，控制逻辑不得复制到前端。browser/agent producer、Supervisor 动作和 heartbeat 历史趋势
-也不属于本切片。
+UI-13.1c 已把 typed `runtime/status` 投影到 New UI Doctor；ARC-01.4c3 随后让 TUI 消费同一 lifecycle 并提供真实
+retention snapshot。历史清理详情与手动 wake 控件仍未实现，控制逻辑不得复制到前端。browser/agent producer、
+Supervisor 动作和 heartbeat 历史趋势也不属于本切片。

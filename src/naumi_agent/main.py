@@ -774,6 +774,9 @@ def _launch_tui(config_path: str) -> None:
         keybindings=keybindings,
         style_config=style_config,
         show_reasoning=bool(getattr(config.ui, "show_reasoning", False)),
+        terminal_runtime_lifecycle_factory=(
+            engine.terminal_runtime_lifecycle_factory
+        ),
     )
     app.run()
 

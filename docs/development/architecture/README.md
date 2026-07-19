@@ -13,5 +13,5 @@
 
 模块顺序：ARC-01/03/05 → ARC-02 → ARC-04 → ARC-06 → ARC-07/08。
 
-ARC-01.4c1-4c2 已交付由 Composition Root 构造的首个 `RuntimeServices` 切片、共享 terminal runtime lifecycle
-factory 与 New UI adapter 迁移；TUI adapter、其余 Service 与全局关闭注册表仍未完成，因此 ARC-02 退出门尚未满足。
+ARC-01.4c1-4c3 已交付由 Composition Root 构造的首个 `RuntimeServices` 切片、共享 terminal runtime lifecycle
+factory 与 New UI/TUI adapter 迁移；其余 Service 与全局关闭注册表仍未完成，因此 ARC-02 退出门尚未满足。

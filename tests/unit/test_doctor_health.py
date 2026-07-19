@@ -150,7 +150,7 @@ def test_runtime_retention_health_distinguishes_live_failed_and_unavailable() ->
     assert failed.severity == "degraded"
     assert "lease_lost" in failed.detail
     assert unavailable.severity == "unknown"
-    assert "TUI fallback" in unavailable.suggestion
+    assert "当前客户端未接入 terminal runtime lifecycle" in unavailable.suggestion
     assert "UNKNOWN 运行时心跳清理" in render_doctor_health_item_markdown(
         unavailable
     )

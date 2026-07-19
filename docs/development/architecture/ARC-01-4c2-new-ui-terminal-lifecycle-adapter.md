@@ -32,5 +32,5 @@
 ## 4. 自我审视与剩余边界
 
 Bridge 仍保存 lifecycle 实例并编排自己与 Engine 的先后顺序，这是 frontend adapter 的合理职责；全进程资源反序关闭与
-失败继续属于 ARC-01.4d，不能在本切片内伪造。Textual TUI 尚未创建 durable runtime heartbeat，因此 Doctor 仍必须显示
-不可观测；下一独立 UI-17 切片应消费同一 factory，而不是复制本轮代码。完成 TUI parity 前，ARC-02 退出门仍未满足。
+失败继续属于 ARC-01.4d，不能在本切片内伪造。ARC-01.4c3 已让 Textual TUI 消费同一 factory 并补齐 durable heartbeat、
+Doctor 与 terminal 语义；UI-17 capability/golden parity 和 ARC-01.4d 仍未完成，因此 ARC-02 退出门仍未满足。
