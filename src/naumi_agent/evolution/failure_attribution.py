@@ -77,9 +77,13 @@ class EvolutionFailureAttributionReceipt(_StrictModel):
     comparison_receipt_sha256: str = Field(pattern=_SHA256_RE)
     validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
     validation_plan_sha256: str = Field(pattern=_SHA256_RE)
-    red_receipt_id: str = Field(pattern=r"^evvredrun_[0-9a-f]{24}$")
+    red_receipt_id: str = Field(
+        pattern=r"^evvred(?:run|cohort)_[0-9a-f]{24}$"
+    )
     red_receipt_sha256: str = Field(pattern=_SHA256_RE)
-    green_receipt_id: str = Field(pattern=r"^evvgreenrun_[0-9a-f]{24}$")
+    green_receipt_id: str = Field(
+        pattern=r"^evvgreen(?:run|cohort)_[0-9a-f]{24}$"
+    )
     green_receipt_sha256: str = Field(pattern=_SHA256_RE)
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
     candidate_revision: int = Field(ge=1)
@@ -132,7 +136,120 @@ class EvolutionFailureAttributionError(RuntimeError):
         self.code = code
 
 
+class EvolutionFailureAttributionAuthority(_StrictModel):
+    """Lane-neutral, fully resolved authority consumed by the mapping kernel."""
+
+    validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
+    validation_plan_sha256: str = Field(pattern=_SHA256_RE)
+    red_receipt_id: str = Field(
+        pattern=r"^evvred(?:run|cohort)_[0-9a-f]{24}$"
+    )
+    red_receipt_sha256: str = Field(pattern=_SHA256_RE)
+    green_receipt_id: str = Field(
+        pattern=r"^evvgreen(?:run|cohort)_[0-9a-f]{24}$"
+    )
+    green_receipt_sha256: str = Field(pattern=_SHA256_RE)
+    candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
+    candidate_revision: int = Field(ge=1)
+    suite_id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    red_batch_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    green_batch_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+    red_samples: int = Field(ge=1, le=100)
+    green_samples: int = Field(ge=1, le=100)
+    red_result_sha256: tuple[str, ...] = Field(min_length=1, max_length=100)
+    green_result_sha256: tuple[str, ...] = Field(min_length=1, max_length=100)
+
+    @field_validator("red_result_sha256", "green_result_sha256")
+    @classmethod
+    def _valid_result_digests(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(re.fullmatch(_SHA256_RE, value) is None for value in values):
+            raise ValueError("Failure Attribution sample digest 格式无效。")
+        return values
+
+    @model_validator(mode="after")
+    def _complete_cohorts(self) -> Self:
+        if not (
+            self.red_samples == len(self.red_result_sha256)
+            and self.green_samples == len(self.green_result_sha256)
+        ):
+            raise ValueError("Failure Attribution cohort authority 不完整。")
+        return self
+
+
+class EvolutionFailureAttributionKernel:
+    """Apply the single mechanical attribution policy to lane-neutral facts."""
+
+    def build(
+        self,
+        *,
+        authority: EvolutionFailureAttributionAuthority,
+        comparison: HarnessStoredEvalComparisonReceipt,
+    ) -> EvolutionFailureAttributionReceipt:
+        try:
+            facts = EvolutionFailureAttributionAuthority.model_validate(
+                authority.model_dump(mode="json")
+            )
+            receipt = HarnessEvalComparisonReceipt.model_validate(
+                comparison.receipt.model_dump(mode="json")
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise EvolutionFailureAttributionError(
+                "attribution_authority_invalid",
+                "Failure Attribution authority 无效或已被篡改。",
+            ) from exc
+        if not (
+            comparison.id == receipt.id
+            and comparison.receipt_sha256 == receipt.receipt_sha256
+            and comparison.workspace_root == receipt.workspace_root
+            and comparison.suite_id == receipt.suite_id
+            and comparison.baseline_id == receipt.baseline_id
+            and comparison.current_batch_id == receipt.current_batch_id
+            and comparison.decision == receipt.decision.value
+            and receipt.suite_id == facts.suite_id
+            and receipt.baseline_batch_id == facts.red_batch_id
+            and receipt.current_batch_id == facts.green_batch_id
+            and receipt.baseline_samples == facts.red_samples
+            and receipt.current_samples == facts.green_samples
+            and receipt.baseline_samples_sha256
+            == _sample_set_sha256(facts.red_result_sha256)
+            and receipt.current_samples_sha256
+            == _sample_set_sha256(facts.green_result_sha256)
+            and tuple(item.result_sha256 for item in receipt.sample_evidence)
+            == facts.green_result_sha256
+        ):
+            raise EvolutionFailureAttributionError(
+                "attribution_authority_mismatch",
+                "RED、GREEN 与 H5c Comparison authority 不一致。",
+            )
+        classification = _classify(receipt)
+        payload = {
+            "schema_version": 1,
+            "policy_version": FAILURE_ATTRIBUTION_POLICY,
+            "comparison_id": receipt.id,
+            "comparison_receipt_sha256": receipt.receipt_sha256,
+            "validation_plan_id": facts.validation_plan_id,
+            "validation_plan_sha256": facts.validation_plan_sha256,
+            "red_receipt_id": facts.red_receipt_id,
+            "red_receipt_sha256": facts.red_receipt_sha256,
+            "green_receipt_id": facts.green_receipt_id,
+            "green_receipt_sha256": facts.green_receipt_sha256,
+            "candidate_id": facts.candidate_id,
+            "candidate_revision": facts.candidate_revision,
+            **classification,
+            "created_at": receipt.created_at,
+        }
+        digest = _sha256_payload(payload)
+        return EvolutionFailureAttributionReceipt.model_validate({
+            **payload,
+            "attribution_id": f"evattr_{digest[:24]}",
+            "attribution_sha256": digest,
+        })
+
+
 class EvolutionFailureAttributionBuilder:
+    def __init__(self, kernel: EvolutionFailureAttributionKernel | None = None) -> None:
+        self._kernel = kernel or EvolutionFailureAttributionKernel()
+
     def build(
         self,
         *,
@@ -151,23 +268,13 @@ class EvolutionFailureAttributionBuilder:
             green = EvolutionSelfReviewGreenCohortReceipt.model_validate(
                 green_receipt.model_dump(mode="json")
             )
-            receipt = HarnessEvalComparisonReceipt.model_validate(
-                comparison.receipt.model_dump(mode="json")
-            )
         except (AttributeError, TypeError, ValueError) as exc:
             raise EvolutionFailureAttributionError(
                 "attribution_authority_invalid",
                 "Failure Attribution authority 无效或已被篡改。",
             ) from exc
         if not (
-            comparison.id == receipt.id
-            and comparison.receipt_sha256 == receipt.receipt_sha256
-            and comparison.workspace_root == receipt.workspace_root
-            and comparison.suite_id == receipt.suite_id
-            and comparison.baseline_id == receipt.baseline_id
-            and comparison.current_batch_id == receipt.current_batch_id
-            and comparison.decision == receipt.decision.value
-            and red.validation_plan_id == plan.validation_plan_id
+            red.validation_plan_id == plan.validation_plan_id
             and red.validation_plan_sha256 == plan.validation_plan_sha256
             and green.validation_plan_id == plan.validation_plan_id
             and green.validation_plan_sha256 == plan.validation_plan_sha256
@@ -175,45 +282,30 @@ class EvolutionFailureAttributionBuilder:
             and green.red_receipt_sha256 == red.receipt_sha256
             and green.candidate_id == plan.candidate_id
             and green.candidate_revision == plan.candidate_revision
-            and receipt.suite_id == red.suite_id == green.suite_id
-            and receipt.baseline_batch_id == red.batch_id
-            and receipt.current_batch_id == green.batch_id
-            and receipt.baseline_samples == red.persisted_samples
-            and receipt.current_samples == green.persisted_samples
-            and receipt.baseline_samples_sha256
-            == _sample_set_sha256(red.sample_result_sha256)
-            and receipt.current_samples_sha256
-            == _sample_set_sha256(green.sample_result_sha256)
-            and tuple(item.result_sha256 for item in receipt.sample_evidence)
-            == green.sample_result_sha256
+            and red.suite_id == green.suite_id
         ):
             raise EvolutionFailureAttributionError(
                 "attribution_authority_mismatch",
-                "Plan、RED、GREEN 与 H5c Comparison authority 不一致。",
+                "Plan、RED 与 GREEN completion authority 不一致。",
             )
-        classification = _classify(receipt)
-        payload = {
-            "schema_version": 1,
-            "policy_version": FAILURE_ATTRIBUTION_POLICY,
-            "comparison_id": receipt.id,
-            "comparison_receipt_sha256": receipt.receipt_sha256,
-            "validation_plan_id": plan.validation_plan_id,
-            "validation_plan_sha256": plan.validation_plan_sha256,
-            "red_receipt_id": red.receipt_id,
-            "red_receipt_sha256": red.receipt_sha256,
-            "green_receipt_id": green.receipt_id,
-            "green_receipt_sha256": green.receipt_sha256,
-            "candidate_id": plan.candidate_id,
-            "candidate_revision": plan.candidate_revision,
-            **classification,
-            "created_at": receipt.created_at,
-        }
-        digest = _sha256_payload(payload)
-        return EvolutionFailureAttributionReceipt.model_validate({
-            **payload,
-            "attribution_id": f"evattr_{digest[:24]}",
-            "attribution_sha256": digest,
-        })
+        authority = EvolutionFailureAttributionAuthority(
+            validation_plan_id=plan.validation_plan_id,
+            validation_plan_sha256=plan.validation_plan_sha256,
+            red_receipt_id=red.receipt_id,
+            red_receipt_sha256=red.receipt_sha256,
+            green_receipt_id=green.receipt_id,
+            green_receipt_sha256=green.receipt_sha256,
+            candidate_id=plan.candidate_id,
+            candidate_revision=plan.candidate_revision,
+            suite_id=red.suite_id,
+            red_batch_id=red.batch_id,
+            green_batch_id=green.batch_id,
+            red_samples=red.persisted_samples,
+            green_samples=green.persisted_samples,
+            red_result_sha256=red.sample_result_sha256,
+            green_result_sha256=green.sample_result_sha256,
+        )
+        return self._kernel.build(authority=authority, comparison=comparison)
 
 
 class EvolutionFailureAttributionExecutor:

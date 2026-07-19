@@ -58,10 +58,8 @@ candidate fault、retry/rerun 和 reflection eligibility flags。canonical diges
 ## 6. 当前边界与下一步
 
 - 当前 Self-Review static lane 不会产生 runner/environment failure；相应映射使用原生 H5c 合同 fixture 验证，
-  后续 ARC-04 interventional runner 必须复用同一 attribution artifact；
-- ARC-04.3a/3b 与 HAR-08.4a/4b 已能在可信 Git snapshot 中以生产权限委托执行一个真实 Profile check，并保留
-  ToolJob lifecycle 与 artifact 证据；但 baseline/candidate cohort 和 adversarial suite 尚未接通，不能把
-  单项检查当作 EVO interventional comparison；
+  EVO-03.5b 已让 ARC-04 interventional lane 复用同一 attribution artifact、机械映射与 Store；
+- Interventional RED/GREEN cohort、H5c 与 failure attribution 已接通；adversarial suite 尚未接通；
 - 归因不是 EVO-04 采纳决策，也不包含 adversarial/security/platform matrix；
-- 下一最小切片应由 HAR-08 复用既有委托链承载成对 cohort；之后才扩展 EVO-03.6 adversarial suite，避免
-  绕开 authority 另造 Evolution runner。
+- 下一最小切片应横向核对 HAR-08.4 Suite/Batch 隔离与 EVO-03.6 adversarial suite 的依赖，继续复用既有
+  H5a/H5c authority，避免另造 Evolution runner。

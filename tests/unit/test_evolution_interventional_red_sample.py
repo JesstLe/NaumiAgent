@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -32,9 +33,18 @@ from naumi_agent.evolution.experiment_leases import (
     ExperimentLeaseState,
     ExperimentWorktreeLease,
 )
+from naumi_agent.evolution.failure_attribution import (
+    EvolutionFailureAttributionError,
+    EvolutionFailureAttributionStore,
+    FailureAttributionAction,
+    FailureAttributionCategory,
+)
 from naumi_agent.evolution.interventional_comparison import (
     EvolutionInterventionalComparisonError,
     EvolutionInterventionalComparisonExecutor,
+)
+from naumi_agent.evolution.interventional_failure_attribution import (
+    EvolutionInterventionalFailureAttributionExecutor,
 )
 from naumi_agent.evolution.interventional_green_cohort import (
     EvolutionInterventionalGreenCohortError,
@@ -967,6 +977,59 @@ async def test_interventional_cohorts_reuse_authority_and_execute_candidate_over
         item.policy_verdict == "failed"
         for item in comparison.receipt.sample_evidence
     )
+    attribution_store = EvolutionFailureAttributionStore(
+        runtime / "failure-attributions.db"
+    )
+    attribution_executor = EvolutionInterventionalFailureAttributionExecutor(
+        harness_store=store,
+        attribution_store=attribution_store,
+    )
+    with pytest.raises(EvolutionFailureAttributionError) as captured:
+        await attribution_executor.execute(
+            validation_plan=plan,
+            red_receipt=receipt,
+            green_receipt=green_cohort_receipt,
+            comparison=replace(comparison, decision="passed"),
+        )
+    assert (
+        captured.value.code
+        == "interventional_attribution_comparison_not_authoritative"
+    )
+    with pytest.raises(EvolutionFailureAttributionError) as captured:
+        await attribution_executor.execute(
+            validation_plan=plan,
+            red_receipt=receipt,
+            green_receipt=green_cohort_receipt.model_copy(
+                update={"candidate_revision": 2}
+            ),
+            comparison=comparison,
+        )
+    assert captured.value.code == "interventional_attribution_authority_invalid"
+    attribution = await attribution_executor.execute(
+        validation_plan=plan,
+        red_receipt=receipt,
+        green_receipt=green_cohort_receipt,
+        comparison=comparison,
+    )
+    repeated_attribution = await attribution_executor.execute(
+        validation_plan=plan,
+        red_receipt=receipt,
+        green_receipt=green_cohort_receipt,
+        comparison=comparison,
+    )
+    restored_attribution = await EvolutionFailureAttributionStore(
+        runtime / "failure-attributions.db"
+    ).get(comparison.id)
+    assert attribution == repeated_attribution == restored_attribution
+    assert attribution.category is FailureAttributionCategory.CANDIDATE_DEFECT
+    assert attribution.action is FailureAttributionAction.REVISE_CANDIDATE
+    assert attribution.reason_code == "candidate_policy_failed"
+    assert attribution.candidate_fault
+    assert not attribution.retryable
+    assert not attribution.requires_rerun
+    assert not attribution.reflection_eligible
+    assert attribution.red_receipt_id == receipt.receipt_id
+    assert attribution.green_receipt_id == green_cohort_receipt.receipt_id
 
     (candidate_root / "sample.py").write_text(candidate_source + "# drift\n")
     with pytest.raises(EvolutionInterventionalGreenCohortError) as captured:

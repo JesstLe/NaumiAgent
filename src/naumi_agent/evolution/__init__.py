@@ -53,6 +53,10 @@ if TYPE_CHECKING:
         EvolutionInterventionalComparisonError,
         EvolutionInterventionalComparisonExecutor,
     )
+    from naumi_agent.evolution.interventional_failure_attribution import (
+        EvolutionInterventionalFailureAttributionBuilder,
+        EvolutionInterventionalFailureAttributionExecutor,
+    )
     from naumi_agent.evolution.interventional_green_cohort import (
         EvolutionInterventionalGreenCohortError,
         EvolutionInterventionalGreenCohortExecutor,
@@ -360,6 +364,8 @@ __all__ = [
     "EvolutionInterventionalGreenSampleReceipt",
     "EvolutionInterventionalComparisonError",
     "EvolutionInterventionalComparisonExecutor",
+    "EvolutionInterventionalFailureAttributionBuilder",
+    "EvolutionInterventionalFailureAttributionExecutor",
     "EvolutionInterventionalCohortKernel",
     "EvolutionInterventionalCohortKernelError",
     "EvolutionInterventionalRunAuthority",
@@ -580,6 +586,10 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalComparisonError",
         "EvolutionInterventionalComparisonExecutor",
     }
+    interventional_failure_attribution_exports = {
+        "EvolutionInterventionalFailureAttributionBuilder",
+        "EvolutionInterventionalFailureAttributionExecutor",
+    }
     interventional_cohort_kernel_exports = {
         "EvolutionInterventionalCohortKernel",
         "EvolutionInterventionalCohortKernelError",
@@ -660,6 +670,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_green_sample"
     elif name in interventional_comparison_exports:
         module_name = "interventional_comparison"
+    elif name in interventional_failure_attribution_exports:
+        module_name = "interventional_failure_attribution"
     elif name in interventional_cohort_kernel_exports:
         module_name = "interventional_cohort_kernel"
     elif name in interventional_sample_kernel_exports:
