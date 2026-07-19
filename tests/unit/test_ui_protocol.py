@@ -90,6 +90,17 @@ def test_protocol_normalizes_queue_promotion_target() -> None:
     assert record["payload"] == {"target_request_id": "submit-later"}
 
 
+def test_protocol_normalizes_queue_cancel_target() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.QUEUE_CANCEL,
+            "payload": {"target_request_id": "  submit-cancel  ", "private": "drop"},
+        }
+    )
+
+    assert record["payload"] == {"target_request_id": "submit-cancel"}
+
+
 def test_protocol_normalizes_interaction_cancel_target() -> None:
     record = normalize_client_record({
         "type": ClientEventType.INTERACTION_CANCEL,
@@ -114,6 +125,17 @@ def test_protocol_rejects_invalid_queue_promotion_target(target: object) -> None
         normalize_client_record(
             {
                 "type": ClientEventType.QUEUE_PROMOTE,
+                "payload": {"target_request_id": target},
+            }
+        )
+
+
+@pytest.mark.parametrize("target", [None, "", " ", "x" * 201])
+def test_protocol_rejects_invalid_queue_cancel_target(target: object) -> None:
+    with pytest.raises(ValueError, match="target_request_id"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.QUEUE_CANCEL,
                 "payload": {"target_request_id": target},
             }
         )

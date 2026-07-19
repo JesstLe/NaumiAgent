@@ -472,6 +472,14 @@ function normalizeServerPayload(type, payload) {
       message: String(payload.message ?? ""),
     };
   }
+  if (type === "run/queue_cancelled") {
+    return {
+      ...payload,
+      target_request_id: String(payload.target_request_id ?? ""),
+      queued: Math.max(0, Math.floor(Number(payload.queued) || 0)),
+      reason: String(payload.reason ?? ""),
+    };
+  }
   if (type === "completion/receipt") {
     return normalizeCompletionReceipt(payload);
   }

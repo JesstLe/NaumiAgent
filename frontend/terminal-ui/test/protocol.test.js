@@ -323,6 +323,28 @@ test("event sender publishes an explicit queue promotion target", () => {
   });
 });
 
+test("queue cancellation uses an explicit target and normalizes its receipt", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("queue_cancel", { target_request_id: "submit-cancel" });
+  const normalized = normalizeServerRecord({
+    type: "run/queue_cancelled",
+    payload: {
+      target_request_id: 42,
+      queued: "1",
+      reason: "用户取消",
+    },
+  });
+
+  assert.equal(JSON.parse(chunks[0]).payload.target_request_id, "submit-cancel");
+  assert.deepEqual(normalized.payload, {
+    target_request_id: "42",
+    queued: 1,
+    reason: "用户取消",
+  });
+});
+
 test("interaction cancellation uses a strict target and terminal receipt", () => {
   const chunks = [];
   const send = createEventSender({ write: (chunk) => chunks.push(chunk) });

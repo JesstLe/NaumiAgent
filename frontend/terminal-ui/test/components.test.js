@@ -281,6 +281,19 @@ test("server-confirmed user delivery renders its queue position", () => {
   assert.doesNotMatch(scheduled, /发送中/);
 });
 
+test("cancelled queued delivery remains visible without retry guidance", () => {
+  const cancelled = renderComponent(Message({
+    message: {
+      kind: "user",
+      content: "不要再执行",
+      deliveryStatus: "cancelled",
+    },
+  }), { width: 48 }).map(stripAnsi).join("\n");
+
+  assert.match(cancelled, /已取消 · 未派发/);
+  assert.doesNotMatch(cancelled, /retry|重试/);
+});
+
 test("task user message exposes task identity and lifecycle without color", () => {
   const running = renderComponent(Message({
     message: {

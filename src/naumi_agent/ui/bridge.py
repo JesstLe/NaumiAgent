@@ -1177,6 +1177,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.QUEUE_PROMOTE:
             await self.promote_queued_chat(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.QUEUE_CANCEL:
+            await self.cancel_queued_chat(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.RECEIPT_REQUEST:
             await self.resend_completion_receipt(payload, request_id=request_id)
             return
@@ -1641,6 +1644,73 @@ class JsonlEngineBridge:
                 "queued": len(self._queued_chat_submissions),
                 "boundary": "after_current_run",
                 "message": "已提升，将在当前运行结束后的下一安全边界执行。",
+            },
+            request_id=request_id,
+        )
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def cancel_queued_chat(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel one queued chat only while it remains before dispatch."""
+        target_request_id = str(payload.get("target_request_id") or "")
+        selected = next(
+            (
+                submission
+                for submission in self._queued_chat_submissions
+                if submission.request_id == target_request_id
+            ),
+            None,
+        )
+        if selected is None:
+            await self.emit_error(
+                "未找到可取消的排队消息；它可能已经开始、完成或被取消。",
+                code="queue_item_not_found",
+                request_id=request_id,
+            )
+            return
+        if selected.durable_item is not None:
+            authority = self._conversation_queue_authority(selected.session_id)
+            if authority is None:
+                await self.emit_error(
+                    "持久队列权威暂不可用，不能安全取消。",
+                    code="queue_authority_unavailable",
+                    request_id=request_id,
+                )
+                return
+            try:
+                await authority.cancel_unclaimed_request(
+                    request_id=target_request_id,
+                )
+            except (ConversationQueueClaimError, HarnessStoreConflictError) as exc:
+                await self.emit_error(
+                    str(exc),
+                    code="queue_cancel_rejected",
+                    request_id=request_id,
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "Durable conversation cancellation failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "排队消息未能安全取消，请运行 /doctor 后重试。",
+                    code="queue_persist_failed",
+                    request_id=request_id,
+                )
+                return
+        self._queued_chat_submissions.remove(selected)
+        await self._emit_queued_chat_positions()
+        await self.emit(
+            ServerEventType.RUN_QUEUE_CANCELLED,
+            {
+                "target_request_id": target_request_id,
+                "queued": len(self._queued_chat_submissions),
+                "reason": "用户在派发前取消了该消息。",
             },
             request_id=request_id,
         )

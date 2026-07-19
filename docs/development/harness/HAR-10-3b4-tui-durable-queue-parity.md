@@ -45,6 +45,6 @@ run。共享 authority 现在允许调用方绕过“由同一 owner 持有、id
 
 ## 当前边界与下一步
 
-本切片只补运行中 TUI queue parity。普通 queued item 的显式取消、跨客户端公平/优先级、cursor/分页、retention
-和启动时无 Session 的自动恢复仍未实现；这些必须继续扩展共享 Store/authority，不能在 TUI 添加本地状态。
-下一条用户可见切片优先考虑普通 queued cancel 与双端详情，而不是回到 ARC 连续纵向开发。
+本切片只补运行中 TUI queue parity。HAR-10.3b5 已进一步交付普通 queued item 的显式取消与双端回执；详见
+`HAR-10-3b5-queued-conversation-cancel.md`。跨客户端公平/优先级、cursor/分页、retention 和启动时无 Session
+的自动恢复仍未实现；这些必须继续扩展共享 Store/authority，不能在 TUI 添加本地状态。
