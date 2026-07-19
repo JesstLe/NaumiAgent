@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.evolution.candidate_snapshots import (
     EvolutionCandidateSnapshotError,
+    EvolutionCandidateWorktreeSnapshot,
     capture_candidate_worktree_snapshot,
     revalidate_candidate_worktree_snapshot,
 )
@@ -60,6 +62,8 @@ from naumi_agent.evolution.validation_plans import (
     EvolutionValidationProfileBinding,
 )
 from naumi_agent.harness.eval_identity import (
+    HarnessEvalBaselineIdentity,
+    HarnessEvalConfigurationIdentity,
     HarnessEvalSourceIdentity,
     build_eval_baseline_identity,
     capture_eval_platform_identity,
@@ -149,6 +153,22 @@ class EvolutionInterventionalGreenSampleError(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedGreenAuthority:
+    request: EvolutionBaselineCohortRequest
+    binding: EvolutionMetricRunnerBinding
+    plan: EvolutionValidationPlan
+    profile: EvolutionValidationProfileBinding
+    green: EvolutionInterventionalGreenCohortRequest
+    red: EvolutionInterventionalRedCohortReceipt
+    lease: ExperimentWorktreeLease
+    snapshot: EvolutionCandidateWorktreeSnapshot
+    configuration: HarnessEvalConfigurationIdentity
+    identity: HarnessEvalBaselineIdentity
+    overlays: tuple[HarnessSandboxSourceOverlay, ...]
+    checks: tuple[HarnessCheckSpec, ...]
+
+
 class EvolutionInterventionalGreenSampleExecutor:
     """Run one GREEN sample against an immutable candidate overlay snapshot."""
 
@@ -183,73 +203,26 @@ class EvolutionInterventionalGreenSampleExecutor:
         lease: ExperimentWorktreeLease,
         run_authority: EvolutionInterventionalRunAuthority | None = None,
     ) -> EvolutionInterventionalGreenSampleReceipt:
-        request, binding, plan, profile, green, red, candidate_lease = (
-            self._validate_authority(
-                green_request,
-                baseline_request,
-                metric_binding,
-                validation_plan,
-                profile_binding,
-                red_receipt,
-                lease,
-            )
+        prepared = await self._prepare_authority(
+            green_request=green_request,
+            baseline_request=baseline_request,
+            metric_binding=metric_binding,
+            validation_plan=validation_plan,
+            profile_binding=profile_binding,
+            red_receipt=red_receipt,
+            lease=lease,
         )
-        now = self._aware_now()
-        current_lease = await self._lease_store.get(candidate_lease.contract_id)
-        if current_lease != candidate_lease:
-            raise EvolutionInterventionalGreenSampleError(
-                "candidate_lease_stale",
-                "Candidate Lease 已变化或不再存在。",
-            )
-        if datetime.fromisoformat(candidate_lease.expires_at) <= now:
-            raise EvolutionInterventionalGreenSampleError(
-                "candidate_lease_expired",
-                "Candidate Lease 已过期，不能执行 Interventional GREEN。",
-            )
-        red_records = await self._load_red_records(request, binding, plan, profile, red)
-        try:
-            snapshot = capture_candidate_worktree_snapshot(
-                candidate_lease,
-                plan,
-                worktree_storage_dir=self._worktree_storage_dir,
-                now=now,
-            )
-        except EvolutionCandidateSnapshotError as exc:
-            raise EvolutionInterventionalGreenSampleError(exc.code, str(exc)) from exc
-        red_identity = red_records[0].result.baseline_identity
-        assert red_identity is not None
-        platform = capture_eval_platform_identity()
-        if red_identity.platform != platform:
-            raise EvolutionInterventionalGreenSampleError(
-                "green_platform_mismatch",
-                "GREEN 平台身份已偏离 RED cohort。",
-            )
-        configuration = build_interventional_configuration(request, binding, plan, profile)
-        if red_identity.configuration != configuration:
-            raise EvolutionInterventionalGreenSampleError(
-                "red_configuration_mismatch",
-                "RED cohort configuration 与 GREEN Request 不一致。",
-            )
-        identity = build_eval_baseline_identity(
-            snapshot.root,
-            configuration=configuration,
-            platform_identity=platform,
-            profile_trusted=True,
-            source_identity=HarnessEvalSourceIdentity(
-                commit=candidate_lease.baseline_commit,
-                tree_sha256=snapshot.fingerprint.digest,
-                dirty=True,
-            ),
-        )
-        overlays = tuple(
-            HarnessSandboxSourceOverlay(
-                path=item.path,
-                content=item.content,
-                sha256=item.sha256,
-                executable=item.executable,
-            )
-            for item in snapshot.blobs
-        )
+        request = prepared.request
+        binding = prepared.binding
+        plan = prepared.plan
+        profile = prepared.profile
+        green = prepared.green
+        red = prepared.red
+        candidate_lease = prepared.lease
+        snapshot = prepared.snapshot
+        configuration = prepared.configuration
+        identity = prepared.identity
+        overlays = prepared.overlays
 
         async def source_is_current() -> bool:
             try:
@@ -327,8 +300,174 @@ class EvolutionInterventionalGreenSampleExecutor:
             plan=plan,
             profile=profile,
             sample_index=sample_index,
-            snapshot=snapshot,
+            candidate_tree_sha256=snapshot.fingerprint.digest,
             stored=stored,
+        )
+
+    async def revalidate_cohort_authority(
+        self,
+        *,
+        green_request: EvolutionInterventionalGreenCohortRequest,
+        baseline_request: EvolutionBaselineCohortRequest,
+        metric_binding: EvolutionMetricRunnerBinding,
+        validation_plan: EvolutionValidationPlan,
+        profile_binding: EvolutionValidationProfileBinding,
+        red_receipt: EvolutionInterventionalRedCohortReceipt,
+        lease: ExperimentWorktreeLease,
+    ) -> HarnessEvalBaselineIdentity:
+        """Perform the complete side-effect-free GREEN preflight before cohort authority."""
+        prepared = await self._prepare_authority(
+            green_request=green_request,
+            baseline_request=baseline_request,
+            metric_binding=metric_binding,
+            validation_plan=validation_plan,
+            profile_binding=profile_binding,
+            red_receipt=red_receipt,
+            lease=lease,
+        )
+        return prepared.identity
+
+    async def validate_cohort_prefix(
+        self,
+        *,
+        records: tuple[HarnessStoredEvalResult, ...],
+        green_request: EvolutionInterventionalGreenCohortRequest,
+        baseline_request: EvolutionBaselineCohortRequest,
+        metric_binding: EvolutionMetricRunnerBinding,
+        validation_plan: EvolutionValidationPlan,
+        profile_binding: EvolutionValidationProfileBinding,
+        red_receipt: EvolutionInterventionalRedCohortReceipt,
+        lease: ExperimentWorktreeLease,
+    ) -> tuple[HarnessEvalBaselineIdentity, list[EvolutionInterventionalGreenSampleReceipt]]:
+        """Preflight once, then validate a continuous existing GREEN prefix."""
+        prepared = await self._prepare_authority(
+            green_request=green_request,
+            baseline_request=baseline_request,
+            metric_binding=metric_binding,
+            validation_plan=validation_plan,
+            profile_binding=profile_binding,
+            red_receipt=red_receipt,
+            lease=lease,
+        )
+        receipts: list[EvolutionInterventionalGreenSampleReceipt] = []
+        for stored in records:
+            self._validate_existing(
+                stored,
+                request=prepared.request,
+                checks=prepared.checks,
+                binding=prepared.binding,
+                identity=prepared.identity,
+            )
+            receipts.append(_build_receipt(
+                green=prepared.green,
+                red=prepared.red,
+                plan=prepared.plan,
+                profile=prepared.profile,
+                sample_index=stored.sample_index,
+                candidate_tree_sha256=prepared.snapshot.fingerprint.digest,
+                stored=stored,
+            ))
+        return prepared.identity, receipts
+
+    async def _prepare_authority(
+        self,
+        *,
+        green_request,
+        baseline_request,
+        metric_binding,
+        validation_plan,
+        profile_binding,
+        red_receipt,
+        lease,
+    ) -> _PreparedGreenAuthority:
+        request, binding, plan, profile, green, red, candidate_lease = (
+            self._validate_authority(
+                green_request,
+                baseline_request,
+                metric_binding,
+                validation_plan,
+                profile_binding,
+                red_receipt,
+                lease,
+            )
+        )
+        try:
+            checks = await self._kernel.current_checks(
+                request,
+                profile,
+                phase="green",
+            )
+        except EvolutionInterventionalSampleKernelError as exc:
+            raise EvolutionInterventionalGreenSampleError(exc.code, str(exc)) from exc
+        now = self._aware_now()
+        current_lease = await self._lease_store.get(candidate_lease.contract_id)
+        if current_lease != candidate_lease:
+            raise EvolutionInterventionalGreenSampleError(
+                "candidate_lease_stale",
+                "Candidate Lease 已变化或不再存在。",
+            )
+        if datetime.fromisoformat(candidate_lease.expires_at) <= now:
+            raise EvolutionInterventionalGreenSampleError(
+                "candidate_lease_expired",
+                "Candidate Lease 已过期，不能执行 Interventional GREEN。",
+            )
+        red_records = await self._load_red_records(request, binding, plan, profile, red)
+        try:
+            snapshot = capture_candidate_worktree_snapshot(
+                candidate_lease,
+                plan,
+                worktree_storage_dir=self._worktree_storage_dir,
+                now=now,
+            )
+        except EvolutionCandidateSnapshotError as exc:
+            raise EvolutionInterventionalGreenSampleError(exc.code, str(exc)) from exc
+        red_identity = red_records[0].result.baseline_identity
+        assert red_identity is not None
+        platform = capture_eval_platform_identity()
+        if red_identity.platform != platform:
+            raise EvolutionInterventionalGreenSampleError(
+                "green_platform_mismatch",
+                "GREEN 平台身份已偏离 RED cohort。",
+            )
+        configuration = build_interventional_configuration(request, binding, plan, profile)
+        if red_identity.configuration != configuration:
+            raise EvolutionInterventionalGreenSampleError(
+                "red_configuration_mismatch",
+                "RED cohort configuration 与 GREEN Request 不一致。",
+            )
+        identity = build_eval_baseline_identity(
+            snapshot.root,
+            configuration=configuration,
+            platform_identity=platform,
+            profile_trusted=True,
+            source_identity=HarnessEvalSourceIdentity(
+                commit=candidate_lease.baseline_commit,
+                tree_sha256=snapshot.fingerprint.digest,
+                dirty=True,
+            ),
+        )
+        overlays = tuple(
+            HarnessSandboxSourceOverlay(
+                path=item.path,
+                content=item.content,
+                sha256=item.sha256,
+                executable=item.executable,
+            )
+            for item in snapshot.blobs
+        )
+        return _PreparedGreenAuthority(
+            request=request,
+            binding=binding,
+            plan=plan,
+            profile=profile,
+            green=green,
+            red=red,
+            lease=candidate_lease,
+            snapshot=snapshot,
+            configuration=configuration,
+            identity=identity,
+            overlays=overlays,
+            checks=checks,
         )
 
     def _validate_authority(self, green_request, baseline_request, metric_binding,
@@ -507,7 +646,16 @@ class EvolutionInterventionalGreenSampleExecutor:
             raise EvolutionInterventionalGreenSampleError(exc.code, str(exc)) from exc
 
 
-def _build_receipt(*, green, red, plan, profile, sample_index, snapshot, stored):
+def _build_receipt(
+    *,
+    green,
+    red,
+    plan,
+    profile,
+    sample_index,
+    candidate_tree_sha256,
+    stored,
+):
     identity = stored.result.baseline_identity
     assert identity is not None
     checks = tuple(
@@ -528,7 +676,7 @@ def _build_receipt(*, green, red, plan, profile, sample_index, snapshot, stored)
         "candidate_id": green.candidate_id,
         "candidate_revision": green.candidate_revision,
         "candidate_files_sha256": green.candidate_files_sha256,
-        "candidate_tree_sha256": snapshot.fingerprint.digest,
+        "candidate_tree_sha256": candidate_tree_sha256,
         "sample_index": sample_index,
         "sample_seed": green.sample_seeds[sample_index],
         "suite_id": green.suite_id,

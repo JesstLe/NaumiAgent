@@ -45,6 +45,13 @@ if TYPE_CHECKING:
         EvolutionInterventionalCohortKernel,
         EvolutionInterventionalCohortKernelError,
     )
+    from naumi_agent.evolution.interventional_green_cohort import (
+        EvolutionInterventionalGreenCohortError,
+        EvolutionInterventionalGreenCohortExecutor,
+        EvolutionInterventionalGreenCohortReceipt,
+        InterventionalGreenCheckSummary,
+        InterventionalGreenMetricSummary,
+    )
     from naumi_agent.evolution.interventional_green_request import (
         EvolutionInterventionalGreenCohortRequest,
         EvolutionInterventionalGreenCohortRequestBuilder,
@@ -333,6 +340,11 @@ __all__ = [
     "EvolutionInterventionalGreenCohortRequest",
     "EvolutionInterventionalGreenCohortRequestBuilder",
     "EvolutionInterventionalGreenRequestError",
+    "EvolutionInterventionalGreenCohortError",
+    "EvolutionInterventionalGreenCohortExecutor",
+    "EvolutionInterventionalGreenCohortReceipt",
+    "InterventionalGreenCheckSummary",
+    "InterventionalGreenMetricSummary",
     "EvolutionInterventionalGreenSampleError",
     "EvolutionInterventionalGreenSampleExecutor",
     "EvolutionInterventionalGreenSampleReceipt",
@@ -536,6 +548,13 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalGreenCohortRequestBuilder",
         "EvolutionInterventionalGreenRequestError",
     }
+    interventional_green_cohort_exports = {
+        "EvolutionInterventionalGreenCohortError",
+        "EvolutionInterventionalGreenCohortExecutor",
+        "EvolutionInterventionalGreenCohortReceipt",
+        "InterventionalGreenCheckSummary",
+        "InterventionalGreenMetricSummary",
+    }
     interventional_green_sample_exports = {
         "EvolutionInterventionalGreenSampleError",
         "EvolutionInterventionalGreenSampleExecutor",
@@ -613,6 +632,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_red_cohort"
     elif name in interventional_green_request_exports:
         module_name = "interventional_green_request"
+    elif name in interventional_green_cohort_exports:
+        module_name = "interventional_green_cohort"
     elif name in interventional_green_sample_exports:
         module_name = "interventional_green_sample"
     elif name in interventional_cohort_kernel_exports:
