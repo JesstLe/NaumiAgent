@@ -41,6 +41,10 @@ if TYPE_CHECKING:
         FailureAttributionAction,
         FailureAttributionCategory,
     )
+    from naumi_agent.evolution.interventional_cohort_kernel import (
+        EvolutionInterventionalCohortKernel,
+        EvolutionInterventionalCohortKernelError,
+    )
     from naumi_agent.evolution.interventional_green_request import (
         EvolutionInterventionalGreenCohortRequest,
         EvolutionInterventionalGreenCohortRequestBuilder,
@@ -332,6 +336,8 @@ __all__ = [
     "EvolutionInterventionalGreenSampleError",
     "EvolutionInterventionalGreenSampleExecutor",
     "EvolutionInterventionalGreenSampleReceipt",
+    "EvolutionInterventionalCohortKernel",
+    "EvolutionInterventionalCohortKernelError",
     "EvolutionInterventionalRunAuthority",
     "EvolutionInterventionalSampleKernel",
     "EvolutionInterventionalSampleKernelError",
@@ -535,6 +541,10 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalGreenSampleExecutor",
         "EvolutionInterventionalGreenSampleReceipt",
     }
+    interventional_cohort_kernel_exports = {
+        "EvolutionInterventionalCohortKernel",
+        "EvolutionInterventionalCohortKernelError",
+    }
     interventional_sample_kernel_exports = {
         "EvolutionInterventionalRunAuthority",
         "EvolutionInterventionalSampleKernel",
@@ -605,6 +615,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_green_request"
     elif name in interventional_green_sample_exports:
         module_name = "interventional_green_sample"
+    elif name in interventional_cohort_kernel_exports:
+        module_name = "interventional_cohort_kernel"
     elif name in interventional_sample_kernel_exports:
         module_name = "interventional_sample_kernel"
     elif name in interventional_red_sample_exports:
