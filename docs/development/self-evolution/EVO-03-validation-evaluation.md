@@ -81,6 +81,9 @@ Eval 和真实 Harness 检查产生。
   Profile trust、同平台/同 configuration 与候选 Snapshot 后，用精确 baseline + typed candidate overlays
   通过共用 ARC-04 kernel 执行同 checks 和 metrics；支持幂等防漂移回执。详见
   `EVO-03-3c2b2-interventional-green-sample.md`。
+- EVO-03.3c2c1 Shared Interventional Cohort Governance Kernel：已实现。把连续 H5a 前缀、cohort-scoped
+  Runtime lease/Run Grant、跨 epoch 恢复、sample receipt 对齐与异常清理收敛为 RED/GREEN 共用内核；RED
+  已迁移且行为保持。详见 `EVO-03-3c2c1-shared-interventional-cohort-kernel.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 

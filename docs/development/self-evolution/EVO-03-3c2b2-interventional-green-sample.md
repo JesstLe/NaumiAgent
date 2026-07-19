@@ -44,6 +44,7 @@ typed metric evidence 原子写入既有 HAR-08 H5a Store。
 
 ## 后续依赖
 
-下一最小切片是 EVO-03.3c2c：在一个 cohort-scoped Runtime lease/Run Grant 下编排连续 GREEN samples，支持
-中断前缀续跑、跨 grant epoch 恢复与 completion receipt；之后再接 EVO-03.4 interventional comparator，
-不得直接跳到自动晋升或自修改闭环。
+EVO-03.3c2c1 已把 RED 验证过的 cohort-scoped Runtime lease/Run Grant、连续前缀恢复与清理编排抽为
+RED/GREEN 共用治理内核。下一最小切片是 EVO-03.3c2c2：复用该内核编排连续 GREEN samples，支持中断前缀
+续跑、跨 grant epoch 恢复与 completion receipt；之后再接 interventional comparator，不得直接跳到自动
+晋升或自修改闭环。

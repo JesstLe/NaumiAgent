@@ -11,18 +11,19 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import (
     RunDelegationGrantAuthority,
-    RunDelegationGrantRequest,
+)
+from naumi_agent.evolution.interventional_cohort_kernel import (
+    EvolutionInterventionalCohortKernel,
+    EvolutionInterventionalCohortKernelError,
 )
 from naumi_agent.evolution.interventional_red_sample import (
     INTERVENTIONAL_RED_CHECK_RUNNER,
-    EvolutionInterventionalRedRunAuthority,
     EvolutionInterventionalRedSampleError,
     EvolutionInterventionalRedSampleExecutor,
     EvolutionInterventionalRedSampleReceipt,
@@ -36,7 +37,6 @@ from naumi_agent.evolution.validation_plans import (
     EvolutionValidationPlan,
     EvolutionValidationProfileBinding,
 )
-from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 INTERVENTIONAL_RED_COHORT_POLICY = "evolution-interventional-red-cohort-v1"
@@ -180,11 +180,16 @@ class EvolutionInterventionalRedCohortExecutor:
     ) -> None:
         self._workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         self._store = store
-        self._permission_store = permission_store
-        self._run_grant_authority = run_grant_authority
         self._sample_executor = sample_executor
         self._now = now or (lambda: datetime.now(UTC).isoformat())
-        self._token = token or (lambda: uuid4().hex)
+        self._cohort_kernel = EvolutionInterventionalCohortKernel(
+            workspace_root=self._workspace_root,
+            store=store,
+            permission_store=permission_store,
+            run_grant_authority=run_grant_authority,
+            now=self._now,
+            token=token,
+        )
 
     async def execute(
         self,
@@ -204,17 +209,33 @@ class EvolutionInterventionalRedCohortExecutor:
             )
         except EvolutionInterventionalRedSampleError as exc:
             raise EvolutionInterventionalRedCohortError(exc.code, str(exc)) from exc
-        records = await self._records(request)
-        _require_continuous_prefix(records, request.requested_samples)
-        receipts = await self._validate_existing_prefix(
-            records,
-            request=request,
-            metric_binding=binding,
-            validation_plan=plan,
-            profile_binding=profile,
-        )
-        _cohort_run_grant_digests(records, request)
-        if len(records) == request.requested_samples:
+        async def load_records():
+            return await self._records(request)
+
+        async def validate_existing(records):
+            return await self._validate_existing_prefix(
+                records,
+                request=request,
+                metric_binding=binding,
+                validation_plan=plan,
+                profile_binding=profile,
+            )
+
+        def validate_evidence(records):
+            _cohort_run_grant_digests(records, request)
+
+        async def execute_sample(sample_index, authority):
+            return await self._sample_executor.execute(
+                parent_receipt_id=parent_receipt_id,
+                sample_index=sample_index,
+                baseline_request=request,
+                metric_binding=binding,
+                validation_plan=plan,
+                profile_binding=profile,
+                run_authority=authority,
+            )
+
+        def build_receipt(records, receipts):
             return _build_cohort_receipt(
                 request,
                 binding,
@@ -224,98 +245,21 @@ class EvolutionInterventionalRedCohortExecutor:
                 receipts,
             )
 
-        parent = await self._permission_store.get(parent_receipt_id)
-        if (
-            parent is None
-            or not parent.authorizes_execution
-            or not parent.run_id
-            or "bash_run" not in parent.delegated_tool_names
-        ):
-            raise EvolutionInterventionalRedCohortError(
-                "cohort_parent_permission_invalid",
-                "Interventional RED cohort 缺少可执行的父权限回执。",
-            )
-        token = self._token().strip()
-        if not token or len(token) > 64 or re.fullmatch(r"[A-Za-z0-9]+", token) is None:
-            raise EvolutionInterventionalRedCohortError(
-                "cohort_owner_token_invalid",
-                "Interventional RED cohort owner token 格式无效。",
-            )
-        owner_id = f"evo-red-cohort-{token[:32]}"
-        lease_seconds = min(
-            3_600,
-            max(60, request.max_total_duration_seconds),
-        )
-        lease = await self._store.acquire_run_lease(
-            workspace_root=self._workspace_root,
-            run_kind=HarnessRunKind.RUNTIME,
-            run_id=parent.run_id,
-            owner_id=owner_id,
-            now=self._now(),
-            lease_seconds=lease_seconds,
-        )
-        if lease is None:
-            raise EvolutionInterventionalRedCohortError(
-                "cohort_runtime_lease_unavailable",
-                "Interventional RED cohort 无法取得独占 Runtime lease。",
-            )
-        grant_id: str | None = None
         try:
-            grant = await self._run_grant_authority.issue(
-                RunDelegationGrantRequest(
-                    idempotency_key=(
-                        f"evo-red-cohort-{request.request_sha256[:18]}-"
-                        f"{lease.epoch}-{hashlib.sha256(owner_id.encode()).hexdigest()[:12]}"
-                    ),
-                    parent_receipt_id=parent_receipt_id,
-                    run_kind=HarnessRunKind.RUNTIME,
-                    lease_owner_id=owner_id,
-                    lease_epoch=lease.epoch,
-                    delegated_tool_names=("bash_run",),
-                ),
-                now=self._now(),
-                ttl_seconds=lease_seconds,
-            )
-            grant_id = grant.contract.grant_id
-            authority = EvolutionInterventionalRedRunAuthority(
+            return await self._cohort_kernel.execute(
+                phase="red",
+                authority_key=request.request_sha256,
                 parent_receipt_id=parent_receipt_id,
-                run_id=parent.run_id,
-                grant_id=grant.contract.grant_id,
-                grant_sha256=grant.contract.grant_sha256,
+                requested_samples=request.requested_samples,
+                max_total_duration_seconds=request.max_total_duration_seconds,
+                load_records=load_records,
+                validate_existing_prefix=validate_existing,
+                validate_run_evidence=validate_evidence,
+                execute_sample=execute_sample,
+                build_receipt=build_receipt,
             )
-            for sample_index in range(len(records), request.requested_samples):
-                receipts.append(await self._sample_executor.execute(
-                    parent_receipt_id=parent_receipt_id,
-                    sample_index=sample_index,
-                    baseline_request=request,
-                    metric_binding=binding,
-                    validation_plan=plan,
-                    profile_binding=profile,
-                    run_authority=authority,
-                ))
-        finally:
-            await self._release_authority(
-                grant_id=grant_id,
-                run_id=parent.run_id,
-                owner_id=owner_id,
-                lease_epoch=lease.epoch,
-            )
-
-        persisted = await self._records(request)
-        _require_continuous_prefix(persisted, request.requested_samples)
-        if len(persisted) != request.requested_samples:
-            raise EvolutionInterventionalRedCohortError(
-                "cohort_persistence_incomplete",
-                "Interventional RED cohort 未完整写入 H5a。",
-            )
-        return _build_cohort_receipt(
-            request,
-            binding,
-            plan,
-            profile,
-            persisted,
-            receipts,
-        )
+        except EvolutionInterventionalCohortKernelError as exc:
+            raise EvolutionInterventionalRedCohortError(exc.code, str(exc)) from exc
 
     async def _records(
         self,
@@ -348,58 +292,6 @@ class EvolutionInterventionalRedCohortExecutor:
                 profile_binding=profile_binding,
             ))
         return receipts
-
-    async def _release_authority(
-        self,
-        *,
-        grant_id: str | None,
-        run_id: str,
-        owner_id: str,
-        lease_epoch: int,
-    ) -> None:
-        cleanup_at = self._now()
-        errors: list[BaseException] = []
-        if grant_id is not None:
-            try:
-                await self._run_grant_authority.revoke(
-                    grant_id=grant_id,
-                    reason="cohort_finished",
-                    revoked_at=cleanup_at,
-                )
-            except BaseException as exc:
-                errors.append(exc)
-        try:
-            released = await self._store.release_run_lease(
-                workspace_root=self._workspace_root,
-                run_kind=HarnessRunKind.RUNTIME,
-                run_id=run_id,
-                owner_id=owner_id,
-                epoch=lease_epoch,
-                now=cleanup_at,
-            )
-            if released is None:
-                errors.append(RuntimeError("Cohort Runtime lease 未能释放。"))
-        except BaseException as exc:
-            errors.append(exc)
-        if errors:
-            detail = "; ".join(str(item) for item in errors)
-            raise EvolutionInterventionalRedCohortError(
-                "cohort_authority_cleanup_failed",
-                f"Interventional RED cohort 权限清理不完整：{detail[:300]}",
-            )
-
-
-def _require_continuous_prefix(
-    records: tuple[HarnessStoredEvalResult, ...],
-    requested_samples: int,
-) -> None:
-    indexes = tuple(item.sample_index for item in records)
-    if indexes != tuple(range(len(records))) or len(records) > requested_samples:
-        raise EvolutionInterventionalRedCohortError(
-            "cohort_sample_prefix_invalid",
-            "Interventional RED H5a sample index 不连续或越界。",
-        )
-
 
 def _build_cohort_receipt(request, binding, plan, profile, records, receipts):
     if len(records) != request.requested_samples or len(receipts) != len(records):
