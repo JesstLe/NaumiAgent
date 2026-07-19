@@ -14,7 +14,7 @@ import stat
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,7 @@ import aiosqlite
 
 from naumi_agent.safety.permissions import PermissionMode
 
-PERMISSION_DECISION_SCHEMA_VERSION = 2
+PERMISSION_DECISION_SCHEMA_VERSION = 3
 _MAX_RECEIPT_BYTES = 32 * 1024
 _MAX_ARGUMENT_BYTES = 256 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -36,6 +36,7 @@ class PermissionDecisionOutcome(StrEnum):
     SESSION_GRANTED = "session_granted"
     BYPASS_ENABLED = "bypass_enabled"
     POLICY_ALLOWED = "policy_allowed"
+    DELEGATED_ALLOWED = "delegated_allowed"
     DENIED = "denied"
 
 
@@ -49,6 +50,7 @@ class PermissionDecisionSource(StrEnum):
     SESSION_GRANT = "session_grant"
     BYPASS = "bypass"
     POLICY = "policy"
+    DELEGATED = "delegated"
 
 
 class PermissionDecisionReceiptError(RuntimeError):
@@ -78,12 +80,15 @@ class PermissionDecisionReceipt:
     risk_level: str
     source_grant_id: str
     delegated_tool_names: tuple[str, ...]
+    parent_receipt_id: str
+    parent_receipt_sha256: str
+    expires_at: str
     decided_at: str
     receipt_sha256: str
 
     def __post_init__(self) -> None:
-        if self.schema_version not in {1, 2}:
-            raise ValueError("权限决定回执 schema_version 必须为 1 或 2。")
+        if self.schema_version not in {1, 2, 3}:
+            raise ValueError("权限决定回执 schema_version 必须为 1、2 或 3。")
         for field in (
             "receipt_id",
             "request_id",
@@ -112,6 +117,9 @@ class PermissionDecisionReceipt:
         _validate_delegated_tool_names(self.delegated_tool_names)
         if self.schema_version == 1 and self.delegated_tool_names:
             raise ValueError("权限决定回执 v1 不支持委托范围。")
+        for field in ("parent_receipt_id", "parent_receipt_sha256", "expires_at"):
+            if self.schema_version < 3 and getattr(self, field):
+                raise ValueError("权限决定回执 v1/v2 不支持子授权字段。")
         _aware_time(self.decided_at, field="decided_at")
         if not _SHA256.fullmatch(self.receipt_sha256):
             raise ValueError("receipt_sha256 必须是 SHA-256。")
@@ -140,6 +148,20 @@ class PermissionDecisionReceipt:
                 raise ValueError("policy 来源与决定不匹配。")
             if self.actor is not PermissionDecisionActor.RUNTIME:
                 raise ValueError("policy 决定必须由 Runtime 记录。")
+        if self.source is PermissionDecisionSource.DELEGATED:
+            if self.outcome is not PermissionDecisionOutcome.DELEGATED_ALLOWED:
+                raise ValueError("delegated 来源与决定不匹配。")
+            if self.actor is not PermissionDecisionActor.RUNTIME:
+                raise ValueError("delegated 决定必须由 Runtime 记录。")
+            _require_identifier(self.parent_receipt_id, field="parent_receipt_id")
+            _require_sha256(self.parent_receipt_sha256, field="parent_receipt_sha256")
+            expires = _aware_time(self.expires_at, field="expires_at")
+            if expires <= _aware_time(self.decided_at, field="decided_at"):
+                raise ValueError("子授权 expires_at 必须晚于 decided_at。")
+            if self.delegated_tool_names:
+                raise ValueError("子授权不得继续委托。")
+        elif self.parent_receipt_id or self.parent_receipt_sha256 or self.expires_at:
+            raise ValueError("非 delegated 回执不得包含子授权字段。")
 
     @property
     def authorizes_execution(self) -> bool:
@@ -181,9 +203,117 @@ class PermissionDecisionReceiptStore:
         delegated_tool_names: tuple[str, ...] = (),
         decided_at: str,
     ) -> PermissionDecisionReceipt:
+        if source is PermissionDecisionSource.DELEGATED:
+            raise ValueError("delegated 回执必须通过 issue_delegated() 签发。")
+        return await self._issue(
+            request_id=request_id,
+            session_id=session_id,
+            run_id=run_id,
+            call_id=call_id,
+            agent_name=agent_name,
+            tool_name=tool_name,
+            tool_family=tool_family,
+            arguments=arguments,
+            outcome=outcome,
+            actor=actor,
+            source=source,
+            permission_mode=permission_mode,
+            risk_level=risk_level,
+            source_grant_id=source_grant_id,
+            delegated_tool_names=delegated_tool_names,
+            parent_receipt_id="",
+            parent_receipt_sha256="",
+            expires_at="",
+            decided_at=decided_at,
+        )
+
+    async def issue_delegated(
+        self,
+        *,
+        parent_receipt_id: str,
+        request_id: str,
+        call_id: str,
+        tool_name: str,
+        tool_family: str,
+        arguments: Mapping[str, object],
+        risk_level: str,
+        decided_at: str,
+        ttl_seconds: int = 60,
+    ) -> PermissionDecisionReceipt:
+        """Derive one exact, non-transitive child authorization from a parent receipt."""
+        parent = await self.get(parent_receipt_id)
+        if parent is None or not parent.authorizes_execution:
+            raise PermissionDecisionReceiptConflictError("父权限回执不存在或不允许执行。")
+        if parent.source is PermissionDecisionSource.DELEGATED:
+            raise PermissionDecisionReceiptConflictError("子授权不得继续派生子授权。")
+        if parent.source not in {
+            PermissionDecisionSource.POLICY,
+            PermissionDecisionSource.BYPASS,
+            PermissionDecisionSource.USER_CONFIRMATION,
+        }:
+            raise PermissionDecisionReceiptConflictError(
+                "当前父权限来源不支持派生子授权。"
+            )
+        if tool_name not in parent.delegated_tool_names:
+            raise PermissionDecisionReceiptConflictError("父权限回执未授权该下游工具。")
+        if not parent.run_id:
+            raise PermissionDecisionReceiptConflictError("父权限回执未绑定 run_id。")
+        decided = _aware_time(decided_at, field="decided_at")
+        parent_time = _aware_time(parent.decided_at, field="parent.decided_at")
+        if decided < parent_time or decided - parent_time > timedelta(seconds=300):
+            raise PermissionDecisionReceiptConflictError("父权限回执已过期或来自未来。")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+            raise TypeError("ttl_seconds 必须是整数。")
+        if not 1 <= ttl_seconds <= 120:
+            raise ValueError("ttl_seconds 必须在 1 到 120 之间。")
+        return await self._issue(
+            request_id=request_id,
+            session_id=parent.session_id,
+            run_id=parent.run_id,
+            call_id=call_id,
+            agent_name=parent.agent_name,
+            tool_name=tool_name,
+            tool_family=tool_family,
+            arguments=arguments,
+            outcome=PermissionDecisionOutcome.DELEGATED_ALLOWED,
+            actor=PermissionDecisionActor.RUNTIME,
+            source=PermissionDecisionSource.DELEGATED,
+            permission_mode=parent.permission_mode,
+            risk_level=risk_level,
+            source_grant_id="",
+            delegated_tool_names=(),
+            parent_receipt_id=parent.receipt_id,
+            parent_receipt_sha256=parent.receipt_sha256,
+            expires_at=(decided + timedelta(seconds=ttl_seconds)).isoformat(),
+            decided_at=decided.isoformat(),
+        )
+
+    async def _issue(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        run_id: str,
+        call_id: str,
+        agent_name: str,
+        tool_name: str,
+        tool_family: str,
+        arguments: Mapping[str, object],
+        outcome: PermissionDecisionOutcome,
+        actor: PermissionDecisionActor,
+        source: PermissionDecisionSource,
+        permission_mode: PermissionMode,
+        risk_level: str,
+        source_grant_id: str,
+        delegated_tool_names: tuple[str, ...],
+        parent_receipt_id: str,
+        parent_receipt_sha256: str,
+        expires_at: str,
+        decided_at: str,
+    ) -> PermissionDecisionReceipt:
         _validate_delegated_tool_names(delegated_tool_names)
         draft = PermissionDecisionReceipt(
-            schema_version=2,
+            schema_version=3,
             receipt_id=uuid4().hex,
             request_id=request_id,
             session_id=session_id,
@@ -200,6 +330,9 @@ class PermissionDecisionReceiptStore:
             risk_level=risk_level,
             source_grant_id=source_grant_id,
             delegated_tool_names=delegated_tool_names,
+            parent_receipt_id=parent_receipt_id,
+            parent_receipt_sha256=parent_receipt_sha256,
+            expires_at=expires_at,
             decided_at=_canonical_time(decided_at, field="decided_at"),
             receipt_sha256="0" * 64,
         )
@@ -274,7 +407,7 @@ class PermissionDecisionReceiptStore:
         try:
             with sqlite3.connect(self._db_path) as db:
                 version = int(db.execute("PRAGMA user_version").fetchone()[0])
-                if version not in {1, PERMISSION_DECISION_SCHEMA_VERSION}:
+                if version not in {1, 2, PERMISSION_DECISION_SCHEMA_VERSION}:
                     raise PermissionDecisionReceiptError(
                         f"权限决定回执 schema v{version} 不受支持。"
                     )
@@ -317,7 +450,7 @@ class PermissionDecisionReceiptStore:
                         await db.execute(
                             f"PRAGMA user_version = {PERMISSION_DECISION_SCHEMA_VERSION}"
                         )
-                    elif version == 1:
+                    elif version in {1, 2}:
                         await db.execute(
                             f"PRAGMA user_version = {PERMISSION_DECISION_SCHEMA_VERSION}"
                         )
@@ -365,7 +498,7 @@ def verify_permission_decision_receipt(receipt: PermissionDecisionReceipt) -> bo
 
 
 def _same_decision(left: PermissionDecisionReceipt, right: PermissionDecisionReceipt) -> bool:
-    ignored = {"receipt_id", "decided_at", "receipt_sha256"}
+    ignored = {"receipt_id", "decided_at", "expires_at", "receipt_sha256"}
     return all(
         getattr(left, field) == getattr(right, field)
         for field in left.__dataclass_fields__
@@ -378,6 +511,10 @@ def _receipt_digest(receipt: PermissionDecisionReceipt) -> str:
     payload.pop("receipt_sha256")
     if receipt.schema_version == 1:
         payload.pop("delegated_tool_names")
+    if receipt.schema_version < 3:
+        payload.pop("parent_receipt_id")
+        payload.pop("parent_receipt_sha256")
+        payload.pop("expires_at")
     return hashlib.sha256(
         json.dumps(
             _json_value(payload),
@@ -410,12 +547,24 @@ def _deserialize_receipt(raw: str) -> PermissionDecisionReceipt:
         raise ValueError("持久化权限决定回执字段集合无效。")
     schema_version = payload.get("schema_version")
     expected = set(PermissionDecisionReceipt.__dataclass_fields__)
+    child_fields = {"parent_receipt_id", "parent_receipt_sha256", "expires_at"}
     if schema_version == 1:
         expected.remove("delegated_tool_names")
+        expected.difference_update(child_fields)
         if set(payload) != expected:
             raise ValueError("持久化权限决定回执字段集合无效。")
         payload["delegated_tool_names"] = ()
+        payload.update({field: "" for field in child_fields})
     elif schema_version == 2:
+        expected.difference_update(child_fields)
+        if set(payload) != expected:
+            raise ValueError("持久化权限决定回执字段集合无效。")
+        delegated_tool_names = payload["delegated_tool_names"]
+        if not isinstance(delegated_tool_names, list):
+            raise ValueError("持久化权限决定回执委托范围无效。")
+        payload["delegated_tool_names"] = tuple(delegated_tool_names)
+        payload.update({field: "" for field in child_fields})
+    elif schema_version == 3:
         if set(payload) != expected:
             raise ValueError("持久化权限决定回执字段集合无效。")
         delegated_tool_names = payload["delegated_tool_names"]
@@ -473,6 +622,11 @@ def _receipt_from_sqlite_row(row: tuple[Any, ...]) -> PermissionDecisionReceipt:
 def _require_identifier(value: str, *, field: str) -> None:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError(f"{field} 必须是安全标识符。")
+
+
+def _require_sha256(value: str, *, field: str) -> None:
+    if not isinstance(value, str) or not _SHA256.fullmatch(value):
+        raise ValueError(f"{field} 必须是 SHA-256。")
 
 
 def _validate_delegated_tool_names(value: tuple[str, ...]) -> None:

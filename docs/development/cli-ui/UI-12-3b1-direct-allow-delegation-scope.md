@@ -24,9 +24,9 @@
 - 委托白名单乱序、重复、超限或非法标识符在持久化前拒绝；
 - 权限、ExecutionGrant、Engine、Catalog 与 Runtime Composition 小模块验证通过。
 
-## 边界与下一步
+## 后续状态
 
-- 父回执尚不能直接执行 `bash_run`；下一切片必须生成独立子回执，绑定父 receipt id/digest、精确 Shell spec、
-  同一 session/run 与短期有效期；
+- UI-12.3b2 已实现独立子回执，绑定父 receipt id/digest、精确 Shell spec 参数摘要、同一 session/run 与短期
+  有效期，并禁止递归委托；详见 `UI-12-3b2-exact-child-authorization.md`；
 - session grant 的后续调用、Hook/plan block、跨会话查询、retention/export 仍属于 UI-12.3b 后续；
-- `/harness check` 尚未切换 Sandbox Runner，禁止把白名单本身当作子授权。
+- `/harness check` 尚未切换 Sandbox Runner；下一步仍需 Worker registration/lease/grant/ToolJob admission 组合。

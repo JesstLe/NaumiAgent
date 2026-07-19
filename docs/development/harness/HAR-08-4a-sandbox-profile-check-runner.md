@@ -33,7 +33,8 @@ admission 的 `AdmittedSandboxShellJob`。Runner 只校验 Shell spec/Job 参数
 
 ## 5. 未完成项
 
-- `/harness check` 与 `harness_run_check` 的生产切换仍待“外层权限决定 -> 内层 ExecutionGrant”委托合同；
+- UI-12.3b2 已完成“外层权限决定 -> 精确内层子回执 -> delegated ExecutionGrant”合同；生产切换仍待单次
+  Worker registration、Tool lease 与 ToolJob admission composer；
 - 尚未接 Eval Suite/重复 Batch/Baseline Comparator，也没有并行调度、缓存或 UI typed progress；
 - 尚未为自进化候选建立 baseline/candidate 两组干预 cohort；EVO-03 只能把本切片视为执行前置；
 - Windows fail closed，Linux bwrap 仍需平台 CI 证据。

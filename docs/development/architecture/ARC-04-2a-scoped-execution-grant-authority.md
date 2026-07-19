@@ -54,8 +54,8 @@ daemon 接收 ToolJob 前必须用 grant id 与实际 request 再验证：
 
 ## 5. 持久化与隐私
 
-- 独立 ExecutionGrant SQLite schema v1；其依赖的 Permission Decision Store 已升级 schema v2，并保持 v1
-  receipt 只读兼容。父目录/数据库均在首次签发时按需创建；POSIX 分别收紧为 0700/0600；
+- 独立 ExecutionGrant SQLite schema v1；其依赖的 Permission Decision Store 已升级 schema v3，并保持
+  v1/v2 receipt 摘要兼容。父目录/数据库均在首次签发时按需创建；POSIX 分别收紧为 0700/0600；
 - 未版本化非空库、未来 schema、损坏合同、索引列不一致和错误路径类型拒绝接管；
 - contract JSON 仅含参数 digest，不含 command、环境变量、reason 正文、用户消息或 API key；
 - grant id、request digest 与 contract digest 分别校验，篡改不能降级为“缺失”；
@@ -77,10 +77,10 @@ daemon 接收 ToolJob 前必须用 grant id 与实际 request 再验证：
 
 - ARC-04.2b 已让 `ImmutableToolJob` admission 消费本 grant，ARC-04.2c 已补齐 durable lifecycle 与
   idempotent terminal receipt；尚缺真正执行的 daemon；
-- UI-12.3a 已提供跨重启 confirmation decision receipt；UI-12.3b1 又提供 policy/bypass direct-allow receipt
-  与有限委托范围，因此 policy execution grant 已可验证签发。父回执派生精确子授权仍未完成；
+- UI-12.3a 已提供跨重启 confirmation decision receipt；UI-12.3b1/3b2 又提供 direct-allow 父回执、有限
+  委托范围与精确短期子回执，因此 policy/delegated execution grant 均可验证签发；
 - Worker admission 的能力/隔离/heartbeat/capacity 仍需与 grant validation 同时通过，二者不可互相替代；
 - grant、Worker Registry、Harness lease 位于三个 SQLite Store，签发不是跨库原子事务；每次消费重读三个
   authority，以 fencing 抵御签发后的 takeover；未来 ARC-02 可用 Runtime Service 单写者减少竞态窗口；
-- ARC-04.3a/HAR-08.4a 已完成内部隔离执行前置；下一最小切片应把 direct-allow 父回执派生为精确、短期的
-  Shell 子授权，再安全切换生产 `/harness check`。
+- ARC-04.3a/HAR-08.4a 与 UI-12.3b2 已完成隔离执行/授权前置；下一最小切片应组合 Worker registration、Tool
+  lease、grant 与 ToolJob admission，再安全切换生产 `/harness check`。
