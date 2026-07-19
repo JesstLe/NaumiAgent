@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import re
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -20,9 +19,15 @@ from naumi_agent.daemons.run_delegation_grants import (
 )
 from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.evolution.interventional_sample_kernel import (
+    INTERVENTIONAL_CHECK_RUNNER,
+    INTERVENTIONAL_SAMPLE_RUNNER,
     EvolutionInterventionalSampleKernel,
     EvolutionInterventionalSampleKernelError,
     EvolutionInterventionalSampleSource,
+    build_interventional_sample_suite,
+    interventional_lifecycle_digest,
+    interventional_run_grant_digest,
+    interventional_run_scope,
 )
 from naumi_agent.evolution.self_review import SELF_REVIEW_STATIC_RUNNER_VERSION
 from naumi_agent.evolution.self_review_eval_runtime import (
@@ -48,24 +53,14 @@ from naumi_agent.harness.eval_identity import (
     build_eval_baseline_identity,
     capture_eval_platform_identity,
 )
-from naumi_agent.harness.eval_models import (
-    EvalCaseStatus,
-    EvalRunStatus,
-    HarnessEvalCaseResult,
-    HarnessEvalComparisonPolicy,
-    HarnessEvalSuiteResult,
-)
+from naumi_agent.harness.eval_models import HarnessEvalComparisonPolicy, HarnessEvalSuiteResult
 from naumi_agent.harness.models import HarnessCheckSpec
-from naumi_agent.harness.sandbox_checks import (
-    HarnessSandboxCheckResult,
-    HarnessSandboxCheckRunner,
-    HarnessSandboxCheckStatus,
-)
+from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
-INTERVENTIONAL_RED_CHECK_RUNNER = "evolution_profile_check@1"
-INTERVENTIONAL_RED_SAMPLE_RUNNER = "evolution_interventional_red@1"
+INTERVENTIONAL_RED_CHECK_RUNNER = INTERVENTIONAL_CHECK_RUNNER
+INTERVENTIONAL_RED_SAMPLE_RUNNER = INTERVENTIONAL_SAMPLE_RUNNER
 INTERVENTIONAL_RED_SAMPLE_POLICY = "evolution-interventional-red-sample-v2"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
@@ -174,6 +169,10 @@ class EvolutionInterventionalRedCheckSampleExecutor:
             now=now,
         )
 
+    @property
+    def sample_kernel(self) -> EvolutionInterventionalSampleKernel:
+        return self._kernel
+
     async def execute(
         self,
         *,
@@ -191,7 +190,12 @@ class EvolutionInterventionalRedCheckSampleExecutor:
             validation_plan,
             profile_binding,
         )
-        configuration, identity = _build_identity(request, metrics, plan, profile)
+        configuration, identity = build_interventional_identity(
+            request,
+            metrics,
+            plan,
+            profile,
+        )
 
         def validate_existing(
             stored: HarnessStoredEvalResult,
@@ -208,11 +212,11 @@ class EvolutionInterventionalRedCheckSampleExecutor:
                 configuration=configuration,
                 identity=identity,
             )
-            return _build_suite_result(
+            return build_interventional_sample_suite(
                 request,
                 results,
+                phase="red",
                 metric_result=metric_result,
-                configuration=configuration,
                 identity=identity,
                 run_scope=run_scope,
                 run_grant_sha256=grant_sha256,
@@ -320,64 +324,21 @@ def _sample_run_id(parent_run_id: str, sample_index: int, check_id: str) -> str:
     return f"evored-{digest[:32]}"
 
 
-def _build_suite_result(
-    request: EvolutionBaselineCohortRequest,
-    results: list[HarnessSandboxCheckResult],
-    *,
-    metric_result: HarnessEvalSuiteResult,
-    configuration: HarnessEvalConfigurationIdentity,
-    identity,
-    run_scope: Literal["sample", "cohort"],
-    run_grant_sha256: str | None,
-) -> HarnessEvalSuiteResult:
+def build_interventional_configuration(request, metrics, plan, profile):
     policy = HarnessEvalComparisonPolicy()
-    cases = (
-        tuple(
-            _case_from_result(
-                item,
-                run_scope=run_scope,
-                run_grant_sha256=run_grant_sha256,
-            )
-            for item in results
-        )
-        + metric_result.cases
-    )
-    status = (
-        EvalRunStatus.EVALUATION_ERROR
-        if any(item.status is EvalCaseStatus.EVALUATION_ERROR for item in cases)
-        else EvalRunStatus.FAILED
-        if any(item.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for item in cases)
-        else EvalRunStatus.PASSED
-    )
-    return HarnessEvalSuiteResult(
+    return HarnessEvalConfigurationIdentity.create(
         suite_id=request.suite_id,
-        title="Evolution interventional RED sample",
-        suite_path="evolution/red/interventional",
-        suite_sha256=configuration.suite_sha256,
-        status=status,
-        cases=cases,
-        code=f"interventional_red_{status.value}",
-        message="精确 Git baseline 的 Profile checks 与可信 metrics 已完成。",
-        comparison_policy=policy,
-        baseline_identity=identity,
-        duration_ms=(
-            sum(item.duration_ms for item in results) + metric_result.duration_ms
-        ),
-    )
-
-
-def _build_identity(request, metrics, plan, profile):
-    policy = HarnessEvalComparisonPolicy()
-    suite_sha256 = _interventional_suite_sha(request, metrics, plan, profile)
-    configuration = HarnessEvalConfigurationIdentity.create(
-        suite_id=request.suite_id,
-        suite_sha256=suite_sha256,
+        suite_sha256=interventional_suite_sha(request, metrics, plan, profile),
         profile_sha256=request.profile_sha256,
         policy_sha256=policy.sha256,
         runner_version=INTERVENTIONAL_RED_SAMPLE_RUNNER,
         repetitions=request.requested_samples,
         live=False,
     )
+
+
+def build_interventional_identity(request, metrics, plan, profile):
+    configuration = build_interventional_configuration(request, metrics, plan, profile)
     identity = build_eval_baseline_identity(
         ".",
         configuration=configuration,
@@ -428,33 +389,6 @@ async def _run_metric_sample(
         ) from exc
 
 
-def _case_from_result(
-    result: HarnessSandboxCheckResult,
-    *,
-    run_scope: Literal["sample", "cohort"],
-    run_grant_sha256: str | None,
-) -> HarnessEvalCaseResult:
-    if result.status is HarnessSandboxCheckStatus.PASSED:
-        status = EvalCaseStatus.PASSED
-    elif result.status is HarnessSandboxCheckStatus.FAILED:
-        status = EvalCaseStatus.IMPLEMENTATION_FAILURE
-    else:
-        status = EvalCaseStatus.EVALUATION_ERROR
-    return HarnessEvalCaseResult(
-        case_id=result.check_id,
-        runner=INTERVENTIONAL_RED_CHECK_RUNNER,
-        status=status,
-        code=result.status.value,
-        message=(
-            f"{result.message} lifecycle_sha256="
-            f"{result.lifecycle_receipt_sha256 or 'missing'} "
-            f"run_scope={run_scope} "
-            f"run_grant_sha256={run_grant_sha256 or 'missing'}"
-        ),
-        duration_ms=result.duration_ms,
-    )
-
-
 def _validate_existing(
     stored: HarnessStoredEvalResult,
     request: EvolutionBaselineCohortRequest,
@@ -473,7 +407,7 @@ def _validate_existing(
         item for item in result.cases
         if item.runner == SELF_REVIEW_STATIC_RUNNER_VERSION
     )
-    expected_suite_sha256 = _interventional_suite_sha(
+    expected_suite_sha256 = interventional_suite_sha(
         request,
         metrics,
         plan,
@@ -494,9 +428,9 @@ def _validate_existing(
         and identity.configuration.suite_sha256 == expected_suite_sha256
         and result.suite_sha256 == identity.configuration.suite_sha256
         and tuple(item.case_id for item in check_cases) == tuple(item.id for item in checks)
-        and all(_lifecycle_digest(item.message) is not None for item in check_cases)
-        and all(_run_scope(item.message) is not None for item in check_cases)
-        and all(_run_grant_digest(item.message) is not None for item in check_cases)
+        and all(interventional_lifecycle_digest(item.message) is not None for item in check_cases)
+        and all(interventional_run_scope(item.message) is not None for item in check_cases)
+        and all(interventional_run_grant_digest(item.message) is not None for item in check_cases)
         and len(metric_cases) == len(request.metrics)
         and all(item.metric_observations for item in metric_cases)
         and observed_metrics == tuple(item.metric_name for item in request.metrics)
@@ -562,7 +496,7 @@ def _sha256_payload(payload: object) -> str:
     ).encode("utf-8")).hexdigest()
 
 
-def _interventional_suite_sha(request, metrics, plan, profile) -> str:
+def interventional_suite_sha(request, metrics, plan, profile) -> str:
     return _sha256_payload({
         "request_sha256": request.request_sha256,
         "metric_binding_sha256": metrics.binding_sha256,
@@ -572,23 +506,8 @@ def _interventional_suite_sha(request, metrics, plan, profile) -> str:
     })
 
 
-def _lifecycle_digest(message: str) -> str | None:
-    match = re.search(r"(?:^| )lifecycle_sha256=([0-9a-f]{64})(?:$| )", message)
-    return match.group(1) if match is not None else None
-
-
-def _run_scope(message: str) -> str | None:
-    match = re.search(r"(?:^| )run_scope=(sample|cohort)(?:$| )", message)
-    return match.group(1) if match is not None else None
-
-
-def _run_grant_digest(message: str) -> str | None:
-    match = re.search(r"(?:^| )run_grant_sha256=([0-9a-f]{64})(?:$| )", message)
-    return match.group(1) if match is not None else None
-
-
 def _require_lifecycle_digest(message: str) -> str:
-    digest = _lifecycle_digest(message)
+    digest = interventional_lifecycle_digest(message)
     if digest is None:
         raise EvolutionInterventionalRedCheckSampleError(
             "lifecycle_receipt_missing",
@@ -615,5 +534,8 @@ __all__ = [
     "INTERVENTIONAL_RED_CHECK_RUNNER",
     "INTERVENTIONAL_RED_SAMPLE_POLICY",
     "INTERVENTIONAL_RED_SAMPLE_RUNNER",
+    "build_interventional_configuration",
+    "build_interventional_identity",
+    "interventional_suite_sha",
     "validate_interventional_red_authority",
 ]

@@ -21,18 +21,28 @@ from naumi_agent.daemons.run_delegation_grants import (
 from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.evolution.validation_cohorts import EvolutionBaselineCohortRequest
 from naumi_agent.evolution.validation_plans import EvolutionValidationProfileBinding
-from naumi_agent.harness.eval_models import HarnessEvalSuiteResult
+from naumi_agent.harness.eval_identity import HarnessEvalBaselineIdentity
+from naumi_agent.harness.eval_models import (
+    EvalCaseStatus,
+    EvalRunStatus,
+    HarnessEvalCaseResult,
+    HarnessEvalComparisonPolicy,
+    HarnessEvalSuiteResult,
+)
 from naumi_agent.harness.models import HarnessCheckSpec
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckResult,
     HarnessSandboxCheckRunner,
+    HarnessSandboxCheckStatus,
     HarnessSandboxSourceOverlay,
 )
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 _SHA256_RE = r"^[0-9a-f]{64}$"
+INTERVENTIONAL_CHECK_RUNNER = "evolution_profile_check@1"
+INTERVENTIONAL_SAMPLE_RUNNER = "evolution_interventional_red@1"
 
 
 class _StrictModel(BaseModel):
@@ -372,6 +382,94 @@ class EvolutionInterventionalSampleKernel:
             )
 
 
+def build_interventional_sample_suite(
+    request: EvolutionBaselineCohortRequest,
+    results: list[HarnessSandboxCheckResult],
+    *,
+    phase: Literal["red", "green"],
+    metric_result: HarnessEvalSuiteResult,
+    identity: HarnessEvalBaselineIdentity,
+    run_scope: Literal["sample", "cohort"],
+    run_grant_sha256: str,
+) -> HarnessEvalSuiteResult:
+    """Build the identical comparable suite shape for RED and GREEN samples."""
+    cases = (
+        tuple(
+            _case_from_result(
+                item,
+                run_scope=run_scope,
+                run_grant_sha256=run_grant_sha256,
+            )
+            for item in results
+        )
+        + metric_result.cases
+    )
+    status = (
+        EvalRunStatus.EVALUATION_ERROR
+        if any(item.status is EvalCaseStatus.EVALUATION_ERROR for item in cases)
+        else EvalRunStatus.FAILED
+        if any(item.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for item in cases)
+        else EvalRunStatus.PASSED
+    )
+    return HarnessEvalSuiteResult(
+        suite_id=request.suite_id,
+        title=f"Evolution interventional {phase.upper()} sample",
+        suite_path=f"evolution/{phase}/interventional",
+        suite_sha256=identity.configuration.suite_sha256,
+        status=status,
+        cases=cases,
+        code=f"interventional_{phase}_{status.value}",
+        message=(
+            f"精确 Git {'baseline' if phase == 'red' else 'candidate overlay'} 的 "
+            "Profile checks 与可信 metrics 已完成。"
+        ),
+        comparison_policy=HarnessEvalComparisonPolicy(),
+        baseline_identity=identity,
+        duration_ms=sum(item.duration_ms for item in results) + metric_result.duration_ms,
+    )
+
+
+def interventional_lifecycle_digest(message: str) -> str | None:
+    match = re.search(r"(?:^| )lifecycle_sha256=([0-9a-f]{64})(?:$| )", message)
+    return match.group(1) if match is not None else None
+
+
+def interventional_run_scope(message: str) -> str | None:
+    match = re.search(r"(?:^| )run_scope=(sample|cohort)(?:$| )", message)
+    return match.group(1) if match is not None else None
+
+
+def interventional_run_grant_digest(message: str) -> str | None:
+    match = re.search(r"(?:^| )run_grant_sha256=([0-9a-f]{64})(?:$| )", message)
+    return match.group(1) if match is not None else None
+
+
+def _case_from_result(
+    result: HarnessSandboxCheckResult,
+    *,
+    run_scope: Literal["sample", "cohort"],
+    run_grant_sha256: str,
+) -> HarnessEvalCaseResult:
+    if result.status is HarnessSandboxCheckStatus.PASSED:
+        status = EvalCaseStatus.PASSED
+    elif result.status is HarnessSandboxCheckStatus.FAILED:
+        status = EvalCaseStatus.IMPLEMENTATION_FAILURE
+    else:
+        status = EvalCaseStatus.EVALUATION_ERROR
+    return HarnessEvalCaseResult(
+        case_id=result.check_id,
+        runner=INTERVENTIONAL_CHECK_RUNNER,
+        status=status,
+        code=result.status.value,
+        message=(
+            f"{result.message} lifecycle_sha256="
+            f"{result.lifecycle_receipt_sha256 or 'missing'} "
+            f"run_scope={run_scope} run_grant_sha256={run_grant_sha256}"
+        ),
+        duration_ms=result.duration_ms,
+    )
+
+
 def _check_matches(check, expected, bound) -> bool:
     return (
         _sha256_payload(check.model_dump(mode="json")) == expected.spec_sha256 == bound.spec_sha256
@@ -405,4 +503,10 @@ __all__ = [
     "EvolutionInterventionalSampleKernel",
     "EvolutionInterventionalSampleKernelError",
     "EvolutionInterventionalSampleSource",
+    "INTERVENTIONAL_CHECK_RUNNER",
+    "INTERVENTIONAL_SAMPLE_RUNNER",
+    "build_interventional_sample_suite",
+    "interventional_lifecycle_digest",
+    "interventional_run_grant_digest",
+    "interventional_run_scope",
 ]
