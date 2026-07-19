@@ -78,5 +78,6 @@ heartbeat timeout 取 `min(lease_seconds, ceil(renew_interval × 2.5))`，下限
 - heartbeat 与 lease renew 是同一 Store 中的两个顺序事务，不是单 SQL 原子提交；
 - offline 只是一种诊断状态，不会自动 takeover、kill 或 restart；这些属于 ARC-04.6/HAR-10.5。
 
-UI-13.1b 已完成 typed heartbeat 到 Doctor 的第一个跨域只读投影。下一最小切片应根据依赖选择 browser/agent
-的真实 producer，或让 UI-18 消费通用 Worker 健康；不要直接扩张成完整 Supervisor。
+UI-13.1b 已完成 typed heartbeat 到 Doctor 的第一个跨域只读投影，HAR-10.2c 已让默认 New UI Bridge 成为
+真实 runtime producer。下一最小切片应根据依赖选择 browser/agent producer、runtime worker list/retention，
+或让 UI-18 消费通用 Worker 健康；不要直接扩张成完整 Supervisor。

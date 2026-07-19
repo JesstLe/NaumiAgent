@@ -1470,6 +1470,98 @@ async def test_bridge_keeps_heartbeat_live_and_bounds_parallel_eval_batches() ->
 
 
 @pytest.mark.asyncio
+async def test_bridge_persists_runtime_heartbeat_until_graceful_shutdown(tmp_path) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path / "workspace"
+    engine.workspace_root.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine.harness_service = SimpleNamespace(store=store)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.emit_ready()
+    heartbeat = await store.get_heartbeat(
+        workspace_root=engine.workspace_root,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id=bridge._runtime_heartbeat_subject_id,
+    )
+    assert heartbeat is not None
+    assert heartbeat.phase is HarnessHeartbeatPhase.RUNNING
+    assert heartbeat.sequence == 2
+    assert heartbeat.instance_id == bridge._runtime_heartbeat_instance_id
+
+    await bridge.shutdown()
+    stopped = await HarnessStore(store.db_path).get_heartbeat(
+        workspace_root=engine.workspace_root,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id=bridge._runtime_heartbeat_subject_id,
+    )
+    assert stopped is not None
+    assert stopped.phase is HarnessHeartbeatPhase.STOPPED
+    assert stopped.sequence == 4
+    records = [json.loads(line) for line in writer.getvalue().splitlines()]
+    assert records[0]["type"] == "ready"
+    assert records[-1]["type"] == "shutdown"
+
+
+@pytest.mark.asyncio
+async def test_bridge_reports_runtime_heartbeat_startup_degradation_once(tmp_path) -> None:
+    class FailingHeartbeatStore(HarnessStore):
+        async def record_heartbeat(self, **kwargs: Any):
+            raise OSError("simulated heartbeat outage")
+
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path / "workspace"
+    engine.workspace_root.mkdir()
+    engine.harness_service = SimpleNamespace(
+        store=FailingHeartbeatStore(tmp_path / "harness.db")
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.emit_ready()
+    await bridge._emit_runtime_heartbeat_degraded()
+    records = [json.loads(line) for line in writer.getvalue().splitlines()]
+    notices = [
+        record for record in records
+        if record["type"] == "ui/message"
+        and record["payload"].get("type") == "system_notice"
+    ]
+    assert records[0]["type"] == "ready"
+    assert len(notices) == 1
+    assert notices[0]["payload"]["title"] == "运行时心跳降级"
+    assert "当前运行仍可继续" in notices[0]["payload"]["content"]
+    await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_marks_runtime_heartbeat_failed_when_engine_shutdown_fails(tmp_path) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path / "workspace"
+    engine.workspace_root.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.shutdown = AsyncMock(side_effect=RuntimeError("simulated shutdown failure"))
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(io.StringIO())
+
+    await bridge.emit_ready()
+    with pytest.raises(RuntimeError, match="shutdown failure"):
+        await bridge.shutdown()
+
+    failed = await store.get_heartbeat(
+        workspace_root=engine.workspace_root,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id=bridge._runtime_heartbeat_subject_id,
+    )
+    assert failed is not None
+    assert failed.phase is HarnessHeartbeatPhase.FAILED
+    assert failed.detail_code == "runtime_shutdown_failed"
+
+
+@pytest.mark.asyncio
 async def test_bridge_handles_harness_replay_request() -> None:
     class DetailService:
         async def replay_run(self, run_id: str) -> HarnessReplayLookup:
@@ -1895,7 +1987,7 @@ async def test_bridge_agent_snapshot_updates_and_session_isolation(
             for record in _records(writer)[close_index:]
         )
     finally:
-        await engine.shutdown()
+        await bridge.shutdown()
 
 
 @pytest.mark.asyncio
