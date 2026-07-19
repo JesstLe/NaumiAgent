@@ -6,6 +6,14 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from naumi_agent.evolution.adversarial_batch_requests import (
+        AdversarialBatchCheckCase,
+        AdversarialBatchLane,
+        AdversarialBatchProbeCase,
+        EvolutionAdversarialBatchRequest,
+        EvolutionAdversarialBatchRequestBuilder,
+        EvolutionAdversarialBatchRequestError,
+    )
     from naumi_agent.evolution.adversarial_probe_contracts import (
         AdversarialProbeBlocker,
         AdversarialProbeCheckBinding,
@@ -237,6 +245,9 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "AdversarialBatchCheckCase",
+    "AdversarialBatchLane",
+    "AdversarialBatchProbeCase",
     "AdversarialProbeBlocker",
     "AdversarialProbeCheckBinding",
     "AdversarialProbeCoverage",
@@ -246,6 +257,9 @@ __all__ = [
     "EvolutionAdversarialProbeContractBuilder",
     "EvolutionAdversarialProbeContractError",
     "EvolutionAdversarialProbeRegistry",
+    "EvolutionAdversarialBatchRequest",
+    "EvolutionAdversarialBatchRequestBuilder",
+    "EvolutionAdversarialBatchRequestError",
     "EvolutionEvidence",
     "EvolutionFailureAttributionBuilder",
     "EvolutionFailureAttributionError",
@@ -413,6 +427,14 @@ def __getattr__(name: str) -> object:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
+    adversarial_batch_request_exports = {
+        "AdversarialBatchCheckCase",
+        "AdversarialBatchLane",
+        "AdversarialBatchProbeCase",
+        "EvolutionAdversarialBatchRequest",
+        "EvolutionAdversarialBatchRequestBuilder",
+        "EvolutionAdversarialBatchRequestError",
+    }
     adversarial_probe_contract_exports = {
         "AdversarialProbeBlocker",
         "AdversarialProbeCheckBinding",
@@ -643,7 +665,9 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewComparisonError",
         "EvolutionSelfReviewComparisonExecutor",
     }
-    if name in adversarial_probe_contract_exports:
+    if name in adversarial_batch_request_exports:
+        module_name = "adversarial_batch_requests"
+    elif name in adversarial_probe_contract_exports:
         module_name = "adversarial_probe_contracts"
     elif name in candidate_exports:
         module_name = "candidate"
