@@ -62,7 +62,8 @@ Blocked runner 没有 timeout 时不会伪造耗时，其缺失由 blocking code
 ## 安全与 UX 语义
 
 - `binding_status=ready` 只表示所有 metric authority 与 timeout 完整，不表示 cohort 可以执行；
-- `execution_ready` 始终为 false，ARC-04 worker 仍是强制依赖；
+- `execution_ready` 在本 v1 binding 中仍固定为 false；HAR-08.4c 已满足精确 baseline source 与单项 ARC-04
+  Worker 前置，但 executor 还必须复验 Request/Binding 并组合全部 Check/metric；
 - 绑定不保存绝对 workspace/worktree 路径、源码、argv 或 secret；
 - blocking codes 稳定排序并纳入 artifact digest，UI 后续可按原因展示“缺 fixture / 缺 runner / 超预算”；
 - 不调用模型，不访问网络，不修改主工作树或 Lease worktree。
@@ -85,5 +86,5 @@ Blocked runner 没有 timeout 时不会伪造耗时，其缺失由 blocking code
   runner，不能仅补 Replay fixture；
 - `feedback_recurrence` 需要独立 observation-window 数据模型、最短观察期和缺失数据语义；
 - EVO-03.2c/3.3a 已完成 Self-Review 静态 RED/GREEN cohort、H5a 连续 sample 与 completion receipt；
-- ARC-04 ephemeral worker 和执行项目代码的 baseline 仍未实现；
+- HAR-08.4c 已实现精确 revision 的单项项目 Check；完整 baseline sample/cohort executor 仍未实现；
 - EVO-03.4a/3.5a 已冻结 RED→GREEN 数值判定与 Failure Attribution；下一步跨查 ARC-04/EVO-03.6。

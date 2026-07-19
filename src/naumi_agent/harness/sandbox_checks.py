@@ -35,7 +35,9 @@ from naumi_agent.harness.fingerprint import (
 from naumi_agent.harness.models import HarnessCheckSpec
 
 _CHECK_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_GIT_OBJECT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 _MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+_MAX_GIT_METADATA_BYTES = 64 * 1024 * 1024
 
 
 class HarnessSandboxCheckStatus(StrEnum):
@@ -71,6 +73,7 @@ class HarnessSandboxCheckResult:
     check_id: str
     run_id: str
     status: HarnessSandboxCheckStatus
+    source_revision: str | None
     source_tree_sha256: str
     snapshot_manifest_sha256: str
     profile_digest: str
@@ -81,6 +84,20 @@ class HarnessSandboxCheckResult:
     duration_ms: int
     artifact_path: Path | None
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class _GitRevisionEntry:
+    mode: str
+    object_id: str
+    path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _GitRevisionSnapshot:
+    commit: str
+    tree_sha256: str
+    entries: tuple[_GitRevisionEntry, ...]
 
 
 class HarnessSandboxCheckRunner:
@@ -152,6 +169,8 @@ class HarnessSandboxCheckRunner:
         profile_is_current: ProfileRevalidator,
         admit_job: SandboxJobAdmitter,
         cancel_event: asyncio.Event | None = None,
+        source_revision: str | None = None,
+        expected_source_tree_sha256: str | None = None,
     ) -> HarnessSandboxCheckResult:
         run_id = validate_run_id(run_id)
         if not isinstance(check, HarnessCheckSpec):
@@ -161,6 +180,11 @@ class HarnessSandboxCheckRunner:
         _require_sha256(profile_digest, field="profile_digest")
         if not callable(profile_is_current) or not callable(admit_job):
             raise TypeError("profile_is_current 与 admit_job 必须可调用。")
+        if (source_revision is None) != (expected_source_tree_sha256 is None):
+            raise ValueError(
+                "source_revision 与 expected_source_tree_sha256 必须同时提供。"
+            )
+        revision_snapshot: _GitRevisionSnapshot | None = None
         if not await profile_is_current():
             return _blocked(
                 check=check,
@@ -168,29 +192,47 @@ class HarnessSandboxCheckRunner:
                 profile_digest=profile_digest,
                 message="Harness Profile 在 Sandbox 快照前已失去信任，检查未执行。",
             )
+        if source_revision is not None:
+            revision_snapshot = await asyncio.to_thread(
+                _resolve_git_revision_snapshot,
+                self.workspace_root,
+                source_revision,
+                expected_source_tree_sha256,
+            )
         _ensure_owned_directory(self.sandbox_root)
         _ensure_owned_directory(self.artifact_root)
-        try:
-            source_before = await asyncio.to_thread(
-                compute_tree_fingerprint,
-                self.workspace_root,
-            )
-        except TreeFingerprintError as exc:
-            return _blocked(
-                check=check,
-                run_id=run_id,
-                profile_digest=profile_digest,
-                message=str(exc),
-                status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
-            )
-        snapshot = self.sandbox_root / f"{run_id}-{check.id}-{source_before.digest[:12]}"
+        if revision_snapshot is None:
+            try:
+                source_before_sha256 = (
+                    await asyncio.to_thread(
+                        compute_tree_fingerprint,
+                        self.workspace_root,
+                    )
+                ).digest
+            except TreeFingerprintError as exc:
+                return _blocked(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    message=str(exc),
+                    status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
+                )
+        else:
+            source_before_sha256 = revision_snapshot.tree_sha256
+        snapshot = (
+            self.sandbox_root
+            / f"{run_id}-{check.id}-{source_before_sha256[:12]}"
+        )
         if snapshot.exists():
             return _blocked(
                 check=check,
                 run_id=run_id,
                 profile_digest=profile_digest,
                 message="Sandbox snapshot identity 已存在；拒绝覆盖未知执行状态。",
-                source_tree_sha256=source_before.digest,
+                source_revision=(
+                    revision_snapshot.commit if revision_snapshot is not None else None
+                ),
+                source_tree_sha256=source_before_sha256,
             )
         manifest_sha256 = ""
         try:
@@ -199,12 +241,13 @@ class HarnessSandboxCheckRunner:
                 snapshot,
                 run_id=run_id,
                 check_id=check.id,
-                source_tree_sha256=source_before.digest,
+                source_tree_sha256=source_before_sha256,
                 profile_digest=profile_digest,
+                revision_snapshot=revision_snapshot,
             )
             executable = _resolve_profile_executable(check.argv[0])
             artifact_identity = hashlib.sha256(
-                f"{run_id}\0{check.id}\0{source_before.digest}".encode()
+                f"{run_id}\0{check.id}\0{source_before_sha256}".encode()
             ).hexdigest()[:24]
             spec = ShellCommandSpec(
                 argv=(executable, *check.argv[1:]),
@@ -228,7 +271,12 @@ class HarnessSandboxCheckRunner:
                     message=(
                         "Harness Profile 在 Sandbox admission 前失去信任，检查未执行。"
                     ),
-                    source_tree_sha256=source_before.digest,
+                    source_revision=(
+                        revision_snapshot.commit
+                        if revision_snapshot is not None
+                        else None
+                    ),
+                    source_tree_sha256=source_before_sha256,
                     snapshot_manifest_sha256=manifest_sha256,
                 )
             admitted = await admit_job(spec)
@@ -247,7 +295,8 @@ class HarnessSandboxCheckRunner:
                 run_id=run_id,
                 profile_digest=profile_digest,
                 profile_is_current=profile_is_current,
-                source_before_sha256=source_before.digest,
+                source_before_sha256=source_before_sha256,
+                revision_snapshot=revision_snapshot,
                 manifest_sha256=manifest_sha256,
                 execution=execution,
             )
@@ -265,7 +314,10 @@ class HarnessSandboxCheckRunner:
                     "Sandbox Profile check 基础设施失败："
                     f"{type(exc).__name__}：{str(exc)[:200]}"
                 ),
-                source_tree_sha256=source_before.digest,
+                source_revision=(
+                    revision_snapshot.commit if revision_snapshot is not None else None
+                ),
+                source_tree_sha256=source_before_sha256,
                 snapshot_manifest_sha256=manifest_sha256,
                 status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
             )
@@ -280,6 +332,7 @@ class HarnessSandboxCheckRunner:
         profile_digest: str,
         profile_is_current: ProfileRevalidator,
         source_before_sha256: str,
+        revision_snapshot: _GitRevisionSnapshot | None,
         manifest_sha256: str,
         execution: ShellJobExecutionResult,
     ) -> HarnessSandboxCheckResult:
@@ -288,44 +341,85 @@ class HarnessSandboxCheckRunner:
                 check=check,
                 run_id=run_id,
                 profile_digest=profile_digest,
+                source_revision=(
+                    revision_snapshot.commit if revision_snapshot is not None else None
+                ),
                 source_tree_sha256=source_before_sha256,
                 manifest_sha256=manifest_sha256,
                 execution=execution,
                 status=HarnessSandboxCheckStatus.STALE,
                 message="Harness Profile 在 Sandbox 执行期间发生变化；结果已作废。",
             )
-        try:
-            source_after = await asyncio.to_thread(
-                compute_tree_fingerprint,
-                self.workspace_root,
-            )
-        except TreeFingerprintError as exc:
-            return _from_execution(
-                check=check,
-                run_id=run_id,
-                profile_digest=profile_digest,
-                source_tree_sha256=source_before_sha256,
-                manifest_sha256=manifest_sha256,
-                execution=execution,
-                status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
-                message=str(exc),
-            )
-        if source_after.digest != source_before_sha256:
-            return _from_execution(
-                check=check,
-                run_id=run_id,
-                profile_digest=profile_digest,
-                source_tree_sha256=source_after.digest,
-                manifest_sha256=manifest_sha256,
-                execution=execution,
-                status=HarnessSandboxCheckStatus.STALE,
-                message="源工作树在 Sandbox 执行期间发生变化；结果不能证明当前代码。",
-            )
+        if revision_snapshot is None:
+            try:
+                source_after = await asyncio.to_thread(
+                    compute_tree_fingerprint,
+                    self.workspace_root,
+                )
+            except TreeFingerprintError as exc:
+                return _from_execution(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    source_revision=None,
+                    source_tree_sha256=source_before_sha256,
+                    manifest_sha256=manifest_sha256,
+                    execution=execution,
+                    status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
+                    message=str(exc),
+                )
+            if source_after.digest != source_before_sha256:
+                return _from_execution(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    source_revision=None,
+                    source_tree_sha256=source_after.digest,
+                    manifest_sha256=manifest_sha256,
+                    execution=execution,
+                    status=HarnessSandboxCheckStatus.STALE,
+                    message="源工作树在 Sandbox 执行期间发生变化；结果不能证明当前代码。",
+                )
+        else:
+            try:
+                revision_after = await asyncio.to_thread(
+                    _resolve_git_revision_snapshot,
+                    self.workspace_root,
+                    revision_snapshot.commit,
+                    revision_snapshot.tree_sha256,
+                )
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                return _from_execution(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    source_revision=revision_snapshot.commit,
+                    source_tree_sha256=source_before_sha256,
+                    manifest_sha256=manifest_sha256,
+                    execution=execution,
+                    status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
+                    message=f"Git revision 终态复验失败：{str(exc)[:200]}",
+                )
+            if revision_after != revision_snapshot:
+                return _from_execution(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    source_revision=revision_snapshot.commit,
+                    source_tree_sha256=revision_after.tree_sha256,
+                    manifest_sha256=manifest_sha256,
+                    execution=execution,
+                    status=HarnessSandboxCheckStatus.STALE,
+                    message="Git revision identity 在 Sandbox 执行期间发生变化。",
+                )
         status = _map_status(execution)
         return _from_execution(
             check=check,
             run_id=run_id,
             profile_digest=profile_digest,
+            source_revision=(
+                revision_snapshot.commit if revision_snapshot is not None else None
+            ),
             source_tree_sha256=source_before_sha256,
             manifest_sha256=manifest_sha256,
             execution=execution,
@@ -341,46 +435,37 @@ class HarnessSandboxCheckRunner:
         check_id: str,
         source_tree_sha256: str,
         profile_digest: str,
+        revision_snapshot: _GitRevisionSnapshot | None,
     ) -> str:
         snapshot.mkdir(mode=0o700)
-        paths = _git_snapshot_paths(self.workspace_root)
-        if len(paths) > self._max_snapshot_files:
+        working_paths: tuple[Path, ...] = ()
+        if revision_snapshot is None:
+            working_paths = _git_snapshot_paths(self.workspace_root)
+            item_count = len(working_paths)
+        else:
+            item_count = len(revision_snapshot.entries)
+        if item_count > self._max_snapshot_files:
             raise ValueError("Sandbox snapshot 文件数量超过上限。")
-        manifest_files: list[dict[str, object]] = []
-        total_bytes = 0
-        for relative in paths:
-            if _is_sensitive_snapshot_path(relative):
-                raise ValueError(
-                    f"Sandbox snapshot 检测到敏感路径，拒绝复制：{relative.as_posix()}"
-                )
-            source = self.workspace_root / relative
-            if not source.exists():
-                continue
-            if source.is_symlink():
-                raise ValueError(f"Sandbox snapshot 不接受 symlink：{relative}")
-            if not source.is_file():
-                continue
-            declared_size = source.stat().st_size
-            if total_bytes + declared_size > self._max_snapshot_bytes:
-                raise ValueError("Sandbox snapshot 总字节数超过上限。")
-            destination = snapshot / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, destination, follow_symlinks=False)
-            payload = destination.read_bytes()
-            total_bytes += len(payload)
-            if total_bytes > self._max_snapshot_bytes:
-                raise ValueError("Sandbox snapshot 总字节数超过上限。")
-            manifest_files.append(
-                {
-                    "path": relative.as_posix(),
-                    "size": len(payload),
-                    "sha256": hashlib.sha256(payload).hexdigest(),
-                }
+        if revision_snapshot is None:
+            manifest_files, total_bytes = self._materialize_working_tree(
+                snapshot,
+                working_paths,
+            )
+        else:
+            manifest_files, total_bytes = self._materialize_revision(
+                snapshot,
+                revision_snapshot,
             )
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "run_id": run_id,
             "check_id": check_id,
+            "source_kind": (
+                "git_revision" if revision_snapshot is not None else "working_tree"
+            ),
+            "source_revision": (
+                revision_snapshot.commit if revision_snapshot is not None else None
+            ),
             "source_tree_sha256": source_tree_sha256,
             "profile_digest": profile_digest,
             "file_count": len(manifest_files),
@@ -398,6 +483,71 @@ class HarnessSandboxCheckRunner:
         manifest_path = snapshot / ".naumi-sandbox-manifest.json"
         manifest_path.write_bytes(encoded)
         return hashlib.sha256(encoded).hexdigest()
+
+    def _materialize_working_tree(
+        self,
+        snapshot: Path,
+        paths: tuple[Path, ...],
+    ) -> tuple[list[dict[str, object]], int]:
+        manifest_files: list[dict[str, object]] = []
+        total_bytes = 0
+        for relative in paths:
+            _validate_snapshot_path(relative)
+            source = self.workspace_root / relative
+            if not source.exists():
+                continue
+            if source.is_symlink():
+                raise ValueError(f"Sandbox snapshot 不接受 symlink：{relative}")
+            if not source.is_file():
+                continue
+            declared_size = source.stat().st_size
+            total_bytes = _accumulate_snapshot_size(
+                total_bytes,
+                declared_size,
+                maximum=self._max_snapshot_bytes,
+            )
+            destination = snapshot / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination, follow_symlinks=False)
+            size, digest = _file_identity(destination)
+            if size != declared_size:
+                raise ValueError("Sandbox snapshot 文件在复制期间发生变化。")
+            manifest_files.append(_manifest_file(relative, size, digest))
+        return manifest_files, total_bytes
+
+    def _materialize_revision(
+        self,
+        snapshot: Path,
+        revision: _GitRevisionSnapshot,
+    ) -> tuple[list[dict[str, object]], int]:
+        manifest_files: list[dict[str, object]] = []
+        total_bytes = 0
+        for entry in revision.entries:
+            _validate_snapshot_path(entry.path)
+            declared_size = _git_blob_size(self.workspace_root, entry.object_id)
+            total_bytes = _accumulate_snapshot_size(
+                total_bytes,
+                declared_size,
+                maximum=self._max_snapshot_bytes,
+            )
+            destination = snapshot / entry.path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _write_git_blob(
+                self.workspace_root,
+                entry.object_id,
+                destination,
+                executable=entry.mode == "100755",
+            )
+            _verify_git_blob_identity(
+                self.workspace_root,
+                destination,
+                expected_object_id=entry.object_id,
+            )
+            size, digest = _file_identity(destination)
+            if size != declared_size:
+                raise ValueError("Git blob 写入字节数与声明不一致。")
+            manifest_files.append(_manifest_file(entry.path, size, digest))
+        return manifest_files, total_bytes
 
 
 def _git_snapshot_paths(workspace_root: Path) -> tuple[Path, ...]:
@@ -419,6 +569,178 @@ def _git_snapshot_paths(workspace_root: Path) -> tuple[Path, ...]:
             raise ValueError("Git snapshot path 试图逃逸工作区。")
         paths.append(path)
     return tuple(paths)
+
+
+def _resolve_git_revision_snapshot(
+    workspace_root: Path,
+    source_revision: str,
+    expected_tree_sha256: str | None,
+) -> _GitRevisionSnapshot:
+    if not isinstance(source_revision, str) or not _GIT_OBJECT.fullmatch(
+        source_revision
+    ):
+        raise ValueError("source_revision 必须是完整小写 Git object id。")
+    assert expected_tree_sha256 is not None
+    _require_sha256(expected_tree_sha256, field="expected_source_tree_sha256")
+    resolved = _git_capture(
+        workspace_root,
+        "rev-parse",
+        "--verify",
+        f"{source_revision}^{{commit}}",
+    ).decode("ascii", errors="strict").strip().lower()
+    if resolved != source_revision:
+        raise ValueError("source_revision 无法解析为精确 commit。")
+    tree_listing = _git_capture(
+        workspace_root,
+        "ls-tree",
+        "-r",
+        "-z",
+        "--full-tree",
+        source_revision,
+    )
+    actual_tree_sha256 = hashlib.sha256(tree_listing).hexdigest()
+    if actual_tree_sha256 != expected_tree_sha256:
+        raise ValueError("Git revision tree digest 与预期 authority 不一致。")
+    entries: list[_GitRevisionEntry] = []
+    paths: set[str] = set()
+    for record in tree_listing.split(b"\0"):
+        if not record:
+            continue
+        try:
+            header, raw_path = record.split(b"\t", 1)
+            mode, object_type, raw_object_id = header.split(b" ", 2)
+            path_text = raw_path.decode("utf-8", errors="strict")
+            mode_text = mode.decode("ascii", errors="strict")
+            object_id = raw_object_id.decode("ascii", errors="strict").lower()
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("Git revision tree entry 编码或结构无效。") from exc
+        if object_type != b"blob" or mode_text not in {"100644", "100755"}:
+            raise ValueError("Git revision snapshot 只接受普通或可执行 blob。")
+        if not _GIT_OBJECT.fullmatch(object_id):
+            raise ValueError("Git revision blob object id 无效。")
+        relative = Path(path_text)
+        _validate_relative_snapshot_path(relative)
+        normalized = relative.as_posix()
+        if normalized in paths:
+            raise ValueError("Git revision snapshot path 重复。")
+        paths.add(normalized)
+        entries.append(
+            _GitRevisionEntry(
+                mode=mode_text,
+                object_id=object_id,
+                path=relative,
+            )
+        )
+    return _GitRevisionSnapshot(
+        commit=resolved,
+        tree_sha256=actual_tree_sha256,
+        entries=tuple(entries),
+    )
+
+
+def _git_capture(workspace_root: Path, *args: str) -> bytes:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=workspace_root,
+        check=True,
+        capture_output=True,
+        timeout=15.0,
+    )
+    if len(completed.stdout) > _MAX_GIT_METADATA_BYTES:
+        raise ValueError("Git metadata 输出超过安全上限。")
+    return completed.stdout
+
+
+def _git_blob_size(workspace_root: Path, object_id: str) -> int:
+    raw = _git_capture(workspace_root, "cat-file", "-s", object_id)
+    try:
+        size = int(raw.decode("ascii", errors="strict").strip())
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("Git blob size 无效。") from exc
+    if size < 0:
+        raise ValueError("Git blob size 不能为负数。")
+    return size
+
+
+def _write_git_blob(
+    workspace_root: Path,
+    object_id: str,
+    destination: Path,
+    *,
+    executable: bool,
+) -> None:
+    with destination.open("xb") as stream:
+        subprocess.run(
+            ["git", "cat-file", "blob", object_id],
+            cwd=workspace_root,
+            check=True,
+            stdout=stream,
+            stderr=subprocess.PIPE,
+            timeout=60.0,
+        )
+    if os.name != "nt":
+        destination.chmod(0o700 if executable else 0o600)
+
+
+def _verify_git_blob_identity(
+    workspace_root: Path,
+    path: Path,
+    *,
+    expected_object_id: str,
+) -> None:
+    actual = _git_capture(
+        workspace_root,
+        "hash-object",
+        "--no-filters",
+        str(path),
+    ).decode("ascii", errors="strict").strip().lower()
+    if actual != expected_object_id:
+        raise ValueError("Git blob 落盘字节与 tree object id 不一致。")
+
+
+def _validate_relative_snapshot_path(path: Path) -> None:
+    value = path.as_posix()
+    if (
+        path.is_absolute()
+        or not path.parts
+        or ".." in path.parts
+        or "." in path.parts
+        or "\x00" in value
+    ):
+        raise ValueError("Sandbox snapshot path 试图逃逸工作区。")
+
+
+def _validate_snapshot_path(path: Path) -> None:
+    _validate_relative_snapshot_path(path)
+    if _is_sensitive_snapshot_path(path):
+        raise ValueError(
+            f"Sandbox snapshot 检测到敏感路径，拒绝复制：{path.as_posix()}"
+        )
+
+
+def _accumulate_snapshot_size(current: int, added: int, *, maximum: int) -> int:
+    updated = current + added
+    if added < 0 or updated > maximum:
+        raise ValueError("Sandbox snapshot 总字节数超过上限。")
+    return updated
+
+
+def _file_identity(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def _manifest_file(path: Path, size: int, digest: str) -> dict[str, object]:
+    return {
+        "path": path.as_posix(),
+        "size": size,
+        "sha256": digest,
+    }
 
 
 def _is_sensitive_snapshot_path(path: Path) -> bool:
@@ -478,6 +800,7 @@ def _from_execution(
     check: HarnessCheckSpec,
     run_id: str,
     profile_digest: str,
+    source_revision: str | None,
     source_tree_sha256: str,
     manifest_sha256: str,
     execution: ShellJobExecutionResult,
@@ -489,6 +812,7 @@ def _from_execution(
         check_id=check.id,
         run_id=run_id,
         status=status,
+        source_revision=source_revision,
         source_tree_sha256=source_tree_sha256,
         snapshot_manifest_sha256=manifest_sha256,
         profile_digest=profile_digest,
@@ -508,6 +832,7 @@ def _blocked(
     run_id: str,
     profile_digest: str,
     message: str,
+    source_revision: str | None = None,
     source_tree_sha256: str = "",
     snapshot_manifest_sha256: str = "",
     status: HarnessSandboxCheckStatus = HarnessSandboxCheckStatus.BLOCKED,
@@ -516,6 +841,7 @@ def _blocked(
         check_id=check.id,
         run_id=run_id,
         status=status,
+        source_revision=source_revision,
         source_tree_sha256=source_tree_sha256,
         snapshot_manifest_sha256=snapshot_manifest_sha256,
         profile_digest=profile_digest,

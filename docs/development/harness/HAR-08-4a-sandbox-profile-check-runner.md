@@ -11,7 +11,8 @@ Worker 执行。这个切片只冻结可信快照、admission 接口和结果证
 - 对源工作树计算 fingerprint，并只复制 `git ls-files -co --exclude-standard` 的有序唯一文件到一次性
   snapshot；拒绝 symlink、路径逃逸、文件/总字节/manifest 上限；
 - `.env*`、私钥/证书、credentials/service-account 与 `.naumi` 中除 `harness.yaml` 外的内容禁止进入快照；
-- snapshot manifest 记录 run/check/source/profile/file digest，并绑定到 `ShellCommandSpec`；
+- snapshot manifest 记录 run/check/source/profile/file digest，并绑定到 `ShellCommandSpec`；HAR-08.4c 已将
+  manifest 升级为 v2，区分 working tree 与精确 Git revision；
 - 检查只能写 snapshot，原工作树执行前后 fingerprint 必须一致；snapshot 始终清理，artifact 独立持久化。
 
 ## 3. Authority 边界

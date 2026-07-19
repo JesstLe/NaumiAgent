@@ -36,8 +36,8 @@
 
 ## 5. 未完成与后续依赖
 
-- Harness Eval Suite、重复 Batch 和 Baseline Comparator 仍走各自既有执行器；下一切片应先设计一个
-  `SandboxCheckPlan`，复用本链的单项 admission，而不是复制 subprocess；
+- HAR-08.4c 已补精确 Git revision snapshot；Harness Eval Suite、重复 Batch 和 Baseline Comparator 仍走
+  各自既有执行器。下一消费者应由 EVO Request 编排本链，而不是复制 subprocess；
 - session grant 的后续调用缺少可验证当前-call 派生事实，继续 fail closed；
 - macOS 已有真实 sandbox 证据；Linux bwrap 与 Windows 隔离后端需要各自 CI/机器证据；
 - 当前 Worker 为每 Job 短寿命进程，不等同 ARC-04.6 长寿命 Supervisor、队列背压或 crash recovery。
