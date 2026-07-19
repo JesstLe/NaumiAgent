@@ -62,6 +62,12 @@ if TYPE_CHECKING:
         EvolutionInterventionalRedSampleReceipt,
         validate_interventional_red_authority,
     )
+    from naumi_agent.evolution.interventional_sample_kernel import (
+        EvolutionInterventionalRunAuthority,
+        EvolutionInterventionalSampleKernel,
+        EvolutionInterventionalSampleKernelError,
+        EvolutionInterventionalSampleSource,
+    )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
         EvolutionMutationGenerationResult,
@@ -316,6 +322,10 @@ __all__ = [
     "EvolutionInterventionalGreenCohortRequest",
     "EvolutionInterventionalGreenCohortRequestBuilder",
     "EvolutionInterventionalGreenRequestError",
+    "EvolutionInterventionalRunAuthority",
+    "EvolutionInterventionalSampleKernel",
+    "EvolutionInterventionalSampleKernelError",
+    "EvolutionInterventionalSampleSource",
     "SelfReviewRedMetricSummary",
     "EvolutionSelfReviewGreenCohortError",
     "EvolutionSelfReviewGreenCohortExecutor",
@@ -509,6 +519,12 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalGreenCohortRequestBuilder",
         "EvolutionInterventionalGreenRequestError",
     }
+    interventional_sample_kernel_exports = {
+        "EvolutionInterventionalRunAuthority",
+        "EvolutionInterventionalSampleKernel",
+        "EvolutionInterventionalSampleKernelError",
+        "EvolutionInterventionalSampleSource",
+    }
     self_review_green_cohort_exports = {
         "EvolutionSelfReviewGreenCohortError",
         "EvolutionSelfReviewGreenCohortExecutor",
@@ -571,6 +587,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_red_cohort"
     elif name in interventional_green_request_exports:
         module_name = "interventional_green_request"
+    elif name in interventional_sample_kernel_exports:
+        module_name = "interventional_sample_kernel"
     elif name in interventional_red_sample_exports:
         module_name = "interventional_red_sample"
     elif name in self_review_green_cohort_exports:
