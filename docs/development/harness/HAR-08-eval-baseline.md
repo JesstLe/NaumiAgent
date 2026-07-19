@@ -110,5 +110,8 @@
 - HAR-08.4c 精确 Revision Snapshot：已实现完整 commit/tree authority、Git object blob 物化、manifest v2、
   非普通 blob/敏感路径阻断与终态复验，为 EVO baseline interventional runner 提供源字节前置。详见
   `HAR-08-4c-exact-revision-sandbox-snapshot.md`。
-- HAR-08.4 仍为 partial：Suite/Batch/Baseline 尚未切换到隔离 Worker，也没有并行进度与 Linux/Windows CI
-  证据。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
+- HAR-08.4e Governed Sandbox Eval Check Group Kernel：已实现。把父权限/Run Grant 最终复验、成组 ARC-04
+  admission、逐项 cleanup 与 lifecycle 完整性下沉到 Harness；Interventional RED/GREEN 已迁移复用。详见
+  `HAR-08-4e-governed-sandbox-eval-check-group.md`。
+- HAR-08.4 仍为 partial：通用 Suite/Batch coordinator 尚未切换到该隔离 kernel，也没有并行进度与
+  Linux/Windows CI 证据。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
