@@ -13,6 +13,12 @@ from naumi_agent.harness.heartbeat import (
     RuntimeHeartbeatPruneReceipt,
     assess_heartbeat,
 )
+from naumi_agent.harness.heartbeat_retention_periodic import (
+    RuntimeHeartbeatRetentionPolicy,
+    RuntimeHeartbeatRetentionService,
+    RuntimeHeartbeatRetentionSnapshot,
+    RuntimeHeartbeatRetentionState,
+)
 from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
 from naumi_agent.harness.knowledge import (
     KnowledgeBudget,
@@ -66,6 +72,10 @@ __all__ = [
     "RuntimeHeartbeatProducer",
     "RuntimeHeartbeatCatalogPage",
     "RuntimeHeartbeatPruneReceipt",
+    "RuntimeHeartbeatRetentionPolicy",
+    "RuntimeHeartbeatRetentionService",
+    "RuntimeHeartbeatRetentionSnapshot",
+    "RuntimeHeartbeatRetentionState",
     "assess_heartbeat",
     "load_harness_profile",
 ]

@@ -26,7 +26,10 @@
     [设计](HAR-10-2d-runtime-heartbeat-retention-authority.md)。
   - HAR-10.2e 已实现：workspace/assessment 绑定 opaque cursor、有界 typed runtime worker catalog 与覆盖索引；见
     [设计](HAR-10-2e-runtime-worker-catalog.md)。
-  - 未完成：browser/agent producer、runtime retention 调度、heartbeat 历史统计、跨 kind 批量查询与
+  - HAR-10.2f1 已实现：独立 runtime RunLease、删除前续租、活跃保护、稳定状态与有界周期 retention core；
+    当前尚未默认接入 Bridge；见
+    [设计](HAR-10-2f1-runtime-heartbeat-retention-periodic-core.md)。
+  - 未完成：HAR-10.2f2 Bridge 配置/生命周期接入、browser/agent producer、heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
@@ -98,7 +101,7 @@ task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting
 交付 Pursuit worker heartbeat 与用户可见的 recovery 聚合，HAR-10.6a/6b 已交付 durable interaction
 authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime parity，HAR-10.3a 已交付不打断
 当前事务的 New UI 队列提升，HAR-10.3b1/3b2/3b3 已交付 durable queue Store、New UI Runtime 接入与
-历史 claim 人工处置；同步
+历史 claim 人工处置；HAR-10.2f1 已交付默认未启用删除的 runtime retention 周期核心；同步
 shell、browser/agent/runtime 逐域接入、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
 接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。
 
