@@ -74,6 +74,9 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.3b Interventional GREEN Request：已实现。把完整 RED receipt、Plan/Profile/Metric authority、
   active Experiment Lease 与 candidate provenance 冻结为不可执行请求；保持相同 suite/seed/order/预算，
   不提前授予 Shell authority。详见 `EVO-03-3b-interventional-green-request.md`。
+- EVO-03.3c1 Shared Candidate Snapshot：已实现。静态 GREEN 与后续 interventional GREEN 共用唯一的
+  Lease/Git/status/file digest/fingerprint 捕获边界，并支持执行后漂移复验。详见
+  `EVO-03-3c1-shared-candidate-snapshot.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 

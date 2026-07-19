@@ -45,6 +45,6 @@ candidate cohort executor 的唯一输入合同，不自行取得权限、创建
 
 ## 下一步
 
-EVO-03.3c 实现 candidate snapshot 的共享捕获与 interventional GREEN 单 sample：必须复用现有静态 GREEN
-对精确 dirty path、文件 digest、并发 fingerprint 的校验逻辑，不能复制第二套 worktree 解析器。之后再以
-EVO-03.3d 编排连续 candidate cohort，并把 RED/GREEN 交给现有 H5b2/H5c Comparator。
+EVO-03.3c1 已实现 candidate snapshot 的共享捕获，并让静态 GREEN 改用唯一公共实现。下一步
+EVO-03.3c2 使用该 Snapshot 实现 interventional GREEN 单 sample；之后再编排连续 candidate cohort，并把
+RED/GREEN 交给现有 H5b2/H5c Comparator。

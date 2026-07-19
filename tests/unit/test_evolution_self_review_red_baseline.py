@@ -11,6 +11,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from naumi_agent.evolution.candidate_snapshots import (
+    EvolutionCandidateSnapshotError,
+    capture_candidate_worktree_snapshot,
+    revalidate_candidate_worktree_snapshot,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseStore,
     ExperimentLeaseState,
@@ -794,6 +799,59 @@ async def test_green_modify_cohort_is_idempotent_and_statistically_improved(
         for item in green_records
     )
     assert _git(candidate, "status", "--porcelain") == status_before
+
+
+@pytest.mark.asyncio
+async def test_candidate_snapshot_is_shared_and_detects_later_drift(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        candidate,
+        storage,
+        plan,
+        _,
+        _,
+        _,
+        _,
+        lease,
+        _,
+        _,
+        _,
+    ) = await _green_authority(tmp_path)
+
+    snapshot = capture_candidate_worktree_snapshot(
+        lease,
+        plan,
+        worktree_storage_dir=storage,
+        now=datetime(2026, 7, 19, 1, tzinfo=UTC),
+    )
+    assert snapshot.root == candidate
+    assert snapshot.blobs == (("sample.py", b"def clean() -> None:\n    pass\n"),)
+    revalidate_candidate_worktree_snapshot(snapshot)
+
+    (candidate / "sample.py").write_text("candidate changed after capture\n")
+    with pytest.raises(EvolutionCandidateSnapshotError) as captured:
+        revalidate_candidate_worktree_snapshot(snapshot)
+    assert captured.value.code == "candidate_worktree_changed_after_snapshot"
+
+    with pytest.raises(EvolutionCandidateSnapshotError) as captured:
+        capture_candidate_worktree_snapshot(
+            lease,
+            plan,
+            worktree_storage_dir=storage,
+            now=datetime(2031, 1, 1, tzinfo=UTC),
+        )
+    assert captured.value.code == "candidate_lease_expired"
+
+    with pytest.raises(EvolutionCandidateSnapshotError) as captured:
+        capture_candidate_worktree_snapshot(
+            lease,
+            plan,
+            worktree_storage_dir=storage,
+            now=datetime(2026, 7, 19),
+        )
+    assert captured.value.code == "candidate_snapshot_clock_invalid"
 
 
 @pytest.mark.asyncio

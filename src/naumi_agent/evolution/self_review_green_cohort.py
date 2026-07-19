@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import re
-import stat
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -16,6 +15,11 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from naumi_agent.evolution.candidate_snapshots import (
+    EvolutionCandidateSnapshotError,
+    capture_candidate_worktree_snapshot,
+    revalidate_candidate_worktree_snapshot,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseStore,
     ExperimentLeaseState,
@@ -43,11 +47,7 @@ from naumi_agent.harness.eval_identity import (
     capture_eval_platform_identity,
 )
 from naumi_agent.harness.eval_models import HarnessEvalSuiteResult
-from naumi_agent.harness.fingerprint import (
-    TreeFingerprint,
-    TreeFingerprintError,
-    compute_tree_fingerprint,
-)
+from naumi_agent.harness.fingerprint import TreeFingerprint
 from naumi_agent.harness.store import (
     HarnessStore,
     HarnessStoreConflictError,
@@ -57,7 +57,6 @@ from naumi_agent.harness.trust import HarnessTrustStore
 
 SELF_REVIEW_GREEN_REQUEST_POLICY = "evolution-self-review-green-request-v1"
 SELF_REVIEW_GREEN_COHORT_POLICY = "evolution-self-review-green-cohort-v1"
-_MAX_SOURCE_BYTES = 2_000_000
 _GIT_TIMEOUT_SECONDS = 10
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
@@ -387,11 +386,18 @@ class EvolutionSelfReviewGreenCohortExecutor:
             plan,
             red,
         )
-        candidate_root, blobs, fingerprint = _capture_candidate_snapshot(
-            candidate_lease,
-            plan,
-            worktree_storage_dir=self._worktree_storage_dir,
-        )
+        try:
+            candidate_snapshot = capture_candidate_worktree_snapshot(
+                candidate_lease,
+                plan,
+                worktree_storage_dir=self._worktree_storage_dir,
+                now=now,
+            )
+        except EvolutionCandidateSnapshotError as exc:
+            raise EvolutionSelfReviewGreenCohortError(exc.code, str(exc)) from exc
+        candidate_root = candidate_snapshot.root
+        blobs = candidate_snapshot.blobs
+        fingerprint = candidate_snapshot.fingerprint
         platform = capture_eval_platform_identity()
         red_identity = red_records[0].result.baseline_identity
         if red_identity is None or red_identity.platform != platform:
@@ -425,17 +431,14 @@ class EvolutionSelfReviewGreenCohortExecutor:
             identity=identity,
         )
         try:
-            current_fingerprint = compute_tree_fingerprint(candidate_root)
-        except (OSError, TreeFingerprintError) as exc:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_fingerprint_read_failed",
-                "无法在 GREEN 扫描后重新读取 candidate fingerprint。",
-            ) from exc
-        if current_fingerprint != fingerprint:
+            revalidate_candidate_worktree_snapshot(candidate_snapshot)
+        except EvolutionCandidateSnapshotError as exc:
+            if exc.code == "candidate_fingerprint_read_failed":
+                raise EvolutionSelfReviewGreenCohortError(exc.code, str(exc)) from exc
             raise EvolutionSelfReviewGreenCohortError(
                 "candidate_worktree_changed_during_scan",
                 "Candidate worktree 在 GREEN 扫描期间发生变化。",
-            )
+            ) from exc
         existing = await self._store.list_eval_results(
             workspace,
             green.batch_id,
@@ -582,137 +585,6 @@ async def _load_and_validate_red_records(
             "H5a RED cohort 与完成回执或当前 authority 不一致。",
         )
     return records
-
-
-def _capture_candidate_snapshot(
-    lease: ExperimentWorktreeLease,
-    plan: EvolutionValidationPlan,
-    *,
-    worktree_storage_dir: Path,
-) -> tuple[Path, tuple[tuple[str, bytes], ...], TreeFingerprint]:
-    try:
-        root = Path(lease.worktree_path).resolve(strict=True)
-    except OSError as exc:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_worktree_missing",
-            "Candidate worktree 不存在或无法读取。",
-        ) from exc
-    if root.parent != worktree_storage_dir or root.name != lease.worktree_name:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_worktree_unmanaged",
-            "Candidate worktree 不属于受管 Lease 存储目录。",
-        )
-    top = Path(_git(root, "rev-parse", "--show-toplevel").decode().strip()).resolve()
-    head = _git(root, "rev-parse", "--verify", "HEAD").decode().strip().lower()
-    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD").decode().strip()
-    if top != root or head != lease.baseline_commit or branch != lease.branch:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_git_identity_mismatch",
-            "Candidate worktree HEAD 或 branch 已偏离 Lease。",
-        )
-    status = _parse_candidate_status(_git(
-        root,
-        "status",
-        "--porcelain=v1",
-        "-z",
-        "--untracked-files=all",
-    ))
-    expected_status = {
-        item.path: (b"??" if item.operation == "create" else b" M")
-        for item in plan.files
-    }
-    if status != expected_status:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_status_mismatch",
-            "Candidate worktree 含缺失、额外、暂存或类型不符的改动。",
-        )
-    try:
-        before = compute_tree_fingerprint(root)
-    except (OSError, TreeFingerprintError) as exc:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_fingerprint_read_failed",
-            "无法读取 candidate worktree fingerprint。",
-        ) from exc
-    if before.head != lease.baseline_commit or before.dirty_paths != tuple(sorted(expected_status)):
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_fingerprint_mismatch",
-            "Candidate worktree fingerprint 与 Plan path 集合不一致。",
-        )
-    blobs: list[tuple[str, bytes]] = []
-    for item in plan.files:
-        path = root.joinpath(*PurePosixPath(item.path).parts)
-        try:
-            metadata = path.lstat()
-        except OSError as exc:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_file_missing",
-                "Candidate 文件不存在或无法读取。",
-            ) from exc
-        if not stat.S_ISREG(metadata.st_mode):
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_file_type_unsafe",
-                "Candidate 文件必须是普通文件。",
-            )
-        if not 0 <= metadata.st_size <= _MAX_SOURCE_BYTES:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_file_too_large",
-                "Candidate Self-Review 文件不能超过 2 MiB。",
-            )
-        try:
-            content = path.read_bytes()
-        except OSError as exc:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_file_read_failed",
-                "Candidate 文件无法完整读取。",
-            ) from exc
-        if (
-            len(content) != metadata.st_size
-            or hashlib.sha256(content).hexdigest() != item.candidate_sha256
-        ):
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_file_digest_mismatch",
-                "Candidate 文件与 Validation Plan after digest 不一致。",
-            )
-        blobs.append((item.path, content))
-    try:
-        after = compute_tree_fingerprint(root)
-    except (OSError, TreeFingerprintError) as exc:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_fingerprint_read_failed",
-            "无法在快照读取后重新读取 candidate fingerprint。",
-        ) from exc
-    if after != before:
-        raise EvolutionSelfReviewGreenCohortError(
-            "candidate_worktree_changed_during_capture",
-            "Candidate worktree 在快照读取期间发生变化。",
-        )
-    return root, tuple(blobs), before
-
-
-def _parse_candidate_status(raw: bytes) -> dict[str, bytes]:
-    result: dict[str, bytes] = {}
-    for record in raw.split(b"\0"):
-        if not record:
-            continue
-        if len(record) < 4 or record[2:3] != b" " or b"R" in record[:2] or b"C" in record[:2]:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_status_unrecognized",
-                "Candidate Git status 包含不可识别的 rename/copy 状态。",
-            )
-        try:
-            path = record[3:].decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_status_unrecognized",
-                "Candidate Git path 不是 UTF-8。",
-            ) from exc
-        if path in result:
-            raise EvolutionSelfReviewGreenCohortError(
-                "candidate_status_duplicate",
-                "Candidate Git status 包含重复路径。",
-            )
-        result[path] = record[:2]
-    return result
 
 
 async def _run_green_repetitions(
