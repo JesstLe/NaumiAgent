@@ -13,6 +13,7 @@ from naumi_agent.config.settings import (
 )
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -60,6 +61,11 @@ class _FalseyWorkerRegistryStore(WorkerRegistryStore):
 
 
 class _FalseyExecutionGrantStore(ExecutionGrantStore):
+    def __bool__(self) -> bool:
+        return False
+
+
+class _FalseyRunDelegationGrantStore(RunDelegationGrantStore):
     def __bool__(self) -> bool:
         return False
 
@@ -120,6 +126,9 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
     assert paths.worker_registry_db_path == paths.runtime_data_dir / "worker-registry.db"
     assert paths.execution_grant_db_path == paths.runtime_data_dir / "execution-grants.db"
+    assert paths.run_delegation_grant_db_path == (
+        paths.runtime_data_dir / "run-delegation-grants.db"
+    )
     assert (
         paths.permission_decision_db_path
         == paths.runtime_data_dir / "permission-decisions.db"
@@ -152,6 +161,9 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
         "worker_registry_db_path": absolute / "data" / "worker-registry.db",
         "execution_grant_db_path": absolute / "data" / "execution-grants.db",
+        "run_delegation_grant_db_path": (
+            absolute / "data" / "run-delegation-grants.db"
+        ),
         "permission_decision_db_path": absolute / "data" / "permission-decisions.db",
         "tool_job_db_path": absolute / "data" / "tool-jobs.db",
         "shell_worker_runtime_dir": absolute / "data" / "shell-worker" / "transport",
@@ -206,6 +218,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
                 "permission_decision_db_path": absolute / "outside" / "decisions.db",
             }
         )
+    with pytest.raises(ValueError, match="run_delegation_grant_db_path 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "run_delegation_grant_db_path": absolute / "outside" / "run-grants.db",
+            }
+        )
     with pytest.raises(ValueError, match="tool_job_db_path 必须位于"):
         RuntimePaths(
             **{
@@ -248,6 +267,9 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
     worker_registry_store = _FalseyWorkerRegistryStore(tmp_path / "custom-workers.db")
     execution_grant_store = _FalseyExecutionGrantStore(tmp_path / "custom-grants.db")
+    run_delegation_grant_store = _FalseyRunDelegationGrantStore(
+        tmp_path / "custom-run-grants.db"
+    )
     permission_decision_store = _FalseyPermissionDecisionStore(
         tmp_path / "custom-decisions.db"
     )
@@ -263,6 +285,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
             chat_run_store=chat_run_store,
             worker_registry_store=worker_registry_store,
             execution_grant_store=execution_grant_store,
+            run_delegation_grant_store=run_delegation_grant_store,
             permission_decision_store=permission_decision_store,
             tool_job_store=tool_job_store,
             evolution_candidate_store=evolution_store,
@@ -279,6 +302,9 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
     assert defaults.worker_registry_store.db_path == paths.worker_registry_db_path
     assert defaults.execution_grant_store.db_path == paths.execution_grant_db_path
+    assert defaults.run_delegation_grant_store.db_path == (
+        paths.run_delegation_grant_db_path
+    )
     assert defaults.permission_decision_store.db_path == paths.permission_decision_db_path
     assert defaults.tool_job_store.db_path == paths.tool_job_db_path
     assert defaults.harness_trust_store._db_path == paths.harness_trust_db_path
@@ -291,6 +317,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert overridden.chat_run_store is chat_run_store
     assert overridden.worker_registry_store is worker_registry_store
     assert overridden.execution_grant_store is execution_grant_store
+    assert overridden.run_delegation_grant_store is run_delegation_grant_store
     assert overridden.permission_decision_store is permission_decision_store
     assert overridden.tool_job_store is tool_job_store
     assert overridden.task_store is task_store
@@ -303,6 +330,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert not paths.pursuit_storage_dir.exists()
     assert not paths.worker_registry_db_path.exists()
     assert not paths.execution_grant_db_path.exists()
+    assert not paths.run_delegation_grant_db_path.exists()
     assert not paths.permission_decision_db_path.exists()
     assert not paths.tool_job_db_path.exists()
     assert not (tmp_path / "state").exists()
@@ -342,6 +370,9 @@ def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
             chat_run_store=ChatRunStore(tmp_path / "chat-runs.db"),
             worker_registry_store=WorkerRegistryStore(tmp_path / "workers.db"),
             execution_grant_store=ExecutionGrantStore(tmp_path / "grants.db"),
+            run_delegation_grant_store=RunDelegationGrantStore(
+                tmp_path / "run-grants.db"
+            ),
             permission_decision_store=PermissionDecisionReceiptStore(
                 tmp_path / "decisions.db"
             ),
@@ -367,6 +398,7 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
             chat_run_store=defaults.chat_run_store,
             worker_registry_store=defaults.worker_registry_store,
             execution_grant_store=defaults.execution_grant_store,
+            run_delegation_grant_store=defaults.run_delegation_grant_store,
             permission_decision_store=defaults.permission_decision_store,
             tool_job_store=defaults.tool_job_store,
             evolution_candidate_store=defaults.evolution_candidate_store,
@@ -535,6 +567,14 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         engine.execution_grant_authority._permission_decision_store
         is engine._resources.permission_decision_store
     )
+    assert (
+        engine.run_delegation_grant_authority._store
+        is engine._resources.run_delegation_grant_store
+    )
+    assert (
+        engine.execution_grant_authority._run_delegation_grant_authority
+        is engine.run_delegation_grant_authority
+    )
     assert engine.tool_job_authority._store is engine._resources.tool_job_store
     assert (
         engine.tool_job_authority._execution_grants
@@ -579,6 +619,10 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         is engine._resources.execution_grant_store
     )
     assert (
+        engine.shell_worker_admission_composer._run_delegation_grant_authority
+        is engine.run_delegation_grant_authority
+    )
+    assert (
         engine.shell_worker_admission_composer._tool_job_store
         is engine._resources.tool_job_store
     )
@@ -599,6 +643,7 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         == engine._paths.shell_worker_artifact_dir
     )
     assert not engine._paths.execution_grant_db_path.exists()
+    assert not engine._paths.run_delegation_grant_db_path.exists()
     assert not engine._paths.permission_decision_db_path.exists()
     assert not engine._paths.tool_job_db_path.exists()
     assert not engine._paths.shell_worker_runtime_dir.exists()

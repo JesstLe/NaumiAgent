@@ -22,6 +22,11 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceiptStore,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.run_delegation_grants import (
+    RunDelegationGrantAuthority,
+    RunDelegationGrantRequest,
+    RunDelegationGrantStore,
+)
 from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.daemons.shell_worker import (
     AuthenticatedLocalShellTransport,
@@ -36,6 +41,7 @@ from naumi_agent.daemons.shell_worker import (
 from naumi_agent.daemons.tool_jobs import (
     ToolJobAuthority,
     ToolJobLifecycleAuthority,
+    ToolJobLifecycleConflictError,
     ToolJobRequest,
     ToolJobState,
     ToolJobStore,
@@ -444,7 +450,7 @@ async def test_admission_composer_builds_and_releases_exact_authority_chain(
         delegated_tool_names=("bash_run",),
         decided_at=T2,
     )
-    timestamps = iter((T3, T4))
+    timestamps = iter((T3, T4, T5))
     composer = ShellWorkerAdmissionComposer(
         worker_registry=registry,
         harness_store=harness,
@@ -486,6 +492,150 @@ async def test_admission_composer_builds_and_releases_exact_authority_chain(
         run_id=parent.run_id,
     )
     assert released is not None and released.state is HarnessRunLeaseState.RELEASED
+
+
+@pytest.mark.asyncio
+async def test_admission_composer_consumes_run_grant_and_revocation_blocks_dispatch(
+    tmp_path: Path,
+) -> None:
+    _require_real_backend()
+    provisional = _request(tmp_path, code="print('run-grant-ok')")
+    runtime = tmp_path / "authority"
+    source_workspace = tmp_path / "source-authority"
+    source_workspace.mkdir()
+    registry = WorkerRegistryStore(runtime / "worker-registry.db")
+    harness = HarnessStore(tmp_path / "state" / "harness.db")
+    permissions = PermissionDecisionReceiptStore(runtime / "permission-decisions.db")
+    grants = ExecutionGrantStore(runtime / "execution-grants.db")
+    run_grants = RunDelegationGrantStore(runtime / "run-delegation-grants.db")
+    jobs = ToolJobStore(runtime / "tool-jobs.db")
+    parent = await permissions.issue(
+        request_id="long-parent-check",
+        session_id="session-a",
+        run_id="long-tool-run",
+        call_id="long-parent-check",
+        agent_name="main",
+        tool_name="evolution_run_baseline",
+        tool_family="evolution",
+        arguments={"cohort": "red"},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=T2,
+    )
+    outer_lease = await harness.acquire_run_lease(
+        workspace_root=source_workspace,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=parent.run_id,
+        owner_id="cohort-owner",
+        now=T3,
+        lease_seconds=1_200,
+    )
+    assert outer_lease is not None
+    run_authority = RunDelegationGrantAuthority(
+        store=run_grants,
+        permission_store=permissions,
+        harness_store=harness,
+        workspace_root=source_workspace,
+    )
+    run_grant = await run_authority.issue(
+        RunDelegationGrantRequest(
+            idempotency_key="long-red-cohort",
+            parent_receipt_id=parent.receipt_id,
+            run_kind=HarnessRunKind.RUNTIME,
+            lease_owner_id=outer_lease.owner_id,
+            lease_epoch=outer_lease.epoch,
+            delegated_tool_names=("bash_run",),
+        ),
+        now=T3,
+        ttl_seconds=1_200,
+    )
+    timestamps = iter(
+        tuple(f"2026-07-19T00:10:{second:02d}+00:00" for second in range(2, 13))
+    )
+    tokens = iter(("b" * 32, "c" * 32))
+    composer = ShellWorkerAdmissionComposer(
+        worker_registry=registry,
+        harness_store=harness,
+        permission_store=permissions,
+        execution_grant_store=grants,
+        tool_job_store=jobs,
+        transport=AuthenticatedLocalShellTransport(runtime_dir=runtime / "transport"),
+        software_version="0.1.214",
+        run_delegation_grant_authority=run_authority,
+        now=lambda: next(timestamps),
+        token=lambda: next(tokens),
+    )
+
+    with pytest.raises(ValueError, match="Run delegation grant 无效"):
+        await composer.compose(
+            parent_receipt_id=parent.receipt_id,
+            spec=provisional.spec,
+            run_grant_id="missing-run-grant",
+        )
+    assert await registry.list_history("local-shell-worker") == ()
+
+    composed = await composer.compose(
+        parent_receipt_id=parent.receipt_id,
+        spec=provisional.spec,
+        run_grant_id=run_grant.contract.grant_id,
+    )
+    child = await permissions.get(
+        composed.admitted.tool_job_request.authorization_reference
+    )
+    assert child is not None
+    assert child.run_delegation_grant_id == run_grant.contract.grant_id
+
+    success = await composed.admitted.coordinator.execute(
+        job_id=composed.admitted.job_id,
+        tool_job_request=composed.admitted.tool_job_request,
+        shell_request=composed.admitted.shell_request,
+        worker_health=composed.admitted.worker_health,
+        requirements=composed.admitted.requirements,
+        dispatch_id=composed.admitted.dispatch_id,
+    )
+    assert success.payload_sent
+    assert success.command is not None
+    assert success.command.status is ShellWorkerStatus.PASSED
+    await composed.release()
+
+    blocked_request = _request(
+        tmp_path,
+        code="print('must-not-dispatch')",
+        artifact_name="blocked.log",
+    )
+    blocked = await composer.compose(
+        parent_receipt_id=parent.receipt_id,
+        spec=blocked_request.spec,
+        run_grant_id=run_grant.contract.grant_id,
+    )
+
+    await run_grants.revoke(
+        grant_id=run_grant.contract.grant_id,
+        reason="user_cancelled",
+        revoked_at="2026-07-19T00:10:10.500000+00:00",
+    )
+    with pytest.raises(ToolJobLifecycleConflictError, match="execution_grant_invalid"):
+        await blocked.admitted.coordinator.execute(
+            job_id=blocked.admitted.job_id,
+            tool_job_request=blocked.admitted.tool_job_request,
+            shell_request=blocked.admitted.shell_request,
+            worker_health=blocked.admitted.worker_health,
+            requirements=blocked.admitted.requirements,
+            dispatch_id=blocked.admitted.dispatch_id,
+        )
+    await blocked.release()
+    assert await registry.get_active("local-shell-worker") is None
+    released = await harness.get_run_lease(
+        workspace_root=blocked_request.workspace_root,
+        run_kind=HarnessRunKind.TOOL,
+        run_id=parent.run_id,
+    )
+    assert released is not None
+    assert released.state is HarnessRunLeaseState.RELEASED
 
 
 @pytest.mark.asyncio

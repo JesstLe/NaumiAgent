@@ -75,7 +75,8 @@
 - schema v4 child receipt 精确绑定 Run Grant id/digest，并在每次签发前重新验证 grant 与 lease fence；
 - delegated ExecutionGrant 签发和 dispatch 都重新验证 Run Grant；撤销立即阻断尚未 dispatch 的 grant；
 - ExecutionGrant expiry 现在不得晚于 child receipt expiry；旧 v1/v2/v3 receipt 保持摘要兼容；
-- Shell admission 尚待接入该 authority，详见 `UI-12-3b4-run-grant-child-execution-chain.md`。
+- ARC-04.3c 已将该 authority 接入 Shell admission；Composer 显式接收任务局部 `run_grant_id`，不使用
+  全局可变授权，详见 `UI-12-3b4-run-grant-child-execution-chain.md`。
 
 ### 尚未完成
 

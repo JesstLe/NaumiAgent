@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import (
@@ -113,6 +114,9 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
         worker_registry_db_path=runtime_data_dir / "worker-registry.db",
         execution_grant_db_path=runtime_data_dir / "execution-grants.db",
+        run_delegation_grant_db_path=(
+            runtime_data_dir / "run-delegation-grants.db"
+        ),
         permission_decision_db_path=runtime_data_dir / "permission-decisions.db",
         tool_job_db_path=runtime_data_dir / "tool-jobs.db",
         shell_worker_runtime_dir=runtime_data_dir / "shell-worker" / "transport",
@@ -153,6 +157,12 @@ def build_runtime_resources(
     execution_grant_store = resolved.execution_grant_store
     if execution_grant_store is None:
         execution_grant_store = ExecutionGrantStore(paths.execution_grant_db_path)
+
+    run_delegation_grant_store = resolved.run_delegation_grant_store
+    if run_delegation_grant_store is None:
+        run_delegation_grant_store = RunDelegationGrantStore(
+            paths.run_delegation_grant_db_path
+        )
 
     permission_decision_store = resolved.permission_decision_store
     if permission_decision_store is None:
@@ -196,6 +206,7 @@ def build_runtime_resources(
         chat_run_store=chat_run_store,
         worker_registry_store=worker_registry_store,
         execution_grant_store=execution_grant_store,
+        run_delegation_grant_store=run_delegation_grant_store,
         permission_decision_store=permission_decision_store,
         tool_job_store=tool_job_store,
         evolution_candidate_store=evolution_candidate_store,

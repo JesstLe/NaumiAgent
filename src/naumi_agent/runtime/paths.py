@@ -16,6 +16,7 @@ class RuntimePaths:
     chat_run_db_path: Path
     worker_registry_db_path: Path
     execution_grant_db_path: Path
+    run_delegation_grant_db_path: Path
     permission_decision_db_path: Path
     tool_job_db_path: Path
     shell_worker_runtime_dir: Path
@@ -42,6 +43,7 @@ class RuntimePaths:
             "chat_run_db_path",
             "worker_registry_db_path",
             "execution_grant_db_path",
+            "run_delegation_grant_db_path",
             "permission_decision_db_path",
             "tool_job_db_path",
             "shell_worker_runtime_dir",
