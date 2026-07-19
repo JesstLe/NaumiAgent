@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "surface": "new_ui",
+  "protocol": {
+    "name": "naumi-terminal-jsonl",
+    "transport": "jsonl",
+    "minimum_version": 1,
+    "maximum_version": 1,
+    "negotiated": true
+  },
+  "capabilities": {
+    "agent_task_control": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/agent-control-page.js", "frontend/terminal-ui/test/flow.test.js"]
+    },
+    "budget_context_status": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/budget-status.js", "frontend/terminal-ui/test/budget-status.test.js"]
+    },
+    "conversation_submit_streaming": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/index.js", "frontend/terminal-ui/test/index-process.test.js"]
+    },
+    "doctor_debug": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/doctor-health-page.js", "frontend/terminal-ui/test/doctor-health-page.test.js"]
+    },
+    "goal_pursuit": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/goal-pursuit-page.js", "frontend/terminal-ui/test/components.test.js"]
+    },
+    "harness_receipt_explain": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/harness-detail-page.js", "frontend/terminal-ui/test/harness-detail-page.test.js"]
+    },
+    "history_resume": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/history-search.js", "frontend/terminal-ui/test/history-search.test.js"]
+    },
+    "model_provider_identity": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/provider-identity.js", "frontend/terminal-ui/test/footer.test.js"]
+    },
+    "permission_bypass": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/permission-panel.js", "frontend/terminal-ui/test/permission-center-page.test.js"]
+    },
+    "queued_send_now": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/state.js", "frontend/terminal-ui/test/state.test.js"]
+    },
+    "run_cancel": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/index.js", "frontend/terminal-ui/test/flow.test.js"]
+    },
+    "terminal_runtime_health": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/heartbeat.js", "frontend/terminal-ui/test/heartbeat.test.js"]
+    },
+    "tool_lifecycle": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/tool-card.js", "frontend/terminal-ui/test/components.test.js"]
+    },
+    "user_interaction": {
+      "state": "supported",
+      "evidence": ["frontend/terminal-ui/src/components/interaction-card.js", "frontend/terminal-ui/test/flow.test.js"]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "surface": "tui",
+  "protocol": {
+    "name": "naumi-python-in-process",
+    "transport": "in_process",
+    "minimum_version": 1,
+    "maximum_version": 1,
+    "negotiated": false
+  },
+  "capabilities": {
+    "agent_task_control": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/agent_control.py", "tests/unit/test_tui_agent_control.py"]
+    },
+    "budget_context_status": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "conversation_submit_streaming": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui_tool_execution.py"]
+    },
+    "doctor_debug": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_doctor_health.py"]
+    },
+    "goal_pursuit": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui_workbench_overview.py"]
+    },
+    "harness_receipt_explain": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/completion_receipt.py", "tests/unit/test_tui.py"]
+    },
+    "history_resume": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "model_provider_identity": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "permission_bypass": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "queued_send_now": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "run_cancel": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "terminal_runtime_health": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    },
+    "tool_lifecycle": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui_tool_execution.py"]
+    },
+    "user_interaction": {
+      "state": "supported",
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+    }
+  }
+}

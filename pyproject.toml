@@ -75,7 +75,9 @@ packages = ["src/naumi_agent"]
 [tool.hatch.build.targets.wheel.force-include]
 "frontend/terminal-ui/package.json" = "naumi_agent/frontend/terminal-ui/package.json"
 "frontend/terminal-ui/protocol-contract.json" = "naumi_agent/frontend/terminal-ui/protocol-contract.json"
+"frontend/terminal-ui/capability-manifest.json" = "naumi_agent/frontend/terminal-ui/capability-manifest.json"
 "frontend/terminal-ui/src" = "naumi_agent/frontend/terminal-ui/src"
+"src/naumi_agent/tui/capability-manifest.json" = "naumi_agent/tui/capability-manifest.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
