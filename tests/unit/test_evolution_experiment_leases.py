@@ -11,11 +11,32 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import naumi_agent.evolution.adversarial_samples as adversarial_sample_module
 import naumi_agent.evolution.mutation_receipts as mutation_receipt_module
 import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
 import naumi_agent.evolution.validation_metric_bindings as metric_binding_module
+from naumi_agent.daemons.execution_grants import ExecutionGrantStore
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionReceiptStore,
+    PermissionDecisionSource,
+)
+from naumi_agent.daemons.run_delegation_grants import (
+    RunDelegationGrantAuthority,
+    RunDelegationGrantRequest,
+    RunDelegationGrantStore,
+)
+from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
+from naumi_agent.daemons.shell_worker import (
+    AuthenticatedLocalShellTransport,
+    ShellSandboxUnavailableError,
+    detect_shell_sandbox_backend,
+)
+from naumi_agent.daemons.tool_jobs import ToolJobStore
+from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
     EvolutionAdversarialBatchRequestBuilder,
@@ -26,6 +47,12 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
     EvolutionAdversarialProbeContractError,
     EvolutionAdversarialProbeRegistry,
+)
+from naumi_agent.evolution.adversarial_samples import (
+    EvolutionAdversarialSampleError,
+    EvolutionAdversarialSampleExecutor,
+    EvolutionAdversarialSampleReceipt,
+    adversarial_lane_authority_key,
 )
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
@@ -114,11 +141,21 @@ from naumi_agent.evolution.validation_plans import (
     EvolutionValidationProfileBinding,
     validation_requirements_for_path,
 )
+from naumi_agent.harness.eval_identity import capture_eval_platform_identity
 from naumi_agent.harness.eval_replay import SAFE_REPLAY_EVAL_RUNNER_VERSION
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
+from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
+from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
+from naumi_agent.harness.sandbox_eval import (
+    HarnessSandboxEvalExecutionKernel,
+    HarnessSandboxEvalRunAuthority,
+)
+from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType, thaw_event_data
+from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry
@@ -589,6 +626,9 @@ async def test_source_snapshot_binds_clean_tree_profile_config_and_tools(
     assert all(tool.naumi_version for tool in first.tools)
     assert first.source_ready is True
     assert first.execution_ready is False
+    assert adversarial_lane_authority_key(first, 1) != (
+        adversarial_lane_authority_key(first, 2)
+    )
 
 
 @pytest.mark.asyncio
@@ -4010,13 +4050,23 @@ checks:
 
 ADVERSARIAL_BINDING_PROFILE = VALIDATION_BINDING_PROFILE + """\
   - id: adversarial_boundary
-    argv: [python, -m, pytest, -q, tests/adversarial/test_footer_boundary.py]
+    argv:
+      - python3
+      - -c
+      - >-
+        import runpy; ns = runpy.run_path('src/naumi_agent/ui/footer.py');
+        assert isinstance(ns['render_footer'](), str)
     timeout_seconds: 10
     when_changed: ['src/**/*.py']
     required_for: [change]
     adversarial_probes: [boundary]
   - id: adversarial_platform
-    argv: [python, -m, pytest, -q, tests/adversarial/test_footer_platform.py]
+    argv:
+      - python3
+      - -c
+      - >-
+        import sys;
+        assert sys.platform in {'darwin', 'linux', 'win32'}
     timeout_seconds: 10
     when_changed: ['src/**/ui/**/*.py']
     required_for: [change]
@@ -4347,15 +4397,15 @@ async def _adversarial_probe_fixture(
         profile_binding=binding,
         workspace_root=workspace,
     )
-    return workspace, contract, plan, probe_contract
+    return workspace, contract, lease, plan, probe_contract, trust_store
 
 
 @pytest.mark.asyncio
 async def test_adversarial_batch_request_freezes_real_red_green_platform_matrix(
     tmp_path: Path,
 ) -> None:
-    workspace, contract, plan, probe_contract = await _adversarial_probe_fixture(
-        tmp_path
+    workspace, contract, _, plan, probe_contract, _ = (
+        await _adversarial_probe_fixture(tmp_path)
     )
     builder = EvolutionAdversarialBatchRequestBuilder()
 
@@ -4423,7 +4473,7 @@ async def test_adversarial_batch_request_freezes_real_red_green_platform_matrix(
 async def test_adversarial_batch_request_rejects_incomplete_coverage_and_budget(
     tmp_path: Path,
 ) -> None:
-    _, contract, plan, incomplete = await _adversarial_probe_fixture(
+    _, contract, _, plan, incomplete, _ = await _adversarial_probe_fixture(
         tmp_path / "incomplete",
         profile_text=VALIDATION_BINDING_PROFILE,
     )
@@ -4437,7 +4487,7 @@ async def test_adversarial_batch_request_rejects_incomplete_coverage_and_budget(
         )
     assert blocked.value.code == "adversarial_probe_coverage_incomplete"
 
-    _, contract, plan, complete = await _adversarial_probe_fixture(
+    _, contract, _, plan, complete, _ = await _adversarial_probe_fixture(
         tmp_path / "budget"
     )
     with pytest.raises(EvolutionAdversarialBatchRequestError) as exceeded:
@@ -4457,6 +4507,348 @@ async def test_adversarial_batch_request_rejects_incomplete_coverage_and_budget(
             requested_samples=True,
         )
     assert invalid_count.value.code == "adversarial_sample_count_invalid"
+
+
+def _require_real_shell_backend() -> None:
+    try:
+        detect_shell_sandbox_backend()
+    except ShellSandboxUnavailableError as exc:
+        pytest.skip(str(exc))
+
+
+async def _adversarial_run_authority(
+    *,
+    workspace: Path,
+    store: HarnessStore,
+    permissions: PermissionDecisionReceiptStore,
+    authority: RunDelegationGrantAuthority,
+    parent_receipt_id: str,
+    parent_run_id: str,
+    lane_order: int,
+):
+    now = datetime.now(UTC).isoformat()
+    owner_id = f"evo-adversarial-lane-{lane_order}"
+    run_lease = await store.acquire_run_lease(
+        workspace_root=workspace,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=parent_run_id,
+        owner_id=owner_id,
+        now=now,
+        lease_seconds=300,
+    )
+    assert run_lease is not None
+    grant = await authority.issue(
+        RunDelegationGrantRequest(
+            idempotency_key=f"adversarial-lane-{lane_order}-{run_lease.epoch}",
+            parent_receipt_id=parent_receipt_id,
+            run_kind=HarnessRunKind.RUNTIME,
+            lease_owner_id=owner_id,
+            lease_epoch=run_lease.epoch,
+            delegated_tool_names=("bash_run",),
+        ),
+        now=now,
+        ttl_seconds=300,
+    )
+    return run_lease, grant
+
+
+async def _release_adversarial_run_authority(
+    *,
+    workspace: Path,
+    store: HarnessStore,
+    authority: RunDelegationGrantAuthority,
+    run_id: str,
+    run_lease,
+    grant_id: str,
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    await authority.revoke(
+        grant_id=grant_id,
+        reason="adversarial_lane_finished",
+        revoked_at=now,
+    )
+    released = await store.release_run_lease(
+        workspace_root=workspace,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=run_id,
+        owner_id=run_lease.owner_id,
+        epoch=run_lease.epoch,
+        now=now,
+    )
+    assert released is not None
+
+
+@pytest.mark.asyncio
+async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_authority(
+    tmp_path: Path,
+) -> None:
+    _require_real_shell_backend()
+    workspace, contract, lease, plan, probes, trust = (
+        await _adversarial_probe_fixture(tmp_path)
+    )
+    request = EvolutionAdversarialBatchRequestBuilder().build(
+        experiment_contract=contract,
+        validation_plan=plan,
+        probe_contract=probes,
+    )
+    platform = capture_eval_platform_identity().system
+    if platform == "unknown":
+        pytest.skip("当前平台无法映射到 adversarial matrix。")
+    red_lane = next(
+        item for item in request.lanes
+        if item.platform == platform and item.phase == "red"
+    )
+    green_lane = next(
+        item for item in request.lanes
+        if item.platform == platform and item.phase == "green"
+    )
+    runtime = tmp_path / "adversarial-runtime"
+    store = HarnessStore(tmp_path / "adversarial-harness.db")
+    permissions = PermissionDecisionReceiptStore(runtime / "permissions.db")
+    run_authority = RunDelegationGrantAuthority(
+        store=RunDelegationGrantStore(runtime / "run-grants.db"),
+        permission_store=permissions,
+        harness_store=store,
+        workspace_root=workspace,
+    )
+    parent = await permissions.issue(
+        request_id="adversarial-parent",
+        session_id="session-adversarial",
+        run_id="run-adversarial",
+        call_id="adversarial-parent",
+        agent_name="main",
+        tool_name="evolution_run_adversarial",
+        tool_family="evolution",
+        arguments={"request_id": request.request_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=datetime.now(UTC).isoformat(),
+    )
+    composer = ShellWorkerAdmissionComposer(
+        worker_registry=WorkerRegistryStore(runtime / "workers.db"),
+        harness_store=store,
+        permission_store=permissions,
+        execution_grant_store=ExecutionGrantStore(runtime / "execution-grants.db"),
+        tool_job_store=ToolJobStore(runtime / "tool-jobs.db"),
+        transport=AuthenticatedLocalShellTransport(runtime_dir=runtime / "transport"),
+        software_version="test",
+        run_delegation_grant_authority=run_authority,
+    )
+    sandbox_kernel = HarnessSandboxEvalExecutionKernel(
+        workspace_root=workspace,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sandbox_runner=HarnessSandboxCheckRunner(
+            workspace_root=workspace,
+            sandbox_root=tmp_path / "adversarial-sandboxes",
+            artifact_root=tmp_path / "adversarial-artifacts",
+        ),
+        shell_admission_composer=composer,
+        now=lambda: datetime.now(UTC).isoformat(),
+    )
+    executor = EvolutionAdversarialSampleExecutor(
+        workspace_root=workspace,
+        store=store,
+        lease_store=EvolutionExperimentLeaseStore(tmp_path / "runtime.db"),
+        worktree_storage_dir=Path(lease.worktree_path).parent,
+        profile_service=HarnessService(workspace_root=workspace, trust_store=trust),
+        sandbox_eval_kernel=sandbox_kernel,
+    )
+
+    receipts: list[EvolutionAdversarialSampleReceipt] = []
+    for lane in (red_lane, green_lane):
+        run_lease, grant = await _adversarial_run_authority(
+            workspace=workspace,
+            store=store,
+            permissions=permissions,
+            authority=run_authority,
+            parent_receipt_id=parent.receipt_id,
+            parent_run_id=parent.run_id,
+            lane_order=lane.order,
+        )
+        run_evidence = HarnessSandboxEvalRunAuthority(
+            parent_receipt_id=parent.receipt_id,
+            run_id=parent.run_id,
+            grant_id=grant.contract.grant_id,
+            grant_sha256=grant.contract.grant_sha256,
+        )
+        receipt = await executor.execute(
+            parent_receipt_id=parent.receipt_id,
+            lane_order=lane.order,
+            sample_index=0,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+            run_authority=run_evidence,
+        )
+        await _release_adversarial_run_authority(
+            workspace=workspace,
+            store=store,
+            authority=run_authority,
+            run_id=parent.run_id,
+            run_lease=run_lease,
+            grant_id=grant.contract.grant_id,
+        )
+        repeated = await executor.execute(
+            parent_receipt_id=parent.receipt_id,
+            lane_order=lane.order,
+            sample_index=0,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+            run_authority=run_evidence,
+        )
+        assert repeated == receipt
+        receipts.append(receipt)
+
+    red, green = receipts
+    assert red.phase == "red" and red.overlay_source_sha256 is None
+    assert red.candidate_snapshot_revalidated is False
+    assert green.phase == "green" and green.overlay_source_sha256 is not None
+    assert green.candidate_snapshot_revalidated is True
+    assert red.platform_identity == green.platform_identity
+    assert red.check_ids == green.check_ids == (
+        "adversarial_boundary",
+        "adversarial_platform",
+    )
+    assert red.check_statuses == green.check_statuses == ("passed", "passed")
+    assert red.run_grant_sha256 != green.run_grant_sha256
+    assert red.source_tree_sha256 != green.source_tree_sha256
+    assert red.harness_result_persisted and green.harness_result_persisted
+    assert red.success_rule_revalidated and green.success_rule_revalidated
+    for lane in (red_lane, green_lane):
+        stored = await store.get_eval_result(
+            workspace,
+            lane.batch_id,
+            request.suite_id,
+            0,
+        )
+        assert stored is not None and stored.result.passed == 2
+        assert all(
+            case.metric_observations[0].metric.endswith(".exit_zero")
+            and case.metric_observations[0].value == 1.0
+            for case in stored.result.cases
+        )
+    case = stored.result.cases[0]
+    forged_observation = case.metric_observations[0].model_copy(update={"value": 0.0})
+    assert not adversarial_sample_module._case_evidence_is_valid(  # noqa: SLF001
+        case.model_copy(update={"metric_observations": (forged_observation,)}),
+        request,
+    )
+    final_lease = await store.get_run_lease(
+        workspace_root=workspace,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=parent.run_id,
+    )
+    assert final_lease is not None
+    assert final_lease.state is HarnessRunLeaseState.RELEASED
+
+    tampered = green.model_dump(mode="json")
+    tampered["platform"] = "linux" if platform != "linux" else "macos"
+    with pytest.raises(ValidationError, match="platform identity"):
+        EvolutionAdversarialSampleReceipt.model_validate(tampered)
+
+    candidate_path = Path(lease.worktree_path) / "src/naumi_agent/ui/footer.py"
+    candidate_path.write_text(
+        "def render_footer():\n    return 'drifted-after-green'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(EvolutionAdversarialSampleError) as drifted:
+        await executor.execute(
+            parent_receipt_id=parent.receipt_id,
+            lane_order=green_lane.order,
+            sample_index=0,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+            run_authority=run_evidence,
+        )
+    assert drifted.value.code == "candidate_file_digest_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_adversarial_sample_rejects_wrong_platform_before_permission_read(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, plan, probes, trust = (
+        await _adversarial_probe_fixture(tmp_path)
+    )
+    request = EvolutionAdversarialBatchRequestBuilder().build(
+        experiment_contract=contract,
+        validation_plan=plan,
+        probe_contract=probes,
+    )
+    current = capture_eval_platform_identity().system
+    if current == "unknown":
+        pytest.skip("当前平台无法映射到 adversarial matrix。")
+    wrong_lane = next(item for item in request.lanes if item.platform != current)
+    permission_store = object()
+    run_authority = type("RunAuthority", (), {
+        "_workspace_root": workspace,
+        "_permission_store": permission_store,
+    })()
+    kernel = HarnessSandboxEvalExecutionKernel(
+        workspace_root=workspace,
+        permission_store=permission_store,  # type: ignore[arg-type]
+        run_grant_authority=run_authority,  # type: ignore[arg-type]
+        sandbox_runner=type("Runner", (), {"workspace_root": workspace})(),  # type: ignore[arg-type]
+        shell_admission_composer=type("Composer", (), {
+            "_permission_store": permission_store,
+            "_run_delegation_grant_authority": run_authority,
+        })(),  # type: ignore[arg-type]
+        now=lambda: datetime.now(UTC).isoformat(),
+    )
+    executor = EvolutionAdversarialSampleExecutor(
+        workspace_root=workspace,
+        store=HarnessStore(tmp_path / "platform-harness.db"),
+        lease_store=EvolutionExperimentLeaseStore(tmp_path / "runtime.db"),
+        worktree_storage_dir=Path(lease.worktree_path).parent,
+        profile_service=HarnessService(workspace_root=workspace, trust_store=trust),
+        sandbox_eval_kernel=kernel,
+    )
+
+    with pytest.raises(EvolutionAdversarialSampleError) as invalid_index:
+        await executor.execute(
+            parent_receipt_id="never-read",
+            lane_order=wrong_lane.order,
+            sample_index=True,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+            run_authority=HarnessSandboxEvalRunAuthority(
+                parent_receipt_id="never-read",
+                run_id="never-read",
+                grant_id="never-read",
+                grant_sha256="a" * 64,
+            ),
+        )
+    assert invalid_index.value.code == "adversarial_sample_index_invalid"
+
+    with pytest.raises(EvolutionAdversarialSampleError) as blocked:
+        await executor.execute(
+            parent_receipt_id="never-read",
+            lane_order=wrong_lane.order,
+            sample_index=0,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+            run_authority=HarnessSandboxEvalRunAuthority(
+                parent_receipt_id="never-read",
+                run_id="never-read",
+                grant_id="never-read",
+                grant_sha256="a" * 64,
+            ),
+        )
+    assert blocked.value.code == "adversarial_platform_mismatch"
 
 
 @pytest.mark.asyncio

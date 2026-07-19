@@ -186,7 +186,13 @@ class HarnessSandboxEvalExecutionKernel:
 
             try:
                 result = await self.sandbox_runner.run(
-                    run_id=_check_run_id(parent.run_id, lane, sample_index, check.id),
+                    run_id=_check_run_id(
+                        parent.run_id,
+                        lane,
+                        sample_index,
+                        check.id,
+                        authority_key=authority_key,
+                    ),
                     check=check,
                     profile_digest=profile_digest,
                     profile_is_current=profile_is_current,
@@ -216,12 +222,17 @@ def _check_run_id(
     lane: Literal["red", "green", "adversarial"],
     sample_index: int,
     check_id: str,
+    *,
+    authority_key: str,
 ) -> str:
-    material = (
-        f"{parent_run_id}:{sample_index}:{check_id}"
-        if lane == "red"
-        else f"{parent_run_id}:{lane}:{sample_index}:{check_id}"
-    )
+    if lane == "red":
+        material = f"{parent_run_id}:{sample_index}:{check_id}"
+    elif lane == "adversarial":
+        material = (
+            f"{parent_run_id}:{lane}:{authority_key}:{sample_index}:{check_id}"
+        )
+    else:
+        material = f"{parent_run_id}:{lane}:{sample_index}:{check_id}"
     digest = hashlib.sha256(material.encode()).hexdigest()
     prefix = "evo" if lane in {"red", "green"} else "heval"
     return f"{prefix}{lane}-{digest[:32]}"

@@ -32,6 +32,9 @@ Kernel 为每个 check 派生稳定、lane 隔离的 run ID，逐项调用 `Harn
 4. 整组只有在每项都产生 ARC-04 job ID 与 lifecycle receipt digest 时才返回；
 5. 返回保持原始 typed `HarnessSandboxCheckResult`，由上层唯一的 Suite builder 组装 H5a evidence。
 
+adversarial run ID 额外绑定 lane authority key，避免不同平台或 RED/GREEN adversarial lane 在共享
+parent/sample/check 时发生碰撞；既有 Evolution RED/GREEN run ID 保持不变。
+
 Kernel 不取得或撤销 cohort/Runtime lease，不持久化 H5a，也不决定 RED/GREEN/adversarial 的指标、Identity、
 Policy 或 receipt。authority 生命周期和证据语义仍由各自 coordinator 负责。
 
@@ -48,5 +51,6 @@ Policy 或 receipt。authority 生命周期和证据语义仍由各自 coordinat
 ## 当前边界与下一步
 
 HAR-08.4f 已在 Harness 中用本 kernel 编排连续 sample、Run Grant 生命周期、H5a 前缀恢复与 partial
-checkpoint。HAR-08.4 仍为 partial：通用 Service/Tool/UI surface、跨 Batch admission/backpressure 和
-Linux/Windows CI 尚未完成。EVO-03.6 后续只新增 adversarial probe/metric/guardrail authority，不能复制执行循环。
+checkpoint。EVO-03.6c 已用本 kernel 真实执行 adversarial RED revision 和 GREEN overlay，并写入 H5a。
+HAR-08.4 仍为 partial：通用 Service/Tool/UI surface、跨 Batch admission/backpressure 和 Linux/Windows CI
+尚未完成；EVO-03.6 后续只接入现有 Batch coordinator 与 H5c，不能复制执行循环。
