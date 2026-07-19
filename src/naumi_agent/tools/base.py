@@ -58,6 +58,7 @@ class ToolMetadata:
     interrupt_behavior: InterruptBehavior = InterruptBehavior.BLOCK
     user_facing_name: str | None = None
     search_hint: str = ""
+    delegated_tool_names: tuple[str, ...] = ()
 
 
 class Tool(ABC):

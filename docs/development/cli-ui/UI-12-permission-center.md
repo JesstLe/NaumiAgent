@@ -44,10 +44,18 @@
 - execution grant 必须消费匹配的真实回执引用，任意字符串、denied 或绑定不一致均 fail closed。
 - 详细合同、验收和剩余边界见 `UI-12-3a-durable-decision-receipts.md`。
 
+### UI-12.3b1 已实现：direct allow 回执与委托范围
+
+- policy/bypass 直接允许的受委托工具会在执行前形成 schema v2 持久回执，区分 Runtime actor 与来源；
+- Tool metadata 与回执共同冻结有限下游工具白名单；`harness_run_check` 当前只允许派生 `bash_run`；
+- policy ExecutionGrant 必须消费匹配的 policy receipt，旧 v1 回执保持只读兼容并惰性迁移；
+- 详细合同与未完成的子授权边界见 `UI-12-3b1-direct-allow-delegation-scope.md`。
+
 ### 尚未完成
 
 - UI-12.2：可操作的 pending queue 与等待顺序。
-- UI-12.3b：补齐 policy/Hook/plan block taxonomy、跨会话查询与 retention/export policy。
+- UI-12.3b 后续：子授权、session grant 后续调用、Hook/plan block taxonomy、跨会话查询与
+  retention/export policy。
 - UI-12.4：针对单次检查结果的完整规则解释链。
 - UI-12.5：workspace scope 持久授权。
 - UI-12.6：断线后的 pending 恢复和已决定 request 幂等。

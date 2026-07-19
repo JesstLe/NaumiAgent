@@ -8,7 +8,8 @@
 
 ## 2. 回执合同
 
-`PermissionDecisionReceipt` schema v1 绑定：
+`PermissionDecisionReceipt` 最初以 schema v1 绑定以下事实；UI-12.3b1 已升级 Store/新回执到 v2，旧 v1
+receipt 仍按原摘要只读兼容：
 
 - receipt/request/session/run/call identity；
 - agent、tool 与 tool family；
@@ -52,7 +53,8 @@ call、tool、参数摘要、permission mode、source 与 outcome。缺失、拒
 ## 6. 未完成边界
 
 - UI-12.2 pending queue、UI-12.6 断线恢复尚未实现；
-- 非交互 policy allow/block、Hook block、plan-mode block 尚未形成同一 durable decision taxonomy；
+- policy/bypass direct allow 已由 UI-12.3b1 补齐；policy block、Hook block、plan-mode block 尚未形成同一
+  durable decision taxonomy；
 - session grant 本体仍是 Engine 内存对象，UI-12.5 workspace grant 未实现；
 - ARC-04.2b/2c 已实现 ImmutableToolJob admission、lifecycle completion receipt 并消费本回执；daemon
   transport 和真实 Shell worker 尚未实现；
