@@ -203,6 +203,7 @@ from naumi_agent.runtime.ports.permission import PermissionPort
 from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.runtime.ports.tool_execution import ToolExecutionPort
 from naumi_agent.runtime.resources import RuntimeResources
+from naumi_agent.runtime.services import RuntimeServices
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
@@ -601,6 +602,7 @@ class AgentEngine:
         ports: RuntimePorts[Session] | None = None,
         paths: RuntimePaths | None = None,
         resources: RuntimeResources | None = None,
+        services: RuntimeServices | None = None,
         session_port: SessionPort[Session] | None = None,
         permission_port: PermissionPort | None = None,
         model_port: ModelPort | None = None,
@@ -623,11 +625,14 @@ class AgentEngine:
             raise TypeError("paths 必须是完整的 RuntimePaths")
         if resources is not None and not isinstance(resources, RuntimeResources):
             raise TypeError("resources 必须是完整的 RuntimeResources")
-        if ports is None or paths is None or resources is None:
+        if services is not None and not isinstance(services, RuntimeServices):
+            raise TypeError("services 必须是完整的 RuntimeServices")
+        if ports is None or paths is None or resources is None or services is None:
             from naumi_agent.runtime.composition import (
                 build_runtime_paths,
                 build_runtime_ports,
                 build_runtime_resources,
+                build_runtime_services,
             )
 
             if paths is None:
@@ -649,6 +654,13 @@ class AgentEngine:
             if resources is None:
                 resources = build_runtime_resources(paths)
 
+            if services is None:
+                services = build_runtime_services(
+                    config,
+                    paths=paths,
+                    resources=resources,
+                )
+
         self._event_sink = ports.event_sink
         self._session_port = ports.session_port
         self._permission_port = ports.permission_port
@@ -656,6 +668,10 @@ class AgentEngine:
         self._tool_execution_port = ports.tool_execution_port
         self._paths = paths
         self._resources = resources
+        self._services = services
+        self.terminal_runtime_lifecycle_factory = (
+            services.terminal_runtime_lifecycle_factory
+        )
         self.workspace_root = paths.workspace_root
         self._runtime_data_dir = paths.runtime_data_dir
         self._worktree_storage_dir = paths.worktree_storage_dir
