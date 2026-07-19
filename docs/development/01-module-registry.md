@@ -24,7 +24,7 @@
 | UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a, 13.1b) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |
 | UI-14 | QuickOpen、Vim 与完整键位层 | planned | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
 | UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a) | render cache | `cli-ui/UI-15-performance.md` |
-| UI-16 | 跨终端、无障碍与国际化 | planned | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
+| UI-16 | 跨终端、无障碍与国际化 | partial (16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
 | UI-17 | New UI/TUI parity 与发布门 | planned | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
 | UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.4b, 18.4c, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
 

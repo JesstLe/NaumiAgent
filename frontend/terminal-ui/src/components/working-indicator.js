@@ -41,10 +41,17 @@ export function workingIndicatorStatus(state) {
   if (state?.interaction || phase === "awaiting_input") {
     return { visible: true, animate: false, label: "等待用户输入", phaseLabel, style: ANSI.yellow };
   }
+  const activePhaseLabel = joinActivePhaseLabels(phaseLabel, state?.activeRuntimePhase);
   if (phase === "executing") {
-    return { visible: true, animate: true, label: "工具执行中", phaseLabel, style: ANSI.cyan };
+    return { visible: true, animate: true, label: "工具执行中", phaseLabel: activePhaseLabel, style: ANSI.cyan };
   }
-  return { visible: true, animate: true, label: "模型工作中", phaseLabel, style: ANSI.green };
+  return { visible: true, animate: true, label: "模型工作中", phaseLabel: activePhaseLabel, style: ANSI.green };
+}
+
+function joinActivePhaseLabels(phaseLabel, runtimePhase) {
+  const runtimeLabel = compactText(sanitizeTerminalText(runtimePhase), 80);
+  if (!runtimeLabel || runtimeLabel === phaseLabel) return phaseLabel;
+  return compactText(`${phaseLabel} · ${runtimeLabel}`, 160);
 }
 
 export function shouldAnimateWorkingIndicator(state, capabilities = {}) {
