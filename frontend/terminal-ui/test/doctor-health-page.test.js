@@ -20,6 +20,12 @@ function snapshot() {
         responsibility: "user_config", detail: "未检测到凭据",
         suggestion: "运行 naumi configure。",
       },
+      {
+        id: "runtime-heartbeat-retention", domain: "runtime",
+        label: "运行时心跳清理", severity: "degraded",
+        responsibility: "product_runtime", detail: "策略已启用；本轮失败；历史失败 1。",
+        suggestion: "检查 Harness Store；清理失败不会中断模型执行。",
+      },
     ],
   };
 }
@@ -30,11 +36,14 @@ test("doctor health page renders typed local evidence at common widths", () => {
       snapshot: snapshot(),
       heartbeat: { status: "healthy", rttMs: 12, ageMs: 0 },
       scrollOffset: 0,
-    }, width, 16);
+    }, width, 22);
     const plain = lines.map(stripAnsi).join("\n");
-    assert.equal(lines.length, 16);
+    assert.equal(lines.length, 22);
     assert(lines.every((line) => visibleWidth(line) <= width));
-    for (const expected of ["环境健康诊断", "本地只读", "Bridge 心跳", "Node.js", "API key", "用户配置", "下一步"]) {
+    for (const expected of [
+      "环境健康诊断", "本地只读", "Bridge 心跳", "Node.js", "API key", "用户配置",
+      "运行时心跳清理", "产品运行时", "清理失败不会中断模型执行", "下一步",
+    ]) {
       assert(plain.includes(expected));
     }
   }

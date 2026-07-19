@@ -3599,14 +3599,19 @@ class JsonlEngineBridge:
             build_doctor_health_snapshot,
             doctor_health_payload,
             pursuit_recovery_health_item,
+            runtime_heartbeat_retention_health_item,
         )
 
         config = getattr(self.engine, "_config", AppConfig())
-        additional_items = ()
+        additional_items = [
+            runtime_heartbeat_retention_health_item(
+                self._runtime_heartbeat_retention_status_payload()
+            )
+        ]
         try:
             recovery = await self._current_pursuit_recovery_snapshot()
             if recovery is not None:
-                additional_items = (pursuit_recovery_health_item(recovery),)
+                additional_items.append(pursuit_recovery_health_item(recovery))
         except Exception as exc:
             logger.warning("Pursuit recovery health lookup failed (%s)", type(exc).__name__)
             if self.debug_trace is not None:
@@ -3620,7 +3625,7 @@ class JsonlEngineBridge:
             )
             health_snapshot = build_doctor_health_snapshot(
                 report,
-                additional_items=additional_items,
+                additional_items=tuple(additional_items),
             )
         except Exception as exc:
             logger.warning("Local doctor failed (%s)", type(exc).__name__)
@@ -3638,7 +3643,7 @@ class JsonlEngineBridge:
             )
             health_snapshot = build_doctor_health_snapshot(
                 report,
-                additional_items=additional_items,
+                additional_items=tuple(additional_items),
             )
         await self.emit(
             ServerEventType.DOCTOR_HEALTH,

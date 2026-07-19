@@ -5939,6 +5939,12 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     engine.goal_store = GoalStore(tmp_path / "goals")
     engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
     engine.harness_service = SimpleNamespace(store=HarnessStore(tmp_path / "harness.db"))
+    engine._config = SimpleNamespace(
+        ui=SimpleNamespace(show_reasoning=False),
+        harness=SimpleNamespace(
+            runtime_heartbeat_retention=SimpleNamespace(enabled=True)
+        ),
+    )
     goal = engine.goal_store.create("诊断追踪恢复")
     run = PursuitRun(
         id="pursuit-doctor-recovery",
@@ -6005,6 +6011,13 @@ async def test_bridge_renders_doctor_report_as_system_notice(
     )
     assert recovery_item["severity"] == "ok"
     assert "安全等待" in recovery_item["detail"]
+    retention_item = next(
+        item
+        for item in health["payload"]["items"]
+        if item["id"] == "runtime-heartbeat-retention"
+    )
+    assert retention_item["severity"] == "degraded"
+    assert "未运行" in retention_item["detail"]
     assert any(record["type"] == "runtime/status" for record in records)
 
 

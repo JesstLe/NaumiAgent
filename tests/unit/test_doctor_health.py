@@ -6,6 +6,8 @@ from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
 from naumi_agent.ui.doctor_health import (
     build_doctor_health_snapshot,
     pursuit_recovery_health_item,
+    render_doctor_health_item_markdown,
+    runtime_heartbeat_retention_health_item,
 )
 from naumi_agent.ui.pursuit_recovery import PursuitRecoverySnapshot
 
@@ -121,3 +123,48 @@ def test_pursuit_recovery_item_uses_shared_state_and_raises_overall_severity() -
     assert "疑似孤立" in item.detail
     assert snapshot.status == "error"
     assert snapshot.items[-1] == item
+
+
+def test_runtime_retention_health_distinguishes_live_failed_and_unavailable() -> None:
+    live = runtime_heartbeat_retention_health_item({
+        "configured_enabled": True,
+        "state": "waiting",
+        "cycle_count": 4,
+        "deleted_count": 12,
+        "failure_count": 1,
+    })
+    failed = runtime_heartbeat_retention_health_item({
+        "configured_enabled": True,
+        "state": "failed",
+        "failure_count": 2,
+        "last_error_code": "lease_lost",
+    })
+    unavailable = runtime_heartbeat_retention_health_item({
+        "configured_enabled": True,
+        "state": "unavailable",
+    })
+
+    assert live.severity == "ok"
+    assert "成功周期 4" in live.detail
+    assert "累计清理 12" in live.detail
+    assert failed.severity == "degraded"
+    assert "lease_lost" in failed.detail
+    assert unavailable.severity == "unknown"
+    assert "TUI fallback" in unavailable.suggestion
+    assert "UNKNOWN 运行时心跳清理" in render_doctor_health_item_markdown(
+        unavailable
+    )
+
+
+def test_runtime_retention_health_sanitizes_untrusted_status() -> None:
+    secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    item = runtime_heartbeat_retention_health_item({
+        "configured_enabled": True,
+        "state": "broken",
+        "cycle_count": secret,
+        "last_error_code": secret,
+    })
+
+    assert item.severity == "unknown"
+    assert secret not in item.detail
+    assert "status_invalid" in item.detail

@@ -45,6 +45,7 @@ from naumi_agent.tui.completion_receipt import (
     format_completion_receipt_text,
 )
 from naumi_agent.tui.semantic_markdown import semantic_markdown_parser
+from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
 from naumi_agent.ui.keybindings import build_keybindings
 from naumi_agent.ui.theme import build_ui_style_config
 from naumi_agent.user_interaction import (
@@ -96,6 +97,51 @@ class _HistoryDispatchApp:
 
 
 class TestNaumiApp:
+    @pytest.mark.asyncio
+    async def test_doctor_exposes_unknown_bridge_retention_in_tui_fallback(
+        self,
+        monkeypatch,
+    ) -> None:
+        from naumi_agent.tui import app as tui_module
+
+        report = DoctorReport(
+            checks=(DoctorCheck("Node.js", "pass", "v22"),)
+        )
+        monkeypatch.setattr(tui_module, "run_doctor", AsyncMock(return_value=report))
+        monkeypatch.setattr(
+            tui_module,
+            "Markdown",
+            lambda content, **_: content,
+        )
+
+        class Chat:
+            mounted = ""
+
+            def mount(self, value) -> None:
+                self.mounted = value
+
+        chat = Chat()
+        status = SimpleNamespace(status_text="")
+        engine = SimpleNamespace(
+            _config=AppConfig(),
+            workspace_root=".",
+            _mcp_manager=None,
+            router=object(),
+        )
+
+        class FakeApp:
+            def __init__(self) -> None:
+                self.engine = engine
+
+            def query_one(self, widget_type):
+                return chat if widget_type is ChatPanel else status
+
+        await NaumiApp._run_doctor.__wrapped__(FakeApp())
+
+        assert "UNKNOWN 运行时心跳清理" in chat.mounted
+        assert "TUI fallback 不托管" in chat.mounted
+        assert status.status_text == "环境诊断存在未知项"
+
     @pytest.mark.asyncio
     async def test_running_tui_persists_promotes_and_cancels_queue_items(
         self,
