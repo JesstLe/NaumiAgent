@@ -33,6 +33,8 @@
 - ARC-04.3a 已完成认证本地 non-PTY transport、默认断网 OS sandbox、process-tree cancel、资源上限、artifact
   digest，并由 Coordinator 消费 ARC-04.2b/2c 权威链，详见
   `ARC-04-3a-authenticated-non-pty-shell-worker.md`。
+- ARC-04.3b 已完成一次性 Shell admission composer，组合精确子授权、Worker incarnation、snapshot Tool lease、
+  delegated grant、ToolJob admission 与终态 cleanup，详见 `ARC-04-3b-ephemeral-shell-admission-composer.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成。因此 ARC-04 保持 partial。
 
@@ -70,4 +72,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
-ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a)。
+ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b)。

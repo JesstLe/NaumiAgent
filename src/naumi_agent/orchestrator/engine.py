@@ -16,6 +16,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from naumi_agent import __version__
 from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
@@ -26,6 +27,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceipt,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.daemons.shell_worker import (
     AuthenticatedLocalShellTransport,
     ShellWorkerCoordinator,
@@ -647,6 +649,15 @@ class AgentEngine:
             lifecycle=self.tool_job_lifecycle_authority,
             worker_registry=resources.worker_registry_store,
             transport=self.shell_worker_transport,
+        )
+        self.shell_worker_admission_composer = ShellWorkerAdmissionComposer(
+            worker_registry=resources.worker_registry_store,
+            harness_store=resources.harness_store,
+            permission_store=resources.permission_decision_store,
+            execution_grant_store=resources.execution_grant_store,
+            tool_job_store=resources.tool_job_store,
+            transport=self.shell_worker_transport,
+            software_version=__version__,
         )
         self.harness_sandbox_check_runner = HarnessSandboxCheckRunner(
             workspace_root=paths.workspace_root,

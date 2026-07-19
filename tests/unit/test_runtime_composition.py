@@ -563,6 +563,30 @@ def test_real_engine_composes_execution_grant_authority_lazily(
     )
     assert engine.shell_worker_coordinator._transport is engine.shell_worker_transport
     assert (
+        engine.shell_worker_admission_composer._worker_registry
+        is engine._resources.worker_registry_store
+    )
+    assert (
+        engine.shell_worker_admission_composer._harness_store
+        is engine._resources.harness_store
+    )
+    assert (
+        engine.shell_worker_admission_composer._permission_store
+        is engine._resources.permission_decision_store
+    )
+    assert (
+        engine.shell_worker_admission_composer._execution_grant_store
+        is engine._resources.execution_grant_store
+    )
+    assert (
+        engine.shell_worker_admission_composer._tool_job_store
+        is engine._resources.tool_job_store
+    )
+    assert (
+        engine.shell_worker_admission_composer._transport
+        is engine.shell_worker_transport
+    )
+    assert (
         engine.shell_worker_transport._runtime_dir
         == engine._paths.shell_worker_runtime_dir
     )
