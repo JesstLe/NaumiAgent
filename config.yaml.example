@@ -28,6 +28,17 @@ memory:
   vector_db_path: "data/chroma"
   compaction_threshold: 0.75
 
+harness:
+  runtime_heartbeat_retention:
+    # 仅清理已超过保留期且机械判定为 offline/stopped/failed 的运行时心跳诊断记录。
+    enabled: true
+    retention_days: 7
+    interval_seconds: 21600
+    standby_retry_seconds: 60
+    lease_seconds: 60
+    scan_limit: 100
+    catalog_limit: 200
+
 search:
   # 实际 token 不写入 YAML；运行时从环境变量解析。
   provider_order: [brave, duckduckgo, browser]

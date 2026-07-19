@@ -20,6 +20,8 @@ class TestAppConfig:
         assert config.memory.session_db_path == "data/sessions.db"
         assert config.ui.theme == "dark"
         assert config.ui.output_style == "detailed"
+        assert config.harness.runtime_heartbeat_retention.enabled is True
+        assert config.harness.runtime_heartbeat_retention.retention_days == 7
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
         assert config.browser.max_concurrent_runs == 2
@@ -27,6 +29,28 @@ class TestAppConfig:
         assert config.search.provider_order == ("brave", "duckduckgo", "browser")
         assert config.search.brave.api_key_ref == "{env:BRAVE_SEARCH_API_KEY}"
         assert config.search.brave.safesearch == "moderate"
+
+    def test_runtime_heartbeat_retention_config_is_bounded(self) -> None:
+        config = AppConfig(
+            harness={
+                "runtime_heartbeat_retention": {
+                    "enabled": False,
+                    "retention_days": 30,
+                    "scan_limit": 250,
+                }
+            }
+        )
+        retention = config.harness.runtime_heartbeat_retention
+        assert retention.enabled is False
+        assert retention.retention_days == 30
+        assert retention.scan_limit == 250
+
+        with pytest.raises(ValueError, match="retention_days"):
+            AppConfig(
+                harness={
+                    "runtime_heartbeat_retention": {"retention_days": 2}
+                }
+            )
 
     def test_search_config_loads_advanced_brave_options(self, tmp_path: Path) -> None:
         yaml_path = tmp_path / "config.yaml"

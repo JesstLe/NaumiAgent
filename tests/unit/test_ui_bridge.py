@@ -1506,6 +1506,70 @@ async def test_bridge_persists_runtime_heartbeat_until_graceful_shutdown(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_bridge_runs_bounded_runtime_heartbeat_retention_and_stops_it(
+    tmp_path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path / "workspace"
+    engine.workspace_root.mkdir()
+    engine._config = SimpleNamespace(
+        ui=SimpleNamespace(show_reasoning=False),
+        harness=SimpleNamespace(
+            runtime_heartbeat_retention=SimpleNamespace(
+                enabled=True,
+                retention_days=3,
+                interval_seconds=60,
+                standby_retry_seconds=1,
+                lease_seconds=30,
+                scan_limit=10,
+                catalog_limit=10,
+            )
+        ),
+    )
+    store = HarnessStore(tmp_path / "harness.db")
+    engine.harness_service = SimpleNamespace(store=store)
+    await store.record_heartbeat(
+        workspace_root=engine.workspace_root,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id="old-runtime",
+        instance_id="old-instance",
+        epoch=1,
+        sequence=1,
+        phase=HarnessHeartbeatPhase.STOPPED,
+        observed_at="2000-01-01T00:00:00+00:00",
+        timeout_seconds=30,
+        detail_code="runtime_stopped",
+    )
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(io.StringIO())
+
+    await bridge.emit_ready()
+    for _ in range(50):
+        service = bridge._runtime_heartbeat_retention
+        if service is not None and service.snapshot().cycle_count == 1:
+            break
+        await asyncio.sleep(0.01)
+
+    service = bridge._runtime_heartbeat_retention
+    assert service is not None
+    assert service.snapshot().deleted_count == 1
+    assert (
+        await store.get_heartbeat(
+            workspace_root=engine.workspace_root,
+            subject_kind=HarnessRunKind.RUNTIME,
+            subject_id="old-runtime",
+        )
+        is None
+    )
+    status = bridge.status_payload()["runtime_heartbeat_retention"]
+    assert status["configured_enabled"] is True
+    assert status["state"] == "waiting"
+
+    await bridge.shutdown()
+    assert service.snapshot().state.value == "stopped"
+
+
+@pytest.mark.asyncio
 async def test_bridge_reports_runtime_heartbeat_startup_degradation_once(tmp_path) -> None:
     class FailingHeartbeatStore(HarnessStore):
         async def record_heartbeat(self, **kwargs: Any):
@@ -1533,6 +1597,7 @@ async def test_bridge_reports_runtime_heartbeat_startup_degradation_once(tmp_pat
     assert len(notices) == 1
     assert notices[0]["payload"]["title"] == "运行时心跳降级"
     assert "当前运行仍可继续" in notices[0]["payload"]["content"]
+    assert bridge._runtime_heartbeat_retention is None
     await bridge.shutdown()
 
 
@@ -1559,6 +1624,22 @@ async def test_bridge_marks_runtime_heartbeat_failed_when_engine_shutdown_fails(
     assert failed is not None
     assert failed.phase is HarnessHeartbeatPhase.FAILED
     assert failed.detail_code == "runtime_shutdown_failed"
+
+
+@pytest.mark.asyncio
+async def test_retention_stop_failure_does_not_block_bridge_shutdown() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._runtime_heartbeat_retention = SimpleNamespace(
+        stop=AsyncMock(side_effect=RuntimeError("private store path"))
+    )
+
+    await bridge.shutdown()
+
+    assert engine.shutdown_called is True
+    assert _records(writer)[-1]["type"] == "shutdown"
 
 
 @pytest.mark.asyncio
