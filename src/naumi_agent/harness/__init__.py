@@ -11,6 +11,7 @@ from naumi_agent.harness.heartbeat import (
     HarnessHeartbeatSnapshot,
     assess_heartbeat,
 )
+from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
 from naumi_agent.harness.knowledge import (
     KnowledgeBudget,
     KnowledgeCandidate,
@@ -60,6 +61,7 @@ __all__ = [
     "KnowledgeReadResult",
     "KnowledgeSelection",
     "RepositoryKnowledgeIndex",
+    "RuntimeHeartbeatProducer",
     "assess_heartbeat",
     "load_harness_profile",
 ]

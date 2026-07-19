@@ -36,6 +36,7 @@ from naumi_agent.harness.eval_surface import (
     eval_batch_terminal_progress,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup
+from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
 )
@@ -43,6 +44,7 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
+from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import (
     HarnessConversationQueueItem,
     HarnessStore,
@@ -98,6 +100,8 @@ _TERMINAL_MISSION_STATUSES = frozenset({
 })
 _SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 _MAX_QUEUED_CONVERSATIONS = 20
+_RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 10.0
+_RUNTIME_HEARTBEAT_TIMEOUT_SECONDS = 30
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
@@ -232,6 +236,10 @@ _EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
 def _task_title(text: str) -> str:
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "新任务")
     return first_line[:80]
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _public_mapping(value: Any) -> dict[str, Any]:
@@ -526,6 +534,12 @@ class JsonlEngineBridge:
         ) = None
         self._interaction_authority_store: object | None = None
         self._interaction_replay_task: asyncio.Task[None] | None = None
+        runtime_identity = f"terminal-ui-{uuid4().hex}"
+        self._runtime_heartbeat_subject_id = runtime_identity
+        self._runtime_heartbeat_instance_id = runtime_identity
+        self._runtime_heartbeat: RuntimeHeartbeatProducer | None = None
+        self._runtime_heartbeat_store: HarnessStore | None = None
+        self._runtime_heartbeat_notice_emitted = False
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
@@ -563,11 +577,14 @@ class JsonlEngineBridge:
             self.debug_trace.output("ui_bridge.stdout", text)
 
     async def emit_ready(self) -> None:
+        heartbeat_error = await self._start_runtime_heartbeat()
         payload = self.status_payload()
         retention_status = payload.get("retention_worker")
         if isinstance(retention_status, dict):
             self._last_retention_worker_status = dict(retention_status)
         await self.emit(ServerEventType.READY, payload)
+        if heartbeat_error:
+            await self._emit_runtime_heartbeat_degraded()
         if self.debug_trace is not None:
             await self.emit(
                 ServerEventType.DEBUG_TRACE,
@@ -584,6 +601,63 @@ class JsonlEngineBridge:
         )
         if current_session_id:
             await self._recover_durable_conversation_queue(current_session_id)
+
+    def _runtime_heartbeat_producer(self) -> RuntimeHeartbeatProducer | None:
+        harness_service = getattr(self.engine, "harness_service", None)
+        store = getattr(harness_service, "store", None)
+        if not isinstance(store, HarnessStore):
+            self._runtime_heartbeat = None
+            self._runtime_heartbeat_store = None
+            return None
+        if self._runtime_heartbeat is None or self._runtime_heartbeat_store is not store:
+            self._runtime_heartbeat = RuntimeHeartbeatProducer(
+                port=store,
+                workspace_root=self.engine.workspace_root,
+                subject_kind=HarnessRunKind.RUNTIME,
+                subject_id=self._runtime_heartbeat_subject_id,
+                instance_id=self._runtime_heartbeat_instance_id,
+                interval_seconds=_RUNTIME_HEARTBEAT_INTERVAL_SECONDS,
+                timeout_seconds=_RUNTIME_HEARTBEAT_TIMEOUT_SECONDS,
+                now_provider=_utc_now,
+                on_failure=self._runtime_heartbeat_failed,
+            )
+            self._runtime_heartbeat_store = store
+        return self._runtime_heartbeat
+
+    async def _start_runtime_heartbeat(self) -> str:
+        producer = self._runtime_heartbeat_producer()
+        if producer is None:
+            return ""
+        try:
+            await producer.start()
+        except Exception as exc:
+            logger.warning("Runtime heartbeat startup failed (%s)", type(exc).__name__)
+            return "heartbeat_start_failed"
+        return ""
+
+    async def _runtime_heartbeat_failed(self, _code: str) -> None:
+        if self._closed:
+            return
+        await self._emit_runtime_heartbeat_degraded()
+
+    async def _emit_runtime_heartbeat_degraded(self) -> None:
+        if self._runtime_heartbeat_notice_emitted or self._closed:
+            return
+        self._runtime_heartbeat_notice_emitted = True
+        await self.emit(
+            ServerEventType.UI_MESSAGE,
+            ui_message_payload(
+                SystemNoticeMessage(
+                    type=MessageType.SYSTEM_NOTICE,
+                    title="运行时心跳降级",
+                    content=(
+                        "持久心跳暂不可用；当前运行仍可继续，但离线诊断可能延迟。"
+                        "请运行 /doctor 检查 Harness 状态库。"
+                    ),
+                    level="warning",
+                )
+            ),
+        )
 
     def _interaction_authority(
         self,
@@ -4055,6 +4129,15 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
+        runtime_heartbeat = self._runtime_heartbeat
+        if runtime_heartbeat is not None:
+            try:
+                await runtime_heartbeat.begin_draining()
+            except Exception as exc:
+                logger.warning(
+                    "Runtime heartbeat draining write failed (%s)",
+                    type(exc).__name__,
+                )
         if self._interaction_replay_task is not None:
             self._interaction_replay_task.cancel()
             await asyncio.gather(
@@ -4137,7 +4220,26 @@ class JsonlEngineBridge:
         if promotion_tasks:
             await asyncio.gather(*promotion_tasks, return_exceptions=True)
         self._harness_eval_promotion_tasks.clear()
-        await self.engine.shutdown()
+        try:
+            await self.engine.shutdown()
+        except Exception:
+            if runtime_heartbeat is not None:
+                try:
+                    await runtime_heartbeat.fail()
+                except Exception as exc:
+                    logger.warning(
+                        "Runtime heartbeat failure write failed (%s)",
+                        type(exc).__name__,
+                    )
+            raise
+        if runtime_heartbeat is not None:
+            try:
+                await runtime_heartbeat.close()
+            except Exception as exc:
+                logger.warning(
+                    "Runtime heartbeat stopped write failed (%s)",
+                    type(exc).__name__,
+                )
         await self.emit(ServerEventType.SHUTDOWN, {"ok": True})
         if self.debug_trace is not None:
             self.debug_trace.close()

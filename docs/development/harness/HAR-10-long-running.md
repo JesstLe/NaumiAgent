@@ -20,7 +20,10 @@
   - HAR-10.2b 已实现：heartbeat + lease + checkpoint + reconcile 的只读 Pursuit Recovery Snapshot，并接入
     Goal 新 UI、CLI/TUI fallback 和 Doctor health；见
     [设计](HAR-10-2b-pursuit-recovery-snapshot.md)。
-  - 未完成：browser/agent/runtime producer、heartbeat 历史统计、批量查询与 Supervisor 动作。
+  - HAR-10.2c 已实现：默认 New UI Python Bridge 的 runtime lifecycle producer、周期 pulse、graceful/failed
+    terminal 与单次降级提醒；见 [设计](HAR-10-2c-terminal-ui-runtime-heartbeat.md)。
+  - 未完成：browser/agent producer、runtime worker 列表与 retention、heartbeat 历史统计、批量查询与
+    Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
     [设计](HAR-10-3a-safe-boundary-queue-promotion.md)。
