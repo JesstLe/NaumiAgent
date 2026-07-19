@@ -8,7 +8,8 @@ import json
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -19,6 +20,16 @@ from naumi_agent.daemons.run_delegation_grants import (
     RunDelegationGrantRequest,
 )
 from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
+from naumi_agent.evolution.self_review import SELF_REVIEW_STATIC_RUNNER_VERSION
+from naumi_agent.evolution.self_review_eval_runtime import (
+    SelfReviewEvalRuntimeError,
+    run_self_review_static_sample,
+    validate_self_review_cohort_authority,
+)
+from naumi_agent.evolution.self_review_red_baseline import (
+    EvolutionSelfReviewRedBaselineError,
+    load_exact_validation_blobs,
+)
 from naumi_agent.evolution.validation_cohorts import EvolutionBaselineCohortRequest
 from naumi_agent.evolution.validation_metric_bindings import (
     EvolutionMetricRunnerBinding,
@@ -51,7 +62,8 @@ from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 INTERVENTIONAL_RED_CHECK_RUNNER = "evolution_profile_check@1"
-INTERVENTIONAL_RED_CHECK_POLICY = "evolution-interventional-red-check-sample-v1"
+INTERVENTIONAL_RED_SAMPLE_RUNNER = "evolution_interventional_red@1"
+INTERVENTIONAL_RED_SAMPLE_POLICY = "evolution-interventional-red-sample-v2"
 _SHA256_RE = r"^[0-9a-f]{64}$"
 
 
@@ -65,9 +77,9 @@ class _StrictModel(BaseModel):
 
 
 class EvolutionInterventionalRedCheckSampleReceipt(_StrictModel):
-    schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-interventional-red-check-sample-v1"] = (
-        INTERVENTIONAL_RED_CHECK_POLICY
+    schema_version: Literal[2] = 2
+    policy_version: Literal["evolution-interventional-red-sample-v2"] = (
+        INTERVENTIONAL_RED_SAMPLE_POLICY
     )
     receipt_id: str = Field(pattern=r"^evvredcheck_[0-9a-f]{24}$")
     receipt_sha256: str = Field(pattern=_SHA256_RE)
@@ -92,7 +104,7 @@ class EvolutionInterventionalRedCheckSampleReceipt(_StrictModel):
     exact_revision_materialized: Literal[True] = True
     arc04_worker_used: Literal[True] = True
     project_code_executed: Literal[True] = True
-    metrics_executed: Literal[False] = False
+    metrics_executed: Literal[True] = True
     sample_complete: Literal[True] = True
     completed_at: str
 
@@ -178,7 +190,14 @@ class EvolutionInterventionalRedCheckSampleExecutor:
             sample_index,
         )
         if existing is not None:
-            _validate_existing(existing, request, checks)
+            _validate_existing(
+                existing,
+                request,
+                checks,
+                metrics,
+                plan,
+                profile,
+            )
             return _build_receipt(
                 request=request,
                 metrics=metrics,
@@ -266,7 +285,27 @@ class EvolutionInterventionalRedCheckSampleExecutor:
                     "project_code_not_executed",
                     "Interventional RED 未形成完整 ARC-04 Worker 执行证据。",
                 )
-            suite = _build_suite_result(request, results)
+            configuration, identity = _build_identity(
+                request,
+                metrics,
+                plan,
+                profile,
+            )
+            metric_result = await _run_metric_sample(
+                workspace_root=self._workspace_root,
+                request=request,
+                binding=metrics,
+                plan=plan,
+                configuration=configuration,
+                identity=identity,
+            )
+            suite = _build_suite_result(
+                request,
+                results,
+                metric_result=metric_result,
+                configuration=configuration,
+                identity=identity,
+            )
             stored = await self._store.record_eval_result(
                 workspace_root=self._workspace_root,
                 batch_id=request.batch_id,
@@ -388,6 +427,13 @@ def _validate_authority(baseline_request, metric_binding, validation_plan, profi
         raise EvolutionInterventionalRedCheckSampleError(
             "sample_authority_mismatch", "Interventional RED authority binding 不一致。"
         )
+    try:
+        validate_self_review_cohort_authority(request, metrics, plan)
+    except SelfReviewEvalRuntimeError as exc:
+        raise EvolutionInterventionalRedCheckSampleError(
+            exc.code,
+            str(exc),
+        ) from exc
     return request, metrics, plan, profile
 
 
@@ -407,14 +453,49 @@ def _sample_run_id(parent_run_id: str, sample_index: int, check_id: str) -> str:
 def _build_suite_result(
     request: EvolutionBaselineCohortRequest,
     results: list[HarnessSandboxCheckResult],
+    *,
+    metric_result: HarnessEvalSuiteResult,
+    configuration: HarnessEvalConfigurationIdentity,
+    identity,
 ) -> HarnessEvalSuiteResult:
     policy = HarnessEvalComparisonPolicy()
+    cases = (
+        tuple(_case_from_result(item) for item in results)
+        + metric_result.cases
+    )
+    status = (
+        EvalRunStatus.EVALUATION_ERROR
+        if any(item.status is EvalCaseStatus.EVALUATION_ERROR for item in cases)
+        else EvalRunStatus.FAILED
+        if any(item.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for item in cases)
+        else EvalRunStatus.PASSED
+    )
+    return HarnessEvalSuiteResult(
+        suite_id=request.suite_id,
+        title="Evolution interventional RED sample",
+        suite_path="evolution/red/interventional",
+        suite_sha256=configuration.suite_sha256,
+        status=status,
+        cases=cases,
+        code=f"interventional_red_{status.value}",
+        message="精确 Git baseline 的 Profile checks 与可信 metrics 已完成。",
+        comparison_policy=policy,
+        baseline_identity=identity,
+        duration_ms=(
+            sum(item.duration_ms for item in results) + metric_result.duration_ms
+        ),
+    )
+
+
+def _build_identity(request, metrics, plan, profile):
+    policy = HarnessEvalComparisonPolicy()
+    suite_sha256 = _interventional_suite_sha(request, metrics, plan, profile)
     configuration = HarnessEvalConfigurationIdentity.create(
         suite_id=request.suite_id,
-        suite_sha256=request.request_sha256,
+        suite_sha256=suite_sha256,
         profile_sha256=request.profile_sha256,
         policy_sha256=policy.sha256,
-        runner_version=INTERVENTIONAL_RED_CHECK_RUNNER,
+        runner_version=INTERVENTIONAL_RED_SAMPLE_RUNNER,
         repetitions=request.requested_samples,
         live=False,
     )
@@ -429,27 +510,43 @@ def _build_suite_result(
             dirty=False,
         ),
     )
-    cases = tuple(_case_from_result(item) for item in results)
-    status = (
-        EvalRunStatus.EVALUATION_ERROR
-        if any(item.status is EvalCaseStatus.EVALUATION_ERROR for item in cases)
-        else EvalRunStatus.FAILED
-        if any(item.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for item in cases)
-        else EvalRunStatus.PASSED
-    )
-    return HarnessEvalSuiteResult(
-        suite_id=request.suite_id,
-        title="Evolution RED Profile checks",
-        suite_path="evolution/red/profile-checks",
-        suite_sha256=request.request_sha256,
-        status=status,
-        cases=cases,
-        code=f"interventional_red_{status.value}",
-        message="基于精确 Git baseline 的 Profile checks 已通过 ARC-04 Worker 执行。",
-        comparison_policy=policy,
-        baseline_identity=identity,
-        duration_ms=sum(item.duration_ms for item in results),
-    )
+    return configuration, identity
+
+
+async def _run_metric_sample(
+    *,
+    workspace_root: Path,
+    request: EvolutionBaselineCohortRequest,
+    binding: EvolutionMetricRunnerBinding,
+    plan: EvolutionValidationPlan,
+    configuration: HarnessEvalConfigurationIdentity,
+    identity,
+) -> HarnessEvalSuiteResult:
+    try:
+        blobs = load_exact_validation_blobs(workspace_root, request, plan)
+        with TemporaryDirectory(prefix="naumi-evo-interventional-red-") as temporary:
+            scan_root = Path(temporary).resolve()
+            files: list[Path] = []
+            for relative, content in blobs:
+                destination = scan_root.joinpath(*PurePosixPath(relative).parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+                files.append(destination)
+            return await run_self_review_static_sample(
+                files=files,
+                scan_root=scan_root,
+                phase="red",
+                request=request,
+                binding=binding,
+                plan=plan,
+                configuration=configuration,
+                identity=identity,
+            )
+    except (EvolutionSelfReviewRedBaselineError, SelfReviewEvalRuntimeError) as exc:
+        raise EvolutionInterventionalRedCheckSampleError(
+            getattr(exc, "code", "metric_execution_failed"),
+            str(exc),
+        ) from exc
 
 
 def _case_from_result(result: HarnessSandboxCheckResult) -> HarnessEvalCaseResult:
@@ -476,19 +573,46 @@ def _validate_existing(
     stored: HarnessStoredEvalResult,
     request: EvolutionBaselineCohortRequest,
     checks: tuple[HarnessCheckSpec, ...],
+    metrics: EvolutionMetricRunnerBinding,
+    plan: EvolutionValidationPlan,
+    profile: EvolutionValidationProfileBinding,
 ) -> None:
     result = stored.result
     identity = result.baseline_identity
+    check_cases = tuple(
+        item for item in result.cases
+        if item.runner == INTERVENTIONAL_RED_CHECK_RUNNER
+    )
+    metric_cases = tuple(
+        item for item in result.cases
+        if item.runner == SELF_REVIEW_STATIC_RUNNER_VERSION
+    )
+    expected_suite_sha256 = _interventional_suite_sha(
+        request,
+        metrics,
+        plan,
+        profile,
+    )
+    observed_metrics = tuple(
+        case.metric_observations[0].metric
+        for case in metric_cases
+        if len(case.metric_observations) == 1
+    )
     if not (
         result.suite_id == request.suite_id
-        and result.suite_sha256 == request.request_sha256
         and identity is not None
         and identity.source.commit == request.baseline_commit
         and identity.source.tree_sha256 == f"sha256:{request.baseline_tree_sha256}"
         and identity.configuration.profile_sha256 == request.profile_sha256
-        and tuple(item.case_id for item in result.cases) == tuple(item.id for item in checks)
-        and all(item.runner == INTERVENTIONAL_RED_CHECK_RUNNER for item in result.cases)
-        and all(_lifecycle_digest(item.message) is not None for item in result.cases)
+        and identity.configuration.runner_version == INTERVENTIONAL_RED_SAMPLE_RUNNER
+        and identity.configuration.suite_sha256 == expected_suite_sha256
+        and result.suite_sha256 == identity.configuration.suite_sha256
+        and tuple(item.case_id for item in check_cases) == tuple(item.id for item in checks)
+        and all(_lifecycle_digest(item.message) is not None for item in check_cases)
+        and len(metric_cases) == len(request.metrics)
+        and all(item.metric_observations for item in metric_cases)
+        and observed_metrics == tuple(item.metric_name for item in request.metrics)
+        and len(check_cases) + len(metric_cases) == len(result.cases)
     ):
         raise EvolutionInterventionalRedCheckSampleError(
             "existing_sample_conflict", "已有 H5a sample 不属于当前 Interventional RED authority。"
@@ -498,9 +622,13 @@ def _validate_existing(
 def _build_receipt(*, request, metrics, plan, profile, sample_index, stored):
     identity = stored.result.baseline_identity
     assert identity is not None
+    check_cases = tuple(
+        item for item in stored.result.cases
+        if item.runner == INTERVENTIONAL_RED_CHECK_RUNNER
+    )
     payload = {
-        "schema_version": 1,
-        "policy_version": INTERVENTIONAL_RED_CHECK_POLICY,
+        "schema_version": 2,
+        "policy_version": INTERVENTIONAL_RED_SAMPLE_POLICY,
         "baseline_request_id": request.request_id,
         "baseline_request_sha256": request.request_sha256,
         "metric_binding_id": metrics.binding_id,
@@ -515,16 +643,16 @@ def _build_receipt(*, request, metrics, plan, profile, sample_index, stored):
         "batch_id": request.batch_id,
         "result_sha256": stored.result_sha256,
         "baseline_identity_sha256": identity.identity_sha256,
-        "check_ids": [item.case_id for item in stored.result.cases],
-        "check_statuses": [item.code for item in stored.result.cases],
+        "check_ids": [item.case_id for item in check_cases],
+        "check_statuses": [item.code for item in check_cases],
         "lifecycle_receipt_sha256": [
-            _require_lifecycle_digest(item.message) for item in stored.result.cases
+            _require_lifecycle_digest(item.message) for item in check_cases
         ],
         "profile_trust_revalidated": True,
         "exact_revision_materialized": True,
         "arc04_worker_used": True,
         "project_code_executed": True,
-        "metrics_executed": False,
+        "metrics_executed": True,
         "sample_complete": True,
         "completed_at": stored.created_at,
     }
@@ -546,6 +674,16 @@ def _sha256_payload(payload: object) -> str:
     ).encode("utf-8")).hexdigest()
 
 
+def _interventional_suite_sha(request, metrics, plan, profile) -> str:
+    return _sha256_payload({
+        "request_sha256": request.request_sha256,
+        "metric_binding_sha256": metrics.binding_sha256,
+        "validation_plan_sha256": plan.validation_plan_sha256,
+        "profile_binding_sha256": profile.binding_sha256,
+        "runner": INTERVENTIONAL_RED_SAMPLE_RUNNER,
+    })
+
+
 def _lifecycle_digest(message: str) -> str | None:
     match = re.search(r"(?:^| )lifecycle_sha256=([0-9a-f]{64})(?:$| )", message)
     return match.group(1) if match is not None else None
@@ -561,10 +699,21 @@ def _require_lifecycle_digest(message: str) -> str:
     return digest
 
 
+EvolutionInterventionalRedSampleError = EvolutionInterventionalRedCheckSampleError
+EvolutionInterventionalRedSampleExecutor = EvolutionInterventionalRedCheckSampleExecutor
+EvolutionInterventionalRedSampleReceipt = EvolutionInterventionalRedCheckSampleReceipt
+INTERVENTIONAL_RED_CHECK_POLICY = INTERVENTIONAL_RED_SAMPLE_POLICY
+
+
 __all__ = [
     "EvolutionInterventionalRedCheckSampleError",
     "EvolutionInterventionalRedCheckSampleExecutor",
     "EvolutionInterventionalRedCheckSampleReceipt",
+    "EvolutionInterventionalRedSampleError",
+    "EvolutionInterventionalRedSampleExecutor",
+    "EvolutionInterventionalRedSampleReceipt",
     "INTERVENTIONAL_RED_CHECK_POLICY",
     "INTERVENTIONAL_RED_CHECK_RUNNER",
+    "INTERVENTIONAL_RED_SAMPLE_POLICY",
+    "INTERVENTIONAL_RED_SAMPLE_RUNNER",
 ]

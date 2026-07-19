@@ -168,37 +168,109 @@ async def run_self_review_static_repetitions(
     timeout = min(int(item) for item in timeouts if item is not None)
     results: list[HarnessEvalSuiteResult] = []
     for _ in range(request.requested_samples):
-        started = time.perf_counter()
-        try:
-            scan = await asyncio.wait_for(
-                asyncio.to_thread(
-                    scan_self_review_files,
-                    files,
-                    workspace_root=scan_root,
-                ),
-                timeout=timeout,
-            )
-        except TimeoutError as exc:
-            raise SelfReviewEvalRuntimeError(
-                "self_review_static_timeout",
-                f"Self-Review 静态 {phase.upper()} 扫描超时。",
-            ) from exc
-        if scan.errors or scan.files_scanned != len(files):
-            raise SelfReviewEvalRuntimeError(
-                "self_review_static_scan_failed",
-                f"Self-Review 静态 {phase.upper()} 未完整扫描全部可信文件。",
-            )
-        results.append(_build_result(
+        results.append(await run_self_review_static_sample(
+            files=files,
+            scan_root=scan_root,
             phase=phase,
             request=request,
             binding=binding,
             plan=plan,
             configuration=configuration,
             identity=identity,
-            findings=scan.findings,
-            duration_ms=(time.perf_counter() - started) * 1_000,
+            timeout_seconds=timeout,
         ))
     return tuple(results)
+
+
+async def run_self_review_static_sample(
+    *,
+    files: list[Path],
+    scan_root: Path,
+    phase: SelfReviewCohortPhase,
+    request: EvolutionBaselineCohortRequest,
+    binding: EvolutionMetricRunnerBinding,
+    plan: EvolutionValidationPlan,
+    configuration: HarnessEvalConfigurationIdentity,
+    identity: HarnessEvalBaselineIdentity,
+    timeout_seconds: int | None = None,
+) -> HarnessEvalSuiteResult:
+    """Run one complete typed static metric sample without persisting it."""
+    validate_self_review_cohort_authority(request, binding, plan)
+    if not (
+        configuration.suite_id == request.suite_id
+        and configuration.profile_sha256 == request.profile_sha256
+        and configuration.repetitions == request.requested_samples
+        and not configuration.live
+        and identity.configuration == configuration
+        and (
+            phase == "green"
+            or (
+                identity.source.commit == request.baseline_commit
+                and identity.source.tree_sha256
+                == f"sha256:{request.baseline_tree_sha256}"
+            )
+        )
+        and (phase == "green" or not identity.source.dirty)
+        and identity.profile_trusted
+    ):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_sample_identity_mismatch",
+            "Self-Review metric sample runtime identity 与可信 Request 不一致。",
+        )
+    bound_timeouts = tuple(
+        item.resolution.timeout_seconds_per_sample for item in binding.entries
+    )
+    if not bound_timeouts or any(item is None for item in bound_timeouts):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_timeout_unbound",
+            "Self-Review metric timeout 未完整绑定。",
+        )
+    bound_timeout = min(int(item) for item in bound_timeouts if item is not None)
+    if timeout_seconds is not None and (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 1 <= timeout_seconds <= 3_600
+    ):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_timeout_invalid",
+            "Self-Review metric sample timeout 格式无效。",
+        )
+    effective_timeout = bound_timeout if timeout_seconds is None else timeout_seconds
+    if effective_timeout != bound_timeout:
+        raise SelfReviewEvalRuntimeError(
+            "self_review_timeout_mismatch",
+            "Self-Review metric sample timeout 与可信 Binding 不一致。",
+        )
+    started = time.perf_counter()
+    try:
+        scan = await asyncio.wait_for(
+            asyncio.to_thread(
+                scan_self_review_files,
+                files,
+                workspace_root=scan_root,
+            ),
+            timeout=effective_timeout,
+        )
+    except TimeoutError as exc:
+        raise SelfReviewEvalRuntimeError(
+            "self_review_static_timeout",
+            f"Self-Review 静态 {phase.upper()} 扫描超时。",
+        ) from exc
+    if scan.errors or scan.files_scanned != len(files):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_static_scan_failed",
+            f"Self-Review 静态 {phase.upper()} 未完整扫描全部可信文件。",
+        )
+    return _build_result(
+        phase=phase,
+        request=request,
+        binding=binding,
+        plan=plan,
+        configuration=configuration,
+        identity=identity,
+        findings=scan.findings,
+        duration_ms=(time.perf_counter() - started) * 1_000,
+    )
 
 
 def require_continuous_eval_prefix(
@@ -310,6 +382,7 @@ __all__ = [
     "SelfReviewEvalRuntimeError",
     "build_self_review_eval_configuration",
     "require_continuous_eval_prefix",
+    "run_self_review_static_sample",
     "run_self_review_static_repetitions",
     "validate_self_review_cohort_authority",
 ]

@@ -421,6 +421,19 @@ def _load_exact_git_blobs(
     return tuple(blobs)
 
 
+def load_exact_validation_blobs(
+    workspace_root: str | Path,
+    request: EvolutionBaselineCohortRequest,
+    plan: EvolutionValidationPlan,
+) -> tuple[tuple[str, bytes], ...]:
+    """Load validation files from the exact bound Git tree without checkout."""
+    return _load_exact_git_blobs(
+        _canonical_git_root(workspace_root),
+        request,
+        plan,
+    )
+
+
 def _canonical_git_root(workspace_root: str | Path) -> Path:
     try:
         requested = Path(workspace_root).expanduser().resolve(strict=True)
@@ -543,4 +556,5 @@ __all__ = [
     "EvolutionSelfReviewRedBaselineExecutor",
     "EvolutionSelfReviewRedCohortReceipt",
     "SelfReviewRedMetricSummary",
+    "load_exact_validation_blobs",
 ]

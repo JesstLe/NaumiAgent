@@ -55,7 +55,7 @@ from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionStore,
 )
 from naumi_agent.evolution.interventional_red_sample import (
-    EvolutionInterventionalRedCheckSampleExecutor,
+    EvolutionInterventionalRedSampleExecutor,
 )
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
@@ -868,8 +868,8 @@ class AgentEngine:
         self.evolution_metric_runner_binding_builder = (
             EvolutionMetricRunnerBindingBuilder()
         )
-        self.evolution_interventional_red_check_sample_executor = (
-            EvolutionInterventionalRedCheckSampleExecutor(
+        self.evolution_interventional_red_sample_executor = (
+            EvolutionInterventionalRedSampleExecutor(
                 workspace_root=paths.workspace_root,
                 store=self._harness_store,
                 permission_store=resources.permission_decision_store,
@@ -878,6 +878,9 @@ class AgentEngine:
                 sandbox_runner=self.harness_sandbox_check_runner,
                 shell_admission_composer=self.shell_worker_admission_composer,
             )
+        )
+        self.evolution_interventional_red_check_sample_executor = (
+            self.evolution_interventional_red_sample_executor
         )
         self.evolution_self_review_red_baseline_executor = (
             EvolutionSelfReviewRedBaselineExecutor(
