@@ -11,7 +11,7 @@ from naumi_agent.harness.conversation_queue_runtime import (
     ConversationQueueClaimError,
     DurableConversationQueueAuthority,
 )
-from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.store import HarnessConversationQueueItem, HarnessStore
 
 T0 = "2026-07-18T00:00:00+00:00"
 T1 = "2026-07-18T00:00:01+00:00"
@@ -212,6 +212,84 @@ async def test_shutdown_cancel_only_accepts_never_claimed_item(tmp_path) -> None
     await authority.claim(second, now=T1)
     with pytest.raises(ConversationQueueClaimError, match="派发边界"):
         await authority.cancel_unclaimed(second, reason="ui_shutdown", now=T10)
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_is_exact_reorders_tail_and_rejects_claimed_item(
+    tmp_path,
+) -> None:
+    authority = _authority(tmp_path)
+    first = await authority.enqueue(
+        request_id="first", text="保留", client_id="terminal-a", now=T0,
+    )
+    second = await authority.enqueue(
+        request_id="second", text="取消", client_id="terminal-a", now=T1,
+    )
+    cancelled = await authority.cancel_unclaimed_request(
+        request_id=second.request_id,
+        now=T10,
+    )
+    remaining = await authority.store.list_queued_conversations(
+        workspace_root=authority.workspace_root,
+        session_id=authority.session_id,
+    )
+
+    assert cancelled.state == "cancelled"
+    assert cancelled.terminal_reason == "user_cancelled_before_dispatch"
+    assert len(remaining) == 1
+    assert remaining[0].request_id == first.request_id
+    assert remaining[0].text == first.text
+    assert remaining[0].position == 1
+    claim = await authority.claim(remaining[0], now=T10)
+    with pytest.raises(ConversationQueueClaimError, match="派发边界"):
+        await authority.cancel_unclaimed_request(
+            request_id=claim.item.request_id,
+            now=T10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_claim_and_cancel_race_has_one_winner_without_cancelled_dispatch(
+    tmp_path,
+) -> None:
+    authority = _authority(tmp_path)
+    item = await authority.enqueue(
+        request_id="race", text="只能有一个结果", client_id="terminal-a", now=T0,
+    )
+
+    claim_result, cancel_result = await asyncio.gather(
+        authority.claim(item, now=T1),
+        authority.cancel_unclaimed_request(request_id=item.request_id, now=T1),
+        return_exceptions=True,
+    )
+
+    assert sum(
+        not isinstance(result, Exception)
+        for result in (claim_result, cancel_result)
+    ) == 1
+    queued = await authority.store.list_queued_conversations(
+        workspace_root=authority.workspace_root,
+        session_id=authority.session_id,
+    )
+    lease = await authority.store.get_run_lease(
+        workspace_root=authority.workspace_root,
+        run_kind="runtime",
+        run_id=authority.claim_run_id(item.request_id),
+    )
+    if isinstance(claim_result, ConversationQueueClaim):
+        assert isinstance(cancel_result, ConversationQueueClaimError)
+        assert len(queued) == 1
+        assert lease is not None and lease.state.value == "active"
+        await authority.finish(
+            claim_result,
+            state="cancelled",
+            terminal_reason="test_cleanup",
+            now=T10,
+        )
+    else:
+        assert isinstance(cancel_result, HarnessConversationQueueItem)
+        assert queued == ()
+        assert lease is None or lease.state.value == "released"
 
 
 @pytest.mark.asyncio

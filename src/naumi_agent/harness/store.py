@@ -2719,6 +2719,7 @@ class HarnessStore:
         claim_run_id: str = "",
         claim_owner_id: str = "",
         claim_epoch: int | None = None,
+        require_unclaimed_run_id: str = "",
     ) -> HarnessConversationQueueItem:
         """Terminalize one item, optionally fencing and releasing its claim."""
         workspace = _canonical_workspace(workspace_root)
@@ -2735,6 +2736,8 @@ class HarnessStore:
         has_claim = any(value not in {"", None} for value in claim_values)
         if has_claim and not all(value not in {"", None} for value in claim_values):
             raise ValueError("queue claim 必须同时提供 run_id、owner_id 和 epoch。")
+        if has_claim and require_unclaimed_run_id:
+            raise ValueError("queue finish 不能同时提交 claim 与 require_unclaimed。")
         normalized_claim_run_id = (
             _normalize_run_lease_id(claim_run_id, field="claim_run_id")
             if has_claim else ""
@@ -2746,6 +2749,13 @@ class HarnessStore:
         normalized_claim_epoch = (
             _normalize_run_epoch(claim_epoch)
             if has_claim and claim_epoch is not None else 0
+        )
+        normalized_unclaimed_run_id = (
+            _normalize_run_lease_id(
+                require_unclaimed_run_id,
+                field="require_unclaimed_run_id",
+            )
+            if require_unclaimed_run_id else ""
         )
         await self._ensure_schema()
         try:
@@ -2771,6 +2781,17 @@ class HarnessStore:
                         f"排队消息已经终结为 {current.state}：{request}"
                     )
                 _ensure_queue_timestamp_forward(current.updated_at, timestamp)
+                if normalized_unclaimed_run_id:
+                    lease_row = await _select_run_lease_row(
+                        db,
+                        workspace_root=workspace,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        run_id=normalized_unclaimed_run_id,
+                    )
+                    if lease_row is not None:
+                        raise HarnessStoreConflictError(
+                            "排队消息已经跨过派发边界，不能按未执行消息取消。"
+                        )
                 if has_claim:
                     lease_row = await _select_run_lease_row(
                         db,
@@ -5930,11 +5951,19 @@ async def _migrate_eval_baseline_purpose_v16(db: aiosqlite.Connection) -> None:
     columns = {str(row["name"]) for row in await cursor.fetchall()}
     if "purpose" in columns:
         return
-    await db.execute(
-        "ALTER TABLE harness_eval_baselines "
-        "ADD COLUMN purpose TEXT NOT NULL DEFAULT 'promotion' "
-        "CHECK (purpose IN ('promotion', 'comparison_reference'))"
-    )
+    try:
+        await db.execute(
+            "ALTER TABLE harness_eval_baselines "
+            "ADD COLUMN purpose TEXT NOT NULL DEFAULT 'promotion' "
+            "CHECK (purpose IN ('promotion', 'comparison_reference'))"
+        )
+    except aiosqlite.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+        cursor = await db.execute("PRAGMA table_info(harness_eval_baselines)")
+        concurrent_columns = {str(row["name"]) for row in await cursor.fetchall()}
+        if "purpose" not in concurrent_columns:
+            raise
 
 
 _SCHEMA_V1 = """

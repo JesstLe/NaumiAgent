@@ -13,7 +13,8 @@ UIMessage、JSONL protocol、tool/activity card、semantic rendering、completio
 inspector、agent control center、tasks、permissions、history、heartbeat、working animation、跨平台
 启动、类型化 Goal/Pursuit 只读页、New UI/Textual TUI 共用的 durable interaction authority，以及
 UI-15.1a 的 New UI 有界 stream delta 合并与控制事件绘制屏障已存在。HAR-10.3b4 已补齐 TUI 运行中输入的
-durable queue、连续 claim 和 `/send-now` parity；两端不再依赖各自的临时排队状态。
+durable queue、连续 claim 和 `/send-now` parity；HAR-10.3b5 已增加双端 `/cancel-queued` 和明确的未派发取消
+状态。两端不再依赖各自的临时排队状态。
 后续模块不得绕开这些路径重建新状态层。
 
 ## 未来顺序

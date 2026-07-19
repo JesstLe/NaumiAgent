@@ -57,6 +57,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/effort", description: "查看或切换模型思考强度" },
   { command: "/retry", description: "重试最近一条发送失败或状态待确认的消息" },
   { command: "/send-now", description: "将排队消息提升到下一安全执行位置" },
+  { command: "/cancel-queued", description: "取消一条尚未派发的排队消息" },
   { command: "/folds", description: "显示可折叠代码片段列表" },
   { command: "/fold", description: "切换指定折叠项（按编号或类型）" },
   { command: "/expand", description: "展开指定折叠项（按编号/全部）" },
@@ -581,6 +582,15 @@ export function reduceServerEvent(state, record) {
         "立即发送",
         payload.message || "已提升到下一安全执行位置。",
         "success",
+      );
+      break;
+    case "run/queue_cancelled":
+      cancelScheduledUserMessage(state, payload.target_request_id, payload.reason);
+      pushSystemMessage(
+        state,
+        "取消排队",
+        payload.reason || "排队消息已在派发前取消。",
+        "info",
       );
       break;
     case "task/created":
@@ -2646,6 +2656,13 @@ export function handleSubmitText(state, text, send) {
   if (text === "/send-now" || text.startsWith("/send-now ")) {
     return promoteQueuedUserMessage(state, send, text.slice("/send-now".length).trim());
   }
+  if (text === "/cancel-queued" || text.startsWith("/cancel-queued ")) {
+    return cancelQueuedUserMessage(
+      state,
+      send,
+      text.slice("/cancel-queued".length).trim(),
+    );
+  }
   if (text.startsWith("/load ")) {
     send("resume", { session_id: text.slice(6).trim() });
     return;
@@ -3628,6 +3645,44 @@ export function promoteQueuedUserMessage(state, send, requestId = "") {
     return null;
   }
   return send("queue_promote", { target_request_id: message.requestId });
+}
+
+export function cancelQueuedUserMessage(state, send, requestId = "") {
+  const normalizedRequestId = String(requestId ?? "").trim();
+  const message = [...state.messages].reverse().find(
+    (item) => item.kind === "user"
+      && item.deliveryStatus === "scheduled"
+      && (!normalizedRequestId || item.requestId === normalizedRequestId),
+  );
+  if (!message) {
+    pushSystemMessage(
+      state,
+      "取消排队",
+      normalizedRequestId
+        ? `没有找到可取消的排队消息: ${normalizedRequestId}`
+        : "当前没有可取消的排队消息。",
+      "warning",
+    );
+    return null;
+  }
+  return send("queue_cancel", { target_request_id: message.requestId });
+}
+
+function cancelScheduledUserMessage(state, requestId, reason = "") {
+  const normalizedRequestId = String(requestId ?? "");
+  const message = state.messages.find(
+    (item) => item.kind === "user"
+      && item.requestId === normalizedRequestId
+      && item.deliveryStatus === "scheduled",
+  );
+  if (!message) return null;
+  message.deliveryStatus = "cancelled";
+  message.queuePosition = 0;
+  message.errorCode = "";
+  message.errorMessage = String(reason ?? "");
+  message.localOutbox = false;
+  clearRenderCache(state.renderCache);
+  return message;
 }
 
 export function acceptUserMessage(state, requestId, content = "") {

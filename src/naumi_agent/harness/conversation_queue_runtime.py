@@ -277,7 +277,28 @@ class DurableConversationQueueAuthority:
         )
         if lease is None:
             raise ConversationQueueClaimError("排队消息已被其他运行实例领取。")
-        return ConversationQueueClaim(item=item, lease=lease)
+        current_items = await self.store.list_queued_conversations(
+            workspace_root=self.workspace_root,
+            session_id=self.session_id,
+            limit=100,
+        )
+        current = next(
+            (candidate for candidate in current_items if candidate.request_id == item.request_id),
+            None,
+        )
+        if current is None or current.payload_sha256 != item.payload_sha256:
+            await self.store.release_run_lease(
+                workspace_root=self.workspace_root,
+                run_kind="runtime",
+                run_id=run_id,
+                owner_id=self.owner_id,
+                epoch=lease.epoch,
+                now=timestamp,
+            )
+            raise ConversationQueueClaimError(
+                "排队消息在 claim 期间已离开等待队列。"
+            )
+        return ConversationQueueClaim(item=current, lease=lease)
 
     async def renew(
         self,
@@ -347,7 +368,27 @@ class DurableConversationQueueAuthority:
             state="cancelled",
             terminal_reason=reason,
             updated_at=now or _utc_now(),
+            require_unclaimed_run_id=self.claim_run_id(item.request_id),
         )
+
+    async def cancel_unclaimed_request(
+        self,
+        *,
+        request_id: str,
+        reason: str = "user_cancelled_before_dispatch",
+        now: str | None = None,
+    ) -> HarnessConversationQueueItem:
+        """Cancel one exact queued request without crossing a dispatch claim."""
+        request = _bounded_identity(request_id, field="request_id")
+        items = await self.store.list_queued_conversations(
+            workspace_root=self.workspace_root,
+            session_id=self.session_id,
+            limit=100,
+        )
+        item = next((candidate for candidate in items if candidate.request_id == request), None)
+        if item is None:
+            raise ConversationQueueClaimError("未找到仍在等待派发的排队消息。")
+        return await self.cancel_unclaimed(item, reason=reason, now=now)
 
     def claim_run_id(self, request_id: str) -> str:
         request = _bounded_identity(request_id, field="request_id")

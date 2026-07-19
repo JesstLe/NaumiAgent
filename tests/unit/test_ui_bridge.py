@@ -4802,6 +4802,52 @@ async def test_bridge_rejects_unknown_queue_promotion_without_reordering() -> No
 
 
 @pytest.mark.asyncio
+async def test_bridge_cancels_durable_queued_chat_before_dispatch(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    engine = _DurableQueueEngine(store=store, workspace_root=workspace)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.submit("active", request_id="submit-active")
+    await asyncio.sleep(0)
+    await bridge.submit("keep", request_id="submit-keep")
+    await bridge.submit("cancel", request_id="submit-cancel")
+    await bridge.handle_client_record({
+        "id": "cancel-queued",
+        "type": ClientEventType.QUEUE_CANCEL,
+        "payload": {"target_request_id": "submit-cancel"},
+    })
+
+    assert [item.request_id for item in bridge._queued_chat_submissions] == [
+        "submit-keep"
+    ]
+    queued = await store.list_queued_conversations(
+        workspace_root=workspace,
+        session_id="session-queue",
+    )
+    assert [item.request_id for item in queued] == ["submit-keep"]
+    receipt = next(
+        record for record in _records(writer)
+        if record["type"] == "run/queue_cancelled"
+    )
+    assert receipt["payload"] == {
+        "target_request_id": "submit-cancel",
+        "queued": 1,
+        "reason": "用户在派发前取消了该消息。",
+    }
+    engine.release_run.set()
+    while bridge._run_task is not None and not bridge._run_task.done():
+        await bridge._run_task
+        await asyncio.sleep(0)
+    assert engine.run_tasks == ["active", "keep"]
+
+
+@pytest.mark.asyncio
 async def test_bridge_advances_queued_chat_after_active_run_failure() -> None:
     class _FailFirstEngine(_FakeEngine):
         def __init__(self) -> None:

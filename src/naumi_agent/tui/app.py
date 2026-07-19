@@ -275,7 +275,12 @@ class _TuiSlashCommandFrontend:
         todo = self._app.query_one(TodoBar)
         todo.todo_text = text
 
-_TUI_LOCAL_COMMANDS = ("/agents", "/workbench")
+_TUI_LOCAL_COMMANDS = (
+    "/agents",
+    "/cancel-queued",
+    "/send-now",
+    "/workbench",
+)
 _SLASH_SUGGESTIONS = SuggestFromList(
     [*_TUI_LOCAL_COMMANDS, *(cmd for cmd, _, _ in COMMANDS)],
     case_sensitive=True,
@@ -2103,6 +2108,9 @@ class NaumiApp(App):
         # 斜杠命令拦截
         if text.startswith("/"):
             command, _, argument = text.partition(" ")
+            if command.lower() == "/cancel-queued":
+                self._cancel_queued_conversation(argument.strip())
+                return
             if self._agent_busy and command.lower() == "/send-now":
                 self._promote_queued_conversation(argument.strip())
                 return
@@ -2162,6 +2170,13 @@ class NaumiApp(App):
         self._queue_authorities[normalized] = authority
         return authority
 
+    def _current_conversation_queue_authority(
+        self,
+    ) -> DurableConversationQueueAuthority | None:
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        return self._conversation_queue_authority(session_id)
+
     @work(exclusive=False, exit_on_error=False)
     async def _enqueue_queued_conversation(self, text: str) -> None:
         chat = self.query_one(ChatPanel)
@@ -2205,13 +2220,12 @@ class NaumiApp(App):
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
         try:
-            session_id = await self._ensure_conversation_session("排队消息")
-            authority = self._conversation_queue_authority(session_id)
+            authority = self._current_conversation_queue_authority()
             if authority is None:
-                raise RuntimeError("durable queue unavailable")
+                raise ConversationQueueClaimError("当前会话没有可提升的排队消息。")
             items = await authority.store.list_queued_conversations(
                 workspace_root=authority.workspace_root,
-                session_id=session_id,
+                session_id=authority.session_id,
                 limit=20,
             )
             target = request_id or (items[-1].request_id if items else "")
@@ -2239,6 +2253,45 @@ class NaumiApp(App):
         chat.mount(
             Markdown(
                 f"**立即发送**：`{promoted.request_id}` 已提升到下一安全执行位置。",
+                classes="agent-msg",
+            )
+        )
+
+    @work(exclusive=False, exit_on_error=False)
+    async def _cancel_queued_conversation(self, request_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            authority = self._current_conversation_queue_authority()
+            if authority is None:
+                raise ConversationQueueClaimError("当前会话没有可取消的排队消息。")
+            items = await authority.store.list_queued_conversations(
+                workspace_root=authority.workspace_root,
+                session_id=authority.session_id,
+                limit=20,
+            )
+            target = request_id or (items[-1].request_id if items else "")
+            if not target:
+                raise ConversationQueueClaimError("当前没有可取消的排队消息。")
+            cancelled = await authority.cancel_unclaimed_request(request_id=target)
+        except (ConversationQueueClaimError, HarnessStoreConflictError) as exc:
+            status.status_text = str(exc)
+            chat.mount(Markdown(f"**取消排队失败**：{exc}", classes="agent-msg"))
+            return
+        except Exception:
+            logger.warning("TUI queue cancellation failed", exc_info=True)
+            status.status_text = "取消排队失败"
+            chat.mount(
+                Markdown(
+                    "**取消排队失败**：无法更新持久队列，请运行 `/doctor`。",
+                    classes="agent-msg",
+                )
+            )
+            return
+        status.status_text = "排队消息已取消，未进入模型执行"
+        chat.mount(
+            Markdown(
+                f"**已取消排队**：`{cancelled.request_id}` 尚未派发。",
                 classes="agent-msg",
             )
         )

@@ -35,7 +35,9 @@
     [设计](HAR-10-3b3-ambiguous-queue-resolution.md)。
   - HAR-10.3b4 已交付 TUI 运行中持久 enqueue、连续 claim/renew/fenced terminal、`/send-now` 和 New UI
     live-claim 重排一致性；见 [设计](HAR-10-3b4-tui-durable-queue-parity.md)。
-  - 未完成：跨客户端公平性、优先级、cursor、retention 与普通 queued 取消传播。
+  - HAR-10.3b5 已交付未 claim 普通消息的 request-ID cancel、New UI/TUI 回执与“已取消 · 未派发”状态；见
+    [设计](HAR-10-3b5-queued-conversation-cancel.md)。
+  - 未完成：跨客户端公平性、优先级、cursor、retention 与 active/外部 worker 取消传播。
 - HAR-10.4 Checkpoint（partial）：
   - HAR-10.4a 已实现：严格有界 schema、单调 sequence、canonical JSON + SHA-256、篡改拒绝、Pursuit
     安全边界写入，以及 legacy missing / verified ready 恢复判定；见

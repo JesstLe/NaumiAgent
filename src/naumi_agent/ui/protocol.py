@@ -50,6 +50,7 @@ class ClientEventType(StrEnum):
     TASK_SUBMIT = "task_submit"
     RUN_CANCEL = "run_cancel"
     QUEUE_PROMOTE = "queue_promote"
+    QUEUE_CANCEL = "queue_cancel"
     RECEIPT_REQUEST = "receipt/request"
     HARNESS_EXPLAIN_REQUEST = "harness/explain/request"
     HARNESS_REPLAY_REQUEST = "harness/replay/request"
@@ -114,6 +115,7 @@ class ServerEventType(StrEnum):
     AGENTS_ACTION = "agents/action"
     RUN_QUEUED = "run/queued"
     RUN_QUEUE_PROMOTED = "run/queue_promoted"
+    RUN_QUEUE_CANCELLED = "run/queue_cancelled"
     RUN_STARTED = "run/started"
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
@@ -284,6 +286,14 @@ def _normalize_client_payload(
         target_request_id = str(payload.get("target_request_id") or "").strip()
         if not target_request_id:
             raise ValueError("立即发送请求缺少 target_request_id。")
+        if len(target_request_id) > 200:
+            raise ValueError("target_request_id 不能超过 200 个字符。")
+        return {"target_request_id": target_request_id}
+
+    if event_type == ClientEventType.QUEUE_CANCEL:
+        target_request_id = str(payload.get("target_request_id") or "").strip()
+        if not target_request_id:
+            raise ValueError("取消排队请求缺少 target_request_id。")
         if len(target_request_id) > 200:
             raise ValueError("target_request_id 不能超过 200 个字符。")
         return {"target_request_id": target_request_id}

@@ -97,7 +97,7 @@ class _HistoryDispatchApp:
 
 class TestNaumiApp:
     @pytest.mark.asyncio
-    async def test_running_tui_persists_messages_and_promotes_latest_queue_item(
+    async def test_running_tui_persists_promotes_and_cancels_queue_items(
         self,
         tmp_path,
     ) -> None:
@@ -133,9 +133,22 @@ class TestNaumiApp:
                 workspace_root=tmp_path,
                 session_id=session.id,
             )
+            assert [item.text for item in promoted] == [
+                "排队第二条",
+                "排队第一条",
+            ]
 
-        assert [item.text for item in promoted] == ["排队第二条", "排队第一条"]
-        assert [item.position for item in promoted] == [1, 2]
+            msg_input.value = "/cancel-queued"
+            msg_input.focus()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            remaining = await store.list_queued_conversations(
+                workspace_root=tmp_path,
+                session_id=session.id,
+            )
+
+        assert [item.text for item in remaining] == ["排队第二条"]
+        assert [item.position for item in remaining] == [1]
 
     @pytest.mark.asyncio
     async def test_tui_dispatches_durable_queue_with_claimed_terminal_fencing(
@@ -219,6 +232,31 @@ class TestNaumiApp:
                 pytest.fail("Session 创建失败后 TUI 仍保持 busy")
             assert msg_input.disabled is False
             assert app.query_one(Spinner)._active is False
+
+    @pytest.mark.asyncio
+    async def test_queue_control_without_session_does_not_create_empty_session(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(
+            store=HarnessStore(tmp_path / "harness.db")
+        )
+        create_session = AsyncMock(side_effect=AssertionError("must not create"))
+        monkeypatch.setattr(engine, "get_or_create_session", create_session)
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            msg_input = app.query_one("#msg-input", Input)
+            msg_input.value = "/cancel-queued"
+            msg_input.focus()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            assert "没有可取消" in app.query_one(StatusBar).status_text
+
+        create_session.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_startup_recovery_starts_long_running_services_before_ready(
@@ -596,6 +634,8 @@ class TestNaumiApp:
 
     def test_tui_slash_completion_includes_local_agents_page(self) -> None:
         assert "/agents" in InputBar()._build_slash_candidates("agents")
+        assert "/send-now" in InputBar()._build_slash_candidates("send")
+        assert "/cancel-queued" in InputBar()._build_slash_candidates("cancel")
 
     @pytest.mark.asyncio
     async def test_resume_helper_skips_empty_recent_sessions(self) -> None:

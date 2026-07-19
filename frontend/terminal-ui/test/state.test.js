@@ -8,6 +8,7 @@ import {
   createInitialState,
   createUiSnapshot,
   applyUiSnapshot,
+  cancelQueuedUserMessage,
   extractTaskPanelItems,
   failQueuedUserMessages,
   getFoldEntries,
@@ -889,6 +890,51 @@ test("send-now supports an explicit queued request and warns when none matches",
 
   assert.equal(sent.length, 0);
   assert.match(state.messages.at(-1).content, /没有找到排队消息/);
+});
+
+test("cancel-queued cancels the latest scheduled message without stopping the run", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  handleSubmitText(state, "保留", (_type, _payload, options = {}) => options.id);
+  const keep = state.messages.at(-1);
+  reduceServerEvent(state, {
+    type: "run/queued",
+    request_id: keep.requestId,
+    payload: { position: 1, queued: 2 },
+  });
+  handleSubmitText(state, "取消", (_type, _payload, options = {}) => options.id);
+  const cancelled = state.messages.at(-1);
+  reduceServerEvent(state, {
+    type: "run/queued",
+    request_id: cancelled.requestId,
+    payload: { position: 2, queued: 2 },
+  });
+  state.running = true;
+
+  handleSubmitText(state, "/cancel-queued", send);
+  assert.deepEqual(sent, [{
+    type: "queue_cancel",
+    payload: { target_request_id: cancelled.requestId },
+  }]);
+  reduceServerEvent(state, {
+    type: "run/queue_cancelled",
+    request_id: "cancel-control",
+    payload: {
+      target_request_id: cancelled.requestId,
+      queued: 1,
+      reason: "用户在派发前取消了该消息。",
+    },
+  });
+
+  assert.equal(state.running, true);
+  assert.equal(cancelled.deliveryStatus, "cancelled");
+  assert.equal(cancelled.queuePosition, 0);
+  assert.equal(keep.deliveryStatus, "scheduled");
+  assert.match(state.messages.at(-1).content, /派发前取消/);
+
+  cancelQueuedUserMessage(state, send, "missing");
+  assert.match(state.messages.at(-1).content, /没有找到可取消/);
 });
 
 test("bridge heartbeat warns once on stale and reports recovery", () => {
