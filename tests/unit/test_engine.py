@@ -16,6 +16,7 @@ import pytest
 from naumi_agent.agents.base import AgentResult
 from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, SafetyConfig
+from naumi_agent.daemons.permission_context import current_permission_receipt
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
     PermissionDecisionOutcome,
@@ -122,6 +123,11 @@ class CoordinatedSafeTool(Tool):
 
 
 class ScopedHarnessCheckTool(Tool):
+    def __init__(self) -> None:
+        self.seen_receipt_ids: list[str | None] = []
+        self.probe_gate = asyncio.Event()
+        self.inherited_context_probe: asyncio.Task[str | None] | None = None
+
     @property
     def name(self) -> str:
         return "harness_run_check"
@@ -146,6 +152,15 @@ class ScopedHarnessCheckTool(Tool):
         return ToolMetadata(delegated_tool_names=("bash_run",))
 
     async def execute(self, **kwargs: object) -> str:
+        receipt = current_permission_receipt()
+        self.seen_receipt_ids.append(receipt.receipt_id if receipt else None)
+
+        async def probe_inherited_context() -> str | None:
+            await self.probe_gate.wait()
+            inherited = current_permission_receipt()
+            return inherited.receipt_id if inherited else None
+
+        self.inherited_context_probe = asyncio.create_task(probe_inherited_context())
         return "scoped ok"
 
 
@@ -2203,7 +2218,8 @@ class TestToolExecution:
         engine: AgentEngine,
     ) -> None:
         session = await engine.get_or_create_session()
-        engine._tool_registry.register(ScopedHarnessCheckTool())
+        tool = ScopedHarnessCheckTool()
+        engine._tool_registry.register(tool)
 
         result = await engine._execute_tool(
             ToolCall(
@@ -2226,6 +2242,12 @@ class TestToolExecution:
         assert receipt.outcome is PermissionDecisionOutcome.POLICY_ALLOWED
         assert receipt.actor is PermissionDecisionActor.RUNTIME
         assert receipt.delegated_tool_names == ("bash_run",)
+        assert tool.seen_receipt_ids == [receipt.receipt_id]
+        assert current_permission_receipt() is None
+        tool.probe_gate.set()
+        assert tool.inherited_context_probe is not None
+        assert await tool.inherited_context_probe is None
+        tool.probe_gate = asyncio.Event()
 
         engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
         bypass = await engine._execute_tool(
@@ -2243,6 +2265,14 @@ class TestToolExecution:
         assert bypass_receipt.outcome is PermissionDecisionOutcome.BYPASS_ENABLED
         assert bypass_receipt.actor is PermissionDecisionActor.RUNTIME
         assert bypass_receipt.delegated_tool_names == ("bash_run",)
+        assert tool.seen_receipt_ids == [
+            receipt.receipt_id,
+            bypass_receipt.receipt_id,
+        ]
+        assert current_permission_receipt() is None
+        tool.probe_gate.set()
+        assert tool.inherited_context_probe is not None
+        assert await tool.inherited_context_probe is None
 
     @pytest.mark.asyncio
     async def test_bypass_confirmation_switches_the_runtime_mode_globally(

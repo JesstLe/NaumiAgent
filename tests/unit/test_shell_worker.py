@@ -441,6 +441,7 @@ async def test_admission_composer_builds_and_releases_exact_authority_chain(
     assert admitted.shell_request.spec == provisional.spec
 
     await composed.release()
+    await composed.release()
 
     assert await registry.get_active(admitted.shell_request.worker_id) is None
     released = await harness.get_run_lease(

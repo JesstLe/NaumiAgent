@@ -56,6 +56,8 @@
 
 - 子回执绑定父 id/digest、同一 session/run、精确参数摘要与短期 expiry，并禁止二次委托；
 - delegated ExecutionGrant 会重新读取父子两层回执并复核白名单，而非信任调用方字符串；
+- HAR-08.4b 已通过可撤销、任务局部的 invocation context 把父回执交给生产 Sandbox Check，Tool 返回后
+  包括已继承 ContextVar 的后台 Task 都不能继续读取该授权；
 - v1/v2 receipt 保持摘要兼容，Store 惰性升级到 schema v3；
 - 详细合同见 `UI-12-3b2-exact-child-authorization.md`。
 

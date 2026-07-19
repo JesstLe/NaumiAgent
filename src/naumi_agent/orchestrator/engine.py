@@ -21,6 +21,10 @@ from naumi_agent.agent_control import AgentControlService
 from naumi_agent.background import BackgroundRunner, BackgroundTaskStore, create_background_tools
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.execution_grants import ExecutionGrantAuthority
+from naumi_agent.daemons.permission_context import (
+    bind_permission_receipt,
+    current_permission_receipt,
+)
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
     PermissionDecisionOutcome,
@@ -668,6 +672,9 @@ class AgentEngine:
             workspace_root=self.workspace_root,
             trust_store=resources.harness_trust_store,
             store=self._harness_store,
+            sandbox_check_runner=self.harness_sandbox_check_runner,
+            shell_admission_composer=self.shell_worker_admission_composer,
+            authorization_receipt_provider=current_permission_receipt,
         )
         self.evolution_candidate_store = resources.evolution_candidate_store
         self.feedback_intake_service = FeedbackIntakeService(
@@ -4695,6 +4702,7 @@ class AgentEngine:
                 status="error",
                 content=f"权限拒绝：{decision.reason}",
             )
+        execution_authorization_receipt: PermissionDecisionReceipt | None = None
         session_grant_applies = (
             decision.outcome is PermissionOutcome.CONFIRM
             and decision.allow_session_grant
@@ -4826,15 +4834,42 @@ class AgentEngine:
                         "权限拒绝：该工具需要可验证的执行授权，但权限回执未能持久化。"
                     ),
                 )
+            execution_authorization_receipt = receipt
+        elif delegated_tool_names:
+            execution_authorization_receipt = next(
+                (
+                    receipt
+                    for receipt in self._permission_decision_store.list_session(
+                        session_id,
+                        limit=50,
+                    )
+                    if receipt.call_id == tc.id
+                    and receipt.authorizes_execution
+                    and tc.name == receipt.tool_name
+                    and set(delegated_tool_names).issubset(
+                        receipt.delegated_tool_names
+                    )
+                ),
+                None,
+            )
+            if execution_authorization_receipt is None:
+                return ToolResult(
+                    call_id=tc.id,
+                    status="error",
+                    content=(
+                        "权限拒绝：受委托工具缺少当前调用的持久权限回执。"
+                    ),
+                )
 
         try:
-            outcome = await self._tool_execution_port.invoke(
-                tool,
-                args,
-                event_callback=(
-                    events.legacy_callback() if events is not None else None
-                ),
-            )
+            with bind_permission_receipt(execution_authorization_receipt):
+                outcome = await self._tool_execution_port.invoke(
+                    tool,
+                    args,
+                    event_callback=(
+                        events.legacy_callback() if events is not None else None
+                    ),
+                )
             output = outcome.content
             duration = outcome.duration_ms
 

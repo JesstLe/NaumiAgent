@@ -76,11 +76,11 @@ daemon 接收 ToolJob 前必须用 grant id 与实际 request 再验证：
 ## 7. 当前不足与下一切片
 
 - ARC-04.2b 已让 `ImmutableToolJob` admission 消费本 grant，ARC-04.2c 已补齐 durable lifecycle 与
-  idempotent terminal receipt；尚缺真正执行的 daemon；
+  idempotent terminal receipt；ARC-04.3a 已提供当前 non-PTY Shell 执行 Worker；
 - UI-12.3a 已提供跨重启 confirmation decision receipt；UI-12.3b1/3b2 又提供 direct-allow 父回执、有限
   委托范围与精确短期子回执，因此 policy/delegated execution grant 均可验证签发；
 - Worker admission 的能力/隔离/heartbeat/capacity 仍需与 grant validation 同时通过，二者不可互相替代；
 - grant、Worker Registry、Harness lease 位于三个 SQLite Store，签发不是跨库原子事务；每次消费重读三个
   authority，以 fencing 抵御签发后的 takeover；未来 ARC-02 可用 Runtime Service 单写者减少竞态窗口；
-- ARC-04.3a/HAR-08.4a 与 UI-12.3b2 已完成隔离执行/授权前置；下一最小切片应组合 Worker registration、Tool
-  lease、grant 与 ToolJob admission，再安全切换生产 `/harness check`。
+- ARC-04.3b/HAR-08.4b 已组合 Worker registration、Tool lease、grant、ToolJob admission 并切换生产
+  `/harness check`；下一消费者切片应复用该链编排 Sandbox Suite/Batch 或成对 cohort。

@@ -16,6 +16,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionReceipt,
+    permission_arguments_sha256,
+)
+from naumi_agent.daemons.shell_admission import (
+    ComposedSandboxShellJob,
+    ShellWorkerAdmissionComposer,
+)
+from naumi_agent.daemons.shell_worker import ShellCommandSpec
 from naumi_agent.harness.checks import (
     HarnessCheckResult,
     HarnessCheckRunner,
@@ -81,6 +90,7 @@ from naumi_agent.harness.knowledge import (
     RepositoryKnowledgeIndex,
 )
 from naumi_agent.harness.models import (
+    HarnessCheckSpec,
     HarnessProfile,
     HarnessProfileSnapshot,
     HarnessProfileStatus,
@@ -89,6 +99,12 @@ from naumi_agent.harness.models import (
 from naumi_agent.harness.profile import load_harness_profile
 from naumi_agent.harness.replay import capture_replay_baseline, replay_stored_run
 from naumi_agent.harness.replay_models import HarnessReplayLookup
+from naumi_agent.harness.sandbox_checks import (
+    AdmittedSandboxShellJob,
+    HarnessSandboxCheckResult,
+    HarnessSandboxCheckRunner,
+    HarnessSandboxCheckStatus,
+)
 from naumi_agent.harness.store import (
     HarnessSessionDeleteImpact,
     HarnessStore,
@@ -178,6 +194,11 @@ class HarnessService:
         trust_store: HarnessTrustStore,
         profile_path: str | Path | None = None,
         store: HarnessStore | None = None,
+        sandbox_check_runner: HarnessSandboxCheckRunner | None = None,
+        shell_admission_composer: ShellWorkerAdmissionComposer | None = None,
+        authorization_receipt_provider: (
+            Callable[[], PermissionDecisionReceipt | None] | None
+        ) = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
@@ -188,6 +209,18 @@ class HarnessService:
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
+        sandbox_dependencies = (
+            sandbox_check_runner,
+            shell_admission_composer,
+            authorization_receipt_provider,
+        )
+        if any(item is not None for item in sandbox_dependencies) and not all(
+            item is not None for item in sandbox_dependencies
+        ):
+            raise ValueError("Sandbox Harness 依赖必须同时提供。")
+        self._sandbox_check_runner = sandbox_check_runner
+        self._shell_admission_composer = shell_admission_composer
+        self._authorization_receipt_provider = authorization_receipt_provider
         self._completion_gate = CompletionGate()
         self._explainer = HarnessExplainer()
         self._check_results: OrderedDict[
@@ -854,15 +887,76 @@ class HarnessService:
             current = await self.status()
             return current.trusted and current.profile_digest == trusted_digest
 
-        result = await self._check_runner.run(
-            run_id=normalized_run_id,
-            check=check,
-            profile_digest=trusted_digest,
-            profile_is_current=profile_is_current,
-        )
+        if self._sandbox_check_runner is None:
+            result = await self._check_runner.run(
+                run_id=normalized_run_id,
+                check=check,
+                profile_digest=trusted_digest,
+                profile_is_current=profile_is_current,
+            )
+        else:
+            result = await self._run_sandbox_check(
+                run_id=normalized_run_id,
+                check=check,
+                profile_digest=trusted_digest,
+                profile_is_current=profile_is_current,
+            )
         await self._record_check_result(result)
         await self._persist_check_result(result, argv=check.argv)
         return result
+
+    async def _run_sandbox_check(
+        self,
+        *,
+        run_id: str,
+        check: HarnessCheckSpec,
+        profile_digest: str,
+        profile_is_current: Callable[[], Awaitable[bool]],
+    ) -> HarnessCheckResult:
+        assert self._sandbox_check_runner is not None
+        assert self._shell_admission_composer is not None
+        assert self._authorization_receipt_provider is not None
+        parent = self._authorization_receipt_provider()
+        expected_arguments = {"check_id": check.id, "run_id": run_id}
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or parent.tool_name != "harness_run_check"
+            or parent.run_id != run_id
+            or "bash_run" not in parent.delegated_tool_names
+            or parent.arguments_sha256
+            != permission_arguments_sha256(expected_arguments)
+        ):
+            return _unavailable_check_result(
+                check_id=check.id,
+                run_id=run_id,
+                profile_digest=profile_digest,
+                message="Harness Sandbox 缺少与当前检查精确匹配的持久权限回执。",
+            )
+        composed: ComposedSandboxShellJob | None = None
+
+        async def admit(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+            nonlocal composed
+            if composed is not None:
+                raise RuntimeError("Harness Sandbox 单次检查不得重复 admission。")
+            composed = await self._shell_admission_composer.compose(
+                parent_receipt_id=parent.receipt_id,
+                spec=spec,
+            )
+            return composed.admitted
+
+        try:
+            sandbox_result = await self._sandbox_check_runner.run(
+                run_id=run_id,
+                check=check,
+                profile_digest=profile_digest,
+                profile_is_current=profile_is_current,
+                admit_job=admit,
+            )
+        finally:
+            if composed is not None:
+                await composed.release()
+        return _sandbox_result_to_check_result(sandbox_result)
 
     async def list_check_results(self, run_id: str) -> tuple[HarnessCheckResult, ...]:
         """Return the latest result per check for one bounded run history."""
@@ -1995,6 +2089,44 @@ def _merge_evidence_refs(
             raise ValueError(f"evidence id {evidence.id} 对应多个不同证据。")
         merged[evidence.id] = evidence
     return tuple(merged.values())
+
+
+def _sandbox_result_to_check_result(
+    result: HarnessSandboxCheckResult,
+) -> HarnessCheckResult:
+    status = {
+        HarnessSandboxCheckStatus.PASSED: HarnessCheckStatus.PASSED,
+        HarnessSandboxCheckStatus.FAILED: HarnessCheckStatus.FAILED,
+        HarnessSandboxCheckStatus.TIMED_OUT: HarnessCheckStatus.TIMED_OUT,
+        HarnessSandboxCheckStatus.CANCELLED: HarnessCheckStatus.CANCELLED,
+        HarnessSandboxCheckStatus.RESOURCE_LIMIT: HarnessCheckStatus.FAILED,
+        HarnessSandboxCheckStatus.BLOCKED: HarnessCheckStatus.BLOCKED_BY_POLICY,
+        HarnessSandboxCheckStatus.STALE: HarnessCheckStatus.STALE,
+        HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR: (
+            HarnessCheckStatus.INFRASTRUCTURE_ERROR
+        ),
+    }[result.status]
+    evidence: list[str] = []
+    if result.job_id is not None:
+        evidence.append(f"ToolJob `{result.job_id}`")
+    if result.lifecycle_receipt_sha256 is not None:
+        evidence.append(f"生命周期回执 `{result.lifecycle_receipt_sha256}`")
+    if result.artifact_path is not None:
+        evidence.append(f"有界日志 `{result.artifact_path}`")
+    message = result.message
+    if evidence:
+        message = f"{message}\n\n执行证据：" + "；".join(evidence) + "。"
+    return HarnessCheckResult(
+        check_id=result.check_id,
+        run_id=result.run_id,
+        status=status,
+        tree_fingerprint=result.source_tree_sha256,
+        profile_digest=result.profile_digest,
+        message=message,
+        output=result.output,
+        exit_code=result.exit_code,
+        duration_ms=result.duration_ms,
+    )
 
 
 def _unavailable_check_result(

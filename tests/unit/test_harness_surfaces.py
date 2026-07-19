@@ -212,6 +212,44 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
 
 
 @pytest.mark.asyncio
+async def test_harness_slash_check_uses_sandbox_worker_and_releases_authority(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        await execute_slash_command(engine, "/harness trust --confirm")
+
+        check = _plain(await execute_slash_command(engine, "/harness check unit"))
+
+        assert "Harness 检查通过" in check
+        assert "surface check ok" in check
+        assert await engine._resources.worker_registry_store.get_active(
+            "local-shell-worker"
+        ) is None
+        history = await engine._resources.worker_registry_store.list_history(
+            "local-shell-worker"
+        )
+        assert len(history) == 1
+        assert history[0].reason_code == "ephemeral_job_finished"
+        assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
+        artifacts = list(engine._paths.shell_worker_artifact_dir.glob("unit-*.log"))
+        assert len(artifacts) == 1
+        assert "surface check ok" in artifacts[0].read_text(encoding="utf-8")
+        receipts = engine.list_permission_decision_receipts()
+        assert {receipt.tool_name for receipt in receipts} == {
+            "harness_run_check",
+            "bash_run",
+        }
+        parent = next(
+            receipt for receipt in receipts if receipt.tool_name == "harness_run_check"
+        )
+        child = next(receipt for receipt in receipts if receipt.tool_name == "bash_run")
+        assert child.parent_receipt_id == parent.receipt_id
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_harness_eval_slash_and_agent_tool_share_service_result(
     tmp_path: Path,
 ) -> None:

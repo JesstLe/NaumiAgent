@@ -20,8 +20,8 @@ Runner 不自行判断 bypass、不伪造用户确认，也不直接签发 grant
 由 ARC-04.2a-2c 完成 permission receipt、Tool lease、Worker registration/health、ExecutionGrant 和 ToolJob
 admission 的 `AdmittedSandboxShellJob`。Runner 只校验 Shell spec/Job 参数/identity 完全一致后调用 Coordinator。
 
-这意味着当前生产 `/harness check` 仍保留旧 `HarnessCheckRunner`，直到 Tool 执行上下文能把真实的外层权限
-回执安全下传给内层 Shell Job；本切片不会用硬编码 bypass 或虚构 policy receipt 偷渡接线。
+HAR-08.4b 已把本 Runner 接入生产 Engine；本文件继续只定义 Runner 自身合同，生产授权和双通道接线见
+`HAR-08-4b-production-sandbox-check-surface.md`。
 
 ## 4. 验收证据
 
@@ -33,8 +33,7 @@ admission 的 `AdmittedSandboxShellJob`。Runner 只校验 Shell spec/Job 参数
 
 ## 5. 未完成项
 
-- UI-12.3b2 与 ARC-04.3b 已完成“父回执 -> 子回执 -> Worker/Lease/Grant/ToolJob admission”组合；生产切换
-  仅剩 Runner cleanup 接线、外层授权 context 传递及 Slash 共路由；
+- HAR-08.4b 已完成 Runner cleanup、任务局部外层授权 context 和 Slash/Agent Tool 共路由；
 - 尚未接 Eval Suite/重复 Batch/Baseline Comparator，也没有并行调度、缓存或 UI typed progress；
 - 尚未为自进化候选建立 baseline/candidate 两组干预 cohort；EVO-03 只能把本切片视为执行前置；
 - Windows fail closed，Linux bwrap 仍需平台 CI 证据。
