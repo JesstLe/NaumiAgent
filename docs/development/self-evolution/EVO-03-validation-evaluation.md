@@ -91,10 +91,14 @@ Eval 和真实 Harness 检查产生。
   H5a、identity/config/platform、check/metric/lifecycle/grant 与 summary evidence 后，复用共享 H5b2/H5c
   kernel 持久化原生 mechanical/Policy/statistical verdict。详见
   `EVO-03-4b-interventional-h5c-comparison.md`。
+- EVO-03.5b Interventional Failure Attribution：已实现。Interventional completion receipts 经严格 adapter
+  转换为 lane-neutral authority，与静态 Self-Review 共用唯一 H5c 校验、机械分类和 durable Store；真实
+  `regressed + failed` 证据归因为 candidate defect。详见
+  `EVO-03-5b-interventional-failure-attribution.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
-Interventional Failure Attribution adapter、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此
-EVO-03 整体保持 partial。
+Interventional Failure Attribution adapter 已完成；adversarial suite 与最终 Evaluation Receipt 仍未实现，
+因此 EVO-03 整体保持 partial。

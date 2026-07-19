@@ -57,6 +57,10 @@ from naumi_agent.evolution.failure_attribution import (
 from naumi_agent.evolution.interventional_comparison import (
     EvolutionInterventionalComparisonExecutor,
 )
+from naumi_agent.evolution.interventional_failure_attribution import (
+    EvolutionInterventionalFailureAttributionBuilder,
+    EvolutionInterventionalFailureAttributionExecutor,
+)
 from naumi_agent.evolution.interventional_green_cohort import (
     EvolutionInterventionalGreenCohortExecutor,
 )
@@ -961,6 +965,16 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 attribution_store=self.evolution_failure_attribution_store,
                 builder=self.evolution_failure_attribution_builder,
+            )
+        )
+        self.evolution_interventional_failure_attribution_builder = (
+            EvolutionInterventionalFailureAttributionBuilder()
+        )
+        self.evolution_interventional_failure_attribution_executor = (
+            EvolutionInterventionalFailureAttributionExecutor(
+                harness_store=self._harness_store,
+                attribution_store=self.evolution_failure_attribution_store,
+                builder=self.evolution_interventional_failure_attribution_builder,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

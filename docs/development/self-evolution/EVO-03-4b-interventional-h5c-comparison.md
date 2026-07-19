@@ -61,6 +61,6 @@ metric 为 0，GREEN 的 check 为 implementation failure 且 metric 为 1，因
 
 ## 下一步
 
-EVO-03.5b 应让现有 Failure Attribution 消费 Interventional completion receipts + 原生 H5c，而不是复制归因
-映射；随后横向评估 EVO-03.6 adversarial suite 与 HAR-08.4 Suite/Batch 隔离完成度。当前不得进入自动晋升、
-源码合并或 EVO-04 reflection decision。
+EVO-03.5b 已让现有 Failure Attribution 消费 Interventional completion receipts + 原生 H5c，并与静态 lane
+共用同一归因内核和 Store。下一步横向评估 EVO-03.6 adversarial suite 与 HAR-08.4 Suite/Batch 隔离完成度。
+当前不得进入自动晋升、源码合并或 EVO-04 reflection decision。
