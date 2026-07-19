@@ -55,7 +55,7 @@
     },
     "terminal_runtime_health": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/heartbeat.js", "frontend/terminal-ui/test/heartbeat.test.js"]
+      "evidence": ["frontend/terminal-ui/src/heartbeat.js", "frontend/terminal-ui/test/runtime-health-golden.test.js"]
     },
     "tool_lifecycle": {
       "state": "supported",

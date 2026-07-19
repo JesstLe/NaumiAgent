@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "composition_unavailable",
+      "configured_enabled": true,
+      "available": false,
+      "snapshot": null,
+      "expected": {
+        "configured_enabled": true,
+        "state": "unavailable",
+        "cycle_count": 0,
+        "deleted_count": 0,
+        "failure_count": 0,
+        "last_error_code": "",
+        "last_cycle_at": "",
+        "next_delay_seconds": 0.0
+      }
+    },
+    {
+      "id": "policy_disabled",
+      "configured_enabled": false,
+      "available": true,
+      "snapshot": null,
+      "expected": {
+        "configured_enabled": false,
+        "state": "stopped",
+        "cycle_count": 0,
+        "deleted_count": 0,
+        "failure_count": 0,
+        "last_error_code": "",
+        "last_cycle_at": "",
+        "next_delay_seconds": 0.0
+      }
+    },
+    {
+      "id": "retention_waiting",
+      "configured_enabled": true,
+      "available": true,
+      "snapshot": {
+        "state": "waiting",
+        "cycle_count": 4,
+        "deleted_count": 12,
+        "failure_count": 1,
+        "last_error_code": "",
+        "last_cycle_at": "2026-07-20T05:06:07+08:00",
+        "next_delay_seconds": 60.0
+      },
+      "expected": {
+        "configured_enabled": true,
+        "state": "waiting",
+        "cycle_count": 4,
+        "deleted_count": 12,
+        "failure_count": 1,
+        "last_error_code": "",
+        "last_cycle_at": "2026-07-20T05:06:07+08:00",
+        "next_delay_seconds": 60.0
+      }
+    },
+    {
+      "id": "failed_values_are_bounded",
+      "configured_enabled": true,
+      "available": true,
+      "snapshot": {
+        "state": "failed",
+        "cycle_count": -1,
+        "deleted_count": 9007199254740992,
+        "failure_count": 3,
+        "last_error_code": "SECRET=/private/store",
+        "last_cycle_at": "not-a-timestamp",
+        "next_delay_seconds": -5.0
+      },
+      "expected": {
+        "configured_enabled": true,
+        "state": "failed",
+        "cycle_count": 0,
+        "deleted_count": 9007199254740991,
+        "failure_count": 3,
+        "last_error_code": "status_invalid",
+        "last_cycle_at": "",
+        "next_delay_seconds": 0.0
+      }
+    }
+  ]
+}

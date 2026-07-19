@@ -90,6 +90,9 @@ from naumi_agent.ui.keybindings import (
     render_keybinding_help,
     to_textual_key,
 )
+from naumi_agent.ui.runtime_health import (
+    runtime_heartbeat_retention_status_payload,
+)
 from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 from naumi_agent.user_interaction import (
@@ -1780,35 +1783,29 @@ class NaumiApp(App):
     def _runtime_heartbeat_retention_status_payload(self) -> dict[str, object]:
         lifecycle = self._terminal_runtime_lifecycle
         factory = self._terminal_runtime_lifecycle_factory
-        if lifecycle is None or factory is None:
+        if factory is None:
             retention_config = getattr(
-                getattr(self.engine._config, "harness", None),
+                getattr(getattr(self.engine, "_config", None), "harness", None),
                 "runtime_heartbeat_retention",
                 None,
             )
-            return {
-                "configured_enabled": bool(
+            return runtime_heartbeat_retention_status_payload(
+                configured_enabled=bool(
                     getattr(retention_config, "enabled", False)
                 ),
-                "state": "unavailable",
-            }
-        snapshot = lifecycle.snapshot()
-        retention = snapshot.retention
-        if retention is None:
-            return {
-                "configured_enabled": factory.retention_config.enabled,
-                "state": "stopped",
-            }
-        return {
-            "configured_enabled": factory.retention_config.enabled,
-            "state": retention.state.value,
-            "cycle_count": retention.cycle_count,
-            "deleted_count": retention.deleted_count,
-            "failure_count": retention.failure_count,
-            "last_error_code": retention.last_error_code,
-            "last_cycle_at": retention.last_cycle_at,
-            "next_delay_seconds": retention.next_delay_seconds,
-        }
+                available=False,
+                snapshot=None,
+            )
+        retention = (
+            lifecycle.snapshot().retention
+            if lifecycle is not None
+            else None
+        )
+        return runtime_heartbeat_retention_status_payload(
+            configured_enabled=factory.retention_config.enabled,
+            available=True,
+            snapshot=retention,
+        )
 
     @work(exclusive=False, exit_on_error=False)
     async def _recover_session_reconciliations(self) -> None:
