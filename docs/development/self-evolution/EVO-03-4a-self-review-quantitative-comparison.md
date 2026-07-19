@@ -33,6 +33,9 @@ Executor 从 Store 重新读取两组有序样本，而不是只相信 completio
 typed H5a samples 交给原生 H5c builder 和 Store，机械生成/持久化 statistical、mechanical、Policy 与逐样本
 证据。
 
+EVO-03.4b 已把上述 H5b2/H5c 持久化编排抽为 `EvolutionComparisonKernel`；本静态 executor 与
+Interventional executor 共用该内核，但各自保留独立 authority/identity/summary gate。
+
 ## 4. 结果语义
 
 Executor 返回 `HarnessStoredEvalComparisonReceipt`：

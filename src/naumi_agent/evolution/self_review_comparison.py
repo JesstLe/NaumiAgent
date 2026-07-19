@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
+from naumi_agent.evolution.comparison_kernel import (
+    EvolutionComparisonKernel,
+    EvolutionComparisonKernelError,
+)
 from naumi_agent.evolution.self_review_eval_runtime import (
     SelfReviewEvalRuntimeError,
     build_self_review_eval_configuration,
@@ -21,16 +25,10 @@ from naumi_agent.evolution.self_review_red_baseline import (
 from naumi_agent.evolution.validation_cohorts import EvolutionBaselineCohortRequest
 from naumi_agent.evolution.validation_metric_bindings import EvolutionMetricRunnerBinding
 from naumi_agent.evolution.validation_plans import EvolutionValidationPlan
-from naumi_agent.harness.eval_receipt import (
-    EvalReceiptSample,
-    build_eval_comparison_receipt,
-)
 from naumi_agent.harness.store import (
     HarnessStore,
-    HarnessStoreConflictError,
     HarnessStoredEvalComparisonReceipt,
     HarnessStoredEvalResult,
-    HarnessStoreError,
 )
 
 
@@ -47,6 +45,7 @@ class EvolutionSelfReviewComparisonExecutor:
         if not isinstance(store, HarnessStore):
             raise TypeError("Self-Review Comparison executor 需要 HarnessStore。")
         self._store = store
+        self._comparison_kernel = EvolutionComparisonKernel(store)
 
     async def execute(
         self,
@@ -114,51 +113,22 @@ class EvolutionSelfReviewComparisonExecutor:
                 plan=plan,
                 green=green_run,
             )
-            reference = await self._store.register_eval_comparison_reference(
-                workspace_root=workspace,
-                batch_id=request.batch_id,
-                suite_id=request.suite_id,
-                registered_by="evolution-validator",
-                registration_reason=(
-                    f"EVO-03 RED reference {plan.validation_plan_id}"
-                ),
-                created_at=red.completed_at,
-            )
-            if reference.purpose != "comparison_reference":
-                raise EvolutionSelfReviewComparisonError(
-                    "comparison_reference_purpose_mismatch",
-                    "RED cohort 已被占用为非 reference Baseline。",
-                )
-            receipt = build_eval_comparison_receipt(
+            return await self._comparison_kernel.execute(
                 workspace_root=workspace,
                 suite_id=request.suite_id,
-                baseline_id=reference.id,
-                baseline_batch_id=reference.batch_id,
-                baseline_samples_sha256=reference.samples_sha256,
-                baseline_samples=_receipt_samples(red_records),
-                current_batch_id=green.batch_id,
-                current_samples=_receipt_samples(green_records),
-                created_at=green_run.completed_at,
+                red_batch_id=request.batch_id,
+                green_batch_id=green.batch_id,
+                red_completed_at=red.completed_at,
+                green_completed_at=green_run.completed_at,
+                validation_plan_id=plan.validation_plan_id,
+                lane_label="Self-Review",
+                red_records=red_records,
+                green_records=green_records,
             )
-            stored = await self._store.record_eval_comparison_receipt(receipt)
         except EvolutionSelfReviewComparisonError:
             raise
-        except HarnessStoreConflictError as exc:
-            raise EvolutionSelfReviewComparisonError(
-                "comparison_persistence_conflict",
-                "Self-Review Comparison 与既有不可变证据冲突。",
-            ) from exc
-        except (HarnessStoreError, ValueError) as exc:
-            raise EvolutionSelfReviewComparisonError(
-                "comparison_persistence_failed",
-                "Self-Review Comparison 无法从可信 H5 evidence 持久化。",
-            ) from exc
-        if stored.receipt != receipt or stored.receipt_sha256 != receipt.receipt_sha256:
-            raise EvolutionSelfReviewComparisonError(
-                "comparison_restore_mismatch",
-                "H5c 恢复的 Comparison Receipt 与写入 authority 不一致。",
-            )
-        return stored
+        except EvolutionComparisonKernelError as exc:
+            raise EvolutionSelfReviewComparisonError(exc.code, str(exc)) from exc
 
 
 def _require_authority(
@@ -271,19 +241,6 @@ def _require_comparable_identities(
             "comparison_identity_mismatch",
             "RED/GREEN configuration、平台或 source identity 不可比较。",
         )
-
-
-def _receipt_samples(
-    records: tuple[HarnessStoredEvalResult, ...],
-) -> tuple[EvalReceiptSample, ...]:
-    return tuple(
-        EvalReceiptSample(
-            sample_index=item.sample_index,
-            result_sha256=item.result_sha256,
-            result=item.result,
-        )
-        for item in records
-    )
 
 
 __all__ = [

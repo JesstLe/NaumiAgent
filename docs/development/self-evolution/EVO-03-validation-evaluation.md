@@ -87,9 +87,14 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.3c2c2 Interventional GREEN Continuous Cohort：已实现。每轮一次完整 preflight 后，以共享 cohort
   kernel 编排连续 candidate samples；支持中断前缀、新 epoch/grant 恢复、同 candidate/config/platform
   evidence gate、防漂移幂等 completion receipt。详见 `EVO-03-3c2c2-interventional-green-cohort.md`。
+- EVO-03.4b Interventional RED/GREEN H5c Comparison：已实现。完整重验两组 completion authority、ordered
+  H5a、identity/config/platform、check/metric/lifecycle/grant 与 summary evidence 后，复用共享 H5b2/H5c
+  kernel 持久化原生 mechanical/Policy/statistical verdict。详见
+  `EVO-03-4b-interventional-h5c-comparison.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
-EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2 已完成连续 candidate cohort。Interventional comparator、
-adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
+Interventional Failure Attribution adapter、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此
+EVO-03 整体保持 partial。

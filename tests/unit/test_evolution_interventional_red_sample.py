@@ -32,6 +32,10 @@ from naumi_agent.evolution.experiment_leases import (
     ExperimentLeaseState,
     ExperimentWorktreeLease,
 )
+from naumi_agent.evolution.interventional_comparison import (
+    EvolutionInterventionalComparisonError,
+    EvolutionInterventionalComparisonExecutor,
+)
 from naumi_agent.evolution.interventional_green_cohort import (
     EvolutionInterventionalGreenCohortError,
     EvolutionInterventionalGreenCohortExecutor,
@@ -908,6 +912,61 @@ async def test_interventional_cohorts_reuse_authority_and_execute_candidate_over
                 update={"persisted_samples": 4}
             ).model_dump(mode="json")
         )
+    comparison_executor = EvolutionInterventionalComparisonExecutor(store)
+    with pytest.raises(EvolutionInterventionalComparisonError) as captured:
+        await comparison_executor.execute(
+            workspace_root=root,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            green_request=green,
+            green_receipt=green_cohort_receipt.model_copy(
+                update={"candidate_revision": 2}
+            ),
+        )
+    assert captured.value.code == "interventional_comparison_authority_invalid"
+    assert await store.get_eval_baseline_by_batch(
+        root,
+        request.suite_id,
+        request.batch_id,
+    ) is None
+    comparison = await comparison_executor.execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        green_request=green,
+        green_receipt=green_cohort_receipt,
+    )
+    repeated_comparison = await comparison_executor.execute(
+        workspace_root=root,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        green_request=green,
+        green_receipt=green_cohort_receipt,
+    )
+    reference = await store.get_eval_baseline_by_batch(
+        root,
+        request.suite_id,
+        request.batch_id,
+    )
+    assert comparison == repeated_comparison
+    assert reference is not None and reference.purpose == "comparison_reference"
+    assert await store.get_active_eval_baseline(root, request.suite_id) is None
+    assert comparison.receipt.statistical_verdict == "regressed"
+    assert comparison.receipt.decision == "failed"
+    assert len(comparison.receipt.sample_evidence) == 5
+    assert all(
+        item.policy_verdict == "failed"
+        for item in comparison.receipt.sample_evidence
+    )
 
     (candidate_root / "sample.py").write_text(candidate_source + "# drift\n")
     with pytest.raises(EvolutionInterventionalGreenCohortError) as captured:
