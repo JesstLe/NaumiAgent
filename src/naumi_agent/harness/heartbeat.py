@@ -52,6 +52,21 @@ class HarnessHeartbeatSnapshot:
     assessed_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeHeartbeatPruneReceipt:
+    workspace_root: str
+    observed_before: str
+    assessed_at: str
+    scan_limit: int
+    scanned_count: int
+    deleted_subject_ids: tuple[str, ...]
+    protected_subject_ids: tuple[str, ...]
+
+    @property
+    def deleted_count(self) -> int:
+        return len(self.deleted_subject_ids)
+
+
 def assess_heartbeat(
     heartbeat: HarnessHeartbeat,
     *,
@@ -110,5 +125,6 @@ __all__ = [
     "HarnessHeartbeatHealth",
     "HarnessHeartbeatPhase",
     "HarnessHeartbeatSnapshot",
+    "RuntimeHeartbeatPruneReceipt",
     "assess_heartbeat",
 ]

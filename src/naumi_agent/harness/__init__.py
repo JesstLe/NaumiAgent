@@ -9,6 +9,7 @@ from naumi_agent.harness.heartbeat import (
     HarnessHeartbeatHealth,
     HarnessHeartbeatPhase,
     HarnessHeartbeatSnapshot,
+    RuntimeHeartbeatPruneReceipt,
     assess_heartbeat,
 )
 from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
@@ -62,6 +63,7 @@ __all__ = [
     "KnowledgeSelection",
     "RepositoryKnowledgeIndex",
     "RuntimeHeartbeatProducer",
+    "RuntimeHeartbeatPruneReceipt",
     "assess_heartbeat",
     "load_harness_profile",
 ]
