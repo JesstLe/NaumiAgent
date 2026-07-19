@@ -50,6 +50,10 @@ from naumi_agent.harness.interaction_runtime import (
 from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycleFactory,
+    TerminalRuntimeState,
+)
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import AgentControlScreen
@@ -1600,6 +1604,9 @@ class NaumiApp(App):
         keybindings: KeybindingSet | None = None,
         style_config: UIStyleConfig | None = None,
         show_reasoning: bool = False,
+        terminal_runtime_lifecycle_factory: (
+            TerminalRuntimeLifecycleFactory | None
+        ) = None,
         **kwargs: Any,
     ) -> None:
         self._keybindings = keybindings or build_keybindings()
@@ -1610,6 +1617,31 @@ class NaumiApp(App):
         self.engine = engine
         self.debug_trace = debug_trace
         self._show_reasoning = show_reasoning
+        if (
+            terminal_runtime_lifecycle_factory is not None
+            and not isinstance(
+                terminal_runtime_lifecycle_factory,
+                TerminalRuntimeLifecycleFactory,
+            )
+        ):
+            raise TypeError(
+                "terminal_runtime_lifecycle_factory 必须是 "
+                "TerminalRuntimeLifecycleFactory。"
+            )
+        self._terminal_runtime_lifecycle_factory = (
+            terminal_runtime_lifecycle_factory
+        )
+        self._terminal_runtime_lifecycle = (
+            terminal_runtime_lifecycle_factory.create(
+                surface="tui",
+                identity=f"tui-{uuid4().hex}",
+                on_heartbeat_failure=self._runtime_heartbeat_failed,
+            )
+            if terminal_runtime_lifecycle_factory is not None
+            else None
+        )
+        self._runtime_heartbeat_notice_emitted = False
+        self._unmounting = False
         self._slash_frontend = _TuiSlashCommandFrontend(self)
         self._interaction_lock = asyncio.Lock()
         self._active_interaction_ids: set[str] = set()
@@ -1646,20 +1678,51 @@ class NaumiApp(App):
         yield Footer()
 
     async def on_unmount(self) -> None:
+        self._unmounting = True
         if self.debug_trace is not None:
             self.debug_trace.event("tui.unmount", {})
-            self.debug_trace.close()
-        owner_tasks = tuple(self._interaction_owner_tasks.values())
-        for task in owner_tasks:
-            task.cancel()
-        if owner_tasks:
-            await asyncio.gather(*owner_tasks, return_exceptions=True)
-        self._interaction_owner_tasks.clear()
-        self._interaction_records.clear()
-        await self._stop_queue_claim_renewal()
-        await self.engine.shutdown()
+        terminal_runtime = self._terminal_runtime_lifecycle
+        if terminal_runtime is not None:
+            try:
+                await terminal_runtime.begin_draining()
+            except Exception as exc:
+                logger.warning(
+                    "TUI terminal runtime draining failed (%s)",
+                    type(exc).__name__,
+                )
+        shutdown_failed = False
+        try:
+            owner_tasks = tuple(self._interaction_owner_tasks.values())
+            for task in owner_tasks:
+                task.cancel()
+            if owner_tasks:
+                await asyncio.gather(*owner_tasks, return_exceptions=True)
+            self._interaction_owner_tasks.clear()
+            self._interaction_records.clear()
+            await self._stop_queue_claim_renewal()
+            await self.engine.shutdown()
+        except BaseException:
+            shutdown_failed = True
+            raise
+        finally:
+            if terminal_runtime is not None:
+                try:
+                    await terminal_runtime.close(
+                        failed=(
+                            shutdown_failed
+                            or terminal_runtime.snapshot().state
+                            is TerminalRuntimeState.FAILED
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "TUI terminal runtime terminal write failed (%s)",
+                        type(exc).__name__,
+                    )
+            if self.debug_trace is not None:
+                self.debug_trace.close()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         """Initialize UI on startup."""
         chat = self.query_one(ChatPanel)
         chat.debug_trace = self.debug_trace
@@ -1675,8 +1738,77 @@ class NaumiApp(App):
             self.debug_trace.event("tui.mount", {"title": self.TITLE})
         self._update_git_title()
         self._show_startup_status()
+        await self._start_terminal_runtime_lifecycle()
         self._recover_session_reconciliations()
         self._recover_durable_interactions()
+
+    async def _start_terminal_runtime_lifecycle(self) -> None:
+        lifecycle = self._terminal_runtime_lifecycle
+        if lifecycle is None:
+            return
+        try:
+            await lifecycle.start()
+        except Exception as exc:
+            logger.warning(
+                "TUI runtime heartbeat startup failed (%s)",
+                type(exc).__name__,
+            )
+            await self._emit_runtime_heartbeat_degraded()
+
+    async def _runtime_heartbeat_failed(self, _code: str) -> None:
+        if self._unmounting:
+            return
+        await self._emit_runtime_heartbeat_degraded()
+
+    async def _emit_runtime_heartbeat_degraded(self) -> None:
+        if self._runtime_heartbeat_notice_emitted or self._unmounting:
+            return
+        self._runtime_heartbeat_notice_emitted = True
+        message = (
+            "### 运行时心跳降级\n\n"
+            "持久心跳暂不可用；当前运行仍可继续，但离线诊断可能延迟。"
+            "请运行 `/doctor` 检查 Harness 状态库。"
+        )
+        try:
+            self.query_one(ChatPanel).mount(Markdown(message, classes="agent-msg"))
+            self.query_one(StatusBar).status_text = (
+                "运行时心跳降级；任务仍可继续，请运行 /doctor"
+            )
+        except Exception:
+            return
+
+    def _runtime_heartbeat_retention_status_payload(self) -> dict[str, object]:
+        lifecycle = self._terminal_runtime_lifecycle
+        factory = self._terminal_runtime_lifecycle_factory
+        if lifecycle is None or factory is None:
+            retention_config = getattr(
+                getattr(self.engine._config, "harness", None),
+                "runtime_heartbeat_retention",
+                None,
+            )
+            return {
+                "configured_enabled": bool(
+                    getattr(retention_config, "enabled", False)
+                ),
+                "state": "unavailable",
+            }
+        snapshot = lifecycle.snapshot()
+        retention = snapshot.retention
+        if retention is None:
+            return {
+                "configured_enabled": factory.retention_config.enabled,
+                "state": "stopped",
+            }
+        return {
+            "configured_enabled": factory.retention_config.enabled,
+            "state": retention.state.value,
+            "cycle_count": retention.cycle_count,
+            "deleted_count": retention.deleted_count,
+            "failure_count": retention.failure_count,
+            "last_error_code": retention.last_error_code,
+            "last_cycle_at": retention.last_cycle_at,
+            "next_delay_seconds": retention.next_delay_seconds,
+        }
 
     @work(exclusive=False, exit_on_error=False)
     async def _recover_session_reconciliations(self) -> None:
@@ -3418,18 +3550,8 @@ class NaumiApp(App):
             mcp_manager=getattr(self.engine, "_mcp_manager", None),
             model_router=self.engine.router,
         )
-        retention_config = getattr(
-            getattr(self.engine._config, "harness", None),
-            "runtime_heartbeat_retention",
-            None,
-        )
         retention_item = runtime_heartbeat_retention_health_item(
-            {
-                "configured_enabled": bool(
-                    getattr(retention_config, "enabled", False)
-                ),
-                "state": "unavailable",
-            }
+            self._runtime_heartbeat_retention_status_payload()
         )
         content = (
             render_doctor_report(report)

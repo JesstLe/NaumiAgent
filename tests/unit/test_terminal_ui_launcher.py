@@ -63,18 +63,23 @@ def test_textual_fallback_binds_engine_to_process_launch_directory(
     captured: dict[str, object] = {}
 
     class FakeEngine:
-        def __init__(self, runtime_config):
+        def __init__(self, runtime_config, **dependencies):
             captured["config"] = runtime_config
+            captured["dependencies"] = dependencies
             self.workspace_root = runtime_config.resolve_workspace_root()
             self.router = SimpleNamespace(resolve_model=lambda _tier: "test-model")
+            self.terminal_runtime_lifecycle_factory = (
+                dependencies["services"].terminal_runtime_lifecycle_factory
+            )
 
     class FakeTrace:
         def output(self, *_args, **_kwargs) -> None:
             return None
 
     class FakeApp:
-        def __init__(self, engine, **_kwargs):
+        def __init__(self, engine, **kwargs):
             captured["engine"] = engine
+            captured["app_kwargs"] = kwargs
 
         def run(self) -> None:
             captured["ran"] = True
@@ -96,6 +101,10 @@ def test_textual_fallback_binds_engine_to_process_launch_directory(
 
     assert config.workspace_root == str(launch.resolve())
     assert captured["engine"].workspace_root == launch.resolve()
+    assert (
+        captured["app_kwargs"]["terminal_runtime_lifecycle_factory"]
+        is captured["dependencies"]["services"].terminal_runtime_lifecycle_factory
+    )
     assert captured["ran"] is True
 
 

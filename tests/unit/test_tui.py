@@ -1,6 +1,7 @@
 """TUI 组件测试."""
 
 import asyncio
+import inspect
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -10,18 +11,30 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from textual.widgets import Input
 
-from naumi_agent.config.settings import AppConfig, ModelConfig, ModelMeta
+from naumi_agent.config.settings import (
+    AppConfig,
+    ModelConfig,
+    ModelMeta,
+    RuntimeHeartbeatRetentionConfig,
+)
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
+from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.interaction import new_interaction_record
 from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
+from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.engine import (
     AgentEngine,
     AgentResult,
     AgentRuntimeMode,
     AgentUsage,
+)
+from naumi_agent.runtime.composition import create_agent_engine
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycleFactory,
+    TerminalRuntimeState,
 )
 from naumi_agent.tui.app import (
     ActivityPanel,
@@ -98,7 +111,7 @@ class _HistoryDispatchApp:
 
 class TestNaumiApp:
     @pytest.mark.asyncio
-    async def test_doctor_exposes_unknown_bridge_retention_in_tui_fallback(
+    async def test_doctor_reports_unavailable_when_tui_factory_is_missing(
         self,
         monkeypatch,
     ) -> None:
@@ -132,6 +145,12 @@ class TestNaumiApp:
         class FakeApp:
             def __init__(self) -> None:
                 self.engine = engine
+                self._terminal_runtime_lifecycle = None
+                self._terminal_runtime_lifecycle_factory = None
+
+            _runtime_heartbeat_retention_status_payload = (
+                NaumiApp._runtime_heartbeat_retention_status_payload
+            )
 
             def query_one(self, widget_type):
                 return chat if widget_type is ChatPanel else status
@@ -139,8 +158,163 @@ class TestNaumiApp:
         await NaumiApp._run_doctor.__wrapped__(FakeApp())
 
         assert "UNKNOWN 运行时心跳清理" in chat.mounted
-        assert "TUI fallback 不托管" in chat.mounted
+        assert "当前客户端未接入 terminal runtime lifecycle" in chat.mounted
         assert status.status_text == "环境诊断存在未知项"
+
+    def test_tui_does_not_construct_terminal_runtime_components(self) -> None:
+        source = inspect.getsource(NaumiApp)
+        assert "RuntimeHeartbeatProducer(" not in source
+        assert "RuntimeHeartbeatRetentionService(" not in source
+        assert "RuntimeHeartbeatRetentionPolicy(" not in source
+
+    @pytest.mark.asyncio
+    async def test_composition_owned_terminal_lifecycle_reaches_tui_doctor(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        config = AppConfig(
+            workspace_root=str(workspace),
+            memory={
+                "session_db_path": str(tmp_path / "runtime" / "sessions.db"),
+                "vector_db_path": str(tmp_path / "runtime" / "chroma"),
+                "long_term_enabled": False,
+            },
+            harness={
+                "runtime_heartbeat_retention": {
+                    "enabled": True,
+                    "retention_days": 3,
+                    "interval_seconds": 60,
+                    "standby_retry_seconds": 1,
+                    "lease_seconds": 30,
+                    "scan_limit": 10,
+                    "catalog_limit": 10,
+                }
+            },
+        )
+        engine = create_agent_engine(config)
+        app = NaumiApp(
+            engine,
+            terminal_runtime_lifecycle_factory=(
+                engine.terminal_runtime_lifecycle_factory
+            ),
+        )
+        lifecycle = app._terminal_runtime_lifecycle
+        assert lifecycle is not None
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            for _ in range(50):
+                payload = app._runtime_heartbeat_retention_status_payload()
+                if payload["state"] in {"waiting", "standby"}:
+                    break
+                await pilot.pause(0.01)
+
+            heartbeat = await engine._harness_store.get_heartbeat(
+                workspace_root=workspace,
+                subject_kind=HarnessRunKind.RUNTIME,
+                subject_id=lifecycle.subject_id,
+            )
+            assert heartbeat is not None
+            assert heartbeat.phase is HarnessHeartbeatPhase.RUNNING
+            assert payload["configured_enabled"] is True
+            assert payload["state"] in {"waiting", "standby"}
+
+        assert lifecycle.snapshot().state is TerminalRuntimeState.STOPPED
+        heartbeat = await engine._harness_store.get_heartbeat(
+            workspace_root=workspace,
+            subject_kind=HarnessRunKind.RUNTIME,
+            subject_id=lifecycle.subject_id,
+        )
+        assert heartbeat is not None
+        assert heartbeat.phase is HarnessHeartbeatPhase.STOPPED
+
+    @pytest.mark.asyncio
+    async def test_tui_marks_terminal_runtime_failed_when_engine_shutdown_fails(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        config = AppConfig(
+            workspace_root=str(workspace),
+            memory={
+                "session_db_path": str(tmp_path / "runtime" / "sessions.db"),
+                "vector_db_path": str(tmp_path / "runtime" / "chroma"),
+                "long_term_enabled": False,
+            },
+            harness={"runtime_heartbeat_retention": {"enabled": False}},
+        )
+        engine = create_agent_engine(config)
+        original_shutdown = engine.shutdown
+        app = NaumiApp(
+            engine,
+            terminal_runtime_lifecycle_factory=(
+                engine.terminal_runtime_lifecycle_factory
+            ),
+        )
+        lifecycle = app._terminal_runtime_lifecycle
+        assert lifecycle is not None
+        await lifecycle.start()
+        engine.shutdown = AsyncMock(side_effect=RuntimeError("shutdown failed"))
+
+        try:
+            with pytest.raises(RuntimeError, match="shutdown failed"):
+                await app.on_unmount()
+            heartbeat = await engine._harness_store.get_heartbeat(
+                workspace_root=workspace,
+                subject_kind=HarnessRunKind.RUNTIME,
+                subject_id=lifecycle.subject_id,
+            )
+            assert heartbeat is not None
+            assert heartbeat.phase is HarnessHeartbeatPhase.FAILED
+            assert lifecycle.snapshot().state is TerminalRuntimeState.FAILED
+        finally:
+            engine.shutdown = original_shutdown
+            await original_shutdown()
+
+    @pytest.mark.asyncio
+    async def test_tui_survives_terminal_runtime_startup_degradation_once(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        class FailingHeartbeatStore(HarnessStore):
+            async def record_heartbeat(self, **kwargs):
+                raise OSError("simulated heartbeat outage")
+
+        monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        config = AppConfig(
+            workspace_root=str(workspace),
+            memory={
+                "session_db_path": str(tmp_path / "runtime" / "sessions.db"),
+                "vector_db_path": str(tmp_path / "runtime" / "chroma"),
+                "long_term_enabled": False,
+            },
+        )
+        engine = create_agent_engine(config)
+        factory = TerminalRuntimeLifecycleFactory(
+            store=FailingHeartbeatStore(tmp_path / "failing-harness.db"),
+            workspace_root=workspace,
+            retention_config=RuntimeHeartbeatRetentionConfig(enabled=False),
+        )
+        app = NaumiApp(
+            engine,
+            terminal_runtime_lifecycle_factory=factory,
+        )
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause(0.05)
+            assert app._runtime_heartbeat_notice_emitted is True
+            assert "运行时心跳降级" in app.query_one(StatusBar).status_text
+            await app._emit_runtime_heartbeat_degraded()
+            assert app._runtime_heartbeat_notice_emitted is True
 
     @pytest.mark.asyncio
     async def test_running_tui_persists_promotes_and_cancels_queue_items(

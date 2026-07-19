@@ -202,11 +202,14 @@ def runtime_heartbeat_retention_health_item(
     if error_code:
         detail += f" 最近错误码 {error_code}。"
     suggestion = {
-        "stopped": "确认默认 New UI Bridge 已完成启动；若心跳也降级，请检查 Harness Store。",
+        "stopped": (
+            "确认当前 terminal runtime lifecycle 已完成启动；"
+            "若心跳也降级，请检查 Harness Store。"
+        ),
         "failed": "保留当前任务继续运行，并检查 Harness Store；清理失败不会中断模型执行。",
         "unavailable": (
-            "TUI fallback 不托管该 Bridge worker；"
-            "请在默认 New UI 的 /doctor 查看实时状态。"
+            "当前客户端未接入 terminal runtime lifecycle；"
+            "请重启当前界面，若持续出现请检查安装版本与 Composition Root。"
         ),
         "unknown": "刷新诊断；若持续未知，请检查 Bridge 协议版本与 Harness 配置。",
     }.get(state, "")
