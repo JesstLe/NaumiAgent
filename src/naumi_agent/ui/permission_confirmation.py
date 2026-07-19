@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Collection, Mapping
 from itertools import islice
 from typing import Any
 
@@ -21,6 +22,72 @@ _JSON_LIMIT = 1200
 _DEPTH_LIMIT = 12
 _INTEGER_BIT_LIMIT = 512
 _CONTAINER_TYPES = (dict, list, tuple, set, frozenset)
+_SUPPORTED_BACKEND_CHOICES = frozenset(
+    {"allow_once", "deny", "grant_session"}
+)
+
+
+def normalize_backend_permission_choices(
+    raw_choices: Any,
+) -> tuple[str, ...] | None:
+    """Normalize one backend-owned choice list without inventing authority."""
+    if (
+        not isinstance(raw_choices, Collection)
+        or isinstance(raw_choices, (str, bytes, bytearray, Mapping))
+    ):
+        return None
+    values = (
+        sorted(raw_choices, key=lambda choice: str(choice))
+        if isinstance(raw_choices, (set, frozenset))
+        else raw_choices
+    )
+    choices: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            return None
+        choice = value.strip().lower()
+        if not choice or choice not in _SUPPORTED_BACKEND_CHOICES:
+            return None
+        if choice not in choices:
+            choices.append(choice)
+    return tuple(choices)
+
+
+def public_permission_request_payload(
+    payload: Mapping[str, Any],
+    *,
+    request_id: str,
+    choices: tuple[str, ...],
+) -> dict[str, Any]:
+    """Build the exact redacted request shown by every terminal frontend."""
+    normalized_choices = normalize_backend_permission_choices(choices)
+    if normalized_choices is None or not {"allow_once", "deny"}.issubset(
+        normalized_choices
+    ):
+        raise ValueError("权限选择必须同时包含 allow_once 与 deny。")
+    public_choices = [*normalized_choices, "bypass"]
+    return {
+        "request_id": request_id,
+        "call_id": str(payload.get("call_id") or ""),
+        "session_id": str(payload.get("session_id") or ""),
+        "run_id": str(payload.get("run_id") or ""),
+        "agent_name": str(
+            payload.get("agent_name") or payload.get("agent") or "main"
+        ),
+        "tool_name": str(
+            payload.get("tool_name") or payload.get("tool") or "tool"
+        ),
+        "tool_family": str(payload.get("tool_family") or ""),
+        "arguments_summary": summarize_arguments(payload.get("arguments", {})),
+        "reason": str(payload.get("reason") or "等待用户确认。"),
+        "risk_level": str(payload.get("risk_level") or "medium"),
+        "choices": public_choices,
+        "scope": "session" if "grant_session" in normalized_choices else "call",
+        "expires_at": payload.get("expires_at"),
+        "requires_double_confirm": False,
+        "status": "needs_confirmation",
+    }
+
 
 def summarize_arguments(arguments: Any) -> dict[str, Any]:
     """Return a bounded, JSON-safe public summary without sensitive values."""

@@ -78,6 +78,15 @@
 - ARC-04.3c 已将该 authority 接入 Shell admission；Composer 显式接收任务局部 `run_grant_id`，不使用
   全局可变授权，详见 `UI-12-3b4-run-grant-child-execution-chain.md`。
 
+### UI-17.2b 已实现：双端权限公开语义锁定
+
+- Bridge 与 TUI 现在使用同一公开投影器，Modal/事件只接收脱敏 `arguments_summary`，不再渲染原始工具参数；
+- 后端 choices 严格限制为 allow once、deny、session grant，非法输入在弹窗前 fail closed；terminal 额外公开全局
+  bypass，且四种操作均返回 canonical choice；
+- bypass 继续遵循“常规工具全权限通过、无高风险二次确认”的既定产品语义，审计和系统边界不变；
+- 共享 fixture 已验证 New UI/TUI 请求相等、私密 token 不泄漏和四个终态映射，详见
+  `UI-17-2b-permission-interaction-golden.md`。
+
 ### 尚未完成
 
 - UI-12.2：可操作的 pending queue 与等待顺序。

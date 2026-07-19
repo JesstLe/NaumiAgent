@@ -43,7 +43,7 @@
     },
     "permission_bypass": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_control_parity.py"]
     },
     "queued_send_now": {
       "state": "supported",
@@ -63,7 +63,7 @@
     },
     "user_interaction": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_control_parity.py"]
     }
   }
 }

@@ -43,7 +43,7 @@
     },
     "permission_bypass": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/components/permission-panel.js", "frontend/terminal-ui/test/permission-center-page.test.js"]
+      "evidence": ["frontend/terminal-ui/src/components/permission-panel.js", "frontend/terminal-ui/test/permission-interaction-golden.test.js"]
     },
     "queued_send_now": {
       "state": "supported",
@@ -63,7 +63,7 @@
     },
     "user_interaction": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/components/interaction-card.js", "frontend/terminal-ui/test/flow.test.js"]
+      "evidence": ["frontend/terminal-ui/src/components/interaction-card.js", "frontend/terminal-ui/test/permission-interaction-golden.test.js"]
     }
   }
 }

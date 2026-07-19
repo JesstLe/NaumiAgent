@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "permission": {
+    "input": {
+      "call_id": "call-golden-1",
+      "session_id": "session-golden",
+      "run_id": "",
+      "agent_name": "main",
+      "tool_name": "bash_run",
+      "tool_family": "shell",
+      "arguments": {
+        "command": "echo hello",
+        "authorization": "Bearer private-token",
+        "nested": {"api_token": "private-token"}
+      },
+      "reason": "需要执行工作区命令。",
+      "risk_level": "medium",
+      "choices": ["grant_session", "allow_once", "deny"],
+      "expires_at": null,
+      "requires_double_confirm": true
+    },
+    "expected_request": {
+      "request_id": "call-golden-1",
+      "call_id": "call-golden-1",
+      "session_id": "session-golden",
+      "run_id": "",
+      "agent_name": "main",
+      "tool_name": "bash_run",
+      "tool_family": "shell",
+      "arguments_summary": {
+        "command": "echo hello",
+        "authorization": "[已隐藏]",
+        "nested": {"api_token": "[已隐藏]"}
+      },
+      "reason": "需要执行工作区命令。",
+      "risk_level": "medium",
+      "choices": ["grant_session", "allow_once", "deny", "bypass"],
+      "scope": "session",
+      "expires_at": null,
+      "requires_double_confirm": false,
+      "status": "needs_confirmation"
+    },
+    "terminal_choices": {
+      "allow_once": "allowed",
+      "deny": "denied",
+      "grant_session": "granted",
+      "bypass": "bypass_enabled"
+    }
+  },
+  "interaction": {
+    "request_id": "ask-golden-1",
+    "session_id": "session-golden",
+    "run_id": "",
+    "agent_name": "main",
+    "input": {
+      "header": "实现策略",
+      "question": "请选择执行方案",
+      "options": [
+        {"value": "safe", "label": "安全方案", "description": "保留兼容路径"},
+        {"value": "fast", "label": "快速方案", "description": "优先交付速度"}
+      ],
+      "allow_custom": true,
+      "custom_label": "其他方案",
+      "timeout_seconds": 300
+    },
+    "expected_request": {
+      "request_id": "ask-golden-1",
+      "session_id": "session-golden",
+      "run_id": "",
+      "agent_name": "main",
+      "header": "实现策略",
+      "question": "请选择执行方案",
+      "options": [
+        {"value": "safe", "label": "安全方案", "description": "保留兼容路径"},
+        {"value": "fast", "label": "快速方案", "description": "优先交付速度"}
+      ],
+      "allow_custom": true,
+      "custom_label": "其他方案",
+      "timeout_seconds": 300,
+      "expires_at": "",
+      "status": "needs_input"
+    },
+    "option_response": {
+      "raw": {"kind": "option", "value": "fast"},
+      "expected": {
+        "kind": "option",
+        "value": "fast",
+        "label": "快速方案",
+        "custom_text": ""
+      }
+    },
+    "custom_response": {
+      "raw": {"kind": "custom", "custom_text": "仅当前工作区"},
+      "expected": {
+        "kind": "custom",
+        "value": "",
+        "label": "其他方案",
+        "custom_text": "仅当前工作区"
+      }
+    }
+  }
+}
