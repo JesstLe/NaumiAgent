@@ -54,6 +54,9 @@ from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionExecutor,
     EvolutionFailureAttributionStore,
 )
+from naumi_agent.evolution.interventional_green_request import (
+    EvolutionInterventionalGreenCohortRequestBuilder,
+)
 from naumi_agent.evolution.interventional_red_cohort import (
     EvolutionInterventionalRedCohortExecutor,
 )
@@ -893,6 +896,9 @@ class AgentEngine:
                 run_grant_authority=self.run_delegation_grant_authority,
                 sample_executor=self.evolution_interventional_red_sample_executor,
             )
+        )
+        self.evolution_interventional_green_cohort_request_builder = (
+            EvolutionInterventionalGreenCohortRequestBuilder()
         )
         self.evolution_self_review_red_baseline_executor = (
             EvolutionSelfReviewRedBaselineExecutor(

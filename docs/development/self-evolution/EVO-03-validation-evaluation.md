@@ -71,9 +71,12 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.2g Interventional RED Cohort：已实现。单次执行尝试以一个 Runtime lease/Run Grant 编排连续
   H5a samples，支持跨父回执 300 秒窗口、中断前缀保留、新 epoch/grant 续跑、完整 authority/lifecycle
   复验与防篡改 completion receipt。详见 `EVO-03-2g-interventional-red-cohort.md`。
+- EVO-03.3b Interventional GREEN Request：已实现。把完整 RED receipt、Plan/Profile/Metric authority、
+  active Experiment Lease 与 candidate provenance 冻结为不可执行请求；保持相同 suite/seed/order/预算，
+  不提前授予 Shell authority。详见 `EVO-03-3b-interventional-green-request.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
-UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort。
-candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持
-partial。
+UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
+EVO-03.3b 已冻结 candidate Request。candidate sample/cohort 执行、adversarial suite 与最终 Evaluation
+Receipt 仍未实现，因此 EVO-03 整体保持 partial。

@@ -34,6 +34,11 @@ if TYPE_CHECKING:
         FailureAttributionAction,
         FailureAttributionCategory,
     )
+    from naumi_agent.evolution.interventional_green_request import (
+        EvolutionInterventionalGreenCohortRequest,
+        EvolutionInterventionalGreenCohortRequestBuilder,
+        EvolutionInterventionalGreenRequestError,
+    )
     from naumi_agent.evolution.interventional_red_cohort import (
         EvolutionInterventionalRedCohortError,
         EvolutionInterventionalRedCohortExecutor,
@@ -298,6 +303,9 @@ __all__ = [
     "EvolutionInterventionalRedCohortReceipt",
     "InterventionalRedCheckSummary",
     "InterventionalRedMetricSummary",
+    "EvolutionInterventionalGreenCohortRequest",
+    "EvolutionInterventionalGreenCohortRequestBuilder",
+    "EvolutionInterventionalGreenRequestError",
     "SelfReviewRedMetricSummary",
     "EvolutionSelfReviewGreenCohortError",
     "EvolutionSelfReviewGreenCohortExecutor",
@@ -480,6 +488,11 @@ def __getattr__(name: str) -> object:
         "InterventionalRedCheckSummary",
         "InterventionalRedMetricSummary",
     }
+    interventional_green_request_exports = {
+        "EvolutionInterventionalGreenCohortRequest",
+        "EvolutionInterventionalGreenCohortRequestBuilder",
+        "EvolutionInterventionalGreenRequestError",
+    }
     self_review_green_cohort_exports = {
         "EvolutionSelfReviewGreenCohortError",
         "EvolutionSelfReviewGreenCohortExecutor",
@@ -538,6 +551,8 @@ def __getattr__(name: str) -> object:
         module_name = "self_review_red_baseline"
     elif name in interventional_red_cohort_exports:
         module_name = "interventional_red_cohort"
+    elif name in interventional_green_request_exports:
+        module_name = "interventional_green_request"
     elif name in interventional_red_sample_exports:
         module_name = "interventional_red_sample"
     elif name in self_review_green_cohort_exports:
