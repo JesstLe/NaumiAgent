@@ -9,6 +9,9 @@ import pytest
 
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.evolution.adversarial_probe_contracts import (
+    EvolutionAdversarialProbeContractBuilder,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -190,6 +193,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_validation_profile_binder,
         EvolutionValidationProfileBinder,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_probe_contract_builder,
+        EvolutionAdversarialProbeContractBuilder,
     )
     assert isinstance(
         engine.evolution_baseline_cohort_request_builder,
