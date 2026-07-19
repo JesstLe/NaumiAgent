@@ -1569,6 +1569,13 @@ test("sequential tools keep separate prepare summaries", () => {
 
 test("runtime perf phase does not corrupt active tool prepare state", () => {
   const state = createInitialState();
+  state.welcome = { phase: "dismissed", dismissed: true };
+
+  reduceServerEvent(state, {
+    type: "run/started",
+    request_id: "run-perf-phase",
+    payload: { task: "验证性能阶段" },
+  });
 
   reduceServerEvent(state, {
     type: "ui/message",
@@ -1591,9 +1598,8 @@ test("runtime perf phase does not corrupt active tool prepare state", () => {
   assert.equal(state.tools[0].prepareTitle, "");
   assert.deepEqual(state.tools[0].prepareDetails, []);
 
-  state.running = true;
   const plain = renderScreen(state, 90, 12, { cwd: "/tmp", home: "/Users/lv" }).map(stripAnsi).join("\n");
-  assert(plain.includes("运行中... · 模型首包: 2400ms"));
+  assert(plain.includes("工具执行中 · 执行工具 · 模型首包: 2400ms"));
 });
 
 test("todo footer state tracks open work and clears when complete", () => {

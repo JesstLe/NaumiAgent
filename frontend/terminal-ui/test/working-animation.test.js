@@ -63,6 +63,45 @@ test("working indicator uses compact and dumb-terminal fallbacks", () => {
   assert.doesNotMatch(stripAnsi(dumb[0]), /[◐◓◑◒╭╮│─◉•]/);
 });
 
+test("working indicator keeps bounded runtime performance feedback while active", () => {
+  const active = runningState("executing", {
+    activeRuntimePhase: "模型首包: 2400ms",
+  });
+
+  const wide = renderWorkingIndicator(active, 100, { bodyHeight: 12, term: "xterm" });
+  const compact = renderWorkingIndicator(active, 60, { bodyHeight: 6, term: "xterm" });
+  const dumb = renderWorkingIndicator(active, 100, { bodyHeight: 12, term: "dumb" });
+
+  assert.match(stripAnsi(wide.join("\n")), /工具执行中 · 执行工具 · 模型首包: 2400ms/);
+  assert.match(stripAnsi(compact.join("\n")), /工具执行中 · 执行工具 · 模型首包: 2400ms/);
+  assert.match(stripAnsi(dumb.join("\n")), /工具执行中 · 执行工具 · 模型首包: 2400ms/);
+});
+
+test("working indicator sanitizes runtime feedback and hides it while blocked", () => {
+  const unsafeRuntime = `模型首包 ${"很长".repeat(80)}\x1b[31m红色\x1b[0m\x1b]8;;https://evil.test\x07隐藏\x1b]8;;\x07`;
+  const active = runningState("generating", { activeRuntimePhase: unsafeRuntime });
+  const status = workingIndicatorStatus(active);
+  const rendered = renderWorkingIndicator(active, 70, { bodyHeight: 10, term: "xterm" });
+
+  assert.doesNotMatch(status.phaseLabel, /evil\.test|\x1b\](?:8)|\x1b\[(?:31|0)m/);
+  assert(rendered.every((line) => visibleWidth(line) <= 70));
+  assert.doesNotMatch(rendered.join(""), /evil\.test/);
+  assert(rendered.some((line) => stripAnsi(line).includes("…")));
+
+  for (const blocked of [
+    { permission: { requestId: "p-runtime" } },
+    { interaction: { requestId: "ask-runtime" } },
+    { cancelPending: true },
+  ]) {
+    const waiting = renderWorkingIndicator(
+      { ...active, ...blocked },
+      100,
+      { bodyHeight: 12, term: "xterm" },
+    );
+    assert.doesNotMatch(stripAnsi(waiting.join("\n")), /模型首包/);
+  }
+});
+
 test("working indicator follows negotiated no-color rendering", () => {
   try {
     configureAnsiColors(false);
