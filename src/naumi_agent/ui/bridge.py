@@ -36,6 +36,11 @@ from naumi_agent.harness.eval_surface import (
     eval_batch_terminal_progress,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup
+from naumi_agent.harness.heartbeat_retention_periodic import (
+    RuntimeHeartbeatRetentionPolicy,
+    RuntimeHeartbeatRetentionService,
+    RuntimeHeartbeatRetentionState,
+)
 from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
@@ -540,10 +545,13 @@ class JsonlEngineBridge:
         self._runtime_heartbeat: RuntimeHeartbeatProducer | None = None
         self._runtime_heartbeat_store: HarnessStore | None = None
         self._runtime_heartbeat_notice_emitted = False
+        self._runtime_heartbeat_retention: RuntimeHeartbeatRetentionService | None = None
+        self._runtime_heartbeat_retention_store: HarnessStore | None = None
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
         self._last_retention_worker_status: dict[str, object] | None = None
+        self._last_runtime_heartbeat_retention_status: dict[str, object] | None = None
         self._closed = False
 
         self.engine.set_permission_confirmer(self.confirm_permission)
@@ -578,10 +586,17 @@ class JsonlEngineBridge:
 
     async def emit_ready(self) -> None:
         heartbeat_error = await self._start_runtime_heartbeat()
+        if not heartbeat_error and self._runtime_heartbeat is not None:
+            self._start_runtime_heartbeat_retention()
         payload = self.status_payload()
         retention_status = payload.get("retention_worker")
         if isinstance(retention_status, dict):
             self._last_retention_worker_status = dict(retention_status)
+        runtime_retention_status = payload.get("runtime_heartbeat_retention")
+        if isinstance(runtime_retention_status, dict):
+            self._last_runtime_heartbeat_retention_status = dict(
+                runtime_retention_status
+            )
         await self.emit(ServerEventType.READY, payload)
         if heartbeat_error:
             await self._emit_runtime_heartbeat_degraded()
@@ -658,6 +673,46 @@ class JsonlEngineBridge:
                 )
             ),
         )
+
+    def _runtime_heartbeat_retention_service(
+        self,
+    ) -> RuntimeHeartbeatRetentionService | None:
+        config = getattr(self.engine, "_config", None)
+        harness_config = getattr(config, "harness", None)
+        retention_config = getattr(
+            harness_config,
+            "runtime_heartbeat_retention",
+            None,
+        )
+        if not bool(getattr(retention_config, "enabled", False)):
+            return None
+        store = self._runtime_heartbeat_store
+        if not isinstance(store, HarnessStore):
+            return None
+        if (
+            self._runtime_heartbeat_retention is None
+            or self._runtime_heartbeat_retention_store is not store
+        ):
+            policy = RuntimeHeartbeatRetentionPolicy(
+                interval_seconds=retention_config.interval_seconds,
+                standby_retry_seconds=retention_config.standby_retry_seconds,
+                retention_seconds=retention_config.retention_days * 86_400,
+                lease_seconds=retention_config.lease_seconds,
+                scan_limit=retention_config.scan_limit,
+                catalog_limit=retention_config.catalog_limit,
+            )
+            self._runtime_heartbeat_retention = RuntimeHeartbeatRetentionService(
+                port=store,
+                workspace_root=self.engine.workspace_root,
+                policy=policy,
+                protected_subject_ids=lambda: (self._runtime_heartbeat_subject_id,),
+            )
+            self._runtime_heartbeat_retention_store = store
+        return self._runtime_heartbeat_retention
+
+    def _start_runtime_heartbeat_retention(self) -> bool:
+        service = self._runtime_heartbeat_retention_service()
+        return service.start() if service is not None else False
 
     def _interaction_authority(
         self,
@@ -1031,6 +1086,9 @@ class JsonlEngineBridge:
             "context": context,
             "budget": budget,
             "retention_worker": self._retention_worker_status_payload(),
+            "runtime_heartbeat_retention": (
+                self._runtime_heartbeat_retention_status_payload()
+            ),
             "evolution_patch_recovery": self._evolution_patch_recovery_payload(),
             "tasks": self._task_activity_payload(),
             "ui": {
@@ -1092,6 +1150,38 @@ class JsonlEngineBridge:
                 "started_at": "",
                 "last_pass_at": "",
             }
+
+    def _runtime_heartbeat_retention_status_payload(self) -> dict[str, object]:
+        config = getattr(self.engine, "_config", None)
+        retention_config = getattr(
+            getattr(config, "harness", None),
+            "runtime_heartbeat_retention",
+            None,
+        )
+        configured_enabled = bool(getattr(retention_config, "enabled", False))
+        service = self._runtime_heartbeat_retention
+        if service is None:
+            return {
+                "configured_enabled": configured_enabled,
+                "state": RuntimeHeartbeatRetentionState.STOPPED.value,
+                "cycle_count": 0,
+                "deleted_count": 0,
+                "failure_count": 0,
+                "last_error_code": "",
+                "last_cycle_at": "",
+                "next_delay_seconds": 0.0,
+            }
+        snapshot = service.snapshot()
+        return {
+            "configured_enabled": configured_enabled,
+            "state": snapshot.state.value,
+            "cycle_count": snapshot.cycle_count,
+            "deleted_count": snapshot.deleted_count,
+            "failure_count": snapshot.failure_count,
+            "last_error_code": snapshot.last_error_code,
+            "last_cycle_at": snapshot.last_cycle_at,
+            "next_delay_seconds": snapshot.next_delay_seconds,
+        }
 
     def _task_activity_payload(self) -> dict[str, int]:
         """Return compact task/activity counts for persistent footer rendering."""
@@ -1194,12 +1284,28 @@ class JsonlEngineBridge:
                 },
                 request_id=request_id,
             )
+            status_changes: dict[str, object] = {}
             retention_status = self._retention_worker_status_payload()
             if retention_status != self._last_retention_worker_status:
                 self._last_retention_worker_status = dict(retention_status)
+                status_changes["retention_worker"] = retention_status
+            runtime_retention_status = (
+                self._runtime_heartbeat_retention_status_payload()
+            )
+            if (
+                runtime_retention_status
+                != self._last_runtime_heartbeat_retention_status
+            ):
+                self._last_runtime_heartbeat_retention_status = dict(
+                    runtime_retention_status
+                )
+                status_changes["runtime_heartbeat_retention"] = (
+                    runtime_retention_status
+                )
+            if status_changes:
                 await self.emit(
                     ServerEventType.STATUS,
-                    {"retention_worker": retention_status},
+                    status_changes,
                 )
             return
 
@@ -4129,6 +4235,15 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
+        runtime_heartbeat_retention = self._runtime_heartbeat_retention
+        if runtime_heartbeat_retention is not None:
+            try:
+                await runtime_heartbeat_retention.stop()
+            except Exception as exc:
+                logger.warning(
+                    "Runtime heartbeat retention shutdown failed (%s)",
+                    type(exc).__name__,
+                )
         runtime_heartbeat = self._runtime_heartbeat
         if runtime_heartbeat is not None:
             try:

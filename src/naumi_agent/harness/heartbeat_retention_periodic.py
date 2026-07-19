@@ -123,6 +123,8 @@ class RuntimeHeartbeatRetentionService:
         if self._task is not None and not self._task.done():
             return False
         self._stop.clear()
+        self._state = RuntimeHeartbeatRetentionState.RUNNING
+        self._next_delay = 0.0
         self._task = asyncio.create_task(self._run_loop(), name="naumi-runtime-heartbeat-retention")
         return True
 

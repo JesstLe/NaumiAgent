@@ -392,6 +392,28 @@ class UIConfig(BaseSettings):
     show_reasoning: bool = True
 
 
+class RuntimeHeartbeatRetentionConfig(BaseSettings):
+    """Safe bounded retention for terminal runtime heartbeat records."""
+
+    enabled: bool = True
+    retention_days: int = Field(default=7, ge=3, le=365)
+    interval_seconds: float = Field(default=21_600, gt=0, le=604_800)
+    standby_retry_seconds: float = Field(default=60, gt=0, le=3600)
+    lease_seconds: int = Field(default=60, ge=3, le=86_400)
+    scan_limit: int = Field(default=100, ge=1, le=1000)
+    catalog_limit: int = Field(default=200, ge=1, le=200)
+
+
+class HarnessConfig(BaseSettings):
+    """Harness runtime policy configuration."""
+
+    model_config = SettingsConfigDict(env_prefix="NAUMI_HARNESS__")
+
+    runtime_heartbeat_retention: RuntimeHeartbeatRetentionConfig = Field(
+        default_factory=RuntimeHeartbeatRetentionConfig
+    )
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NAUMI_",
@@ -412,6 +434,7 @@ class AppConfig(BaseSettings):
     browser: BrowserAutomationConfig = Field(default_factory=BrowserAutomationConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    harness: HarnessConfig = Field(default_factory=HarnessConfig)
     keybindings: dict[str, str | list[str]] = Field(default_factory=dict)
     workspace_root: str = Field(default_factory=lambda: str(Path.cwd()))
     custom_tools_dir: str | None = None

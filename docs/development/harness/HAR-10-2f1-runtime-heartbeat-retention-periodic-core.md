@@ -53,6 +53,5 @@ HAR-10.2f2 中作为独立功能验收。
 
 ## 未完成与下一步
 
-HAR-10.2f2 需要单独完成 Bridge 接入：增加默认关闭或明确安全默认值的配置、在 heartbeat producer 就绪后启动、把
-当前 Bridge subject 注入保护集合、在 producer terminal 前先 graceful stop，并通过用户可见 runtime status/Doctor
-展示降级状态。完成该接入前，本切片不会在用户启动 Naumi 时自动删除任何记录。
+HAR-10.2f2 已完成安全默认配置、Bridge 启停、当前 subject 保护和 typed runtime status；见
+[设计](HAR-10-2f2-runtime-retention-bridge-lifecycle.md)。New UI/Doctor 的专用详情投影仍应作为独立只读切片完成。
