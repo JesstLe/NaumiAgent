@@ -22,6 +22,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceiptStore,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.daemons.shell_worker import (
     AuthenticatedLocalShellTransport,
     ShellCommandRequest,
@@ -49,10 +50,13 @@ from naumi_agent.daemons.worker_contract import (
     issue_worker_contract,
     issue_worker_health_report,
 )
-from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.daemons.worker_registry import (
+    WorkerRegistrationState,
+    WorkerRegistryStore,
+)
 from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
 from naumi_agent.harness.models import HarnessCheckSpec
-from naumi_agent.harness.run_lease import HarnessRunKind
+from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
 from naumi_agent.harness.sandbox_checks import (
     AdmittedSandboxShellJob,
     HarnessSandboxCheckRunner,
@@ -374,6 +378,77 @@ async def test_coordinator_consumes_tool_job_authority_and_reuses_terminal_recei
     assert not replay.payload_sent
     assert replay.command is None
     assert replay.job == result.job
+
+
+@pytest.mark.asyncio
+async def test_admission_composer_builds_and_releases_exact_authority_chain(
+    tmp_path: Path,
+) -> None:
+    provisional = _request(tmp_path, code="print('admitted')")
+    runtime = tmp_path / "authority"
+    registry = WorkerRegistryStore(runtime / "worker-registry.db")
+    harness = HarnessStore(tmp_path / "state" / "harness.db")
+    permissions = PermissionDecisionReceiptStore(runtime / "permission-decisions.db")
+    grants = ExecutionGrantStore(runtime / "execution-grants.db")
+    jobs = ToolJobStore(runtime / "tool-jobs.db")
+    parent = await permissions.issue(
+        request_id="parent-check",
+        session_id="session-a",
+        run_id="tool-run-a",
+        call_id="parent-check",
+        agent_name="main",
+        tool_name="harness_run_check",
+        tool_family="harness_run_check",
+        arguments={"check_id": "unit", "run_id": "tool-run-a"},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=T2,
+    )
+    timestamps = iter((T3, T4))
+    composer = ShellWorkerAdmissionComposer(
+        worker_registry=registry,
+        harness_store=harness,
+        permission_store=permissions,
+        execution_grant_store=grants,
+        tool_job_store=jobs,
+        transport=AuthenticatedLocalShellTransport(runtime_dir=runtime / "transport"),
+        software_version="0.1.214",
+        now=lambda: next(timestamps),
+        token=lambda: "a" * 32,
+    )
+
+    composed = await composer.compose(
+        parent_receipt_id=parent.receipt_id,
+        spec=provisional.spec,
+    )
+
+    admitted = composed.admitted
+    stored = await jobs.get(admitted.job_id)
+    active = await registry.get_active(admitted.shell_request.worker_id)
+    lease = await harness.get_run_lease(
+        workspace_root=provisional.workspace_root,
+        run_kind=HarnessRunKind.TOOL,
+        run_id=parent.run_id,
+    )
+    assert stored is not None and stored.state is ToolJobState.ADMITTED
+    assert active is not None and active.state is WorkerRegistrationState.ACTIVE
+    assert lease is not None and lease.state is HarnessRunLeaseState.ACTIVE
+    assert admitted.tool_job_request.arguments == provisional.spec.canonical_payload()
+    assert admitted.shell_request.spec == provisional.spec
+
+    await composed.release()
+
+    assert await registry.get_active(admitted.shell_request.worker_id) is None
+    released = await harness.get_run_lease(
+        workspace_root=provisional.workspace_root,
+        run_kind=HarnessRunKind.TOOL,
+        run_id=parent.run_id,
+    )
+    assert released is not None and released.state is HarnessRunLeaseState.RELEASED
 
 
 @pytest.mark.asyncio
