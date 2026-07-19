@@ -42,6 +42,6 @@ SQLite 写事务让 prune 与 heartbeat pulse 串行化：
 
 ## 当前边界
 
-本切片没有决定默认保留天数、没有 worker list/cursor，也没有接入 Session retention periodic service。下一切片
-应先实现有界 runtime worker catalog，让周期清理能够获取“当前实例保护集合”和可观察 receipt，再决定配置项与
-调度；不能让 UI 直接执行无保护的 DELETE。
+本切片没有决定默认保留天数，也没有接入 Session retention periodic service。HAR-10.2e 已补充有界 runtime
+worker catalog 与稳定 cursor；下一切片应在独立 periodic service 中组合 catalog、保护集合与 prune receipt，
+再决定配置项和调度，不能让 UI 直接执行无保护的 DELETE。

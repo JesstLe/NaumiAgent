@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -38,6 +39,7 @@ from naumi_agent.harness.heartbeat import (
     HarnessHeartbeat,
     HarnessHeartbeatHealth,
     HarnessHeartbeatPhase,
+    RuntimeHeartbeatCatalogPage,
     RuntimeHeartbeatPruneReceipt,
     assess_heartbeat,
 )
@@ -88,6 +90,7 @@ _INTERACTION_ID_RE = re.compile(r"^ask-[A-Za-z0-9._:-]{1,128}$")
 _CONVERSATION_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CONVERSATION_QUEUE_TERMINAL_STATES = frozenset({"completed", "cancelled", "failed"})
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
+_MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
@@ -2513,6 +2516,76 @@ class HarnessStore:
                 return _heartbeat_from_row(row) if row is not None else None
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法读取 Harness 心跳。") from exc
+
+    async def list_runtime_heartbeats(
+        self,
+        *,
+        workspace_root: str | Path,
+        assessed_at: str,
+        limit: int = 50,
+        cursor: str = "",
+    ) -> RuntimeHeartbeatCatalogPage:
+        """List a bounded runtime worker catalog using an opaque stable cursor."""
+        workspace = _canonical_workspace(workspace_root)
+        now = _normalize_utc_timestamp(assessed_at, field="assessed_at")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("runtime heartbeat catalog limit 必须在 1 到 200 之间。")
+        position = _decode_runtime_heartbeat_cursor(
+            cursor,
+            workspace_root=workspace,
+            assessed_at=now,
+        ) if cursor else None
+        if not self._db_path.is_file():
+            return RuntimeHeartbeatCatalogPage(workspace, now, (), "")
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                parameters: list[object] = [
+                    workspace,
+                    HarnessRunKind.RUNTIME.value,
+                ]
+                continuation = ""
+                if position is not None:
+                    continuation = (
+                        " AND (observed_at < ? OR "
+                        "(observed_at = ? AND subject_id > ?))"
+                    )
+                    parameters.extend((position[0], position[0], position[1]))
+                parameters.append(limit + 1)
+                row_cursor = await db.execute(
+                    f"""
+                    SELECT * FROM harness_heartbeats
+                    WHERE workspace_root = ? AND subject_kind = ?{continuation}
+                    ORDER BY observed_at DESC, subject_id ASC
+                    LIMIT ?
+                    """,
+                    tuple(parameters),
+                )
+                rows = await row_cursor.fetchall()
+                has_more = len(rows) > limit
+                page_rows = rows[:limit]
+                items = tuple(
+                    assess_heartbeat(_heartbeat_from_row(row), now=now)
+                    for row in page_rows
+                )
+                next_cursor = ""
+                if has_more and page_rows:
+                    last = _heartbeat_from_row(page_rows[-1])
+                    next_cursor = _encode_runtime_heartbeat_cursor(
+                        workspace_root=workspace,
+                        assessed_at=now,
+                        observed_at=last.observed_at,
+                        subject_id=last.subject_id,
+                    )
+                return RuntimeHeartbeatCatalogPage(
+                    workspace_root=workspace,
+                    assessed_at=now,
+                    items=items,
+                    next_cursor=next_cursor,
+                )
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法读取 runtime Harness 心跳目录。") from exc
 
     async def prune_runtime_heartbeats(
         self,
@@ -5619,6 +5692,98 @@ async def _select_heartbeat_row(
     return await cursor.fetchone()
 
 
+def _encode_runtime_heartbeat_cursor(
+    *,
+    workspace_root: str,
+    assessed_at: str,
+    observed_at: str,
+    subject_id: str,
+) -> str:
+    payload = {
+        "a": assessed_at,
+        "o": observed_at,
+        "s": subject_id,
+        "v": 1,
+        "w": hashlib.sha256(workspace_root.encode("utf-8")).hexdigest(),
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    envelope = json.dumps(
+        {
+            "d": hashlib.sha256(canonical).hexdigest(),
+            "p": payload,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(envelope).decode("ascii").rstrip("=")
+
+
+def _decode_runtime_heartbeat_cursor(
+    value: str,
+    *,
+    workspace_root: str,
+    assessed_at: str,
+) -> tuple[str, str]:
+    token = value.strip() if isinstance(value, str) else ""
+    if not token or len(token) > _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH:
+        raise ValueError("runtime heartbeat cursor 为空或过长。")
+    try:
+        padding = "=" * (-len(token) % 4)
+        decoded = base64.b64decode(
+            token + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        envelope = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("runtime heartbeat cursor 格式无效。") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"d", "p"}:
+        raise ValueError("runtime heartbeat cursor envelope 无效。")
+    payload = envelope.get("p")
+    digest = envelope.get("d")
+    if not isinstance(payload, dict) or set(payload) != {"a", "o", "s", "v", "w"}:
+        raise ValueError("runtime heartbeat cursor payload 无效。")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if not isinstance(digest, str) or not hmac.compare_digest(digest, expected_digest):
+        raise ValueError("runtime heartbeat cursor 摘要校验失败。")
+    if payload.get("v") != 1:
+        raise ValueError("runtime heartbeat cursor 版本不兼容。")
+    expected_workspace = hashlib.sha256(workspace_root.encode("utf-8")).hexdigest()
+    workspace_digest = payload.get("w")
+    if (
+        not isinstance(workspace_digest, str)
+        or not hmac.compare_digest(workspace_digest, expected_workspace)
+    ):
+        raise ValueError("runtime heartbeat cursor 不属于当前工作区。")
+    cursor_assessed_at = _normalize_utc_timestamp(
+        payload.get("a"),
+        field="cursor.assessed_at",
+    )
+    if not hmac.compare_digest(cursor_assessed_at, assessed_at):
+        raise ValueError("runtime heartbeat cursor 的评估时间已变化。")
+    observed_at = _normalize_utc_timestamp(
+        payload.get("o"),
+        field="cursor.observed_at",
+    )
+    subject_id = _normalize_run_lease_id(
+        payload.get("s"),
+        field="cursor.subject_id",
+    )
+    return observed_at, subject_id
+
+
 def _heartbeat_from_row(row: aiosqlite.Row) -> HarnessHeartbeat:
     return HarnessHeartbeat(
         workspace_root=str(row["workspace_root"]),
@@ -6443,6 +6608,11 @@ CREATE TABLE IF NOT EXISTS harness_heartbeats (
 
 CREATE INDEX IF NOT EXISTS idx_harness_heartbeats_observed
 ON harness_heartbeats (workspace_root, subject_kind, observed_at, subject_id);
+
+CREATE INDEX IF NOT EXISTS idx_harness_heartbeats_catalog
+ON harness_heartbeats (
+    workspace_root, subject_kind, observed_at DESC, subject_id ASC
+);
 """
 
 _SCHEMA_V13 = """
