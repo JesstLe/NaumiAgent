@@ -28,6 +28,7 @@ from naumi_agent.runtime.composition import (
     build_runtime_paths,
     build_runtime_ports,
     build_runtime_resources,
+    build_runtime_services,
     create_agent_engine,
 )
 from naumi_agent.runtime.dependencies import RuntimePortOverrides
@@ -513,7 +514,13 @@ def test_explicit_catalog_is_loaded_once_and_passed_to_model_router(
 def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
     config = _config(tmp_path)
     ports = build_runtime_ports(config)
-    resources = build_runtime_resources(build_runtime_paths(config))
+    paths = build_runtime_paths(config)
+    resources = build_runtime_resources(paths)
+    services = build_runtime_services(
+        config,
+        paths=paths,
+        resources=resources,
+    )
     sentinel = object()
 
     with (
@@ -530,6 +537,10 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
             return_value=resources,
         ) as build_resources,
         patch(
+            "naumi_agent.runtime.composition.build_runtime_services",
+            return_value=services,
+        ) as build_services,
+        patch(
             "naumi_agent.orchestrator.engine.AgentEngine",
             return_value=sentinel,
         ) as engine_type,
@@ -540,11 +551,18 @@ def test_create_agent_engine_injects_every_built_port(tmp_path: Path) -> None:
     paths = build_paths.return_value
     build_ports.assert_called_once_with(config, paths=paths, overrides=None)
     build_resources.assert_called_once_with(paths, overrides=None)
+    build_services.assert_called_once_with(
+        config,
+        paths=paths,
+        resources=resources,
+        overrides=None,
+    )
     engine_type.assert_called_once_with(
         config,
         ports=ports,
         paths=paths,
         resources=resources,
+        services=services,
     )
 
 

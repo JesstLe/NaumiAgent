@@ -37,6 +37,8 @@ from naumi_agent.runtime.resources import (
     RuntimeResources,
     validate_runtime_resource_overrides,
 )
+from naumi_agent.runtime.services import RuntimeServiceOverrides, RuntimeServices
+from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tasks.store import TaskStore
@@ -219,11 +221,42 @@ def build_runtime_resources(
     )
 
 
+def build_runtime_services(
+    config: AppConfig,
+    *,
+    paths: RuntimePaths,
+    resources: RuntimeResources,
+    overrides: RuntimeServiceOverrides | None = None,
+) -> RuntimeServices:
+    """Build validated long-running services without starting background work."""
+    if not isinstance(paths, RuntimePaths):
+        raise TypeError("paths 必须是完整的 RuntimePaths。")
+    if not isinstance(resources, RuntimeResources):
+        raise TypeError("resources 必须是完整的 RuntimeResources。")
+    resolved = RuntimeServiceOverrides() if overrides is None else overrides
+    if not isinstance(resolved, RuntimeServiceOverrides):
+        raise TypeError("overrides 必须是 RuntimeServiceOverrides。")
+    factory = resolved.terminal_runtime_lifecycle_factory
+    if factory is not None and not isinstance(factory, TerminalRuntimeLifecycleFactory):
+        raise TypeError(
+            "terminal_runtime_lifecycle_factory 必须是 "
+            "TerminalRuntimeLifecycleFactory。"
+        )
+    if factory is None:
+        factory = TerminalRuntimeLifecycleFactory(
+            store=resources.harness_store,
+            workspace_root=paths.workspace_root,
+            retention_config=config.harness.runtime_heartbeat_retention,
+        )
+    return RuntimeServices(terminal_runtime_lifecycle_factory=factory)
+
+
 def create_agent_engine(
     config: AppConfig,
     *,
     port_overrides: RuntimePortOverrides[Session] | None = None,
     resource_overrides: RuntimeResourceOverrides | None = None,
+    service_overrides: RuntimeServiceOverrides | None = None,
 ) -> AgentEngine:
     """Create one Engine from the authoritative default Port composition."""
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -231,12 +264,25 @@ def create_agent_engine(
     paths = build_runtime_paths(config)
     ports = build_runtime_ports(config, paths=paths, overrides=port_overrides)
     resources = build_runtime_resources(paths, overrides=resource_overrides)
-    return AgentEngine(config, ports=ports, paths=paths, resources=resources)
+    services = build_runtime_services(
+        config,
+        paths=paths,
+        resources=resources,
+        overrides=service_overrides,
+    )
+    return AgentEngine(
+        config,
+        ports=ports,
+        paths=paths,
+        resources=resources,
+        services=services,
+    )
 
 
 __all__ = [
     "build_runtime_paths",
     "build_runtime_ports",
     "build_runtime_resources",
+    "build_runtime_services",
     "create_agent_engine",
 ]
