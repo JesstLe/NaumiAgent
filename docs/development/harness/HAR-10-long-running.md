@@ -33,7 +33,9 @@
   - HAR-10.3b3 已在 Harness DB v15 交付历史 claim 审查、live-owner 保护、过期/released claim 的审计
     retry/cancel、新 request identity 与 New UI 即时刷新；见
     [设计](HAR-10-3b3-ambiguous-queue-resolution.md)。
-  - 未完成：TUI 运行中输入队列、跨客户端公平性、优先级、cursor、retention 与普通 queued 取消传播。
+  - HAR-10.3b4 已交付 TUI 运行中持久 enqueue、连续 claim/renew/fenced terminal、`/send-now` 和 New UI
+    live-claim 重排一致性；见 [设计](HAR-10-3b4-tui-durable-queue-parity.md)。
+  - 未完成：跨客户端公平性、优先级、cursor、retention 与普通 queued 取消传播。
 - HAR-10.4 Checkpoint（partial）：
   - HAR-10.4a 已实现：严格有界 schema、单调 sequence、canonical JSON + SHA-256、篡改拒绝、Pursuit
     安全边界写入，以及 legacy missing / verified ready 恢复判定；见
@@ -89,7 +91,7 @@ authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime par
 当前事务的 New UI 队列提升，HAR-10.3b1/3b2/3b3 已交付 durable queue Store、New UI Runtime 接入与
 历史 claim 人工处置；同步
 shell、browser/agent/runtime 逐域接入、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
-接入与 TUI queue parity 仍属于后续实现。
+接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。
 
 ## 验收标准
 

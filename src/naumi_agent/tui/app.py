@@ -37,11 +37,17 @@ from textual.widgets import (
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
+from naumi_agent.harness.conversation_queue_runtime import (
+    ConversationQueueClaim,
+    ConversationQueueClaimError,
+    DurableConversationQueueAuthority,
+)
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.harness.interaction import HarnessInteractionRecord
 from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
+from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.streaming.sinks import CallbackEventSink
@@ -1605,6 +1611,15 @@ class NaumiApp(App):
             DurableInteractionAuthorityClient | None
         ) = None
         self._interaction_authority_store: object | None = None
+        self._conversation_session_lock = asyncio.Lock()
+        self._queue_owner_id = f"queue-tui-{uuid4().hex}"
+        self._queue_authorities: dict[str, DurableConversationQueueAuthority] = {}
+        self._active_queue_authority: DurableConversationQueueAuthority | None = None
+        self._active_queue_claim: ConversationQueueClaim | None = None
+        self._queue_claim_renew_task: asyncio.Task[None] | None = None
+        self._queue_claim_lost = False
+        self._agent_busy = False
+        self._agent_worker: Any | None = None
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -1632,6 +1647,7 @@ class NaumiApp(App):
             await asyncio.gather(*owner_tasks, return_exceptions=True)
         self._interaction_owner_tasks.clear()
         self._interaction_records.clear()
+        await self._stop_queue_claim_renewal()
         await self.engine.shutdown()
 
     def on_mount(self) -> None:
@@ -2086,16 +2102,146 @@ class NaumiApp(App):
 
         # 斜杠命令拦截
         if text.startswith("/"):
+            command, _, argument = text.partition(" ")
+            if self._agent_busy and command.lower() == "/send-now":
+                self._promote_queued_conversation(argument.strip())
+                return
+            if self._agent_busy and command.lower() not in {"/q", "/quit", "/exit"}:
+                self.query_one(ChatPanel).mount(
+                    Markdown(
+                        "当前模型仍在运行；普通消息可继续排队，"
+                        "使用 `/send-now [request-id]` 调整下一条消息。",
+                        classes="agent-msg",
+                    )
+                )
+                return
             self._handle_slash_command(text)
+            return
+
+        if self._agent_busy:
+            self._enqueue_queued_conversation(msg.content)
             return
 
         chat = self.query_one(ChatPanel)
         chat.add_user_message(msg.content)
         status = self.query_one(StatusBar)
         status.status_text = "思考中..."
-        self._set_input_enabled(False)
+        self._agent_busy = True
         self.query_one(Spinner)._active = True
-        self._run_agent(msg.content)
+        self._agent_worker = self._run_agent(msg.content)
+
+    async def _ensure_conversation_session(self, text: str) -> str:
+        async with self._conversation_session_lock:
+            session = getattr(self.engine, "_session", None)
+            if session is None:
+                title = next(
+                    (line.strip() for line in text.splitlines() if line.strip()),
+                    "新任务",
+                )[:80]
+                session = await self.engine.get_or_create_session(title=title)
+            return str(getattr(session, "id", "") or "")
+
+    def _conversation_queue_authority(
+        self,
+        session_id: str,
+    ) -> DurableConversationQueueAuthority | None:
+        normalized = session_id.strip()
+        harness_service = getattr(self.engine, "harness_service", None)
+        store = getattr(harness_service, "store", None)
+        if not normalized or not isinstance(store, HarnessStore):
+            return None
+        existing = self._queue_authorities.get(normalized)
+        if existing is not None and existing.store is store:
+            return existing
+        authority = DurableConversationQueueAuthority(
+            store=store,
+            workspace_root=self.engine.workspace_root,
+            session_id=normalized,
+            owner_id=self._queue_owner_id,
+        )
+        self._queue_authorities[normalized] = authority
+        return authority
+
+    @work(exclusive=False, exit_on_error=False)
+    async def _enqueue_queued_conversation(self, text: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            session_id = await self._ensure_conversation_session(text)
+            authority = self._conversation_queue_authority(session_id)
+            if authority is None:
+                raise RuntimeError("durable queue unavailable")
+            item = await authority.enqueue(
+                request_id=f"tui-{uuid4().hex}",
+                text=text,
+                client_id=self._queue_owner_id,
+            )
+        except HarnessStoreConflictError as exc:
+            message = str(exc)
+            status.status_text = message
+            chat.mount(Markdown(f"**排队失败**：{message}", classes="agent-msg"))
+            return
+        except Exception:
+            logger.warning("TUI durable conversation enqueue failed", exc_info=True)
+            status.status_text = "排队消息未能安全保存"
+            chat.mount(
+                Markdown(
+                    "**排队失败**：消息没有进入持久队列，请运行 `/doctor` 后重试。",
+                    classes="agent-msg",
+                )
+            )
+            return
+        chat.add_user_message(text)
+        chat.mount(
+            Markdown(
+                f"已排队 · 第 {item.position} 位 · `{item.request_id}`",
+                classes="agent-msg",
+            )
+        )
+        status.status_text = f"已排队 {item.position} 条；可用 /send-now 提升"
+
+    @work(exclusive=False, exit_on_error=False)
+    async def _promote_queued_conversation(self, request_id: str) -> None:
+        chat = self.query_one(ChatPanel)
+        status = self.query_one(StatusBar)
+        try:
+            session_id = await self._ensure_conversation_session("排队消息")
+            authority = self._conversation_queue_authority(session_id)
+            if authority is None:
+                raise RuntimeError("durable queue unavailable")
+            items = await authority.store.list_queued_conversations(
+                workspace_root=authority.workspace_root,
+                session_id=session_id,
+                limit=20,
+            )
+            target = request_id or (items[-1].request_id if items else "")
+            if not target:
+                raise ConversationQueueClaimError("当前没有可提升的排队消息。")
+            promoted = await authority.promote(
+                request_id=target,
+                active_claim=self._active_queue_claim,
+            )
+        except (ConversationQueueClaimError, HarnessStoreConflictError) as exc:
+            status.status_text = str(exc)
+            chat.mount(Markdown(f"**立即发送失败**：{exc}", classes="agent-msg"))
+            return
+        except Exception:
+            logger.warning("TUI queue promotion failed", exc_info=True)
+            status.status_text = "队列提升失败"
+            chat.mount(
+                Markdown(
+                    "**立即发送失败**：无法读取持久队列，请运行 `/doctor`。",
+                    classes="agent-msg",
+                )
+            )
+            return
+        status.status_text = "已提升到下一安全执行位置"
+        chat.mount(
+            Markdown(
+                f"**立即发送**：`{promoted.request_id}` 已提升到下一安全执行位置。",
+                classes="agent-msg",
+            )
+        )
 
     def _handle_slash_command(self, text: str) -> None:
         if self.debug_trace is not None:
@@ -2203,14 +2349,22 @@ class NaumiApp(App):
         status.reasoning_text = "on" if enabled else "off"
         status.status_text = "就绪"
 
-    @work(exclusive=True, exit_on_error=False)
-    async def _run_agent(self, task: str) -> None:
+    @work(exclusive=False, exit_on_error=False)
+    async def _run_agent(
+        self,
+        task: str,
+        queue_authority: DurableConversationQueueAuthority | None = None,
+        queue_claim: ConversationQueueClaim | None = None,
+    ) -> None:
         import time
 
         from naumi_agent.main import _tool_label
 
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
+        terminal_state = "failed"
+        terminal_reason = "run_failed"
+        queue_commit_ok = True
         if self.debug_trace is not None:
             self.debug_trace.event("tui.agent_run_start", {"task": task})
 
@@ -2581,6 +2735,12 @@ class NaumiApp(App):
 
         captured_noise = ""
         try:
+            await self._ensure_conversation_session(task)
+            if queue_authority is not None and queue_claim is not None:
+                self._active_queue_authority = queue_authority
+                self._active_queue_claim = queue_claim
+                self._queue_claim_lost = False
+                self._start_queue_claim_renewal(queue_authority, queue_claim)
             with _capture_tui_terminal_noise() as (stdout_buf, stderr_buf):
                 result = await self.engine.run_streaming(
                     task,
@@ -2601,6 +2761,13 @@ class NaumiApp(App):
             if result.status == "error" and result.error:
                 chat.start_response()
                 chat.add_response_token(f"**错误**: {result.error}")
+
+            if result.status in {"completed", "success"}:
+                terminal_state = "completed"
+                terminal_reason = "run_completed"
+            else:
+                terminal_state = "failed"
+                terminal_reason = f"run_{result.status or 'failed'}"
 
             token_speed = _get_token_speed()
             ttft = _get_ttft()
@@ -2643,6 +2810,10 @@ class NaumiApp(App):
             ctx_pct = ctx["percentage"]
             status_parts.append(f"上下文: {ctx_pct}%")
             status.status_text = "✅ " + " | ".join(status_parts)
+        except asyncio.CancelledError:
+            terminal_state = "cancelled"
+            terminal_reason = "run_cancelled"
+            raise
         except Exception as e:
             if "stdout_buf" in locals() and "stderr_buf" in locals():
                 captured_noise = _captured_terminal_text(stdout_buf, stderr_buf)
@@ -2654,6 +2825,25 @@ class NaumiApp(App):
             chat.finalize(0, 0.0, engine=self.engine)
             status.status_text = f"❌ 错误: {e}"
         finally:
+            await self._stop_queue_claim_renewal()
+            if queue_authority is not None and queue_claim is not None:
+                if self._queue_claim_lost:
+                    queue_commit_ok = False
+                else:
+                    try:
+                        await queue_authority.finish(
+                            queue_claim,
+                            state=terminal_state,
+                            terminal_reason=terminal_reason,
+                        )
+                    except Exception:
+                        queue_commit_ok = False
+                        logger.warning("TUI queue terminal commit failed", exc_info=True)
+                        status.status_text = (
+                            "排队消息终态未通过 claim 校验；请重开会话核对。"
+                        )
+                self._active_queue_authority = None
+                self._active_queue_claim = None
             _mount_captured_terminal_noise(
                 chat,
                 captured_noise,
@@ -2661,6 +2851,10 @@ class NaumiApp(App):
             )
             self.query_one(Spinner)._active = False
             self._set_input_enabled(True)
+            self._agent_busy = False
+            self._agent_worker = None
+            if queue_commit_ok:
+                await self._start_next_queued_conversation()
 
     def _set_input_enabled(self, enabled: bool) -> None:
         input_bar = self.query_one(InputBar)
@@ -2670,6 +2864,81 @@ class NaumiApp(App):
         send_btn.disabled = not enabled
         if enabled:
             msg_input.focus()
+
+    def _start_queue_claim_renewal(
+        self,
+        authority: DurableConversationQueueAuthority,
+        claim: ConversationQueueClaim,
+    ) -> None:
+        current = self._queue_claim_renew_task
+        if current is not None and not current.done():
+            current.cancel()
+
+        async def keepalive() -> None:
+            active = claim
+            try:
+                while self._agent_busy:
+                    await asyncio.sleep(max(1.0, authority.lease_seconds / 3))
+                    active = await authority.renew(active)
+                    self._active_queue_claim = active
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._queue_claim_lost = True
+                logger.warning("TUI queue claim renewal failed", exc_info=True)
+                self.query_one(StatusBar).status_text = (
+                    "排队消息 claim 续租失败；当前运行将停止以避免重复提交。"
+                )
+                worker = self._agent_worker
+                if worker is not None:
+                    worker.cancel()
+
+        self._queue_claim_renew_task = asyncio.create_task(
+            keepalive(),
+            name=f"naumi-tui-queue-claim-{claim.item.request_id}",
+        )
+
+    async def _stop_queue_claim_renewal(self) -> None:
+        task = self._queue_claim_renew_task
+        self._queue_claim_renew_task = None
+        if task is None or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _start_next_queued_conversation(self) -> bool:
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        authority = self._conversation_queue_authority(session_id)
+        if authority is None:
+            return False
+        try:
+            recovery = await authority.recover(limit=20)
+            if recovery.blocked:
+                self.query_one(StatusBar).status_text = (
+                    "排队消息存在待核对的历史 claim；请使用 /queue 处理。"
+                )
+                return False
+            if not recovery.ready:
+                return False
+            item = recovery.ready[0]
+            claim = await authority.claim(item)
+        except ConversationQueueClaimError as exc:
+            self.query_one(StatusBar).status_text = str(exc)
+            return False
+        except Exception:
+            logger.warning("TUI queue dispatch failed", exc_info=True)
+            self.query_one(StatusBar).status_text = (
+                "持久队列派发失败；请运行 /doctor 后恢复会话。"
+            )
+            return False
+        self._agent_busy = True
+        self.query_one(Spinner)._active = True
+        self.query_one(StatusBar).status_text = (
+            f"开始执行排队消息 · {item.request_id}"
+        )
+        self._agent_worker = self._run_agent(item.text, authority, claim)
+        return True
 
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)
