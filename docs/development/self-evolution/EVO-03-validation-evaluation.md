@@ -63,5 +63,6 @@ Eval 和真实 Harness 检查产生。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
-Interventional Harness runner、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持
-partial。
+UI-12.3b3 已交付最长 3600 秒、绑定 Harness Run Lease fence 的可撤销运行委托 authority，但尚未接入
+短期 delegated receipt、Shell admission 或 cohort executor。Interventional Harness runner、adversarial
+suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。
