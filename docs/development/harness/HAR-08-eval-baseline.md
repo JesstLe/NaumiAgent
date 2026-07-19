@@ -104,6 +104,8 @@
 - HAR-08.4a 单项 Sandbox Profile Check Runner：已实现可信 Git snapshot、敏感路径阻断、三阶段 Profile
   复验、ARC-04.2/4.3 admission/执行链、源树防污染与独立 artifact。详见
   `HAR-08-4a-sandbox-profile-check-runner.md`。
-- HAR-08.4 仍为 partial：生产 `/harness check` 与 Agent Tool 尚未获得外层权限回执到内层 Shell Job 的真实
-  委托合同；Suite/Batch/Baseline、并行进度和跨平台证据也未接通。Live 与其余 surface 仍为 planned，当前
-  不得把 HAR-08 整体标记为 implemented。
+- HAR-08.4b 生产 Sandbox Check Surface：已实现任务局部父回执、精确参数复核、Composer admission/finally
+  cleanup、`/harness check` 与 Agent Tool 共路由，以及 ToolJob/lifecycle/artifact 可见证据。详见
+  `HAR-08-4b-production-sandbox-check-surface.md`。
+- HAR-08.4 仍为 partial：Suite/Batch/Baseline 尚未切换到隔离 Worker，也没有并行进度与 Linux/Windows CI
+  证据。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。

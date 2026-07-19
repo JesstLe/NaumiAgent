@@ -51,9 +51,9 @@
 
 - HAR-08.4 Sandbox Eval 只能消费 ARC-04 提供的显式隔离能力合同：临时 workspace/worktree、
   默认断网、环境变量 allowlist、资源上限、进程树取消、artifact digest 与可审计退出状态。
-- 现有 `ValidationExecutor` 仍不能证明 Sandbox Eval 的 `no_host_side_effect`。HAR-08.4a 已改为消费
-  ARC-04.3a 隔离合同跑一个真实 Profile check，但生产 `/harness check` 在权限回执委托接通前仍不得静默切换
-  或以硬编码 bypass 冒充 authority。
+- 现有 `ValidationExecutor` 仍不能证明 Sandbox Eval 的 `no_host_side_effect`。HAR-08.4a/4b 已使生产
+  `/harness check` 和 Agent Tool 消费 ARC-04.3a/3b 的真实隔离与委托链；Suite/Batch 仍不得直接复用旧
+  subprocess 路径冒充 Sandbox。
 
 ## 已完成的最小前置
 

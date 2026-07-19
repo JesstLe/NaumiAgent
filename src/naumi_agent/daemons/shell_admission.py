@@ -32,6 +32,7 @@ from naumi_agent.daemons.tool_jobs import (
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionRequirements,
     WorkerCapability,
+    WorkerContract,
     WorkerIsolationContract,
     WorkerKind,
     WorkerResourceEnvelope,
@@ -269,24 +270,22 @@ class ShellWorkerAdmissionComposer:
                 transport=self._transport,
                 now=self._now,
             )
+            release_lock = asyncio.Lock()
+            released = False
 
             async def release() -> None:
-                released_at = self._now()
-                await self._harness_store.release_run_lease(
-                    workspace_root=spec.workspace_root,
-                    run_kind=HarnessRunKind.TOOL,
-                    run_id=parent.run_id,
-                    owner_id=contract.instance_id,
-                    epoch=lease.epoch,
-                    now=released_at,
-                )
-                await self._worker_registry.revoke(
-                    worker_id=contract.worker_id,
-                    instance_id=contract.instance_id,
-                    epoch=contract.epoch,
-                    reason_code="ephemeral_job_finished",
-                    revoked_at=released_at,
-                )
+                nonlocal released
+                async with release_lock:
+                    if released:
+                        return
+                    await self._release_authorities(
+                        spec=spec,
+                        run_id=parent.run_id,
+                        contract=contract,
+                        lease_epoch=lease.epoch,
+                        reason_code="ephemeral_job_finished",
+                    )
+                    released = True
 
             return ComposedSandboxShellJob(
                 admitted=AdmittedSandboxShellJob(
@@ -303,24 +302,56 @@ class ShellWorkerAdmissionComposer:
                 worker_epoch=contract.epoch,
                 _release=release,
             )
-        except BaseException:
-            cleanup_at = self._now()
-            await self._harness_store.release_run_lease(
+        except BaseException as exc:
+            try:
+                await self._release_authorities(
+                    spec=spec,
+                    run_id=parent.run_id,
+                    contract=contract,
+                    lease_epoch=lease.epoch,
+                    reason_code="admission_failed",
+                )
+            except BaseException as cleanup_exc:
+                exc.add_note(f"Shell admission 清理失败：{cleanup_exc}")
+            raise
+
+    async def _release_authorities(
+        self,
+        *,
+        spec: ShellCommandSpec,
+        run_id: str,
+        contract: WorkerContract,
+        lease_epoch: int,
+        reason_code: str,
+    ) -> None:
+        released_at = self._now()
+        errors: list[BaseException] = []
+        try:
+            released_lease = await self._harness_store.release_run_lease(
                 workspace_root=spec.workspace_root,
                 run_kind=HarnessRunKind.TOOL,
-                run_id=parent.run_id,
+                run_id=run_id,
                 owner_id=contract.instance_id,
-                epoch=lease.epoch,
-                now=cleanup_at,
+                epoch=lease_epoch,
+                now=released_at,
             )
+            if released_lease is None:
+                errors.append(RuntimeError("Tool run lease 已失效或不再属于当前 Worker。"))
+        except BaseException as exc:
+            errors.append(exc)
+        try:
             await self._worker_registry.revoke(
                 worker_id=contract.worker_id,
                 instance_id=contract.instance_id,
                 epoch=contract.epoch,
-                reason_code="admission_failed",
-                revoked_at=cleanup_at,
+                reason_code=reason_code,
+                revoked_at=released_at,
             )
-            raise
+        except BaseException as exc:
+            errors.append(exc)
+        if errors:
+            detail = "; ".join(f"{type(item).__name__}: {item}" for item in errors)
+            raise RuntimeError(f"Shell admission 权限清理不完整：{detail}")
 
 
 __all__ = ["ComposedSandboxShellJob", "ShellWorkerAdmissionComposer"]

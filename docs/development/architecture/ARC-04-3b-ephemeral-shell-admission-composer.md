@@ -14,8 +14,8 @@ Worker、Lease、Grant、ToolJob 身份。
 - 通过 UI-12.3b2 签发 `bash_run` 子回执，再用 snapshot workspace authority 签发 delegated ExecutionGrant；
 - ToolJob admission 消费同一 Registry、Lease、Grant、health 与 isolation requirements；Shell request、dispatch id
   和 Coordinator 全部绑定该不可变 Job；
-- compose 中途失败会释放 Lease 并撤销 Worker；调用方完成执行后必须调用 `release()`，再次 fencing 两项
-  authority。释放不会删除 artifact 或 ToolJob receipt。
+- compose 中途失败会尽力同时释放 Lease 与撤销 Worker；调用方完成执行后必须调用幂等 `release()`，再次
+  fencing 两项 authority。单项清理失败不会跳过另一项，失败会显式上抛；释放不会删除 artifact 或 ToolJob receipt。
 
 ## 验收证据
 
@@ -31,5 +31,6 @@ Worker、Lease、Grant、ToolJob 身份。
 - Composer 只负责 admission/cleanup，不执行 payload，也不是长寿命 Supervisor；
 - 当前同一 Engine 内用 registration lock 串行分配 epoch；跨 Runtime 竞争由 Registry fail closed，未来
   Supervisor 需要数据库原子 epoch allocator；
-- 下一切片让 `HarnessSandboxCheckRunner` 接收 parent receipt context，调用 Composer 并在 finally release，随后
-  Slash 与 Agent Tool 才能共享生产路径。
+- HAR-08.4b 已让 `HarnessSandboxCheckRunner` 接收任务局部 parent receipt context，在 `finally` 调用 Composer
+  release，并使 Slash 与 Agent Tool 共享生产路径；下一步不再扩张 Shell 前置，应转向 Sandbox Suite/Batch
+  编排或 ARC-04.6 Supervisor 的最小消费者需求。

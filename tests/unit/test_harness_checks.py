@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -172,6 +173,41 @@ async def test_untrusted_profile_never_starts_check(tmp_path: Path) -> None:
     assert result.status is HarnessCheckStatus.BLOCKED_BY_POLICY
     assert "未受信任" in result.message
     assert not marker.exists()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_check_without_exact_parent_receipt_fails_closed(
+    tmp_path: Path,
+) -> None:
+    workspace, _ = _workspace(tmp_path)
+    runner = AsyncMock()
+    composer = AsyncMock()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+        sandbox_check_runner=runner,
+        shell_admission_composer=composer,
+        authorization_receipt_provider=lambda: None,
+    )
+    await service.trust(source="user_slash")
+
+    result = await service.run_check(check_id="unit", run_id="run-no-receipt")
+
+    assert result.status is HarnessCheckStatus.BLOCKED_BY_POLICY
+    assert "精确匹配的持久权限回执" in result.message
+    runner.run.assert_not_awaited()
+    composer.compose.assert_not_awaited()
+
+
+def test_sandbox_check_dependencies_are_all_or_none(tmp_path: Path) -> None:
+    workspace, _ = _workspace(tmp_path)
+
+    with pytest.raises(ValueError, match="Sandbox Harness 依赖必须同时提供"):
+        HarnessService(
+            workspace_root=workspace,
+            trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+            sandbox_check_runner=AsyncMock(),
+        )
 
 
 @pytest.mark.asyncio

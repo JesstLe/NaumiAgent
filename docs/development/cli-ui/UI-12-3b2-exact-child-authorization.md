@@ -27,7 +27,8 @@
 
 ## 边界与下一步
 
-- 本切片不注册 Worker、不创建 Tool run lease，也不发送 Shell payload；
-- 下一切片由 Runtime admission composer 消费当前授权链，按单次检查注册 Worker incarnation、取得 lease、
-  签发 grant、admit ToolJob，并把结果交给既有 `HarnessSandboxCheckRunner`；
+- 本切片自身不注册 Worker、不创建 Tool run lease，也不发送 Shell payload；ARC-04.3b/HAR-08.4b 已作为消费者
+  接通该链路；
+- Engine 只在实际 Tool 调用的 `ContextVar` 任务作用域绑定精确父回执，Tool 返回或抛错后自动复位；Service
+  重新核对 tool/run/arguments digest 与 `bash_run` 委托范围，不接受全局可变“当前权限”；
 - session grant 后续调用必须先具有可验证的当前 grant 状态，不能直接放宽本合同。

@@ -3131,7 +3131,6 @@ async def _run_harness(engine: Any, arg: str) -> None:
     from naumi_agent.harness.explain import render_harness_explanation
     from naumi_agent.harness.service import (
         HarnessStatusCode,
-        render_harness_check,
         render_harness_doctor,
         render_harness_knowledge,
         render_harness_replay,
@@ -3388,18 +3387,21 @@ async def _run_harness(engine: Any, arg: str) -> None:
         console.print(Markdown(render_harness_knowledge(result)))
         return
     if subcommand == "check" and len(parts) == 2:
-        session = getattr(engine, "_session", None)
-        session_id = getattr(session, "id", "")
-        run_id = f"manual:{session_id or uuid.uuid4().hex}"
-        try:
-            result = await service.run_check(
-                check_id=parts[1],
-                run_id=run_id,
+        from naumi_agent.tools.base import ToolCall
+
+        session = await engine.get_or_create_session()
+        run_id = f"manual:{session.id}"
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-{uuid.uuid4().hex}",
+                name="harness_run_check",
+                arguments=json.dumps(
+                    {"check_id": parts[1], "run_id": run_id},
+                    ensure_ascii=False,
+                ),
             )
-        except ValueError as exc:
-            console.print(f"[yellow]Harness 检查参数无效：{exc}[/yellow]")
-            return
-        console.print(Markdown(render_harness_check(result)))
+        )
+        console.print(Markdown(result.content))
         return
     if subcommand == "trust" and len(parts) == 1:
         report = await service.doctor()
