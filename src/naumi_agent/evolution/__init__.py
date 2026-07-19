@@ -7,6 +7,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from naumi_agent.evolution.candidate import EvolutionCandidateDraft
+    from naumi_agent.evolution.candidate_snapshots import (
+        EvolutionCandidateSnapshotError,
+        EvolutionCandidateWorktreeSnapshot,
+        capture_candidate_worktree_snapshot,
+        revalidate_candidate_worktree_snapshot,
+    )
     from naumi_agent.evolution.evidence import EvolutionEvidence
     from naumi_agent.evolution.experiment_leases import (
         EvolutionExperimentLeaseManager,
@@ -194,6 +200,10 @@ __all__ = [
     "FailureAttributionAction",
     "FailureAttributionCategory",
     "EvolutionCandidateDraft",
+    "EvolutionCandidateSnapshotError",
+    "EvolutionCandidateWorktreeSnapshot",
+    "capture_candidate_worktree_snapshot",
+    "revalidate_candidate_worktree_snapshot",
     "EvolutionCandidateEvent",
     "EvolutionCandidateStore",
     "EvolutionProposalPreview",
@@ -327,6 +337,12 @@ def __getattr__(name: str) -> object:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
+    candidate_snapshot_exports = {
+        "EvolutionCandidateSnapshotError",
+        "EvolutionCandidateWorktreeSnapshot",
+        "capture_candidate_worktree_snapshot",
+        "revalidate_candidate_worktree_snapshot",
+    }
     evidence_exports = {
         "EvolutionEvidence",
         "adapt_harness_failure_evidence",
@@ -507,6 +523,8 @@ def __getattr__(name: str) -> object:
     }
     if name in candidate_exports:
         module_name = "candidate"
+    elif name in candidate_snapshot_exports:
+        module_name = "candidate_snapshots"
     elif name in evidence_exports:
         module_name = "evidence"
     elif name in failure_attribution_exports:

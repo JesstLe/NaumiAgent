@@ -39,6 +39,9 @@ GREEN 只接受一个最小、精确的脏 worktree：
 可信字节被复制到系统临时目录后才交给 AST scanner。扫描不读取 candidate worktree 的后续变化，也不访问
 网络、模型或项目进程。
 
+EVO-03.3c1 已把上述全部规则抽取为 `capture_candidate_worktree_snapshot()`，本执行器删除私有实现并在扫描
+完成后调用公共复验函数；interventional GREEN 必须消费同一 Snapshot，不能另写 Git status parser。
+
 ## RED 对照与 H5a 语义
 
 - Executor 从 H5a 重新加载完整 RED batch，并逐项核对 RED receipt result digest；
