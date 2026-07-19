@@ -39,5 +39,6 @@ Bridge 只显示一次中文降级提醒，当前对话仍可继续。
 ## 当前边界
 
 本切片不提供通用 runtime worker 列表、历史 jitter/丢包统计、崩溃实例 retention、Supervisor 动作或配置项。
-每次 Bridge 启动保留一个 latest subject 行，后续必须由 HAR-06 retention/ARC-08 策略有界清理 terminal/offline
-runtime rows；在该策略交付前不能宣称 24 小时/长期进程 churn 的存储 SLO 已完成。
+每次 Bridge 启动保留一个 latest subject 行。HAR-10.2d 已提供只删除 terminal/offline runtime 的有界 Store
+authority，但尚未交付 worker catalog、默认保留期和周期调度；在这些策略接入前不能宣称 24 小时/长期进程
+churn 的存储 SLO 已完成。

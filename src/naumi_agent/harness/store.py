@@ -36,7 +36,10 @@ from naumi_agent.harness.eval_models import (
 from naumi_agent.harness.eval_receipt import HarnessEvalComparisonReceipt
 from naumi_agent.harness.heartbeat import (
     HarnessHeartbeat,
+    HarnessHeartbeatHealth,
     HarnessHeartbeatPhase,
+    RuntimeHeartbeatPruneReceipt,
+    assess_heartbeat,
 )
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
@@ -2510,6 +2513,98 @@ class HarnessStore:
                 return _heartbeat_from_row(row) if row is not None else None
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法读取 Harness 心跳。") from exc
+
+    async def prune_runtime_heartbeats(
+        self,
+        *,
+        workspace_root: str | Path,
+        observed_before: str,
+        assessed_at: str,
+        limit: int = 100,
+        protected_subject_ids: Sequence[str] = (),
+    ) -> RuntimeHeartbeatPruneReceipt:
+        """Delete only bounded, mechanically terminal/offline runtime records."""
+        workspace = _canonical_workspace(workspace_root)
+        cutoff = _normalize_utc_timestamp(
+            observed_before,
+            field="observed_before",
+        )
+        now = _normalize_utc_timestamp(assessed_at, field="assessed_at")
+        if datetime.fromisoformat(cutoff) >= datetime.fromisoformat(now):
+            raise ValueError("runtime heartbeat 清理 cutoff 必须早于 assessed_at。")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("runtime heartbeat 清理 limit 必须在 1 到 1000 之间。")
+        if isinstance(protected_subject_ids, (str, bytes, bytearray)):
+            raise ValueError("受保护的 runtime heartbeat subject 必须是 ID 序列。")
+        if len(protected_subject_ids) > 500:
+            raise ValueError("受保护的 runtime heartbeat subject 不能超过 500 个。")
+        protected = tuple(sorted({
+            _normalize_run_lease_id(value, field="protected_subject_id")
+            for value in protected_subject_ids
+        }))
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                parameters: list[object] = [
+                    workspace,
+                    HarnessRunKind.RUNTIME.value,
+                    cutoff,
+                ]
+                protected_clause = ""
+                if protected:
+                    protected_clause = (
+                        f" AND subject_id NOT IN ({','.join('?' for _ in protected)})"
+                    )
+                    parameters.extend(protected)
+                parameters.append(limit)
+                cursor = await db.execute(
+                    f"""
+                    SELECT * FROM harness_heartbeats
+                    WHERE workspace_root = ? AND subject_kind = ?
+                      AND observed_at < ?{protected_clause}
+                    ORDER BY observed_at ASC, subject_id ASC
+                    LIMIT ?
+                    """,
+                    tuple(parameters),
+                )
+                rows = await cursor.fetchall()
+                eligible: list[str] = []
+                allowed_health = {
+                    HarnessHeartbeatHealth.OFFLINE,
+                    HarnessHeartbeatHealth.STOPPED,
+                    HarnessHeartbeatHealth.FAILED,
+                }
+                for row in rows:
+                    heartbeat = _heartbeat_from_row(row)
+                    if assess_heartbeat(heartbeat, now=now).health in allowed_health:
+                        eligible.append(heartbeat.subject_id)
+                if eligible:
+                    await db.executemany(
+                        """
+                        DELETE FROM harness_heartbeats
+                        WHERE workspace_root = ? AND subject_kind = ? AND subject_id = ?
+                        """,
+                        [
+                            (workspace, HarnessRunKind.RUNTIME.value, subject_id)
+                            for subject_id in eligible
+                        ],
+                    )
+                await db.commit()
+                return RuntimeHeartbeatPruneReceipt(
+                    workspace_root=workspace,
+                    observed_before=cutoff,
+                    assessed_at=now,
+                    scan_limit=limit,
+                    scanned_count=len(rows),
+                    deleted_subject_ids=tuple(eligible),
+                    protected_subject_ids=protected,
+                )
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法清理 runtime Harness 心跳。") from exc
 
     async def enqueue_conversation(
         self,
