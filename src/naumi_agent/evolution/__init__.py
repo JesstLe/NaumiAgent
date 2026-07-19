@@ -46,6 +46,11 @@ if TYPE_CHECKING:
         EvolutionInterventionalGreenCohortRequestBuilder,
         EvolutionInterventionalGreenRequestError,
     )
+    from naumi_agent.evolution.interventional_green_sample import (
+        EvolutionInterventionalGreenSampleError,
+        EvolutionInterventionalGreenSampleExecutor,
+        EvolutionInterventionalGreenSampleReceipt,
+    )
     from naumi_agent.evolution.interventional_red_cohort import (
         EvolutionInterventionalRedCohortError,
         EvolutionInterventionalRedCohortExecutor,
@@ -324,6 +329,9 @@ __all__ = [
     "EvolutionInterventionalGreenCohortRequest",
     "EvolutionInterventionalGreenCohortRequestBuilder",
     "EvolutionInterventionalGreenRequestError",
+    "EvolutionInterventionalGreenSampleError",
+    "EvolutionInterventionalGreenSampleExecutor",
+    "EvolutionInterventionalGreenSampleReceipt",
     "EvolutionInterventionalRunAuthority",
     "EvolutionInterventionalSampleKernel",
     "EvolutionInterventionalSampleKernelError",
@@ -522,6 +530,11 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalGreenCohortRequestBuilder",
         "EvolutionInterventionalGreenRequestError",
     }
+    interventional_green_sample_exports = {
+        "EvolutionInterventionalGreenSampleError",
+        "EvolutionInterventionalGreenSampleExecutor",
+        "EvolutionInterventionalGreenSampleReceipt",
+    }
     interventional_sample_kernel_exports = {
         "EvolutionInterventionalRunAuthority",
         "EvolutionInterventionalSampleKernel",
@@ -590,6 +603,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_red_cohort"
     elif name in interventional_green_request_exports:
         module_name = "interventional_green_request"
+    elif name in interventional_green_sample_exports:
+        module_name = "interventional_green_sample"
     elif name in interventional_sample_kernel_exports:
         module_name = "interventional_sample_kernel"
     elif name in interventional_red_sample_exports:

@@ -57,6 +57,9 @@ from naumi_agent.evolution.failure_attribution import (
 from naumi_agent.evolution.interventional_green_request import (
     EvolutionInterventionalGreenCohortRequestBuilder,
 )
+from naumi_agent.evolution.interventional_green_sample import (
+    EvolutionInterventionalGreenSampleExecutor,
+)
 from naumi_agent.evolution.interventional_red_cohort import (
     EvolutionInterventionalRedCohortExecutor,
 )
@@ -899,6 +902,15 @@ class AgentEngine:
         )
         self.evolution_interventional_green_cohort_request_builder = (
             EvolutionInterventionalGreenCohortRequestBuilder()
+        )
+        self.evolution_interventional_green_sample_executor = (
+            EvolutionInterventionalGreenSampleExecutor(
+                workspace_root=paths.workspace_root,
+                store=self._harness_store,
+                lease_store=self.evolution_experiment_lease_store,
+                worktree_storage_dir=self._worktree_storage_dir,
+                sample_kernel=self.evolution_interventional_red_sample_executor.sample_kernel,
+            )
         )
         self.evolution_self_review_red_baseline_executor = (
             EvolutionSelfReviewRedBaselineExecutor(

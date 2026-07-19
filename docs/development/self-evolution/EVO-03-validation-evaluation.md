@@ -77,9 +77,13 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.3c1 Shared Candidate Snapshot：已实现。静态 GREEN 与后续 interventional GREEN 共用唯一的
   Lease/Git/status/file digest/fingerprint 捕获边界，并支持执行后漂移复验。详见
   `EVO-03-3c1-shared-candidate-snapshot.md`。
+- EVO-03.3c2b2 Interventional GREEN Single Sample：已实现。在重验完整 RED H5a cohort、active Lease、
+  Profile trust、同平台/同 configuration 与候选 Snapshot 后，用精确 baseline + typed candidate overlays
+  通过共用 ARC-04 kernel 执行同 checks 和 metrics；支持幂等防漂移回执。详见
+  `EVO-03-3c2b2-interventional-green-sample.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
-EVO-03.3b 已冻结 candidate Request。candidate sample/cohort 执行、adversarial suite 与最终 Evaluation
-Receipt 仍未实现，因此 EVO-03 整体保持 partial。
+EVO-03.3b 已冻结 candidate Request，EVO-03.3c2b2 已完成 candidate 单样本执行。连续 candidate cohort、
+interventional comparator、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持 partial。

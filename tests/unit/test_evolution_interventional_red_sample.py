@@ -36,6 +36,10 @@ from naumi_agent.evolution.interventional_green_request import (
     EvolutionInterventionalGreenCohortRequestBuilder,
     EvolutionInterventionalGreenRequestError,
 )
+from naumi_agent.evolution.interventional_green_sample import (
+    EvolutionInterventionalGreenSampleError,
+    EvolutionInterventionalGreenSampleExecutor,
+)
 from naumi_agent.evolution.interventional_red_cohort import (
     EvolutionInterventionalRedCohortError,
     EvolutionInterventionalRedCohortExecutor,
@@ -119,6 +123,14 @@ class _AdvancingSampleExecutor:
         if self.calls == 1:
             self.clock.value += timedelta(seconds=301)
         return result
+
+
+class _LeaseStore:
+    def __init__(self, lease: ExperimentWorktreeLease) -> None:
+        self.lease = lease
+
+    async def get(self, contract_id: str) -> ExperimentWorktreeLease | None:
+        return self.lease if contract_id == self.lease.contract_id else None
 
 
 async def _authority(tmp_path: Path):
@@ -431,7 +443,7 @@ async def test_interventional_red_executes_exact_revision_and_releases_authority
 
 
 @pytest.mark.asyncio
-async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
+async def test_interventional_cohorts_reuse_authority_and_execute_candidate_overlay(
     tmp_path: Path,
 ) -> None:
     _require_real_backend()
@@ -584,6 +596,28 @@ async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
         ("revoked", "cohort_finished"),
         ("revoked", "cohort_finished"),
     ]
+    worktree_storage = tmp_path / "worktrees"
+    worktree_storage.mkdir()
+    worktree_name = f"experiment-{plan.contract_id.removeprefix('evx_')[:16]}"
+    candidate_root = worktree_storage / worktree_name
+    candidate_branch = "experiment/candidate"
+    _git(
+        root,
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        candidate_branch,
+        str(candidate_root),
+        plan.baseline_commit,
+    )
+    candidate_source = (
+        "try:\n"
+        "    raise RuntimeError('candidate')\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
+    (candidate_root / "sample.py").write_text(candidate_source)
     lease = ExperimentWorktreeLease(
         lease_id=plan.lease_id,
         contract_id=plan.contract_id,
@@ -593,9 +627,9 @@ async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
         task_id="task-cohort",
         owner="owner-cohort",
         state=ExperimentLeaseState.ACTIVE,
-        worktree_name=f"experiment-{plan.contract_id.removeprefix('evx_')[:16]}",
-        worktree_path=str(root),
-        branch="experiment/candidate",
+        worktree_name=worktree_name,
+        worktree_path=str(candidate_root),
+        branch=candidate_branch,
         baseline_commit=plan.baseline_commit,
         expires_at="2026-07-19T01:00:00+00:00",
         created_at="2026-07-19T00:00:00+00:00",
@@ -656,6 +690,112 @@ async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
             lease=lease,
         )
     assert captured.value.code == "interventional_green_authority_invalid"
+
+    green_parent = await permissions.issue(
+        request_id="green-parent",
+        session_id="session-green",
+        run_id="run-green",
+        call_id="green-parent",
+        agent_name="main",
+        tool_name="evolution_run_candidate",
+        tool_family="evolution",
+        arguments={"request_id": green.request_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=clock(),
+    )
+    green_executor = EvolutionInterventionalGreenSampleExecutor(
+        workspace_root=root,
+        store=store,
+        lease_store=_LeaseStore(lease),  # type: ignore[arg-type]
+        worktree_storage_dir=worktree_storage,
+        sample_kernel=sample.sample_kernel,
+        clock=lambda: clock.value,
+    )
+    with pytest.raises(EvolutionInterventionalGreenSampleError) as captured:
+        await green_executor.execute(
+            parent_receipt_id="must-not-acquire-authority",
+            sample_index=0,
+            green_request=green.model_copy(update={"candidate_revision": 2}),
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=lease,
+        )
+    assert captured.value.code == "green_sample_authority_invalid"
+    green_receipt = await green_executor.execute(
+        parent_receipt_id=green_parent.receipt_id,
+        sample_index=0,
+        green_request=green,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+    repeated_receipt = await green_executor.execute(
+        parent_receipt_id="not-needed-for-existing-green",
+        sample_index=0,
+        green_request=green,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+
+    assert green_receipt == repeated_receipt
+    assert green_receipt.check_statuses == ("failed",)
+    assert green_receipt.candidate_snapshot_revalidated
+    green_stored = await store.get_eval_result(
+        root,
+        green.batch_id,
+        green.suite_id,
+        0,
+    )
+    assert green_stored is not None
+    assert green_stored.result.baseline_identity is not None
+    assert green_stored.result.baseline_identity.source.dirty
+    assert green_stored.result.cases[0].status.value == "implementation_failure"
+    assert green_stored.result.cases[1].metric_observations[0].value == 1
+    assert (root / "sample.py").read_text() == "baseline\n"
+    green_runtime_lease = await store.get_run_lease(
+        workspace_root=root,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=green_parent.run_id,
+    )
+    assert (
+        green_runtime_lease is not None
+        and green_runtime_lease.state is HarnessRunLeaseState.RELEASED
+    )
+    with sqlite3.connect(runtime / "run-grants.db") as db:
+        final_grant = db.execute(
+            "SELECT state, revoke_reason FROM run_delegation_grants ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+    assert final_grant == ("revoked", "sample_finished")
+
+    (candidate_root / "sample.py").write_text(candidate_source + "# drift\n")
+    with pytest.raises(EvolutionInterventionalGreenSampleError) as captured:
+        await green_executor.execute(
+            parent_receipt_id="not-needed-for-stale-green",
+            sample_index=0,
+            green_request=green,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=lease,
+        )
+    assert captured.value.code == "candidate_file_digest_mismatch"
 
 
 @pytest.mark.asyncio
