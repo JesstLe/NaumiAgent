@@ -61,6 +61,15 @@
 - v1/v2 receipt 保持摘要兼容，Store 惰性升级到 schema v3；
 - 详细合同见 `UI-12-3b2-exact-child-authorization.md`。
 
+### UI-12.3b3 已实现：有界 Run Delegation Grant
+
+- 长周期 Harness/Evolution 运行可在父回执仍新鲜时签发独立 run grant，绑定父 digest、session/run、
+  workspace、下游 Tool scope 与 Harness Run Lease owner/epoch；
+- grant 最长 3600 秒且不晚于签发时 lease expiry；撤销、过期、lease release/takeover、父链或持久化篡改
+  均失败关闭；
+- 现有短期子回执与 ExecutionGrant 上限没有放宽；下一切片才把 run grant 接入精确子回执和 Shell
+  admission，详见 `UI-12-3b3-bounded-run-delegation.md`。
+
 ### 尚未完成
 
 - UI-12.2：可操作的 pending queue 与等待顺序。

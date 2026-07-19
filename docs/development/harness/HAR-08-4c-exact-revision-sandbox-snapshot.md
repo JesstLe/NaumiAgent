@@ -45,6 +45,8 @@ Shell Worker 继续只消费完整 manifest digest，因此旧 admission/ToolJob
 - 该 workspace 由 Git object bytes 物化，不携带 `.git` metadata；ruff/pytest/compile 等源码 Check 可运行，
   但需要 `git status/log/diff` 的 Check 仍须未来的受控 Git metadata broker，不能声称完整 ephemeral worktree；
 - 还没有把 `EvolutionBaselineCohortRequest` 的 check 顺序、seed、样本预算和 H5a Result 组合成 executor；
-- 下一最小切片应在 EVO-03 新建 interventional RED sample executor：重新验证 Contract/Plan/Binding/Request，
-  对每个 sample 顺序调用本 Runner，并生成既有 HAR-08 typed evidence；不得另造 subprocess 或结果 Store；
+- UI-12.3b3 已先交付有界 Run Delegation grant，避免最长 3600 秒 cohort 通过全局放宽短期权限回执续命；
+- 下一最小切片先把该 grant 接入精确 delegated receipt/ExecutionGrant/Shell admission，再在 EVO-03 新建
+  interventional RED sample executor：重新验证 Contract/Plan/Binding/Request，对每个 sample 顺序调用本
+  Runner，并生成既有 HAR-08 typed evidence；不得另造 subprocess 或结果 Store；
 - Candidate GREEN 还需要从受管 Lease revision/patch 生成等价隔离 snapshot，之后才能形成成对 cohort。
