@@ -65,3 +65,9 @@ TUI mount 后启动非阻塞 recovery worker：
 
 UI-18.4 仍保持 partial。HAR-10.3a 与 UI-18.4c 已交付；下一步应在 UI-18.4d takeover/details、
 `HAR-10.3b durable queue authority` 与其他路线之间按用户价值和依赖选择一个最小切片。
+
+## UI-17.2b parity 补充
+
+Bridge 与 TUI 现已共用 `public_interaction_request_payload()`，并在有无 durable authority 时都使用同一个答案规范化器。
+共享 golden fixture 锁定公开 request、option response 和 custom response；这补齐表面语义一致性，但不改变本模块的
+lease、takeover、expire 与 Pursuit checkpoint 边界。详细证据见 `UI-17-2b-permission-interaction-golden.md`。

@@ -145,6 +145,48 @@ def normalize_interaction_response(
     raise ValueError("交互响应 kind 只能是 option 或 custom")
 
 
+def public_interaction_request_payload(
+    request: UserInteractionRequest,
+    *,
+    request_id: str,
+    session_id: str = "",
+    run_id: str = "",
+    agent_name: str = "main",
+    expires_at: str = "",
+) -> dict[str, Any]:
+    """Build the exact pending-question shape shown by every frontend."""
+    if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", request_id):
+        raise ValueError("交互 request_id 格式无效")
+    return {
+        "request_id": request_id,
+        "session_id": _bounded_text(
+            session_id,
+            field="会话 ID",
+            maximum=128,
+            required=False,
+        ),
+        "run_id": _bounded_text(
+            run_id,
+            field="运行 ID",
+            maximum=128,
+            required=False,
+        ),
+        "agent_name": _bounded_text(
+            agent_name or "main",
+            field="Agent 名称",
+            maximum=80,
+        ),
+        **request.to_public_dict(),
+        "expires_at": _bounded_text(
+            expires_at,
+            field="过期时间",
+            maximum=64,
+            required=False,
+        ),
+        "status": "needs_input",
+    }
+
+
 def _bounded_text(
     value: Any,
     *,

@@ -940,29 +940,58 @@ class TestNaumiApp:
         assert len(updated) == 1
 
     @pytest.mark.asyncio
-    async def test_permission_confirmation_modal_returns_choice(self) -> None:
+    async def test_permission_confirmation_modal_returns_all_canonical_choices(
+        self,
+    ) -> None:
         engine = AgentEngine(AppConfig())
         app = NaumiApp(engine)
+        observed: list[str] = []
         async with app.run_test(size=(100, 30)) as pilot:
-            task = asyncio.create_task(
-                app.confirm_permission(
-                    {
-                        "tool_name": "code_execute",
-                        "reason": "该工具需要用户确认。",
-                        "arguments": {"code": "print('ok')"},
-                        "risk_level": "high",
-                        "permission_mode": "moderate",
-                    }
+            for button_id in (
+                "allow_once",
+                "deny",
+                "grant_session",
+                "bypass",
+            ):
+                task = asyncio.create_task(
+                    app.confirm_permission(
+                        {
+                            "call_id": f"call-{button_id}",
+                            "tool_name": "code_execute",
+                            "reason": "该工具需要用户确认。",
+                            "arguments": {
+                                "code": "print('ok')",
+                                "authorization": "Bearer private-token",
+                            },
+                            "risk_level": "high",
+                            "permission_mode": "moderate",
+                            "choices": [
+                                "allow_once",
+                                "deny",
+                                "grant_session",
+                            ],
+                        }
+                    )
                 )
-            )
-            await pilot.pause(0.1)
-            await pilot.press("ctrl+i")
-            await pilot.pause(0.05)
-            assert isinstance(app.screen, PermissionConfirmScreen)
-            await pilot.click("#allow")
-            choice = await asyncio.wait_for(task, timeout=2)
+                await pilot.pause(0.05)
+                assert isinstance(app.screen, PermissionConfirmScreen)
+                assert (
+                    app.screen.payload["arguments_summary"]["authorization"]
+                    == "[已隐藏]"
+                )
+                assert "private-token" not in json.dumps(
+                    app.screen.payload,
+                    ensure_ascii=False,
+                )
+                await pilot.click(f"#{button_id}")
+                observed.append(await asyncio.wait_for(task, timeout=2))
 
-        assert choice == "allow"
+        assert observed == [
+            "allow_once",
+            "deny",
+            "grant_session",
+            "bypass",
+        ]
 
     @pytest.mark.asyncio
     async def test_user_interaction_modal_supports_arrow_choice(self, tmp_path) -> None:

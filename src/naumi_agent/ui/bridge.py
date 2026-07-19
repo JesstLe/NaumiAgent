@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,7 +66,10 @@ from naumi_agent.ui.harness_protocol import (
     harness_replay_payload,
 )
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
-from naumi_agent.ui.permission_confirmation import summarize_arguments
+from naumi_agent.ui.permission_confirmation import (
+    normalize_backend_permission_choices,
+    public_permission_request_payload,
+)
 from naumi_agent.ui.protocol import (
     PROTOCOL_CAPABILITIES,
     ClientEventType,
@@ -88,6 +91,7 @@ from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
     normalize_interaction_response,
+    public_interaction_request_payload,
 )
 from naumi_agent.workbench.models import ParallelMode, RiskLevel
 from naumi_agent.workbench.proposal_governance import (
@@ -104,7 +108,6 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "closed",
     "archived",
 })
-_SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 _MAX_QUEUED_CONVERSATIONS = 20
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
@@ -161,30 +164,6 @@ def _backend_choices_error_message(kind: str) -> str:
     if kind == "medium_risk_unusable":
         return "后端权限选择无法同时提供批准与拒绝，系统已拒绝本次操作。"
     return "后端权限选择为空或无效，系统已拒绝本次操作。"
-
-
-def _normalize_backend_choices(raw_choices: Any) -> tuple[str, ...] | None:
-    if (
-        not isinstance(raw_choices, Collection)
-        or isinstance(raw_choices, (str, bytes, bytearray, Mapping))
-    ):
-        return None
-
-    values = (
-        sorted(raw_choices, key=lambda choice: str(choice))
-        if isinstance(raw_choices, (set, frozenset))
-        else raw_choices
-    )
-    choices: list[str] = []
-    for value in values:
-        if not isinstance(value, str):
-            return None
-        choice = value.strip().lower()
-        if not choice or choice not in _SUPPORTED_PERMISSION_CHOICES:
-            return None
-        if choice not in choices:
-            choices.append(choice)
-    return tuple(choices)
 
 
 _SLASH_ALIAS_MAP: dict[str, str] = {
@@ -3755,7 +3734,7 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return "deny"
-        choices = _normalize_backend_choices(payload["choices"])
+        choices = normalize_backend_permission_choices(payload["choices"])
         if choices is None:
             await self.emit_error(
                 _backend_choices_error_message("invalid"),
@@ -3779,23 +3758,11 @@ class JsonlEngineBridge:
             return "deny"
         loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
-        public_payload = {
-            "request_id": request_id,
-            "call_id": call_id,
-            "session_id": str(payload.get("session_id") or ""),
-            "run_id": str(payload.get("run_id") or ""),
-            "agent_name": str(payload.get("agent_name") or payload.get("agent") or "main"),
-            "tool_name": str(payload.get("tool_name") or payload.get("tool") or "tool"),
-            "tool_family": str(payload.get("tool_family") or ""),
-            "arguments_summary": summarize_arguments(payload.get("arguments", {})),
-            "reason": str(payload.get("reason") or "等待用户确认。"),
-            "risk_level": str(payload.get("risk_level") or "medium"),
-            "choices": list(choices),
-            "scope": "session" if "grant_session" in choices else "call",
-            "expires_at": payload.get("expires_at"),
-            "requires_double_confirm": False,
-            "status": "needs_confirmation",
-        }
+        public_payload = public_permission_request_payload(
+            payload,
+            request_id=request_id,
+            choices=choices,
+        )
         pending = PendingPermission(
             future=future,
             public_payload=public_payload,
@@ -3845,15 +3812,16 @@ class JsonlEngineBridge:
             await pursuit_begin(request_id, request.to_public_dict())
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, str]] = loop.create_future()
-        public_payload = {
-            "request_id": request_id,
-            "session_id": str(getattr(getattr(self.engine, "_session", None), "id", "") or ""),
-            "run_id": str(self._active_run_context.get("run_id") or ""),
-            "agent_name": str(payload.get("agent_name") or "main"),
-            **request.to_public_dict(),
-            "expires_at": durable_record.expires_at if durable_record else "",
-            "status": "needs_input",
-        }
+        public_payload = public_interaction_request_payload(
+            request,
+            request_id=request_id,
+            session_id=str(
+                getattr(getattr(self.engine, "_session", None), "id", "") or ""
+            ),
+            run_id=str(self._active_run_context.get("run_id") or ""),
+            agent_name=str(payload.get("agent_name") or "main"),
+            expires_at=durable_record.expires_at if durable_record else "",
+        )
         pending = PendingInteraction(
             future=future,
             request=request,

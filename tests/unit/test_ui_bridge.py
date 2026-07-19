@@ -4359,7 +4359,12 @@ async def test_bridge_deduplicates_valid_backend_choices_in_backend_order() -> N
     await asyncio.sleep(0)
 
     request = next(record for record in _records(writer) if record["type"] == "permission/request")
-    assert request["payload"]["choices"] == ["grant_session", "allow_once", "deny"]
+    assert request["payload"]["choices"] == [
+        "grant_session",
+        "allow_once",
+        "deny",
+        "bypass",
+    ]
 
     await bridge.resolve_permission(
         {"request_id": "call-repeated-choices", "choice": "deny"}, request_id="response"
@@ -4466,7 +4471,12 @@ async def test_bridge_legacy_high_risk_flag_does_not_add_a_second_confirmation()
     await asyncio.sleep(0)
 
     request = next(record for record in _records(writer) if record["type"] == "permission/request")
-    assert request["payload"]["choices"] == ["grant_session", "allow_once", "deny"]
+    assert request["payload"]["choices"] == [
+        "grant_session",
+        "allow_once",
+        "deny",
+        "bypass",
+    ]
     assert request["payload"]["requires_double_confirm"] is False
 
     await bridge.resolve_permission(

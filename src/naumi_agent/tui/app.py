@@ -90,6 +90,10 @@ from naumi_agent.ui.keybindings import (
     render_keybinding_help,
     to_textual_key,
 )
+from naumi_agent.ui.permission_confirmation import (
+    normalize_backend_permission_choices,
+    public_permission_request_payload,
+)
 from naumi_agent.ui.runtime_health import (
     runtime_heartbeat_retention_status_payload,
 )
@@ -98,6 +102,8 @@ from naumi_agent.ui.tool_activity import format_tool_prepare_status
 from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
+    normalize_interaction_response,
+    public_interaction_request_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -944,7 +950,7 @@ class PermissionConfirmScreen(ModalScreen[str]):
 
         tool_name = str(self.payload.get("tool_name", "?"))
         reason = str(self.payload.get("reason", "") or "该工具需要用户确认。")
-        arguments = self.payload.get("arguments", {})
+        arguments = self.payload.get("arguments_summary", {})
         preview = json.dumps(arguments, ensure_ascii=False, indent=2, default=str)
         if len(preview) > 1200:
             preview = preview[:1200] + "\n..."
@@ -953,9 +959,27 @@ class PermissionConfirmScreen(ModalScreen[str]):
             yield Label(reason)
             yield Static(preview, classes="permission-preview")
             with Horizontal():
-                yield Button("允许一次", variant="success", id="allow")
-                yield Button("拒绝", variant="error", id="deny")
-                yield Button("Bypass 全权限执行", variant="warning", id="bypass")
+                choices = tuple(self.payload.get("choices") or ())
+                if "allow_once" in choices:
+                    yield Button(
+                        "允许一次",
+                        variant="success",
+                        id="allow_once",
+                    )
+                if "deny" in choices:
+                    yield Button("拒绝", variant="error", id="deny")
+                if "grant_session" in choices:
+                    yield Button(
+                        "本会话授权",
+                        variant="primary",
+                        id="grant_session",
+                    )
+                if "bypass" in choices:
+                    yield Button(
+                        "Bypass 全权限执行",
+                        variant="warning",
+                        id="bypass",
+                    )
 
     @on(Button.Pressed)
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -1847,12 +1871,27 @@ class NaumiApp(App):
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         """Show a modal confirmation dialog for sensitive tools."""
+        choices = normalize_backend_permission_choices(payload.get("choices"))
+        if choices is None or not {"allow_once", "deny"}.issubset(choices):
+            try:
+                self.query_one(StatusBar).status_text = (
+                    "权限选择无效，已安全拒绝本次工具执行"
+                )
+            except Exception:
+                pass
+            return "deny"
+        request_id = str(payload.get("call_id") or f"tui-perm-{uuid4().hex}")
+        public_payload = public_permission_request_payload(
+            payload,
+            request_id=request_id,
+            choices=choices,
+        )
         if self.debug_trace is not None:
             self.debug_trace.event(
                 "tui.permission_confirm_prompt",
                 {
-                    "tool_name": payload.get("tool_name"),
-                    "risk_level": payload.get("risk_level"),
+                    "tool_name": public_payload.get("tool_name"),
+                    "risk_level": public_payload.get("risk_level"),
                     "permission_mode": payload.get("permission_mode"),
                 },
             )
@@ -1863,7 +1902,7 @@ class NaumiApp(App):
             if not future.done():
                 future.set_result(str(choice or "deny"))
 
-        self.push_screen(PermissionConfirmScreen(payload), on_choice)
+        self.push_screen(PermissionConfirmScreen(public_payload), on_choice)
         result = await future
         choice = str(result or "deny")
         if choice == "bypass":
@@ -1871,7 +1910,7 @@ class NaumiApp(App):
         if self.debug_trace is not None:
             self.debug_trace.event(
                 "tui.permission_confirm_choice",
-                {"tool_name": payload.get("tool_name"), "choice": choice},
+                {"tool_name": public_payload.get("tool_name"), "choice": choice},
             )
         return choice
 
@@ -1882,11 +1921,11 @@ class NaumiApp(App):
         if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
             interaction_id = f"ask-{uuid4().hex}"
         authority = self._interaction_authority()
+        session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "") or ""
+        )
         record: HarnessInteractionRecord | None = None
         if authority is not None:
-            session_id = str(
-                getattr(getattr(self.engine, "_session", None), "id", "") or ""
-            )
             record = await authority.create(
                 request=request,
                 interaction_id=interaction_id,
@@ -1911,15 +1950,22 @@ class NaumiApp(App):
             async with self._interaction_lock:
                 record = self._interaction_records.get(interaction_id, record)
                 raw_response = await self._present_user_interaction(
-                    {
-                        **request.to_public_dict(),
-                        "request_id": interaction_id,
-                        "expires_at": record.expires_at if record else "",
-                    },
+                    public_interaction_request_payload(
+                        request,
+                        request_id=interaction_id,
+                        session_id=session_id,
+                        run_id="",
+                        agent_name=str(payload.get("agent_name") or "main"),
+                        expires_at=record.expires_at if record else "",
+                    ),
                     record=record,
                 )
+                response = normalize_interaction_response(
+                    request,
+                    raw_response,
+                )
             if authority is None or record is None:
-                return raw_response
+                return response
             record = await self._stop_interaction_owner_renewal(
                 interaction_id,
                 fallback=record,
@@ -1927,7 +1973,7 @@ class NaumiApp(App):
             try:
                 record, response = await authority.answer(
                     record=record,
-                    response=raw_response,
+                    response=response,
                 )
             except Exception as exc:
                 self._set_interaction_status(
