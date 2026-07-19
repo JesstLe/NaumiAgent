@@ -17,7 +17,12 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.store import HarnessStore
-from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
+from naumi_agent.orchestrator.engine import (
+    AgentEngine,
+    AgentResult,
+    AgentRuntimeMode,
+    AgentUsage,
+)
 from naumi_agent.tui.app import (
     ActivityPanel,
     ChatPanel,
@@ -25,6 +30,7 @@ from naumi_agent.tui.app import (
     InputBar,
     NaumiApp,
     PermissionConfirmScreen,
+    Spinner,
     StatusBar,
     TodoBar,
     UserInteractionScreen,
@@ -90,6 +96,130 @@ class _HistoryDispatchApp:
 
 
 class TestNaumiApp:
+    @pytest.mark.asyncio
+    async def test_running_tui_persists_messages_and_promotes_latest_queue_item(
+        self,
+        tmp_path,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        session = await engine.get_or_create_session(title="TUI queue")
+        app = NaumiApp(engine)
+        app._agent_busy = True
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            msg_input = app.query_one("#msg-input", Input)
+            assert msg_input.disabled is False
+            for text in ("排队第一条", "排队第二条"):
+                msg_input.value = text
+                msg_input.focus()
+                await pilot.press("enter")
+                await pilot.pause(0.1)
+
+            queued = await store.list_queued_conversations(
+                workspace_root=tmp_path,
+                session_id=session.id,
+            )
+            assert [item.text for item in queued] == ["排队第一条", "排队第二条"]
+            assert [item.position for item in queued] == [1, 2]
+
+            msg_input.value = "/send-now"
+            msg_input.focus()
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            promoted = await store.list_queued_conversations(
+                workspace_root=tmp_path,
+                session_id=session.id,
+            )
+
+        assert [item.text for item in promoted] == ["排队第二条", "排队第一条"]
+        assert [item.position for item in promoted] == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_tui_dispatches_durable_queue_with_claimed_terminal_fencing(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        session = await engine.get_or_create_session(title="TUI dispatch")
+        app = NaumiApp(engine)
+        authority = app._conversation_queue_authority(session.id)
+        assert authority is not None
+        items = [
+            await authority.enqueue(
+                request_id=f"tui-dispatch-{index}",
+                text=text,
+                client_id=app._queue_owner_id,
+            )
+            for index, text in enumerate(("第一条", "第二条"), start=1)
+        ]
+        calls: list[str] = []
+
+        async def run_streaming(task: str, _sink: object) -> AgentResult:
+            calls.append(task)
+            return AgentResult(status="completed", usage=AgentUsage(turns=1))
+
+        monkeypatch.setattr(engine, "run_streaming", run_streaming)
+        async with app.run_test(size=(100, 30)) as pilot:
+            assert await app._start_next_queued_conversation()
+            for _ in range(60):
+                queued = await store.list_queued_conversations(
+                    workspace_root=tmp_path,
+                    session_id=session.id,
+                )
+                if not queued and not app._agent_busy:
+                    break
+                await pilot.pause(0.05)
+            else:
+                pytest.fail("TUI 持久队列没有完成连续派发")
+
+        assert calls == ["第一条", "第二条"]
+        for item in items:
+            lease = await store.get_run_lease(
+                workspace_root=tmp_path,
+                run_kind="runtime",
+                run_id=authority.claim_run_id(item.request_id),
+            )
+            assert lease is not None and lease.state.value == "released"
+
+    @pytest.mark.asyncio
+    async def test_tui_session_creation_failure_restores_input_and_busy_state(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = AgentEngine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(
+            store=HarnessStore(tmp_path / "harness.db")
+        )
+        monkeypatch.setattr(
+            engine,
+            "get_or_create_session",
+            AsyncMock(side_effect=RuntimeError("session unavailable")),
+        )
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            msg_input = app.query_one("#msg-input", Input)
+            msg_input.value = "创建失败也要恢复"
+            msg_input.focus()
+            await pilot.press("enter")
+            for _ in range(30):
+                if not app._agent_busy:
+                    break
+                await pilot.pause(0.05)
+            else:
+                pytest.fail("Session 创建失败后 TUI 仍保持 busy")
+            assert msg_input.disabled is False
+            assert app.query_one(Spinner)._active is False
+
     @pytest.mark.asyncio
     async def test_startup_recovery_starts_long_running_services_before_ready(
         self,

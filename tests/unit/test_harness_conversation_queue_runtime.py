@@ -91,6 +91,42 @@ async def test_existing_or_expired_claim_blocks_automatic_recovery(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_owner_can_promote_unclaimed_tail_around_its_live_active_claim(
+    tmp_path,
+) -> None:
+    authority = _authority(tmp_path)
+    active = await authority.enqueue(
+        request_id="active", text="执行中", client_id="terminal-a", now=T0,
+    )
+    await authority.enqueue(
+        request_id="first", text="下一条", client_id="terminal-a", now=T1,
+    )
+    latest = await authority.enqueue(
+        request_id="latest", text="立即发送", client_id="terminal-a", now=T10,
+    )
+    claim = await authority.claim(active, now=T0)
+
+    promoted = await authority.promote(
+        request_id=latest.request_id,
+        active_claim=claim,
+        now=T10,
+    )
+    queued = await authority.store.list_queued_conversations(
+        workspace_root=authority.workspace_root,
+        session_id=authority.session_id,
+    )
+
+    assert promoted.position == 1
+    assert [item.request_id for item in queued] == ["latest", "active", "first"]
+    with pytest.raises(ConversationQueueClaimError, match="尚未派发"):
+        await authority.promote(
+            request_id=active.request_id,
+            active_claim=claim,
+            now=T10,
+        )
+
+
+@pytest.mark.asyncio
 async def test_only_one_authority_can_claim_one_item(tmp_path) -> None:
     first = _authority(tmp_path, owner="bridge-a")
     second = _authority(tmp_path, owner="bridge-b")

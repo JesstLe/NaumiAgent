@@ -1608,7 +1608,10 @@ class JsonlEngineBridge:
                 )
                 return
             try:
-                await authority.promote(request_id=target_request_id)
+                await authority.promote(
+                    request_id=target_request_id,
+                    active_claim=self._active_queue_claim,
+                )
             except (ConversationQueueClaimError, HarnessStoreConflictError) as exc:
                 await self.emit_error(
                     str(exc),

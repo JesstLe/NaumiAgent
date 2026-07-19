@@ -84,19 +84,64 @@ class DurableConversationQueueAuthority:
         self,
         *,
         request_id: str,
+        active_claim: ConversationQueueClaim | None = None,
         now: str | None = None,
     ) -> HarnessConversationQueueItem:
+        timestamp = now or _utc_now()
         recovery = await self.recover()
         if recovery.blocked:
-            raise ConversationQueueClaimError(
-                "队列存在待核对的历史 claim，完成恢复处理前不能重排。"
+            if active_claim is None:
+                raise ConversationQueueClaimError(
+                    "队列存在待核对的历史 claim，完成恢复处理前不能重排。"
+                )
+            await self._validate_live_active_claim_for_promotion(
+                active_claim,
+                request_id=request_id,
+                queued=recovery.blocked,
+                now=timestamp,
             )
         return await self.store.promote_queued_conversation(
             workspace_root=self.workspace_root,
             session_id=self.session_id,
             request_id=request_id,
-            updated_at=now or _utc_now(),
+            updated_at=timestamp,
         )
+
+    async def _validate_live_active_claim_for_promotion(
+        self,
+        claim: ConversationQueueClaim,
+        *,
+        request_id: str,
+        queued: tuple[HarnessConversationQueueItem, ...],
+        now: str,
+    ) -> None:
+        self._validate_claim(claim)
+        if request_id == claim.item.request_id or not queued or queued[0] != claim.item:
+            raise ConversationQueueClaimError(
+                "只能重排当前 live claim 之后、尚未派发的消息。"
+            )
+        current = await self.store.get_run_lease(
+            workspace_root=self.workspace_root,
+            run_kind="runtime",
+            run_id=claim.lease.run_id,
+        )
+        if (
+            current != claim.lease
+            or datetime.fromisoformat(current.expires_at) <= datetime.fromisoformat(now)
+        ):
+            raise ConversationQueueClaimError(
+                "当前排队消息 claim 已漂移或过期，不能安全重排。"
+            )
+        for item in queued[1:]:
+            lease = await self.store.get_run_lease(
+                workspace_root=self.workspace_root,
+                run_kind="runtime",
+                run_id=self.claim_run_id(item.request_id),
+            )
+            if lease is not None:
+                raise ConversationQueueClaimError(
+                    "后续队列存在其他历史 claim，完成恢复处理前不能重排。"
+                )
 
     async def recover(self, *, limit: int = 20) -> ConversationQueueRecovery:
         """Return safe unclaimed prefix and fail-closed ambiguous suffix."""
