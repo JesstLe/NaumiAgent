@@ -17,8 +17,10 @@ from naumi_agent.agents.base import AgentResult
 from naumi_agent.agents.team_protocol import execute_team_signal
 from naumi_agent.config.settings import AppConfig, MemoryConfig, ModelConfig, SafetyConfig
 from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
     PermissionDecisionOutcome,
     PermissionDecisionReceiptStore,
+    PermissionDecisionSource,
 )
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
@@ -117,6 +119,34 @@ class CoordinatedSafeTool(Tool):
             self._both_entered.set()
         await self._release.wait()
         return self._name
+
+
+class ScopedHarnessCheckTool(Tool):
+    @property
+    def name(self) -> str:
+        return "harness_run_check"
+
+    @property
+    def description(self) -> str:
+        return "测试受权委托工具"
+
+    @property
+    def parameters_schema(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {
+                "check_id": {"type": "string"},
+                "run_id": {"type": "string"},
+            },
+            "required": ["check_id", "run_id"],
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(delegated_tool_names=("bash_run",))
+
+    async def execute(self, **kwargs: object) -> str:
+        return "scoped ok"
 
 
 def _usage() -> TokenUsage:
@@ -2166,6 +2196,53 @@ class TestToolExecution:
             engine._paths.permission_decision_db_path
         ).list_session(session.id)
         assert reopened == receipts
+
+    @pytest.mark.asyncio
+    async def test_delegating_tool_persists_direct_policy_authority_before_execution(
+        self,
+        engine: AgentEngine,
+    ) -> None:
+        session = await engine.get_or_create_session()
+        engine._tool_registry.register(ScopedHarnessCheckTool())
+
+        result = await engine._execute_tool(
+            ToolCall(
+                id="harness-check-1",
+                name="harness_run_check",
+                arguments=json.dumps(
+                    {"check_id": "unit", "run_id": "manual:policy-run"}
+                ),
+            )
+        )
+
+        assert result.status == "success"
+        assert result.content == "scoped ok"
+        receipts = engine.list_permission_decision_receipts()
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.session_id == session.id
+        assert receipt.run_id == "manual:policy-run"
+        assert receipt.source is PermissionDecisionSource.POLICY
+        assert receipt.outcome is PermissionDecisionOutcome.POLICY_ALLOWED
+        assert receipt.actor is PermissionDecisionActor.RUNTIME
+        assert receipt.delegated_tool_names == ("bash_run",)
+
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        bypass = await engine._execute_tool(
+            ToolCall(
+                id="harness-check-2",
+                name="harness_run_check",
+                arguments=json.dumps(
+                    {"check_id": "unit", "run_id": "manual:bypass-run"}
+                ),
+            )
+        )
+        assert bypass.status == "success"
+        bypass_receipt = engine.list_permission_decision_receipts()[-1]
+        assert bypass_receipt.source is PermissionDecisionSource.BYPASS
+        assert bypass_receipt.outcome is PermissionDecisionOutcome.BYPASS_ENABLED
+        assert bypass_receipt.actor is PermissionDecisionActor.RUNTIME
+        assert bypass_receipt.delegated_tool_names == ("bash_run",)
 
     @pytest.mark.asyncio
     async def test_bypass_confirmation_switches_the_runtime_mode_globally(

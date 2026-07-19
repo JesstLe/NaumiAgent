@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -26,6 +28,8 @@ async def _issue(
     call_id: str = "call-1",
     outcome: PermissionDecisionOutcome = PermissionDecisionOutcome.ALLOW_ONCE,
     source: PermissionDecisionSource = PermissionDecisionSource.USER_CONFIRMATION,
+    actor: PermissionDecisionActor = PermissionDecisionActor.USER,
+    delegated_tool_names: tuple[str, ...] = (),
     arguments: dict[str, object] | None = None,
 ):
     return await store.issue(
@@ -38,10 +42,11 @@ async def _issue(
         tool_family="shell",
         arguments=arguments or {"command": "printf safe"},
         outcome=outcome,
-        actor=PermissionDecisionActor.USER,
+        actor=actor,
         source=source,
         permission_mode=PermissionMode.MODERATE,
         risk_level="high",
+        delegated_tool_names=delegated_tool_names,
         decided_at=NOW,
     )
 
@@ -61,7 +66,7 @@ async def test_issue_reopen_and_list_without_raw_arguments(tmp_path: Path) -> No
     assert receipt.authorizes_execution
     assert b"super-secret-token" not in store.db_path.read_bytes()
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
     if os.name != "nt":
         assert store.db_path.stat().st_mode & 0o777 == 0o600
 
@@ -89,6 +94,34 @@ async def test_denied_receipt_never_authorizes_execution(tmp_path: Path) -> None
     denied = await _issue(store, outcome=PermissionDecisionOutcome.DENIED)
 
     assert denied.authorizes_execution is False
+
+
+@pytest.mark.asyncio
+async def test_policy_receipt_persists_sorted_delegation_scope(tmp_path: Path) -> None:
+    store = PermissionDecisionReceiptStore(tmp_path / "decisions.db")
+    receipt = await _issue(
+        store,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        source=PermissionDecisionSource.POLICY,
+        actor=PermissionDecisionActor.RUNTIME,
+        delegated_tool_names=("bash_run",),
+    )
+
+    assert receipt.authorizes_execution
+    assert receipt.delegated_tool_names == ("bash_run",)
+    assert await PermissionDecisionReceiptStore(store.db_path).get(
+        receipt.receipt_id
+    ) == receipt
+
+    with pytest.raises(ValueError, match="唯一、排序"):
+        await _issue(
+            store,
+            call_id="call-2",
+            outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+            source=PermissionDecisionSource.POLICY,
+            actor=PermissionDecisionActor.RUNTIME,
+            delegated_tool_names=("z_tool", "a_tool"),
+        )
 
 
 @pytest.mark.asyncio
@@ -124,3 +157,53 @@ def test_store_is_lazy_and_rejects_relative_paths(tmp_path: Path) -> None:
     assert not path.exists()
     with pytest.raises(ValueError, match="绝对路径"):
         PermissionDecisionReceiptStore("relative.db")
+
+
+@pytest.mark.asyncio
+async def test_v1_receipt_is_read_and_store_migrates_without_rewriting_it(
+    tmp_path: Path,
+) -> None:
+    store = PermissionDecisionReceiptStore(tmp_path / "decisions.db")
+    receipt = await _issue(store)
+    with sqlite3.connect(store.db_path) as db:
+        payload = json.loads(
+            db.execute(
+                "SELECT receipt_json FROM permission_decisions WHERE receipt_id = ?",
+                (receipt.receipt_id,),
+            ).fetchone()[0]
+        )
+        payload["schema_version"] = 1
+        payload.pop("delegated_tool_names")
+        digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                digest_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+        raw = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        db.execute(
+            "UPDATE permission_decisions SET receipt_sha256 = ?, receipt_json = ?",
+            (payload["receipt_sha256"], raw),
+        )
+        db.execute("PRAGMA user_version = 1")
+        db.commit()
+
+    reopened = PermissionDecisionReceiptStore(store.db_path)
+    restored = await reopened.get(receipt.receipt_id)
+    assert restored is not None
+    assert restored.schema_version == 1
+    assert restored.delegated_tool_names == ()
+
+    await _issue(reopened, call_id="call-2")
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2

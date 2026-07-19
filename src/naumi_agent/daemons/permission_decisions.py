@@ -24,7 +24,7 @@ import aiosqlite
 
 from naumi_agent.safety.permissions import PermissionMode
 
-PERMISSION_DECISION_SCHEMA_VERSION = 1
+PERMISSION_DECISION_SCHEMA_VERSION = 2
 _MAX_RECEIPT_BYTES = 32 * 1024
 _MAX_ARGUMENT_BYTES = 256 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -35,17 +35,20 @@ class PermissionDecisionOutcome(StrEnum):
     ALLOW_ONCE = "allow_once"
     SESSION_GRANTED = "session_granted"
     BYPASS_ENABLED = "bypass_enabled"
+    POLICY_ALLOWED = "policy_allowed"
     DENIED = "denied"
 
 
 class PermissionDecisionActor(StrEnum):
     USER = "user"
+    RUNTIME = "runtime"
 
 
 class PermissionDecisionSource(StrEnum):
     USER_CONFIRMATION = "user_confirmation"
     SESSION_GRANT = "session_grant"
     BYPASS = "bypass"
+    POLICY = "policy"
 
 
 class PermissionDecisionReceiptError(RuntimeError):
@@ -74,12 +77,13 @@ class PermissionDecisionReceipt:
     permission_mode: PermissionMode
     risk_level: str
     source_grant_id: str
+    delegated_tool_names: tuple[str, ...]
     decided_at: str
     receipt_sha256: str
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
-            raise ValueError("权限决定回执 schema_version 必须为 1。")
+        if self.schema_version not in {1, 2}:
+            raise ValueError("权限决定回执 schema_version 必须为 1 或 2。")
         for field in (
             "receipt_id",
             "request_id",
@@ -105,6 +109,9 @@ class PermissionDecisionReceipt:
             raise TypeError("source 必须是 PermissionDecisionSource。")
         if not isinstance(self.permission_mode, PermissionMode):
             raise TypeError("permission_mode 必须是 PermissionMode。")
+        _validate_delegated_tool_names(self.delegated_tool_names)
+        if self.schema_version == 1 and self.delegated_tool_names:
+            raise ValueError("权限决定回执 v1 不支持委托范围。")
         _aware_time(self.decided_at, field="decided_at")
         if not _SHA256.fullmatch(self.receipt_sha256):
             raise ValueError("receipt_sha256 必须是 SHA-256。")
@@ -128,6 +135,11 @@ class PermissionDecisionReceipt:
             and self.outcome is not PermissionDecisionOutcome.BYPASS_ENABLED
         ):
             raise ValueError("bypass 来源与决定不匹配。")
+        if self.source is PermissionDecisionSource.POLICY:
+            if self.outcome is not PermissionDecisionOutcome.POLICY_ALLOWED:
+                raise ValueError("policy 来源与决定不匹配。")
+            if self.actor is not PermissionDecisionActor.RUNTIME:
+                raise ValueError("policy 决定必须由 Runtime 记录。")
 
     @property
     def authorizes_execution(self) -> bool:
@@ -166,10 +178,12 @@ class PermissionDecisionReceiptStore:
         permission_mode: PermissionMode,
         risk_level: str,
         source_grant_id: str = "",
+        delegated_tool_names: tuple[str, ...] = (),
         decided_at: str,
     ) -> PermissionDecisionReceipt:
+        _validate_delegated_tool_names(delegated_tool_names)
         draft = PermissionDecisionReceipt(
-            schema_version=1,
+            schema_version=2,
             receipt_id=uuid4().hex,
             request_id=request_id,
             session_id=session_id,
@@ -185,6 +199,7 @@ class PermissionDecisionReceiptStore:
             permission_mode=permission_mode,
             risk_level=risk_level,
             source_grant_id=source_grant_id,
+            delegated_tool_names=delegated_tool_names,
             decided_at=_canonical_time(decided_at, field="decided_at"),
             receipt_sha256="0" * 64,
         )
@@ -259,7 +274,7 @@ class PermissionDecisionReceiptStore:
         try:
             with sqlite3.connect(self._db_path) as db:
                 version = int(db.execute("PRAGMA user_version").fetchone()[0])
-                if version != PERMISSION_DECISION_SCHEMA_VERSION:
+                if version not in {1, PERMISSION_DECISION_SCHEMA_VERSION}:
                     raise PermissionDecisionReceiptError(
                         f"权限决定回执 schema v{version} 不受支持。"
                     )
@@ -299,6 +314,10 @@ class PermissionDecisionReceiptStore:
                                 "权限决定回执是未知的未版本化数据库。"
                             )
                         await db.execute(_SCHEMA_V1)
+                        await db.execute(
+                            f"PRAGMA user_version = {PERMISSION_DECISION_SCHEMA_VERSION}"
+                        )
+                    elif version == 1:
                         await db.execute(
                             f"PRAGMA user_version = {PERMISSION_DECISION_SCHEMA_VERSION}"
                         )
@@ -357,6 +376,8 @@ def _same_decision(left: PermissionDecisionReceipt, right: PermissionDecisionRec
 def _receipt_digest(receipt: PermissionDecisionReceipt) -> str:
     payload = asdict(receipt)
     payload.pop("receipt_sha256")
+    if receipt.schema_version == 1:
+        payload.pop("delegated_tool_names")
     return hashlib.sha256(
         json.dumps(
             _json_value(payload),
@@ -385,9 +406,24 @@ def _deserialize_receipt(raw: str) -> PermissionDecisionReceipt:
     if not isinstance(raw, str) or len(raw.encode()) > _MAX_RECEIPT_BYTES:
         raise ValueError("持久化权限决定回执大小无效。")
     payload = json.loads(raw)
-    expected = set(PermissionDecisionReceipt.__dataclass_fields__)
-    if not isinstance(payload, dict) or set(payload) != expected:
+    if not isinstance(payload, dict):
         raise ValueError("持久化权限决定回执字段集合无效。")
+    schema_version = payload.get("schema_version")
+    expected = set(PermissionDecisionReceipt.__dataclass_fields__)
+    if schema_version == 1:
+        expected.remove("delegated_tool_names")
+        if set(payload) != expected:
+            raise ValueError("持久化权限决定回执字段集合无效。")
+        payload["delegated_tool_names"] = ()
+    elif schema_version == 2:
+        if set(payload) != expected:
+            raise ValueError("持久化权限决定回执字段集合无效。")
+        delegated_tool_names = payload["delegated_tool_names"]
+        if not isinstance(delegated_tool_names, list):
+            raise ValueError("持久化权限决定回执委托范围无效。")
+        payload["delegated_tool_names"] = tuple(delegated_tool_names)
+    else:
+        raise ValueError("持久化权限决定回执 schema_version 无效。")
     receipt = PermissionDecisionReceipt(
         **{
             **payload,
@@ -437,6 +473,15 @@ def _receipt_from_sqlite_row(row: tuple[Any, ...]) -> PermissionDecisionReceipt:
 def _require_identifier(value: str, *, field: str) -> None:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError(f"{field} 必须是安全标识符。")
+
+
+def _validate_delegated_tool_names(value: tuple[str, ...]) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("delegated_tool_names 必须是 tuple。")
+    if len(value) > 16 or value != tuple(sorted(set(value))):
+        raise ValueError("delegated_tool_names 必须唯一、排序且不超过 16 项。")
+    for tool_name in value:
+        _require_identifier(tool_name, field="delegated_tool_names")
 
 
 def _aware_time(value: str, *, field: str) -> datetime:

@@ -145,6 +145,11 @@ async def _authorize(
             PermissionDecisionOutcome.SESSION_GRANTED,
             PermissionMode.MODERATE,
         ),
+        ExecutionGrantSource.POLICY: (
+            PermissionDecisionSource.POLICY,
+            PermissionDecisionOutcome.POLICY_ALLOWED,
+            PermissionMode.MODERATE,
+        ),
     }[source]
     receipt = await store.issue(
         request_id=request.call_id,
@@ -156,7 +161,11 @@ async def _authorize(
         tool_family="shell",
         arguments=request.arguments,
         outcome=outcome,
-        actor=PermissionDecisionActor.USER,
+        actor=(
+            PermissionDecisionActor.RUNTIME
+            if source is ExecutionGrantSource.POLICY
+            else PermissionDecisionActor.USER
+        ),
         source=receipt_source,
         permission_mode=mode,
         risk_level="high",
@@ -168,6 +177,14 @@ async def _authorize(
 
 def _bypass_decision() -> PermissionDecision:
     return PermissionChecker(PermissionMode.BYPASS).check("bash_run", {})
+
+
+def _policy_decision() -> PermissionDecision:
+    return PermissionDecision(
+        allowed=True,
+        outcome=PermissionOutcome.ALLOW,
+        tool_family="shell",
+    )
 
 
 @pytest.mark.asyncio
@@ -221,6 +238,29 @@ async def test_issue_reopen_and_validate_without_persisting_raw_arguments(
     assert "super-secret-token" not in raw
     if os.name != "nt":
         assert store.db_path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.asyncio
+async def test_policy_grant_requires_and_consumes_runtime_policy_receipt(
+    tmp_path: Path,
+) -> None:
+    authority, *_, decision_store = await _authority(tmp_path)
+    request = await _authorize(
+        decision_store,
+        _request(),
+        source=ExecutionGrantSource.POLICY,
+    )
+
+    issued = await authority.issue(
+        request,
+        decision=_policy_decision(),
+        permission_mode=PermissionMode.MODERATE,
+        source=ExecutionGrantSource.POLICY,
+        now=T2,
+    )
+
+    assert issued.contract.source is ExecutionGrantSource.POLICY
+    assert issued.contract.permission_mode is PermissionMode.MODERATE
 
 
 @pytest.mark.asyncio

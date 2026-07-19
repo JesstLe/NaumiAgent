@@ -4785,6 +4785,37 @@ class AgentEngine:
                 content="权限拒绝：工具执行前会话已切换，已停止执行该工具。",
             )
 
+        delegated_tool_names = tuple(tool.metadata.delegated_tool_names)
+        if decision.outcome is PermissionOutcome.ALLOW and delegated_tool_names:
+            direct_source = (
+                PermissionDecisionSource.BYPASS
+                if self._permission_port.mode is PermissionMode.BYPASS
+                else PermissionDecisionSource.POLICY
+            )
+            direct_outcome = (
+                PermissionDecisionOutcome.BYPASS_ENABLED
+                if direct_source is PermissionDecisionSource.BYPASS
+                else PermissionDecisionOutcome.POLICY_ALLOWED
+            )
+            receipt = await self._record_terminal_permission_decision(
+                tool_call=tc,
+                arguments=args,
+                decision=decision,
+                session_id=session_id,
+                agent_name=agent_name,
+                outcome=direct_outcome,
+                source=direct_source,
+                actor=PermissionDecisionActor.RUNTIME,
+            )
+            if receipt is None:
+                return ToolResult(
+                    call_id=tc.id,
+                    status="error",
+                    content=(
+                        "权限拒绝：该工具需要可验证的执行授权，但权限回执未能持久化。"
+                    ),
+                )
+
         try:
             outcome = await self._tool_execution_port.invoke(
                 tool,
@@ -5070,6 +5101,7 @@ class AgentEngine:
         agent_name: str | None,
         outcome: PermissionDecisionOutcome,
         source: PermissionDecisionSource,
+        actor: PermissionDecisionActor = PermissionDecisionActor.USER,
         permission_mode: PermissionMode | None = None,
         source_grant_id: str = "",
     ) -> PermissionDecisionReceipt | None:
@@ -5078,7 +5110,16 @@ class AgentEngine:
             logger.error("Cannot persist permission decision without a session")
             return None
         state = self._active_harness_run
-        run_id = str(state.contract.run_id if state is not None else "")
+        argument_run_id = arguments.get("run_id")
+        run_id = str(
+            state.contract.run_id
+            if state is not None
+            else argument_run_id if isinstance(argument_run_id, str) else ""
+        )
+        tool = self._tool_registry.get(tool_call.name)
+        delegated_tool_names = (
+            tuple(tool.metadata.delegated_tool_names) if tool is not None else ()
+        )
         try:
             return await self._permission_decision_store.issue(
                 request_id=tool_call.id,
@@ -5090,7 +5131,7 @@ class AgentEngine:
                 tool_family=decision.tool_family or tool_call.name,
                 arguments=arguments,
                 outcome=outcome,
-                actor=PermissionDecisionActor.USER,
+                actor=actor,
                 source=source,
                 permission_mode=permission_mode or self._permission_port.mode,
                 risk_level=(
@@ -5098,6 +5139,7 @@ class AgentEngine:
                     or "unknown"
                 ),
                 source_grant_id=source_grant_id,
+                delegated_tool_names=delegated_tool_names,
                 decided_at=datetime.now().astimezone().isoformat(),
             )
         except Exception as exc:

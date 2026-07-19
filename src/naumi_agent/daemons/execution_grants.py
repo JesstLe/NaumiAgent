@@ -393,11 +393,13 @@ class ExecutionGrantAuthority:
                 PermissionDecisionSource.BYPASS,
                 PermissionDecisionOutcome.BYPASS_ENABLED,
             ),
+            ExecutionGrantSource.POLICY: (
+                PermissionDecisionSource.POLICY,
+                PermissionDecisionOutcome.POLICY_ALLOWED,
+            ),
         }.get(source)
         if expected_receipt_source is None:
-            raise ExecutionGrantConflictError(
-                "policy execution grant 尚未绑定可验证的权限决定回执。"
-            )
+            raise ExecutionGrantConflictError("execution grant 来源不受支持。")
         if (
             not receipt.authorizes_execution
             or (receipt.source, receipt.outcome) != expected_receipt_source

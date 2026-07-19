@@ -578,6 +578,7 @@ class HarnessRunCheckTool(Tool):
             command_argument_names=(),
             user_facing_name=self.description,
             search_hint="harness validation check test lint verify completion evidence",
+            delegated_tool_names=("bash_run",),
         )
 
     @property
