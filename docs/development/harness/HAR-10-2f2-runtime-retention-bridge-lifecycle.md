@@ -20,16 +20,17 @@ AppConfig 的嵌套规则，例如 `NAUMI_HARNESS__RUNTIME_HEARTBEAT_RETENTION__
 
 ## Bridge 生命周期
 
-1. `emit_ready()` 先启动当前 Bridge 的 typed heartbeat producer；
-2. producer 可用且启动无错误时，才构造并启动 retention service；
+1. Composition Root 构造共享 `TerminalRuntimeLifecycleFactory`，Bridge 不直接构造 producer、policy 或 retention；
+2. `emit_ready()` 创建隔离的 `new_ui` lifecycle，并按统一状态机启动 heartbeat 与可选 retention；
 3. 当前 Bridge subject ID 始终注入保护集合；
 4. ready 与后续 ping 的 `runtime/status` 暴露 configured/state/cycle/deleted/failure/error/time/delay；
 5. 同一次 ping 的 Session retention 与 runtime heartbeat retention 变化合并为一条 status，避免重复刷新；
-6. shutdown 先 graceful stop retention，再写 producer draining/terminal，保证当前实例不会在收尾竞争中被清理；
-7. retention stop 异常只写脱敏日志，不阻断 engine shutdown 与 heartbeat terminal。
+6. shutdown 通过 lifecycle 先 graceful stop retention，再写 producer draining/terminal，保证当前实例不会在收尾竞争中被清理；
+7. retention stop 异常记录为稳定错误码，不阻断 engine shutdown 与 heartbeat terminal；配置状态来自 factory 快照，
+   不受 Engine config 后续修改影响。
 
-没有 HarnessStore、显式禁用或 heartbeat producer 启动降级时，Bridge 不创建后台清理服务。状态仍明确返回
-`configured_enabled` 与 `stopped`，不会把“未运行”伪装成成功清理。
+显式禁用或 heartbeat producer 启动降级时不会留下后台清理任务。缺少 Composition-owned factory 的测试替身保持
+无副作用；状态仍明确返回 `configured_enabled` 与 `stopped`，不会把“未运行”伪装成成功清理。
 
 ## 验收证据
 
@@ -38,6 +39,7 @@ AppConfig 的嵌套规则，例如 `NAUMI_HARNESS__RUNTIME_HEARTBEAT_RETENTION__
 - 当前 Bridge heartbeat 保留，shutdown 后 retention 为 stopped、heartbeat 为 terminal；
 - 既有 heartbeat graceful/failure/degradation 测试保持通过；
 - ping 状态变化仍只发一条 `runtime/status`；
+- 静态检查证明 Bridge 不再构造 producer/retention，真实 Composition Root 到 Bridge 的 SQLite 路径通过；
 - 只运行 config、runtime retention 与 Bridge 指定测试节点，不运行全量测试。
 
 ## 未完成

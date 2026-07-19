@@ -36,12 +36,6 @@ from naumi_agent.harness.eval_surface import (
     eval_batch_terminal_progress,
 )
 from naumi_agent.harness.explain import HarnessExplainLookup
-from naumi_agent.harness.heartbeat_retention_periodic import (
-    RuntimeHeartbeatRetentionPolicy,
-    RuntimeHeartbeatRetentionService,
-    RuntimeHeartbeatRetentionState,
-)
-from naumi_agent.harness.heartbeat_runtime import RuntimeHeartbeatProducer
 from naumi_agent.harness.interaction import (
     HarnessInteractionRecord,
 )
@@ -49,7 +43,6 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
-from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import (
     HarnessConversationQueueItem,
     HarnessStore,
@@ -58,6 +51,11 @@ from naumi_agent.harness.store import (
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycle,
+    TerminalRuntimeLifecycleFactory,
+    TerminalRuntimeState,
+)
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.harness_protocol import (
@@ -105,8 +103,6 @@ _TERMINAL_MISSION_STATUSES = frozenset({
 })
 _SUPPORTED_PERMISSION_CHOICES = frozenset({"allow_once", "deny", "grant_session"})
 _MAX_QUEUED_CONVERSATIONS = 20
-_RUNTIME_HEARTBEAT_INTERVAL_SECONDS = 10.0
-_RUNTIME_HEARTBEAT_TIMEOUT_SECONDS = 30
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
@@ -241,10 +237,6 @@ _EXIT_COMMANDS = {"/q", "/quit", "/exit", "exit"}
 def _task_title(text: str) -> str:
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "新任务")
     return first_line[:80]
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
 
 
 def _public_mapping(value: Any) -> dict[str, Any]:
@@ -542,11 +534,8 @@ class JsonlEngineBridge:
         runtime_identity = f"terminal-ui-{uuid4().hex}"
         self._runtime_heartbeat_subject_id = runtime_identity
         self._runtime_heartbeat_instance_id = runtime_identity
-        self._runtime_heartbeat: RuntimeHeartbeatProducer | None = None
-        self._runtime_heartbeat_store: HarnessStore | None = None
+        self._terminal_runtime_lifecycle: TerminalRuntimeLifecycle | None = None
         self._runtime_heartbeat_notice_emitted = False
-        self._runtime_heartbeat_retention: RuntimeHeartbeatRetentionService | None = None
-        self._runtime_heartbeat_retention_store: HarnessStore | None = None
         config = getattr(self.engine, "_config", None)
         ui_config = getattr(config, "ui", None)
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
@@ -585,9 +574,7 @@ class JsonlEngineBridge:
             self.debug_trace.output("ui_bridge.stdout", text)
 
     async def emit_ready(self) -> None:
-        heartbeat_error = await self._start_runtime_heartbeat()
-        if not heartbeat_error and self._runtime_heartbeat is not None:
-            self._start_runtime_heartbeat_retention()
+        heartbeat_error = await self._start_terminal_runtime_lifecycle()
         payload = self.status_payload()
         retention_status = payload.get("retention_worker")
         if isinstance(retention_status, dict):
@@ -617,34 +604,29 @@ class JsonlEngineBridge:
         if current_session_id:
             await self._recover_durable_conversation_queue(current_session_id)
 
-    def _runtime_heartbeat_producer(self) -> RuntimeHeartbeatProducer | None:
-        harness_service = getattr(self.engine, "harness_service", None)
-        store = getattr(harness_service, "store", None)
-        if not isinstance(store, HarnessStore):
-            self._runtime_heartbeat = None
-            self._runtime_heartbeat_store = None
+    def _terminal_runtime_service(self) -> TerminalRuntimeLifecycle | None:
+        if self._terminal_runtime_lifecycle is not None:
+            return self._terminal_runtime_lifecycle
+        factory = getattr(
+            self.engine,
+            "terminal_runtime_lifecycle_factory",
+            None,
+        )
+        if not isinstance(factory, TerminalRuntimeLifecycleFactory):
             return None
-        if self._runtime_heartbeat is None or self._runtime_heartbeat_store is not store:
-            self._runtime_heartbeat = RuntimeHeartbeatProducer(
-                port=store,
-                workspace_root=self.engine.workspace_root,
-                subject_kind=HarnessRunKind.RUNTIME,
-                subject_id=self._runtime_heartbeat_subject_id,
-                instance_id=self._runtime_heartbeat_instance_id,
-                interval_seconds=_RUNTIME_HEARTBEAT_INTERVAL_SECONDS,
-                timeout_seconds=_RUNTIME_HEARTBEAT_TIMEOUT_SECONDS,
-                now_provider=_utc_now,
-                on_failure=self._runtime_heartbeat_failed,
-            )
-            self._runtime_heartbeat_store = store
-        return self._runtime_heartbeat
+        self._terminal_runtime_lifecycle = factory.create(
+            surface="new_ui",
+            identity=self._runtime_heartbeat_subject_id,
+            on_heartbeat_failure=self._runtime_heartbeat_failed,
+        )
+        return self._terminal_runtime_lifecycle
 
-    async def _start_runtime_heartbeat(self) -> str:
-        producer = self._runtime_heartbeat_producer()
-        if producer is None:
+    async def _start_terminal_runtime_lifecycle(self) -> str:
+        lifecycle = self._terminal_runtime_service()
+        if lifecycle is None:
             return ""
         try:
-            await producer.start()
+            await lifecycle.start()
         except Exception as exc:
             logger.warning("Runtime heartbeat startup failed (%s)", type(exc).__name__)
             return "heartbeat_start_failed"
@@ -673,46 +655,6 @@ class JsonlEngineBridge:
                 )
             ),
         )
-
-    def _runtime_heartbeat_retention_service(
-        self,
-    ) -> RuntimeHeartbeatRetentionService | None:
-        config = getattr(self.engine, "_config", None)
-        harness_config = getattr(config, "harness", None)
-        retention_config = getattr(
-            harness_config,
-            "runtime_heartbeat_retention",
-            None,
-        )
-        if not bool(getattr(retention_config, "enabled", False)):
-            return None
-        store = self._runtime_heartbeat_store
-        if not isinstance(store, HarnessStore):
-            return None
-        if (
-            self._runtime_heartbeat_retention is None
-            or self._runtime_heartbeat_retention_store is not store
-        ):
-            policy = RuntimeHeartbeatRetentionPolicy(
-                interval_seconds=retention_config.interval_seconds,
-                standby_retry_seconds=retention_config.standby_retry_seconds,
-                retention_seconds=retention_config.retention_days * 86_400,
-                lease_seconds=retention_config.lease_seconds,
-                scan_limit=retention_config.scan_limit,
-                catalog_limit=retention_config.catalog_limit,
-            )
-            self._runtime_heartbeat_retention = RuntimeHeartbeatRetentionService(
-                port=store,
-                workspace_root=self.engine.workspace_root,
-                policy=policy,
-                protected_subject_ids=lambda: (self._runtime_heartbeat_subject_id,),
-            )
-            self._runtime_heartbeat_retention_store = store
-        return self._runtime_heartbeat_retention
-
-    def _start_runtime_heartbeat_retention(self) -> bool:
-        service = self._runtime_heartbeat_retention_service()
-        return service.start() if service is not None else False
 
     def _interaction_authority(
         self,
@@ -1158,12 +1100,27 @@ class JsonlEngineBridge:
             "runtime_heartbeat_retention",
             None,
         )
-        configured_enabled = bool(getattr(retention_config, "enabled", False))
-        service = self._runtime_heartbeat_retention
-        if service is None:
+        lifecycle = self._terminal_runtime_lifecycle
+        lifecycle_snapshot = lifecycle.snapshot() if lifecycle is not None else None
+        retention = (
+            lifecycle_snapshot.retention
+            if lifecycle_snapshot is not None
+            else None
+        )
+        factory = getattr(
+            self.engine,
+            "terminal_runtime_lifecycle_factory",
+            None,
+        )
+        configured_enabled = (
+            factory.retention_config.enabled
+            if isinstance(factory, TerminalRuntimeLifecycleFactory)
+            else bool(getattr(retention_config, "enabled", False))
+        )
+        if retention is None:
             return {
                 "configured_enabled": configured_enabled,
-                "state": RuntimeHeartbeatRetentionState.STOPPED.value,
+                "state": "stopped",
                 "cycle_count": 0,
                 "deleted_count": 0,
                 "failure_count": 0,
@@ -1171,16 +1128,15 @@ class JsonlEngineBridge:
                 "last_cycle_at": "",
                 "next_delay_seconds": 0.0,
             }
-        snapshot = service.snapshot()
         return {
             "configured_enabled": configured_enabled,
-            "state": snapshot.state.value,
-            "cycle_count": snapshot.cycle_count,
-            "deleted_count": snapshot.deleted_count,
-            "failure_count": snapshot.failure_count,
-            "last_error_code": snapshot.last_error_code,
-            "last_cycle_at": snapshot.last_cycle_at,
-            "next_delay_seconds": snapshot.next_delay_seconds,
+            "state": retention.state.value,
+            "cycle_count": retention.cycle_count,
+            "deleted_count": retention.deleted_count,
+            "failure_count": retention.failure_count,
+            "last_error_code": retention.last_error_code,
+            "last_cycle_at": retention.last_cycle_at,
+            "next_delay_seconds": retention.next_delay_seconds,
         }
 
     def _task_activity_payload(self) -> dict[str, int]:
@@ -4240,22 +4196,13 @@ class JsonlEngineBridge:
         if self._closed:
             return
         self._closed = True
-        runtime_heartbeat_retention = self._runtime_heartbeat_retention
-        if runtime_heartbeat_retention is not None:
+        terminal_runtime = self._terminal_runtime_lifecycle
+        if terminal_runtime is not None:
             try:
-                await runtime_heartbeat_retention.stop()
+                await terminal_runtime.begin_draining()
             except Exception as exc:
                 logger.warning(
-                    "Runtime heartbeat retention shutdown failed (%s)",
-                    type(exc).__name__,
-                )
-        runtime_heartbeat = self._runtime_heartbeat
-        if runtime_heartbeat is not None:
-            try:
-                await runtime_heartbeat.begin_draining()
-            except Exception as exc:
-                logger.warning(
-                    "Runtime heartbeat draining write failed (%s)",
+                    "Terminal runtime draining failed (%s)",
                     type(exc).__name__,
                 )
         if self._interaction_replay_task is not None:
@@ -4343,21 +4290,26 @@ class JsonlEngineBridge:
         try:
             await self.engine.shutdown()
         except Exception:
-            if runtime_heartbeat is not None:
+            if terminal_runtime is not None:
                 try:
-                    await runtime_heartbeat.fail()
+                    await terminal_runtime.close(failed=True)
                 except Exception as exc:
                     logger.warning(
-                        "Runtime heartbeat failure write failed (%s)",
+                        "Terminal runtime failure write failed (%s)",
                         type(exc).__name__,
                     )
             raise
-        if runtime_heartbeat is not None:
+        if terminal_runtime is not None:
             try:
-                await runtime_heartbeat.close()
+                await terminal_runtime.close(
+                    failed=(
+                        terminal_runtime.snapshot().state
+                        is TerminalRuntimeState.FAILED
+                    )
+                )
             except Exception as exc:
                 logger.warning(
-                    "Runtime heartbeat stopped write failed (%s)",
+                    "Terminal runtime stopped write failed (%s)",
                     type(exc).__name__,
                 )
         await self.emit(ServerEventType.SHUTDOWN, {"ok": True})

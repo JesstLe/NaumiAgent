@@ -326,6 +326,9 @@ ARC-01.5 只处理真正的 legacy 表面，例如旧 callback union、legacy em
 - 4c1 已实现：建立增量 `RuntimeServices`、共享 `TerminalRuntimeLifecycleFactory`、root/Engine identity 注入与
   真实 heartbeat/retention 状态机；见
   [设计与验收](ARC-01-4c1-terminal-runtime-lifecycle-service.md)；
+- 4c2 已实现：New UI Bridge 消费 root-owned factory，删除 UI-local producer/retention 构造，并保持 startup、
+  status 与 shutdown 行为；见
+  [设计与验收](ARC-01-4c2-new-ui-terminal-lifecycle-adapter.md)；
 - 构造 Harness、Compactor、Planner、Workbench、Inspector、Skill 与 ToolRegistry；
 - 删除 Engine 内 `_register_*` 默认装配职责，保留运行时动态注册 API；
 - 隔离/移除 analysis router 的模块级全局注入；
