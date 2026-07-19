@@ -222,6 +222,72 @@ class EvolutionAdversarialSampleExecutor:
         self._kernel = sandbox_eval_kernel
         self._clock = clock or (lambda: datetime.now(UTC))
 
+    async def preflight(
+        self,
+        *,
+        lane_order: int,
+        batch_request: EvolutionAdversarialBatchRequest,
+        probe_contract: EvolutionAdversarialProbeContract,
+        validation_plan: EvolutionValidationPlan,
+        lease: ExperimentWorktreeLease,
+    ) -> None:
+        """Revalidate one lane before a Batch coordinator reads parent authority."""
+        await self._prepare(
+            lane_order=lane_order,
+            sample_index=0,
+            batch_request=batch_request,
+            probe_contract=probe_contract,
+            validation_plan=validation_plan,
+            lease=lease,
+        )
+
+    async def validate_existing(
+        self,
+        *,
+        lane_order: int,
+        sample_index: int,
+        batch_request: EvolutionAdversarialBatchRequest,
+        probe_contract: EvolutionAdversarialProbeContract,
+        validation_plan: EvolutionValidationPlan,
+        lease: ExperimentWorktreeLease,
+    ) -> EvolutionAdversarialSampleReceipt:
+        """Rebuild a receipt from immutable H5a without requiring live Run authority."""
+        prepared = await self._prepare(
+            lane_order=lane_order,
+            sample_index=sample_index,
+            batch_request=batch_request,
+            probe_contract=probe_contract,
+            validation_plan=validation_plan,
+            lease=lease,
+        )
+        request = prepared.request
+        identity = build_eval_baseline_identity(
+            self._workspace_root,
+            configuration=_configuration(request),
+            platform_identity=prepared.platform,
+            profile_trusted=True,
+            source_identity=prepared.source_identity,
+        )
+        stored = await self._store.get_eval_result(
+            self._workspace_root,
+            prepared.lane.batch_id,
+            request.suite_id,
+            sample_index,
+        )
+        if stored is None:
+            raise EvolutionAdversarialSampleError(
+                "adversarial_stored_result_missing",
+                "Adversarial sample H5a 结果不存在。",
+            )
+        _validate_stored(
+            stored,
+            request,
+            prepared,
+            identity,
+            sample_index=sample_index,
+        )
+        return _build_receipt(request, prepared, stored)
+
     async def execute(
         self,
         *,

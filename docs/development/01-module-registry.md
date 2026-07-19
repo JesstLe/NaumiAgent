@@ -10,7 +10,7 @@
 | HAR-05 | 安全 Replay 与可重复解释 | implemented | H4.1-H4.4 | `harness/HAR-05-safe-replay.md` |
 | HAR-06 | Session 生命周期与派生数据清理 | implemented | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a) | HAR-05 | `harness/HAR-07-completion-ui.md` |
-| HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.4a, 8.6a, 8.6b, 8.7a-8.7e, H5a-H5c, H5b2, 8.8a-8.8e3) | HAR-05, ARC-03, ARC-04 | `harness/HAR-08-eval-baseline.md` |
+| HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.4a-8.4f, 8.6a, 8.6b, 8.7a-8.7e, H5a-H5c, H5b2, 8.8a-8.8e3) | HAR-05, ARC-03, ARC-04 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a, 9.2a, 9.3a) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
 | HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2f2, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a, 10.6b, 10.8a) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
@@ -45,7 +45,7 @@
 | ARC-01 | Domain Boundary 与依赖防火墙 | partial (1.1-1.3, 1.4a, 1.4b1, 1.4b2a-1.4b2j, 1.4c1-1.4c3) | 当前 Python 单体 | `architecture/ARC-01-domain-boundaries.md` |
 | ARC-02 | Runtime Service 化 | planned | ARC-01 | `architecture/ARC-02-runtime-service.md` |
 | ARC-03 | 协议版本与兼容治理 | partial (3.2a, 3.2b1, 3.4a) | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
-| ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3b) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
+| ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3c) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
 | ARC-05 | 状态 Schema 与迁移平台 | partial (5.1, 5.2a) | ARC-01 | `architecture/ARC-05-state-migrations.md` |
 | ARC-06 | 高并发、背压与集群调度 | planned | ARC-02, ARC-04 | `architecture/ARC-06-concurrency-cluster.md` |
 | ARC-07 | 跨平台闭源打包与更新 | planned | ARC-02, UI-17 | `architecture/ARC-07-packaging-update.md` |
@@ -57,7 +57,7 @@
 | --- | --- | --- | --- | --- |
 | EVO-01 | 自我审查证据与改进候选 | partial (1.1a, 1.1b, 1.2a, 1.3a, 1.4a, 1.6a, 1.6a1) | Harness Evidence | `self-evolution/EVO-01-review-candidates.md` |
 | EVO-02 | 隔离变异与补丁生成 | partial (2.1a, 2.2a, 2.3a, 2.4a, 2.4b, 2.5a, 2.5b, 2.5c1, 2.5c2a, 2.5c2b, 2.6a, 2.6b, 2.7a, 2.7b1, 2.7b2, 2.7c1) | EVO-01, Worktree | `self-evolution/EVO-02-isolated-mutation.md` |
-| EVO-03 | 多层验证与 Eval 对照 | partial (3.1a, 3.1b, 3.2a-3.2d, 3.3a, 3.4a, 3.5a) | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
+| EVO-03 | 多层验证与 Eval 对照 | partial (3.1a, 3.1b, 3.2a-3.2g, 3.3a-3.3c2c2, 3.4a-3.4b, 3.5a-3.5b, 3.6a-3.6d) | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
 | EVO-04 | 反思决策与防奖励投机 | planned | EVO-03 | `self-evolution/EVO-04-reflection-decision.md` |
 | EVO-05 | 提升、回滚与发布治理 | planned | EVO-04, ARC-07 | `self-evolution/EVO-05-promotion-rollback.md` |
 | EVO-06 | 持续学习与能力扩展 | planned | EVO-05, HAR-09 | `self-evolution/EVO-06-continuous-evolution.md` |
