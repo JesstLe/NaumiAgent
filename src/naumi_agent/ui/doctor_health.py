@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -150,6 +150,91 @@ def pursuit_recovery_health_item(
     )
 
 
+def runtime_heartbeat_retention_health_item(
+    status: Mapping[str, object],
+) -> DoctorHealthItem:
+    """Project the bounded Bridge retention status without reading raw Store data."""
+    configured = status.get("configured_enabled") is True
+    if not configured:
+        return DoctorHealthItem(
+            id="runtime-heartbeat-retention",
+            domain="runtime",
+            label="运行时心跳清理",
+            severity="ok",
+            responsibility="unknown",
+            detail="策略已显式关闭；不会自动删除 runtime heartbeat 诊断记录。",
+            suggestion="",
+        )
+
+    raw_state = str(status.get("state", "unknown") or "unknown").lower()
+    state = raw_state if raw_state in {
+        "running", "waiting", "standby", "stopped", "failed", "unavailable"
+    } else "unknown"
+    cycles = _nonnegative_int(status.get("cycle_count"))
+    deleted = _nonnegative_int(status.get("deleted_count"))
+    failures = _nonnegative_int(status.get("failure_count"))
+    error_code = str(status.get("last_error_code", "") or "")
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", error_code):
+        error_code = "" if not error_code else "status_invalid"
+
+    severity: DoctorHealthSeverity = {
+        "running": "ok",
+        "waiting": "ok",
+        "standby": "ok",
+        "stopped": "degraded",
+        "failed": "degraded",
+        "unavailable": "unknown",
+        "unknown": "unknown",
+    }[state]
+    state_label = {
+        "running": "正在执行",
+        "waiting": "等待下一轮",
+        "standby": "由另一实例协调",
+        "stopped": "未运行",
+        "failed": "本轮失败",
+        "unavailable": "当前客户端不可观测",
+        "unknown": "状态未知",
+    }[state]
+    detail = (
+        f"策略已启用；{state_label}；成功周期 {cycles}，累计清理 {deleted}，"
+        f"历史失败 {failures}。"
+    )
+    if error_code:
+        detail += f" 最近错误码 {error_code}。"
+    suggestion = {
+        "stopped": "确认默认 New UI Bridge 已完成启动；若心跳也降级，请检查 Harness Store。",
+        "failed": "保留当前任务继续运行，并检查 Harness Store；清理失败不会中断模型执行。",
+        "unavailable": (
+            "TUI fallback 不托管该 Bridge worker；"
+            "请在默认 New UI 的 /doctor 查看实时状态。"
+        ),
+        "unknown": "刷新诊断；若持续未知，请检查 Bridge 协议版本与 Harness 配置。",
+    }.get(state, "")
+    return DoctorHealthItem(
+        id="runtime-heartbeat-retention",
+        domain="runtime",
+        label="运行时心跳清理",
+        severity=severity,
+        responsibility="product_runtime" if severity != "ok" else "unknown",
+        detail=_bounded(detail, 500),
+        suggestion=_bounded(suggestion, 500),
+    )
+
+
+def render_doctor_health_item_markdown(item: DoctorHealthItem) -> str:
+    """Render one typed item for the Textual fallback without losing unknown state."""
+    label = {
+        "ok": "PASS",
+        "degraded": "WARN",
+        "error": "ERROR",
+        "unknown": "UNKNOWN",
+    }[item.severity]
+    lines = [f"- **{label} {item.label}**：{item.detail}"]
+    if item.suggestion:
+        lines.append(f"  建议：{item.suggestion}")
+    return "\n".join(lines)
+
+
 def doctor_health_payload(snapshot: DoctorHealthSnapshot) -> dict[str, object]:
     """Serialize the public contract; no raw configuration or exception object escapes."""
     return snapshot.model_dump(mode="json")
@@ -242,10 +327,21 @@ def _bounded(value: object, limit: int) -> str:
     return text[:limit]
 
 
+def _nonnegative_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 __all__ = [
     "DoctorHealthItem",
     "DoctorHealthSnapshot",
     "build_doctor_health_snapshot",
     "doctor_health_payload",
     "pursuit_recovery_health_item",
+    "render_doctor_health_item_markdown",
+    "runtime_heartbeat_retention_health_item",
 ]

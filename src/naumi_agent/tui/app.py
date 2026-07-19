@@ -67,6 +67,10 @@ from naumi_agent.tui.working_indicator import (
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+from naumi_agent.ui.doctor_health import (
+    render_doctor_health_item_markdown,
+    runtime_heartbeat_retention_health_item,
+)
 from naumi_agent.ui.history_screen import (
     build_history_snapshot,
     render_history_preview,
@@ -3414,12 +3418,32 @@ class NaumiApp(App):
             mcp_manager=getattr(self.engine, "_mcp_manager", None),
             model_router=self.engine.router,
         )
-        chat.mount(Markdown(render_doctor_report(report), classes="agent-msg"))
+        retention_config = getattr(
+            getattr(self.engine._config, "harness", None),
+            "runtime_heartbeat_retention",
+            None,
+        )
+        retention_item = runtime_heartbeat_retention_health_item(
+            {
+                "configured_enabled": bool(
+                    getattr(retention_config, "enabled", False)
+                ),
+                "state": "unavailable",
+            }
+        )
+        content = (
+            render_doctor_report(report)
+            + "\n\n"
+            + render_doctor_health_item_markdown(retention_item)
+        )
+        chat.mount(Markdown(content, classes="agent-msg"))
         status.status_text = {
             "pass": "环境诊断通过",
             "warn": "环境诊断存在提醒",
             "error": "环境诊断发现错误",
         }[report.status]
+        if report.status == "pass" and retention_item.severity == "unknown":
+            status.status_text = "环境诊断存在未知项"
 
     @work(exclusive=True, exit_on_error=False)
     async def _archive_session(self, session_id: str) -> None:

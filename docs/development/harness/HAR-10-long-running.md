@@ -32,7 +32,9 @@
   - HAR-10.2f2 已实现：安全默认配置、producer 成功后的 Bridge 启动、terminal 前 graceful stop、当前 subject 保护
     和合并的 typed runtime status；见
     [设计](HAR-10-2f2-runtime-retention-bridge-lifecycle.md)。
-  - 未完成：New UI/Doctor retention 详情投影、browser/agent producer、heartbeat 历史统计、跨 kind 批量查询与
+  - UI-13.1c 已实现：New UI Doctor 展示真实 retention 调度状态，TUI fallback 明确显示不可观测边界；见
+    [设计](../cli-ui/UI-13-1c-runtime-heartbeat-retention-health.md)。
+  - 未完成：retention 历史详情与控制动作、browser/agent producer、heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
