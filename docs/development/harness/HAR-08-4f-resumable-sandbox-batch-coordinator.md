@@ -60,7 +60,6 @@ adapter 保留既有 `evo-*-cohort` identity、`cohort_*` error code 与 `cohort
 ## 当前边界与下一步
 
 Coordinator 当前按序执行 sample；尚未接入通用 `/harness eval sandbox` Service/Tool/UI surface，也未实现跨
-Batch admission/backpressure 或 Linux/Windows CI。EVO-03.6a/6b 已冻结 Probe/Profile/check、RED/GREEN
-平台矩阵、samples、lanes 和最坏预算；EVO-03.6c 已提供消费外部 Batch authority 的单 lane/sample executor，
-并真实写入 H5a。下一步只需提供 adversarial lane adapter，把 coordinator 的 grant/连续前缀交给该 executor，
-由本 coordinator 统一恢复和清理；不得新建 Evolution worker/cohort 状态机。
+Batch admission/backpressure 或 Linux/Windows CI。EVO-03.6d 已把 6c 的单 lane/sample executor 接入本
+coordinator：当前真实平台 RED/GREEN 都从既有 1/5 H5a 前缀恢复到 5/5，并由本层统一签发/撤销 grant 和释放
+lease。下一步是消费两份 cohort receipt 的 H5c adapter；不得新建 Evolution worker/cohort 状态机或评分器。

@@ -42,6 +42,11 @@ from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequestBuilder,
     EvolutionAdversarialBatchRequestError,
 )
+from naumi_agent.evolution.adversarial_cohort import (
+    EvolutionAdversarialCohortError,
+    EvolutionAdversarialCohortExecutor,
+    EvolutionAdversarialCohortReceipt,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContract,
     EvolutionAdversarialProbeContractBuilder,
@@ -4735,6 +4740,51 @@ async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_au
             and case.metric_observations[0].value == 1.0
             for case in stored.result.cases
         )
+
+    cohort_executor = EvolutionAdversarialCohortExecutor(
+        workspace_root=workspace,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=executor,
+    )
+    cohorts: list[EvolutionAdversarialCohortReceipt] = []
+    for lane in (red_lane, green_lane):
+        cohort = await cohort_executor.execute(
+            parent_receipt_id=parent.receipt_id,
+            lane_order=lane.order,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+        )
+        cohorts.append(cohort)
+        assert cohort.persisted_samples == cohort.requested_samples == 5
+        assert cohort.sample_seeds == request.sample_seeds
+        assert len(cohort.sample_receipt_sha256) == 5
+        assert len(cohort.sample_result_sha256) == 5
+        assert len(cohort.run_grant_sha256) == 2
+        assert all(item.passed == 5 for item in cohort.checks)
+        assert all(item.sample_values == (1.0,) * 5 for item in cohort.checks)
+
+    red_cohort, green_cohort = cohorts
+    assert red_cohort.phase == "red" and red_cohort.overlay_source_sha256 is None
+    assert green_cohort.phase == "green" and green_cohort.overlay_source_sha256
+    assert red_cohort.authority_key != green_cohort.authority_key
+    repeated_cohort = await cohort_executor.execute(
+        parent_receipt_id="not-read-after-completion",
+        lane_order=red_lane.order,
+        batch_request=request,
+        probe_contract=probes,
+        validation_plan=plan,
+        lease=lease,
+    )
+    assert repeated_cohort == red_cohort
+    tampered_cohort = red_cohort.model_dump(mode="json")
+    tampered_cohort["requested_samples"] = 6
+    with pytest.raises(ValidationError, match="样本前缀"):
+        EvolutionAdversarialCohortReceipt.model_validate(tampered_cohort)
+
     case = stored.result.cases[0]
     forged_observation = case.metric_observations[0].model_copy(update={"value": 0.0})
     assert not adversarial_sample_module._case_evidence_is_valid(  # noqa: SLF001
@@ -4805,9 +4855,10 @@ async def test_adversarial_sample_rejects_wrong_platform_before_permission_read(
         })(),  # type: ignore[arg-type]
         now=lambda: datetime.now(UTC).isoformat(),
     )
+    store = HarnessStore(tmp_path / "platform-harness.db")
     executor = EvolutionAdversarialSampleExecutor(
         workspace_root=workspace,
-        store=HarnessStore(tmp_path / "platform-harness.db"),
+        store=store,
         lease_store=EvolutionExperimentLeaseStore(tmp_path / "runtime.db"),
         worktree_storage_dir=Path(lease.worktree_path).parent,
         profile_service=HarnessService(workspace_root=workspace, trust_store=trust),
@@ -4849,6 +4900,35 @@ async def test_adversarial_sample_rejects_wrong_platform_before_permission_read(
             ),
         )
     assert blocked.value.code == "adversarial_platform_mismatch"
+
+    cohort = EvolutionAdversarialCohortExecutor(
+        workspace_root=workspace,
+        store=store,
+        permission_store=permission_store,  # type: ignore[arg-type]
+        run_grant_authority=run_authority,  # type: ignore[arg-type]
+        sample_executor=executor,
+    )
+    with pytest.raises(EvolutionAdversarialCohortError) as cohort_blocked:
+        await cohort.execute(
+            parent_receipt_id="never-read",
+            lane_order=wrong_lane.order,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+        )
+    assert cohort_blocked.value.code == "adversarial_platform_mismatch"
+
+    with pytest.raises(EvolutionAdversarialCohortError) as bool_lane:
+        await cohort.execute(
+            parent_receipt_id="never-read",
+            lane_order=True,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            lease=lease,
+        )
+    assert bool_lane.value.code == "adversarial_cohort_lane_invalid"
 
 
 @pytest.mark.asyncio
