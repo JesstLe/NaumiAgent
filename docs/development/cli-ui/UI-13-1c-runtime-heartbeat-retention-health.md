@@ -42,5 +42,5 @@ New UI 使用 Bridge 已有的 `runtime_heartbeat_retention` 状态：configured
 ## 5. 当前不足与下一步
 
 ARC-01.4c1-4c3 已建立共享 terminal lifecycle 并迁移 New UI/TUI；两端都能提供真实 heartbeat/retention 状态与关闭
-语义，且没有复制 producer。尚未完成的是 UI-17 golden parity fixture、手动 wake、历史清理详情和 SLO 趋势；后三者
-分别属于控制面与 ARC-08，不应塞入只读 Doctor 投影。
+语义，且没有复制 producer。UI-17.2a 已用同一 fixture 锁定两端 retention 公开字段；尚未完成的是手动 wake、历史
+清理详情和 SLO 趋势，分别属于控制面与 ARC-08，不应塞入只读 Doctor 投影。

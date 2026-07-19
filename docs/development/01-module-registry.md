@@ -25,7 +25,7 @@
 | UI-14 | QuickOpen、Vim 与完整键位层 | planned | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
 | UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a) | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | partial (16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
-| UI-17 | New UI/TUI parity 与发布门 | partial (17.1) | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
+| UI-17 | New UI/TUI parity 与发布门 | partial (17.1, 17.2a) | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
 | UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.4b, 18.4c, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
 
 ## Claude Code Source Alignment

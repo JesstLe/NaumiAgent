@@ -55,7 +55,7 @@
     },
     "terminal_runtime_health": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_runtime_health_parity.py"]
     },
     "tool_lifecycle": {
       "state": "supported",

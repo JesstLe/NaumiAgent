@@ -80,6 +80,9 @@ from naumi_agent.ui.protocol import (
     ui_message_payload,
 )
 from naumi_agent.ui.protocol_registry import load_protocol_event_registry
+from naumi_agent.ui.runtime_health import (
+    runtime_heartbeat_retention_status_payload,
+)
 from naumi_agent.user_interaction import (
     UserInteractionRequest,
     UserInteractionUnavailableError,
@@ -1117,27 +1120,11 @@ class JsonlEngineBridge:
             if isinstance(factory, TerminalRuntimeLifecycleFactory)
             else bool(getattr(retention_config, "enabled", False))
         )
-        if retention is None:
-            return {
-                "configured_enabled": configured_enabled,
-                "state": "stopped",
-                "cycle_count": 0,
-                "deleted_count": 0,
-                "failure_count": 0,
-                "last_error_code": "",
-                "last_cycle_at": "",
-                "next_delay_seconds": 0.0,
-            }
-        return {
-            "configured_enabled": configured_enabled,
-            "state": retention.state.value,
-            "cycle_count": retention.cycle_count,
-            "deleted_count": retention.deleted_count,
-            "failure_count": retention.failure_count,
-            "last_error_code": retention.last_error_code,
-            "last_cycle_at": retention.last_cycle_at,
-            "next_delay_seconds": retention.next_delay_seconds,
-        }
+        return runtime_heartbeat_retention_status_payload(
+            configured_enabled=configured_enabled,
+            available=isinstance(factory, TerminalRuntimeLifecycleFactory),
+            snapshot=retention,
+        )
 
     def _task_activity_payload(self) -> dict[str, int]:
         """Return compact task/activity counts for persistent footer rendering."""
