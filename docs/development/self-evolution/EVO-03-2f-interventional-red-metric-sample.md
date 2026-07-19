@@ -70,6 +70,6 @@ sample，而是返回 `existing_sample_conflict`。调用方必须重新生成 E
 
 - 只支持所有 metric binding 均 ready 且 verifier 为 `self_review_static` 的 Python Plan；blocked replay、feedback
   recurrence 不会被降级或伪造。
-- 下一步实现连续 sample orchestrator：固定 sample index/seed，逐项调用本 executor，验证 H5a 连续前缀，
-  最终生成完整 RED cohort completion receipt。
+- EVO-03.2g 已实现连续 sample orchestrator、cohort-scoped Run Grant、跨父回执窗口执行、中断续跑与完整
+  completion receipt，详见 `EVO-03-2g-interventional-red-cohort.md`。
 - candidate interventional cohort 必须复用相同复合 runner、Suite digest 维度、seed/order 与资源合同。

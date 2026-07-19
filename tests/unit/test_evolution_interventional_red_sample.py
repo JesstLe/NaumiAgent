@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,10 @@ from naumi_agent.daemons.shell_worker import (
 )
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.evolution.interventional_red_cohort import (
+    EvolutionInterventionalRedCohortError,
+    EvolutionInterventionalRedCohortExecutor,
+)
 from naumi_agent.evolution.interventional_red_sample import (
     EvolutionInterventionalRedSampleError,
     EvolutionInterventionalRedSampleExecutor,
@@ -82,6 +86,31 @@ def _require_real_backend() -> None:
         detect_shell_sandbox_backend()
     except ShellSandboxUnavailableError as exc:
         pytest.skip(str(exc))
+
+
+class _MutableClock:
+    def __init__(self, value: datetime) -> None:
+        self.value = value
+
+    def __call__(self) -> str:
+        return self.value.isoformat()
+
+
+class _AdvancingSampleExecutor:
+    def __init__(self, delegate, clock: _MutableClock, *, fail_on_call: int | None = None) -> None:
+        self.delegate = delegate
+        self.clock = clock
+        self.calls = 0
+        self.fail_on_call = fail_on_call
+
+    async def execute(self, **kwargs):
+        if self.fail_on_call == self.calls + 1:
+            raise RuntimeError("simulated cohort interruption")
+        result = await self.delegate.execute(**kwargs)
+        self.calls += 1
+        if self.calls == 1:
+            self.clock.value += timedelta(seconds=301)
+        return result
 
 
 async def _authority(tmp_path: Path):
@@ -241,7 +270,7 @@ async def _authority(tmp_path: Path):
         "checks": [check.model_dump(mode="json")],
         "metrics": [baseline_metric.model_dump(mode="json")],
         "check_timeout_seconds_per_sample": 10,
-        "max_total_duration_seconds": 300,
+        "max_total_duration_seconds": 600,
         "network_access": False,
         "dependency_installation": False,
         "runtime_identity_required": True,
@@ -370,6 +399,178 @@ async def test_interventional_red_executes_exact_revision_and_releases_authority
             "SELECT state, revoke_reason FROM run_delegation_grants"
         ).fetchall()
     assert states == [("revoked", "sample_finished")]
+    cohort = EvolutionInterventionalRedCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=executor,
+    )
+    with pytest.raises(EvolutionInterventionalRedCohortError) as captured:
+        await cohort.execute(
+            parent_receipt_id=parent.receipt_id,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+        )
+    assert captured.value.code == "cohort_run_authority_evidence_incomplete"
+
+
+@pytest.mark.asyncio
+async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
+    tmp_path: Path,
+) -> None:
+    _require_real_backend()
+    root, trust, plan, profile_binding, request, metrics = await _authority(tmp_path)
+    runtime = tmp_path / "runtime"
+    store = HarnessStore(tmp_path / "harness.db")
+    permissions = PermissionDecisionReceiptStore(runtime / "permissions.db")
+    run_grants = RunDelegationGrantStore(runtime / "run-grants.db")
+    clock = _MutableClock(datetime(2026, 7, 19, tzinfo=UTC))
+    run_authority = RunDelegationGrantAuthority(
+        store=run_grants,
+        permission_store=permissions,
+        harness_store=store,
+        workspace_root=root,
+    )
+    parent = await permissions.issue(
+        request_id="cohort-parent",
+        session_id="session-cohort",
+        run_id="run-cohort",
+        call_id="cohort-parent",
+        agent_name="main",
+        tool_name="evolution_run_baseline",
+        tool_family="evolution",
+        arguments={"request_id": request.request_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=clock(),
+    )
+    composer = ShellWorkerAdmissionComposer(
+        worker_registry=WorkerRegistryStore(runtime / "workers.db"),
+        harness_store=store,
+        permission_store=permissions,
+        execution_grant_store=ExecutionGrantStore(runtime / "execution-grants.db"),
+        tool_job_store=ToolJobStore(runtime / "tool-jobs.db"),
+        transport=AuthenticatedLocalShellTransport(runtime_dir=runtime / "transport"),
+        software_version="test",
+        run_delegation_grant_authority=run_authority,
+        now=clock,
+    )
+    sample = EvolutionInterventionalRedSampleExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        profile_service=HarnessService(workspace_root=root, trust_store=trust),
+        sandbox_runner=HarnessSandboxCheckRunner(
+            workspace_root=root,
+            sandbox_root=tmp_path / "sandboxes",
+            artifact_root=tmp_path / "artifacts",
+        ),
+        shell_admission_composer=composer,
+        now=clock,
+    )
+    advancing = _AdvancingSampleExecutor(sample, clock, fail_on_call=3)
+    cohort = EvolutionInterventionalRedCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=advancing,
+        now=clock,
+        token=lambda: "a" * 32,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated cohort interruption"):
+        await cohort.execute(
+            parent_receipt_id=parent.receipt_id,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+        )
+    prefix = await store.list_eval_results(
+        root,
+        request.batch_id,
+        request.suite_id,
+        limit=6,
+    )
+    assert tuple(item.sample_index for item in prefix) == (0, 1)
+    resumed_parent = await permissions.issue(
+        request_id="resumed-cohort-parent",
+        session_id="session-cohort",
+        run_id="run-cohort-resumed",
+        call_id="resumed-cohort-parent",
+        agent_name="main",
+        tool_name="evolution_run_baseline",
+        tool_family="evolution",
+        arguments={"request_id": request.request_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=clock(),
+    )
+    resumed = EvolutionInterventionalRedCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=sample,
+        now=clock,
+        token=lambda: "b" * 32,
+    )
+    receipt = await resumed.execute(
+        parent_receipt_id=resumed_parent.receipt_id,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+    )
+    repeated = await resumed.execute(
+        parent_receipt_id="not-needed-after-completion",
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+    )
+
+    assert receipt == repeated
+    assert receipt.persisted_samples == receipt.requested_samples == 5
+    assert receipt.metrics[0].sample_values == (0, 0, 0, 0, 0)
+    assert receipt.checks[0].passed == 5
+    assert len(set(receipt.sample_receipt_sha256)) == 5
+    assert len(receipt.cohort_run_grant_sha256) == 2
+    assert clock.value == datetime(2026, 7, 19, tzinfo=UTC) + timedelta(seconds=301)
+    records = await store.list_eval_results(
+        root,
+        request.batch_id,
+        request.suite_id,
+        limit=6,
+    )
+    assert tuple(item.sample_index for item in records) == (0, 1, 2, 3, 4)
+    lease = await store.get_run_lease(
+        workspace_root=root,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=resumed_parent.run_id,
+    )
+    assert lease is not None and lease.state is HarnessRunLeaseState.RELEASED
+    with sqlite3.connect(runtime / "run-grants.db") as db:
+        states = db.execute(
+            "SELECT state, revoke_reason FROM run_delegation_grants"
+        ).fetchall()
+    assert states == [
+        ("revoked", "cohort_finished"),
+        ("revoked", "cohort_finished"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -409,6 +610,38 @@ async def test_interventional_red_rejects_profile_drift_before_authority_acquisi
         )
 
     assert captured.value.code == "profile_trust_revalidation_failed"
+    assert await store.get_run_lease(
+        workspace_root=root,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id="must-not-exist",
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_interventional_red_cohort_rejects_tampering_before_lease(
+    tmp_path: Path,
+) -> None:
+    root, _, plan, profile_binding, request, metrics = await _authority(tmp_path)
+    store = HarnessStore(tmp_path / "harness.db")
+    cohort = EvolutionInterventionalRedCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=None,  # type: ignore[arg-type]
+        run_grant_authority=None,  # type: ignore[arg-type]
+        sample_executor=None,  # type: ignore[arg-type]
+    )
+    tampered = metrics.model_copy(update={"baseline_request_sha256": "f" * 64})
+
+    with pytest.raises(EvolutionInterventionalRedCohortError) as captured:
+        await cohort.execute(
+            parent_receipt_id="must-not-read",
+            baseline_request=request,
+            metric_binding=tampered,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+        )
+
+    assert captured.value.code == "sample_authority_invalid"
     assert await store.get_run_lease(
         workspace_root=root,
         run_kind=HarnessRunKind.RUNTIME,

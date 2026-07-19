@@ -68,9 +68,12 @@ Eval 和真实 Harness 检查产生。
   cases 与精确 baseline Git objects 上真实运行的 `self_review_static@1` typed observations 合为一个复合
   Suite；Suite identity 绑定全部 authority，幂等读取复验 case/metric/lifecycle 完整性。详见
   `EVO-03-2f-interventional-red-metric-sample.md`。
+- EVO-03.2g Interventional RED Cohort：已实现。单次执行尝试以一个 Runtime lease/Run Grant 编排连续
+  H5a samples，支持跨父回执 300 秒窗口、中断前缀保留、新 epoch/grant 续跑、完整 authority/lifecycle
+  复验与防篡改 completion receipt。详见 `EVO-03-2g-interventional-red-cohort.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
-UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f 接入单 sample interventional check 与 ready metric。
-完整 RED cohort、candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此
-EVO-03 整体保持 partial。
+UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort。
+candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此 EVO-03 整体保持
+partial。
