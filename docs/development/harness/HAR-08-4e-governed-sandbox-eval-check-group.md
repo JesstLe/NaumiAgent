@@ -47,7 +47,6 @@ Policy 或 receipt。authority 生命周期和证据语义仍由各自 coordinat
 
 ## 当前边界与下一步
 
-HAR-08.4 仍为 partial：通用 Sandbox Suite/Batch coordinator 尚未负责 Run Grant 生命周期、并发/背压、
-progress 与 partial receipt；Linux/Windows CI 证据也未完成。下一切片应在 Harness 中编排本 kernel 的连续
-sample batch，并复用 H5a immutable Store；EVO-03.6 随后只新增 adversarial probe/metric/guardrail authority，
-不能复制执行循环。
+HAR-08.4f 已在 Harness 中用本 kernel 编排连续 sample、Run Grant 生命周期、H5a 前缀恢复与 partial
+checkpoint。HAR-08.4 仍为 partial：通用 Service/Tool/UI surface、跨 Batch admission/backpressure 和
+Linux/Windows CI 尚未完成。EVO-03.6 后续只新增 adversarial probe/metric/guardrail authority，不能复制执行循环。

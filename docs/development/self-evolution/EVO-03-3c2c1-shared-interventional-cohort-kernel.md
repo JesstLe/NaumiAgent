@@ -8,7 +8,7 @@ candidate 权限。
 
 ## 共用边界
 
-`EvolutionInterventionalCohortKernel` 只负责以下 phase-neutral 治理事实：
+HAR-08.4f `HarnessSandboxBatchCoordinator` 现负责以下 phase-neutral 治理事实：
 
 1. 校验 RED/GREEN phase、SHA-256 authority key、5..100 样本和 60..3600 秒总预算；
 2. 加载 H5a records，要求 sample index 是从 0 开始的连续前缀；
@@ -23,6 +23,9 @@ candidate 权限。
 
 内核不理解 RED baseline、GREEN candidate、Profile checks、metrics 或 Snapshot；这些仍由 phase executor
 提供的回调验证和执行。因此抽取不会把 candidate authority 下沉到通用 Runtime，也不会形成新的旁路。
+
+`EvolutionInterventionalCohortKernel` 现在是兼容 adapter：选择 `evolution` namespace，保留既有 owner、
+idempotency key、`cohort_*` error code 与 revoke reason；实际恢复/权限/进度/清理状态机不再位于 Evolution。
 
 ## RED 迁移
 
@@ -43,4 +46,5 @@ identity、错误码、`cohort_finished` 撤销原因和幂等行为保持稳定
 EVO-03.3c2c2 已以该内核编排 GREEN 连续 samples：每轮一次完整 preflight，并由 GREEN sample executor 在
 真实执行边界继续重验 RED H5a、active Lease、Profile 与 Candidate Snapshot；completion receipt 证明所有
 GREEN samples 使用同一 candidate identity、configuration/platform/seed/order，并支持中断前缀安全续跑。
-下一步进入 interventional H5c comparator。
+Interventional H5c comparator 与 Failure Attribution 已完成。HAR-08.4f 现又补齐可复用 Batch coordinator，
+下一步可实现 EVO-03.6a Adversarial Probe Contract，并直接消费共享 check-group/Batch governance。

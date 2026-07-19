@@ -60,7 +60,8 @@
   默认断网、环境变量 allowlist、资源上限、进程树取消、artifact digest 与可审计退出状态。
 - 现有 `ValidationExecutor` 仍不能证明 Sandbox Eval 的 `no_host_side_effect`。HAR-08.4a/4b 已使生产
   `/harness check` 和 Agent Tool 消费 ARC-04.3a/3b 的真实隔离与委托链；HAR-08.4e 又提供共享的成组
-  Check execution kernel。通用 Suite/Batch coordinator 仍不得直接复用旧 subprocess 路径冒充 Sandbox。
+  Check execution kernel，HAR-08.4f 负责连续 Batch lease/grant/恢复/清理。通用 surface 仍不得直接复用旧
+  subprocess 路径冒充 Sandbox。
 
 ## 已完成的最小前置
 

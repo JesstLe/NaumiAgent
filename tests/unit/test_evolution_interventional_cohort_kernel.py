@@ -27,11 +27,15 @@ class _NeverAcquireStore:
 
 
 def _kernel(tmp_path: Path, *, now, token=lambda: "a" * 32):
+    permission_store = _ParentStore()
     return EvolutionInterventionalCohortKernel(
         workspace_root=tmp_path,
         store=_NeverAcquireStore(),  # type: ignore[arg-type]
-        permission_store=_ParentStore(),  # type: ignore[arg-type]
-        run_grant_authority=None,  # type: ignore[arg-type]
+        permission_store=permission_store,  # type: ignore[arg-type]
+        run_grant_authority=SimpleNamespace(  # type: ignore[arg-type]
+            _workspace_root=tmp_path,
+            _permission_store=permission_store,
+        ),
         now=now,
         token=token,
     )

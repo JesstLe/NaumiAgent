@@ -95,8 +95,9 @@ Eval 和真实 Harness 检查产生。
   转换为 lane-neutral authority，与静态 Self-Review 共用唯一 H5c 校验、机械分类和 durable Store；真实
   `regressed + failed` 证据归因为 candidate defect。详见
   `EVO-03-5b-interventional-failure-attribution.md`。
-- HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
-  Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
+- HAR-08.4a..4f 与 ARC-04.3a..3c 已实现精确 revision/overlay、成组 Check execution、连续 Batch
+  lease/grant/恢复/partial checkpoint；Interventional RED/GREEN 已完整消费这些共享前置。Adversarial lane
+  仍需独立 probe/metric/guardrail authority，但不得复制 worker 或 Batch 状态机。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
