@@ -68,7 +68,8 @@ infrastructure failure；后续 Comparator 再决定候选是否改善。
 ## 当前不足与下一步
 
 - 当前 interventional lane 仅支持 ready `self_review_static` Python metric；blocked verifier 继续 fail-closed。
-- RED cohort 已完整，下一步设计 candidate interventional request/cohort：必须复用相同 sample seeds、复合
-  Suite config、Profile checks、metric runners、平台和预算，且从 active Experiment Lease 的 candidate
-  snapshot 执行。
+- EVO-03.3b 已冻结 candidate interventional Request：复用相同 sample seeds、复合 Suite config、Profile
+  checks、metric runners、平台和预算，并绑定 active Experiment Lease 与完整 candidate provenance。
+- 下一步从该 Request 和受管 candidate snapshot 实现单 sample GREEN 执行；候选 worktree 捕获必须复用
+  EVO-03.3a 的精确 dirty path、文件 digest 与并发 fingerprint 校验。
 - RED/GREEN 都完成后再接入现有 H5b2/H5c Comparator，不另造比较管线。

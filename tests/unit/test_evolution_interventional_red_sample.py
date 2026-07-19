@@ -28,6 +28,14 @@ from naumi_agent.daemons.shell_worker import (
 )
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.evolution.experiment_leases import (
+    ExperimentLeaseState,
+    ExperimentWorktreeLease,
+)
+from naumi_agent.evolution.interventional_green_request import (
+    EvolutionInterventionalGreenCohortRequestBuilder,
+    EvolutionInterventionalGreenRequestError,
+)
 from naumi_agent.evolution.interventional_red_cohort import (
     EvolutionInterventionalRedCohortError,
     EvolutionInterventionalRedCohortExecutor,
@@ -166,12 +174,17 @@ async def _authority(tmp_path: Path):
         baseline_sha256=hashlib.sha256(b"baseline\n").hexdigest(),
         candidate_sha256=hashlib.sha256(candidate_source).hexdigest(),
     )
+    contract_id = f"evx_{'1' * 24}"
+    contract_manifest_sha256 = "2" * 64
+    lease_digest = hashlib.sha256(
+        f"{contract_id}:{contract_manifest_sha256}".encode()
+    ).hexdigest()
     plan_payload = {
         "schema_version": 2,
         "policy_version": VALIDATION_PLAN_POLICY,
-        "contract_id": f"evx_{'1' * 24}",
-        "contract_manifest_sha256": "2" * 64,
-        "lease_id": f"evl_{'3' * 24}",
+        "contract_id": contract_id,
+        "contract_manifest_sha256": contract_manifest_sha256,
+        "lease_id": f"evl_{lease_digest[:24]}",
         "source_snapshot_id": f"evs_{'4' * 24}",
         "source_snapshot_sha256": "5" * 64,
         "mutation_receipt_id": f"evmr_{'6' * 24}",
@@ -571,6 +584,78 @@ async def test_interventional_red_cohort_reuses_one_grant_beyond_parent_window(
         ("revoked", "cohort_finished"),
         ("revoked", "cohort_finished"),
     ]
+    lease = ExperimentWorktreeLease(
+        lease_id=plan.lease_id,
+        contract_id=plan.contract_id,
+        manifest_sha256=plan.contract_manifest_sha256,
+        session_id="session-cohort",
+        mission_id="mission-cohort",
+        task_id="task-cohort",
+        owner="owner-cohort",
+        state=ExperimentLeaseState.ACTIVE,
+        worktree_name=f"experiment-{plan.contract_id.removeprefix('evx_')[:16]}",
+        worktree_path=str(root),
+        branch="experiment/candidate",
+        baseline_commit=plan.baseline_commit,
+        expires_at="2026-07-19T01:00:00+00:00",
+        created_at="2026-07-19T00:00:00+00:00",
+        updated_at="2026-07-19T00:00:00+00:00",
+        worktree_ready=True,
+    )
+    green = EvolutionInterventionalGreenCohortRequestBuilder().build(
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+    repeated_green = EvolutionInterventionalGreenCohortRequestBuilder().build(
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+    assert green == repeated_green
+    assert green.sample_seeds == request.sample_seeds
+    assert green.suite_id == request.suite_id
+    assert green.lease_id == plan.lease_id
+    assert green.project_code_execution_allowed
+    assert green.arc04_worker_required
+    assert not green.execution_ready
+    with pytest.raises(ValueError):
+        type(green).model_validate(
+            green.model_copy(update={"candidate_revision": 2}).model_dump(mode="json")
+        )
+
+    stale_lease = lease.model_copy(update={
+        "state": ExperimentLeaseState.RELEASED,
+        "worktree_ready": False,
+    })
+    with pytest.raises(EvolutionInterventionalGreenRequestError) as captured:
+        EvolutionInterventionalGreenCohortRequestBuilder().build(
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=stale_lease,
+        )
+    assert captured.value.code == "interventional_green_authority_mismatch"
+
+    tampered_red = receipt.model_copy(update={"persisted_samples": 4})
+    with pytest.raises(EvolutionInterventionalGreenRequestError) as captured:
+        EvolutionInterventionalGreenCohortRequestBuilder().build(
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=tampered_red,
+            lease=lease,
+        )
+    assert captured.value.code == "interventional_green_authority_invalid"
 
 
 @pytest.mark.asyncio

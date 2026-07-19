@@ -86,6 +86,7 @@ Blocked runner 没有 timeout 时不会伪造耗时，其缺失由 blocking code
   runner，不能仅补 Replay fixture；
 - `feedback_recurrence` 需要独立 observation-window 数据模型、最短观察期和缺失数据语义；
 - EVO-03.2c/3.3a 已完成 Self-Review 静态 RED/GREEN cohort、H5a 连续 sample 与 completion receipt；
-- EVO-03.2f 已在 H5a 首次写入前把 ready `self_review_static` typed observation 与精确 revision Profile-check
-  cases 合入同一 sample；完整连续 RED cohort 仍待实现；
+- EVO-03.2e/2f/2g 已把 ready `self_review_static` typed observations 与精确 revision Profile-check cases
+  合入完整连续 RED cohort；
+- EVO-03.3b 已冻结保持相同 metric runner、suite、seed/order 与预算的 interventional candidate Request；
 - EVO-03.4a/3.5a 已冻结 RED→GREEN 数值判定与 Failure Attribution；下一步跨查 ARC-04/EVO-03.6。
