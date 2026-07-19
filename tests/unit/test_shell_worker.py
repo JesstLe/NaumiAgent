@@ -280,6 +280,42 @@ async def _admitted_shell_job(tmp_path: Path, spec: ShellCommandSpec):
     return admitted, tool_request, jobs, job_store, registry, contract
 
 
+async def _sandbox_job(
+    tmp_path: Path,
+    spec: ShellCommandSpec,
+) -> AdmittedSandboxShellJob:
+    admitted, tool_request, jobs, store, registry, contract = (
+        await _admitted_shell_job(tmp_path / "sandbox-admission", spec)
+    )
+    shell_request = ShellCommandRequest(
+        job_id=admitted.contract.job_id,
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        worker_contract_sha256=contract.contract_sha256,
+        spec=spec,
+    )
+    timestamps = iter((T4, T5, T6))
+    coordinator = ShellWorkerCoordinator(
+        jobs=jobs,
+        lifecycle=ToolJobLifecycleAuthority(store, registry),
+        worker_registry=registry,
+        transport=AuthenticatedLocalShellTransport(
+            runtime_dir=tmp_path / "sandbox-transport"
+        ),
+        now=lambda: next(timestamps),
+    )
+    return AdmittedSandboxShellJob(
+        job_id=admitted.contract.job_id,
+        tool_job_request=tool_request,
+        shell_request=shell_request,
+        worker_health=_health(contract),
+        requirements=_requirements(contract),
+        dispatch_id="dispatch-sandbox",
+        coordinator=coordinator,
+    )
+
+
 def _require_real_backend() -> ShellSandboxBackend:
     try:
         return detect_shell_sandbox_backend()
@@ -501,36 +537,7 @@ async def test_harness_profile_check_runs_in_ephemeral_worker_snapshot(
         return True
 
     async def admit_job(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
-        admitted, tool_request, jobs, store, registry, contract = (
-            await _admitted_shell_job(tmp_path / "sandbox-admission", spec)
-        )
-        shell_request = ShellCommandRequest(
-            job_id=admitted.contract.job_id,
-            worker_id=contract.worker_id,
-            worker_instance_id=contract.instance_id,
-            worker_epoch=contract.epoch,
-            worker_contract_sha256=contract.contract_sha256,
-            spec=spec,
-        )
-        timestamps = iter((T4, T5, T6))
-        coordinator = ShellWorkerCoordinator(
-            jobs=jobs,
-            lifecycle=ToolJobLifecycleAuthority(store, registry),
-            worker_registry=registry,
-            transport=AuthenticatedLocalShellTransport(
-                runtime_dir=tmp_path / "sandbox-transport"
-            ),
-            now=lambda: next(timestamps),
-        )
-        return AdmittedSandboxShellJob(
-            job_id=admitted.contract.job_id,
-            tool_job_request=tool_request,
-            shell_request=shell_request,
-            worker_health=_health(contract),
-            requirements=_requirements(contract),
-            dispatch_id="dispatch-sandbox",
-            coordinator=coordinator,
-        )
+        return await _sandbox_job(tmp_path, spec)
 
     result = await runner.run(
         run_id="sandbox-run-a",
@@ -547,6 +554,198 @@ async def test_harness_profile_check_runs_in_ephemeral_worker_snapshot(
     assert "profile check passed" in result.output
     assert not (workspace / "sandbox-only.txt").exists()
     assert not tuple((tmp_path / "sandboxes").iterdir())
+
+
+@pytest.mark.asyncio
+async def test_harness_profile_check_materializes_exact_git_revision(
+    tmp_path: Path,
+) -> None:
+    _require_real_backend()
+    workspace = tmp_path / "revision-workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.com"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Harness Tests"],
+        cwd=workspace,
+        check=True,
+    )
+    source = workspace / "source.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "baseline"],
+        cwd=workspace,
+        check=True,
+    )
+    baseline_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tree_listing = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--full-tree", baseline_commit],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    ).stdout
+    baseline_tree_sha256 = hashlib.sha256(tree_listing).hexdigest()
+    source.write_text("VALUE = 99\n", encoding="utf-8")
+    (workspace / "candidate-only.py").write_text("CANDIDATE = True\n", encoding="utf-8")
+    check = HarnessCheckSpec(
+        id="baseline",
+        argv=(
+            sys.executable,
+            "-c",
+            "import json; from pathlib import Path; "
+            "assert Path('source.py').read_text() == 'VALUE = 1\\n'; "
+            "assert not Path('candidate-only.py').exists(); "
+            "m=json.loads(Path('.naumi-sandbox-manifest.json').read_text()); "
+            f"assert m['source_revision'] == '{baseline_commit}'; "
+            "assert m['source_kind'] == 'git_revision'; "
+            "print('exact baseline revision')",
+        ),
+        timeout_seconds=10,
+        required_for=("change",),
+        provides=("unit",),
+    )
+    runner = HarnessSandboxCheckRunner(
+        workspace_root=workspace,
+        sandbox_root=(tmp_path / "revision-sandboxes").resolve(),
+        artifact_root=(tmp_path / "revision-artifacts").resolve(),
+    )
+
+    async def trusted() -> bool:
+        return True
+
+    async def admit_job(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+        return await _sandbox_job(tmp_path / "revision-job", spec)
+
+    result = await runner.run(
+        run_id="revision-run-a",
+        check=check,
+        profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+        profile_is_current=trusted,
+        admit_job=admit_job,
+        source_revision=baseline_commit,
+        expected_source_tree_sha256=baseline_tree_sha256,
+    )
+
+    assert result.status is HarnessSandboxCheckStatus.PASSED
+    assert result.source_revision == baseline_commit
+    assert result.source_tree_sha256 == baseline_tree_sha256
+    assert "exact baseline revision" in result.output
+    assert source.read_text(encoding="utf-8") == "VALUE = 99\n"
+    assert (workspace / "candidate-only.py").is_file()
+    assert not tuple((tmp_path / "revision-sandboxes").iterdir())
+
+    with pytest.raises(ValueError, match="tree digest"):
+        await runner.run(
+            run_id="revision-run-b",
+            check=check,
+            profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+            profile_is_current=trusted,
+            admit_job=admit_job,
+            source_revision=baseline_commit,
+            expected_source_tree_sha256="0" * 64,
+        )
+
+    with pytest.raises(ValueError, match="必须同时提供"):
+        await runner.run(
+            run_id="revision-run-c",
+            check=check,
+            profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+            profile_is_current=trusted,
+            admit_job=admit_job,
+            source_revision=baseline_commit,
+        )
+
+
+@pytest.mark.asyncio
+async def test_git_revision_snapshot_rejects_symlink_tree_entry(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "symlink-revision"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "tests@example.com"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Harness Tests"],
+        cwd=workspace,
+        check=True,
+    )
+    object_id = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=workspace,
+        check=True,
+        input=b"../outside",
+        capture_output=True,
+    ).stdout.decode("ascii").strip()
+    subprocess.run(
+        ["git", "update-index", "--add", "--cacheinfo", f"120000,{object_id},link"],
+        cwd=workspace,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "symlink fixture"],
+        cwd=workspace,
+        check=True,
+    )
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tree_listing = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--full-tree", revision],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    ).stdout
+    runner = HarnessSandboxCheckRunner(
+        workspace_root=workspace,
+        sandbox_root=(tmp_path / "symlink-sandboxes").resolve(),
+        artifact_root=(tmp_path / "symlink-artifacts").resolve(),
+    )
+    check = HarnessCheckSpec(
+        id="unit",
+        argv=(sys.executable, "-c", "raise AssertionError('must not run')"),
+    )
+    admitted = False
+
+    async def trusted() -> bool:
+        return True
+
+    async def reject_admission(_spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+        nonlocal admitted
+        admitted = True
+        raise AssertionError("admission must not run")
+
+    with pytest.raises(ValueError, match="普通或可执行 blob"):
+        await runner.run(
+            run_id="symlink-run",
+            check=check,
+            profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+            profile_is_current=trusted,
+            admit_job=reject_admission,
+            source_revision=revision,
+            expected_source_tree_sha256=hashlib.sha256(tree_listing).hexdigest(),
+        )
+
+    assert not admitted
+    assert not (tmp_path / "symlink-sandboxes").exists()
 
 
 @pytest.mark.asyncio

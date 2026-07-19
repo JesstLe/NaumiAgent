@@ -107,5 +107,8 @@
 - HAR-08.4b 生产 Sandbox Check Surface：已实现任务局部父回执、精确参数复核、Composer admission/finally
   cleanup、`/harness check` 与 Agent Tool 共路由，以及 ToolJob/lifecycle/artifact 可见证据。详见
   `HAR-08-4b-production-sandbox-check-surface.md`。
+- HAR-08.4c 精确 Revision Snapshot：已实现完整 commit/tree authority、Git object blob 物化、manifest v2、
+  非普通 blob/敏感路径阻断与终态复验，为 EVO baseline interventional runner 提供源字节前置。详见
+  `HAR-08-4c-exact-revision-sandbox-snapshot.md`。
 - HAR-08.4 仍为 partial：Suite/Batch/Baseline 尚未切换到隔离 Worker，也没有并行进度与 Linux/Windows CI
   证据。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
