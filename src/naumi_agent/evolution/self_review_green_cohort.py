@@ -396,7 +396,7 @@ class EvolutionSelfReviewGreenCohortExecutor:
         except EvolutionCandidateSnapshotError as exc:
             raise EvolutionSelfReviewGreenCohortError(exc.code, str(exc)) from exc
         candidate_root = candidate_snapshot.root
-        blobs = candidate_snapshot.blobs
+        blobs = tuple((item.path, item.content) for item in candidate_snapshot.blobs)
         fingerprint = candidate_snapshot.fingerprint
         platform = capture_eval_platform_identity()
         red_identity = red_records[0].result.baseline_identity

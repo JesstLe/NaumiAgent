@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import subprocess
 from dataclasses import replace
@@ -827,8 +828,24 @@ async def test_candidate_snapshot_is_shared_and_detects_later_drift(
         now=datetime(2026, 7, 19, 1, tzinfo=UTC),
     )
     assert snapshot.root == candidate
-    assert snapshot.blobs == (("sample.py", b"def clean() -> None:\n    pass\n"),)
+    assert len(snapshot.blobs) == 1
+    assert snapshot.blobs[0].path == "sample.py"
+    assert snapshot.blobs[0].content == b"def clean() -> None:\n    pass\n"
+    assert snapshot.blobs[0].sha256 == plan.files[0].candidate_sha256
+    assert not snapshot.blobs[0].executable
     revalidate_candidate_worktree_snapshot(snapshot)
+
+    if os.name != "nt":
+        (candidate / "sample.py").chmod(0o755)
+        with pytest.raises(EvolutionCandidateSnapshotError) as captured:
+            capture_candidate_worktree_snapshot(
+                lease,
+                plan,
+                worktree_storage_dir=storage,
+                now=datetime(2026, 7, 19, 1, tzinfo=UTC),
+            )
+        assert captured.value.code == "candidate_file_mode_mismatch"
+        (candidate / "sample.py").chmod(0o644)
 
     (candidate / "sample.py").write_text("candidate changed after capture\n")
     with pytest.raises(EvolutionCandidateSnapshotError) as captured:
@@ -852,6 +869,37 @@ async def test_candidate_snapshot_is_shared_and_detects_later_drift(
             now=datetime(2026, 7, 19),
         )
     assert captured.value.code == "candidate_snapshot_clock_invalid"
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(os.name == "nt", reason="Windows 不提供 POSIX executable bit")
+async def test_candidate_snapshot_rejects_executable_created_file(
+    tmp_path: Path,
+) -> None:
+    (
+        _,
+        candidate,
+        storage,
+        plan,
+        _,
+        _,
+        _,
+        _,
+        lease,
+        _,
+        _,
+        _,
+    ) = await _green_authority(tmp_path, operation="create")
+    (candidate / "sample.py").chmod(0o755)
+
+    with pytest.raises(EvolutionCandidateSnapshotError) as captured:
+        capture_candidate_worktree_snapshot(
+            lease,
+            plan,
+            worktree_storage_dir=storage,
+            now=datetime(2026, 7, 19, 1, tzinfo=UTC),
+        )
+    assert captured.value.code == "candidate_file_mode_mismatch"
 
 
 @pytest.mark.asyncio
