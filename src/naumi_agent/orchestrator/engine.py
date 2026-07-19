@@ -31,6 +31,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceipt,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantAuthority
 from naumi_agent.daemons.shell_admission import ShellWorkerAdmissionComposer
 from naumi_agent.daemons.shell_worker import (
     AuthenticatedLocalShellTransport,
@@ -629,12 +630,19 @@ class AgentEngine:
         self._worktree_storage_dir = paths.worktree_storage_dir
         self._harness_store = resources.harness_store
         self._permission_decision_store = resources.permission_decision_store
+        self.run_delegation_grant_authority = RunDelegationGrantAuthority(
+            store=resources.run_delegation_grant_store,
+            permission_store=resources.permission_decision_store,
+            harness_store=resources.harness_store,
+            workspace_root=paths.workspace_root,
+        )
         self.execution_grant_authority = ExecutionGrantAuthority(
             store=resources.execution_grant_store,
             worker_registry=resources.worker_registry_store,
             harness_store=resources.harness_store,
             permission_decision_store=resources.permission_decision_store,
             workspace_root=paths.workspace_root,
+            run_delegation_grant_authority=self.run_delegation_grant_authority,
         )
         self.tool_job_authority = ToolJobAuthority(
             store=resources.tool_job_store,
@@ -662,6 +670,7 @@ class AgentEngine:
             tool_job_store=resources.tool_job_store,
             transport=self.shell_worker_transport,
             software_version=__version__,
+            run_delegation_grant_authority=self.run_delegation_grant_authority,
         )
         self.harness_sandbox_check_runner = HarnessSandboxCheckRunner(
             workspace_root=paths.workspace_root,

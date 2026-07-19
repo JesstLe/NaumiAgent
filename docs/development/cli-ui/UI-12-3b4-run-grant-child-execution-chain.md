@@ -35,6 +35,6 @@
 
 ## 尚未完成
 
-Shell admission composer 还只接收一次性 parent receipt。下一最小切片应让 Composer 接受任务局部的
-`run_grant_id` + authority：每次 check 通过 schema v4 child 再签发 ExecutionGrant，并在 compose 与 dispatch
-之间持续复验。完成后才能让 EVO-03 interventional RED cohort 顺序消费既有 Sandbox Runner。
+ARC-04.3c 已让 Shell admission composer 接受任务局部 `run_grant_id` + authority：每次 check 通过 schema
+v4 child 再签发 ExecutionGrant，并在 compose 与 dispatch 之间持续复验。下一最小切片可以进入 EVO-03
+interventional RED cohort，顺序消费既有 Sandbox Runner。

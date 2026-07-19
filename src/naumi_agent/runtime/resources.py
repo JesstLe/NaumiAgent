@@ -6,6 +6,7 @@ from dataclasses import dataclass, fields
 
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -25,6 +26,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
     "execution_grant_store": (
         ExecutionGrantStore,
         "execution_grant_store 必须是 ExecutionGrantStore 实例。",
+    ),
+    "run_delegation_grant_store": (
+        RunDelegationGrantStore,
+        "run_delegation_grant_store 必须是 RunDelegationGrantStore 实例。",
     ),
     "permission_decision_store": (
         PermissionDecisionReceiptStore,
@@ -76,6 +81,7 @@ class RuntimeResources:
     chat_run_store: ChatRunStore
     worker_registry_store: WorkerRegistryStore
     execution_grant_store: ExecutionGrantStore
+    run_delegation_grant_store: RunDelegationGrantStore
     permission_decision_store: PermissionDecisionReceiptStore
     tool_job_store: ToolJobStore
     evolution_candidate_store: EvolutionCandidateStore
@@ -102,6 +108,7 @@ class RuntimeResourceOverrides:
     chat_run_store: ChatRunStore | None = None
     worker_registry_store: WorkerRegistryStore | None = None
     execution_grant_store: ExecutionGrantStore | None = None
+    run_delegation_grant_store: RunDelegationGrantStore | None = None
     permission_decision_store: PermissionDecisionReceiptStore | None = None
     tool_job_store: ToolJobStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None

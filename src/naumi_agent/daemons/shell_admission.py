@@ -17,6 +17,7 @@ from naumi_agent.daemons.execution_grants import (
     ExecutionGrantStore,
 )
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantAuthority
 from naumi_agent.daemons.shell_worker import (
     AuthenticatedLocalShellTransport,
     ShellCommandRequest,
@@ -90,6 +91,7 @@ class ShellWorkerAdmissionComposer:
         tool_job_store: ToolJobStore,
         transport: AuthenticatedLocalShellTransport,
         software_version: str,
+        run_delegation_grant_authority: RunDelegationGrantAuthority | None = None,
         worker_id: str = "local-shell-worker",
         now: NowProvider | None = None,
         token: TokenProvider | None = None,
@@ -101,6 +103,7 @@ class ShellWorkerAdmissionComposer:
         self._tool_job_store = tool_job_store
         self._transport = transport
         self._software_version = software_version
+        self._run_delegation_grant_authority = run_delegation_grant_authority
         self._worker_id = worker_id
         self._now = now or (lambda: datetime.now(UTC).isoformat())
         self._token = token or (lambda: uuid4().hex)
@@ -111,13 +114,34 @@ class ShellWorkerAdmissionComposer:
         *,
         parent_receipt_id: str,
         spec: ShellCommandSpec,
+        run_grant_id: str | None = None,
     ) -> ComposedSandboxShellJob:
         now = self._now()
         parent = await self._permission_store.get(parent_receipt_id)
         if parent is None:
             raise ValueError("Shell admission 父权限回执不存在。")
+        run_grant_sha256 = ""
+        if run_grant_id is not None:
+            if self._run_delegation_grant_authority is None:
+                raise ValueError("Shell admission 缺少 Run delegation authority。")
+            run_validation = await self._run_delegation_grant_authority.validate(
+                grant_id=run_grant_id,
+                now=now,
+            )
+            run_contract = run_validation.contract
+            if (
+                not run_validation.allowed
+                or run_contract is None
+                or run_contract.parent_receipt_id != parent.receipt_id
+                or run_contract.parent_receipt_sha256 != parent.receipt_sha256
+                or run_contract.session_id != parent.session_id
+                or run_contract.run_id != parent.run_id
+                or "bash_run" not in run_contract.delegated_tool_names
+            ):
+                raise ValueError("Shell admission 的 Run delegation grant 无效。")
+            run_grant_sha256 = run_contract.grant_sha256
         identity = hashlib.sha256(
-            f"{parent.receipt_sha256}\0{spec.digest()}".encode()
+            f"{parent.receipt_sha256}\0{run_grant_sha256}\0{spec.digest()}".encode()
         ).hexdigest()
         instance_id = f"shell-{self._token()[:32]}"
         async with self._registration_lock:
@@ -163,17 +187,34 @@ class ShellWorkerAdmissionComposer:
             raise RuntimeError("Shell admission 无法取得 Tool run lease。")
         try:
             call_id = f"shell-{identity[:48]}"
-            child = await self._permission_store.issue_delegated(
-                parent_receipt_id=parent.receipt_id,
-                request_id=call_id,
-                call_id=call_id,
-                tool_name="bash_run",
-                tool_family="shell",
-                arguments=spec.canonical_payload(),
-                risk_level="high",
-                decided_at=now,
-                ttl_seconds=min(120, max(15, int(spec.timeout_seconds) + 10)),
-            )
+            child_ttl = min(120, max(15, int(spec.timeout_seconds) + 10))
+            authorization_now = self._now()
+            if run_grant_id is None:
+                child = await self._permission_store.issue_delegated(
+                    parent_receipt_id=parent.receipt_id,
+                    request_id=call_id,
+                    call_id=call_id,
+                    tool_name="bash_run",
+                    tool_family="shell",
+                    arguments=spec.canonical_payload(),
+                    risk_level="high",
+                    decided_at=authorization_now,
+                    ttl_seconds=child_ttl,
+                )
+            else:
+                assert self._run_delegation_grant_authority is not None
+                child = await self._permission_store.issue_run_delegated(
+                    run_grant_authority=self._run_delegation_grant_authority,
+                    run_grant_id=run_grant_id,
+                    request_id=call_id,
+                    call_id=call_id,
+                    tool_name="bash_run",
+                    tool_family="shell",
+                    arguments=spec.canonical_payload(),
+                    risk_level="high",
+                    decided_at=authorization_now,
+                    ttl_seconds=child_ttl,
+                )
             grant_request = ExecutionGrantRequest(
                 session_id=parent.session_id,
                 run_id=parent.run_id,
@@ -190,6 +231,11 @@ class ShellWorkerAdmissionComposer:
                 harness_store=self._harness_store,
                 permission_decision_store=self._permission_store,
                 workspace_root=spec.workspace_root,
+                run_delegation_grant_authority=(
+                    self._run_delegation_grant_authority
+                    if run_grant_id is not None
+                    else None
+                ),
             )
             grant = await grant_authority.issue(
                 grant_request,
@@ -200,8 +246,8 @@ class ShellWorkerAdmissionComposer:
                 ),
                 permission_mode=parent.permission_mode,
                 source=ExecutionGrantSource.DELEGATED,
-                now=now,
-                ttl_seconds=min(120, max(15, int(spec.timeout_seconds) + 10)),
+                now=authorization_now,
+                ttl_seconds=child_ttl,
             )
             tool_request = ToolJobRequest(
                 session_id=grant_request.session_id,
@@ -224,7 +270,7 @@ class ShellWorkerAdmissionComposer:
                     epoch=contract.epoch,
                     sequence=1,
                     phase=HarnessHeartbeatPhase.RUNNING,
-                    observed_at=now,
+                    observed_at=authorization_now,
                     timeout_seconds=30,
                     detail_code="ephemeral_shell_ready",
                 ),
@@ -251,7 +297,7 @@ class ShellWorkerAdmissionComposer:
                 tool_request,
                 worker_health=health,
                 requirements=requirements,
-                now=now,
+                now=authorization_now,
             )
             shell_request = ShellCommandRequest(
                 job_id=stored.contract.job_id,
