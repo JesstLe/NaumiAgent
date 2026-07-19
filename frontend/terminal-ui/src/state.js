@@ -24,6 +24,9 @@ const MAX_HARNESS_RECEIPTS = 100;
 const MAX_HARNESS_DETAILS = 100;
 const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
 const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "team"]);
+const COMMAND_INDEX_CATEGORIES = new Set(["basic", "session", "analysis", "orchestration", "navigation", "control"]);
+const COMMAND_INDEX_SOURCES = new Set(["shared_runtime", "new_ui", "tui"]);
+const COMMAND_INDEX_RISKS = new Set(["read_only", "session_state", "permission_change", "workspace_write", "tool_execution", "destructive"]);
 
 const RUN_ACTIVITY_PHASE_LABELS = Object.freeze({
   preparing: "准备运行",
@@ -140,6 +143,43 @@ function mergeAliasesIntoEntry(existing, aliases) {
   existing.aliases = [...merged];
 }
 
+function commandMetadata(item) {
+  const schemaVersion = Number(item?.schema_version) === 1 ? 1 : 0;
+  const rawArguments = item?.arguments;
+  const args = rawArguments && typeof rawArguments === "object"
+    ? {
+      takes_arguments: Boolean(rawArguments.takes_arguments),
+      syntax: String(rawArguments.syntax || ""),
+      required: Boolean(rawArguments.required),
+    }
+    : { takes_arguments: false, syntax: "", required: false };
+  const metadata = {
+    schema_version: schemaVersion,
+    category: String(item?.category || "navigation"),
+    source: String(item?.source || "new_ui"),
+    readonly: Boolean(item?.readonly),
+    permission_risk: String(item?.permission_risk || "unknown"),
+    arguments: args,
+  };
+  if (!schemaVersion) return metadata;
+  const valid = COMMAND_INDEX_CATEGORIES.has(metadata.category)
+    && COMMAND_INDEX_SOURCES.has(metadata.source)
+    && COMMAND_INDEX_RISKS.has(metadata.permission_risk)
+    && metadata.readonly === (metadata.permission_risk === "read_only")
+    && metadata.arguments.syntax.length <= 300
+    && metadata.arguments.takes_arguments === Boolean(metadata.arguments.syntax)
+    && (!metadata.arguments.required || metadata.arguments.takes_arguments);
+  return valid ? metadata : null;
+}
+
+function normalizeCommandAliases(rawAliases, command) {
+  return (Array.isArray(rawAliases) ? rawAliases : [])
+    .map((alias) => String(alias || "").trim().toLowerCase())
+    .filter((alias, index, values) => /^\/[a-z][a-z0-9_-]{0,63}$/.test(alias)
+      && alias !== command && values.indexOf(alias) === index)
+    .slice(0, 12);
+}
+
 function normalizeSlashCommandList(rawCommands) {
   const sourceCommands =
     Array.isArray(rawCommands) && rawCommands.length
@@ -149,22 +189,29 @@ function normalizeSlashCommandList(rawCommands) {
   for (const item of sourceCommands) {
     if (!item || typeof item !== "object") continue;
     const command = String(item.command || "").trim().toLowerCase();
-    if (!command.startsWith("/")) continue;
+    if (!/^\/[a-z][a-z0-9_-]{0,63}$/.test(command)) continue;
+    const metadata = commandMetadata(item);
+    if (!metadata) continue;
     const canonical = command;
-    const description = String(item.description || "").trim();
+    const description = String(item.description || "").trim().slice(0, 300);
+    if (!description) continue;
+    const aliases = normalizeCommandAliases(item.aliases, command);
     const existing = normalized.get(canonical);
     if (existing) {
       if (!existing.description && description) {
         existing.description = description;
       }
-      mergeAliasesIntoEntry(existing, Array.isArray(item.aliases) ? item.aliases : []);
+      mergeAliasesIntoEntry(existing, aliases);
+      if (Number(item.schema_version) === 1) {
+        Object.assign(existing, metadata);
+      }
       continue;
     }
-    const aliases = Array.isArray(item.aliases) ? item.aliases : [];
     const entry = {
       command: canonical,
       aliases: [...aliases],
       description,
+      ...metadata,
     };
     normalized.set(canonical, entry);
   }
@@ -221,6 +268,12 @@ export function getSlashCommandCompletions(input, slashCommands) {
       command: entry.command,
       aliases: [...(entry.aliases || [])],
       description: entry.description,
+      schema_version: entry.schema_version,
+      category: entry.category,
+      source: entry.source,
+      readonly: entry.readonly,
+      permission_risk: entry.permission_risk,
+      arguments: { ...entry.arguments },
       selected: false,
     }));
 }

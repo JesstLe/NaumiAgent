@@ -35,7 +35,6 @@ from textual.widgets import (
 )
 
 from naumi_agent.cli.slash_router import execute_slash_command
-from naumi_agent.cli_completer import COMMANDS
 from naumi_agent.clipboard import copy_or_save_transcript, strip_ansi
 from naumi_agent.harness.conversation_queue_runtime import (
     ConversationQueueClaim,
@@ -70,6 +69,7 @@ from naumi_agent.tui.working_indicator import (
 )
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
+from naumi_agent.ui.command_index import build_terminal_command_index
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.doctor_health import (
     render_doctor_health_item_markdown,
@@ -292,14 +292,9 @@ class _TuiSlashCommandFrontend:
         todo = self._app.query_one(TodoBar)
         todo.todo_text = text
 
-_TUI_LOCAL_COMMANDS = (
-    "/agents",
-    "/cancel-queued",
-    "/send-now",
-    "/workbench",
-)
+_TUI_COMMAND_INDEX = build_terminal_command_index("tui")
 _SLASH_SUGGESTIONS = SuggestFromList(
-    [*_TUI_LOCAL_COMMANDS, *(cmd for cmd, _, _ in COMMANDS)],
+    [item.command for item in _TUI_COMMAND_INDEX],
     case_sensitive=True,
 )
 
@@ -1259,9 +1254,9 @@ class InputBar(Horizontal):
 
     def _build_slash_candidates(self, query: str) -> list[str]:
         candidates = [
-            cmd
-            for cmd in [*_TUI_LOCAL_COMMANDS, *(item[0] for item in COMMANDS)]
-            if _matches_slash_command(query, cmd)
+            item.command
+            for item in _TUI_COMMAND_INDEX
+            if _matches_slash_command(query, item.command)
         ]
         return sorted(candidates)
 

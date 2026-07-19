@@ -2833,6 +2833,19 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert "知识" in harness["description"]
     assert "解释" in harness["description"]
     assert "评测" in harness["description"]
+    assert harness["schema_version"] == 1
+    assert harness["category"] == "basic"
+    assert harness["source"] == "shared_runtime"
+    assert harness["readonly"] is False
+    assert harness["permission_risk"] == "tool_execution"
+    assert harness["arguments"] == {
+        "takes_arguments": True,
+        "syntax": "[status|doctor|explain|replay|eval|baseline|knowledge|check|trust|untrust]",
+        "required": False,
+    }
+    mode = next(item for item in slash_commands if item["command"] == "/mode")
+    assert mode["source"] == "new_ui"
+    assert mode["permission_risk"] == "permission_change"
 
 
 def test_bridge_fallback_slash_registry_keeps_goal_available() -> None:

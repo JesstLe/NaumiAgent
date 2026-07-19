@@ -287,12 +287,33 @@ export function CommandCompletionFooter({ state }) {
       const rows = completions.map((item, index) => {
         const alias = item.aliases.length ? `(${item.aliases.join(", ")})` : "";
         const marker = item.selected ? ">" : " ";
-        const text = `${marker} ${String(index + 1).padStart(2, "0")}. ${item.command} ${alias} ${item.description}`;
-        return color(ANSI.cyan, text.trim());
+        const syntax = item.arguments?.syntax ? ` ${item.arguments.syntax}` : "";
+        const risk = commandRiskLabel(item.permission_risk);
+        const text = `${marker} ${String(index + 1).padStart(2, "0")}. ${item.command}${syntax} ${alias} [${item.category}] ${risk} ${item.description}`;
+        return color(commandRiskColor(item.permission_risk, item.selected), text.trim());
       });
       return boxLines("命令补全", rows, ctx.width);
     },
   };
+}
+
+function commandRiskLabel(risk) {
+  if (risk === "read_only") return "只读";
+  if (risk === "session_state") return "会话状态";
+  if (risk === "permission_change") return "权限变更";
+  if (risk === "workspace_write") return "工作区写入";
+  if (risk === "tool_execution") return "执行";
+  if (risk === "destructive") return "破坏性";
+  return "风险待确认";
+}
+
+function commandRiskColor(risk, selected) {
+  if (selected) return ANSI.yellow;
+  if (risk === "read_only") return ANSI.green;
+  if (risk === "session_state") return ANSI.cyan;
+  if (risk === "permission_change" || risk === "workspace_write") return ANSI.yellow;
+  if (risk === "tool_execution" || risk === "destructive") return ANSI.red;
+  return ANSI.dim;
 }
 
 export function renderFooter(state, width, env = {}) {
