@@ -25,6 +25,12 @@ if TYPE_CHECKING:
         EvolutionAdversarialProbeContractError,
         EvolutionAdversarialProbeRegistry,
     )
+    from naumi_agent.evolution.adversarial_samples import (
+        EvolutionAdversarialSampleError,
+        EvolutionAdversarialSampleExecutor,
+        EvolutionAdversarialSampleReceipt,
+        adversarial_lane_authority_key,
+    )
     from naumi_agent.evolution.candidate import EvolutionCandidateDraft
     from naumi_agent.evolution.candidate_snapshots import (
         EvolutionCandidateSnapshotError,
@@ -260,6 +266,10 @@ __all__ = [
     "EvolutionAdversarialBatchRequest",
     "EvolutionAdversarialBatchRequestBuilder",
     "EvolutionAdversarialBatchRequestError",
+    "EvolutionAdversarialSampleError",
+    "EvolutionAdversarialSampleExecutor",
+    "EvolutionAdversarialSampleReceipt",
+    "adversarial_lane_authority_key",
     "EvolutionEvidence",
     "EvolutionFailureAttributionBuilder",
     "EvolutionFailureAttributionError",
@@ -445,6 +455,12 @@ def __getattr__(name: str) -> object:
         "EvolutionAdversarialProbeContractBuilder",
         "EvolutionAdversarialProbeContractError",
         "EvolutionAdversarialProbeRegistry",
+    }
+    adversarial_sample_exports = {
+        "EvolutionAdversarialSampleError",
+        "EvolutionAdversarialSampleExecutor",
+        "EvolutionAdversarialSampleReceipt",
+        "adversarial_lane_authority_key",
     }
     candidate_snapshot_exports = {
         "EvolutionCandidateSnapshotError",
@@ -665,7 +681,9 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewComparisonError",
         "EvolutionSelfReviewComparisonExecutor",
     }
-    if name in adversarial_batch_request_exports:
+    if name in adversarial_sample_exports:
+        module_name = "adversarial_samples"
+    elif name in adversarial_batch_request_exports:
         module_name = "adversarial_batch_requests"
     elif name in adversarial_probe_contract_exports:
         module_name = "adversarial_probe_contracts"

@@ -47,6 +47,9 @@ from naumi_agent.evolution.adversarial_batch_requests import (
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
+from naumi_agent.evolution.adversarial_samples import (
+    EvolutionAdversarialSampleExecutor,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -912,6 +915,17 @@ class AgentEngine:
         )
         self.evolution_interventional_red_check_sample_executor = (
             self.evolution_interventional_red_sample_executor
+        )
+        self.evolution_adversarial_sample_executor = EvolutionAdversarialSampleExecutor(
+            workspace_root=paths.workspace_root,
+            store=self._harness_store,
+            lease_store=self.evolution_experiment_lease_store,
+            worktree_storage_dir=self._worktree_storage_dir,
+            profile_service=self.harness_service,
+            sandbox_eval_kernel=(
+                self.evolution_interventional_red_sample_executor
+                .sample_kernel.sandbox_eval_kernel
+            ),
         )
         self.evolution_interventional_red_cohort_executor = (
             EvolutionInterventionalRedCohortExecutor(

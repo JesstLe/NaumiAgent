@@ -11,6 +11,7 @@ from naumi_agent.harness.sandbox_eval import (
     HarnessSandboxEvalExecutionKernel,
     HarnessSandboxEvalRunAuthority,
     HarnessSandboxEvalSource,
+    _check_run_id,
 )
 
 
@@ -44,6 +45,34 @@ def _authority() -> HarnessSandboxEvalRunAuthority:
 
 async def _current() -> bool:
     return True
+
+
+def test_adversarial_run_id_binds_lane_authority_without_changing_red_identity() -> None:
+    red = _check_run_id(
+        "run",
+        "red",
+        0,
+        "unit",
+        authority_key="a" * 64,
+    )
+    first = _check_run_id(
+        "run",
+        "adversarial",
+        0,
+        "unit",
+        authority_key="a" * 64,
+    )
+    second = _check_run_id(
+        "run",
+        "adversarial",
+        0,
+        "unit",
+        authority_key="b" * 64,
+    )
+
+    assert red == "evored-0dcb65bb9911b66ff2a9e2529ee810f9"
+    assert first.startswith("hevaladversarial-")
+    assert first != second
 
 
 def test_sandbox_eval_rejects_cross_workspace_runner(tmp_path: Path) -> None:

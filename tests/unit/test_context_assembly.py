@@ -15,6 +15,9 @@ from naumi_agent.evolution.adversarial_batch_requests import (
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
+from naumi_agent.evolution.adversarial_samples import (
+    EvolutionAdversarialSampleExecutor,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -204,6 +207,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_adversarial_batch_request_builder,
         EvolutionAdversarialBatchRequestBuilder,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_sample_executor,
+        EvolutionAdversarialSampleExecutor,
     )
     assert isinstance(
         engine.evolution_baseline_cohort_request_builder,
