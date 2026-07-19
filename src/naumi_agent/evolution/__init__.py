@@ -14,6 +14,10 @@ if TYPE_CHECKING:
         capture_candidate_worktree_snapshot,
         revalidate_candidate_worktree_snapshot,
     )
+    from naumi_agent.evolution.comparison_kernel import (
+        EvolutionComparisonKernel,
+        EvolutionComparisonKernelError,
+    )
     from naumi_agent.evolution.evidence import EvolutionEvidence
     from naumi_agent.evolution.experiment_leases import (
         EvolutionExperimentLeaseManager,
@@ -44,6 +48,10 @@ if TYPE_CHECKING:
     from naumi_agent.evolution.interventional_cohort_kernel import (
         EvolutionInterventionalCohortKernel,
         EvolutionInterventionalCohortKernelError,
+    )
+    from naumi_agent.evolution.interventional_comparison import (
+        EvolutionInterventionalComparisonError,
+        EvolutionInterventionalComparisonExecutor,
     )
     from naumi_agent.evolution.interventional_green_cohort import (
         EvolutionInterventionalGreenCohortError,
@@ -226,6 +234,8 @@ __all__ = [
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
     "EvolutionCandidateWorktreeSnapshot",
+    "EvolutionComparisonKernel",
+    "EvolutionComparisonKernelError",
     "capture_candidate_worktree_snapshot",
     "revalidate_candidate_worktree_snapshot",
     "EvolutionCandidateEvent",
@@ -348,6 +358,8 @@ __all__ = [
     "EvolutionInterventionalGreenSampleError",
     "EvolutionInterventionalGreenSampleExecutor",
     "EvolutionInterventionalGreenSampleReceipt",
+    "EvolutionInterventionalComparisonError",
+    "EvolutionInterventionalComparisonExecutor",
     "EvolutionInterventionalCohortKernel",
     "EvolutionInterventionalCohortKernelError",
     "EvolutionInterventionalRunAuthority",
@@ -381,6 +393,10 @@ def __getattr__(name: str) -> object:
         "EvolutionCandidateWorktreeSnapshot",
         "capture_candidate_worktree_snapshot",
         "revalidate_candidate_worktree_snapshot",
+    }
+    comparison_kernel_exports = {
+        "EvolutionComparisonKernel",
+        "EvolutionComparisonKernelError",
     }
     evidence_exports = {
         "EvolutionEvidence",
@@ -560,6 +576,10 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalGreenSampleExecutor",
         "EvolutionInterventionalGreenSampleReceipt",
     }
+    interventional_comparison_exports = {
+        "EvolutionInterventionalComparisonError",
+        "EvolutionInterventionalComparisonExecutor",
+    }
     interventional_cohort_kernel_exports = {
         "EvolutionInterventionalCohortKernel",
         "EvolutionInterventionalCohortKernelError",
@@ -586,6 +606,8 @@ def __getattr__(name: str) -> object:
         module_name = "candidate"
     elif name in candidate_snapshot_exports:
         module_name = "candidate_snapshots"
+    elif name in comparison_kernel_exports:
+        module_name = "comparison_kernel"
     elif name in evidence_exports:
         module_name = "evidence"
     elif name in failure_attribution_exports:
@@ -636,6 +658,8 @@ def __getattr__(name: str) -> object:
         module_name = "interventional_green_cohort"
     elif name in interventional_green_sample_exports:
         module_name = "interventional_green_sample"
+    elif name in interventional_comparison_exports:
+        module_name = "interventional_comparison"
     elif name in interventional_cohort_kernel_exports:
         module_name = "interventional_cohort_kernel"
     elif name in interventional_sample_kernel_exports:
