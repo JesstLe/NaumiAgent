@@ -10,6 +10,7 @@ import pytest
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
     PermissionDecisionOutcome,
+    PermissionDecisionReceiptConflictError,
     PermissionDecisionReceiptStore,
     PermissionDecisionSource,
 )
@@ -253,3 +254,52 @@ async def test_tampered_contract_is_rejected_on_reopen(tmp_path: Path) -> None:
 
     with pytest.raises(RunDelegationGrantError, match="无法读取"):
         await RunDelegationGrantStore(store.db_path).get(issued.contract.grant_id)
+
+
+@pytest.mark.asyncio
+async def test_run_grant_issues_exact_short_child_after_parent_window(
+    tmp_path: Path,
+) -> None:
+    authority, request, parent, _lease, store, permissions, *_ = await _authority(
+        tmp_path
+    )
+    issued = await authority.issue(request, now=T1, ttl_seconds=1_200)
+
+    child = await permissions.issue_run_delegated(
+        run_grant_authority=authority,
+        run_grant_id=issued.contract.grant_id,
+        request_id="late-shell-child",
+        call_id="late-shell-child",
+        tool_name="bash_run",
+        tool_family="shell",
+        arguments={"argv": ["/usr/bin/true"]},
+        risk_level="high",
+        decided_at=T601,
+        ttl_seconds=120,
+    )
+
+    assert child.parent_receipt_id == parent.receipt_id
+    assert child.run_delegation_grant_id == issued.contract.grant_id
+    assert child.run_delegation_grant_sha256 == issued.contract.grant_sha256
+    assert child.expires_at == "2026-07-19T08:12:01+00:00"
+    assert await PermissionDecisionReceiptStore(permissions.db_path).get(
+        child.receipt_id
+    ) == child
+
+    await store.revoke(
+        grant_id=issued.contract.grant_id,
+        reason="user_cancelled",
+        revoked_at="2026-07-19T08:10:02+00:00",
+    )
+    with pytest.raises(PermissionDecisionReceiptConflictError, match="当前无效"):
+        await permissions.issue_run_delegated(
+            run_grant_authority=authority,
+            run_grant_id=issued.contract.grant_id,
+            request_id="revoked-shell-child",
+            call_id="revoked-shell-child",
+            tool_name="bash_run",
+            tool_family="shell",
+            arguments={"argv": ["/usr/bin/true"]},
+            risk_level="high",
+            decided_at="2026-07-19T08:10:03+00:00",
+        )
