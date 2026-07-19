@@ -36,6 +36,6 @@ idempotency key、sample run ID、H5a identity 与 receipt 保持原派生规则
 
 ## 下一步
 
-EVO-03.3c2b 使用同一 kernel：GREEN source 由 HAR-08.4d baseline+overlays 提供，metric 扫描读取
-EVO-03.3c1 immutable blobs，identity 复用 RED configuration/platform 并把 candidate fingerprint 标为 dirty，
-最后生成独立 GREEN sample receipt。
+EVO-03.3c2b1 已让 Candidate blobs 同时绑定 bytes/SHA-256/executable mode。EVO-03.3c2b2 使用同一
+kernel：GREEN source 由 HAR-08.4d baseline+overlays 提供，metric 扫描读取 immutable blobs，identity 复用
+RED configuration/platform 并把 candidate fingerprint 标为 dirty，最后生成独立 GREEN sample receipt。

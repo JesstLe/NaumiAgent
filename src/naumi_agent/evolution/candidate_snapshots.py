@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import stat
 import subprocess
 from dataclasses import dataclass
@@ -31,9 +32,25 @@ class EvolutionCandidateSnapshotError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class EvolutionCandidateSourceBlob:
+    path: str
+    content: bytes
+    sha256: str
+    executable: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.content, bytes):
+            raise TypeError("Candidate blob content 必须是 bytes。")
+        if hashlib.sha256(self.content).hexdigest() != self.sha256:
+            raise ValueError("Candidate blob SHA-256 与字节不一致。")
+        if not isinstance(self.executable, bool):
+            raise TypeError("Candidate blob executable 必须是 bool。")
+
+
+@dataclass(frozen=True, slots=True)
 class EvolutionCandidateWorktreeSnapshot:
     root: Path
-    blobs: tuple[tuple[str, bytes], ...]
+    blobs: tuple[EvolutionCandidateSourceBlob, ...]
     fingerprint: TreeFingerprint
 
 
@@ -135,7 +152,7 @@ def capture_candidate_worktree_snapshot(
             "candidate_fingerprint_mismatch",
             "Candidate worktree fingerprint 与 Plan path 集合不一致。",
         )
-    blobs: list[tuple[str, bytes]] = []
+    blobs: list[EvolutionCandidateSourceBlob] = []
     for item in validation_plan.files:
         path = root.joinpath(*PurePosixPath(item.path).parts)
         try:
@@ -149,6 +166,12 @@ def capture_candidate_worktree_snapshot(
             raise EvolutionCandidateSnapshotError(
                 "candidate_file_type_unsafe",
                 "Candidate 文件必须是普通文件。",
+            )
+        executable = _candidate_executable(root, item.path, item.operation)
+        if os.name != "nt" and bool(metadata.st_mode & stat.S_IXUSR) is not executable:
+            raise EvolutionCandidateSnapshotError(
+                "candidate_file_mode_mismatch",
+                "Candidate 文件 executable mode 已偏离 baseline/create authority。",
             )
         if not 0 <= metadata.st_size <= _MAX_SOURCE_BYTES:
             raise EvolutionCandidateSnapshotError(
@@ -170,7 +193,12 @@ def capture_candidate_worktree_snapshot(
                 "candidate_file_digest_mismatch",
                 "Candidate 文件与 Validation Plan after digest 不一致。",
             )
-        blobs.append((item.path, content))
+        blobs.append(EvolutionCandidateSourceBlob(
+            path=item.path,
+            content=content,
+            sha256=item.candidate_sha256,
+            executable=executable,
+        ))
     after = _fingerprint(root, "无法在快照读取后重新读取 candidate fingerprint。")
     if after != before:
         raise EvolutionCandidateSnapshotError(
@@ -227,6 +255,38 @@ def _parse_candidate_status(raw: bytes) -> dict[str, bytes]:
     return result
 
 
+def _candidate_executable(root: Path, path: str, operation: str) -> bool:
+    raw = _git(root, "ls-files", "--stage", "-z", "--", path)
+    if operation == "create":
+        if raw:
+            raise EvolutionCandidateSnapshotError(
+                "candidate_create_baseline_conflict",
+                "Create candidate path 已存在于 baseline index。",
+            )
+        return False
+    records = tuple(item for item in raw.split(b"\0") if item)
+    if len(records) != 1:
+        raise EvolutionCandidateSnapshotError(
+            "candidate_baseline_mode_missing",
+            "Modify candidate 缺少唯一 baseline file mode。",
+        )
+    try:
+        header, raw_path = records[0].split(b"\t", 1)
+        mode, _object_id, stage = header.split(b" ", 2)
+        decoded_path = raw_path.decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise EvolutionCandidateSnapshotError(
+            "candidate_baseline_mode_invalid",
+            "Candidate baseline index mode 无法验证。",
+        ) from exc
+    if decoded_path != path or stage != b"0" or mode not in {b"100644", b"100755"}:
+        raise EvolutionCandidateSnapshotError(
+            "candidate_baseline_mode_invalid",
+            "Candidate baseline index 不是 stage-0 普通文件。",
+        )
+    return mode == b"100755"
+
+
 def _fingerprint(root: Path, message: str) -> TreeFingerprint:
     try:
         return compute_tree_fingerprint(root)
@@ -267,6 +327,7 @@ def _git(root: Path, *args: str) -> bytes:
 
 __all__ = [
     "EvolutionCandidateSnapshotError",
+    "EvolutionCandidateSourceBlob",
     "EvolutionCandidateWorktreeSnapshot",
     "capture_candidate_worktree_snapshot",
     "revalidate_candidate_worktree_snapshot",

@@ -20,9 +20,10 @@ worktree storage，重新验证嵌套 artifact 后捕获：
 - 每个文件字节 SHA-256 等于 Plan `candidate_sha256`；
 - 读取前后 `TreeFingerprint` 完全相同。
 
-返回的 `EvolutionCandidateWorktreeSnapshot` 只在进程内持有 root、immutable blobs 与 fingerprint，不写入
-源码 artifact。`revalidate_candidate_worktree_snapshot()` 在扫描或 worker 执行之后再次核对 fingerprint，
-防止捕获后、H5a 持久化前发生并发漂移。
+返回的 `EvolutionCandidateWorktreeSnapshot` 只在进程内持有 root、typed immutable blobs 与 fingerprint，
+不写入源码 artifact。EVO-03.3c2b1 进一步让每个 blob 绑定内容摘要和从 baseline Git mode 推导的 executable
+语义。`revalidate_candidate_worktree_snapshot()` 在扫描或 worker 执行之后再次核对 fingerprint，防止捕获
+后、H5a 持久化前发生并发漂移。
 
 ## 迁移结果
 

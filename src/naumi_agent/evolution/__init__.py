@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from naumi_agent.evolution.candidate import EvolutionCandidateDraft
     from naumi_agent.evolution.candidate_snapshots import (
         EvolutionCandidateSnapshotError,
+        EvolutionCandidateSourceBlob,
         EvolutionCandidateWorktreeSnapshot,
         capture_candidate_worktree_snapshot,
         revalidate_candidate_worktree_snapshot,
@@ -207,6 +208,7 @@ __all__ = [
     "FailureAttributionCategory",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
+    "EvolutionCandidateSourceBlob",
     "EvolutionCandidateWorktreeSnapshot",
     "capture_candidate_worktree_snapshot",
     "revalidate_candidate_worktree_snapshot",
@@ -349,6 +351,7 @@ def __getattr__(name: str) -> object:
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
     candidate_snapshot_exports = {
         "EvolutionCandidateSnapshotError",
+        "EvolutionCandidateSourceBlob",
         "EvolutionCandidateWorktreeSnapshot",
         "capture_candidate_worktree_snapshot",
         "revalidate_candidate_worktree_snapshot",
