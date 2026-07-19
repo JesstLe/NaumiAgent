@@ -38,6 +38,9 @@ if TYPE_CHECKING:
         EvolutionInterventionalRedCheckSampleError,
         EvolutionInterventionalRedCheckSampleExecutor,
         EvolutionInterventionalRedCheckSampleReceipt,
+        EvolutionInterventionalRedSampleError,
+        EvolutionInterventionalRedSampleExecutor,
+        EvolutionInterventionalRedSampleReceipt,
     )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
@@ -276,6 +279,9 @@ __all__ = [
     "EvolutionInterventionalRedCheckSampleError",
     "EvolutionInterventionalRedCheckSampleExecutor",
     "EvolutionInterventionalRedCheckSampleReceipt",
+    "EvolutionInterventionalRedSampleError",
+    "EvolutionInterventionalRedSampleExecutor",
+    "EvolutionInterventionalRedSampleReceipt",
     "SelfReviewRedMetricSummary",
     "EvolutionSelfReviewGreenCohortError",
     "EvolutionSelfReviewGreenCohortExecutor",
@@ -445,6 +451,9 @@ def __getattr__(name: str) -> object:
         "EvolutionInterventionalRedCheckSampleError",
         "EvolutionInterventionalRedCheckSampleExecutor",
         "EvolutionInterventionalRedCheckSampleReceipt",
+        "EvolutionInterventionalRedSampleError",
+        "EvolutionInterventionalRedSampleExecutor",
+        "EvolutionInterventionalRedSampleReceipt",
     }
     self_review_green_cohort_exports = {
         "EvolutionSelfReviewGreenCohortError",

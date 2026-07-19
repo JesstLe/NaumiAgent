@@ -29,8 +29,8 @@ from naumi_agent.daemons.shell_worker import (
 from naumi_agent.daemons.tool_jobs import ToolJobStore
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.evolution.interventional_red_sample import (
-    EvolutionInterventionalRedCheckSampleError,
-    EvolutionInterventionalRedCheckSampleExecutor,
+    EvolutionInterventionalRedSampleError,
+    EvolutionInterventionalRedSampleExecutor,
 )
 from naumi_agent.evolution.validation_cohorts import (
     BASELINE_COHORT_REQUEST_POLICY,
@@ -123,13 +123,19 @@ async def _authority(tmp_path: Path):
         verifier="self_review_static",
         procedure="统计 broad_except。",
     )
+    candidate_source = (
+        b"try:\n"
+        b"    raise RuntimeError('candidate')\n"
+        b"except Exception:\n"
+        b"    pass\n"
+    )
     file = ValidationFileRequirement(
         path="sample.py",
         file_kind="python",
         required_checks=("unit",),
         operation="modify",
         baseline_sha256=hashlib.sha256(b"baseline\n").hexdigest(),
-        candidate_sha256=hashlib.sha256(b"candidate\n").hexdigest(),
+        candidate_sha256=hashlib.sha256(candidate_source).hexdigest(),
     )
     plan_payload = {
         "schema_version": 2,
@@ -268,7 +274,12 @@ async def test_interventional_red_executes_exact_revision_and_releases_authority
 ) -> None:
     _require_real_backend()
     root, trust, plan, profile_binding, request, metrics = await _authority(tmp_path)
-    (root / "sample.py").write_text("candidate\n")
+    (root / "sample.py").write_text(
+        "try:\n"
+        "    raise RuntimeError('candidate')\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
     runtime = tmp_path / "runtime"
     store = HarnessStore(tmp_path / "harness.db")
     permissions = PermissionDecisionReceiptStore(runtime / "permissions.db")
@@ -306,7 +317,7 @@ async def test_interventional_red_executes_exact_revision_and_releases_authority
         software_version="test",
         run_delegation_grant_authority=run_authority,
     )
-    executor = EvolutionInterventionalRedCheckSampleExecutor(
+    executor = EvolutionInterventionalRedSampleExecutor(
         workspace_root=root,
         store=store,
         permission_store=permissions,
@@ -340,9 +351,14 @@ async def test_interventional_red_executes_exact_revision_and_releases_authority
     assert receipt == repeated
     assert receipt.check_statuses == ("passed",)
     assert len(receipt.lifecycle_receipt_sha256) == 1
-    assert receipt.metrics_executed is False
+    assert receipt.metrics_executed is True
     stored = await store.get_eval_result(root, request.batch_id, request.suite_id, 0)
-    assert stored is not None and stored.result.passed == 1
+    assert stored is not None and stored.result.passed == 2
+    metric_case = stored.result.cases[1]
+    assert metric_case.metric_observations[0].metric == (
+        "self_review.broad_except.count"
+    )
+    assert metric_case.metric_observations[0].value == 0
     lease = await store.get_run_lease(
         workspace_root=root,
         run_kind=HarnessRunKind.RUNTIME,
@@ -369,7 +385,7 @@ async def test_interventional_red_rejects_profile_drift_before_authority_acquisi
         )
     )
     store = HarnessStore(tmp_path / "harness.db")
-    executor = EvolutionInterventionalRedCheckSampleExecutor(
+    executor = EvolutionInterventionalRedSampleExecutor(
         workspace_root=root,
         store=store,
         permission_store=None,  # type: ignore[arg-type]
@@ -380,7 +396,7 @@ async def test_interventional_red_rejects_profile_drift_before_authority_acquisi
     )
 
     with pytest.raises(
-        EvolutionInterventionalRedCheckSampleError,
+        EvolutionInterventionalRedSampleError,
         match="Profile 信任已失效",
     ) as captured:
         await executor.execute(

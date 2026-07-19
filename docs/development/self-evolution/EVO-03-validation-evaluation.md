@@ -64,9 +64,13 @@ Eval 和真实 Harness 检查产生。
   Profile trust，在精确 baseline commit/tree 上通过可撤销 Run Grant 和 ARC-04 Worker 执行单个 sample 的
   全部 Profile checks，写入既有 H5a，并绑定每项 lifecycle receipt digest；明确不执行 metric、不冒充完整
   cohort。详见 `EVO-03-2e-interventional-red-check-sample.md`。
+- EVO-03.2f Interventional RED Metric Sample：已实现。在 H5a 不可变键首次写入前，把 ARC-04 Profile-check
+  cases 与精确 baseline Git objects 上真实运行的 `self_review_static@1` typed observations 合为一个复合
+  Suite；Suite identity 绑定全部 authority，幂等读取复验 case/metric/lifecycle 完整性。详见
+  `EVO-03-2f-interventional-red-metric-sample.md`。
 - HAR-08.4a/4b/4c 与 ARC-04.3a/3b 已实现带生产权限委托、精确 baseline commit/tree 的单项真实 Sandbox
   Profile check，但 Request check/sample 编排与 candidate 对照尚未实现，因此不计为 EVO-03 interventional lane 完成。
 
-UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e 接入单 sample interventional check。完整 RED cohort、
-同环境 metric observation、candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未
-实现，因此 EVO-03 整体保持 partial。
+UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f 接入单 sample interventional check 与 ready metric。
+完整 RED cohort、candidate interventional lane、adversarial suite 与最终 Evaluation Receipt 仍未实现，因此
+EVO-03 整体保持 partial。
