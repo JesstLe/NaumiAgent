@@ -55,6 +55,7 @@ def test_load_valid_profile_returns_exact_digest_and_immutable_contract(
     assert snapshot.profile is not None
     assert snapshot.profile.checks[0].argv == ("uv", "run", "pytest", "-q")
     assert snapshot.profile.checks[0].provides == ("contract", "unit")
+    assert snapshot.profile.checks[0].adversarial_probes == ()
     assert snapshot.profile.knowledge.entrypoints == (
         "AGENTS.md",
         "docs/harness/index.md",
@@ -107,6 +108,12 @@ def test_missing_profile_is_actionable_non_error_state(tmp_path: Path) -> None:
         (
             "schema_version: 1\nchecks:\n"
             "  - {id: tests, argv: [uv], provides: [unit, unit]}\n",
+            "invalid_profile",
+        ),
+        (
+            "schema_version: 1\nchecks:\n"
+            "  - {id: tests, argv: [uv], "
+            "adversarial_probes: [boundary, boundary]}\n",
             "invalid_profile",
         ),
         (

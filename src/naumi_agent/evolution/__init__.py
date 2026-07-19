@@ -6,6 +6,17 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from naumi_agent.evolution.adversarial_probe_contracts import (
+        AdversarialProbeBlocker,
+        AdversarialProbeCheckBinding,
+        AdversarialProbeCoverage,
+        AdversarialProbeDefinition,
+        AdversarialProbeRequirement,
+        EvolutionAdversarialProbeContract,
+        EvolutionAdversarialProbeContractBuilder,
+        EvolutionAdversarialProbeContractError,
+        EvolutionAdversarialProbeRegistry,
+    )
     from naumi_agent.evolution.candidate import EvolutionCandidateDraft
     from naumi_agent.evolution.candidate_snapshots import (
         EvolutionCandidateSnapshotError,
@@ -226,6 +237,15 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "AdversarialProbeBlocker",
+    "AdversarialProbeCheckBinding",
+    "AdversarialProbeCoverage",
+    "AdversarialProbeDefinition",
+    "AdversarialProbeRequirement",
+    "EvolutionAdversarialProbeContract",
+    "EvolutionAdversarialProbeContractBuilder",
+    "EvolutionAdversarialProbeContractError",
+    "EvolutionAdversarialProbeRegistry",
     "EvolutionEvidence",
     "EvolutionFailureAttributionBuilder",
     "EvolutionFailureAttributionError",
@@ -393,6 +413,17 @@ def __getattr__(name: str) -> object:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
+    adversarial_probe_contract_exports = {
+        "AdversarialProbeBlocker",
+        "AdversarialProbeCheckBinding",
+        "AdversarialProbeCoverage",
+        "AdversarialProbeDefinition",
+        "AdversarialProbeRequirement",
+        "EvolutionAdversarialProbeContract",
+        "EvolutionAdversarialProbeContractBuilder",
+        "EvolutionAdversarialProbeContractError",
+        "EvolutionAdversarialProbeRegistry",
+    }
     candidate_snapshot_exports = {
         "EvolutionCandidateSnapshotError",
         "EvolutionCandidateSourceBlob",
@@ -612,7 +643,9 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewComparisonError",
         "EvolutionSelfReviewComparisonExecutor",
     }
-    if name in candidate_exports:
+    if name in adversarial_probe_contract_exports:
+        module_name = "adversarial_probe_contracts"
+    elif name in candidate_exports:
         module_name = "candidate"
     elif name in candidate_snapshot_exports:
         module_name = "candidate_snapshots"

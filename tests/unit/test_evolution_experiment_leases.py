@@ -16,6 +16,12 @@ import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
 import naumi_agent.evolution.validation_metric_bindings as metric_binding_module
+from naumi_agent.evolution.adversarial_probe_contracts import (
+    EvolutionAdversarialProbeContract,
+    EvolutionAdversarialProbeContractBuilder,
+    EvolutionAdversarialProbeContractError,
+    EvolutionAdversarialProbeRegistry,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -3997,6 +4003,39 @@ checks:
     provides: [unit, contract]
 """
 
+ADVERSARIAL_BINDING_PROFILE = VALIDATION_BINDING_PROFILE + """\
+  - id: adversarial_boundary
+    argv: [python, -m, pytest, -q, tests/adversarial/test_footer_boundary.py]
+    timeout_seconds: 120
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    adversarial_probes: [boundary]
+  - id: adversarial_platform
+    argv: [python, -m, pytest, -q, tests/adversarial/test_footer_platform.py]
+    timeout_seconds: 120
+    when_changed: ['src/**/ui/**/*.py']
+    required_for: [change]
+    adversarial_probes: [cross_platform]
+"""
+
+
+def test_adversarial_probe_registry_mechanically_covers_all_risk_dimensions() -> None:
+    requirements = EvolutionAdversarialProbeRegistry().requirements_for(
+        "src/naumi_agent/evolution/runtime/security_store_terminal.py"
+    )
+
+    assert tuple(item.kind for item in requirements) == (
+        "boundary",
+        "concurrency",
+        "cross_platform",
+        "recovery",
+        "reward_hacking",
+        "security",
+    )
+    assert next(
+        item for item in requirements if item.kind == "cross_platform"
+    ).platform_scope == "matrix"
+
 
 @pytest.mark.asyncio
 async def test_validation_profile_binding_requires_current_trust_and_unique_coverage(
@@ -4124,6 +4163,155 @@ async def _validation_binding_fixture(tmp_path: Path):
         workspace_root=workspace,
     )
     return workspace, contract, lease, plan, binding
+
+
+@pytest.mark.asyncio
+async def test_adversarial_probe_contract_binds_real_trusted_profile_without_execution(
+    tmp_path: Path,
+) -> None:
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path,
+        profile_text=ADVERSARIAL_BINDING_PROFILE,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "harness-trust.db")
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+    binding = await EvolutionValidationProfileBinder(trust_store).bind(
+        plan,
+        workspace_root=workspace,
+    )
+    builder = EvolutionAdversarialProbeContractBuilder(trust_store)
+
+    first = await builder.build(
+        validation_plan=plan,
+        profile_binding=binding,
+        workspace_root=workspace,
+    )
+    second = await builder.build(
+        validation_plan=plan,
+        profile_binding=binding,
+        workspace_root=workspace,
+        platform_identity=first.platform_identity,
+    )
+
+    assert first == second
+    assert first.probe_contract_id == f"evapc_{first.probe_contract_sha256[:24]}"
+    assert first.validation_plan_sha256 == plan.validation_plan_sha256
+    assert first.profile_binding_sha256 == binding.binding_sha256
+    assert first.candidate_files_sha256 == plan.candidate_files_sha256
+    assert tuple((item.kind, item.platform_scope) for item in first.requirements) == (
+        ("boundary", "current"),
+        ("cross_platform", "matrix"),
+    )
+    assert tuple(item.check_id for item in first.checks) == (
+        "adversarial_boundary",
+        "adversarial_platform",
+    )
+    assert first.coverage_complete is True
+    assert first.blockers == ()
+    assert first.har08_batch_required is True
+    assert first.runner_binding_status == "required"
+    assert first.execution_ready is False
+    assert "tests/adversarial" not in first.model_dump_json()
+
+    tampered = first.model_dump(mode="json")
+    tampered["coverage"][0]["check_id"] = "adversarial_platform"
+    with pytest.raises(ValidationError, match="capability|摘要"):
+        EvolutionAdversarialProbeContract.model_validate(tampered)
+
+
+@pytest.mark.asyncio
+async def test_adversarial_probe_contract_reports_missing_and_ambiguous_checks(
+    tmp_path: Path,
+) -> None:
+    missing_workspace, contract, lease, snapshot, receipt = (
+        await _validation_receipt_fixture(
+            tmp_path / "missing",
+            profile_text=VALIDATION_BINDING_PROFILE,
+        )
+    )
+    missing_plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    missing_trust = HarnessTrustStore(tmp_path / "missing-trust.db")
+    await missing_trust.trust(
+        missing_workspace,
+        snapshot.profile_sha256,
+        source="user_slash",
+    )
+    missing_binding = await EvolutionValidationProfileBinder(missing_trust).bind(
+        missing_plan,
+        workspace_root=missing_workspace,
+    )
+    missing = await EvolutionAdversarialProbeContractBuilder(missing_trust).build(
+        validation_plan=missing_plan,
+        profile_binding=missing_binding,
+        workspace_root=missing_workspace,
+    )
+
+    assert missing.coverage_complete is False
+    assert missing.coverage == ()
+    assert tuple((item.kind, item.code) for item in missing.blockers) == (
+        ("boundary", "probe_check_missing"),
+        ("cross_platform", "probe_check_missing"),
+    )
+
+    ambiguous_profile = ADVERSARIAL_BINDING_PROFILE + """\
+  - id: adversarial_boundary_second
+    argv: [python, -m, pytest, -q, tests/adversarial/test_footer_boundary_2.py]
+    when_changed: ['src/**/*.py']
+    required_for: [change]
+    adversarial_probes: [boundary]
+"""
+    workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
+        tmp_path / "ambiguous",
+        profile_text=ambiguous_profile,
+    )
+    plan = EvolutionValidationPlanner().plan(
+        contract=contract,
+        lease=lease,
+        source_snapshot=snapshot,
+        mutation_receipt=receipt,
+    )
+    trust_store = HarnessTrustStore(tmp_path / "ambiguous-trust.db")
+    await trust_store.trust(workspace, snapshot.profile_sha256, source="user_slash")
+    binding = await EvolutionValidationProfileBinder(trust_store).bind(
+        plan,
+        workspace_root=workspace,
+    )
+    ambiguous = await EvolutionAdversarialProbeContractBuilder(trust_store).build(
+        validation_plan=plan,
+        profile_binding=binding,
+        workspace_root=workspace,
+    )
+
+    assert ambiguous.coverage_complete is False
+    assert ambiguous.blockers[0].code == "probe_check_ambiguous"
+    assert ambiguous.blockers[0].candidate_check_ids == (
+        "adversarial_boundary",
+        "adversarial_boundary_second",
+    )
+
+    profile_path = workspace / ".naumi" / "harness.yaml"
+    profile_path.write_text(
+        profile_path.read_text(encoding="utf-8") + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(EvolutionAdversarialProbeContractError) as drifted:
+        await EvolutionAdversarialProbeContractBuilder(trust_store).build(
+            validation_plan=plan,
+            profile_binding=binding,
+            workspace_root=workspace,
+        )
+    assert drifted.value.code == "probe_profile_drifted"
 
 
 @pytest.mark.asyncio

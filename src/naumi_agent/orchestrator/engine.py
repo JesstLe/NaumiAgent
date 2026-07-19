@@ -41,6 +41,9 @@ from naumi_agent.daemons.tool_jobs import (
     ToolJobAuthority,
     ToolJobLifecycleAuthority,
 )
+from naumi_agent.evolution.adversarial_probe_contracts import (
+    EvolutionAdversarialProbeContractBuilder,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -880,6 +883,9 @@ class AgentEngine:
         self.evolution_validation_planner = EvolutionValidationPlanner()
         self.evolution_validation_profile_binder = EvolutionValidationProfileBinder(
             resources.harness_trust_store
+        )
+        self.evolution_adversarial_probe_contract_builder = (
+            EvolutionAdversarialProbeContractBuilder(resources.harness_trust_store)
         )
         self.evolution_baseline_cohort_request_builder = (
             EvolutionBaselineCohortRequestBuilder()

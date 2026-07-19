@@ -169,6 +169,17 @@ class HarnessCheckSpec(_StrictModel):
     provides: tuple[
         Literal["lint", "compile", "unit", "contract", "smoke"], ...
     ] = ()
+    adversarial_probes: tuple[
+        Literal[
+            "boundary",
+            "concurrency",
+            "security",
+            "recovery",
+            "cross_platform",
+            "reward_hacking",
+        ],
+        ...,
+    ] = ()
 
     @field_validator("id")
     @classmethod
@@ -207,6 +218,16 @@ class HarnessCheckSpec(_StrictModel):
     ) -> tuple[str, ...]:
         if len(values) != len(set(values)):
             raise ValueError("check provides 不能重复")
+        return tuple(sorted(values))
+
+    @field_validator("adversarial_probes")
+    @classmethod
+    def _validate_adversarial_probes(
+        cls,
+        values: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if len(values) != len(set(values)):
+            raise ValueError("check adversarial_probes 不能重复")
         return tuple(sorted(values))
 
 
