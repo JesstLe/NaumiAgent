@@ -41,10 +41,8 @@ workspace 以及当前 Run Lease owner/epoch/state/expiry。释放租约、epoch
 
 ## 尚未完成
 
-本切片只交付 run authority，不把它冒充已完成的 cohort executor。下一切片需要：
+本切片只交付 run authority，不把它冒充已完成的 cohort executor。UI-12.3b4 已完成前两项，当前还需要：
 
-1. 为短期 delegated permission receipt 增加精确 `run_grant_id` 绑定；
-2. 签发子回执和 delegated ExecutionGrant 前后都重新读取本 Store；
-3. Shell admission composer 接受任务局部 run grant context；
-4. 然后由 EVO-03 interventional RED executor 获取一个 Runtime Run Lease，顺序执行既有
+1. Shell admission composer 接受任务局部 run grant context；
+2. 然后由 EVO-03 interventional RED executor 获取一个 Runtime Run Lease，顺序执行既有
    `HarnessSandboxCheckRunner`，并在取消/终态释放 lease、撤销 grant。

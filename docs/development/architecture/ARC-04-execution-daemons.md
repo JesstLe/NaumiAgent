@@ -38,6 +38,8 @@
 - UI-12.3b3 已补充独立的有界 Run Delegation authority：长运行不再依赖放宽父回执 freshness，而是绑定
   父 digest、下游 scope 和 Harness Run Lease fence 并持续复验；ARC-04 下一切片需把该 authority 接入
   短期子回执与 Shell admission，不能让消费者自行续签或拼接授权链。
+- UI-12.3b4 已让 schema v4 child receipt 与 ExecutionGrant 在签发和 dispatch 阶段消费 Run Grant，并将
+  ExecutionGrant expiry 截断到 child expiry；ARC-04 剩余前置是把 authority 注入 Shell admission composer。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成。因此 ARC-04 保持 partial。
 

@@ -47,7 +47,7 @@
 ### UI-12.3b1 已实现：direct allow 回执与委托范围
 
 - policy/bypass 直接允许的受委托工具会在执行前形成持久回执，区分 Runtime actor 与来源；该能力最初由
-  schema v2 交付，当前新回执使用兼容的 schema v3；
+  schema v2 交付，当前新回执使用兼容的 schema v4；
 - Tool metadata 与回执共同冻结有限下游工具白名单；`harness_run_check` 当前只允许派生 `bash_run`；
 - policy ExecutionGrant 必须消费匹配的 policy receipt，旧 v1 回执保持只读兼容并惰性迁移；
 - 详细合同与未完成的子授权边界见 `UI-12-3b1-direct-allow-delegation-scope.md`。
@@ -58,7 +58,7 @@
 - delegated ExecutionGrant 会重新读取父子两层回执并复核白名单，而非信任调用方字符串；
 - HAR-08.4b 已通过可撤销、任务局部的 invocation context 把父回执交给生产 Sandbox Check，Tool 返回后
   包括已继承 ContextVar 的后台 Task 都不能继续读取该授权；
-- v1/v2 receipt 保持摘要兼容，Store 惰性升级到 schema v3；
+- v1/v2/v3 receipt 保持摘要兼容，Store 惰性升级到 schema v4；
 - 详细合同见 `UI-12-3b2-exact-child-authorization.md`。
 
 ### UI-12.3b3 已实现：有界 Run Delegation Grant
@@ -67,8 +67,15 @@
   workspace、下游 Tool scope 与 Harness Run Lease owner/epoch；
 - grant 最长 3600 秒且不晚于签发时 lease expiry；撤销、过期、lease release/takeover、父链或持久化篡改
   均失败关闭；
-- 现有短期子回执与 ExecutionGrant 上限没有放宽；下一切片才把 run grant 接入精确子回执和 Shell
-  admission，详见 `UI-12-3b3-bounded-run-delegation.md`。
+- 现有短期子回执与 ExecutionGrant 上限没有放宽；UI-12.3b4 已接入精确子回执，Shell admission 仍是
+  下一消费者，详见 `UI-12-3b3-bounded-run-delegation.md`。
+
+### UI-12.3b4 已实现：Run Grant 子回执与 ExecutionGrant 闭环
+
+- schema v4 child receipt 精确绑定 Run Grant id/digest，并在每次签发前重新验证 grant 与 lease fence；
+- delegated ExecutionGrant 签发和 dispatch 都重新验证 Run Grant；撤销立即阻断尚未 dispatch 的 grant；
+- ExecutionGrant expiry 现在不得晚于 child receipt expiry；旧 v1/v2/v3 receipt 保持摘要兼容；
+- Shell admission 尚待接入该 authority，详见 `UI-12-3b4-run-grant-child-execution-chain.md`。
 
 ### 尚未完成
 

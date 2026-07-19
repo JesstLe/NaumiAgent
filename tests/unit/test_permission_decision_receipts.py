@@ -66,7 +66,9 @@ async def test_issue_reopen_and_list_without_raw_arguments(tmp_path: Path) -> No
     assert receipt.authorizes_execution
     assert b"super-secret-token" not in store.db_path.read_bytes()
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == (
+            PERMISSION_DECISION_SCHEMA_VERSION
+        )
     if os.name != "nt":
         assert store.db_path.stat().st_mode & 0o777 == 0o600
 
@@ -260,6 +262,8 @@ async def test_v1_receipt_is_read_and_store_migrates_without_rewriting_it(
         payload.pop("parent_receipt_id")
         payload.pop("parent_receipt_sha256")
         payload.pop("expires_at")
+        payload.pop("run_delegation_grant_id")
+        payload.pop("run_delegation_grant_sha256")
         digest_payload = {key: value for key, value in payload.items() if key != "receipt_sha256"}
         payload["receipt_sha256"] = hashlib.sha256(
             json.dumps(
@@ -292,11 +296,13 @@ async def test_v1_receipt_is_read_and_store_migrates_without_rewriting_it(
 
     await _issue(reopened, call_id="call-2")
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == (
+            PERMISSION_DECISION_SCHEMA_VERSION
+        )
 
 
 @pytest.mark.asyncio
-async def test_v2_receipt_is_read_and_store_migrates_to_v3(tmp_path: Path) -> None:
+async def test_v2_receipt_is_read_and_store_migrates_to_v4(tmp_path: Path) -> None:
     store = PermissionDecisionReceiptStore(tmp_path / "decisions.db")
     receipt = await _issue(
         store,
@@ -312,6 +318,8 @@ async def test_v2_receipt_is_read_and_store_migrates_to_v3(tmp_path: Path) -> No
         payload["schema_version"] = 2
         for field in ("parent_receipt_id", "parent_receipt_sha256", "expires_at"):
             payload.pop(field)
+        payload.pop("run_delegation_grant_id")
+        payload.pop("run_delegation_grant_sha256")
         digest_payload = {
             key: value for key, value in payload.items() if key != "receipt_sha256"
         }
@@ -345,4 +353,76 @@ async def test_v2_receipt_is_read_and_store_migrates_to_v3(tmp_path: Path) -> No
     assert restored.delegated_tool_names == ("bash_run",)
     assert restored.parent_receipt_id == ""
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == (
+            PERMISSION_DECISION_SCHEMA_VERSION
+        )
+
+
+@pytest.mark.asyncio
+async def test_v3_child_receipt_is_read_and_store_migrates_to_v4(
+    tmp_path: Path,
+) -> None:
+    store = PermissionDecisionReceiptStore(tmp_path / "decisions.db")
+    parent = await _issue(
+        store,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        source=PermissionDecisionSource.POLICY,
+        actor=PermissionDecisionActor.RUNTIME,
+        delegated_tool_names=("bash_run",),
+    )
+    child = await store.issue_delegated(
+        parent_receipt_id=parent.receipt_id,
+        request_id="v3-child",
+        call_id="v3-child",
+        tool_name="bash_run",
+        tool_family="shell",
+        arguments={"argv": ["/usr/bin/true"]},
+        risk_level="high",
+        decided_at="2026-07-19T08:00:01+00:00",
+    )
+    with sqlite3.connect(store.db_path) as db:
+        payload = json.loads(
+            db.execute(
+                "SELECT receipt_json FROM permission_decisions WHERE receipt_id = ?",
+                (child.receipt_id,),
+            ).fetchone()[0]
+        )
+        payload["schema_version"] = 3
+        payload.pop("run_delegation_grant_id")
+        payload.pop("run_delegation_grant_sha256")
+        digest_payload = {
+            key: value for key, value in payload.items() if key != "receipt_sha256"
+        }
+        payload["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                digest_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+        db.execute(
+            "UPDATE permission_decisions SET receipt_sha256 = ?, receipt_json = ? "
+            "WHERE receipt_id = ?",
+            (
+                payload["receipt_sha256"],
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ),
+                child.receipt_id,
+            ),
+        )
+        db.execute("PRAGMA user_version = 3")
+
+    reopened = PermissionDecisionReceiptStore(store.db_path)
+    restored = await reopened.get(child.receipt_id)
+    assert restored is not None
+    assert restored.schema_version == 3
+    assert restored.run_delegation_grant_id == ""
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4

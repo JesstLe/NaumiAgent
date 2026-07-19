@@ -26,6 +26,11 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionReceiptStore,
     PermissionDecisionSource,
 )
+from naumi_agent.daemons.run_delegation_grants import (
+    RunDelegationGrantAuthority,
+    RunDelegationGrantRequest,
+    RunDelegationGrantStore,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
     WorkerIsolationContract,
@@ -308,6 +313,15 @@ async def test_delegated_grant_revalidates_parent_scope_and_exact_child_args(
     )
 
     assert issued.contract.source is ExecutionGrantSource.DELEGATED
+    assert issued.contract.expires_at == child.expires_at
+    expired = await authority.validate(
+        grant_id=issued.contract.grant_id,
+        request=authorized,
+        now="2026-07-19T00:00:33+00:00",
+    )
+    assert not expired.allowed
+    assert ExecutionGrantValidationReason.EXPIRED in expired.reasons
+    assert ExecutionGrantValidationReason.AUTHORIZATION_INVALID in expired.reasons
     with pytest.raises(ExecutionGrantConflictError, match="回执与执行请求不匹配"):
         await authority.issue(
             replace(authorized, arguments={"command": "printf changed"}),
@@ -316,6 +330,122 @@ async def test_delegated_grant_revalidates_parent_scope_and_exact_child_args(
             source=ExecutionGrantSource.DELEGATED,
             now=T2,
         )
+
+
+@pytest.mark.asyncio
+async def test_run_delegated_execution_revalidates_revocation_at_dispatch(
+    tmp_path: Path,
+) -> None:
+    (
+        _authority_without_run_grant,
+        execution_store,
+        registry,
+        harness,
+        contract,
+        lease,
+        decision_store,
+    ) = await _authority(tmp_path)
+    renewed = await harness.renew_run_lease(
+        workspace_root=tmp_path / "workspace",
+        run_kind=HarnessRunKind.TOOL,
+        run_id=lease.run_id,
+        owner_id=lease.owner_id,
+        epoch=lease.epoch,
+        now=T2,
+        lease_seconds=600,
+    )
+    assert renewed is not None
+    parent = await decision_store.issue(
+        request_id="long-parent",
+        session_id="session-a",
+        run_id="tool-run-a",
+        call_id="long-parent",
+        agent_name="main",
+        tool_name="evolution_run_baseline",
+        tool_family="evolution",
+        arguments={"cohort": "red"},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=T1,
+    )
+    run_store = RunDelegationGrantStore(
+        tmp_path / "runtime" / "run-delegation-grants.db"
+    )
+    run_authority = RunDelegationGrantAuthority(
+        store=run_store,
+        permission_store=decision_store,
+        harness_store=harness,
+        workspace_root=tmp_path / "workspace",
+    )
+    run_grant = await run_authority.issue(
+        RunDelegationGrantRequest(
+            idempotency_key="long-red-cohort",
+            parent_receipt_id=parent.receipt_id,
+            run_kind=HarnessRunKind.TOOL,
+            lease_owner_id=contract.instance_id,
+            lease_epoch=renewed.epoch,
+            delegated_tool_names=("bash_run",),
+        ),
+        now=T2,
+        ttl_seconds=600,
+    )
+    request = _request()
+    late = "2026-07-19T00:05:01+00:00"
+    child = await decision_store.issue_run_delegated(
+        run_grant_authority=run_authority,
+        run_grant_id=run_grant.contract.grant_id,
+        request_id=request.call_id,
+        call_id=request.call_id,
+        tool_name=request.tool_name,
+        tool_family="shell",
+        arguments=request.arguments,
+        risk_level="high",
+        decided_at=late,
+        ttl_seconds=120,
+    )
+    authorized = replace(request, authorization_reference=child.receipt_id)
+    authority = ExecutionGrantAuthority(
+        store=execution_store,
+        worker_registry=registry,
+        harness_store=harness,
+        permission_decision_store=decision_store,
+        workspace_root=tmp_path / "workspace",
+        run_delegation_grant_authority=run_authority,
+    )
+    issued = await authority.issue(
+        authorized,
+        decision=_policy_decision(),
+        permission_mode=PermissionMode.MODERATE,
+        source=ExecutionGrantSource.DELEGATED,
+        now=late,
+        ttl_seconds=120,
+    )
+    before_revoke = await authority.validate(
+        grant_id=issued.contract.grant_id,
+        request=authorized,
+        now="2026-07-19T00:05:02+00:00",
+    )
+    assert before_revoke.allowed
+
+    await run_store.revoke(
+        grant_id=run_grant.contract.grant_id,
+        reason="user_cancelled",
+        revoked_at="2026-07-19T00:05:03+00:00",
+    )
+    after_revoke = await authority.validate(
+        grant_id=issued.contract.grant_id,
+        request=authorized,
+        now="2026-07-19T00:05:04+00:00",
+    )
+    assert not after_revoke.allowed
+    assert (
+        ExecutionGrantValidationReason.AUTHORIZATION_INVALID
+        in after_revoke.reasons
+    )
 
 
 @pytest.mark.asyncio

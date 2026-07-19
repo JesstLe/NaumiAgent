@@ -27,6 +27,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionSource,
     permission_arguments_sha256,
 )
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantAuthority
 from naumi_agent.daemons.worker_contract import WorkerKind
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.harness.run_lease import HarnessRunKind, HarnessRunLeaseState
@@ -68,6 +69,7 @@ class ExecutionGrantValidationReason(StrEnum):
     LEASE_RELEASED = "lease_released"
     LEASE_EXPIRED = "lease_expired"
     LEASE_MISMATCH = "lease_mismatch"
+    AUTHORIZATION_INVALID = "authorization_invalid"
 
 
 class ExecutionGrantError(RuntimeError):
@@ -357,12 +359,14 @@ class ExecutionGrantAuthority:
         harness_store: HarnessStore,
         permission_decision_store: PermissionDecisionReceiptStore,
         workspace_root: str | Path,
+        run_delegation_grant_authority: RunDelegationGrantAuthority | None = None,
     ) -> None:
         self._store = store
         self._worker_registry = worker_registry
         self._harness_store = harness_store
         self._permission_decision_store = permission_decision_store
         self._workspace_root = Path(workspace_root).expanduser().resolve(strict=False)
+        self._run_delegation_grant_authority = run_delegation_grant_authority
 
     async def issue(
         self,
@@ -431,6 +435,30 @@ class ExecutionGrantAuthority:
                 or parent.run_id != receipt.run_id
             ):
                 raise ExecutionGrantConflictError("子权限回执的父授权链无效。")
+            if receipt.run_delegation_grant_id:
+                if self._run_delegation_grant_authority is None:
+                    raise ExecutionGrantConflictError(
+                        "Run delegated 回执缺少运行委托 authority。"
+                    )
+                run_validation = await self._run_delegation_grant_authority.validate(
+                    grant_id=receipt.run_delegation_grant_id,
+                    now=issued_at,
+                )
+                run_contract = run_validation.contract
+                if (
+                    not run_validation.allowed
+                    or run_contract is None
+                    or run_contract.grant_sha256
+                    != receipt.run_delegation_grant_sha256
+                    or run_contract.parent_receipt_id != parent.receipt_id
+                    or run_contract.parent_receipt_sha256 != parent.receipt_sha256
+                    or run_contract.session_id != receipt.session_id
+                    or run_contract.run_id != receipt.run_id
+                    or receipt.tool_name not in run_contract.delegated_tool_names
+                ):
+                    raise ExecutionGrantConflictError(
+                        "Run delegated 回执的运行委托链无效。"
+                    )
         receipt_age = issued - datetime.fromisoformat(receipt.decided_at)
         if receipt_age < timedelta(0) or receipt_age > timedelta(seconds=300):
             raise ExecutionGrantConflictError("权限决定回执已过期或来自未来时间。")
@@ -462,7 +490,10 @@ class ExecutionGrantAuthority:
         lease_expiry = datetime.fromisoformat(lease.expires_at)
         if lease_expiry <= issued:
             raise ExecutionGrantConflictError("Tool run lease 已过期。")
-        expires = min(issued + timedelta(seconds=ttl_seconds), lease_expiry)
+        expiry_candidates = [issued + timedelta(seconds=ttl_seconds), lease_expiry]
+        if receipt.source is PermissionDecisionSource.DELEGATED:
+            expiry_candidates.append(datetime.fromisoformat(receipt.expires_at))
+        expires = min(expiry_candidates)
         arguments_sha256 = execution_arguments_sha256(request.arguments)
         workspace_sha256 = hashlib.sha256(
             str(self._workspace_root).encode("utf-8")
@@ -534,6 +565,36 @@ class ExecutionGrantAuthority:
             reasons.append(ExecutionGrantValidationReason.EXPIRED)
         if not _request_matches(contract, request, workspace_root=self._workspace_root):
             reasons.append(ExecutionGrantValidationReason.REQUEST_MISMATCH)
+
+        receipt = await self._permission_decision_store.get(
+            contract.authorization_reference
+        )
+        if receipt is None:
+            reasons.append(ExecutionGrantValidationReason.AUTHORIZATION_INVALID)
+        elif receipt.source is PermissionDecisionSource.DELEGATED:
+            if datetime.fromisoformat(receipt.expires_at) <= datetime.fromisoformat(
+                checked_at
+            ):
+                reasons.append(ExecutionGrantValidationReason.AUTHORIZATION_INVALID)
+            if receipt.run_delegation_grant_id:
+                if self._run_delegation_grant_authority is None:
+                    reasons.append(ExecutionGrantValidationReason.AUTHORIZATION_INVALID)
+                else:
+                    run_validation = (
+                        await self._run_delegation_grant_authority.validate(
+                            grant_id=receipt.run_delegation_grant_id,
+                            now=checked_at,
+                        )
+                    )
+                    if (
+                        not run_validation.allowed
+                        or run_validation.contract is None
+                        or run_validation.contract.grant_sha256
+                        != receipt.run_delegation_grant_sha256
+                    ):
+                        reasons.append(
+                            ExecutionGrantValidationReason.AUTHORIZATION_INVALID
+                        )
 
         registration = await self._worker_registry.get_active(contract.worker_id)
         if (
