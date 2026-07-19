@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from naumi_agent.daemons.shell_worker import (
     ShellCommandRequest,
@@ -84,6 +84,28 @@ class HarnessSandboxCheckResult:
     duration_ms: int
     artifact_path: Path | None
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxSourceOverlay:
+    path: str
+    content: bytes
+    sha256: str
+    executable: bool = False
+
+    def __post_init__(self) -> None:
+        pure = PurePosixPath(self.path)
+        relative = Path(*pure.parts)
+        _validate_snapshot_path(relative)
+        if pure.as_posix() != self.path:
+            raise ValueError("Sandbox source overlay path 必须是规范 POSIX 相对路径。")
+        if not isinstance(self.content, bytes):
+            raise TypeError("Sandbox source overlay content 必须是 bytes。")
+        if not isinstance(self.executable, bool):
+            raise TypeError("Sandbox source overlay executable 必须是 bool。")
+        _require_sha256(self.sha256, field="source_overlay.sha256")
+        if hashlib.sha256(self.content).hexdigest() != self.sha256:
+            raise ValueError("Sandbox source overlay 摘要与字节不一致。")
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +193,9 @@ class HarnessSandboxCheckRunner:
         cancel_event: asyncio.Event | None = None,
         source_revision: str | None = None,
         expected_source_tree_sha256: str | None = None,
+        source_overlays: tuple[HarnessSandboxSourceOverlay, ...] = (),
+        overlay_source_sha256: str | None = None,
+        source_is_current: ProfileRevalidator | None = None,
     ) -> HarnessSandboxCheckResult:
         run_id = validate_run_id(run_id)
         if not isinstance(check, HarnessCheckSpec):
@@ -184,6 +209,17 @@ class HarnessSandboxCheckRunner:
             raise ValueError(
                 "source_revision 与 expected_source_tree_sha256 必须同时提供。"
             )
+        overlays = _validate_source_overlays(source_overlays)
+        if overlays:
+            if source_revision is None or overlay_source_sha256 is None or not callable(
+                source_is_current
+            ):
+                raise ValueError(
+                    "source overlays 必须绑定 revision、source digest 与复验回调。"
+                )
+            _require_sha256(overlay_source_sha256, field="overlay_source_sha256")
+        elif overlay_source_sha256 is not None or source_is_current is not None:
+            raise ValueError("无 source overlays 时不得提供 overlay source authority。")
         revision_snapshot: _GitRevisionSnapshot | None = None
         if not await profile_is_current():
             return _blocked(
@@ -218,7 +254,11 @@ class HarnessSandboxCheckRunner:
                     status=HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR,
                 )
         else:
-            source_before_sha256 = revision_snapshot.tree_sha256
+            source_before_sha256 = (
+                overlay_source_sha256
+                if overlays
+                else revision_snapshot.tree_sha256
+            )
         snapshot = (
             self.sandbox_root
             / f"{run_id}-{check.id}-{source_before_sha256[:12]}"
@@ -244,6 +284,7 @@ class HarnessSandboxCheckRunner:
                 source_tree_sha256=source_before_sha256,
                 profile_digest=profile_digest,
                 revision_snapshot=revision_snapshot,
+                source_overlays=overlays,
             )
             executable = _resolve_profile_executable(check.argv[0])
             artifact_identity = hashlib.sha256(
@@ -279,6 +320,17 @@ class HarnessSandboxCheckRunner:
                     source_tree_sha256=source_before_sha256,
                     snapshot_manifest_sha256=manifest_sha256,
                 )
+            if source_is_current is not None and not await source_is_current():
+                return _blocked(
+                    check=check,
+                    run_id=run_id,
+                    profile_digest=profile_digest,
+                    message="Candidate Snapshot 在 Sandbox admission 前已漂移，检查未执行。",
+                    source_revision=revision_snapshot.commit,
+                    source_tree_sha256=source_before_sha256,
+                    snapshot_manifest_sha256=manifest_sha256,
+                    status=HarnessSandboxCheckStatus.STALE,
+                )
             admitted = await admit_job(spec)
             _validate_admitted_job(admitted, spec=spec)
             execution = await admitted.coordinator.execute(
@@ -297,6 +349,7 @@ class HarnessSandboxCheckRunner:
                 profile_is_current=profile_is_current,
                 source_before_sha256=source_before_sha256,
                 revision_snapshot=revision_snapshot,
+                source_is_current=source_is_current,
                 manifest_sha256=manifest_sha256,
                 execution=execution,
             )
@@ -333,6 +386,7 @@ class HarnessSandboxCheckRunner:
         profile_is_current: ProfileRevalidator,
         source_before_sha256: str,
         revision_snapshot: _GitRevisionSnapshot | None,
+        source_is_current: ProfileRevalidator | None,
         manifest_sha256: str,
         execution: ShellJobExecutionResult,
     ) -> HarnessSandboxCheckResult:
@@ -349,6 +403,18 @@ class HarnessSandboxCheckRunner:
                 execution=execution,
                 status=HarnessSandboxCheckStatus.STALE,
                 message="Harness Profile 在 Sandbox 执行期间发生变化；结果已作废。",
+            )
+        if source_is_current is not None and not await source_is_current():
+            return _from_execution(
+                check=check,
+                run_id=run_id,
+                profile_digest=profile_digest,
+                source_revision=revision_snapshot.commit if revision_snapshot else None,
+                source_tree_sha256=source_before_sha256,
+                manifest_sha256=manifest_sha256,
+                execution=execution,
+                status=HarnessSandboxCheckStatus.STALE,
+                message="Candidate Snapshot 在 Sandbox 执行期间发生变化；结果已作废。",
             )
         if revision_snapshot is None:
             try:
@@ -436,6 +502,7 @@ class HarnessSandboxCheckRunner:
         source_tree_sha256: str,
         profile_digest: str,
         revision_snapshot: _GitRevisionSnapshot | None,
+        source_overlays: tuple[HarnessSandboxSourceOverlay, ...],
     ) -> str:
         snapshot.mkdir(mode=0o700)
         working_paths: tuple[Path, ...] = ()
@@ -456,12 +523,25 @@ class HarnessSandboxCheckRunner:
                 snapshot,
                 revision_snapshot,
             )
+        if source_overlays:
+            manifest_files, total_bytes = self._materialize_overlays(
+                snapshot,
+                manifest_files,
+                total_bytes,
+                source_overlays,
+            )
         manifest = {
             "schema_version": 2,
             "run_id": run_id,
             "check_id": check_id,
             "source_kind": (
-                "git_revision" if revision_snapshot is not None else "working_tree"
+                (
+                    "git_revision_overlay"
+                    if source_overlays
+                    else "git_revision"
+                )
+                if revision_snapshot is not None
+                else "working_tree"
             ),
             "source_revision": (
                 revision_snapshot.commit if revision_snapshot is not None else None
@@ -514,6 +594,35 @@ class HarnessSandboxCheckRunner:
                 raise ValueError("Sandbox snapshot 文件在复制期间发生变化。")
             manifest_files.append(_manifest_file(relative, size, digest))
         return manifest_files, total_bytes
+
+    def _materialize_overlays(
+        self,
+        snapshot: Path,
+        manifest_files: list[dict[str, object]],
+        total_bytes: int,
+        overlays: tuple[HarnessSandboxSourceOverlay, ...],
+    ) -> tuple[list[dict[str, object]], int]:
+        by_path = {str(item["path"]): item for item in manifest_files}
+        for overlay in overlays:
+            relative = Path(*PurePosixPath(overlay.path).parts)
+            previous = by_path.get(overlay.path)
+            previous_size = int(previous["size"]) if previous is not None else 0
+            updated_total = total_bytes - previous_size + len(overlay.content)
+            if updated_total < 0 or updated_total > self._max_snapshot_bytes:
+                raise ValueError("Sandbox snapshot overlay 后总字节数超过上限。")
+            destination = snapshot / relative
+            if destination.exists() and not destination.is_file():
+                raise ValueError("Sandbox source overlay 不能替换目录或特殊文件。")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(overlay.content)
+            if os.name != "nt":
+                destination.chmod(0o700 if overlay.executable else 0o600)
+            size, digest = _file_identity(destination)
+            if size != len(overlay.content) or digest != overlay.sha256:
+                raise ValueError("Sandbox source overlay 落盘字节与 authority 不一致。")
+            by_path[overlay.path] = _manifest_file(relative, size, digest)
+            total_bytes = updated_total
+        return [by_path[path] for path in sorted(by_path)], total_bytes
 
     def _materialize_revision(
         self,
@@ -928,6 +1037,19 @@ def _require_sha256(value: str, *, field: str) -> None:
         raise ValueError(f"{field} 必须是 SHA-256。")
 
 
+def _validate_source_overlays(
+    values: tuple[HarnessSandboxSourceOverlay, ...],
+) -> tuple[HarnessSandboxSourceOverlay, ...]:
+    if not isinstance(values, tuple) or len(values) > 16:
+        raise TypeError("source_overlays 必须是最多 16 项的 tuple。")
+    if any(not isinstance(item, HarnessSandboxSourceOverlay) for item in values):
+        raise TypeError("source_overlays 包含无效条目。")
+    paths = tuple(item.path for item in values)
+    if paths != tuple(sorted(set(paths))):
+        raise ValueError("source_overlays 必须按 path 排序且不得重复。")
+    return values
+
+
 def _paths_overlap(left: Path, right: Path) -> bool:
     return _is_relative_to(left, right) or _is_relative_to(right, left)
 
@@ -962,5 +1084,6 @@ __all__ = [
     "HarnessSandboxCheckResult",
     "HarnessSandboxCheckRunner",
     "HarnessSandboxCheckStatus",
+    "HarnessSandboxSourceOverlay",
     "SandboxJobAdmitter",
 ]

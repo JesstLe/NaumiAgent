@@ -50,4 +50,5 @@ Shell Worker 继续只消费完整 manifest digest，因此旧 admission/ToolJob
   Shell admission 生产接入；下一最小切片在 EVO-03 新建
   interventional RED sample executor：重新验证 Contract/Plan/Binding/Request，对每个 sample 顺序调用本
   Runner，并生成既有 HAR-08 typed evidence；不得另造 subprocess 或结果 Store；
-- Candidate GREEN 还需要从受管 Lease revision/patch 生成等价隔离 snapshot，之后才能形成成对 cohort。
+- HAR-08.4d 已在精确 baseline revision 上支持经过摘要校验的 candidate source overlays，并在 admission 前、
+  Worker 完成后复验外部 Candidate Snapshot，详见 `HAR-08-4d-exact-revision-source-overlays.md`。

@@ -67,6 +67,7 @@ from naumi_agent.harness.sandbox_checks import (
     AdmittedSandboxShellJob,
     HarnessSandboxCheckRunner,
     HarnessSandboxCheckStatus,
+    HarnessSandboxSourceOverlay,
 )
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
@@ -814,6 +815,167 @@ async def test_harness_profile_check_materializes_exact_git_revision(
             profile_is_current=trusted,
             admit_job=admit_job,
             source_revision=baseline_commit,
+        )
+
+
+@pytest.mark.asyncio
+async def test_harness_exact_revision_applies_authorized_candidate_overlays(
+    tmp_path: Path,
+) -> None:
+    _require_real_backend()
+    workspace = tmp_path / "overlay-workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    (workspace / "source.py").write_text("VALUE = 1\n")
+    subprocess.run(["git", "add", "."], cwd=workspace, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Harness Tests",
+            "-c",
+            "user.email=tests@example.com",
+            "commit",
+            "-qm",
+            "baseline",
+        ],
+        cwd=workspace,
+        check=True,
+    )
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tree_listing = subprocess.run(
+        ["git", "ls-tree", "-r", "-z", "--full-tree", revision],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    ).stdout
+    modified = b"VALUE = 2\n"
+    created = b"CANDIDATE = True\n"
+    overlays = (
+        HarnessSandboxSourceOverlay(
+            path="candidate.py",
+            content=created,
+            sha256=hashlib.sha256(created).hexdigest(),
+        ),
+        HarnessSandboxSourceOverlay(
+            path="source.py",
+            content=modified,
+            sha256=hashlib.sha256(modified).hexdigest(),
+        ),
+    )
+    with pytest.raises(ValueError, match="敏感路径"):
+        HarnessSandboxSourceOverlay(
+            path=".env",
+            content=b"SECRET=value\n",
+            sha256=hashlib.sha256(b"SECRET=value\n").hexdigest(),
+        )
+    candidate_digest = hashlib.sha256(b"candidate-fingerprint").hexdigest()
+    check = HarnessCheckSpec(
+        id="candidate",
+        argv=(
+            sys.executable,
+            "-c",
+            "import json; from pathlib import Path; "
+            "assert Path('source.py').read_text() == 'VALUE = 2\\n'; "
+            "assert Path('candidate.py').read_text() == 'CANDIDATE = True\\n'; "
+            "m=json.loads(Path('.naumi-sandbox-manifest.json').read_text()); "
+            "assert m['source_kind'] == 'git_revision_overlay'; "
+            f"assert m['source_tree_sha256'] == '{candidate_digest}'; "
+            "print('authorized candidate overlay')",
+        ),
+        timeout_seconds=10,
+    )
+    runner = HarnessSandboxCheckRunner(
+        workspace_root=workspace,
+        sandbox_root=(tmp_path / "overlay-sandboxes").resolve(),
+        artifact_root=(tmp_path / "overlay-artifacts").resolve(),
+    )
+    source_checks = 0
+
+    async def current() -> bool:
+        nonlocal source_checks
+        source_checks += 1
+        return True
+
+    async def admit_job(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+        return await _sandbox_job(tmp_path / "overlay-job", spec)
+
+    result = await runner.run(
+        run_id="overlay-run-a",
+        check=check,
+        profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+        profile_is_current=lambda: asyncio.sleep(0, result=True),
+        admit_job=admit_job,
+        source_revision=revision,
+        expected_source_tree_sha256=hashlib.sha256(tree_listing).hexdigest(),
+        source_overlays=overlays,
+        overlay_source_sha256=candidate_digest,
+        source_is_current=current,
+    )
+
+    assert result.status is HarnessSandboxCheckStatus.PASSED
+    assert result.source_revision == revision
+    assert result.source_tree_sha256 == candidate_digest
+    assert source_checks == 2
+    assert (workspace / "source.py").read_text() == "VALUE = 1\n"
+    assert not (workspace / "candidate.py").exists()
+
+    admitted = False
+
+    async def stale() -> bool:
+        return False
+
+    async def reject_admission(_spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+        nonlocal admitted
+        admitted = True
+        raise AssertionError("stale candidate must not reach admission")
+
+    stale_result = await runner.run(
+        run_id="overlay-run-stale",
+        check=check,
+        profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+        profile_is_current=lambda: asyncio.sleep(0, result=True),
+        admit_job=reject_admission,
+        source_revision=revision,
+        expected_source_tree_sha256=hashlib.sha256(tree_listing).hexdigest(),
+        source_overlays=overlays,
+        overlay_source_sha256=candidate_digest,
+        source_is_current=stale,
+    )
+    assert stale_result.status is HarnessSandboxCheckStatus.STALE
+    assert not admitted
+
+    with pytest.raises(ValueError, match="复验回调"):
+        await runner.run(
+            run_id="overlay-run-invalid",
+            check=check,
+            profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+            profile_is_current=lambda: asyncio.sleep(0, result=True),
+            admit_job=reject_admission,
+            source_revision=revision,
+            expected_source_tree_sha256=hashlib.sha256(tree_listing).hexdigest(),
+            source_overlays=overlays,
+            overlay_source_sha256=candidate_digest,
+        )
+
+    with pytest.raises(ValueError, match="排序"):
+        await runner.run(
+            run_id="overlay-run-unsorted",
+            check=check,
+            profile_digest=hashlib.sha256(b"trusted-profile").hexdigest(),
+            profile_is_current=lambda: asyncio.sleep(0, result=True),
+            admit_job=reject_admission,
+            source_revision=revision,
+            expected_source_tree_sha256=hashlib.sha256(tree_listing).hexdigest(),
+            source_overlays=tuple(reversed(overlays)),
+            overlay_source_sha256=candidate_digest,
+            source_is_current=current,
         )
 
 
