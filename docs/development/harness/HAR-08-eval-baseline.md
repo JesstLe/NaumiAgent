@@ -113,5 +113,8 @@
 - HAR-08.4e Governed Sandbox Eval Check Group Kernel：已实现。把父权限/Run Grant 最终复验、成组 ARC-04
   admission、逐项 cleanup 与 lifecycle 完整性下沉到 Harness；Interventional RED/GREEN 已迁移复用。详见
   `HAR-08-4e-governed-sandbox-eval-check-group.md`。
-- HAR-08.4 仍为 partial：通用 Suite/Batch coordinator 尚未切换到该隔离 kernel，也没有并行进度与
-  Linux/Windows CI 证据。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
+- HAR-08.4f Resumable Sandbox Batch Coordinator：已实现。连续 H5a 前缀、单一 lease/grant、逐 sample
+  Store-confirmed checkpoint、中断清理与跨 epoch 恢复已下沉到 Harness；Evolution cohort 仅保留兼容 adapter。
+  详见 `HAR-08-4f-resumable-sandbox-batch-coordinator.md`。
+- HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨 Batch admission/backpressure 与
+  Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
