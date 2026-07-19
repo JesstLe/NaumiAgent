@@ -46,8 +46,8 @@ opaque cursor 使用 canonical JSON + SHA-256 envelope，再做 URL-safe Base64 
 - catalog 混合排序索引在真实 SQLite 中存在；
 - Ruff、compileall、5 项 catalog 与 16 项 heartbeat/retention 定向测试通过，未运行全量测试。
 
-## 下一步
+## 后续衔接
 
-HAR-10.2f 可在独立 periodic service 中组合 catalog 与 HAR-10.2d prune：先读取当前 Bridge/活跃保护集合，再按配置的
-保留期执行有界清理并公开 receipt。调度失败不能影响 heartbeat producer，且不能复用 Session retention 的 lease
-却不声明新的工作负载语义。Doctor/New UI 展示也应作为另一个只读切片接入，避免在 catalog 内混入协议代码。
+HAR-10.2f1 已在独立 periodic service 中组合 catalog 与 HAR-10.2d prune，并声明独立 runtime RunLease、活跃保护、
+删除前续租和稳定回执。该核心仍未接入 Bridge，因此默认不会执行后台删除。HAR-10.2f2 再补配置、Bridge 生命周期与
+用户可见状态；Doctor/New UI 展示也应保持只读投影，避免在 catalog 内混入协议代码。
