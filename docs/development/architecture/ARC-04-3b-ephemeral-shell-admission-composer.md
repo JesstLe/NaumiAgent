@@ -32,5 +32,5 @@ Worker、Lease、Grant、ToolJob 身份。
 - 当前同一 Engine 内用 registration lock 串行分配 epoch；跨 Runtime 竞争由 Registry fail closed，未来
   Supervisor 需要数据库原子 epoch allocator；
 - HAR-08.4b 已让 `HarnessSandboxCheckRunner` 接收任务局部 parent receipt context，在 `finally` 调用 Composer
-  release，并使 Slash 与 Agent Tool 共享生产路径；下一步不再扩张 Shell 前置，应转向 Sandbox Suite/Batch
-  编排或 ARC-04.6 Supervisor 的最小消费者需求。
+  release，并使 Slash 与 Agent Tool 共享生产路径；HAR-08.4e 已让成组 Eval checks 复用同一 Composer，
+  下一步应转向通用 Sandbox Batch coordinator，而不是继续扩张 Shell 前置。

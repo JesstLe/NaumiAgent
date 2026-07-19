@@ -11,8 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import (
     RunDelegationGrantAuthority,
@@ -35,7 +33,12 @@ from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckResult,
     HarnessSandboxCheckRunner,
     HarnessSandboxCheckStatus,
-    HarnessSandboxSourceOverlay,
+)
+from naumi_agent.harness.sandbox_eval import (
+    HarnessSandboxEvalExecutionError,
+    HarnessSandboxEvalExecutionKernel,
+    HarnessSandboxEvalRunAuthority,
+    HarnessSandboxEvalSource,
 )
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
@@ -45,15 +48,8 @@ INTERVENTIONAL_CHECK_RUNNER = "evolution_profile_check@1"
 INTERVENTIONAL_SAMPLE_RUNNER = "evolution_interventional_red@1"
 
 
-class _StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
-
-
-class EvolutionInterventionalRunAuthority(_StrictModel):
-    parent_receipt_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-    run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-    grant_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-    grant_sha256: str = Field(pattern=_SHA256_RE)
+class EvolutionInterventionalRunAuthority(HarnessSandboxEvalRunAuthority):
+    """Compatibility name for the shared Harness Sandbox Eval authority."""
 
 
 class EvolutionInterventionalSampleKernelError(RuntimeError):
@@ -62,16 +58,9 @@ class EvolutionInterventionalSampleKernelError(RuntimeError):
         self.code = code
 
 
-type SourceCurrent = Callable[[], Awaitable[bool]]
-
-
 @dataclass(frozen=True, slots=True)
-class EvolutionInterventionalSampleSource:
-    revision: str
-    revision_tree_sha256: str
-    overlays: tuple[HarnessSandboxSourceOverlay, ...] = ()
-    overlay_source_sha256: str | None = None
-    source_is_current: SourceCurrent | None = None
+class EvolutionInterventionalSampleSource(HarnessSandboxEvalSource):
+    """Compatibility name for the shared Harness Sandbox Eval source."""
 
 
 type ExistingValidator = Callable[
@@ -109,6 +98,14 @@ class EvolutionInterventionalSampleKernel:
         self.sandbox_runner = sandbox_runner
         self.shell_admission_composer = shell_admission_composer
         self.now = now or (lambda: datetime.now(UTC).isoformat())
+        self.sandbox_eval_kernel = HarnessSandboxEvalExecutionKernel(
+            workspace_root=self.workspace_root,
+            permission_store=permission_store,
+            run_grant_authority=run_grant_authority,
+            sandbox_runner=sandbox_runner,
+            shell_admission_composer=shell_admission_composer,
+            now=self.now,
+        )
 
     async def execute(
         self,
@@ -169,25 +166,6 @@ class EvolutionInterventionalSampleKernel:
             authority = EvolutionInterventionalRunAuthority.model_validate(
                 run_authority.model_dump(mode="json")
             )
-            validation = await self.run_grant_authority.validate(
-                grant_id=authority.grant_id,
-                now=self.now(),
-            )
-            contract = validation.contract
-            if not (
-                validation.allowed
-                and contract is not None
-                and authority.parent_receipt_id == parent_receipt_id
-                and authority.run_id == parent.run_id == contract.run_id
-                and authority.grant_id == contract.grant_id
-                and authority.grant_sha256 == contract.grant_sha256
-                and contract.parent_receipt_id == parent_receipt_id
-                and "bash_run" in contract.delegated_tool_names
-            ):
-                raise EvolutionInterventionalSampleKernelError(
-                    "cohort_run_authority_invalid",
-                    f"Interventional {phase.upper()} cohort Run authority 已失效或不匹配。",
-                )
             grant_id = authority.grant_id
             grant_sha256 = authority.grant_sha256
         else:
@@ -230,51 +208,30 @@ class EvolutionInterventionalSampleKernel:
                 raise
             grant_id = grant.contract.grant_id
             grant_sha256 = grant.contract.grant_sha256
-        results: list[HarnessSandboxCheckResult] = []
         try:
             assert grant_id is not None and grant_sha256 is not None
-            for check in checks:
-                composed = None
-
-                async def admit(spec, *, _grant_id=grant_id):
-                    nonlocal composed
-                    composed = await self.shell_admission_composer.compose(
-                        parent_receipt_id=parent_receipt_id,
-                        spec=spec,
-                        run_grant_id=_grant_id,
-                    )
-                    return composed.admitted
-
-                try:
-                    result = await self.sandbox_runner.run(
-                        run_id=_sample_run_id(parent.run_id, phase, sample_index, check.id),
-                        check=check,
-                        profile_digest=request.profile_sha256,
-                        profile_is_current=lambda: self._profile_is_current(
-                            request,
-                            profile,
-                            phase=phase,
-                        ),
-                        admit_job=admit,
-                        source_revision=source.revision,
-                        expected_source_tree_sha256=source.revision_tree_sha256,
-                        source_overlays=source.overlays,
-                        overlay_source_sha256=source.overlay_source_sha256,
-                        source_is_current=source.source_is_current,
-                    )
-                    results.append(result)
-                finally:
-                    if composed is not None:
-                        await composed.release()
-            if not results or not all(
-                item.job_id and item.lifecycle_receipt_sha256 for item in results
-            ):
-                raise EvolutionInterventionalSampleKernelError(
-                    "project_code_not_executed",
-                    f"Interventional {phase.upper()} 未形成完整 ARC-04 Worker 执行证据。",
-                )
+            results = await self.sandbox_eval_kernel.execute(
+                lane=phase,
+                authority_key=authority_key,
+                parent_receipt_id=parent_receipt_id,
+                sample_index=sample_index,
+                checks=checks,
+                profile_digest=request.profile_sha256,
+                profile_is_current=lambda: self._profile_is_current(
+                    request,
+                    profile,
+                    phase=phase,
+                ),
+                source=source,
+                run_authority=HarnessSandboxEvalRunAuthority(
+                    parent_receipt_id=parent_receipt_id,
+                    run_id=parent.run_id,
+                    grant_id=grant_id,
+                    grant_sha256=grant_sha256,
+                ),
+            )
             suite = await build_suite(
-                results,
+                list(results),
                 "cohort" if run_authority is not None else "sample",
                 grant_sha256,
             )
@@ -290,6 +247,11 @@ class EvolutionInterventionalSampleKernel:
                 result=suite,
                 created_at=self.now(),
             )
+        except HarnessSandboxEvalExecutionError as exc:
+            raise EvolutionInterventionalSampleKernelError(
+                exc.code,
+                str(exc),
+            ) from exc
         finally:
             await self._cleanup_owned_authority(
                 owned_lease=owned_lease,
@@ -492,16 +454,6 @@ def _check_matches(check, expected, bound) -> bool:
         and _sha256_payload(list(check.argv)) == expected.argv_sha256 == bound.argv_sha256
         and check.timeout_seconds == expected.timeout_seconds == bound.timeout_seconds
     )
-
-
-def _sample_run_id(parent_run_id: str, phase: str, sample_index: int, check_id: str) -> str:
-    material = (
-        f"{parent_run_id}:{sample_index}:{check_id}"
-        if phase == "red"
-        else f"{parent_run_id}:green:{sample_index}:{check_id}"
-    )
-    digest = hashlib.sha256(material.encode()).hexdigest()
-    return f"evo{phase}-{digest[:32]}"
 
 
 def _sha256_payload(payload: object) -> str:
