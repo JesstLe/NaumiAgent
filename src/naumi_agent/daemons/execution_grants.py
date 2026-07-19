@@ -49,6 +49,7 @@ class ExecutionGrantSource(StrEnum):
     USER_CONFIRMATION = "user_confirmation"
     SESSION_GRANT = "session_grant"
     BYPASS = "bypass"
+    DELEGATED = "delegated"
 
 
 class ExecutionGrantState(StrEnum):
@@ -397,6 +398,10 @@ class ExecutionGrantAuthority:
                 PermissionDecisionSource.POLICY,
                 PermissionDecisionOutcome.POLICY_ALLOWED,
             ),
+            ExecutionGrantSource.DELEGATED: (
+                PermissionDecisionSource.DELEGATED,
+                PermissionDecisionOutcome.DELEGATED_ALLOWED,
+            ),
         }.get(source)
         if expected_receipt_source is None:
             raise ExecutionGrantConflictError("execution grant 来源不受支持。")
@@ -411,6 +416,21 @@ class ExecutionGrantAuthority:
             or receipt.arguments_sha256 != permission_arguments_sha256(request.arguments)
         ):
             raise ExecutionGrantConflictError("权限决定回执与执行请求不匹配。")
+        if receipt.source is PermissionDecisionSource.DELEGATED:
+            if datetime.fromisoformat(receipt.expires_at) <= issued:
+                raise ExecutionGrantConflictError("子权限回执已过期。")
+            parent = await self._permission_decision_store.get(
+                receipt.parent_receipt_id
+            )
+            if (
+                parent is None
+                or not parent.authorizes_execution
+                or parent.receipt_sha256 != receipt.parent_receipt_sha256
+                or receipt.tool_name not in parent.delegated_tool_names
+                or parent.session_id != receipt.session_id
+                or parent.run_id != receipt.run_id
+            ):
+                raise ExecutionGrantConflictError("子权限回执的父授权链无效。")
         receipt_age = issued - datetime.fromisoformat(receipt.decided_at)
         if receipt_age < timedelta(0) or receipt_age > timedelta(seconds=300):
             raise ExecutionGrantConflictError("权限决定回执已过期或来自未来时间。")
@@ -618,6 +638,9 @@ def _validate_authorization(
             or decision.requires_confirmation
         ):
             raise ValueError("policy grant 必须来自非 bypass 的直接允许决定。")
+    elif source is ExecutionGrantSource.DELEGATED:
+        if decision.outcome is not PermissionOutcome.ALLOW or decision.requires_confirmation:
+            raise ValueError("delegated grant 必须来自已允许的父工具决定。")
     elif source is ExecutionGrantSource.USER_CONFIRMATION:
         if decision.outcome is not PermissionOutcome.CONFIRM or not decision.requires_confirmation:
             raise ValueError("用户确认 grant 必须绑定待确认决定。")

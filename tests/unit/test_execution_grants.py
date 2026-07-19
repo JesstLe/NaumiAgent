@@ -264,6 +264,61 @@ async def test_policy_grant_requires_and_consumes_runtime_policy_receipt(
 
 
 @pytest.mark.asyncio
+async def test_delegated_grant_revalidates_parent_scope_and_exact_child_args(
+    tmp_path: Path,
+) -> None:
+    authority, *_, decision_store = await _authority(tmp_path)
+    request = _request()
+    parent = await decision_store.issue(
+        request_id="parent-call",
+        session_id=request.session_id,
+        run_id=request.run_id,
+        call_id="parent-call",
+        agent_name="main",
+        tool_name="harness_run_check",
+        tool_family="harness_run_check",
+        arguments={"check_id": "unit", "run_id": request.run_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=T1,
+    )
+    child = await decision_store.issue_delegated(
+        parent_receipt_id=parent.receipt_id,
+        request_id=request.call_id,
+        call_id=request.call_id,
+        tool_name=request.tool_name,
+        tool_family="shell",
+        arguments=request.arguments,
+        risk_level="high",
+        decided_at=T2,
+        ttl_seconds=30,
+    )
+    authorized = replace(request, authorization_reference=child.receipt_id)
+
+    issued = await authority.issue(
+        authorized,
+        decision=_policy_decision(),
+        permission_mode=PermissionMode.MODERATE,
+        source=ExecutionGrantSource.DELEGATED,
+        now=T2,
+    )
+
+    assert issued.contract.source is ExecutionGrantSource.DELEGATED
+    with pytest.raises(ExecutionGrantConflictError, match="回执与执行请求不匹配"):
+        await authority.issue(
+            replace(authorized, arguments={"command": "printf changed"}),
+            decision=_policy_decision(),
+            permission_mode=PermissionMode.MODERATE,
+            source=ExecutionGrantSource.DELEGATED,
+            now=T2,
+        )
+
+
+@pytest.mark.asyncio
 async def test_idempotent_retry_reuses_first_grant_and_conflicting_args_fail(
     tmp_path: Path,
 ) -> None:

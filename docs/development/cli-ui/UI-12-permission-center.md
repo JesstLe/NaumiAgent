@@ -46,15 +46,23 @@
 
 ### UI-12.3b1 已实现：direct allow 回执与委托范围
 
-- policy/bypass 直接允许的受委托工具会在执行前形成 schema v2 持久回执，区分 Runtime actor 与来源；
+- policy/bypass 直接允许的受委托工具会在执行前形成持久回执，区分 Runtime actor 与来源；该能力最初由
+  schema v2 交付，当前新回执使用兼容的 schema v3；
 - Tool metadata 与回执共同冻结有限下游工具白名单；`harness_run_check` 当前只允许派生 `bash_run`；
 - policy ExecutionGrant 必须消费匹配的 policy receipt，旧 v1 回执保持只读兼容并惰性迁移；
 - 详细合同与未完成的子授权边界见 `UI-12-3b1-direct-allow-delegation-scope.md`。
 
+### UI-12.3b2 已实现：精确子授权
+
+- 子回执绑定父 id/digest、同一 session/run、精确参数摘要与短期 expiry，并禁止二次委托；
+- delegated ExecutionGrant 会重新读取父子两层回执并复核白名单，而非信任调用方字符串；
+- v1/v2 receipt 保持摘要兼容，Store 惰性升级到 schema v3；
+- 详细合同见 `UI-12-3b2-exact-child-authorization.md`。
+
 ### 尚未完成
 
 - UI-12.2：可操作的 pending queue 与等待顺序。
-- UI-12.3b 后续：子授权、session grant 后续调用、Hook/plan block taxonomy、跨会话查询与
+- UI-12.3b 后续：session grant 后续调用、Hook/plan block taxonomy、跨会话查询与
   retention/export policy。
 - UI-12.4：针对单次检查结果的完整规则解释链。
 - UI-12.5：workspace scope 持久授权。
