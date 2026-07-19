@@ -40,7 +40,7 @@ identity、错误码、`cohort_finished` 撤销原因和幂等行为保持稳定
 
 ## 下一步
 
-EVO-03.3c2c2 以该内核编排 GREEN 连续 samples：每次执行仍由 GREEN sample executor 重验完整 RED H5a、
-active Lease 与 Candidate Snapshot；cohort completion receipt 还必须证明所有 GREEN sample 使用同一 candidate
-identity、同一 configuration/platform/seed/order，并支持中断前缀安全续跑。完成后才进入 interventional
-H5c comparator。
+EVO-03.3c2c2 已以该内核编排 GREEN 连续 samples：每轮一次完整 preflight，并由 GREEN sample executor 在
+真实执行边界继续重验 RED H5a、active Lease、Profile 与 Candidate Snapshot；completion receipt 证明所有
+GREEN samples 使用同一 candidate identity、configuration/platform/seed/order，并支持中断前缀安全续跑。
+下一步进入 interventional H5c comparator。

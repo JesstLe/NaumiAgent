@@ -32,6 +32,10 @@ from naumi_agent.evolution.experiment_leases import (
     ExperimentLeaseState,
     ExperimentWorktreeLease,
 )
+from naumi_agent.evolution.interventional_green_cohort import (
+    EvolutionInterventionalGreenCohortError,
+    EvolutionInterventionalGreenCohortExecutor,
+)
 from naumi_agent.evolution.interventional_green_request import (
     EvolutionInterventionalGreenCohortRequestBuilder,
     EvolutionInterventionalGreenRequestError,
@@ -123,6 +127,12 @@ class _AdvancingSampleExecutor:
         if self.calls == 1:
             self.clock.value += timedelta(seconds=301)
         return result
+
+    async def revalidate_cohort_authority(self, **kwargs):
+        return await self.delegate.revalidate_cohort_authority(**kwargs)
+
+    async def validate_cohort_prefix(self, **kwargs):
+        return await self.delegate.validate_cohort_prefix(**kwargs)
 
 
 class _LeaseStore:
@@ -729,8 +739,52 @@ async def test_interventional_cohorts_reuse_authority_and_execute_candidate_over
             lease=lease,
         )
     assert captured.value.code == "green_sample_authority_invalid"
+    advancing_green = _AdvancingSampleExecutor(
+        green_executor,
+        clock,
+        fail_on_call=2,
+    )
+    green_cohort = EvolutionInterventionalGreenCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=advancing_green,  # type: ignore[arg-type]
+        now=clock,
+        token=lambda: "c" * 32,
+    )
+    with pytest.raises(EvolutionInterventionalGreenCohortError) as captured:
+        await green_cohort.execute(
+            parent_receipt_id="must-not-acquire-cohort-authority",
+            green_request=green.model_copy(update={"candidate_revision": 2}),
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=lease,
+        )
+    assert captured.value.code == "green_cohort_authority_invalid"
+    with pytest.raises(RuntimeError, match="simulated cohort interruption"):
+        await green_cohort.execute(
+            parent_receipt_id=green_parent.receipt_id,
+            green_request=green,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=lease,
+        )
+    green_prefix = await store.list_eval_results(
+        root,
+        green.batch_id,
+        green.suite_id,
+        limit=6,
+    )
+    assert tuple(item.sample_index for item in green_prefix) == (0,)
     green_receipt = await green_executor.execute(
-        parent_receipt_id=green_parent.receipt_id,
+        parent_receipt_id="not-needed-for-existing-green",
         sample_index=0,
         green_request=green,
         baseline_request=request,
@@ -780,9 +834,94 @@ async def test_interventional_cohorts_reuse_authority_and_execute_candidate_over
         final_grant = db.execute(
             "SELECT state, revoke_reason FROM run_delegation_grants ORDER BY rowid DESC LIMIT 1"
         ).fetchone()
-    assert final_grant == ("revoked", "sample_finished")
+    assert final_grant == ("revoked", "cohort_finished")
+
+    resumed_green_parent = await permissions.issue(
+        request_id="green-parent-resumed",
+        session_id="session-green",
+        run_id="run-green-resumed",
+        call_id="green-parent-resumed",
+        agent_name="main",
+        tool_name="evolution_run_candidate",
+        tool_family="evolution",
+        arguments={"request_id": green.request_id},
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="high",
+        delegated_tool_names=("bash_run",),
+        decided_at=clock(),
+    )
+    resumed_green = EvolutionInterventionalGreenCohortExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=green_executor,
+        now=clock,
+        token=lambda: "d" * 32,
+    )
+    green_cohort_receipt = await resumed_green.execute(
+        parent_receipt_id=resumed_green_parent.receipt_id,
+        green_request=green,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+    repeated_green_cohort = await resumed_green.execute(
+        parent_receipt_id="not-needed-after-green-completion",
+        green_request=green,
+        baseline_request=request,
+        metric_binding=metrics,
+        validation_plan=plan,
+        profile_binding=profile_binding,
+        red_receipt=receipt,
+        lease=lease,
+    )
+    assert green_cohort_receipt == repeated_green_cohort
+    assert green_cohort_receipt.persisted_samples == 5
+    assert green_cohort_receipt.metrics[0].sample_values == (1, 1, 1, 1, 1)
+    assert green_cohort_receipt.checks[0].failed == 5
+    assert len(green_cohort_receipt.cohort_run_grant_sha256) == 2
+    assert len(set(green_cohort_receipt.sample_receipt_sha256)) == 5
+    resumed_green_lease = await store.get_run_lease(
+        workspace_root=root,
+        run_kind=HarnessRunKind.RUNTIME,
+        run_id=resumed_green_parent.run_id,
+    )
+    assert (
+        resumed_green_lease is not None
+        and resumed_green_lease.state is HarnessRunLeaseState.RELEASED
+    )
+    with sqlite3.connect(runtime / "run-grants.db") as db:
+        all_grants = db.execute(
+            "SELECT state, revoke_reason FROM run_delegation_grants ORDER BY rowid"
+        ).fetchall()
+    assert all_grants == [("revoked", "cohort_finished")] * 4
+    with pytest.raises(ValueError):
+        type(green_cohort_receipt).model_validate(
+            green_cohort_receipt.model_copy(
+                update={"persisted_samples": 4}
+            ).model_dump(mode="json")
+        )
 
     (candidate_root / "sample.py").write_text(candidate_source + "# drift\n")
+    with pytest.raises(EvolutionInterventionalGreenCohortError) as captured:
+        await resumed_green.execute(
+            parent_receipt_id="not-needed-for-stale-green-cohort",
+            green_request=green,
+            baseline_request=request,
+            metric_binding=metrics,
+            validation_plan=plan,
+            profile_binding=profile_binding,
+            red_receipt=receipt,
+            lease=lease,
+        )
+    assert captured.value.code == "candidate_file_digest_mismatch"
     with pytest.raises(EvolutionInterventionalGreenSampleError) as captured:
         await green_executor.execute(
             parent_receipt_id="not-needed-for-stale-green",

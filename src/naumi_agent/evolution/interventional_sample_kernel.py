@@ -297,6 +297,22 @@ class EvolutionInterventionalSampleKernel:
                 run_id=parent.run_id,
             )
 
+    async def current_checks(
+        self,
+        baseline_request: EvolutionBaselineCohortRequest,
+        profile_binding: EvolutionValidationProfileBinding,
+        *,
+        phase: Literal["red", "green"],
+    ) -> tuple[HarnessCheckSpec, ...]:
+        """Revalidate current Profile trust and return the exact bound check set."""
+        request = EvolutionBaselineCohortRequest.model_validate(
+            baseline_request.model_dump(mode="json")
+        )
+        profile = EvolutionValidationProfileBinding.model_validate(
+            profile_binding.model_dump(mode="json")
+        )
+        return await self._current_checks(request, profile, phase=phase)
+
     async def _current_checks(self, request, profile, *, phase: str):
         status = await self.profile_service.status()
         if not status.trusted or status.snapshot.profile is None:
