@@ -9,8 +9,14 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.daemons.permission_decisions import (
+    PermissionDecisionActor,
+    PermissionDecisionOutcome,
+    PermissionDecisionSource,
+)
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ClientEventType
 
@@ -71,16 +77,21 @@ async def test_real_engine_bridge_node_permission_snapshot(tmp_path: Path) -> No
     session = Session(id="permission-real-session", workspace_root=str(tmp_path))
     engine._session = session
     engine._permission_grant_store.create(session.id, "shell", "perm-source")
-    engine._append_permission_bubble(
-        {
-            "request_id": "history-real",
-            "call_id": "history-real",
-            "session_id": session.id,
-            "agent_name": "main",
-            "tool_name": "file_write",
-            "status": "allowed",
-            "reason": "用户已允许写入定向测试文件。",
-        }
+    await engine._permission_decision_store.issue(
+        request_id="history-real",
+        session_id=session.id,
+        run_id="run-history-real",
+        call_id="history-real",
+        agent_name="main",
+        tool_name="file_write",
+        tool_family="filesystem",
+        arguments={"path": "target.txt"},
+        outcome=PermissionDecisionOutcome.ALLOW_ONCE,
+        actor=PermissionDecisionActor.USER,
+        source=PermissionDecisionSource.USER_CONFIRMATION,
+        permission_mode=PermissionMode.MODERATE,
+        risk_level="medium",
+        decided_at="2026-07-21T12:00:00+00:00",
     )
     writer = io.StringIO()
     bridge = JsonlEngineBridge(engine, config_path="config.yaml")
