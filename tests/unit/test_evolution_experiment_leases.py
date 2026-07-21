@@ -631,9 +631,6 @@ async def test_source_snapshot_binds_clean_tree_profile_config_and_tools(
     assert all(tool.naumi_version for tool in first.tools)
     assert first.source_ready is True
     assert first.execution_ready is False
-    assert adversarial_lane_authority_key(first, 1) != (
-        adversarial_lane_authority_key(first, 2)
-    )
 
 
 @pytest.mark.asyncio
@@ -4440,6 +4437,9 @@ async def test_adversarial_batch_request_freezes_real_red_green_platform_matrix(
         ("macos", "green"),
         ("windows", "red"),
         ("windows", "green"),
+    )
+    assert adversarial_lane_authority_key(first, first.lanes[0].order) != (
+        adversarial_lane_authority_key(first, first.lanes[1].order)
     )
     assert tuple(item.order for item in first.probes) == (1, 2)
     assert tuple(item.check_id for item in first.checks) == (
