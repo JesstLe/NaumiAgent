@@ -97,7 +97,7 @@ def test_configure_default_creates_project_naumi_config(
 
 
 def test_configure_help_does_not_offer_plaintext_key_argument() -> None:
-    result = runner.invoke(app, ["configure", "--help"])
+    result = runner.invoke(app, ["configure", "--help"], terminal_width=120)
 
     assert result.exit_code == 0
     assert "--api-key-stdin" in result.output
