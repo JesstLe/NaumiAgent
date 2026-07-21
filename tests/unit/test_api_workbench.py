@@ -2703,6 +2703,10 @@ async def test_workbench_event_stream_can_send_initial_snapshot_on_connect() -> 
             "failures": [],
             "events": [],
             "worktrees": [],
+            "worktrees_status": "ready",
+            "worktrees_code": "",
+            "worktrees_total": 0,
+            "worktrees_truncated": False,
         },
     }
     assert websocket.sent_json[-1] == {"type": "refresh_complete", "count": 1}
