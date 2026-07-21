@@ -41,13 +41,13 @@ assert_cli_contains:
   - team handoff
   - planner
   - renderer
-  - subagent completed
+  - 子智能体 已完成
   - ui-reviewer
   - recovery completed
 assert_tui_contains:
   - todo 已更新
   - team handoff
-  - subagent completed
+  - 子智能体 已完成
   - ui-reviewer
   - 恢复流程：completed
 min_history_lines: 3
