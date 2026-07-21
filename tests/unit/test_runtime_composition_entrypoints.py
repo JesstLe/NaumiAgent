@@ -27,6 +27,7 @@ async def test_api_lifespan_uses_root_and_shuts_down(
     engine = SimpleNamespace(
         chat_run_store=object(),
         set_permission_confirmer=lambda _callback: None,
+        start_long_running_services=AsyncMock(return_value=("recovered",)),
         shutdown=AsyncMock(),
     )
     config = SimpleNamespace()
@@ -37,5 +38,7 @@ async def test_api_lifespan_uses_root_and_shuts_down(
     async with api_app.lifespan(app):
         assert app.state.engine is engine
         assert app.state.config is config
+        assert app.state.session_reconciliation_recovery == ("recovered",)
 
+    engine.start_long_running_services.assert_awaited_once()
     engine.shutdown.assert_awaited_once()
