@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from textual.pilot import Pilot
-from textual.widgets import Input
+from textual.widgets import Button, Input
 
 from naumi_agent.config.settings import (
     AppConfig,
@@ -1011,7 +1011,9 @@ class TestNaumiApp:
                     app.screen.payload,
                     ensure_ascii=False,
                 )
-                await pilot.click(f"#{button_id}")
+                button = app.screen.query_one(f"#{button_id}", Button)
+                button.focus()
+                await pilot.press("enter")
                 observed.append(
                     await asyncio.wait_for(
                         task,
