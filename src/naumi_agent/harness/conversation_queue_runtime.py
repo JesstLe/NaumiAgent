@@ -361,15 +361,18 @@ class DurableConversationQueueAuthority:
             raise ConversationQueueClaimError(
                 "排队消息已经跨过派发边界，不能按未执行消息取消。"
             )
-        return await self.store.finish_queued_conversation(
-            workspace_root=self.workspace_root,
-            session_id=self.session_id,
-            request_id=item.request_id,
-            state="cancelled",
-            terminal_reason=reason,
-            updated_at=now or _utc_now(),
-            require_unclaimed_run_id=self.claim_run_id(item.request_id),
-        )
+        try:
+            return await self.store.finish_queued_conversation(
+                workspace_root=self.workspace_root,
+                session_id=self.session_id,
+                request_id=item.request_id,
+                state="cancelled",
+                terminal_reason=reason,
+                updated_at=now or _utc_now(),
+                require_unclaimed_run_id=self.claim_run_id(item.request_id),
+            )
+        except HarnessStoreConflictError as exc:
+            raise ConversationQueueClaimError(str(exc)) from exc
 
     async def cancel_unclaimed_request(
         self,
