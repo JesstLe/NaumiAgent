@@ -1129,6 +1129,16 @@ class TestNaumiApp:
         assert authority is not None
         authority.owner_renew_interval_seconds = 0.02
         observed: list[str] = []
+        renew_committed = asyncio.Event()
+        original_renew = authority.renew
+
+        async def renew_then_wait_for_cancellation(*, record):
+            renewed = await original_renew(record=record)
+            renew_committed.set()
+            await asyncio.Event().wait()
+            return renewed
+
+        authority.renew = renew_then_wait_for_cancellation
 
         async def begin(interaction_id: str, _request: dict[str, object]) -> None:
             record = await store.get_interaction(
@@ -1176,9 +1186,10 @@ class TestNaumiApp:
             assert observed == ["created"]
             await _wait_for_ui_condition(
                 pilot,
-                owner_lease_renewed,
-                description="持久交互 owner 续租",
+                lambda: renew_committed.is_set(),
+                description="持久交互 owner 已提交但尚未回写的续租",
             )
+            assert await owner_lease_renewed()
             renewed = await store.get_interaction(
                 workspace_root=tmp_path,
                 interaction_id="ask-tui-durable",
