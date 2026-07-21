@@ -46,9 +46,16 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
         "harness_doctor",
         "harness_explain",
         "harness_replay",
+        "harness_eval",
+        "harness_eval_replay",
+        "harness_eval_baseline",
+        "harness_eval_batch",
+        "harness_eval_baseline_promote",
+        "harness_eval_compare",
         "harness_read_knowledge",
         "harness_run_check",
     ]
+    assert all(item._service is service for item in tools)  # noqa: SLF001
     assert tool.metadata.read_only
     assert tool.metadata.concurrency_safe
     assert tool.metadata.path_argument_names == ("path",)
