@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from typer.main import get_command
 from typer.testing import CliRunner
 
 import naumi_agent.config.configurator as configurator
@@ -97,8 +98,14 @@ def test_configure_default_creates_project_naumi_config(
 
 
 def test_configure_help_does_not_offer_plaintext_key_argument() -> None:
-    result = runner.invoke(app, ["configure", "--help"], terminal_width=120)
+    result = runner.invoke(app, ["configure", "--help"])
+    configure = get_command(app).commands["configure"]
+    option_names = {
+        option_name
+        for parameter in configure.params
+        for option_name in getattr(parameter, "opts", ())
+    }
 
     assert result.exit_code == 0
-    assert "--api-key-stdin" in result.output
-    assert "--api-key " not in result.output
+    assert "--api-key-stdin" in option_names
+    assert "--api-key" not in option_names
