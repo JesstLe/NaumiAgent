@@ -166,14 +166,20 @@ async def test_textual_agents_slash_route_and_permission_modal_priority() -> Non
 @pytest.mark.asyncio
 async def test_textual_bypass_confirmation_enables_full_permission_mode() -> None:
     engine = AgentEngine(AppConfig())
+    session = await engine.get_or_create_session()
     app = NaumiApp(engine)
 
     async with app.run_test(size=(110, 34)) as pilot:
-        execution = asyncio.create_task(engine._execute_tool(ToolCall(
-            id="tui-bypass",
-            name="bash_run",
-            arguments='{"command": "printf tui-bypass"}',
-        )))
+        execution = asyncio.create_task(
+            engine.execute_tool(
+                ToolCall(
+                    id="tui-bypass",
+                    name="bash_run",
+                    arguments='{"command": "printf tui-bypass"}',
+                ),
+                agent_name="tui",
+            )
+        )
         await pilot.pause(0.05)
         assert isinstance(app.screen, PermissionConfirmScreen)
         assert "全权限" in str(app.screen.query_one("#bypass", Button).label)
@@ -184,6 +190,9 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
         assert "tui-bypass" in result.content
         assert engine.runtime_mode is AgentRuntimeMode.BYPASS
         assert engine.permission_mode is PermissionMode.BYPASS
+        receipt = engine.list_permission_decision_receipts()[-1]
+        assert receipt.session_id == session.id
+        assert receipt.agent_name == "tui"
 
 
 def _snapshot() -> AgentControlSnapshot:
