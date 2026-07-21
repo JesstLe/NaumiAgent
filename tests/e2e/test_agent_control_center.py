@@ -110,7 +110,7 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
             await event_callback("tool_start", {"tool_name": "grep"})
             sibling_started.set()
             await sibling_release.wait()
-            await event_callback("tool_result", {"tool_name": "grep"})
+            await event_callback("tool_end", {"tool_name": "grep"})
             return AgentResult(
                 status="completed",
                 response="兄弟任务正常完成。",
