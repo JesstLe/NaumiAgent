@@ -32,10 +32,10 @@ jobs:
           python -m coverage erase
           pytest tests/e2e tests/integration -q --tb=short \
             --cov=src/naumi_agent --cov-append --cov-report=
-          find tests/unit -maxdepth 1 -name 'test_*.py' -print \
-            | sort \
-            | xargs -n 40 pytest -q --tb=short \
-                --cov=src/naumi_agent --cov-append --cov-report=
+          while IFS= read -r test_file; do
+            pytest "$test_file" -q --tb=short \
+              --cov=src/naumi_agent --cov-append --cov-report=
+          done < <(find tests/unit -maxdepth 1 -name 'test_*.py' -print | sort)
           python -m coverage report --fail-under=50
 
   typecheck:
