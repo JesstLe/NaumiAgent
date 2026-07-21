@@ -25,7 +25,13 @@ from naumi_agent.daemons.permission_decisions import (
 )
 from naumi_agent.hooks import HookContext, HookPoint
 from naumi_agent.memory.session import Session
-from naumi_agent.model.router import ModelResponse, ModelTier, StreamChunk, TokenUsage
+from naumi_agent.model.router import (
+    ModelResponse,
+    ModelRouter,
+    ModelTier,
+    StreamChunk,
+    TokenUsage,
+)
 from naumi_agent.orchestrator.engine import (
     AgentEngine,
     AgentRuntimeMode,
@@ -34,6 +40,7 @@ from naumi_agent.orchestrator.engine import (
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runtime.composition import create_agent_engine
+from naumi_agent.runtime.dependencies import RuntimePortOverrides
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
@@ -532,11 +539,28 @@ def engine(request: pytest.FixtureRequest) -> AgentEngine:
 
 @pytest.fixture
 def mock_router() -> MagicMock:
-    router = MagicMock()
+    router = MagicMock(spec=ModelRouter)
     router.resolve_model.return_value = "test-model"
     router.get_context_window.return_value = 200_000
     router.get_max_output.return_value = 4_096
     return router
+
+
+@pytest.fixture
+def context_budget_engine(
+    request: pytest.FixtureRequest,
+    mock_router: MagicMock,
+) -> AgentEngine:
+    instance = create_agent_engine(
+        AppConfig(),
+        port_overrides=RuntimePortOverrides(model_port=mock_router),
+    )
+
+    def cleanup() -> None:
+        asyncio.run(instance.shutdown())
+
+    request.addfinalizer(cleanup)
+    return instance
 
 
 @pytest.mark.asyncio
@@ -832,10 +856,10 @@ class TestContextVisualPayloads:
 class TestContextBudget:
     def test_compute_context_budget_uses_model_window_when_runtime_budget_is_unlimited(
         self,
-        engine: AgentEngine,
+        context_budget_engine: AgentEngine,
         mock_router: MagicMock,
     ) -> None:
-        engine._router = mock_router
+        engine = context_budget_engine
         engine._config.memory.compaction_reserved_tokens = 20_000
         mock_router.get_context_window.return_value = 120_000
         mock_router.get_max_output.return_value = 8_000
@@ -847,10 +871,10 @@ class TestContextBudget:
 
     def test_compute_context_budget_reserves_output_tokens(
         self,
-        engine: AgentEngine,
+        context_budget_engine: AgentEngine,
         mock_router: MagicMock,
     ) -> None:
-        engine._router = mock_router
+        engine = context_budget_engine
         engine._config.memory.compaction_reserved_tokens = 20_000
         mock_router.get_context_window.return_value = 120_000
         mock_router.get_max_output.return_value = 8_000
@@ -862,10 +886,10 @@ class TestContextBudget:
 
     def test_compute_context_budget_falls_back_when_reserve_exceeds_window(
         self,
-        engine: AgentEngine,
+        context_budget_engine: AgentEngine,
         mock_router: MagicMock,
     ) -> None:
-        engine._router = mock_router
+        engine = context_budget_engine
         engine._config.memory.compaction_reserved_tokens = 200_000
         mock_router.get_context_window.return_value = 120_000
         mock_router.get_max_output.return_value = 300_000
