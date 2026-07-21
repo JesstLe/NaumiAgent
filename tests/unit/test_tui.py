@@ -322,7 +322,7 @@ class TestNaumiApp:
         tmp_path,
     ) -> None:
         store = HarnessStore(tmp_path / "harness.db")
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         session = await engine.get_or_create_session(title="TUI queue")
@@ -377,7 +377,7 @@ class TestNaumiApp:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         store = HarnessStore(tmp_path / "harness.db")
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         session = await engine.get_or_create_session(title="TUI dispatch")
@@ -427,7 +427,7 @@ class TestNaumiApp:
         tmp_path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(
             store=HarnessStore(tmp_path / "harness.db")
@@ -459,7 +459,7 @@ class TestNaumiApp:
         tmp_path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(
             store=HarnessStore(tmp_path / "harness.db")
@@ -1064,7 +1064,7 @@ class TestNaumiApp:
         tmp_path,
     ) -> None:
         store = HarnessStore(tmp_path / "harness.db")
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         app = NaumiApp(engine)
@@ -1144,7 +1144,7 @@ class TestNaumiApp:
             interaction_id="ask-tui-replay",
         )
         await store.create_interaction(workspace_root=tmp_path, record=record)
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         app = NaumiApp(engine)
@@ -1175,7 +1175,7 @@ class TestNaumiApp:
         tmp_path,
     ) -> None:
         store = HarnessStore(tmp_path / "harness.db")
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         app = NaumiApp(engine)
@@ -1220,7 +1220,7 @@ class TestNaumiApp:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         store = HarnessStore(tmp_path / "harness.db")
-        engine = AgentEngine(AppConfig())
+        engine = create_agent_engine(AppConfig())
         engine.workspace_root = tmp_path
         engine.harness_service = SimpleNamespace(store=store)
         app = NaumiApp(engine)

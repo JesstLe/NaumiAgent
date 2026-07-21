@@ -15,7 +15,7 @@ from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionSource,
 )
 from naumi_agent.memory.session import Session
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.protocol import ClientEventType
@@ -73,7 +73,7 @@ process.stdout.write(JSON.stringify({ snapshot: state.permissionCenter.snapshot,
 @pytest.mark.asyncio
 async def test_real_engine_bridge_node_permission_snapshot(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    engine = AgentEngine(_config(tmp_path))
+    engine = create_agent_engine(_config(tmp_path))
     session = Session(id="permission-real-session", workspace_root=str(tmp_path))
     engine._session = session
     engine._permission_grant_store.create(session.id, "shell", "perm-source")

@@ -10,7 +10,7 @@ import pytest
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.store import HarnessStore, resolve_harness_db_path
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 
 
 @pytest.mark.asyncio
@@ -19,7 +19,7 @@ async def test_long_running_engine_starts_real_worker_and_releases_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             workspace_root=str(tmp_path),
             memory=MemoryConfig(

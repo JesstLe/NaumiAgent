@@ -10,10 +10,11 @@ import pytest
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.harness.retention_periodic import RetentionWorkerState
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 
 
 def _engine(tmp_path, *, enabled: bool) -> AgentEngine:
-    return AgentEngine(
+    return create_agent_engine(
         AppConfig(
             workspace_root=str(tmp_path),
             memory=MemoryConfig(

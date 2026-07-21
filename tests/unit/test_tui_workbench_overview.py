@@ -9,7 +9,7 @@ import pytest
 from textual.widgets import Input, Markdown, Static
 
 from naumi_agent.config.settings import AppConfig, MemoryConfig
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
     ProposalDecisionScreen,
@@ -169,7 +169,7 @@ def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> 
 
 @pytest.mark.asyncio
 async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
     engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
         side_effect=[_snapshot(), RuntimeError("store unavailable")]
@@ -217,7 +217,7 @@ async def test_textual_workbench_slash_route_refreshes_and_retains_last_snapshot
 
 @pytest.mark.asyncio
 async def test_textual_workbench_reviews_loads_selected_service_evidence() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
     engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
         return_value=_snapshot()
@@ -257,7 +257,7 @@ async def test_textual_workbench_reviews_loads_selected_service_evidence() -> No
 
 @pytest.mark.asyncio
 async def test_textual_workbench_rejects_proposal_with_required_reason() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
     initial = _proposal_snapshot()
     completed = {
@@ -305,7 +305,7 @@ async def test_textual_workbench_rejects_proposal_with_required_reason() -> None
 
 @pytest.mark.asyncio
 async def test_textual_workbench_bypass_approves_proposal_without_modal() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine.set_runtime_mode("bypass")
     engine._session = SimpleNamespace(id="session-workbench-tui")
     initial = _proposal_snapshot()
@@ -341,7 +341,7 @@ async def test_textual_workbench_bypass_approves_proposal_without_modal() -> Non
 
 @pytest.mark.asyncio
 async def test_textual_workbench_rejects_cross_session_snapshot() -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-current")
     engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
         return_value=_snapshot()
@@ -367,7 +367,7 @@ async def test_textual_workbench_rejects_cross_session_snapshot() -> None:
 async def test_textual_workbench_keeps_core_status_visible_at_supported_widths(
     width: int,
 ) -> None:
-    engine = AgentEngine(AppConfig())
+    engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
     engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
         return_value=_snapshot()
@@ -386,7 +386,7 @@ async def test_textual_workbench_keeps_core_status_visible_at_supported_widths(
 
 @pytest.mark.asyncio
 async def test_real_store_service_and_textual_workbench_chain(tmp_path) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             memory=MemoryConfig(
                 session_db_path=str(tmp_path / "sessions.db"),

@@ -12,7 +12,7 @@ from naumi_agent.evolution.proposal import generate_proposal_preview
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.ui.bridge import JsonlEngineBridge
 from naumi_agent.ui.evolution_review import evolution_review_payload
@@ -177,7 +177,7 @@ def test_protocol_normalizes_and_rejects_evolution_review_requests() -> None:
 
 @pytest.mark.asyncio
 async def test_real_bridge_emits_typed_read_only_detail(tmp_path: Path) -> None:
-    engine = AgentEngine(AppConfig(
+    engine = create_agent_engine(AppConfig(
         workspace_root=str(tmp_path),
         memory=MemoryConfig(
             session_db_path=str(tmp_path / "sessions.db"),
@@ -219,7 +219,7 @@ async def test_bridge_evolution_failure_is_fixed_and_private(tmp_path: Path) -> 
         async def list_snapshot(self, *_args: object, **_kwargs: object) -> object:
             raise OSError("token=must-not-render")
 
-    engine = AgentEngine(AppConfig(
+    engine = create_agent_engine(AppConfig(
         workspace_root=str(tmp_path),
         memory=MemoryConfig(
             session_db_path=str(tmp_path / "sessions.db"),

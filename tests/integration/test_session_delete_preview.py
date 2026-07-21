@@ -11,7 +11,7 @@ from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKin
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 
 
 @pytest.mark.asyncio
@@ -24,7 +24,7 @@ async def test_engine_previews_real_session_and_workspace_scoped_harness_rows(
         memory=MemoryConfig(session_db_path=str(tmp_path / "runtime" / "sessions.db")),
         workspace_root=str(workspace),
     )
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     harness_store = HarnessStore(tmp_path / "state" / "harness.db")
     engine.harness_service = HarnessService(
         workspace_root=workspace,

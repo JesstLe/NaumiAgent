@@ -30,6 +30,7 @@ from naumi_agent.harness.retention_planner import (
 from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tools.session import (
     SessionDeleteTool,
     SessionHistoryTool,
@@ -284,7 +285,7 @@ async def test_session_retention_tool_runs_one_destructive_bounded_pass() -> Non
 
 
 def test_engine_registers_session_retention_tool(tmp_path) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
     )
 
@@ -310,7 +311,7 @@ async def test_session_retention_worker_tool_controls_explicit_lifecycle() -> No
 
 
 def test_engine_registers_session_retention_worker_tool(tmp_path) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(memory=MemoryConfig(session_db_path=str(tmp_path / "sessions.db")))
     )
 

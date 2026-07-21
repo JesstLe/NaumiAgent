@@ -24,6 +24,8 @@ from naumi_agent.harness.retention_planner import (
 from naumi_agent.memory.session import Session, SessionStore
 from naumi_agent.model.router import StreamChunk, TokenUsage
 from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
+from naumi_agent.runtime.dependencies import RuntimePortOverrides
 from naumi_agent.runtime.ports.session import SessionPort
 
 EXPECTED_SESSION_PORT_METHODS = {
@@ -236,7 +238,7 @@ async def test_all_engine_session_operations_route_through_injected_port(
 async def test_default_store_load_reactivates_archived_session_and_marks_access(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(_config(tmp_path))
+    engine = create_agent_engine(_config(tmp_path))
     old = datetime.now() - timedelta(days=90)
     session = Session(
         title="待恢复",
@@ -262,7 +264,7 @@ async def test_default_store_load_reactivates_archived_session_and_marks_access(
 async def test_archiving_current_session_cannot_be_undone_by_later_save(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(_config(tmp_path))
+    engine = create_agent_engine(_config(tmp_path))
     session = await engine.get_or_create_session(title="当前会话")
 
     try:
@@ -284,7 +286,7 @@ async def test_engine_builds_retention_preview_from_default_store_config(
 ) -> None:
     config = _config(tmp_path)
     config.memory.session_retention.delete_archived_after_days = 30
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     old = datetime.now() - timedelta(days=45)
     await engine.session_store.save(
         Session(
@@ -310,7 +312,10 @@ async def test_retention_preview_fails_closed_for_port_without_scan_capability(
     tmp_path: Path,
 ) -> None:
     port = _recording_port(tmp_path)
-    engine = AgentEngine(_config(tmp_path), session_port=port)
+    engine = create_agent_engine(
+        _config(tmp_path),
+        port_overrides=RuntimePortOverrides(session_port=port),
+    )
 
     try:
         with pytest.raises(RuntimeError, match="不支持保留策略预览"):
@@ -323,7 +328,7 @@ async def test_retention_preview_fails_closed_for_port_without_scan_capability(
 async def test_engine_retention_pass_uses_retention_actor_and_bounded_preview(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(_config(tmp_path))
+    engine = create_agent_engine(_config(tmp_path))
     preview = SessionRetentionPreview(
         selected=(
             SessionRetentionSelection(
