@@ -78,8 +78,11 @@ def _engine(tmp_path: Path) -> AgentEngine:
                             "outcome": "accepted",
                             "selected_version": 1,
                             "capabilities": [
+                                "goal_snapshot",
                                 "heartbeat",
+                                "task_snapshot",
                                 "typed_ui_messages",
+                                "workbench_proposal_actions",
                                 "workbench_snapshot",
                             ],
                         },
