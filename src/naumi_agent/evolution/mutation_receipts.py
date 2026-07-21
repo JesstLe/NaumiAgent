@@ -379,6 +379,7 @@ class EvolutionMutationReceiptStore:
 
     def __init__(self, database_path: str | Path) -> None:
         self._database_path = str(database_path)
+        self._initialize_database()
 
     def put(self, receipt: EvolutionMutationReceipt) -> EvolutionMutationReceipt:
         try:
@@ -464,18 +465,23 @@ class EvolutionMutationReceiptStore:
         db = sqlite3.connect(self._database_path, timeout=10)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout = 10000")
-        db.execute("PRAGMA journal_mode = WAL")
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS evolution_mutation_receipts (
-                   mutation_receipt_id TEXT PRIMARY KEY,
-                   lease_id TEXT NOT NULL UNIQUE,
-                   mutation_plan_id TEXT NOT NULL UNIQUE,
-                   receipt_sha256 TEXT NOT NULL,
-                   receipt_json TEXT NOT NULL,
-                   created_at TEXT NOT NULL
-               )"""
-        )
         return db
+
+    def _initialize_database(self) -> None:
+        with closing(sqlite3.connect(self._database_path, timeout=10)) as db:
+            db.execute("PRAGMA busy_timeout = 10000")
+            db.execute("PRAGMA journal_mode = WAL")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS evolution_mutation_receipts (
+                       mutation_receipt_id TEXT PRIMARY KEY,
+                       lease_id TEXT NOT NULL UNIQUE,
+                       mutation_plan_id TEXT NOT NULL UNIQUE,
+                       receipt_sha256 TEXT NOT NULL,
+                       receipt_json TEXT NOT NULL,
+                       created_at TEXT NOT NULL
+                   )"""
+            )
+            db.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> EvolutionMutationReceipt:
