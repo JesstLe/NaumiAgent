@@ -15,7 +15,8 @@ from naumi_agent.harness.feedback import (
     build_agent_interpreted_feedback,
     build_direct_user_feedback,
 )
-from naumi_agent.orchestrator.engine import AgentEngine, AgentResult
+from naumi_agent.orchestrator.engine import AgentResult
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tools.feedback import FeedbackIntakeTool
 
 NOW = datetime(2026, 7, 18, 8, 0, tzinfo=UTC)
@@ -270,7 +271,7 @@ async def test_direct_feedback_fails_closed_without_composed_service(
 async def test_streaming_engine_mints_and_clears_trusted_feedback_turn(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(AppConfig(
+    engine = create_agent_engine(AppConfig(
         workspace_root=str(tmp_path),
         memory=MemoryConfig(
             session_db_path=str(tmp_path / "sessions.db"),

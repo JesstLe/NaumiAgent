@@ -3596,7 +3596,7 @@ async def test_bridge_proposal_action_rejects_cross_session_write() -> None:
 async def test_real_sqlite_bridge_proposal_action_persists_state_and_audit(
     tmp_path: Path,
 ) -> None:
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             memory=MemoryConfig(
                 session_db_path=str(tmp_path / "sessions.db"),

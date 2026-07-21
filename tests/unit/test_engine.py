@@ -33,6 +33,7 @@ from naumi_agent.orchestrator.engine import (
 )
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 from naumi_agent.safety.budget import TokenBudget
 from naumi_agent.safety.permissions import (
@@ -78,7 +79,7 @@ async def test_engine_passes_browser_replay_policy_to_runtime(
             "long_term_enabled": False,
         },  # type: ignore[arg-type]
     )
-    engine = AgentEngine(config)
+    engine = create_agent_engine(config)
     try:
         assert engine._browser_session.replay_recording_enabled is True
     finally:

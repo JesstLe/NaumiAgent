@@ -12,7 +12,7 @@ from naumi_agent.harness.completion import HarnessEvidenceRef
 from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
 from naumi_agent.harness.store import HarnessStoreError
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.runtime.composition import create_agent_engine
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_engine_delete_reconciles_harness_and_runtime_authority(
     monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "runtime" / "sessions.db")),
             workspace_root=str(workspace),
@@ -118,7 +118,7 @@ async def test_engine_harness_failure_clears_deleted_session_then_startup_recove
     monkeypatch.setenv("NAUMI_STATE_HOME", str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    engine = AgentEngine(
+    engine = create_agent_engine(
         AppConfig(
             memory=MemoryConfig(session_db_path=str(tmp_path / "runtime" / "sessions.db")),
             workspace_root=str(workspace),
