@@ -2102,7 +2102,26 @@ class NaumiApp(App):
         if owner_task is not None and owner_task is not asyncio.current_task():
             owner_task.cancel()
             await asyncio.gather(owner_task, return_exceptions=True)
-        return self._interaction_records.pop(interaction_id, fallback)
+        latest = self._interaction_records.pop(interaction_id, fallback)
+        authority = self._interaction_authority()
+        if authority is None:
+            return latest
+        try:
+            durable = await authority.store.get_interaction(
+                workspace_root=self.engine.workspace_root,
+                interaction_id=interaction_id,
+            )
+        except Exception:
+            durable = None
+        if (
+            durable is not None
+            and durable.state == "pending"
+            and durable.owner_id == authority.owner_id == latest.owner_id
+            and durable.owner_epoch == latest.owner_epoch
+            and durable.sequence >= latest.sequence
+        ):
+            return durable
+        return latest
 
     async def _present_user_interaction(
         self,
