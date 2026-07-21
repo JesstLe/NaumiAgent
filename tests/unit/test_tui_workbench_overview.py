@@ -414,6 +414,12 @@ async def test_real_store_service_and_textual_workbench_chain(tmp_path) -> None:
 
         screen = app.screen
         assert isinstance(screen, WorkbenchOverviewScreen)
+        for _ in range(200):
+            if screen.snapshot is not None:
+                break
+            await pilot.pause(0.05)
+        else:
+            pytest.fail("真实 Workbench 权威快照未在 10 秒内加载完成")
         rendered = screen.query_one("#workbench-content", Markdown)._markdown
         assert "真实 Workbench 目标" in rendered
         assert "真实 TUI 任务" in rendered
