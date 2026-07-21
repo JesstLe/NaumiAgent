@@ -4,11 +4,13 @@ import asyncio
 import inspect
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from textual.pilot import Pilot
 from textual.widgets import Input
 
 from naumi_agent.config.settings import (
@@ -65,6 +67,28 @@ from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
 )
+
+_ASYNC_UI_TIMEOUT_SECONDS = 10.0
+
+
+async def _wait_for_ui_condition(
+    pilot: Pilot,
+    predicate: Callable[[], bool | Awaitable[bool]],
+    *,
+    description: str,
+    timeout: float = _ASYNC_UI_TIMEOUT_SECONDS,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        ready = predicate()
+        if inspect.isawaitable(ready):
+            ready = await ready
+        if ready:
+            return
+        if loop.time() >= deadline:
+            pytest.fail(f"{description} 未在 {timeout:g} 秒内就绪。")
+        await pilot.pause(0.05)
 
 
 class FakeMarkdown:
@@ -973,7 +997,11 @@ class TestNaumiApp:
                         }
                     )
                 )
-                await pilot.pause(0.05)
+                await _wait_for_ui_condition(
+                    pilot,
+                    lambda: isinstance(app.screen, PermissionConfirmScreen),
+                    description=f"权限确认弹窗 {button_id}",
+                )
                 assert isinstance(app.screen, PermissionConfirmScreen)
                 assert (
                     app.screen.payload["arguments_summary"]["authorization"]
@@ -984,7 +1012,12 @@ class TestNaumiApp:
                     ensure_ascii=False,
                 )
                 await pilot.click(f"#{button_id}")
-                observed.append(await asyncio.wait_for(task, timeout=2))
+                observed.append(
+                    await asyncio.wait_for(
+                        task,
+                        timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+                    )
+                )
 
         assert observed == [
             "allow_once",
@@ -1012,10 +1045,17 @@ class TestNaumiApp:
                 "allow_custom": True,
                 "custom_label": "其他方案",
             }))
-            await pilot.pause(0.1)
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: isinstance(app.screen, UserInteractionScreen),
+                description="用户选项弹窗",
+            )
             assert isinstance(app.screen, UserInteractionScreen)
             await pilot.press("down", "enter")
-            result = await asyncio.wait_for(task, timeout=2)
+            result = await asyncio.wait_for(
+                task,
+                timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+            )
 
         assert result == {
             "kind": "option",
@@ -1043,13 +1083,28 @@ class TestNaumiApp:
                 "allow_custom": True,
                 "custom_label": "其他方案",
             }))
-            await pilot.pause(0.1)
-            await pilot.click("#interaction-custom")
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: isinstance(app.screen, UserInteractionScreen),
+                description="自定义输入弹窗",
+            )
+            await pilot.press("down", "down", "enter")
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: app.screen.query_one(
+                    "#interaction-custom-input",
+                    Input,
+                ).display,
+                description="自定义输入框",
+            )
             custom = app.screen.query_one("#interaction-custom-input", Input)
             custom.value = "仅当前工作区"
             custom.focus()
             await pilot.press("enter")
-            result = await asyncio.wait_for(task, timeout=2)
+            result = await asyncio.wait_for(
+                task,
+                timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+            )
 
         assert result == {
             "kind": "custom",
@@ -1089,6 +1144,13 @@ class TestNaumiApp:
             assert record is not None and record.state == "answered"
             observed.append("answered")
 
+        async def owner_lease_renewed() -> bool:
+            record = await store.get_interaction(
+                workspace_root=tmp_path,
+                interaction_id="ask-tui-durable",
+            )
+            return record is not None and record.sequence > 1
+
         async with app.run_test(size=(100, 30)) as pilot:
             task = asyncio.create_task(app.request_user_interaction({
                 "header": "恢复策略",
@@ -1104,8 +1166,17 @@ class TestNaumiApp:
                 "_pursuit_begin": begin,
                 "_pursuit_resolve": resolve,
             }))
-            await pilot.pause(0.12)
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: observed == ["created"],
+                description="持久交互创建回调",
+            )
             assert observed == ["created"]
+            await _wait_for_ui_condition(
+                pilot,
+                owner_lease_renewed,
+                description="持久交互 owner 续租",
+            )
             renewed = await store.get_interaction(
                 workspace_root=tmp_path,
                 interaction_id="ask-tui-durable",
@@ -1113,7 +1184,10 @@ class TestNaumiApp:
             assert renewed is not None
             assert renewed.sequence > 1
             await pilot.press("enter")
-            result = await asyncio.wait_for(task, timeout=2)
+            result = await asyncio.wait_for(
+                task,
+                timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+            )
 
         assert result["value"] == "safe"
         assert observed == ["created", "answered"]
@@ -1199,10 +1273,17 @@ class TestNaumiApp:
                 "_durable_subject_id": "pursuit-checkpoint-failure",
                 "_pursuit_resolve": fail_checkpoint,
             }))
-            await pilot.pause(0.1)
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: isinstance(app.screen, UserInteractionScreen),
+                description="检查点失败交互弹窗",
+            )
             await pilot.press("enter")
             with pytest.raises(UserInteractionUnavailableError, match="pursue resume"):
-                await asyncio.wait_for(task, timeout=2)
+                await asyncio.wait_for(
+                    task,
+                    timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+                )
             assert "pursue resume" in app.query_one(StatusBar).status_text
 
         answered = await store.get_interaction(
