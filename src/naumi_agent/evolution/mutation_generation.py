@@ -263,6 +263,7 @@ class EvolutionMutationGenerationTraceStore:
 
     def __init__(self, database_path: str | Path) -> None:
         self._database_path = str(database_path)
+        self._initialize_database()
 
     def put(
         self,
@@ -340,19 +341,24 @@ class EvolutionMutationGenerationTraceStore:
         db = sqlite3.connect(self._database_path, timeout=10)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout = 10000")
-        db.execute("PRAGMA journal_mode = WAL")
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS evolution_mutation_generation_traces (
-                   trace_id TEXT PRIMARY KEY,
-                   mutation_plan_id TEXT NOT NULL,
-                   attempt INTEGER NOT NULL,
-                   trace_sha256 TEXT NOT NULL,
-                   trace_json TEXT NOT NULL,
-                   completed_at TEXT NOT NULL,
-                   UNIQUE(mutation_plan_id, attempt)
-               )"""
-        )
         return db
+
+    def _initialize_database(self) -> None:
+        with closing(sqlite3.connect(self._database_path, timeout=10)) as db:
+            db.execute("PRAGMA busy_timeout = 10000")
+            db.execute("PRAGMA journal_mode = WAL")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS evolution_mutation_generation_traces (
+                       trace_id TEXT PRIMARY KEY,
+                       mutation_plan_id TEXT NOT NULL,
+                       attempt INTEGER NOT NULL,
+                       trace_sha256 TEXT NOT NULL,
+                       trace_json TEXT NOT NULL,
+                       completed_at TEXT NOT NULL,
+                       UNIQUE(mutation_plan_id, attempt)
+                   )"""
+            )
+            db.commit()
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> EvolutionMutationGenerationTrace:
