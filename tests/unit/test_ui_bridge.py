@@ -6150,8 +6150,9 @@ async def test_bridge_renders_doctor_report_as_system_notice(
         for item in health["payload"]["items"]
         if item["id"] == "runtime-heartbeat-retention"
     )
-    assert retention_item["severity"] == "degraded"
-    assert "未运行" in retention_item["detail"]
+    assert retention_item["severity"] == "unknown"
+    assert "当前客户端不可观测" in retention_item["detail"]
+    assert "未接入 terminal runtime lifecycle" in retention_item["suggestion"]
     assert any(record["type"] == "runtime/status" for record in records)
 
 
