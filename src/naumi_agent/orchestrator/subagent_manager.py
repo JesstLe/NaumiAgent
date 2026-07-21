@@ -515,14 +515,20 @@ class SubAgentManager:
                 return
             execution.last_updated_mono = time.monotonic()
             tool_name = str(data.get("tool_name") or data.get("name") or "").strip()
+            tool_finished = event in {
+                RuntimeEventType.TOOL_END.value,
+                RuntimeEventType.TOOL_ERROR.value,
+            }
             if event.startswith("tool_prepare"):
                 execution.phase = "preparing_tool"
-            elif event in {"tool_start", "tool_use"}:
+            elif event == RuntimeEventType.TOOL_START.value:
                 execution.phase = "running_tool"
-            elif event == "tool_result":
+            elif tool_finished:
                 execution.phase = "running"
+                execution.current_tool = ""
             if tool_name:
-                execution.current_tool = tool_name if event != "tool_result" else ""
+                if not tool_finished:
+                    execution.current_tool = tool_name
                 if not execution.recent_tools or execution.recent_tools[-1] != tool_name:
                     execution.recent_tools.append(tool_name)
                     execution.recent_tools = execution.recent_tools[-20:]

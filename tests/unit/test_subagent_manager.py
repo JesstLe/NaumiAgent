@@ -446,15 +446,26 @@ class TestSubAgentManager:
         assert manager.get_state("coder") == AgentState.IDLE
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("terminal_event", "terminal_payload"),
+        [
+            ("tool_end", {"tool_name": "file_read"}),
+            ("tool_error", {}),
+        ],
+    )
     async def test_execution_observes_tool_progress_without_swallowing_callback(
         self,
         manager: SubAgentManager,
         monkeypatch: pytest.MonkeyPatch,
+        terminal_event: str,
+        terminal_payload: dict[str, object],
     ) -> None:
         agent = manager.get_agent("coder")
         assert agent is not None
         tool_seen = asyncio.Event()
+        tool_finished = asyncio.Event()
         release = asyncio.Event()
+        finish = asyncio.Event()
         forwarded: list[tuple[str, dict[str, object]]] = []
 
         async def tool_execute(
@@ -466,6 +477,9 @@ class TestSubAgentManager:
             await event_callback("tool_start", {"tool_name": "file_read"})
             tool_seen.set()
             await release.wait()
+            await event_callback(terminal_event, terminal_payload)
+            tool_finished.set()
+            await finish.wait()
             return AgentResult(status="completed", turns=1)
 
         async def callback(event: str, data: dict[str, object]) -> None:
@@ -488,6 +502,18 @@ class TestSubAgentManager:
             ("tool_start", {"tool_name": "file_read"})
         ]
         release.set()
+        await asyncio.wait_for(tool_finished.wait(), timeout=1)
+        active = next(
+            item for item in manager.list_executions()
+            if item.task_id == "tool-progress"
+        )
+        assert active.phase == "running"
+        assert active.current_tool == ""
+        assert active.recent_tools == ("file_read",)
+        assert [item for item in forwarded if item[0] == terminal_event] == [
+            (terminal_event, terminal_payload)
+        ]
+        finish.set()
         assert (await delegated).status == "completed"
 
     @pytest.mark.asyncio
