@@ -10,6 +10,10 @@ from textual.widgets import Button, Markdown, Static, TabbedContent
 
 from naumi_agent.agent_control import AgentControlSnapshot
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.shell_worker import (
+    ShellSandboxUnavailableError,
+    detect_shell_sandbox_backend,
+)
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.orchestrator.subagent_manager import StopExecutionResult
 from naumi_agent.safety.permissions import PermissionMode
@@ -19,6 +23,15 @@ from naumi_agent.tui.agent_control import (
     format_agent_control_markdown,
 )
 from naumi_agent.tui.app import NaumiApp, PermissionConfirmScreen
+
+_ASYNC_TOOL_TIMEOUT_SECONDS = 10.0
+
+
+def _require_real_shell_backend() -> None:
+    try:
+        detect_shell_sandbox_backend()
+    except ShellSandboxUnavailableError as exc:
+        pytest.skip(str(exc))
 
 
 def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
@@ -165,34 +178,47 @@ async def test_textual_agents_slash_route_and_permission_modal_priority() -> Non
 
 @pytest.mark.asyncio
 async def test_textual_bypass_confirmation_enables_full_permission_mode() -> None:
+    _require_real_shell_backend()
     engine = AgentEngine(AppConfig())
     session = await engine.get_or_create_session()
     app = NaumiApp(engine)
 
-    async with app.run_test(size=(110, 34)) as pilot:
-        execution = asyncio.create_task(
-            engine.execute_tool(
-                ToolCall(
-                    id="tui-bypass",
-                    name="bash_run",
-                    arguments='{"command": "printf tui-bypass"}',
-                ),
-                agent_name="tui",
+    try:
+        async with app.run_test(size=(110, 34)) as pilot:
+            execution = asyncio.create_task(
+                engine.execute_tool(
+                    ToolCall(
+                        id="tui-bypass",
+                        name="bash_run",
+                        arguments='{"command": "printf tui-bypass"}',
+                    ),
+                    agent_name="tui",
+                )
             )
-        )
-        await pilot.pause(0.05)
-        assert isinstance(app.screen, PermissionConfirmScreen)
-        assert "全权限" in str(app.screen.query_one("#bypass", Button).label)
-        await pilot.click("#bypass")
-        result = await execution
+            for _ in range(200):
+                if isinstance(app.screen, PermissionConfirmScreen):
+                    break
+                await pilot.pause(0.05)
+            else:
+                pytest.fail("Bypass 权限确认弹窗未在 10 秒内就绪。")
+            assert "全权限" in str(app.screen.query_one("#bypass", Button).label)
+            bypass = app.screen.query_one("#bypass", Button)
+            bypass.focus()
+            await pilot.press("enter")
+            result = await asyncio.wait_for(
+                execution,
+                timeout=_ASYNC_TOOL_TIMEOUT_SECONDS,
+            )
 
-        assert result.status == "success"
-        assert "tui-bypass" in result.content
-        assert engine.runtime_mode is AgentRuntimeMode.BYPASS
-        assert engine.permission_mode is PermissionMode.BYPASS
-        receipt = engine.list_permission_decision_receipts()[-1]
-        assert receipt.session_id == session.id
-        assert receipt.agent_name == "tui"
+            assert result.status == "success"
+            assert "tui-bypass" in result.content
+            assert engine.runtime_mode is AgentRuntimeMode.BYPASS
+            assert engine.permission_mode is PermissionMode.BYPASS
+            receipt = engine.list_permission_decision_receipts()[-1]
+            assert receipt.session_id == session.id
+            assert receipt.agent_name == "tui"
+    finally:
+        await engine.shutdown()
 
 
 def _snapshot() -> AgentControlSnapshot:
