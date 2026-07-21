@@ -231,7 +231,7 @@ class AuthenticatedLocalShellTransport:
         self,
         *,
         runtime_dir: str | Path,
-        handshake_timeout_seconds: float = 5.0,
+        handshake_timeout_seconds: float = 15.0,
         terminate_grace_seconds: float = 1.0,
     ) -> None:
         unresolved = Path(runtime_dir).expanduser()
@@ -306,7 +306,9 @@ class AuthenticatedLocalShellTransport:
                 raise ShellWorkerError("Shell Worker 在结果回执后异常退出。")
             return result
         except (EOFError, OSError, TimeoutError, ValueError) as exc:
-            raise ShellWorkerError("Shell Worker 本机认证传输失败。") from exc
+            raise ShellWorkerError(
+                f"Shell Worker 本机认证传输失败：{type(exc).__name__}。"
+            ) from exc
         finally:
             if connection is not None:
                 with contextlib.suppress(OSError):

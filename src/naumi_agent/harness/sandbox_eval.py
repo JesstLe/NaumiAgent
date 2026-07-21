@@ -207,12 +207,20 @@ class HarnessSandboxEvalExecutionKernel:
             finally:
                 if composed is not None:
                     await composed.release()
-        if not results or not all(
-            item.job_id and item.lifecycle_receipt_sha256 for item in results
-        ):
+        incomplete_results = tuple(
+            item
+            for item in results
+            if not item.job_id or not item.lifecycle_receipt_sha256
+        )
+        if not results or incomplete_results:
+            details = "; ".join(
+                f"{item.check_id}={item.status.value}：{item.message}"
+                for item in incomplete_results
+            )
             raise HarnessSandboxEvalExecutionError(
                 "project_code_not_executed",
-                "Sandbox Eval 未形成完整 ARC-04 Worker 执行证据。",
+                "Sandbox Eval 未形成完整 ARC-04 Worker 执行证据。"
+                + (f"失败详情：{details}" if details else ""),
             )
         return tuple(results)
 
