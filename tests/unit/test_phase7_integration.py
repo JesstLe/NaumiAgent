@@ -206,22 +206,22 @@ class TestSlashCommandRouting:
             "file_read": MagicMock(),
             "file_write": MagicMock(),
         }
-        engine._execute_tool = AsyncMock(
+        engine.execute_tool = AsyncMock(
             return_value=ToolResult(
                 call_id="call-1", status="success", content="ok"
             )
         )
-        engine._execute_tool.__name__ = "_execute_tool"  # for compatibility
 
         await _handle_command(engine, '/glob "src/**/*.py" "."')
         await _handle_command(engine, "/read src/main.py")
         await _handle_command(engine, "/write src/tmp.txt hello")
 
-        assert engine._execute_tool.await_count == 3
+        assert engine.execute_tool.await_count == 3
         tool_names = []
         args_payload = []
-        for call in engine._execute_tool.await_args_list:
+        for call in engine.execute_tool.await_args_list:
             tool_call = call.args[0]
+            assert call.kwargs == {"agent_name": "cli"}
             tool_names.append(tool_call.name)
             args_payload.append(json.loads(tool_call.arguments))
         assert tool_names == ["glob", "file_read", "file_write"]
