@@ -25,7 +25,18 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: pytest tests/ -q --tb=short --cov=src/naumi_agent --cov-fail-under=50
+      - name: Run tests with process-isolated coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m coverage erase
+          pytest tests/e2e tests/integration -q --tb=short \
+            --cov=src/naumi_agent --cov-append --cov-report=
+          find tests/unit -maxdepth 1 -name 'test_*.py' -print \
+            | sort \
+            | xargs -n 40 pytest -q --tb=short \
+                --cov=src/naumi_agent --cov-append --cov-report=
+          python -m coverage report --fail-under=50
 
   typecheck:
     runs-on: ubuntu-latest
