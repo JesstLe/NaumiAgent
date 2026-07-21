@@ -1210,14 +1210,14 @@ class TestSessionLoading:
             active = await engine.get_or_create_session()
             engine._permission_grant_store.create(active.id, "shell", "active-grant")
             replacement = await engine.session_store.create_session(title="replacement")
-            original_load = engine.session_store.load
+            original_resume = engine.session_store.resume
 
             async def delayed_load(session_id: str) -> Session | None:
                 entered.set()
                 await release.wait()
-                return await original_load(session_id)
+                return await original_resume(session_id)
 
-            engine.session_store.load = delayed_load  # type: ignore[method-assign]
+            engine.session_store.resume = delayed_load  # type: ignore[method-assign]
             confirmations: list[dict[str, object]] = []
 
             async def confirm(payload: dict[str, object]) -> str:
@@ -1341,7 +1341,7 @@ class TestSessionLoading:
                 await release.wait()
                 return None
 
-            engine.session_store.load = failed_load  # type: ignore[method-assign]
+            engine.session_store.resume = failed_load  # type: ignore[method-assign]
             confirmations: list[dict[str, object]] = []
 
             async def confirm(payload: dict[str, object]) -> str:
@@ -1637,13 +1637,13 @@ class TestSessionLoading:
                 "shell",
                 "active-grant",
             )
-            original_load = engine.session_store.load
+            original_resume = engine.session_store.resume
 
             async def same_session_load(session_id: str) -> Session | None:
                 assert engine._session_transition_epochs == {}
-                return await original_load(session_id)
+                return await original_resume(session_id)
 
-            engine.session_store.load = same_session_load  # type: ignore[method-assign]
+            engine.session_store.resume = same_session_load  # type: ignore[method-assign]
 
             assert await engine.load_session(active.id) is True
             assert engine._session is not None
@@ -1920,7 +1920,7 @@ class TestSessionAuthorizationGeneration:
             await engine.get_or_create_session()
             intermediate = await engine.session_store.create_session(title="intermediate")
             final = await engine.session_store.create_session(title="final")
-            real_load = engine.session_store.load
+            real_resume = engine.session_store.resume
 
             async def gated_load(session_id: str) -> Session | None:
                 if session_id == intermediate.id:
@@ -1929,9 +1929,9 @@ class TestSessionAuthorizationGeneration:
                 elif session_id == final.id:
                     second_entered.set()
                     await second_release.wait()
-                return await real_load(session_id)
+                return await real_resume(session_id)
 
-            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            engine.session_store.resume = gated_load  # type: ignore[method-assign]
             first_load = asyncio.create_task(engine.load_session(intermediate.id))
             await first_entered.wait()
             second_load = asyncio.create_task(engine.load_session(final.id))
@@ -1988,15 +1988,15 @@ class TestSessionAuthorizationGeneration:
             active = await engine.get_or_create_session()
             first_target = await engine.session_store.create_session(title="first")
             second_target = await engine.session_store.create_session(title="second")
-            real_load = engine.session_store.load
+            real_resume = engine.session_store.resume
 
             async def gated_load(session_id: str) -> Session | None:
                 if session_id == first_target.id:
                     entered.set()
                     await release.wait()
-                return await real_load(session_id)
+                return await real_resume(session_id)
 
-            engine.session_store.load = gated_load  # type: ignore[method-assign]
+            engine.session_store.resume = gated_load  # type: ignore[method-assign]
             running_load = asyncio.create_task(engine.load_session(first_target.id))
             await entered.wait()
             queued_load = asyncio.create_task(engine.load_session(second_target.id))
