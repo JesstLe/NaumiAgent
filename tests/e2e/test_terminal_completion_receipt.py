@@ -271,6 +271,7 @@ async def test_real_git_pytest_sqlite_bridge_and_both_terminal_renderers(
         assert "pytest test_real.py -q" in textual
 
         node_script = r"""
+import { stripAnsi } from './frontend/terminal-ui/src/ansi.js';
 import { normalizeServerRecord } from './frontend/terminal-ui/src/protocol.js';
 import { createInitialState, reduceServerEvent } from './frontend/terminal-ui/src/state.js';
 import { renderBody } from './frontend/terminal-ui/src/render.js';
@@ -278,7 +279,7 @@ const receipt = JSON.parse(process.env.NAUMI_RECEIPT_JSON);
 const record = normalizeServerRecord({type: 'completion/receipt', payload: receipt});
 const state = createInitialState();
 reduceServerEvent(state, record);
-process.stdout.write(renderBody(state, 80).join('\n'));
+process.stdout.write(renderBody(state, 80).map(stripAnsi).join('\n'));
 """
         node = subprocess.run(
             ["node", "--input-type=module", "-e", node_script],
