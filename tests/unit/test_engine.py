@@ -607,7 +607,9 @@ class TestEngineInit:
 
         unknown = []
         for name in engine.tool_registry.names:
-            decision = checker.check(name, {})
+            tool = engine.tool_registry.get(name)
+            assert tool is not None
+            decision = checker.check(name, {}, tool=tool)
             if not decision.allowed and decision.code == PermissionReasonCode.UNKNOWN_TOOL:
                 unknown.append(name)
 
