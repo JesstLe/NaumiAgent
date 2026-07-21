@@ -12,6 +12,10 @@ import yaml
 
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.daemons.shell_worker import (
+    ShellSandboxUnavailableError,
+    detect_shell_sandbox_backend,
+)
 from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
 from naumi_agent.harness.completion import (
     HarnessCompletionReceipt,
@@ -39,6 +43,21 @@ evals:
 
 def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _shell_backend_available() -> bool:
+    try:
+        detect_shell_sandbox_backend()
+    except ShellSandboxUnavailableError:
+        return False
+    return True
+
+
+def _require_real_shell_backend() -> None:
+    try:
+        detect_shell_sandbox_backend()
+    except ShellSandboxUnavailableError as exc:
+        pytest.skip(str(exc))
 
 
 def _engine(tmp_path: Path) -> AgentEngine:
@@ -204,8 +223,12 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         assert "Harness 已就绪" in ready
         assert "HARNESS_SURFACE_RULE" in knowledge
         assert "AGENTS.md" in knowledge
-        assert "Harness 检查通过" in check
-        assert "surface check ok" in check
+        if _shell_backend_available():
+            assert "Harness 检查通过" in check
+            assert "surface check ok" in check
+        else:
+            assert "Harness 检查基础设施异常" in check
+            assert "sandbox_unavailable" in check
         assert "已撤销" in revoked
         assert "Harness 离线 Eval" in eval_output
         assert "通过 1" in eval_output
@@ -218,6 +241,7 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
 async def test_harness_slash_check_uses_sandbox_worker_and_releases_authority(
     tmp_path: Path,
 ) -> None:
+    _require_real_shell_backend()
     engine = _engine(tmp_path)
     try:
         await execute_slash_command(engine, "/harness trust --confirm")
