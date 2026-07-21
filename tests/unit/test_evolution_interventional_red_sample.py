@@ -1129,14 +1129,45 @@ async def test_interventional_red_rejects_profile_drift_before_authority_acquisi
 async def test_interventional_red_cohort_rejects_tampering_before_lease(
     tmp_path: Path,
 ) -> None:
-    root, _, plan, profile_binding, request, metrics = await _authority(tmp_path)
+    root, trust, plan, profile_binding, request, metrics = await _authority(tmp_path)
     store = HarnessStore(tmp_path / "harness.db")
+    runtime = tmp_path / "runtime"
+    permissions = PermissionDecisionReceiptStore(runtime / "permissions.db")
+    run_authority = RunDelegationGrantAuthority(
+        store=RunDelegationGrantStore(runtime / "run-grants.db"),
+        permission_store=permissions,
+        harness_store=store,
+        workspace_root=root,
+    )
+    composer = ShellWorkerAdmissionComposer(
+        worker_registry=WorkerRegistryStore(runtime / "workers.db"),
+        harness_store=store,
+        permission_store=permissions,
+        execution_grant_store=ExecutionGrantStore(runtime / "execution-grants.db"),
+        tool_job_store=ToolJobStore(runtime / "tool-jobs.db"),
+        transport=AuthenticatedLocalShellTransport(runtime_dir=runtime / "transport"),
+        software_version="test",
+        run_delegation_grant_authority=run_authority,
+    )
+    sample = EvolutionInterventionalRedSampleExecutor(
+        workspace_root=root,
+        store=store,
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        profile_service=HarnessService(workspace_root=root, trust_store=trust),
+        sandbox_runner=HarnessSandboxCheckRunner(
+            workspace_root=root,
+            sandbox_root=tmp_path / "sandboxes",
+            artifact_root=tmp_path / "artifacts",
+        ),
+        shell_admission_composer=composer,
+    )
     cohort = EvolutionInterventionalRedCohortExecutor(
         workspace_root=root,
         store=store,
-        permission_store=None,  # type: ignore[arg-type]
-        run_grant_authority=None,  # type: ignore[arg-type]
-        sample_executor=None,  # type: ignore[arg-type]
+        permission_store=permissions,
+        run_grant_authority=run_authority,
+        sample_executor=sample,
     )
     tampered = metrics.model_copy(update={"baseline_request_sha256": "f" * 64})
 
