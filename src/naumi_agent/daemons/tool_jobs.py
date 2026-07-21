@@ -355,15 +355,18 @@ class ToolJobStore:
         await self._ensure_schema()
         try:
             async with self._connection() as db:
+                await db.execute("BEGIN")
                 cursor = await db.execute(
                     "SELECT * FROM tool_jobs WHERE job_id = ?",
                     (job_id,),
                 )
                 row = await cursor.fetchone()
                 if row is None:
+                    await db.commit()
                     return None
                 stored = _stored_job_from_row(row)
                 await _validate_event_chain(db, stored)
+                await db.commit()
                 return stored
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise ToolJobError("无法读取 ToolJob。") from exc
@@ -512,6 +515,7 @@ class ToolJobStore:
         await self._ensure_schema()
         try:
             async with self._connection() as db:
+                await db.execute("BEGIN")
                 cursor = await db.execute(
                     "SELECT * FROM tool_jobs WHERE state IN (?, ?) "
                     "ORDER BY admitted_at, job_id",
@@ -522,6 +526,7 @@ class ToolJobStore:
                     stored = _stored_job_from_row(row)
                     await _validate_event_chain(db, stored)
                     stored_jobs.append(stored)
+                await db.commit()
                 return tuple(stored_jobs)
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise ToolJobError("无法读取待恢复 ToolJob。") from exc

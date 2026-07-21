@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import naumi_agent.daemons.tool_jobs as tool_jobs_module
 from naumi_agent.daemons.execution_grants import (
     ExecutionGrantAuthority,
     ExecutionGrantRequest,
@@ -613,6 +614,37 @@ async def test_concurrent_terminal_retry_writes_exactly_one_receipt(
             "SELECT COUNT(*) FROM tool_job_lifecycle_events WHERE job_id = ?",
             (admitted.contract.job_id,),
         ).fetchone()[0] == 3
+
+
+@pytest.mark.asyncio
+async def test_get_validates_event_chain_inside_one_read_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority, request, store, *_, contract, _ = await _authority(tmp_path)
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    original_validate = tool_jobs_module._validate_event_chain
+    transaction_states: list[bool] = []
+
+    async def validate_in_snapshot(db, stored) -> None:
+        transaction_states.append(db.in_transaction)
+        await original_validate(db, stored)
+
+    monkeypatch.setattr(
+        tool_jobs_module,
+        "_validate_event_chain",
+        validate_in_snapshot,
+    )
+
+    loaded = await ToolJobStore(store.db_path).get(admitted.contract.job_id)
+
+    assert loaded == admitted
+    assert transaction_states == [True]
 
 
 @pytest.mark.asyncio
