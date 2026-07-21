@@ -82,7 +82,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert decisions.path == (
         tmp_path / "runtime" / "permission-decisions.db"
     ).resolve()
-    assert decisions.supported_schema_version == PERMISSION_DECISION_SCHEMA_VERSION == 3
+    assert decisions.supported_schema_version == PERMISSION_DECISION_SCHEMA_VERSION == 4
     assert decisions.retention is RetentionPolicy.AUDIT_LONG_TERM
     tool_jobs = next(
         item for item in definitions if item.store_id == "runtime.tool_jobs"
