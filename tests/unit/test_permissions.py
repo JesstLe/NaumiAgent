@@ -64,6 +64,76 @@ class TestPermissionChecker:
         assert unrestricted.allowed
         assert not unrestricted.requires_confirmation
 
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "harness_eval_batch",
+            "harness_eval_compare",
+            "feedback_intake",
+            "evolution_proposal_queue",
+        ],
+    )
+    def test_bounded_state_writes_are_explicitly_allowed_without_confirmation(
+        self,
+        tool_name: str,
+    ) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        allowed = moderate.check(tool_name, {})
+        blocked = lockdown.check(tool_name, {})
+
+        assert allowed.allowed
+        assert not allowed.requires_confirmation
+        assert allowed.risk_level is PermissionRiskLevel.MEDIUM
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "harness_eval_baseline_promote",
+            "goal_create",
+            "goal_update",
+            "goal_interaction_cancel",
+        ],
+    )
+    def test_governance_writes_require_confirmation_and_block_lockdown(
+        self,
+        tool_name: str,
+    ) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        guarded = moderate.check(tool_name, {})
+        blocked = lockdown.check(tool_name, {})
+
+        assert guarded.allowed
+        assert guarded.requires_confirmation
+        assert guarded.risk_level is PermissionRiskLevel.HIGH
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        ["session_retention_run", "session_retention_worker", "goal_pursue"],
+    )
+    def test_destructive_or_autonomous_tools_block_strict_mode(
+        self,
+        tool_name: str,
+    ) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        strict = PermissionChecker(PermissionMode.STRICT)
+
+        guarded = moderate.check(tool_name, {})
+        blocked = strict.check(tool_name, {})
+
+        assert guarded.allowed
+        assert guarded.requires_confirmation
+        assert guarded.risk_level is PermissionRiskLevel.HIGH
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
     def test_lockdown_blocks_write(self) -> None:
         checker = PermissionChecker(PermissionMode.LOCKDOWN, allowed_dirs=["/workspace"])
         result = checker.check("file_write", {"path": "/workspace/test.txt"})
