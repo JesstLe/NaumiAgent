@@ -39,7 +39,13 @@ cases:
     expected:
       outcome: accepted
       selected_version: 1
-      capabilities: [heartbeat, typed_ui_messages, workbench_snapshot]
+      capabilities:
+        - goal_snapshot
+        - heartbeat
+        - task_snapshot
+        - typed_ui_messages
+        - workbench_snapshot
+        - workbench_proposal_actions
     metrics: *protocol_metrics
     budget: *case_budget
 
