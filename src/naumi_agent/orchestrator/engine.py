@@ -60,6 +60,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.evaluation_lane_receipts import (
+    EvolutionEvaluationLaneReceiptBuilder,
+    EvolutionEvaluationLaneReceiptExecutor,
+    EvolutionEvaluationLaneReceiptStore,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -1049,6 +1054,20 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 attribution_store=self.evolution_failure_attribution_store,
                 builder=self.evolution_adversarial_failure_attribution_builder,
+            )
+        )
+        self.evolution_evaluation_lane_receipt_builder = (
+            EvolutionEvaluationLaneReceiptBuilder()
+        )
+        self.evolution_evaluation_lane_receipt_store = (
+            EvolutionEvaluationLaneReceiptStore(config.memory.session_db_path)
+        )
+        self.evolution_evaluation_lane_receipt_executor = (
+            EvolutionEvaluationLaneReceiptExecutor(
+                harness_store=self._harness_store,
+                attribution_store=self.evolution_failure_attribution_store,
+                receipt_store=self.evolution_evaluation_lane_receipt_store,
+                builder=self.evolution_evaluation_lane_receipt_builder,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

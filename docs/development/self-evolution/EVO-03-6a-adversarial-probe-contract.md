@@ -74,6 +74,7 @@ HAR-08.4e/4f。
 
 ## 当前不足与下一步
 
-当前没有执行 probe、没有跨平台 CI matrix receipt、没有 adversarial H5a/H5c，也没有最终 Evaluation Receipt。
+EVO-03.6c..6e、5c、7a 已让当前平台 probe 进入真实 H5a/H5c、Attribution 与明确非最终的单 lane receipt；
+跨平台 CI matrix receipt、dispatcher 和 EVO-03.7b 最终聚合仍未完成。
 `path_patterns` 是显式保守规则，但仍需随着真实风险目录新增版本化定义。EVO-03.6b Batch Request 已完成；
 下一步实现单 lane/sample authority adapter，再由 HAR-08.4e/4f 执行，本模块不得新增 runner。

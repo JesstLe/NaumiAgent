@@ -29,6 +29,10 @@ Eval 和真实 Harness 检查产生。
     configuration/source/platform、probe/lifecycle/Run Grant 与 summary evidence，并复用共享 H5b2/H5c
     内核持久化原生 verdict；详见 `EVO-03-6e-adversarial-h5c-comparison.md`。
 - EVO-03.7 Evaluation receipt：before/after、sample、成本、失败、artifact digest。
+  - EVO-03.7a Evaluation Lane Receipt 已实现：按工作区和 comparison ID 重读 H5a/H5c/Attribution，汇总
+    before/after、duration、typed token/cost coverage 与六类 artifact digest；模型强制保持非最终状态，用户
+    `/evolution evaluation` 与 Agent Tool 共用同一签发链。详见
+    `EVO-03-7a-evaluation-lane-receipt.md`。
 
 ## 验收标准
 
@@ -114,14 +118,18 @@ Eval 和真实 Harness 检查产生。
   receipts，重新读取 Harness Store H5c 后进入共享 lane-neutral authority、机械分类与 durable Store；真实
   `unchanged + passed` 证据归因为 objective not improved。详见
   `EVO-03-5c-adversarial-failure-attribution.md`。
+- EVO-03.7a Evaluation Lane Receipt：已实现。共享 executor 从 durable Store 重读一条完整 H5a→H5c→
+  Attribution authority，签发带 before/after、资源 coverage 与 artifact manifest 的防篡改单 lane receipt；
+  Slash/Agent 双通道明确显示它不是候选最终回执。详见 `EVO-03-7a-evaluation-lane-receipt.md`。
 - HAR-08.4a..4f 与 ARC-04.3a..3c 已实现精确 revision/overlay、成组 Check execution、连续 Batch
   lease/grant/恢复/partial checkpoint；Interventional RED/GREEN 已完整消费这些共享前置。EVO-03.6a/6b/6c
   已冻结 adversarial Registry/Profile/check/Batch authority，并完成单 lane/sample、当前平台 RED/GREEN 连续
   lane cohort 的真实 H5a 执行、同平台 H5b2/H5c 比较与 Failure Attribution。下一步应重新比较跨平台
-  dispatcher、HAR-08 通用 surface 与最终 Evaluation Receipt 的依赖，不得复制 worker、Batch 状态机或评分器。
+  dispatcher、HAR-08 通用 surface 与 EVO-03.7b 最终聚合的依赖，不得复制 worker、Batch 状态机或评分器。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
 Interventional Failure Attribution adapter、Adversarial Probe Contract、Batch Request、单 lane/sample、当前平台
-连续 cohort、同平台 RED/GREEN 比较与 Attribution 已完成；跨平台调度与最终 Evaluation Receipt 仍未实现，
+连续 cohort、同平台 RED/GREEN 比较、Attribution 与单 lane Evaluation Receipt 已完成；跨平台调度与最终聚合
+Evaluation Receipt 仍未实现，
 因此 EVO-03 整体保持 partial。

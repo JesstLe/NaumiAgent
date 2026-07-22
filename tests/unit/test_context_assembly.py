@@ -26,6 +26,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.evaluation_lane_receipts import (
+    EvolutionEvaluationLaneReceiptBuilder,
+    EvolutionEvaluationLaneReceiptExecutor,
+    EvolutionEvaluationLaneReceiptStore,
+)
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
     EvolutionExperimentLeaseStore,
@@ -271,6 +276,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_failure_attribution_executor,
         EvolutionFailureAttributionExecutor,
+    )
+    assert isinstance(
+        engine.evolution_evaluation_lane_receipt_builder,
+        EvolutionEvaluationLaneReceiptBuilder,
+    )
+    assert isinstance(
+        engine.evolution_evaluation_lane_receipt_store,
+        EvolutionEvaluationLaneReceiptStore,
+    )
+    assert isinstance(
+        engine.evolution_evaluation_lane_receipt_executor,
+        EvolutionEvaluationLaneReceiptExecutor,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

@@ -42,5 +42,5 @@ statistical 与 mechanical code 校验和分类，最终写入共享 `EvolutionF
 ## 当前边界与后续依赖
 
 本切片只归因一对同平台 Adversarial RED/GREEN cohort，不负责 Linux/macOS/Windows matrix 汇总，不实现通用
-Sandbox Eval Service/Tool/UI，也不签发 EVO-03.7 最终 Evaluation Receipt。下一步应重新比较跨平台 dispatcher、
-HAR-08 通用 surface 与 EVO-03.7：优先实现能复用现有 H5a/H5c/Attribution authority 的最小用户可审查切片。
+Sandbox Eval Service/Tool/UI，也不签发候选最终 Evaluation Receipt。EVO-03.7a 已能把本切片产物签发为明确非最终的
+单 lane receipt；跨平台 dispatcher、HAR-08 通用 surface 与 EVO-03.7b 最终聚合仍未完成。

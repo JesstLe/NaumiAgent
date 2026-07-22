@@ -122,5 +122,8 @@
 - EVO-03.5c 已把同平台 Adversarial H5c 接入共享 Failure Attribution authority 与 durable Store；Harness
   仍只提供不可变结果和比较事实，不承担 Evolution 分类策略。见
   `../self-evolution/EVO-03-5c-adversarial-failure-attribution.md`。
+- EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
+  Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
+  `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
 - HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨 Batch admission/backpressure 与
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。

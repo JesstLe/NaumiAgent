@@ -57,6 +57,17 @@ if TYPE_CHECKING:
         EvolutionComparisonKernel,
         EvolutionComparisonKernelError,
     )
+    from naumi_agent.evolution.evaluation_lane_receipts import (
+        EvaluationLaneKind,
+        EvolutionEvaluationArtifactRef,
+        EvolutionEvaluationCohortSummary,
+        EvolutionEvaluationLaneReceipt,
+        EvolutionEvaluationLaneReceiptBuilder,
+        EvolutionEvaluationLaneReceiptError,
+        EvolutionEvaluationLaneReceiptExecutor,
+        EvolutionEvaluationLaneReceiptStore,
+        render_evaluation_lane_receipt,
+    )
     from naumi_agent.evolution.evidence import EvolutionEvidence
     from naumi_agent.evolution.experiment_leases import (
         EvolutionExperimentLeaseManager,
@@ -293,6 +304,15 @@ __all__ = [
     "EvolutionAdversarialSampleReceipt",
     "adversarial_lane_authority_key",
     "EvolutionEvidence",
+    "EvaluationLaneKind",
+    "EvolutionEvaluationArtifactRef",
+    "EvolutionEvaluationCohortSummary",
+    "EvolutionEvaluationLaneReceipt",
+    "EvolutionEvaluationLaneReceiptBuilder",
+    "EvolutionEvaluationLaneReceiptError",
+    "EvolutionEvaluationLaneReceiptExecutor",
+    "EvolutionEvaluationLaneReceiptStore",
+    "render_evaluation_lane_receipt",
     "EvolutionFailureAttributionBuilder",
     "EvolutionFailureAttributionError",
     "EvolutionFailureAttributionExecutor",
@@ -513,6 +533,17 @@ def __getattr__(name: str) -> object:
         "EvolutionEvidence",
         "adapt_harness_failure_evidence",
         "adapt_self_review_static_evidence",
+    }
+    evaluation_lane_receipt_exports = {
+        "EvaluationLaneKind",
+        "EvolutionEvaluationArtifactRef",
+        "EvolutionEvaluationCohortSummary",
+        "EvolutionEvaluationLaneReceipt",
+        "EvolutionEvaluationLaneReceiptBuilder",
+        "EvolutionEvaluationLaneReceiptError",
+        "EvolutionEvaluationLaneReceiptExecutor",
+        "EvolutionEvaluationLaneReceiptStore",
+        "render_evaluation_lane_receipt",
     }
     failure_attribution_exports = {
         "EvolutionFailureAttributionBuilder",
@@ -737,6 +768,8 @@ def __getattr__(name: str) -> object:
         module_name = "comparison_kernel"
     elif name in evidence_exports:
         module_name = "evidence"
+    elif name in evaluation_lane_receipt_exports:
+        module_name = "evaluation_lane_receipts"
     elif name in failure_attribution_exports:
         module_name = "failure_attribution"
     elif name in proposal_exports:
