@@ -14,7 +14,10 @@ from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tui import app as tui_app
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.completion_receipt import format_completion_receipt_text
-from naumi_agent.ui.harness_detail import render_harness_detail_markdown
+from naumi_agent.ui.harness_detail import (
+    render_harness_detail_markdown,
+    render_harness_evidence_markdown,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN = json.loads(
@@ -37,12 +40,15 @@ def test_tui_receipt_and_detail_cover_shared_harness_golden() -> None:
         GOLDEN["explain"],
         GOLDEN["replay"],
     )
+    evidence = render_harness_evidence_markdown(GOLDEN["explain"])
 
     for fragment in GOLDEN["expected_receipt_fragments"]:
         assert fragment in receipt
     for fragment in GOLDEN["expected_detail_fragments"]:
         assert fragment in detail
-    assert "private" not in f"{receipt}\n{detail}"
+    for fragment in GOLDEN["expected_evidence_focus_fragments"]:
+        assert fragment in evidence
+    assert "private" not in f"{receipt}\n{detail}\n{evidence}"
 
 
 @pytest.mark.asyncio

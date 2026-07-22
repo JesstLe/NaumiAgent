@@ -3106,7 +3106,10 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert harness["permission_risk"] == "tool_execution"
     assert harness["arguments"] == {
         "takes_arguments": True,
-        "syntax": "[status|doctor|explain|replay|eval|baseline|knowledge|check|trust|untrust]",
+        "syntax": (
+            "[status|doctor|explain|replay|detail|evidence|eval|baseline|"
+            "knowledge|check|trust|untrust]"
+        ),
         "required": False,
     }
     mode = next(item for item in slash_commands if item["command"] == "/mode")

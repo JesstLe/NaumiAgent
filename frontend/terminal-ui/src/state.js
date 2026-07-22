@@ -62,7 +62,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/evolution", description: "审阅 Candidate，并显式加入 Workbench 队列" },
   { command: "/agents", description: "打开 Agent 控制中心" },
   { command: "/doctor", description: "运行环境诊断" },
-  { command: "/harness", description: "Harness Profile 状态、离线评测、知识、检查与信任" },
+  { command: "/harness", description: "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考文本" },
   { command: "/effort", description: "查看或切换模型思考强度" },
@@ -363,7 +363,10 @@ export function createInitialState() {
       runId: "",
       explainLoading: false,
       replayLoading: false,
+      focus: "all",
       scrollOffset: 0,
+      detailScrollOffset: 0,
+      evidenceScrollOffset: 0,
     },
     harnessEvalBaseline: {
       suiteId: "",
@@ -1020,7 +1023,10 @@ export function reduceServerEvent(state, record) {
         runId: "",
         explainLoading: false,
         replayLoading: false,
+        focus: "all",
         scrollOffset: 0,
+        detailScrollOffset: 0,
+        evidenceScrollOffset: 0,
       };
       state.harnessEvalBaseline = {
         suiteId: "",
@@ -2734,44 +2740,24 @@ export function handleSubmitText(state, text, send) {
     send("harness/eval-baseline/request", { suite_id: suiteId });
     return;
   }
+  const harnessEvidenceMatch = commandText.match(/^\/harness\s+evidence(?:\s+(\S+))?$/i);
+  if (harnessEvidenceMatch) {
+    openHarnessDetailRoute(
+      state,
+      String(harnessEvidenceMatch[1] || "latest"),
+      send,
+      { focus: "evidence", requestReplay: false },
+    );
+    return;
+  }
   const harnessDetailMatch = commandText.match(/^\/harness\s+detail(?:\s+(\S+))?$/i);
   if (harnessDetailMatch) {
-    const requested = String(harnessDetailMatch[1] || "latest");
-    const runId = requested.toLowerCase() === "latest"
-      ? latestHarnessRunId(state)
-      : requested;
-    if (!runId) {
-      pushSystemMessage(state, "Harness 详情", "没有可查看的 Harness 完成回执。", "warning");
-      return;
-    }
-    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(runId)) {
-      pushSystemMessage(
-        state,
-        "Harness 详情",
-        "run id 无效：仅支持 1-128 位字母、数字、点、下划线、冒号或连字符。",
-        "warning",
-      );
-      return;
-    }
-    const originAnchor = {
-      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
-      followTail: Boolean(state.followTail),
-    };
-    state.route = { name: "harness_detail", originAnchor };
-    state.harnessDetail = {
-      runId,
-      explainLoading: true,
-      replayLoading: true,
-      scrollOffset: 0,
-    };
-    send("harness/explain/request", {
-      run_id: runId,
-      known_revision: Number(state.harnessExplanations[runId]?.revision) || 0,
-    });
-    send("harness/replay/request", {
-      run_id: runId,
-      known_revision: Number(state.harnessReplays[runId]?.revision) || 0,
-    });
+    openHarnessDetailRoute(
+      state,
+      String(harnessDetailMatch[1] || "latest"),
+      send,
+      { focus: "all", requestReplay: true },
+    );
     return;
   }
   if (commandText === "/workbench") {
@@ -3478,14 +3464,48 @@ export function handleHarnessDetailKey(state, key, send) {
     requestHarnessDetailSection(state, "replay", send);
     return true;
   }
+  if (["v", "V"].includes(key)) {
+    toggleHarnessEvidenceFocus(state, send);
+    return true;
+  }
   const current = Math.max(0, Number(state.harnessDetail.scrollOffset) || 0);
-  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) state.harnessDetail.scrollOffset = Math.max(0, current - 1);
-  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) state.harnessDetail.scrollOffset = current + 1;
-  else if (key === INPUT_KEYS.pageUp) state.harnessDetail.scrollOffset = Math.max(0, current - 10);
-  else if (key === INPUT_KEYS.pageDown) state.harnessDetail.scrollOffset = current + 10;
-  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessDetail.scrollOffset = 0;
-  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessDetail.scrollOffset = Number.MAX_SAFE_INTEGER;
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) setHarnessDetailScrollOffset(state, Math.max(0, current - 1));
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) setHarnessDetailScrollOffset(state, current + 1);
+  else if (key === INPUT_KEYS.pageUp) setHarnessDetailScrollOffset(state, Math.max(0, current - 10));
+  else if (key === INPUT_KEYS.pageDown) setHarnessDetailScrollOffset(state, current + 10);
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) setHarnessDetailScrollOffset(state, 0);
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) setHarnessDetailScrollOffset(state, Number.MAX_SAFE_INTEGER);
   return true;
+}
+
+function toggleHarnessEvidenceFocus(state, send) {
+  const detail = state.harnessDetail;
+  const current = Math.max(0, Number(detail.scrollOffset) || 0);
+  if (detail.focus === "evidence") {
+    detail.evidenceScrollOffset = current;
+    detail.focus = "all";
+    detail.scrollOffset = Math.max(0, Number(detail.detailScrollOffset) || 0);
+    if (!state.harnessReplays[detail.runId] && !detail.replayLoading) {
+      requestHarnessDetailSection(state, "replay", send);
+    }
+    return;
+  }
+  detail.detailScrollOffset = current;
+  detail.focus = "evidence";
+  detail.scrollOffset = Math.max(0, Number(detail.evidenceScrollOffset) || 0);
+  if (!state.harnessExplanations[detail.runId] && !detail.explainLoading) {
+    requestHarnessDetailSection(state, "explain", send);
+  }
+}
+
+function setHarnessDetailScrollOffset(state, value) {
+  const safeValue = Math.max(0, Number(value) || 0);
+  state.harnessDetail.scrollOffset = safeValue;
+  if (state.harnessDetail.focus === "evidence") {
+    state.harnessDetail.evidenceScrollOffset = safeValue;
+  } else {
+    state.harnessDetail.detailScrollOffset = safeValue;
+  }
 }
 
 function requestHarnessDetailSection(state, section, send) {
@@ -3806,6 +3826,56 @@ function parseEvolutionReviewCommand(text) {
     else return null;
   }
   return request.query.length <= 256 ? request : null;
+}
+
+function openHarnessDetailRoute(
+  state,
+  requested,
+  send,
+  { focus, requestReplay },
+) {
+  const runId = requested.toLowerCase() === "latest"
+    ? latestHarnessRunId(state)
+    : requested;
+  const title = focus === "evidence" ? "Harness 证据" : "Harness 详情";
+  if (!runId) {
+    pushSystemMessage(state, title, "没有可查看的 Harness 完成回执。", "warning");
+    return false;
+  }
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(runId)) {
+    pushSystemMessage(
+      state,
+      title,
+      "run id 无效：仅支持 1-128 位字母、数字、点、下划线、冒号或连字符。",
+      "warning",
+    );
+    return false;
+  }
+  const originAnchor = {
+    scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+    followTail: Boolean(state.followTail),
+  };
+  state.route = { name: "harness_detail", originAnchor };
+  state.harnessDetail = {
+    runId,
+    explainLoading: true,
+    replayLoading: requestReplay,
+    focus,
+    scrollOffset: 0,
+    detailScrollOffset: 0,
+    evidenceScrollOffset: 0,
+  };
+  send("harness/explain/request", {
+    run_id: runId,
+    known_revision: Number(state.harnessExplanations[runId]?.revision) || 0,
+  });
+  if (requestReplay) {
+    send("harness/replay/request", {
+      run_id: runId,
+      known_revision: Number(state.harnessReplays[runId]?.revision) || 0,
+    });
+  }
+  return true;
 }
 
 function latestHarnessRunId(state) {

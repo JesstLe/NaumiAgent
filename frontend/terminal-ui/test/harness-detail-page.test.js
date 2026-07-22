@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { stripAnsi, visibleWidth } from "../src/ansi.js";
 import { renderHarnessDetailPage } from "../src/components/harness-detail-page.js";
+
+const GOLDEN = JSON.parse(fs.readFileSync(
+  new URL("../../../tests/fixtures/har07/terminal-parity-golden.json", import.meta.url),
+  "utf8",
+));
 
 function detail() {
   return {
@@ -59,5 +65,39 @@ test("Harness detail page reports loading and unavailable state without invented
   assert(plain.includes("正在加载"));
   assert(plain.includes("状态库暂不可用"));
   assert(plain.includes("Replay 不存在"));
+  assert(!plain.includes("已验证"));
+});
+
+test("Harness evidence focus renders relationships orphans and missing references", () => {
+  const value = {
+    runId: GOLDEN.explain.run_id,
+    focus: "evidence",
+    explainLoading: false,
+    replayLoading: false,
+    explain: GOLDEN.explain,
+    replay: null,
+    scrollOffset: 0,
+  };
+
+  for (const width of [80, 120, 200]) {
+    const lines = renderHarnessDetailPage(value, width, 60);
+    const plain = lines.map(stripAnsi).join("\n");
+    assert(lines.every((line) => visibleWidth(line) <= width));
+    for (const expected of GOLDEN.expected_evidence_focus_fragments) {
+      assert(plain.includes(expected), `${width}: missing ${expected}`);
+    }
+    assert(plain.includes("v 返回全部"));
+    assert(!plain.includes("Artifact"));
+  }
+});
+
+test("Harness evidence focus keeps unavailable state factual", () => {
+  const value = detail();
+  value.focus = "evidence";
+  value.explain = { lookup_status: "not_found", message: "证据运行不存在" };
+  const plain = renderHarnessDetailPage(value, 100, 12).map(stripAnsi).join("\n");
+
+  assert(plain.includes("Harness 证据焦点"));
+  assert(plain.includes("证据运行不存在"));
   assert(!plain.includes("已验证"));
 });
