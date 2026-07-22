@@ -3031,6 +3031,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.adversarial_batch_requests import (
         EvolutionAdversarialBatchRequest,
     )
+    from naumi_agent.evolution.counterfactual_evidence import (
+        EvolutionCounterfactualEvidenceError,
+        render_counterfactual_evidence,
+    )
     from naumi_agent.evolution.decision_inputs import (
         EvolutionDecisionInputError,
         render_decision_input,
@@ -3176,6 +3180,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_independent_review(review)))
             return
+        if action == "counterfactual":
+            if len(parts) != 2:
+                raise ValueError("counterfactual 需要一个 Independent Review ID。")
+            artifact = await (
+                engine.evolution_counterfactual_evidence_executor.execute(
+                    workspace_root=engine.workspace_root,
+                    review_id=parts[1],
+                )
+            )
+            console.print(Markdown(render_counterfactual_evidence(artifact)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3204,7 +3219,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "仅支持 list、detail、experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
-                "independent-review 或 enqueue。"
+                "independent-review、counterfactual 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3252,6 +3267,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "counterfactual":
+            console.print(
+                f"Evolution Counterfactual Evidence 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3263,6 +3285,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution decision-input <final-evaluation-receipt-id>；"
             "/evolution mechanical-gate <decision-input-id>；"
             "/evolution independent-review <gate-id> [reviewer-model]；"
+            "/evolution counterfactual <independent-review-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3314,6 +3337,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionIndependentReviewError as exc:
         console.print(
             f"Evolution Independent Review 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionCounterfactualEvidenceError as exc:
+        console.print(
+            f"Evolution Counterfactual Evidence 未完成：{exc}",
             style="yellow",
             markup=False,
         )

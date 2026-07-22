@@ -57,6 +57,22 @@ if TYPE_CHECKING:
         EvolutionComparisonKernel,
         EvolutionComparisonKernelError,
     )
+    from naumi_agent.evolution.counterfactual_evidence import (
+        CounterfactualCheck,
+        CounterfactualFileEvidence,
+        CounterfactualFinding,
+        CounterfactualFindingCode,
+        CounterfactualLeaseBinding,
+        CounterfactualRequiredAction,
+        CounterfactualRule,
+        CounterfactualSeverity,
+        EvolutionCounterfactualEvidence,
+        EvolutionCounterfactualEvidenceBuilder,
+        EvolutionCounterfactualEvidenceError,
+        EvolutionCounterfactualEvidenceExecutor,
+        EvolutionCounterfactualEvidenceStore,
+        render_counterfactual_evidence,
+    )
     from naumi_agent.evolution.evaluation_lane_receipts import (
         EvaluationLaneKind,
         EvolutionEvaluationArtifactRef,
@@ -358,6 +374,20 @@ __all__ = [
     "IndependentReviewerBudget",
     "IndependentReviewerIdentity",
     "render_independent_review",
+    "CounterfactualCheck",
+    "CounterfactualFileEvidence",
+    "CounterfactualFinding",
+    "CounterfactualFindingCode",
+    "CounterfactualLeaseBinding",
+    "CounterfactualRequiredAction",
+    "CounterfactualRule",
+    "CounterfactualSeverity",
+    "EvolutionCounterfactualEvidence",
+    "EvolutionCounterfactualEvidenceBuilder",
+    "EvolutionCounterfactualEvidenceError",
+    "EvolutionCounterfactualEvidenceExecutor",
+    "EvolutionCounterfactualEvidenceStore",
+    "render_counterfactual_evidence",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -616,6 +646,22 @@ def __getattr__(name: str) -> object:
         "IndependentReviewerIdentity",
         "render_independent_review",
     }
+    counterfactual_evidence_exports = {
+        "CounterfactualCheck",
+        "CounterfactualFileEvidence",
+        "CounterfactualFinding",
+        "CounterfactualFindingCode",
+        "CounterfactualLeaseBinding",
+        "CounterfactualRequiredAction",
+        "CounterfactualRule",
+        "CounterfactualSeverity",
+        "EvolutionCounterfactualEvidence",
+        "EvolutionCounterfactualEvidenceBuilder",
+        "EvolutionCounterfactualEvidenceError",
+        "EvolutionCounterfactualEvidenceExecutor",
+        "EvolutionCounterfactualEvidenceStore",
+        "render_counterfactual_evidence",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -848,6 +894,8 @@ def __getattr__(name: str) -> object:
         module_name = "failure_attribution"
     elif name in independent_review_exports:
         module_name = "independent_reviews"
+    elif name in counterfactual_evidence_exports:
+        module_name = "counterfactual_evidence"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

@@ -85,13 +85,12 @@ normal 无逐次确认、每会话最多 50 次；任何权限模式都不能覆
 ## 明确未完成
 
 - EVO-04.3a independent reviewer identity/model/prompt binding 已完成；
-- EVO-04.4 counterfactual；
+- EVO-04.4a counterfactual 已完成；
 - EVO-04.5 reward-hacking detector；
 - EVO-04.6 accept/revise/reject/escalate 最终状态；
 - EVO-04.7 reflection memory 和 EVO-05 promotion。
 
 ## 下一步
 
-EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract：
-只允许 `outcome=pass` 进入不同 canonical model 的 strict JSON advisory，`veto` 路径完全不调用模型。下一步
-进入 EVO-04.4a Counterfactual Evidence Contract。
+EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract；
+EVO-04.4a 已实现真实字节驱动的 Counterfactual Evidence。下一步进入 EVO-04.5a Reward-hacking Evidence。

@@ -125,9 +125,10 @@ single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 me
 - Author Receipt 缺失、跨 workspace、非法 evidence ref 与 Store 索引篡改失败关闭；
 - Ruff、compile/import、Engine composition 与相关聚焦 pytest 通过。
 
-## 明确未完成
+## 后续状态
 
-- EVO-04.4 counterfactual：更小改动、删测试/放宽指标等替代解释；
+- EVO-04.4a counterfactual 已完成：真实 baseline/candidate/diff 复核，以及更小改动、删测试、metric/threshold、
+  skip/mock 和评测泄漏替代解释扫描；
 - EVO-04.5 reward-hacking detector；
 - EVO-04.6 accept/revise/reject/escalate 最终状态；
 - EVO-04.7 reflection memory 与 EVO-05 promotion；
@@ -135,6 +136,5 @@ single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 me
 
 ## 下一步
 
-实现 EVO-04.4a Counterfactual Evidence Contract：只消费 Mechanical Gate、Independent Review、Mutation
-Receipt 与 Experiment constraints，机械检查是否存在更小 scope，以及改善是否来自删测试、修改 metric、
-放宽阈值、skip/mock 或评测泄漏；Reviewer 的建议不能直接成为最终 decision。
+EVO-04.4a 已实现，详见 `EVO-04-4a-counterfactual-evidence-contract.md`。下一步实现 EVO-04.5a
+Reward-hacking Evidence Contract；Reviewer 和 Counterfactual concern 都不能直接成为最终 decision。

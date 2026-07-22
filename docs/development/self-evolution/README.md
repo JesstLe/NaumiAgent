@@ -28,7 +28,11 @@ Promotion/Rollback → Feedback`。
 
 ## Agent Tool 权限治理
 
-[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.3 的六个 durable
+[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.4 的七个 durable
 派生 Tool 建立精确权限规则：中风险、normal 无逐次确认、strict 可用、lockdown 阻断、bypass 全权限，
 并按 Evaluation/Decision family 设置会话上限。以后新增非只读 Evolution Tool 必须与权限规则和注册表门
 同一切片交付。
+
+EVO-04.4a 已交付真实字节驱动的 Counterfactual Evidence：从 completed Independent Review 重读完整
+authority 链，对受管 worktree 的 baseline/candidate/diff 与 Mutation Receipt 做逐文件复核，并检查更小
+scope、删测试、metric/threshold、skip/mock 与评测泄漏。它不调用模型、不保存源码，也不形成最终 decision。

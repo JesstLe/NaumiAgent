@@ -63,6 +63,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.counterfactual_evidence import (
+    EvolutionCounterfactualEvidenceBuilder,
+    EvolutionCounterfactualEvidenceExecutor,
+    EvolutionCounterfactualEvidenceStore,
+)
 from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputBuilder,
     EvolutionDecisionInputExecutor,
@@ -1179,6 +1184,25 @@ class AgentEngine:
             author_store=self.evolution_mutation_author_receipt_store,
             review_store=self.evolution_independent_review_store,
             builder=self.evolution_independent_review_builder,
+        )
+        self.evolution_counterfactual_evidence_builder = (
+            EvolutionCounterfactualEvidenceBuilder()
+        )
+        self.evolution_counterfactual_evidence_store = (
+            EvolutionCounterfactualEvidenceStore(config.memory.session_db_path)
+        )
+        self.evolution_counterfactual_evidence_executor = (
+            EvolutionCounterfactualEvidenceExecutor(
+                review_store=self.evolution_independent_review_store,
+                gate_store=self.evolution_mechanical_gate_store,
+                decision_store=self.evolution_decision_input_store,
+                mutation_store=self.evolution_mutation_receipt_store,
+                experiment_store=self.evolution_experiment_contract_store,
+                lease_store=self.evolution_experiment_lease_store,
+                evidence_store=self.evolution_counterfactual_evidence_store,
+                worktree_storage_dir=self._worktree_storage_dir,
+                builder=self.evolution_counterfactual_evidence_builder,
+            )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

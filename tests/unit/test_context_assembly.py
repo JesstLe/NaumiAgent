@@ -29,6 +29,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.counterfactual_evidence import (
+    EvolutionCounterfactualEvidenceBuilder,
+    EvolutionCounterfactualEvidenceExecutor,
+    EvolutionCounterfactualEvidenceStore,
+)
 from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputBuilder,
     EvolutionDecisionInputExecutor,
@@ -258,6 +263,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_independent_review_executor,
         EvolutionIndependentReviewExecutor,
+    )
+    assert isinstance(
+        engine.evolution_counterfactual_evidence_builder,
+        EvolutionCounterfactualEvidenceBuilder,
+    )
+    assert isinstance(
+        engine.evolution_counterfactual_evidence_store,
+        EvolutionCounterfactualEvidenceStore,
+    )
+    assert isinstance(
+        engine.evolution_counterfactual_evidence_executor,
+        EvolutionCounterfactualEvidenceExecutor,
     )
     assert isinstance(
         engine.evolution_validation_planner,
