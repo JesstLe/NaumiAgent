@@ -263,7 +263,7 @@ class EvolutionAdversarialSampleExecutor:
         request = prepared.request
         identity = build_eval_baseline_identity(
             self._workspace_root,
-            configuration=_configuration(request),
+            configuration=build_adversarial_configuration(request),
             platform_identity=prepared.platform,
             profile_trusted=True,
             source_identity=prepared.source_identity,
@@ -310,7 +310,7 @@ class EvolutionAdversarialSampleExecutor:
         )
         request = prepared.request
         lane = prepared.lane
-        configuration = _configuration(request)
+        configuration = build_adversarial_configuration(request)
         identity = build_eval_baseline_identity(
             self._workspace_root,
             configuration=configuration,
@@ -627,9 +627,10 @@ def _check_matches(check: HarnessCheckSpec, expected) -> bool:
     )
 
 
-def _configuration(
+def build_adversarial_configuration(
     request: EvolutionAdversarialBatchRequest,
 ) -> HarnessEvalConfigurationIdentity:
+    """Build the sole comparable Harness configuration for adversarial lanes."""
     policy = HarnessEvalComparisonPolicy()
     return HarnessEvalConfigurationIdentity.create(
         suite_id=request.suite_id,
@@ -923,4 +924,5 @@ __all__ = [
     "EvolutionAdversarialSampleExecutor",
     "EvolutionAdversarialSampleReceipt",
     "adversarial_lane_authority_key",
+    "build_adversarial_configuration",
 ]

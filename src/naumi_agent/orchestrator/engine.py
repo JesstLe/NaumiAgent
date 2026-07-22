@@ -44,6 +44,12 @@ from naumi_agent.daemons.tool_jobs import (
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequestBuilder,
 )
+from naumi_agent.evolution.adversarial_cohort import (
+    EvolutionAdversarialCohortExecutor,
+)
+from naumi_agent.evolution.adversarial_comparison import (
+    EvolutionAdversarialComparisonExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -942,6 +948,18 @@ class AgentEngine:
                 self.evolution_interventional_red_sample_executor
                 .sample_kernel.sandbox_eval_kernel
             ),
+        )
+        self.evolution_adversarial_cohort_executor = (
+            EvolutionAdversarialCohortExecutor(
+                workspace_root=paths.workspace_root,
+                store=self._harness_store,
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                sample_executor=self.evolution_adversarial_sample_executor,
+            )
+        )
+        self.evolution_adversarial_comparison_executor = (
+            EvolutionAdversarialComparisonExecutor(self._harness_store)
         )
         self.evolution_interventional_red_cohort_executor = (
             EvolutionInterventionalRedCohortExecutor(
