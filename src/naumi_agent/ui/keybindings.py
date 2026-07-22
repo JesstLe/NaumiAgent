@@ -36,6 +36,7 @@ class KeybindingAction(StrEnum):
     SHOW_TOOLS = "show_tools"
     TOGGLE_BROWSER = "toggle_browser"
     OPEN_COMMAND_QUICK_OPEN = "open_command_quick_open"
+    RUN_CANCEL = "run_cancel"
 
 
 @dataclass(frozen=True)
@@ -255,6 +256,14 @@ KEYBINDING_DEFINITIONS: tuple[KeybindingDefinition, ...] = (
         ("c-p",),
         interfaces=("tui",),
         textual_action="open_command_quick_open",
+        textual_priority=True,
+    ),
+    KeybindingDefinition(
+        KeybindingAction.RUN_CANCEL,
+        "取消当前运行；再次按下退出",
+        ("c-c",),
+        interfaces=("tui",),
+        textual_action="request_run_cancel",
         textual_priority=True,
     ),
 )

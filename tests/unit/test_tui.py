@@ -847,6 +847,7 @@ class TestNaumiApp:
         assert "ctrl+l" in binding_keys
         assert "ctrl+g" in binding_keys
         assert "ctrl+p" in binding_keys
+        assert "ctrl+c" in binding_keys
 
     def test_custom_bindings_are_generated_for_tui(self) -> None:
         bindings = build_keybindings(

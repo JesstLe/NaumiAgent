@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "submission": {
+    "text": "执行定向验证",
+    "request_id": "submit-1",
+    "expected_client": {
+      "type": "submit",
+      "payload": {
+        "text": "执行定向验证"
+      }
+    },
+    "expected_delivery_status": "queued"
+  },
+  "tool_lifecycle": {
+    "events": [
+      {
+        "engine_event": "tool_prepare_start",
+        "data": {
+          "name": "bash_run",
+          "call_id": "tool-golden-1",
+          "argument_chars": 27,
+          "elapsed_ms": 4
+        },
+        "expected_message": {
+          "type": "tool_prepare",
+          "tool_name": "bash_run",
+          "tool_call_id": "tool-golden-1",
+          "phase": "start",
+          "path": "",
+          "argument_chars": 27,
+          "content_chars": 0,
+          "content_lines": 0,
+          "elapsed_ms": 4,
+          "todo_total": 0,
+          "todo_completed": 0,
+          "todo_open": 0,
+          "todo_items": []
+        }
+      },
+      {
+        "engine_event": "tool_prepare_end",
+        "data": {
+          "name": "bash_run",
+          "call_id": "tool-golden-1",
+          "argument_chars": 27,
+          "elapsed_ms": 7
+        },
+        "expected_message": {
+          "type": "tool_prepare",
+          "tool_name": "bash_run",
+          "tool_call_id": "tool-golden-1",
+          "phase": "end",
+          "path": "",
+          "argument_chars": 27,
+          "content_chars": 0,
+          "content_lines": 0,
+          "elapsed_ms": 7,
+          "todo_total": 0,
+          "todo_completed": 0,
+          "todo_open": 0,
+          "todo_items": []
+        }
+      },
+      {
+        "engine_event": "tool_start",
+        "data": {
+          "name": "bash_run",
+          "call_id": "tool-golden-1",
+          "args": {
+            "command": "printf 'ok\\n'"
+          }
+        },
+        "expected_message": {
+          "type": "tool_use",
+          "tool_name": "bash_run",
+          "tool_call_id": "tool-golden-1",
+          "args_summary": "{\"command\": \"printf 'ok\\\\n'\"}",
+          "args_raw": "",
+          "primary_arg": "printf 'ok\\n'",
+          "file_path": "",
+          "command": "printf 'ok\\n'",
+          "query": "",
+          "url": ""
+        }
+      },
+      {
+        "engine_event": "tool_end",
+        "data": {
+          "name": "bash_run",
+          "call_id": "tool-golden-1",
+          "status": "success",
+          "duration_ms": 12,
+          "content": "ok\n"
+        },
+        "expected_message": {
+          "type": "tool_result",
+          "tool_name": "bash_run",
+          "tool_call_id": "tool-golden-1",
+          "status": "success",
+          "duration_ms": 12,
+          "content_preview": "ok\n",
+          "content_length": 3,
+          "preview_format": "text",
+          "preview_language": "",
+          "content_truncated": false
+        }
+      }
+    ]
+  },
+  "completion": {
+    "engine_event": "completion_receipt",
+    "data": {
+      "schema_version": 1,
+      "receipt_id": "receipt-golden-1",
+      "run_id": "run-golden-1",
+      "outcome": "completed",
+      "summary": "定向验证通过。",
+      "changes": [
+        {
+          "path": "src/example.py",
+          "status": "modified",
+          "additions": 2,
+          "deletions": 1
+        }
+      ],
+      "validations": [
+        {
+          "command": "pytest -q tests/unit/test_example.py",
+          "scope": "unit",
+          "status": "passed",
+          "exit_code": 0,
+          "passed": 1
+        }
+      ],
+      "git_state": {
+        "available": true,
+        "dirty": true,
+        "branch": "main"
+      },
+      "evidence_refs": [
+        "test:unit/example"
+      ],
+      "duration_ms": 42
+    },
+    "expected_message": {
+      "type": "completion_receipt",
+      "receipt": {
+        "schema_version": 1,
+        "receipt_id": "receipt-golden-1",
+        "run_id": "run-golden-1",
+        "outcome": "completed",
+        "summary": "定向验证通过。",
+        "changes": [
+          {
+            "path": "src/example.py",
+            "status": "modified",
+            "source_tool": "",
+            "scope": "task",
+            "additions": 2,
+            "deletions": 1
+          }
+        ],
+        "validations": [
+          {
+            "command": "pytest -q tests/unit/test_example.py",
+            "scope": "unit",
+            "status": "passed",
+            "exit_code": 0,
+            "passed": 1,
+            "failed": 0,
+            "skipped": 0,
+            "log_ref": ""
+          }
+        ],
+        "unverified": [],
+        "approvals": [],
+        "risks": [],
+        "git_state": {
+          "available": true,
+          "branch": "main",
+          "dirty": true,
+          "commit": "",
+          "ahead": 0,
+          "behind": 0
+        },
+        "next_actions": [],
+        "evidence_refs": [
+          "test:unit/example"
+        ],
+        "started_at": "",
+        "completed_at": "",
+        "duration_ms": 42
+      }
+    }
+  },
+  "cancel": {
+    "reason": "用户按下 Ctrl+C",
+    "request_id": "cancel-1",
+    "expected_client": {
+      "type": "run_cancel",
+      "payload": {
+        "reason": "用户按下 Ctrl+C"
+      }
+    },
+    "expected_terminal_status": "cancelled"
+  }
+}

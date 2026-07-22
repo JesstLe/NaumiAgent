@@ -19,7 +19,7 @@
     },
     "conversation_submit_streaming": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui_tool_execution.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_run_parity.py"]
     },
     "doctor_debug": {
       "state": "supported",
@@ -51,7 +51,7 @@
     },
     "run_cancel": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_run_parity.py"]
     },
     "terminal_runtime_health": {
       "state": "supported",
@@ -59,7 +59,7 @@
     },
     "tool_lifecycle": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_tui_tool_execution.py"]
+      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_terminal_run_parity.py"]
     },
     "user_interaction": {
       "state": "supported",

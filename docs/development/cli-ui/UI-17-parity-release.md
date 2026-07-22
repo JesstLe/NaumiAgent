@@ -15,10 +15,11 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
 
 - UI-17.1 Capability manifest：已实现；每个前端声明协议版本、14 项产品 capability 与真实证据，见
   [设计与验收](UI-17-1-capability-manifest.md)。
-- UI-17.2 Golden scenarios：partial (17.2a-17.2b)；runtime-health 已使用同一 fixture 对 Bridge、TUI 与 Node reducer
+- UI-17.2 Golden scenarios：partial (17.2a-17.2c)；runtime-health 已使用同一 fixture 对 Bridge、TUI 与 Node reducer
   断言语义字段，见 [设计与验收](UI-17-2a-runtime-health-golden.md)；permission/bypass 与 model-initiated interaction 已
   锁定脱敏请求、canonical choice/answer 和终态，见 [设计与验收](UI-17-2b-permission-interaction-golden.md)；
-  submit/tool/receipt/cancel 等仍待实现。
+  submit/tool/receipt/cancel 已锁定统一输入、类型化消息、完成终态和 Ctrl+C 行为，见
+  [设计与验收](UI-17-2c-terminal-run-golden.md)。流式 token/error/retry 等场景仍待实现。
 - UI-17.3 Compatibility negotiation：缺能力时降级或拒绝，不发送未知关键事件。
 - UI-17.4 Release matrix：OS、Python、Node、终端、安装方式、升级/回滚。
 - UI-17.5 Deprecation telemetry：仅本地统计 fallback 原因，不上传用户内容。
@@ -27,8 +28,8 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
 ## 已交付前置
 
 ARC-01.4c1-4c3 已让 New UI 与 TUI 消费同一个 Composition-owned terminal lifecycle factory，并用真实 Harness
-SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2b 已锁定
-runtime-health、permission/bypass 与 interaction golden；其余 golden scenarios 与 UI-17.3 compatibility negotiation
+SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2c 已锁定
+runtime-health、permission/bypass、interaction 与基本 run lifecycle golden；其余 golden scenarios 与 UI-17.3 compatibility negotiation
 尚未完成，不能凭局部对照通过发布门。
 
 ## 验收标准
