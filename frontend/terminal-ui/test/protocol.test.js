@@ -432,6 +432,7 @@ test("protocol contract drives client and server event validation", () => {
     capabilities: [
       "goal_snapshot",
       "heartbeat",
+      "session_list",
       "task_snapshot",
       "typed_ui_messages",
       "workbench_proposal_actions",
@@ -533,6 +534,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     capabilities: [
       "goal_snapshot",
       "heartbeat",
+      "session_list",
       "task_snapshot",
       "typed_ui_messages",
       "workbench_proposal_actions",
@@ -915,6 +917,56 @@ test("task snapshot is strict, bounded, and drops private fields", () => {
       payload: { ...normalized, items: [{ ...item, status: "invented" }] },
     }),
     /status/,
+  );
+});
+
+test("session list is workspace scoped, bounded, strict, and drops private fields", () => {
+  const item = {
+    session_id: "session-1",
+    title: "历史会话",
+    model: "provider/model",
+    updated_at: "2026-07-22T08:00:00+00:00",
+    message_count: 2,
+    user_message_count: 1,
+    git_branch: "main",
+    is_current: false,
+    resumable: true,
+    messages: [{ role: "user", content: "must-drop" }],
+    summary: "must-drop",
+    workspace_root: "/private/workspace",
+  };
+  const normalized = normalizeServerRecord({
+    type: "sessions/list",
+    payload: {
+      schema_version: 1,
+      generated_at: "2026-07-22T08:00:01+00:00",
+      scope: "workspace",
+      page: 1,
+      page_size: 100,
+      total: 125,
+      query: "history",
+      items: Array.from({ length: 105 }, () => item),
+      warnings: [],
+    },
+  }).payload;
+  assert.equal(normalized.items.length, 100);
+  assert.equal(normalized.items[0].title, "历史会话");
+  assert.equal(Object.hasOwn(normalized.items[0], "messages"), false);
+  assert.equal(Object.hasOwn(normalized.items[0], "summary"), false);
+  assert.equal(Object.hasOwn(normalized.items[0], "workspace_root"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "sessions/list",
+      payload: { ...normalized, scope: "global" },
+    }),
+    /scope/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "sessions/list",
+      payload: { ...normalized, items: [{ ...item, session_id: "bad;id" }] },
+    }),
+    /session_id/,
   );
 });
 

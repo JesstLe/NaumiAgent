@@ -362,6 +362,7 @@ class SessionStore:
         page: int = 1,
         page_size: int = 20,
         query: str = "",
+        workspace_root: str | None = None,
     ) -> tuple[list[Session], int]:
         db = await self._get_db()
         offset = (page - 1) * page_size
@@ -369,6 +370,10 @@ class SessionStore:
 
         where = "status = 'active'"
         params: list[Any] = []
+        normalized_workspace = str(workspace_root or "").strip()
+        if normalized_workspace:
+            where += " AND workspace_root = ?"
+            params.append(normalized_workspace)
         if normalized_query:
             where += (
                 " AND (id LIKE ? OR title LIKE ? OR model LIKE ? OR "

@@ -532,3 +532,29 @@ def test_argument_summary_terminates_for_self_referential_containers(
 
     encoded = _assert_bounded_strict_json(summary)
     assert "[循环引用]" in encoded
+
+
+def test_session_list_request_is_bounded_and_private_fields_are_dropped() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.SESSIONS_LIST_REQUEST,
+        "payload": {
+            "page": 0,
+            "page_size": 500,
+            "query": "  历史  ",
+            "workspace_root": "/must/not/be/client-controlled",
+        },
+    })
+
+    assert record["payload"] == {
+        "page": 1,
+        "page_size": 100,
+        "query": "历史",
+    }
+
+
+def test_session_list_request_rejects_oversized_query() -> None:
+    with pytest.raises(ValueError, match="200"):
+        normalize_client_record({
+            "type": ClientEventType.SESSIONS_LIST_REQUEST,
+            "payload": {"query": "x" * 201},
+        })

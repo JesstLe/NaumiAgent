@@ -522,6 +522,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
+  if (type === "sessions/list") {
+    return normalizeSessionList(payload);
+  }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
   }
@@ -2285,6 +2288,68 @@ function normalizeTaskSnapshot(payload) {
       .map(normalizeTaskTimelineEvent),
     warnings: harnessTextArray(payload.warnings, "tasks/snapshot warnings", 20),
   };
+}
+
+function normalizeSessionList(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`sessions/list schema_version 不兼容: ${payload.schema_version}`);
+  }
+  if (payload.scope !== "workspace") {
+    throw new Error("sessions/list scope 必须是 workspace");
+  }
+  const page = harnessPositiveInteger(payload.page, "sessions/list page");
+  const pageSize = harnessPositiveInteger(payload.page_size, "sessions/list page_size");
+  if (page > 10_000 || pageSize > 100) {
+    throw new Error("sessions/list 分页参数超出协议范围");
+  }
+  const items = harnessObjectArray(payload.items, "sessions/list items", 100)
+    .slice(0, pageSize)
+    .map(normalizeSessionListItem);
+  return {
+    schema_version: 1,
+    generated_at: sessionText(payload.generated_at, "sessions/list generated_at", 64),
+    scope: "workspace",
+    page,
+    page_size: pageSize,
+    total: harnessNonnegativeInteger(payload.total, "sessions/list total"),
+    query: sessionText(payload.query, "sessions/list query", 200),
+    items,
+    warnings: harnessTextArray(payload.warnings, "sessions/list warnings", 10)
+      .map((value) => sessionText(value, "sessions/list warning", 300)),
+  };
+}
+
+function normalizeSessionListItem(value) {
+  const item = harnessObject(value, "sessions/list item");
+  const sessionId = sessionText(item.session_id, "sessions/list item.session_id", 128);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sessionId)) {
+    throw new Error("sessions/list item.session_id 格式无效");
+  }
+  return {
+    session_id: sessionId,
+    title: sessionText(item.title, "sessions/list item.title", 300),
+    model: sessionText(item.model, "sessions/list item.model", 200),
+    updated_at: sessionText(item.updated_at, "sessions/list item.updated_at", 64),
+    message_count: harnessNonnegativeInteger(
+      item.message_count,
+      "sessions/list item.message_count",
+    ),
+    user_message_count: harnessNonnegativeInteger(
+      item.user_message_count,
+      "sessions/list item.user_message_count",
+    ),
+    git_branch: sessionText(item.git_branch, "sessions/list item.git_branch", 200),
+    is_current: harnessBoolean(item.is_current, "sessions/list item.is_current"),
+    resumable: harnessBoolean(item.resumable, "sessions/list item.resumable"),
+  };
+}
+
+function sessionText(value, name, maxChars) {
+  const text = harnessText(value, name);
+  if (text.length > maxChars) {
+    throw new Error(`${name} 不能超过 ${maxChars} 个字符`);
+  }
+  return text;
 }
 
 function normalizeGoalSnapshot(payload) {

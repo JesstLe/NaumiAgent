@@ -1321,6 +1321,10 @@ class JsonlEngineBridge:
             await self.resume_session(payload, request_id=request_id)
             return
 
+        if event_type == ClientEventType.SESSIONS_LIST_REQUEST:
+            await self.list_sessions(payload, request_id=request_id)
+            return
+
         if event_type == ClientEventType.GOAL_PANEL:
             await self.show_goal_panel(payload, request_id=request_id)
             return
@@ -3282,6 +3286,36 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def list_sessions(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Emit one workspace-scoped, bounded, read-only session snapshot."""
+        from naumi_agent.ui.session_list import build_session_list_snapshot
+
+        try:
+            snapshot = await build_session_list_snapshot(
+                self.engine,
+                page=int(payload["page"]),
+                page_size=int(payload["page_size"]),
+                query=str(payload["query"]),
+            )
+        except Exception:
+            logger.exception("Session list projection failed")
+            await self.emit_error(
+                "暂时无法读取当前工作区的会话列表，请稍后重试。",
+                code="session_list_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.SESSIONS_LIST,
+            snapshot.to_protocol_dict(),
+            request_id=request_id,
+        )
 
     async def show_goal_panel(
         self,

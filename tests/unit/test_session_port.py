@@ -94,9 +94,10 @@ class _RecordingSessionPort:
         page: int = 1,
         page_size: int = 20,
         query: str = "",
+        workspace_root: str | None = None,
     ) -> tuple[list[Session], int]:
         self.calls.append("list_sessions")
-        return await self.delegate.list_sessions(page, page_size, query)
+        return await self.delegate.list_sessions(page, page_size, query, workspace_root)
 
     async def delete(self, session_id: str) -> bool:
         self.calls.append("delete")

@@ -33,8 +33,9 @@ class SessionPort(Protocol[SessionT]):
         page: int = 1,
         page_size: int = 20,
         query: str = "",
+        workspace_root: str | None = None,
     ) -> tuple[list[SessionT], int]:
-        """Return one result page and the total matching session count."""
+        """Return one result page, optionally scoped to one exact workspace."""
         ...
 
     async def delete(self, session_id: str) -> bool:
