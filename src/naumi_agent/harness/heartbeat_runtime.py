@@ -24,6 +24,9 @@ class HeartbeatLifecycleDetailCodes:
     starting: str = "runtime_starting"
     running: str = "runtime_ready"
     alive: str = "runtime_alive"
+    waiting: str = "runtime_waiting"
+    waiting_alive: str = "runtime_waiting_alive"
+    resumed: str = "runtime_resumed"
     draining: str = "runtime_draining"
     stopped: str = "runtime_stopped"
     failed: str = "runtime_shutdown_failed"
@@ -140,14 +143,60 @@ class RuntimeHeartbeatProducer:
         return heartbeat
 
     async def pulse_now(self) -> HarnessHeartbeat:
-        """Write one explicit liveness observation while the worker is running."""
+        """Write one liveness observation without erasing a waiting boundary."""
         if not self._started or self._closed:
             raise RuntimeError("Heartbeat producer 尚未运行。")
-        if self._phase is not HarnessHeartbeatPhase.RUNNING:
-            raise RuntimeError("只有 running Heartbeat 可以继续 pulse。")
+        if self._phase not in {
+            HarnessHeartbeatPhase.RUNNING,
+            HarnessHeartbeatPhase.WAITING,
+        }:
+            raise RuntimeError("只有 running 或 waiting Heartbeat 可以继续 pulse。")
+        if self._phase is HarnessHeartbeatPhase.WAITING:
+            return await self._record(
+                HarnessHeartbeatPhase.WAITING,
+                self.detail_codes.waiting_alive,
+            )
         return await self._record(
             HarnessHeartbeatPhase.RUNNING,
             self.detail_codes.alive,
+        )
+
+    async def enter_waiting(
+        self,
+        *,
+        detail_code: str | None = None,
+    ) -> HarnessHeartbeat:
+        """Persist a live waiting boundary while periodic pulses continue."""
+        if not self._started or self._closed:
+            raise RuntimeError("Heartbeat producer 尚未运行。")
+        if self._phase not in {
+            HarnessHeartbeatPhase.RUNNING,
+            HarnessHeartbeatPhase.WAITING,
+        }:
+            raise RuntimeError("只有 running 或 waiting Heartbeat 可以进入等待。")
+        return await self._record(
+            HarnessHeartbeatPhase.WAITING,
+            detail_code or self.detail_codes.waiting,
+        )
+
+    async def resume_running(
+        self,
+        *,
+        detail_code: str | None = None,
+    ) -> HarnessHeartbeat:
+        """Persist an explicit waiting-to-running transition."""
+        if not self._started or self._closed:
+            raise RuntimeError("Heartbeat producer 尚未运行。")
+        if self._phase is HarnessHeartbeatPhase.RUNNING:
+            return await self._record(
+                HarnessHeartbeatPhase.RUNNING,
+                detail_code or self.detail_codes.resumed,
+            )
+        if self._phase is not HarnessHeartbeatPhase.WAITING:
+            raise RuntimeError("只有 waiting Heartbeat 可以恢复运行。")
+        return await self._record(
+            HarnessHeartbeatPhase.RUNNING,
+            detail_code or self.detail_codes.resumed,
         )
 
     async def begin_draining(self) -> HarnessHeartbeat | None:

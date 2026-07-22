@@ -96,6 +96,27 @@ async def test_runtime_heartbeat_records_failed_shutdown(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_heartbeat_preserves_waiting_during_pulse_and_resume(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    producer = _producer(store, workspace)
+
+    await producer.start()
+    waiting = await producer.enter_waiting(detail_code="waiting_for_user")
+    assert waiting.phase is HarnessHeartbeatPhase.WAITING
+    pulse = await producer.pulse_now()
+    assert pulse.phase is HarnessHeartbeatPhase.WAITING
+    assert pulse.detail_code == "runtime_waiting_alive"
+    resumed = await producer.resume_running(detail_code="user_replied")
+    assert resumed.phase is HarnessHeartbeatPhase.RUNNING
+    assert resumed.detail_code == "user_replied"
+    assert await producer.close()
+
+
+@pytest.mark.asyncio
 async def test_runtime_heartbeat_reports_periodic_write_failure_once(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

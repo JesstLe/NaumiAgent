@@ -14,8 +14,8 @@ background reconcile 已实现。resume 支持新 lease epoch continuation，在
 HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除 assessment 的隐式全量测试和 lint。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
-HAR-10.2c-10.2g 已进一步交付默认 New UI runtime producer、安全 retention authority、typed worker catalog、
-独立租约协调的周期 retention core、Bridge 生命周期和真实 Agent 委派 heartbeat。browser producer、跨 kind
+HAR-10.2c-10.2h 已进一步交付默认 New UI runtime producer、安全 retention authority、typed worker catalog、
+独立租约协调的周期 retention core、Bridge 生命周期、真实 Agent 委派 heartbeat 和 browser execution heartbeat。跨 kind
 catalog、专用 Doctor 详情和 Supervisor
 仍未完成。
 HAR-10.6a 在 Harness Store v13 提供 durable interaction request/answer、timeout、takeover 与
@@ -30,6 +30,8 @@ HAR-10.2d 已建立 old offline/terminal runtime 的有界 retention authority�
 HAR-10.2e 已建立可跨 Store 翻页的 typed runtime worker catalog；
 HAR-10.2f1/2 已建立删除前精确续租、活跃保护和稳定状态的周期 retention core，并以 7 天安全默认值接入 Bridge；
 HAR-10.2g 已让每次 Agent 委派产生 durable heartbeat，并在 New UI/TUI Agent Control 显示阶段和降级码；
+HAR-10.2h 已让每次真实 browser run 产生 durable heartbeat，在等待指令/人工接管时保持 waiting pulse，并由 Task Panel
+双端展示 phase、epoch 与降级码；
 HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/terminal 与
 `/send-now`，并修复两端在本 owner live claim 期间无法重排后缀的问题。HAR-10.3b5 又补齐未 claim 普通消息的
 精确取消和双端回执。跨客户端公平与 active worker 取消传播仍未完成。

@@ -65,5 +65,5 @@ New UI 与 Textual TUI 使用同一后端快照：New UI 在执行详情中合�
 
 本切片没有实现 agent RunLease、跨 kind worker catalog、agent heartbeat retention/history、跨进程取消传播、自动重启或
 Supervisor 动作。硬崩溃/SIGKILL 无法写 terminal，最后一个 running heartbeat 依照 timeout 进入 stale/offline，后续
-恢复不得仅凭 heartbeat 自动接管。下一步应在 browser producer、跨 kind catalog/history 或 agent lease/fencing 中根据
-跨文档依赖选择一个最小闭环，不直接扩张为完整集群调度器。
+恢复不得仅凭 heartbeat 自动接管。HAR-10.2h 已按相同 authority 交付 browser producer；跨 kind catalog/history 与
+agent/browser lease/fencing 仍应根据跨文档依赖拆成最小闭环，不直接扩张为完整集群调度器。

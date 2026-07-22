@@ -792,6 +792,9 @@ class AgentEngine:
         self.agent_execution_heartbeat_factory = (
             services.agent_execution_heartbeat_factory
         )
+        self.browser_execution_heartbeat_factory = (
+            services.browser_execution_heartbeat_factory
+        )
         self.workspace_root = paths.workspace_root
         self._runtime_data_dir = paths.runtime_data_dir
         self.tool_output_archive = ToolOutputArchive(
@@ -2000,6 +2003,9 @@ class AgentEngine:
                         self._config.browser.max_concurrent_runs
                     ),
                     "run_history_limit": self._config.browser.run_history_limit,
+                    "heartbeat_factory": (
+                        self.browser_execution_heartbeat_factory
+                    ),
                 },
             )
         return self._task_runner
