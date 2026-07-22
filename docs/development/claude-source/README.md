@@ -15,5 +15,5 @@
 
 ## 模块顺序
 
-CC-01 治理先行；CC-02 是 Ink 决策实验；CC-03/04 按产品优先级迁入；CC-05 只消费 CC-01 已批准
-基线并持续维护，不得绕过 source refresh approval。
+CC-01 治理先行；CC-02 是 Ink 决策实验；CC-03/04 按产品优先级迁入；CC-05.1 已提供只读批准
+基线 observation，后续 CC-05 模块持续维护差异，但不得绕过 source refresh approval。

@@ -427,7 +427,9 @@ class SourceRefreshStore:
             return approved, entry
 
     def get_proposal(self, proposal_id: str) -> SourceRefreshProposal | None:
-        with self._connect() as db:
+        if not self.db_path.is_file():
+            return None
+        with self._connect_readonly() as db:
             row = db.execute(
                 """
                 SELECT proposal_id, source_name, base_entry_id, status, payload_json, created_at
@@ -445,13 +447,36 @@ class SourceRefreshStore:
     ) -> tuple[SourceIdentityHistoryEntry, ...]:
         if limit < 1 or limit > 200:
             raise ValueError("history limit 必须在 1 到 200 之间。")
-        with self._connect() as db:
+        if not self.db_path.is_file():
+            return ()
+        with self._connect_readonly() as db:
             entries = self._history_entries(db, source_name.strip())
         return tuple(reversed(entries))[:limit]
 
     def latest(self, source_name: str) -> SourceIdentityHistoryEntry | None:
-        with self._connect() as db:
+        if not self.db_path.is_file():
+            return None
+        with self._connect_readonly() as db:
             return self._latest_entry(db, source_name.strip())
+
+    def _connect_readonly(self) -> sqlite3.Connection:
+        uri = f"{self.db_path.as_uri()}?mode=ro"
+        db = sqlite3.connect(uri, timeout=10, uri=True)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA query_only=ON")
+            db.execute("PRAGMA busy_timeout=10000")
+            version = int(db.execute("PRAGMA user_version").fetchone()[0])
+            if version != CLAUDE_SOURCE_STORE_SCHEMA_VERSION:
+                raise ValueError(
+                    "claude-source.db schema 版本不受支持："
+                    f"{version}；当前仅支持 v{CLAUDE_SOURCE_STORE_SCHEMA_VERSION}。"
+                )
+            self._validate_schema(db)
+            return db
+        except Exception:
+            db.close()
+            raise
 
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
