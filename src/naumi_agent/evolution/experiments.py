@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -13,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from naumi_agent.evolution.proposal import (
@@ -25,6 +27,7 @@ from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.workbench.service import WorkbenchService
 
 EXPERIMENT_CONTRACT_POLICY = "evolution-experiment-contract-v1"
+EXPERIMENT_CONTRACT_AUTHORITY_POLICY = "evolution-experiment-contract-authority-v1"
 EXPERIMENT_SCOPE_POLICY = "evolution-experiment-scope-v1"
 EXPERIMENT_BUDGET_POLICY = "evolution-experiment-budget-v1"
 _CONTRACT_ID_RE = re.compile(r"^evx_[0-9a-f]{24}$")
@@ -35,6 +38,7 @@ _METRIC_RE = re.compile(r"^[a-z][a-z0-9_.]{0,127}$")
 _SAFE_ID_RE = re.compile(r"^[^\x00\r\n]{1,128}$")
 _ABSOLUTE_PATH_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/])")
 _ALLOWED_TOOLS = ("file_read", "glob", "grep", "file_edit", "file_write")
+_MAX_CONTRACT_AUTHORITY_BYTES = 512 * 1_024
 
 
 class _StrictModel(BaseModel):
@@ -254,6 +258,227 @@ class EvolutionExperimentContract(_StrictModel):
         return normalized
 
 
+class EvolutionExperimentContractAuthority(_StrictModel):
+    """Workspace-bound durable authority around an immutable Contract v1."""
+
+    schema_version: Literal[1] = 1
+    policy_version: Literal["evolution-experiment-contract-authority-v1"] = (
+        EXPERIMENT_CONTRACT_AUTHORITY_POLICY
+    )
+    authority_id: str = Field(pattern=r"^evxauth_[0-9a-f]{24}$")
+    authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    workspace_root: str = Field(min_length=1, max_length=4_096)
+    contract_id: str = Field(pattern=r"^evx_[0-9a-f]{24}$")
+    contract_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
+    candidate_revision: int = Field(ge=1)
+    approved_at: str = Field(min_length=1, max_length=100)
+    contract: EvolutionExperimentContract
+
+    @field_validator("workspace_root")
+    @classmethod
+    def _canonical_workspace(cls, value: str) -> str:
+        return _canonical_workspace_root(value)
+
+    @model_validator(mode="after")
+    def _authority_is_exact_and_tamper_evident(
+        self,
+    ) -> EvolutionExperimentContractAuthority:
+        contract = self.contract
+        if not (
+            self.contract_id == contract.contract_id
+            and self.contract_manifest_sha256 == contract.manifest_sha256
+            and self.candidate_id == contract.source.candidate_id
+            and self.candidate_revision == contract.source.candidate_revision
+            and self.approved_at == contract.source.approved_at
+        ):
+            raise ValueError("Experiment Contract Authority 投影不一致。")
+        digest = _manifest_digest(
+            self.model_dump(
+                mode="json",
+                exclude={"authority_id", "authority_sha256"},
+            )
+        )
+        if not hmac.compare_digest(self.authority_sha256, digest):
+            raise ValueError("Experiment Contract Authority 摘要不一致。")
+        if self.authority_id != f"evxauth_{digest[:24]}":
+            raise ValueError("Experiment Contract Authority identity 不一致。")
+        return self
+
+
+class EvolutionExperimentContractStoreError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class EvolutionExperimentContractStore:
+    """Immutable workspace-scoped storage for issued Experiment Contracts."""
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._db_path = Path(db_path).expanduser().resolve()
+
+    async def record(
+        self,
+        *,
+        workspace_root: str | Path,
+        contract: EvolutionExperimentContract,
+    ) -> EvolutionExperimentContractAuthority:
+        authority = build_experiment_contract_authority(
+            workspace_root=workspace_root,
+            contract=contract,
+        )
+        encoded = authority.model_dump_json()
+        if len(encoded.encode("utf-8")) > _MAX_CONTRACT_AUTHORITY_BYTES:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_authority_oversized",
+                "Experiment Contract Authority 超过 512 KiB 上限。",
+            )
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_contract_store_schema(db)
+                await db.execute("BEGIN IMMEDIATE")
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_experiment_contracts "
+                        "WHERE workspace_root = ? AND contract_id = ?",
+                        (authority.workspace_root, authority.contract_id),
+                    )
+                ).fetchone()
+                if row is not None:
+                    restored = _contract_authority_from_row(row)
+                    if restored != authority:
+                        await db.rollback()
+                        raise EvolutionExperimentContractStoreError(
+                            "experiment_contract_authority_conflict",
+                            "同一工作区和 Contract ID 不可覆盖为不同 authority。",
+                        )
+                    await db.rollback()
+                    return restored
+                await db.execute(
+                    "INSERT INTO evolution_experiment_contracts "
+                    "(workspace_root, contract_id, manifest_sha256, authority_id, "
+                    "authority_sha256, authority_json, approved_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        authority.workspace_root,
+                        authority.contract_id,
+                        authority.contract_manifest_sha256,
+                        authority.authority_id,
+                        authority.authority_sha256,
+                        encoded,
+                        authority.approved_at,
+                    ),
+                )
+                await db.commit()
+        except EvolutionExperimentContractStoreError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_authority_store_error",
+                "Experiment Contract Authority 无法持久化。",
+            ) from exc
+        restored = await self.get(workspace_root, authority.contract_id)
+        assert restored is not None
+        return restored
+
+    async def get(
+        self,
+        workspace_root: str | Path,
+        contract_id: str,
+    ) -> EvolutionExperimentContractAuthority | None:
+        workspace = _canonical_workspace_root(workspace_root)
+        if not isinstance(contract_id, str) or _CONTRACT_ID_RE.fullmatch(contract_id) is None:
+            raise ValueError("contract_id 格式无效。")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_contract_store_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_experiment_contracts "
+                        "WHERE workspace_root = ? AND contract_id = ?",
+                        (workspace, contract_id),
+                    )
+                ).fetchone()
+                return _contract_authority_from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_authority_store_corrupt",
+                "Experiment Contract Authority 损坏或无法读取。",
+            ) from exc
+
+
+def build_experiment_contract_authority(
+    *,
+    workspace_root: str | Path,
+    contract: EvolutionExperimentContract,
+) -> EvolutionExperimentContractAuthority:
+    try:
+        artifact = EvolutionExperimentContract.model_validate(
+            contract.model_dump(mode="json")
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise EvolutionExperimentContractStoreError(
+            "experiment_contract_authority_invalid",
+            "Experiment Contract 无效或已被篡改。",
+        ) from exc
+    payload = {
+        "schema_version": 1,
+        "policy_version": EXPERIMENT_CONTRACT_AUTHORITY_POLICY,
+        "workspace_root": _canonical_workspace_root(workspace_root),
+        "contract_id": artifact.contract_id,
+        "contract_manifest_sha256": artifact.manifest_sha256,
+        "candidate_id": artifact.source.candidate_id,
+        "candidate_revision": artifact.source.candidate_revision,
+        "approved_at": artifact.source.approved_at,
+        "contract": artifact.model_dump(mode="json"),
+    }
+    digest = _manifest_digest(payload)
+    return EvolutionExperimentContractAuthority.model_validate({
+        **payload,
+        "authority_id": f"evxauth_{digest[:24]}",
+        "authority_sha256": digest,
+    })
+
+
+def render_experiment_contract_authority(
+    authority: EvolutionExperimentContractAuthority,
+) -> str:
+    artifact = EvolutionExperimentContractAuthority.model_validate(
+        authority.model_dump(mode="json")
+    )
+    contract = artifact.contract
+    checks = ", ".join(f"`{item.metric_name}`" for item in contract.allowed_checks)
+    files = ", ".join(f"`{item}`" for item in contract.scope.allowed_files)
+    return "\n".join((
+        f"# Experiment Contract Authority `{artifact.authority_id}`",
+        "",
+        "**这是已批准实验约束的不可执行持久 authority，不是执行或推广许可。**",
+        "",
+        f"- Contract：`{artifact.contract_id}`",
+        f"- Candidate：`{artifact.candidate_id}` · revision {artifact.candidate_revision}",
+        f"- Reviewer：`{contract.source.reviewer}` · {artifact.approved_at}",
+        f"- Scope：{contract.scope.impact_scope}",
+        f"- Files：{files}",
+        (
+            "- Budget："
+            f"files {contract.budget.max_changed_files} · "
+            f"lines {contract.budget.max_changed_lines} · "
+            f"tools {contract.budget.max_tool_calls} · "
+            f"seconds {contract.budget.max_duration_seconds} · "
+            f"attempts {contract.budget.max_attempts}"
+        ),
+        f"- Checks：{checks}",
+        "- Network / dependency install：禁止 / 禁止",
+        f"- Authority SHA-256：`{artifact.authority_sha256}`",
+    ))
+
+
 class ExperimentBaselineReader(Protocol):
     def read(self, workspace_root: str | Path) -> ExperimentBaseline: ...
 
@@ -315,10 +540,14 @@ class EvolutionExperimentContractIssuer:
         *,
         review_service: EvolutionReviewService,
         workbench_service: WorkbenchService,
+        store: EvolutionExperimentContractStore,
         baseline_reader: ExperimentBaselineReader | None = None,
     ) -> None:
+        if not isinstance(store, EvolutionExperimentContractStore):
+            raise TypeError("Experiment Contract Issuer 需要 durable Store。")
         self._review_service = review_service
         self._workbench_service = workbench_service
+        self._store = store
         self._baseline_reader = baseline_reader or GitExperimentBaselineReader()
 
     async def issue(
@@ -394,11 +623,16 @@ class EvolutionExperimentContractIssuer:
         }
         plain = _jsonable(payload)
         manifest_sha256 = _manifest_digest(plain)
-        return EvolutionExperimentContract(
+        contract = EvolutionExperimentContract(
             contract_id=_contract_id(manifest_sha256),
             manifest_sha256=manifest_sha256,
             **plain,
         )
+        authority = await self._store.record(
+            workspace_root=workspace_root,
+            contract=contract,
+        )
+        return authority.contract
 
 
 _BUDGET_CAPS: dict[str, ExperimentBudget] = {
@@ -523,6 +757,55 @@ def _safe_id(value: str, label: str) -> str:
     return normalized
 
 
+def _canonical_workspace_root(value: str | Path) -> str:
+    raw = str(value)
+    if any(char in raw for char in ("\x00", "\r", "\n")):
+        raise ValueError("Experiment Contract workspace 含非法字符。")
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        raise ValueError("Experiment Contract workspace 必须是绝对路径。")
+    return str(path.resolve())
+
+
+async def _ensure_contract_store_schema(db: aiosqlite.Connection) -> None:
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS evolution_experiment_contracts (
+            workspace_root TEXT NOT NULL,
+            contract_id TEXT NOT NULL,
+            manifest_sha256 TEXT NOT NULL,
+            authority_id TEXT NOT NULL UNIQUE,
+            authority_sha256 TEXT NOT NULL,
+            authority_json TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_root, contract_id)
+        )
+        """
+    )
+
+
+def _contract_authority_from_row(
+    row: aiosqlite.Row,
+) -> EvolutionExperimentContractAuthority:
+    serialized = row["authority_json"]
+    if (
+        not isinstance(serialized, str)
+        or len(serialized.encode("utf-8")) > _MAX_CONTRACT_AUTHORITY_BYTES
+    ):
+        raise ValueError("Experiment Contract Authority payload 损坏。")
+    authority = EvolutionExperimentContractAuthority.model_validate_json(serialized)
+    if not (
+        row["workspace_root"] == authority.workspace_root
+        and row["contract_id"] == authority.contract_id
+        and row["manifest_sha256"] == authority.contract_manifest_sha256
+        and row["authority_id"] == authority.authority_id
+        and row["authority_sha256"] == authority.authority_sha256
+        and row["approved_at"] == authority.approved_at
+    ):
+        raise ValueError("Experiment Contract Authority row 与 payload 不一致。")
+    return authority
+
+
 def _jsonable(value: Any) -> dict[str, Any]:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -550,13 +833,19 @@ def _contract_id(manifest_sha256: str) -> str:
 
 
 __all__ = [
+    "EXPERIMENT_CONTRACT_AUTHORITY_POLICY",
     "EvolutionExperimentContract",
+    "EvolutionExperimentContractAuthority",
     "EvolutionExperimentContractIssuer",
+    "EvolutionExperimentContractStore",
+    "EvolutionExperimentContractStoreError",
     "ExperimentBaseline",
     "ExperimentBudget",
     "ExperimentCheck",
     "ExperimentScope",
     "ExperimentSource",
     "GitExperimentBaselineReader",
+    "build_experiment_contract_authority",
     "default_experiment_budget",
+    "render_experiment_contract_authority",
 ]

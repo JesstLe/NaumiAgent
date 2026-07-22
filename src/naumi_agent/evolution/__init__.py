@@ -83,8 +83,13 @@ if TYPE_CHECKING:
     )
     from naumi_agent.evolution.experiments import (
         EvolutionExperimentContract,
+        EvolutionExperimentContractAuthority,
         EvolutionExperimentContractIssuer,
+        EvolutionExperimentContractStore,
+        EvolutionExperimentContractStoreError,
         ExperimentBudget,
+        build_experiment_contract_authority,
+        render_experiment_contract_authority,
     )
     from naumi_agent.evolution.failure_attribution import (
         EvolutionFailureAttributionBuilder,
@@ -339,7 +344,12 @@ __all__ = [
     "parse_proposal_scope_files",
     "EvolutionStoredCandidate",
     "EvolutionExperimentContract",
+    "EvolutionExperimentContractAuthority",
     "EvolutionExperimentContractIssuer",
+    "EvolutionExperimentContractStore",
+    "EvolutionExperimentContractStoreError",
+    "build_experiment_contract_authority",
+    "render_experiment_contract_authority",
     "EvolutionExperimentLeaseManager",
     "EvolutionExperimentLeaseStore",
     "EvolutionExperimentSourceSnapshot",
@@ -562,8 +572,13 @@ def __getattr__(name: str) -> object:
     }
     experiment_exports = {
         "EvolutionExperimentContract",
+        "EvolutionExperimentContractAuthority",
         "EvolutionExperimentContractIssuer",
+        "EvolutionExperimentContractStore",
+        "EvolutionExperimentContractStoreError",
         "ExperimentBudget",
+        "build_experiment_contract_authority",
+        "render_experiment_contract_authority",
     }
     experiment_lease_exports = {
         "EvolutionExperimentLeaseManager",

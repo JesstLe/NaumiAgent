@@ -80,7 +80,10 @@ from naumi_agent.evolution.experiment_leases import (
 from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
-from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContractIssuer,
+    EvolutionExperimentContractStore,
+)
 from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionBuilder,
     EvolutionFailureAttributionExecutor,
@@ -891,9 +894,13 @@ class AgentEngine:
             review_service=self.evolution_review_service,
             workbench_service=self.workbench_service,
         )
+        self.evolution_experiment_contract_store = EvolutionExperimentContractStore(
+            config.memory.session_db_path
+        )
         self.evolution_experiment_contract_issuer = EvolutionExperimentContractIssuer(
             review_service=self.evolution_review_service,
             workbench_service=self.workbench_service,
+            store=self.evolution_experiment_contract_store,
         )
         self.evolution_experiment_lease_store = EvolutionExperimentLeaseStore(
             config.memory.session_db_path

@@ -30,7 +30,7 @@
 - 同 baseline+candidate+seed 可重建相同 experiment manifest。
 - 失败 patch 保留证据但不进入验证/推广。
 
-## 实现进展（2026-07-18）
+## 实现进展（2026-07-22）
 
 - EVO-02.1a 已实现不可执行 Experiment Contract v1：只有来源仍可验证的 approved Evolution Proposal
   可以签发；manifest 固化真实 Git HEAD、dirty 事实、scope、risk budget、固定工具和机械检查，并使用
@@ -39,6 +39,10 @@
   触发代码、Git 写入或实验资格。
 - 真实 Git + Candidate SQLite + Workbench SQLite 端到端与篡改/漂移/越界预算测试已通过。详见
   `EVO-02-1a-experiment-contract.md`。
+- EVO-02.1b 已实现 workspace-bound Durable Experiment Contract Authority：Issuer 强制在返回前持久化完整
+  approved scope/budget/tools/checks/network constraints，并支持并发幂等、workspace 隔离、row/payload/digest
+  篡改检测与 slash/Agent 双通道只读审查。详见
+  `EVO-02-1b-durable-experiment-contract-authority.md`。
 - EVO-02.2a 已实现持久 Worktree Lease v1：Contract/owner/baseline/路径唯一绑定，SQLite CAS 并发仲裁，
   精确 baseline 创建，崩溃窗口恢复、到期回收和 dirty/ahead tombstone；任何状态都不授予执行权限。
   `AgentEngine` 已组合 Contract Issuer、Lease Store 与 Lease Manager。详见
@@ -84,4 +88,5 @@
 - EVO-02.7c1 已实现受控 Mutation Turn Runner：生产 `ModelPort` 读取完整 approved baseline，只能调用严格
   schema 的虚拟 `file_edit/file_write`，并受 50 轮上限、总超时、Token/prompt 预算、取消回收和 typed
   Runtime Event 约束；生成阶段仍不写磁盘。详见 `EVO-02-7c1-mutation-turn-runner.md`。
-- HAR-08 RED/GREEN 尚未消费 Mutation Receipt v2，因此 EVO-02 整体保持 partial。
+- EVO-03 RED/GREEN 已消费 Mutation Receipt v2；EVO-02 仍只覆盖受治理实验链的已列切片，完整自动编排与后续
+  决策/推广闭环尚未完成，因此整体保持 `partial`。

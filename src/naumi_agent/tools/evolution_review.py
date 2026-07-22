@@ -15,6 +15,10 @@ from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptError,
     render_evaluation_lane_receipt,
 )
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContractStoreError,
+    render_experiment_contract_authority,
+)
 from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptError,
     render_final_evaluation_receipt,
@@ -114,6 +118,60 @@ class EvolutionCandidatesTool(Tool):
         except (EvolutionStoreError, OSError, ValueError):
             return "Evolution Candidate 状态库不可读，或过滤条件无效。请运行 /doctor。"
         return render_evolution_review(snapshot)
+
+
+class EvolutionExperimentContractAuthorityTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_experiment_contract_authority"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 durable Store 只读重载当前工作区的 Experiment Contract Authority，"
+            "查看已批准 scope、文件、预算、检查与禁用能力；不签发执行或推广许可。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "contract_id": {
+                    "type": "string",
+                    "pattern": "^evx_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["contract_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="Evolution 实验约束 Authority",
+            search_hint=(
+                "evolution experiment contract authority scope budget constraints "
+                "自进化 实验 合同 约束 预算"
+            ),
+        )
+
+    async def execute(self, contract_id: str) -> str:
+        try:
+            authority = await self._engine.evolution_experiment_contract_store.get(
+                self._engine.workspace_root,
+                contract_id.strip(),
+            )
+        except (EvolutionExperimentContractStoreError, OSError, TypeError, ValueError):
+            return "Experiment Contract Authority 不可读取；请运行 /doctor 后重试。"
+        if authority is None:
+            return "当前工作区不存在该 Experiment Contract Authority。"
+        return render_experiment_contract_authority(authority)
 
 
 class EvolutionProposalQueueTool(Tool):
@@ -377,6 +435,7 @@ def create_evolution_review_tools(
 ) -> list[Tool]:
     return [
         EvolutionCandidatesTool(engine, service),
+        EvolutionExperimentContractAuthorityTool(engine),
         EvolutionEvaluationReceiptTool(engine),
         EvolutionEvaluationAggregationContractTool(engine),
         EvolutionFinalEvaluationReceiptTool(engine),
@@ -386,6 +445,7 @@ def create_evolution_review_tools(
 
 __all__ = [
     "EvolutionCandidatesTool",
+    "EvolutionExperimentContractAuthorityTool",
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
     "EvolutionFinalEvaluationReceiptTool",
