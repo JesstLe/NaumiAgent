@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "stream": {
+    "request_id": "submit-1",
+    "run_id": "run-stream-1",
+    "submission_text": "生成流式回复",
+    "events": [
+      {
+        "engine_event": "response_start",
+        "data": {},
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "start",
+          "content": ""
+        }
+      },
+      {
+        "engine_event": "token",
+        "data": {
+          "content": "第一段"
+        },
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "token",
+          "content": "第一段"
+        }
+      },
+      {
+        "engine_event": "token",
+        "data": {
+          "content": "，第二段。"
+        },
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "token",
+          "content": "，第二段。"
+        }
+      },
+      {
+        "engine_event": "response_end",
+        "data": {},
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "end",
+          "content": ""
+        }
+      }
+    ],
+    "expected_content": "第一段，第二段。",
+    "expected_stream_status": "completed"
+  },
+  "interrupted": {
+    "request_id": "submit-1",
+    "run_id": "run-interrupted-1",
+    "submission_text": "检查中断恢复",
+    "partial_events": [
+      {
+        "engine_event": "response_start",
+        "data": {},
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "start",
+          "content": ""
+        }
+      },
+      {
+        "engine_event": "token",
+        "data": {
+          "content": "已经收到的部分"
+        },
+        "expected_message": {
+          "type": "assistant_stream",
+          "phase": "token",
+          "content": "已经收到的部分"
+        }
+      }
+    ],
+    "error_record": {
+      "type": "error",
+      "request_id": "submit-1",
+      "payload": {
+        "code": "model_timeout",
+        "message": "模型服务响应超时。"
+      }
+    },
+    "expected_error_message": {
+      "type": "error",
+      "message": "模型服务响应超时。"
+    },
+    "expected_content": "已经收到的部分",
+    "expected_stream_status": "interrupted",
+    "expected_delivery_status": "accepted"
+  },
+  "delivery_retry": {
+    "submission_text": "重试本地发送",
+    "first_request_id": "submit-1",
+    "failure_record": {
+      "type": "error",
+      "request_id": "submit-1",
+      "payload": {
+        "code": "transport_write_failed",
+        "message": "无法写入本地 Bridge。"
+      }
+    },
+    "expected_failed_status": "failed",
+    "retry_command": "/retry submit-1",
+    "retry_request_id": "submit-2",
+    "expected_retry_status": "queued",
+    "expected_attempt": 2
+  }
+}

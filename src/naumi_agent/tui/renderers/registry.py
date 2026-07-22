@@ -425,6 +425,7 @@ def _render_error(
 ) -> None:
     chat.start_response()
     chat.add_response_token(f"**错误**: {msg.message}")
+    status.status_text = "执行失败"
 
 
 def _render_completion_receipt(
