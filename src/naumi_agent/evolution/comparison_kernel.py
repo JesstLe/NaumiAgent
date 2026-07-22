@@ -42,7 +42,7 @@ class EvolutionComparisonKernel:
         red_completed_at: str,
         green_completed_at: str,
         validation_plan_id: str,
-        lane_label: Literal["Self-Review", "Interventional"],
+        lane_label: Literal["Self-Review", "Interventional", "Adversarial"],
         red_records: tuple[HarnessStoredEvalResult, ...],
         green_records: tuple[HarnessStoredEvalResult, ...],
     ) -> HarnessStoredEvalComparisonReceipt:

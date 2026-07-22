@@ -12,6 +12,10 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequestBuilder,
 )
+from naumi_agent.evolution.adversarial_cohort import EvolutionAdversarialCohortExecutor
+from naumi_agent.evolution.adversarial_comparison import (
+    EvolutionAdversarialComparisonExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -211,6 +215,14 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_adversarial_sample_executor,
         EvolutionAdversarialSampleExecutor,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_cohort_executor,
+        EvolutionAdversarialCohortExecutor,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_comparison_executor,
+        EvolutionAdversarialComparisonExecutor,
     )
     assert isinstance(
         engine.evolution_baseline_cohort_request_builder,

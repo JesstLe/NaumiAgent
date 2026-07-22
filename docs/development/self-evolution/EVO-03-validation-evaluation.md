@@ -25,6 +25,9 @@ Eval 和真实 Harness 检查产生。
   - EVO-03.6d Lane Cohort 已实现：当前真实平台的 RED/GREEN lane 通过 HAR-08.4f 共用连续前缀恢复、单轮
     lease/Run Grant 和清理状态机，形成防篡改 cohort receipt；不复制 worker 或 Batch coordinator。详见
     `EVO-03-6d-adversarial-lane-cohort.md`。
+  - EVO-03.6e H5c Comparison 已实现：严格配对同平台 RED/GREEN cohort，重新验证 ordered H5a、
+    configuration/source/platform、probe/lifecycle/Run Grant 与 summary evidence，并复用共享 H5b2/H5c
+    内核持久化原生 verdict；详见 `EVO-03-6e-adversarial-h5c-comparison.md`。
 - EVO-03.7 Evaluation receipt：before/after、sample、成本、失败、artifact digest。
 
 ## 验收标准
@@ -109,12 +112,12 @@ Eval 和真实 Harness 检查产生。
   `EVO-03-5b-interventional-failure-attribution.md`。
 - HAR-08.4a..4f 与 ARC-04.3a..3c 已实现精确 revision/overlay、成组 Check execution、连续 Batch
   lease/grant/恢复/partial checkpoint；Interventional RED/GREEN 已完整消费这些共享前置。EVO-03.6a/6b/6c
-  已冻结 adversarial Registry/Profile/check/Batch authority，并完成单 lane/sample 与当前平台 RED/GREEN 连续
-  lane cohort 的真实 H5a 执行。下一步只配对同平台两份 cohort receipt 并复用 H5b2/H5c 比较，不得复制
-  worker、Batch 状态机或评分器。
+  已冻结 adversarial Registry/Profile/check/Batch authority，并完成单 lane/sample、当前平台 RED/GREEN 连续
+  lane cohort 的真实 H5a 执行和同平台 H5b2/H5c 比较。下一步应重新比较跨平台 dispatcher、adversarial
+  Failure Attribution adapter 与最终 Evaluation Receipt 的依赖，不得复制 worker、Batch 状态机或评分器。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
 Interventional Failure Attribution adapter、Adversarial Probe Contract、Batch Request、单 lane/sample 与当前平台
-连续 cohort 已完成；adversarial RED/GREEN 比较、跨平台调度与最终 Evaluation Receipt 仍未实现，
+连续 cohort 与同平台 RED/GREEN 比较已完成；跨平台调度与最终 Evaluation Receipt 仍未实现，
 因此 EVO-03 整体保持 partial。

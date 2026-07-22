@@ -47,6 +47,10 @@ from naumi_agent.evolution.adversarial_cohort import (
     EvolutionAdversarialCohortExecutor,
     EvolutionAdversarialCohortReceipt,
 )
+from naumi_agent.evolution.adversarial_comparison import (
+    EvolutionAdversarialComparisonError,
+    EvolutionAdversarialComparisonExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContract,
     EvolutionAdversarialProbeContractBuilder,
@@ -4780,6 +4784,43 @@ async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_au
         lease=lease,
     )
     assert repeated_cohort == red_cohort
+    comparison_executor = EvolutionAdversarialComparisonExecutor(store)
+    comparison = await comparison_executor.execute(
+        workspace_root=workspace,
+        batch_request=request,
+        probe_contract=probes,
+        validation_plan=plan,
+        red_receipt=red_cohort,
+        green_receipt=green_cohort,
+    )
+    repeated_comparison = await comparison_executor.execute(
+        workspace_root=workspace,
+        batch_request=request,
+        probe_contract=probes,
+        validation_plan=plan,
+        red_receipt=red_cohort,
+        green_receipt=green_cohort,
+    )
+    assert repeated_comparison == comparison
+    assert comparison.receipt.baseline_batch_id == red_lane.batch_id
+    assert comparison.receipt.current_batch_id == green_lane.batch_id
+    assert comparison.receipt.statistical_verdict == "unchanged"
+    assert comparison.receipt.decision == "passed"
+    assert len(comparison.receipt.sample_evidence) == 5
+    assert all(
+        item.mechanical_verdict == "unchanged"
+        for item in comparison.receipt.sample_evidence
+    )
+    with pytest.raises(EvolutionAdversarialComparisonError) as wrong_phase:
+        await comparison_executor.execute(
+            workspace_root=workspace,
+            batch_request=request,
+            probe_contract=probes,
+            validation_plan=plan,
+            red_receipt=red_cohort,
+            green_receipt=red_cohort,
+        )
+    assert wrong_phase.value.code == "adversarial_comparison_authority_mismatch"
     tampered_cohort = red_cohort.model_dump(mode="json")
     tampered_cohort["requested_samples"] = 6
     with pytest.raises(ValidationError, match="样本前缀"):

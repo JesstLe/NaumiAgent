@@ -36,7 +36,7 @@ passed/failed/evaluation-error 计数和逐样本 `exit_zero` 数值。Evaluatio
 
 ## 当前不足与下一步
 
-本切片只完成当前真实平台上的单 lane 连续闭环，不调度 Linux/Windows，也不比较 RED/GREEN。下一最小切片应实现
-EVO-03.6e：严格配对同平台 RED/GREEN cohort receipt，复用现有 H5b2/H5c comparator 形成 adversarial verdict；
-不得另建 Evolution 评分器。跨平台 dispatcher、通用 Harness Service/Tool/UI 与最终 EVO-03.7 Evaluation Receipt
-仍需独立切片。
+本切片只完成当前真实平台上的单 lane 连续闭环，不调度 Linux/Windows。EVO-03.6e 已在其后严格配对
+同平台 RED/GREEN cohort receipt，并复用现有 H5b2/H5c comparator 形成 adversarial verdict，见
+`EVO-03-6e-adversarial-h5c-comparison.md`。跨平台 dispatcher、通用 Harness Service/Tool/UI 与最终
+EVO-03.7 Evaluation Receipt 仍需独立切片。
