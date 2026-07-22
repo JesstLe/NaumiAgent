@@ -97,6 +97,10 @@ Pursuit 提供目标分解/评估/行动；HAR-10 提供可靠运行控制和完
 worker lease，Harness 不重新实现 goal planner。Goal、Pursuit、Harness Run 通过稳定 ID
 关联。
 
+ARC-03.5a 已提供长运行 New UI 的最小传输完整性前置：协商后的 JSONL 缺口不会静默渲染为成功状态，
+而会隔离并回退到直接读取 Engine 的 TUI。它只保护当前连接的可见真相，不替代 HAR-10 的持久 lease、
+checkpoint、reconcile，也不提供断线事件补发。
+
 ## 已完成前置
 
 ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 和运行时资源所有权收口，

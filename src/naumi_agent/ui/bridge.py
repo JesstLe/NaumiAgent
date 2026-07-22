@@ -570,15 +570,15 @@ class JsonlEngineBridge:
         """Emit one JSONL record to the frontend."""
         if self._writer is None:
             raise RuntimeError("bridge writer is not bound")
-        self._sequence += 1
-        record = make_envelope(
-            event,
-            payload or {},
-            request_id=request_id,
-            sequence=self._sequence,
-        )
-        text = encode_jsonl(record)
         async with self._writer_lock:
+            self._sequence += 1
+            record = make_envelope(
+                event,
+                payload or {},
+                request_id=request_id,
+                sequence=self._sequence,
+            )
+            text = encode_jsonl(record)
             self._writer.write(text)
             self._writer.flush()
         if self.debug_trace is not None:

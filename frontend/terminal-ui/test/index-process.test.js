@@ -217,7 +217,17 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
       selected_version: 1,
       server_minimum_version: 1,
       server_maximum_version: 1,
-      capabilities: ["heartbeat", "typed_ui_messages", "workbench_snapshot"],
+      capabilities: [
+        "evolution_evaluation_lane",
+        "goal_snapshot",
+        "heartbeat",
+        "sequence_integrity",
+        "session_list",
+        "task_snapshot",
+        "typed_ui_messages",
+        "workbench_proposal_actions",
+        "workbench_snapshot",
+      ],
     });
     assert.equal(await stopTerminalUi(app), 0);
   } finally {
@@ -272,6 +282,32 @@ test("terminal UI rejects a malformed hello ack without releasing early input", 
         && record.payload.record.type === "submit",
     ));
     assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI quarantines a negotiated sequence gap and exits for TUI fallback", async () => {
+  const app = launchTerminalUi("sequence-gap-bridge.js");
+  const output = collectOutput(app);
+  const exitPromise = once(app, "exit");
+
+  try {
+    await waitForOutput(output, "事件流序号不完整（期望 2，收到 3）", 7000);
+    const [code] = await exitPromise;
+    assert.equal(code, 1);
+    const desync = readDebugEvents(app.debugLogPath).find(
+      (record) => record.event === "protocol.sequence.desync",
+    );
+    assert(desync);
+    assert.equal(desync.payload.code, "sequence_gap");
+    assert.equal(desync.payload.expected_seq, 2);
+    assert.equal(desync.payload.received_seq, 3);
+    assert(!readDebugEvents(app.debugLogPath).some(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "ready",
+    ));
+    assert(!stripAnsi(output.text).includes("gap-record-must-not-render"));
   } finally {
     forceKill(app);
   }

@@ -7,6 +7,7 @@ import {
   attachJsonlLineReader,
   createHelloPayload,
   createEventSender,
+  createServerSequenceGuard,
   eventPolicy,
   normalizeBudgetStatus,
   normalizeServerRecord,
@@ -440,6 +441,7 @@ test("protocol contract drives client and server event validation", () => {
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
+      "sequence_integrity",
       "session_list",
       "task_snapshot",
       "typed_ui_messages",
@@ -586,6 +588,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
+      "sequence_integrity",
       "session_list",
       "task_snapshot",
       "typed_ui_messages",
@@ -1592,7 +1595,7 @@ function inspectorSnapshotFixture(revision) {
 test("normalizeServerRecord stabilizes bridge payloads", () => {
   assert.deepEqual(normalizeServerRecord({
     id: 42,
-    seq: "7",
+    seq: 7,
     type: "user/message",
     version: "1",
     payload: { content: 123 },
@@ -1603,6 +1606,13 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     version: 1,
     payload: { content: "123" },
   });
+
+  for (const seq of ["7", 0, -1, true, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => normalizeServerRecord({ type: "user/message", seq, payload: { content: "x" } }),
+      /seq 必须是正安全整数/,
+    );
+  }
 
   assert.deepEqual(normalizeServerRecord({
     type: "session/replayed",
@@ -1770,6 +1780,61 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     started_at: "",
     completed_at: "",
     duration_ms: 0,
+  });
+});
+
+test("server sequence guard accepts contiguous records and quarantines gaps", () => {
+  const guard = createServerSequenceGuard();
+  assert.deepEqual(guard.observe({ seq: 99 }), {
+    action: "accept",
+    code: "preflight_baseline",
+    lastSeq: 99,
+  });
+  assert.equal(guard.enable({ seq: 100 }).code, "contiguous");
+  assert.equal(guard.observe({ seq: 101 }).code, "contiguous");
+  assert.deepEqual(guard.observe({ seq: 101 }), {
+    action: "ignore",
+    code: "duplicate_sequence",
+    expectedSeq: 102,
+    receivedSeq: 101,
+    lastSeq: 101,
+  });
+  assert.equal(guard.observe({ seq: 4 }).code, "out_of_order_sequence");
+  assert.deepEqual(guard.observe({ seq: 109 }), {
+    action: "desync",
+    code: "sequence_gap",
+    expectedSeq: 102,
+    receivedSeq: 109,
+    lastSeq: 101,
+  });
+  assert.equal(guard.observe({ seq: 102 }).action, "quarantine");
+  assert.deepEqual(guard.snapshot(), { enabled: true, desynced: true, lastSeq: 101 });
+});
+
+test("server sequence guard fails closed on missing and invalid negotiated sequence", () => {
+  const missing = createServerSequenceGuard();
+  assert.equal(missing.enable({}).code, "missing_sequence");
+  assert.equal(missing.observe({ seq: 1 }).action, "quarantine");
+
+  const invalid = createServerSequenceGuard();
+  assert.equal(invalid.enable({ seq: 1 }).action, "accept");
+  assert.deepEqual(invalid.invalidate("oops"), {
+    action: "desync",
+    code: "invalid_sequence",
+    expectedSeq: 2,
+    receivedSeq: "oops",
+    lastSeq: 1,
+  });
+
+  const startupGap = createServerSequenceGuard();
+  assert.equal(startupGap.observe({ seq: 1 }).action, "accept");
+  assert.equal(startupGap.observe({ seq: 3 }).action, "accept");
+  assert.deepEqual(startupGap.enable({ seq: 4 }), {
+    action: "desync",
+    code: "sequence_gap",
+    expectedSeq: 2,
+    receivedSeq: 3,
+    lastSeq: 3,
   });
 });
 

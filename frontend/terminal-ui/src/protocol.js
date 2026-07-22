@@ -493,8 +493,120 @@ export function normalizeServerRecord(record) {
   };
   if (normalized.id != null) normalized.id = String(normalized.id);
   if (normalized.request_id != null) normalized.request_id = String(normalized.request_id);
-  if (normalized.seq != null) normalized.seq = Number(normalized.seq);
+  if (normalized.seq != null) {
+    if (!isValidServerSequence(normalized.seq)) {
+      throw new Error("Bridge seq 必须是正安全整数");
+    }
+  }
   return normalized;
+}
+
+export function isValidServerSequence(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+export function createServerSequenceGuard() {
+  let enabled = false;
+  let desynced = false;
+  let lastSeq = null;
+  let preflightFailure = null;
+
+  function failure(code, receivedSeq) {
+    desynced = true;
+    return {
+      action: "desync",
+      code,
+      expectedSeq: lastSeq == null ? null : lastSeq + 1,
+      receivedSeq: receivedSeq ?? null,
+      lastSeq,
+    };
+  }
+
+  function observe(record) {
+    if (!enabled) {
+      const seq = record?.seq;
+      if (seq == null) {
+        preflightFailure ??= {
+          code: "missing_sequence",
+          expectedSeq: lastSeq == null ? null : lastSeq + 1,
+          receivedSeq: null,
+        };
+        return { action: "accept", code: "preflight_missing_sequence", lastSeq };
+      }
+      if (lastSeq == null) {
+        lastSeq = seq;
+        return { action: "accept", code: "preflight_baseline", lastSeq };
+      }
+      const expectedSeq = lastSeq + 1;
+      if (seq === expectedSeq) {
+        lastSeq = seq;
+        return { action: "accept", code: "preflight_contiguous", lastSeq };
+      }
+      preflightFailure ??= {
+        code: seq <= lastSeq
+          ? (seq === lastSeq ? "duplicate_sequence" : "out_of_order_sequence")
+          : "sequence_gap",
+        expectedSeq,
+        receivedSeq: seq,
+      };
+      lastSeq = Math.max(lastSeq, seq);
+      return { action: "accept", code: "preflight_anomaly", lastSeq };
+    }
+    if (desynced) return { action: "quarantine", code: "stream_desynced", lastSeq };
+    const seq = record?.seq;
+    if (seq == null) return failure("missing_sequence", null);
+    if (lastSeq == null) {
+      lastSeq = seq;
+      return { action: "accept", code: "baseline", lastSeq };
+    }
+    const expectedSeq = lastSeq + 1;
+    if (seq === expectedSeq) {
+      lastSeq = seq;
+      return { action: "accept", code: "contiguous", lastSeq };
+    }
+    if (seq <= lastSeq) {
+      return {
+        action: "ignore",
+        code: seq === lastSeq ? "duplicate_sequence" : "out_of_order_sequence",
+        expectedSeq,
+        receivedSeq: seq,
+        lastSeq,
+      };
+    }
+    return failure("sequence_gap", seq);
+  }
+
+  return {
+    enable(record) {
+      if (enabled) return observe(record);
+      enabled = true;
+      if (preflightFailure) {
+        desynced = true;
+        return {
+          action: "desync",
+          ...preflightFailure,
+          lastSeq,
+        };
+      }
+      return observe(record);
+    },
+    observe,
+    invalidate(receivedSeq) {
+      if (!enabled) {
+        preflightFailure ??= {
+          code: "invalid_sequence",
+          expectedSeq: lastSeq == null ? null : lastSeq + 1,
+          receivedSeq: receivedSeq ?? null,
+        };
+        return { action: "accept", code: "preflight_invalid_sequence", lastSeq };
+      }
+      if (desynced) return { action: "quarantine", code: "stream_desynced", lastSeq };
+      return failure("invalid_sequence", receivedSeq);
+    },
+    snapshot() {
+      return { enabled, desynced, lastSeq };
+    },
+  };
 }
 
 function normalizeServerPayload(type, payload) {

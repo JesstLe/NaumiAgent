@@ -27,6 +27,7 @@ PROTOCOL_CAPABILITIES = (
     "goal_snapshot",
     "heartbeat",
     "session_list",
+    "sequence_integrity",
     "task_snapshot",
     "typed_ui_messages",
     "workbench_snapshot",
