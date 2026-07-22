@@ -28,6 +28,13 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert registry.policy("server", "permission/request").owner == "safety"
     assert registry.policy("server", "run/completed").criticality == "terminal"
     assert registry.policy("client", "ping").persistence == "never"
+    assert registry.required_capability(
+        "client", "evolution/evaluation-lane/request"
+    ) == "evolution_evaluation_lane"
+    assert registry.required_capability(
+        "server", "evolution/evaluation-lane"
+    ) == "evolution_evaluation_lane"
+    assert registry.required_capability("client", "submit") is None
     with pytest.raises(TypeError):
         registry.client["future/event"] = registry.policy("client", "ping")  # type: ignore[index]
 
@@ -91,4 +98,46 @@ def test_registry_rejects_unknown_top_level_policy_group(tmp_path: Path) -> None
     path.write_text(json.dumps(document), encoding="utf-8")
 
     with pytest.raises(ProtocolRegistryError, match="contract_version"):
+        load_protocol_event_registry(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda document: document["event_capabilities"].update(
+                {"unknown_feature": {"client_events": ["ping"], "server_events": []}}
+            ),
+            "未发布能力",
+        ),
+        (
+            lambda document: document["event_capabilities"][
+                "evolution_evaluation_lane"
+            ]["client_events"].append("future/request"),
+            "未注册 client 事件",
+        ),
+        (
+            lambda document: document["event_capabilities"].update(
+                {
+                    "goal_snapshot": {
+                        "client_events": ["evolution/evaluation-lane/request"],
+                        "server_events": [],
+                    }
+                }
+            ),
+            "多个能力重复绑定",
+        ),
+    ],
+)
+def test_registry_rejects_unsafe_capability_bindings(
+    tmp_path: Path,
+    mutation: object,
+    message: str,
+) -> None:
+    document = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    mutation(document)  # type: ignore[operator]
+    path = tmp_path / "unsafe-capability.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ProtocolRegistryError, match=message):
         load_protocol_event_registry(path)

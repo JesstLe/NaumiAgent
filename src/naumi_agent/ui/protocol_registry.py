@@ -66,16 +66,39 @@ class EventPolicy(_StrictModel):
         return self
 
 
+class EventCapabilityBinding(_StrictModel):
+    client_events: tuple[str, ...] = Field(default=(), max_length=128)
+    server_events: tuple[str, ...] = Field(default=(), max_length=128)
+
+    @model_validator(mode="after")
+    def _events_are_unique(self) -> EventCapabilityBinding:
+        for direction, events in (
+            ("client", self.client_events),
+            ("server", self.server_events),
+        ):
+            if len(events) != len(set(events)):
+                raise ValueError(f"{direction}_events 不得重复。")
+        if not self.client_events and not self.server_events:
+            raise ValueError("能力绑定至少需要一个事件。")
+        return self
+
+
 class ProtocolEventRegistry(_StrictModel):
     contract_version: StrictInt = Field(ge=1)
     registry_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     client: Mapping[str, EventPolicy]
     server: Mapping[str, EventPolicy]
+    event_capabilities: Mapping[str, EventCapabilityBinding]
 
     @model_validator(mode="after")
     def _freeze_policy_maps(self) -> ProtocolEventRegistry:
         object.__setattr__(self, "client", MappingProxyType(dict(self.client)))
         object.__setattr__(self, "server", MappingProxyType(dict(self.server)))
+        object.__setattr__(
+            self,
+            "event_capabilities",
+            MappingProxyType(dict(self.event_capabilities)),
+        )
         return self
 
     def policy(self, direction: EventDirection, event_type: str) -> EventPolicy:
@@ -88,6 +111,26 @@ class ProtocolEventRegistry(_StrictModel):
             raise ProtocolRegistryError(
                 f"未注册 {direction} 事件：{event_type}"
             ) from exc
+
+    def required_capability(
+        self,
+        direction: EventDirection,
+        event_type: str,
+    ) -> str | None:
+        """Return the single negotiated capability governing an event, if any."""
+        if direction not in ("client", "server"):
+            raise ProtocolRegistryError(f"未知事件方向：{direction}")
+        field = "client_events" if direction == "client" else "server_events"
+        matches = [
+            capability
+            for capability, binding in self.event_capabilities.items()
+            if event_type in getattr(binding, field)
+        ]
+        if len(matches) > 1:
+            raise ProtocolRegistryError(
+                f"{direction} 事件 {event_type} 被多个能力重复绑定。"
+            )
+        return matches[0] if matches else None
 
 
 def load_protocol_event_registry(
@@ -122,18 +165,42 @@ def load_protocol_event_registry(
         set(raw_server),
         {str(event) for event in ServerEventType},
     )
+    raw_negotiation = document.get("negotiation")
+    raw_capability_registry = document.get("event_capabilities")
+    if not isinstance(raw_negotiation, dict) or not isinstance(
+        raw_negotiation.get("capabilities"), list
+    ):
+        raise ProtocolRegistryError("protocol contract 缺少 negotiation capabilities。")
+    if not isinstance(raw_capability_registry, dict):
+        raise ProtocolRegistryError("protocol contract 缺少 event_capabilities。")
+    published_capabilities = set(raw_negotiation["capabilities"])
+    unknown_capabilities = sorted(set(raw_capability_registry) - published_capabilities)
+    if unknown_capabilities:
+        raise ProtocolRegistryError(
+            f"event_capabilities 包含未发布能力：{unknown_capabilities}"
+        )
     canonical = json.dumps(
-        {"client": raw_client, "server": raw_server},
+        {
+            "client": raw_client,
+            "server": raw_server,
+            "event_capabilities": raw_capability_registry,
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
     try:
+        bindings = {
+            name: EventCapabilityBinding.model_validate(value)
+            for name, value in raw_capability_registry.items()
+        }
+        _validate_capability_bindings(bindings)
         return ProtocolEventRegistry(
             contract_version=document.get("version", 0),
             registry_sha256=hashlib.sha256(canonical).hexdigest(),
             client={name: EventPolicy.model_validate(value) for name, value in raw_client.items()},
             server={name: EventPolicy.model_validate(value) for name, value in raw_server.items()},
+            event_capabilities=bindings,
         )
     except (TypeError, ValueError) as exc:
         raise ProtocolRegistryError(f"event_registry 无效：{exc}") from exc
@@ -150,6 +217,31 @@ def _assert_exact_coverage(
         raise ProtocolRegistryError(
             f"{direction} event_registry 覆盖不完整：missing={missing} unknown={unknown}"
         )
+
+
+def _validate_capability_bindings(
+    bindings: Mapping[str, EventCapabilityBinding],
+) -> None:
+    expected = {
+        "client": {str(event) for event in ClientEventType},
+        "server": {str(event) for event in ServerEventType},
+    }
+    for direction, field in (
+        ("client", "client_events"),
+        ("server", "server_events"),
+    ):
+        owners: dict[str, str] = {}
+        for capability, binding in bindings.items():
+            for event_type in getattr(binding, field):
+                if event_type not in expected[direction]:
+                    raise ProtocolRegistryError(
+                        f"event_capabilities {capability} 引用未注册 {direction} 事件：{event_type}"
+                    )
+                previous = owners.setdefault(event_type, capability)
+                if previous != capability:
+                    raise ProtocolRegistryError(
+                        f"{direction} 事件 {event_type} 被多个能力重复绑定。"
+                    )
 
 
 def _contract_path() -> Path:
@@ -172,6 +264,7 @@ def _contract_path() -> Path:
 
 
 __all__ = [
+    "EventCapabilityBinding",
     "EventPolicy",
     "ProtocolEventRegistry",
     "ProtocolRegistryError",

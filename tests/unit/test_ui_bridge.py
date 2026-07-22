@@ -96,7 +96,6 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     negotiate_hello,
     normalize_client_record,
-    required_client_event_capability,
 )
 from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
@@ -953,11 +952,12 @@ def test_protocol_contract_matches_python_enums() -> None:
         ],
         "required_capabilities": ["typed_ui_messages"],
     }
-    required = required_client_event_capability(
-        ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST
-    )
-    assert required == "evolution_evaluation_lane"
-    assert required in contract["negotiation"]["capabilities"]
+    assert contract["event_capabilities"] == {
+        "evolution_evaluation_lane": {
+            "client_events": ["evolution/evaluation-lane/request"],
+            "server_events": ["evolution/evaluation-lane"],
+        }
+    }
 
 
 def test_protocol_negotiates_highest_shared_version_and_capability_intersection() -> None:

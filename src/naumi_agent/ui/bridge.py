@@ -90,7 +90,6 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     negotiate_hello,
     normalize_client_record,
-    required_client_event_capability,
     ui_message_payload,
 )
 from naumi_agent.ui.protocol_registry import load_protocol_event_registry
@@ -1225,7 +1224,10 @@ class JsonlEngineBridge:
             )
             return
 
-        required_capability = required_client_event_capability(event_type)
+        required_capability = self._protocol_event_registry.required_capability(
+            "client",
+            event_type,
+        )
         if (
             required_capability is not None
             and (
