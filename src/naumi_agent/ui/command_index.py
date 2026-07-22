@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Sequence
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
@@ -33,6 +35,23 @@ type PermissionRisk = Literal[
     "tool_execution",
     "destructive",
 ]
+
+_CATEGORY_SEARCH_LABELS = {
+    "basic": "基础",
+    "session": "会话",
+    "analysis": "分析",
+    "orchestration": "编排",
+    "navigation": "导航",
+    "control": "控制",
+}
+_RISK_SEARCH_LABELS = {
+    "read_only": "只读",
+    "session_state": "会话状态",
+    "permission_change": "权限变更",
+    "workspace_write": "工作区写入",
+    "tool_execution": "工具执行",
+    "destructive": "破坏性",
+}
 
 _CATEGORY_MAP = {
     "基础": "basic",
@@ -227,6 +246,31 @@ def build_terminal_command_index(surface: CommandSurface) -> tuple[TerminalComma
     return tuple(sorted(entries.values(), key=lambda item: (item.category, item.command)))
 
 
+def search_terminal_commands(
+    entries: Sequence[TerminalCommandIndexEntry],
+    query: str,
+    *,
+    limit: int = 50,
+) -> tuple[TerminalCommandIndexEntry, ...]:
+    """Rank bounded command metadata without executing or mutating a command."""
+    if limit < 1 or limit > 200:
+        raise ValueError("命令搜索 limit 必须在 1 到 200 之间。")
+    term = _normalize_search_text(query)[:200].removeprefix("/")
+    ranked = [
+        (score, entry.command, entry)
+        for entry in entries
+        if (score := _command_search_score(entry, term)) is not None
+    ]
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return tuple(item[2] for item in ranked[:limit])
+
+
+def terminal_command_template(entry: TerminalCommandIndexEntry) -> str:
+    """Return the editable composer template for a QuickOpen selection."""
+    syntax = entry.arguments.syntax.strip()
+    return f"{entry.command} {syntax}" if syntax else entry.command
+
+
 def _entry(meta: CommandMeta, *, source: CommandSource) -> TerminalCommandIndexEntry:
     aliases = tuple(
         sorted(alias for alias, canonical in COMMAND_ALIASES.items() if canonical == meta.name)
@@ -269,10 +313,78 @@ def _permission_risk(meta: CommandMeta) -> PermissionRisk:
     return "tool_execution"
 
 
+def _command_search_score(
+    entry: TerminalCommandIndexEntry,
+    term: str,
+) -> int | None:
+    if not term:
+        return 0
+    command = _normalize_search_text(entry.command.removeprefix("/"))
+    aliases = tuple(
+        _normalize_search_text(alias.removeprefix("/")) for alias in entry.aliases
+    )
+    if term == command:
+        return 0
+    if term in aliases:
+        return 1
+    if command.startswith(term):
+        return 10_000 + len(command) - len(term)
+    alias_prefixes = [len(alias) - len(term) for alias in aliases if alias.startswith(term)]
+    if alias_prefixes:
+        return 12_000 + min(alias_prefixes)
+    if term in command:
+        return 20_000 + command.index(term)
+    alias_positions = [alias.index(term) for alias in aliases if term in alias]
+    if alias_positions:
+        return 30_000 + min(alias_positions)
+    metadata = _normalize_search_text(
+        " ".join(
+            (
+                entry.description,
+                entry.category,
+                _CATEGORY_SEARCH_LABELS[entry.category],
+                entry.permission_risk,
+                _RISK_SEARCH_LABELS[entry.permission_risk],
+                entry.source,
+            )
+        )
+    )
+    if term in metadata:
+        return 40_000 + metadata.index(term)
+    command_gap = _subsequence_gap(term, command)
+    if command_gap is not None:
+        return 60_000 + command_gap
+    alias_gaps = [
+        gap for alias in aliases if (gap := _subsequence_gap(term, alias)) is not None
+    ]
+    if alias_gaps:
+        return 70_000 + min(alias_gaps)
+    metadata_gap = _subsequence_gap(term, metadata)
+    return None if metadata_gap is None else 100_000 + metadata_gap
+
+
+def _subsequence_gap(term: str, target: str) -> int | None:
+    position = -1
+    score = 0
+    for character in term:
+        next_position = target.find(character, position + 1)
+        if next_position < 0:
+            return None
+        score += next_position if position < 0 else next_position - position - 1
+        position = next_position
+    return score
+
+
+def _normalize_search_text(value: str) -> str:
+    return unicodedata.normalize("NFKC", str(value)).strip().casefold()
+
+
 __all__ = [
     "COMMAND_ALIASES",
     "COMMAND_INDEX_SCHEMA_VERSION",
     "CommandArgumentSchema",
     "TerminalCommandIndexEntry",
     "build_terminal_command_index",
+    "search_terminal_commands",
+    "terminal_command_template",
 ]

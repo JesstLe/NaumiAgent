@@ -30,6 +30,46 @@ test("terminal UI startup welcome transitions from booting to ready and dismisse
   }
 });
 
+test("terminal UI command QuickOpen fills composer without submitting", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("保留草稿");
+    await waitForLatestScreen(output, "保留草稿▌", 7000);
+
+    app.stdin.write("\x10");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("write");
+    await waitForLatestScreen(output, "/write", 7000);
+    await waitForLatestScreen(output, "不会自动发送或执行", 7000);
+    app.stdin.write("\n");
+    await waitForLatestScreenWithout(output, "命令 QuickOpen", 7000);
+    await waitForLatestScreen(output, "/write▌", 7000);
+
+    let submits = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    );
+    assert.equal(submits.length, 0);
+
+    app.stdin.write("\x1b[112;5u");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("\x1b");
+    await waitForLatestScreenWithout(output, "命令 QuickOpen", 7000);
+    await waitForLatestScreen(output, "/write▌", 7000);
+    submits = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    );
+    assert.equal(submits.length, 0);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI animates active work without repeatedly clearing the screen", async () => {
   const app = launchTerminalUi("fake-bridge.js", {
     env: {

@@ -35,6 +35,7 @@ class KeybindingAction(StrEnum):
     CLEAR_CHAT = "clear_chat"
     SHOW_TOOLS = "show_tools"
     TOGGLE_BROWSER = "toggle_browser"
+    OPEN_COMMAND_QUICK_OPEN = "open_command_quick_open"
 
 
 @dataclass(frozen=True)
@@ -247,6 +248,14 @@ KEYBINDING_DEFINITIONS: tuple[KeybindingDefinition, ...] = (
         ("c-b",),
         interfaces=("tui",),
         textual_action="toggle_browser",
+    ),
+    KeybindingDefinition(
+        KeybindingAction.OPEN_COMMAND_QUICK_OPEN,
+        "打开命令 QuickOpen",
+        ("c-p",),
+        interfaces=("tui",),
+        textual_action="open_command_quick_open",
+        textual_priority=True,
     ),
 )
 

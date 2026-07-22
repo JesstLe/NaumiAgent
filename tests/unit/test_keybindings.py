@@ -56,6 +56,7 @@ def test_config_overrides_replace_defaults() -> None:
     )
     assert bindings.keys_for(KeybindingAction.MODE_CYCLE, interface="tui") == ("f2",)
     assert "Ctrl+Y" not in render_keybinding_help(bindings, interface="cli")
+    assert "Ctrl+P" in render_keybinding_help(bindings, interface="tui")
 
 
 def test_conflict_detection_is_scoped_by_interface_and_permission_mode() -> None:

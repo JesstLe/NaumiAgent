@@ -39,6 +39,14 @@ import {
   syncSlashCompletion,
 } from "./slash-completion.js";
 import {
+  acceptCommandQuickOpen,
+  appendCommandQuickOpenQuery,
+  backspaceCommandQuickOpenQuery,
+  closeCommandQuickOpen,
+  moveCommandQuickOpenSelection,
+  openCommandQuickOpen,
+} from "./command-quick-open.js";
+import {
   attachJsonlLineReader,
   createEventSender,
   createHelloPayload,
@@ -515,7 +523,9 @@ function handleKeyInput(chunk) {
   });
   for (const token of tokens) {
     if (token.type === "paste") {
-      if (state.interaction) {
+      if (state.commandQuickOpen?.open) {
+        appendCommandQuickOpenQuery(state, token.value);
+      } else if (state.interaction) {
         handleInteractionKey(state, token.value, send);
       } else if (state.historySearch?.open) {
         appendHistorySearchQuery(state, token.value);
@@ -598,6 +608,17 @@ function handleSingleKeyInput(chunk) {
     ) return;
   }
   if (state.interaction && handleInteractionKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
+  }
+  if (state.commandQuickOpen?.open) {
+    handleCommandQuickOpenKey(chunk);
+    scheduleRedraw();
+    return;
+  }
+  if (isCommandQuickOpenKey(chunk)) {
+    if (state.historySearch?.open) cancelHistorySearch(state);
+    openCommandQuickOpen(state);
     scheduleRedraw();
     return;
   }
@@ -849,6 +870,36 @@ function handleHistorySearchKey(chunk) {
     return true;
   }
   return true;
+}
+
+function handleCommandQuickOpenKey(chunk) {
+  if (chunk === INPUT_KEYS.escape || isCommandQuickOpenKey(chunk)) {
+    return closeCommandQuickOpen(state);
+  }
+  if (chunk === INPUT_KEYS.up) return moveCommandQuickOpenSelection(state, "previous") || true;
+  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.tab) {
+    return moveCommandQuickOpenSelection(state, "next") || true;
+  }
+  if (chunk === "\r" || chunk === "\n" || chunk === INPUT_KEYS.ctrlEnter) {
+    const accepted = acceptCommandQuickOpen(state);
+    if (accepted) {
+      syncSlashCompletion(state);
+      dismissSlashCompletion(state);
+    }
+    return true;
+  }
+  if (chunk === "\u007f" || chunk === "\b") {
+    return backspaceCommandQuickOpenQuery(state) || true;
+  }
+  if (chunk >= " " && chunk !== "\x7f") {
+    appendCommandQuickOpenQuery(state, chunk);
+    return true;
+  }
+  return true;
+}
+
+function isCommandQuickOpenKey(chunk) {
+  return chunk === INPUT_KEYS.ctrlP || chunk === INPUT_KEYS.ctrlPEnhanced;
 }
 
 function handleSlashCompletionKey(chunk) {

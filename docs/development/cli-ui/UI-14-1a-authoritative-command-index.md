@@ -38,6 +38,6 @@ argument schema 当前用于展示和风险预览，不替代各命令真实 par
 
 ## 当前不足与下一步
 
-UI-14 仍为 partial。下一步 UI-14.2a 应先实现有界 Command QuickOpen provider：按 category/source/risk 查询本索引，选择
-只把 command+syntax 写入 composer，写操作不得直接执行。文件、会话、任务、Agent provider、100k 文件后台索引、最近使用
-排序和 Vim mode 仍需后续独立切片。
+UI-14 仍为 partial。UI-14.2a 已在 `UI-14-2a-command-quick-open.md` 交付有界 Command QuickOpen provider，并保证
+选择只把 command+syntax 写入 composer。文件、会话、任务、Agent provider、100k 文件后台索引、最近使用排序和 Vim mode
+仍需后续独立切片。

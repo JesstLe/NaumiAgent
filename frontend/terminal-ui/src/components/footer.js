@@ -11,6 +11,7 @@ import {
 import { boxLines } from "./core.js";
 import { renderInputLinesWithCursor } from "../input-buffer.js";
 import { getSlashCompletionItems } from "../slash-completion.js";
+import { commandRiskColor, commandRiskLabel } from "../command-metadata.js";
 import { formatBudgetStatus } from "./budget-status.js";
 import { formatProviderIdentity } from "./provider-identity.js";
 
@@ -253,7 +254,7 @@ export function PromptFooter({ state }) {
 export function HelpFooter() {
   return {
     render(ctx) {
-      return wrapAnsiLine(color(ANSI.dim, "Ctrl+I Inspector · Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
+      return wrapAnsiLine(color(ANSI.dim, "Ctrl+P 命令 · Ctrl+I Inspector · Ctrl+T 对话/任务 · Shift+Tab 模式 · Enter 发送 · Shift+Enter 换行 · Ctrl+R 历史 · ↑/↓ 导航 · PgUp/PgDn 滚动 · Ctrl+C 取消/退出"), ctx.width);
     },
   };
 }
@@ -297,31 +298,21 @@ export function CommandCompletionFooter({ state }) {
   };
 }
 
-function commandRiskLabel(risk) {
-  if (risk === "read_only") return "只读";
-  if (risk === "session_state") return "会话状态";
-  if (risk === "permission_change") return "权限变更";
-  if (risk === "workspace_write") return "工作区写入";
-  if (risk === "tool_execution") return "执行";
-  if (risk === "destructive") return "破坏性";
-  return "风险待确认";
-}
-
-function commandRiskColor(risk, selected) {
-  if (selected) return ANSI.yellow;
-  if (risk === "read_only") return ANSI.green;
-  if (risk === "session_state") return ANSI.cyan;
-  if (risk === "permission_change" || risk === "workspace_write") return ANSI.yellow;
-  if (risk === "tool_execution" || risk === "destructive") return ANSI.red;
-  return ANSI.dim;
-}
-
 export function renderFooter(state, width, env = {}) {
   return renderFooterSections(state, width, env).flatMap((section) => section.lines);
 }
 
 export function renderFooterSections(state, width, env = {}) {
   const ctx = { width };
+  if (state.commandQuickOpen?.open) {
+    return [
+      { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
+      {
+        name: "command-quick-open-help",
+        lines: wrapAnsiLine(color(ANSI.cyan, "QuickOpen · ↑/↓/Tab 选择 · Enter 填入 · Esc/Ctrl+P 取消 · 不会自动执行"), ctx.width),
+      },
+    ];
+  }
   return [
     { name: "permission", lines: PermissionFooter({ permission: state.permission }).render(ctx) },
     { name: "interaction", lines: state.permission ? [] : InteractionFooter({ interaction: state.interaction }).render(ctx) },

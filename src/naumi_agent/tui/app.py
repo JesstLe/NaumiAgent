@@ -56,6 +56,7 @@ from naumi_agent.runtime.terminal_runtime import (
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import AgentControlScreen
+from naumi_agent.tui.command_quick_open import CommandQuickOpenScreen
 from naumi_agent.tui.completion_receipt import (
     completion_outcome_label,
     format_completion_receipt_text,
@@ -3223,6 +3224,20 @@ class NaumiApp(App):
         browser.show_panel = not browser.show_panel
         if browser.show_panel:
             browser.refresh_browser_state(self.engine)
+
+    def action_open_command_quick_open(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            return
+
+        def on_selected(template: str | None) -> None:
+            if not template:
+                return
+            input_widget = self.query_one("#msg-input", Input)
+            input_widget.value = template
+            input_widget.cursor_position = len(template)
+            input_widget.focus()
+
+        self.push_screen(CommandQuickOpenScreen(_TUI_COMMAND_INDEX), on_selected)
 
     def action_cycle_runtime_mode(self) -> None:
         mode = self.engine.cycle_runtime_mode()

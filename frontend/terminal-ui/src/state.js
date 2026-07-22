@@ -317,6 +317,13 @@ export function createInitialState() {
       selectedIndex: 0,
       dismissedInput: null,
     },
+    commandQuickOpen: {
+      open: false,
+      query: "",
+      selectedIndex: 0,
+      draftText: "",
+      draftCursor: 0,
+    },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
     lastFirstTokenLatencyMs: null,
@@ -2049,6 +2056,7 @@ export function handleUiMessage(state, message) {
 export function handlePermissionRequest(state, record) {
   const payload = record.payload ?? {};
   const requestId = record.request_id ?? record.id ?? "";
+  if (state.commandQuickOpen?.open) state.commandQuickOpen.open = false;
   state.permission = { requestId, payload };
   updateRunActivityPermission(state, requestId);
   updateRunActivityPhase(state, "awaiting_permission");
@@ -2094,6 +2102,7 @@ export function handleInteractionRequest(state, record) {
       (message) => message.kind === "interaction" && message.requestId === requestId,
     )
   ) return;
+  if (state.commandQuickOpen?.open) state.commandQuickOpen.open = false;
   const queued = Boolean(state.interaction);
   const interaction = {
     requestId,
