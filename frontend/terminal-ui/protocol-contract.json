@@ -5,6 +5,7 @@
     "minimum_version": 1,
     "maximum_version": 1,
     "capabilities": [
+      "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
       "session_list",

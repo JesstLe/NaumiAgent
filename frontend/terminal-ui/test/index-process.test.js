@@ -277,6 +277,33 @@ test("terminal UI rejects a malformed hello ack without releasing early input", 
   }
 });
 
+test("terminal UI downgrades typed Evaluation Lane against an older Bridge", async () => {
+  const app = launchTerminalUi("history-bridge.js");
+  const output = collectOutput(app);
+  const comparisonId = "d".repeat(64);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write(`/evolution evaluation ${comparisonId}\n`);
+    await waitForOutput(output, "当前 Bridge 不支持 Evaluation Lane 类型化页面", 7000);
+    await waitForOutput(output, `submit#1:/evolution evaluation ${comparisonId}`, 7000);
+
+    const events = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send",
+    );
+    assert(events.some(
+      (record) => record.payload.record.type === "submit"
+        && record.payload.record.payload.text === `/evolution evaluation ${comparisonId}`,
+    ));
+    assert(!events.some(
+      (record) => record.payload.record.type === "evolution/evaluation-lane/request",
+    ));
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI effort command uses shared Python backend and refreshed status", async () => {
   const app = launchTerminalUi("python-bridge-fixture.py", {
     bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],

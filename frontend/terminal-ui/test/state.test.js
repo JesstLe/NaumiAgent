@@ -1982,6 +1982,8 @@ test("evolution command opens typed review route and navigates to detail", () =>
 
 test("evaluation lane command opens typed receipt route and stays out of chat", () => {
   const state = createInitialState();
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["evolution_evaluation_lane"] };
   state.scrollOffset = 7;
   state.followTail = false;
   const sent = [];
@@ -2015,6 +2017,34 @@ test("evaluation lane command opens typed receipt route and stays out of chat", 
   });
   assert.equal(state.route.name, "conversation");
   assert.equal(state.evolutionEvaluationLane.snapshot, null);
+});
+
+test("evaluation lane command downgrades before or without typed capability", () => {
+  const comparisonId = "d".repeat(64);
+  for (const negotiated of [false, true]) {
+    const state = createInitialState();
+    state.protocolNegotiated = negotiated;
+    state.protocolNegotiation = negotiated
+      ? { capabilities: ["typed_ui_messages"] }
+      : null;
+    const sent = [];
+
+    handleSubmitText(
+      state,
+      `/evolution evaluation ${comparisonId}`,
+      (type, payload, options) => {
+        sent.push({ type, payload, options });
+        return "fallback-submit";
+      },
+    );
+
+    assert.equal(state.route.name, "conversation");
+    assert.equal(state.evolutionEvaluationLane.loading, false);
+    assert.equal(sent[0].type, "submit");
+    assert.equal(sent[0].payload.text, `/evolution evaluation ${comparisonId}`);
+    assert.equal(state.messages.some((item) => item.title === "兼容模式"), true);
+    assert.equal(state.messages.some((item) => item.content?.includes("类型化页面")), negotiated);
+  }
 });
 
 test("evolution enqueue sends an explicit bound queue request", () => {

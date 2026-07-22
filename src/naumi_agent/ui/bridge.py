@@ -85,6 +85,7 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     negotiate_hello,
     normalize_client_record,
+    required_client_event_capability,
     ui_message_payload,
 )
 from naumi_agent.ui.protocol_registry import load_protocol_event_registry
@@ -482,6 +483,7 @@ class JsonlEngineBridge:
         self.adapter = EngineEventAdapter()
         self._sequence = 0
         self._client_capabilities = set(PROTOCOL_CAPABILITIES)
+        self._protocol_negotiated = False
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._protocol_event_registry = load_protocol_event_registry()
@@ -1182,6 +1184,7 @@ class JsonlEngineBridge:
                 )
                 return
             self._client_capabilities = set(negotiation.get("capabilities", ()))
+            self._protocol_negotiated = True
             await self.emit(
                 ServerEventType.ACK,
                 {"event": event_type, "negotiation": negotiation},
@@ -1190,6 +1193,21 @@ class JsonlEngineBridge:
             await self.emit(
                 ServerEventType.STATUS,
                 self.status_payload(include_slash_commands=False),
+            )
+            return
+
+        required_capability = required_client_event_capability(event_type)
+        if (
+            required_capability is not None
+            and (
+                not self._protocol_negotiated
+                or required_capability not in self._client_capabilities
+            )
+        ):
+            await self.emit_error(
+                "当前终端 UI 未协商此类型化能力；请使用兼容命令通道或升级终端 UI。",
+                code="protocol_capability_not_negotiated",
+                request_id=request_id,
             )
             return
 

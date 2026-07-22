@@ -96,6 +96,7 @@ from naumi_agent.ui.protocol import (
     make_envelope,
     negotiate_hello,
     normalize_client_record,
+    required_client_event_capability,
 )
 from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
@@ -830,6 +831,24 @@ async def test_bridge_ping_emits_current_retention_worker_status() -> None:
     bridge.bind_writer(writer)
 
     await bridge.handle_client_record(
+        {
+            "id": "hello-lane",
+            "type": ClientEventType.HELLO,
+            "payload": {
+                "client": "naumi-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": [
+                    "evolution_evaluation_lane",
+                    "typed_ui_messages",
+                ],
+            },
+        }
+    )
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record(
         {"id": "ping-1", "type": ClientEventType.PING, "payload": {}}
     )
 
@@ -923,8 +942,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "minimum_version": 1,
         "maximum_version": 1,
         "capabilities": [
+            "evolution_evaluation_lane",
             "goal_snapshot",
             "heartbeat",
+            "session_list",
             "task_snapshot",
             "typed_ui_messages",
             "workbench_snapshot",
@@ -932,6 +953,11 @@ def test_protocol_contract_matches_python_enums() -> None:
         ],
         "required_capabilities": ["typed_ui_messages"],
     }
+    required = required_client_event_capability(
+        ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST
+    )
+    assert required == "evolution_evaluation_lane"
+    assert required in contract["negotiation"]["capabilities"]
 
 
 def test_protocol_negotiates_highest_shared_version_and_capability_intersection() -> None:
@@ -1318,6 +1344,24 @@ async def test_bridge_returns_path_free_typed_evaluation_lane_receipt() -> None:
 
     await bridge.handle_client_record(
         {
+            "id": "hello-lane",
+            "type": ClientEventType.HELLO,
+            "payload": {
+                "client": "naumi-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": [
+                    "evolution_evaluation_lane",
+                    "typed_ui_messages",
+                ],
+            },
+        }
+    )
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record(
+        {
             "id": "lane-status",
             "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
             "payload": {"comparison_id": comparison_id},
@@ -1371,6 +1415,24 @@ async def test_bridge_redacts_evaluation_lane_authority_failures() -> None:
 
     await bridge.handle_client_record(
         {
+            "id": "hello-lane-failure",
+            "type": ClientEventType.HELLO,
+            "payload": {
+                "client": "naumi-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": [
+                    "evolution_evaluation_lane",
+                    "typed_ui_messages",
+                ],
+            },
+        }
+    )
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record(
+        {
             "id": "lane-failed",
             "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
             "payload": {"comparison_id": "c" * 64},
@@ -1380,6 +1442,31 @@ async def test_bridge_redacts_evaluation_lane_authority_failures() -> None:
     response = next(record for record in _records(writer) if record["type"] == "error")
     assert response["payload"]["code"] == "evolution_evaluation_lane_failed"
     assert "PRIVATE" not in response["payload"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_bridge_rejects_unnegotiated_evaluation_lane_without_execution() -> None:
+    class Executor:
+        async def execute_by_id(self, **kwargs: Any):
+            raise AssertionError("unnegotiated capability must not execute")
+
+    engine = _FakeEngine()
+    engine.evolution_evaluation_lane_receipt_executor = Executor()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "lane-unnegotiated",
+            "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
+            "payload": {"comparison_id": "c" * 64},
+        }
+    )
+
+    response = next(record for record in _records(writer) if record["type"] == "error")
+    assert response["payload"]["code"] == "protocol_capability_not_negotiated"
+    assert "类型化能力" in response["payload"]["message"]
 
 
 @pytest.mark.asyncio

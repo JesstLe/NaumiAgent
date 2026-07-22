@@ -13,6 +13,7 @@ import re
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 from uuid import uuid4
 
@@ -23,6 +24,7 @@ PROTOCOL_VERSION = 1
 PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
+    "evolution_evaluation_lane",
     "goal_snapshot",
     "heartbeat",
     "session_list",
@@ -32,6 +34,9 @@ PROTOCOL_CAPABILITIES = (
     "workbench_proposal_actions",
 )
 PROTOCOL_REQUIRED_CAPABILITIES = ("typed_ui_messages",)
+PROTOCOL_CLIENT_EVENT_CAPABILITIES = MappingProxyType(
+    {"evolution/evaluation-lane/request": "evolution_evaluation_lane"}
+)
 _CAPABILITY_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -757,6 +762,11 @@ def negotiate_hello(payload: dict[str, Any]) -> dict[str, Any]:
         "server_maximum_version": PROTOCOL_MAXIMUM_VERSION,
         "capabilities": sorted(set(PROTOCOL_CAPABILITIES) & client_capabilities),
     }
+
+
+def required_client_event_capability(event_type: str) -> str | None:
+    """Return the optional negotiated capability required by a client event."""
+    return PROTOCOL_CLIENT_EVENT_CAPABILITIES.get(str(event_type))
 
 
 def _normalize_harness_detail_request(payload: dict[str, Any]) -> dict[str, Any]:
