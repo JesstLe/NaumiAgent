@@ -143,6 +143,11 @@ class TestPermissionChecker:
                 "evolution_reflection_memory",
                 50,
             ),
+            (
+                "evolution_promotion_package_input",
+                "evolution_promotion_artifact",
+                50,
+            ),
         ],
     )
     def test_evolution_derived_artifacts_have_bounded_permission_rules(

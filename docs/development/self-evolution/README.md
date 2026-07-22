@@ -45,5 +45,9 @@ EVO-04.6a 已交付四态 Decision State：mechanical veto 固定 rejected，结
 交互形成不可变 Resolution；用户答案仍不能直接接受 Candidate 或执行 promotion。
 
 EVO-04.7a 已交付 Reflection Memory：只保存确定性 lesson/action/signal 和 authority ID/digest，自定义用户文本、
-Reviewer 叙事和源码不落库；记录不进入向量索引、自动召回或系统 Prompt，并支持 append-only 撤销。EVO-04
-至此闭合反思决策链，下一最小依赖是 EVO-05.1a Promotion Package Input Contract。
+Reviewer 叙事和源码不落库；记录不进入向量索引、自动召回或系统 Prompt，并支持 append-only 撤销。
+
+[EVO-05.1a](EVO-05-1a-promotion-package-input-contract.md) 已交付 Promotion Package Input：仅 active 的
+`accepted_experiment` Reflection 可冻结 patch、baseline、完整 receipt refs、risk、migration assessment 和
+rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligibility。下一最小依赖是 EVO-05.1b；当前仍无
+approval、Git 写入、merge、push、publish 或 promotion executor。

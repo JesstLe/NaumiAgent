@@ -136,5 +136,5 @@ single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 me
 
 ## 下一步
 
-EVO-04.4a 至 EVO-04.7a 已实现。下一步实现 EVO-05.1a Promotion Package Input Contract；Reviewer 意见没有
+EVO-04.4a 至 EVO-04.7a 已实现。EVO-05.1a Promotion Package Input Contract 也已完成；Reviewer 意见没有
 进入 Decision/Resolution/Reflection 状态算法，仍不能成为 promotion authority。

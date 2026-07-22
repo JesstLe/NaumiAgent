@@ -283,6 +283,29 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.promotion_package_inputs import (
+        EVOLUTION_PROMOTION_MIGRATION_ASSESSMENT_POLICY,
+        EVOLUTION_PROMOTION_PACKAGE_INPUT_POLICY,
+        EVOLUTION_PROMOTION_PATCH_MANIFEST_POLICY,
+        EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY,
+        EvolutionPromotionBaseline,
+        EvolutionPromotionEvidenceKind,
+        EvolutionPromotionEvidenceRef,
+        EvolutionPromotionMigrationAssessment,
+        EvolutionPromotionMigrationSignal,
+        EvolutionPromotionPackageInput,
+        EvolutionPromotionPackageInputBuilder,
+        EvolutionPromotionPackageInputError,
+        EvolutionPromotionPackageInputExecutor,
+        EvolutionPromotionPackageInputStore,
+        EvolutionPromotionPackageInputView,
+        EvolutionPromotionPatchFile,
+        EvolutionPromotionPatchManifest,
+        EvolutionPromotionRollbackOperation,
+        EvolutionPromotionRollbackPlan,
+        EvolutionPromotionRollbackStep,
+        render_evolution_promotion_package_input,
+    )
     from naumi_agent.evolution.reflection_memories import (
         EvolutionReflectionAction,
         EvolutionReflectionEvidenceKind,
@@ -508,6 +531,27 @@ __all__ = [
     "EvolutionReflectionRevocationReason",
     "EvolutionReflectionSignal",
     "render_evolution_reflection_memory",
+    "EVOLUTION_PROMOTION_MIGRATION_ASSESSMENT_POLICY",
+    "EVOLUTION_PROMOTION_PACKAGE_INPUT_POLICY",
+    "EVOLUTION_PROMOTION_PATCH_MANIFEST_POLICY",
+    "EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY",
+    "EvolutionPromotionBaseline",
+    "EvolutionPromotionEvidenceKind",
+    "EvolutionPromotionEvidenceRef",
+    "EvolutionPromotionMigrationAssessment",
+    "EvolutionPromotionMigrationSignal",
+    "EvolutionPromotionPackageInput",
+    "EvolutionPromotionPackageInputBuilder",
+    "EvolutionPromotionPackageInputError",
+    "EvolutionPromotionPackageInputExecutor",
+    "EvolutionPromotionPackageInputStore",
+    "EvolutionPromotionPackageInputView",
+    "EvolutionPromotionPatchFile",
+    "EvolutionPromotionPatchManifest",
+    "EvolutionPromotionRollbackOperation",
+    "EvolutionPromotionRollbackPlan",
+    "EvolutionPromotionRollbackStep",
+    "render_evolution_promotion_package_input",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -846,6 +890,29 @@ def __getattr__(name: str) -> object:
         "EvolutionReflectionSignal",
         "render_evolution_reflection_memory",
     }
+    promotion_package_input_exports = {
+        "EVOLUTION_PROMOTION_MIGRATION_ASSESSMENT_POLICY",
+        "EVOLUTION_PROMOTION_PACKAGE_INPUT_POLICY",
+        "EVOLUTION_PROMOTION_PATCH_MANIFEST_POLICY",
+        "EVOLUTION_PROMOTION_ROLLBACK_PLAN_POLICY",
+        "EvolutionPromotionBaseline",
+        "EvolutionPromotionEvidenceKind",
+        "EvolutionPromotionEvidenceRef",
+        "EvolutionPromotionMigrationAssessment",
+        "EvolutionPromotionMigrationSignal",
+        "EvolutionPromotionPackageInput",
+        "EvolutionPromotionPackageInputBuilder",
+        "EvolutionPromotionPackageInputError",
+        "EvolutionPromotionPackageInputExecutor",
+        "EvolutionPromotionPackageInputStore",
+        "EvolutionPromotionPackageInputView",
+        "EvolutionPromotionPatchFile",
+        "EvolutionPromotionPatchManifest",
+        "EvolutionPromotionRollbackOperation",
+        "EvolutionPromotionRollbackPlan",
+        "EvolutionPromotionRollbackStep",
+        "render_evolution_promotion_package_input",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -1088,6 +1155,8 @@ def __getattr__(name: str) -> object:
         module_name = "reward_hacking_evidence"
     elif name in reflection_memory_exports:
         module_name = "reflection_memories"
+    elif name in promotion_package_input_exports:
+        module_name = "promotion_package_inputs"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:
