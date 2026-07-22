@@ -86,6 +86,7 @@ Gate JSON、digest、workspace、Decision Input ID、outcome 或 created_at 任�
 
 ## 下一步
 
-实现 EVO-04.3a Independent Reviewer Contract：只允许读取 `outcome=pass` 的 Gate；记录 reviewer 与 author 的
-身份隔离、模型/provider、system prompt digest 和结构化意见。若 Gate 为 `veto`，Reviewer 只能解释 veto 与建议
-required actions，不能将其改为 pass。
+EVO-02.7c2 已先补齐 Trace-bound Mutation Author Receipt。下一步实现 EVO-04.3a Independent Reviewer
+Contract：只允许 `outcome=pass` 的 Gate 进入模型审查；从 Author Receipt 机械验证 reviewer 与 author 的
+身份隔离，并记录 reviewer 模型/provider、system prompt digest 和结构化意见。若 Gate 为 `veto`，只显示
+veto 与 required actions，不能将其改为 pass。

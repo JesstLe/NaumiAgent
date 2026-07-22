@@ -14,13 +14,25 @@ from typing import Any, Protocol
 from naumi_agent.evolution.experiment_leases import ExperimentWorktreeLease
 from naumi_agent.evolution.experiment_snapshots import EvolutionExperimentSourceSnapshot
 from naumi_agent.evolution.experiments import EvolutionExperimentContract
+from naumi_agent.evolution.mutation_author_receipts import (
+    EvolutionMutationAuthorReceipt,
+    EvolutionMutationAuthorReceiptBuilder,
+    EvolutionMutationAuthorReceiptError,
+    EvolutionMutationAuthorReceiptStore,
+    MutationAuthorModelCallFact,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationError,
     EvolutionMutationGenerationResult,
     EvolutionMutationGenerationService,
 )
 from naumi_agent.evolution.mutation_plans import EvolutionMutationPlan
-from naumi_agent.model.router import ModelResponse, ModelTier, TokenUsage
+from naumi_agent.model.router import (
+    ModelResponse,
+    ModelRuntimeIdentity,
+    ModelTier,
+    TokenUsage,
+)
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.tools.base import ToolCall, ToolResult
@@ -78,6 +90,7 @@ class MutationTurnBudget:
 @dataclass(frozen=True, slots=True)
 class EvolutionMutationTurnResult:
     generation: EvolutionMutationGenerationResult
+    author_receipt: EvolutionMutationAuthorReceipt
     turns: int
     model_calls: int
     tool_calls: int
@@ -102,9 +115,15 @@ class EvolutionMutationTurnRunner:
         *,
         model_port: ModelPort,
         generation_service: EvolutionMutationGenerationService,
+        author_receipt_store: EvolutionMutationAuthorReceiptStore,
+        author_receipt_builder: EvolutionMutationAuthorReceiptBuilder | None = None,
     ) -> None:
         self._model_port = model_port
         self._generation_service = generation_service
+        self._author_receipt_store = author_receipt_store
+        self._author_receipt_builder = (
+            author_receipt_builder or EvolutionMutationAuthorReceiptBuilder()
+        )
 
     async def run(
         self,
@@ -140,6 +159,8 @@ class EvolutionMutationTurnRunner:
             raise EvolutionMutationTurnError(exc.code, str(exc)) from exc
         try:
             resolved_model = model or self._model_port.resolve_model(ModelTier.CAPABLE)
+            runtime_identity = self._model_port.get_runtime_identity(resolved_model)
+            _require_runtime_identity(runtime_identity, resolved_model)
             context_window = self._safe_model_limit(
                 "context window",
                 self._model_port.get_context_window(resolved_model),
@@ -176,11 +197,13 @@ class EvolutionMutationTurnRunner:
             mutation_plan,
             session.prompt_baseline_contents(),
         )
+        initial_messages = tuple(messages)
         _require_prompt_budget(messages, prompt_limit)
         tools = _mutation_tool_schemas(mutation_plan.authorized_files)
         deadline = asyncio.get_running_loop().time() + float(limits.timeout_seconds)
         usage = TokenUsage()
         models: list[str] = []
+        author_call_facts: list[MutationAuthorModelCallFact] = []
         tool_call_count = 0
 
         try:
@@ -215,6 +238,18 @@ class EvolutionMutationTurnRunner:
                     )
                 models.append(response.model or resolved_model)
                 calls = _parse_model_tool_calls(response.tool_calls)
+                try:
+                    author_call_facts.append(
+                        self._author_receipt_builder.build_call_fact(
+                            order=turn,
+                            input_messages=messages,
+                            response=response,
+                            response_model=response.model or resolved_model,
+                            tool_call_count=len(calls),
+                        )
+                    )
+                except EvolutionMutationAuthorReceiptError as exc:
+                    raise EvolutionMutationTurnError(exc.code, str(exc)) from exc
                 if not calls:
                     try:
                         generation = await session.finalize()
@@ -230,6 +265,10 @@ class EvolutionMutationTurnRunner:
                         tool_calls=tool_call_count,
                         usage=usage,
                         models=models,
+                        runtime_identity=runtime_identity,
+                        initial_messages=initial_messages,
+                        tool_schemas=tools,
+                        author_call_facts=author_call_facts,
                         events=events,
                     )
 
@@ -287,6 +326,10 @@ class EvolutionMutationTurnRunner:
                         tool_calls=tool_call_count,
                         usage=usage,
                         models=models,
+                        runtime_identity=runtime_identity,
+                        initial_messages=initial_messages,
+                        tool_schemas=tools,
+                        author_call_facts=author_call_facts,
                         events=events,
                     )
             raise EvolutionMutationTurnError(
@@ -317,8 +360,23 @@ class EvolutionMutationTurnRunner:
         tool_calls: int,
         usage: TokenUsage,
         models: list[str],
+        runtime_identity: ModelRuntimeIdentity,
+        initial_messages: tuple[dict[str, Any], ...],
+        tool_schemas: list[dict[str, Any]],
+        author_call_facts: list[MutationAuthorModelCallFact],
         events: MutationTurnEventPublisher | None,
     ) -> EvolutionMutationTurnResult:
+        try:
+            author_receipt = self._author_receipt_builder.build(
+                trace=generation.trace,
+                identity=runtime_identity,
+                initial_messages=initial_messages,
+                tool_schemas=tool_schemas,
+                model_calls=author_call_facts,
+            )
+            author_receipt = self._author_receipt_store.put(author_receipt)
+        except EvolutionMutationAuthorReceiptError as exc:
+            raise EvolutionMutationTurnError(exc.code, str(exc)) from exc
         event_delivery_failed = False
         try:
             await _publish(
@@ -329,6 +387,8 @@ class EvolutionMutationTurnRunner:
                     "status": "completed",
                     "trace_id": generation.trace.trace_id,
                     "trace_sha256": generation.trace.trace_sha256,
+                    "author_receipt_id": author_receipt.receipt_id,
+                    "author_receipt_sha256": author_receipt.receipt_sha256,
                     "turns": turns,
                     "tool_calls": tool_calls,
                     "total_tokens": usage.total_tokens,
@@ -340,6 +400,7 @@ class EvolutionMutationTurnRunner:
             event_delivery_failed = True
         return EvolutionMutationTurnResult(
             generation=generation,
+            author_receipt=author_receipt,
             turns=turns,
             model_calls=model_calls,
             tool_calls=tool_calls,
@@ -582,6 +643,36 @@ def _require_prompt_budget(messages: list[dict[str, Any]], limit: int) -> None:
         raise EvolutionMutationTurnError(
             "mutation_turn_prompt_oversized",
             "Mutation Turn 上下文超过模型与安全预算，未截断 approved source。",
+        )
+
+
+def _require_runtime_identity(identity: object, resolved_model: str) -> None:
+    if not isinstance(identity, ModelRuntimeIdentity):
+        raise EvolutionMutationTurnError(
+            "mutation_turn_model_identity_invalid",
+            "Mutation Turn 模型运行时身份无效。",
+        )
+    values = (
+        identity.requested_model,
+        identity.canonical_model,
+        identity.upstream_model,
+        identity.provider,
+        identity.api_format,
+        identity.source,
+    )
+    if (
+        identity.requested_model.strip() != resolved_model.strip()
+        or any(
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > 512
+            or any(character in value for character in "\x00\r\n")
+            for value in values
+        )
+    ):
+        raise EvolutionMutationTurnError(
+            "mutation_turn_model_identity_invalid",
+            "Mutation Turn 模型运行时身份无效。",
         )
 
 
