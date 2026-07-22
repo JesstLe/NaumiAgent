@@ -46,5 +46,5 @@ Attribution 合同。该切片不复制分类表、不引入模型判断、不�
 
 本切片只完成 Interventional H5c 后的可信归因，不实现 EVO-04 reflection decision 或自动晋升。
 EVO-03.6a..6e 与 EVO-03.5c 已让当前平台 Adversarial RED/GREEN 复用同一 H5a/H5c/Attribution authority，
-EVO-03.7a 已提供明确非最终的单 lane receipt；跨平台 matrix dispatcher、HAR-08 通用 surface 与 EVO-03.7b
-最终聚合仍未完成。
+EVO-03.7a/3.7b1/3.7b2 已从非最终单 lane receipt 推进到完整 Final Evaluation Receipt 聚合器；跨平台 matrix
+dispatcher、真实三平台回执与 HAR-08 通用 surface 仍未完成。

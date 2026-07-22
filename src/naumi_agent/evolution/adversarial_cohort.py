@@ -10,7 +10,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -37,6 +37,11 @@ from naumi_agent.evolution.validation_plans import EvolutionValidationPlan
 from naumi_agent.harness.eval_models import EvalCaseStatus
 from naumi_agent.harness.sandbox_batch import BatchProgressCallback
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
+
+if TYPE_CHECKING:
+    from naumi_agent.evolution.adversarial_cohort_receipts import (
+        EvolutionAdversarialCohortReceiptStore,
+    )
 
 ADVERSARIAL_COHORT_POLICY = "evolution-adversarial-cohort-v1"
 _SHA256_RE = r"^[0-9a-f]{64}$"
@@ -182,6 +187,7 @@ class EvolutionAdversarialCohortExecutor:
         permission_store: PermissionDecisionReceiptStore,
         run_grant_authority: RunDelegationGrantAuthority,
         sample_executor: EvolutionAdversarialSampleExecutor,
+        receipt_store: EvolutionAdversarialCohortReceiptStore,
         now: Callable[[], str] | None = None,
         token: Callable[[], str] | None = None,
     ) -> None:
@@ -195,6 +201,13 @@ class EvolutionAdversarialCohortExecutor:
             raise ValueError("Adversarial Cohort Sample Executor composition 不一致。")
         self._store = store
         self._sample_executor = sample_executor
+        from naumi_agent.evolution.adversarial_cohort_receipts import (
+            EvolutionAdversarialCohortReceiptStore,
+        )
+
+        if not isinstance(receipt_store, EvolutionAdversarialCohortReceiptStore):
+            raise TypeError("Adversarial Cohort 需要 Receipt Store。")
+        self._receipt_store = receipt_store
         self._coordinator = EvolutionInterventionalCohortKernel(
             workspace_root=self._workspace_root,
             store=store,
@@ -320,7 +333,7 @@ class EvolutionAdversarialCohortExecutor:
                 "adversarial_cohort_final_revalidation_mismatch",
                 "Adversarial cohort 完成后 authority 复验不一致。",
             )
-        return receipt
+        return await self._receipt_store.record(receipt)
 
 
 def _validate_run_evidence(records, request) -> tuple[str, ...]:

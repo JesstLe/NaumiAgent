@@ -47,6 +47,9 @@ from naumi_agent.evolution.adversarial_batch_requests import (
 from naumi_agent.evolution.adversarial_cohort import (
     EvolutionAdversarialCohortExecutor,
 )
+from naumi_agent.evolution.adversarial_cohort_receipts import (
+    EvolutionAdversarialCohortReceiptStore,
+)
 from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonExecutor,
 )
@@ -82,6 +85,11 @@ from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionBuilder,
     EvolutionFailureAttributionExecutor,
     EvolutionFailureAttributionStore,
+)
+from naumi_agent.evolution.final_evaluation_receipts import (
+    EvolutionFinalEvaluationReceiptBuilder,
+    EvolutionFinalEvaluationReceiptExecutor,
+    EvolutionFinalEvaluationReceiptStore,
 )
 from naumi_agent.evolution.interventional_comparison import (
     EvolutionInterventionalComparisonExecutor,
@@ -967,6 +975,9 @@ class AgentEngine:
                 .sample_kernel.sandbox_eval_kernel
             ),
         )
+        self.evolution_adversarial_cohort_receipt_store = (
+            EvolutionAdversarialCohortReceiptStore(config.memory.session_db_path)
+        )
         self.evolution_adversarial_cohort_executor = (
             EvolutionAdversarialCohortExecutor(
                 workspace_root=paths.workspace_root,
@@ -974,6 +985,7 @@ class AgentEngine:
                 permission_store=resources.permission_decision_store,
                 run_grant_authority=self.run_delegation_grant_authority,
                 sample_executor=self.evolution_adversarial_sample_executor,
+                receipt_store=self.evolution_adversarial_cohort_receipt_store,
             )
         )
         self.evolution_adversarial_comparison_executor = (
@@ -1089,6 +1101,21 @@ class AgentEngine:
             EvolutionEvaluationAggregationContractIssuer(
                 store=self.evolution_evaluation_aggregation_contract_store,
                 builder=self.evolution_evaluation_aggregation_contract_builder,
+            )
+        )
+        self.evolution_final_evaluation_receipt_builder = (
+            EvolutionFinalEvaluationReceiptBuilder()
+        )
+        self.evolution_final_evaluation_receipt_store = (
+            EvolutionFinalEvaluationReceiptStore(config.memory.session_db_path)
+        )
+        self.evolution_final_evaluation_receipt_executor = (
+            EvolutionFinalEvaluationReceiptExecutor(
+                contract_store=self.evolution_evaluation_aggregation_contract_store,
+                lane_store=self.evolution_evaluation_lane_receipt_store,
+                cohort_store=self.evolution_adversarial_cohort_receipt_store,
+                receipt_store=self.evolution_final_evaluation_receipt_store,
+                builder=self.evolution_final_evaluation_receipt_builder,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

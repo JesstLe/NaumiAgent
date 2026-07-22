@@ -13,6 +13,9 @@ from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequestBuilder,
 )
 from naumi_agent.evolution.adversarial_cohort import EvolutionAdversarialCohortExecutor
+from naumi_agent.evolution.adversarial_cohort_receipts import (
+    EvolutionAdversarialCohortReceiptStore,
+)
 from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonExecutor,
 )
@@ -48,6 +51,11 @@ from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionBuilder,
     EvolutionFailureAttributionExecutor,
     EvolutionFailureAttributionStore,
+)
+from naumi_agent.evolution.final_evaluation_receipts import (
+    EvolutionFinalEvaluationReceiptBuilder,
+    EvolutionFinalEvaluationReceiptExecutor,
+    EvolutionFinalEvaluationReceiptStore,
 )
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
@@ -235,6 +243,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
         EvolutionAdversarialCohortExecutor,
     )
     assert isinstance(
+        engine.evolution_adversarial_cohort_receipt_store,
+        EvolutionAdversarialCohortReceiptStore,
+    )
+    assert isinstance(
         engine.evolution_adversarial_comparison_executor,
         EvolutionAdversarialComparisonExecutor,
     )
@@ -305,6 +317,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_evaluation_aggregation_contract_issuer,
         EvolutionEvaluationAggregationContractIssuer,
+    )
+    assert isinstance(
+        engine.evolution_final_evaluation_receipt_builder,
+        EvolutionFinalEvaluationReceiptBuilder,
+    )
+    assert isinstance(
+        engine.evolution_final_evaluation_receipt_store,
+        EvolutionFinalEvaluationReceiptStore,
+    )
+    assert isinstance(
+        engine.evolution_final_evaluation_receipt_executor,
+        EvolutionFinalEvaluationReceiptExecutor,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

@@ -39,4 +39,5 @@ passed/failed/evaluation-error 计数和逐样本 `exit_zero` 数值。Evaluatio
 本切片只完成当前真实平台上的单 lane 连续闭环，不调度 Linux/Windows。EVO-03.6e 已在其后严格配对
 同平台 RED/GREEN cohort receipt，并复用现有 H5b2/H5c comparator 形成 adversarial verdict，见
 `EVO-03-6e-adversarial-h5c-comparison.md`。EVO-03.5c/7a 已补 Attribution 与明确非最终的单 lane receipt；
-跨平台 dispatcher、通用 Harness Service/Tool/UI 与 EVO-03.7b 最终聚合仍需独立切片。
+EVO-03.7b1/3.7b2 已补完整 matrix authority 与最终证据聚合器。跨平台 dispatcher、真实三平台回执与通用
+Harness Service/Tool/UI 仍需独立切片。

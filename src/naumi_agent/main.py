@@ -3039,6 +3039,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionEvaluationLaneReceiptError,
         render_evaluation_lane_receipt,
     )
+    from naumi_agent.evolution.final_evaluation_receipts import (
+        EvolutionFinalEvaluationReceiptError,
+        render_final_evaluation_receipt,
+    )
     from naumi_agent.evolution.queue import render_queue_result
     from naumi_agent.evolution.review import (
         EvolutionReviewFilter,
@@ -3098,6 +3102,21 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evaluation_aggregation_contract(contract)))
             return
+        if action == "evaluation-final":
+            if not 4 <= len(parts) <= 6:
+                raise ValueError(
+                    "evaluation-final 需要 Contract ID、一个 Interventional H5c ID "
+                    "和 1..3 个 Adversarial H5c ID。"
+                )
+            receipt = await (
+                engine.evolution_final_evaluation_receipt_executor.execute(
+                    aggregation_contract_id=parts[1],
+                    interventional_comparison_id=parts[2],
+                    adversarial_comparison_ids=tuple(parts[3:]),
+                )
+            )
+            console.print(Markdown(render_final_evaluation_receipt(receipt)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3123,7 +3142,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
         else:
             raise ValueError(
-                "仅支持 list、detail、evaluation、evaluation-contract 或 enqueue。"
+                "仅支持 list、detail、evaluation、evaluation-contract、"
+                "evaluation-final 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3136,11 +3156,20 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "evaluation-final":
+            console.print(
+                f"Final Evaluation Receipt 未签发：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
+            "/evolution evaluation-final <contract-id> <interventional-h5c-id> "
+            "<adversarial-h5c-id...>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3157,6 +3186,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionEvaluationAggregationContractError as exc:
         console.print(
             f"Evaluation Aggregation Contract 未签发：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionFinalEvaluationReceiptError as exc:
+        console.print(
+            f"Final Evaluation Receipt 未签发：{exc}",
             style="yellow",
             markup=False,
         )
