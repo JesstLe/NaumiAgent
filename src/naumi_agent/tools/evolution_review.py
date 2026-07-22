@@ -7,6 +7,10 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.approval_requirements import (
+    EvolutionPromotionApprovalRequirementError,
+    render_evolution_promotion_approval_requirement,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceError,
     render_counterfactual_evidence,
@@ -1208,6 +1212,67 @@ class EvolutionPromotionPackageTool(Tool):
         return render_evolution_promotion_package(view)
 
 
+class EvolutionPromotionApprovalRequirementTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_promotion_approval_requirement"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 still-current Promotion Package 计算并冻结审批角色、签名门、"
+            "技术前置条件与有效期。该工具不创建用户交互、不批准、不签名、"
+            "不写 Git，也不执行 Promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "package_id": {
+                    "type": "string",
+                    "pattern": "^evpromopkg_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["package_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批要求",
+            search_hint=(
+                "evolution promotion approval requirement roles signatures expiry "
+                "提升 审批 要求 角色 签名 有效期"
+            ),
+        )
+
+    async def execute(self, package_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_promotion_approval_requirement_executor.execute(
+                    workspace_root=self._engine.workspace_root,
+                    package_id=package_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionApprovalRequirementError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Requirement 未完成：{exc}"
+        return render_evolution_promotion_approval_requirement(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1230,6 +1295,7 @@ def create_evolution_review_tools(
         EvolutionReflectionMemoryRevokeTool(engine),
         EvolutionPromotionPackageInputTool(engine),
         EvolutionPromotionPackageTool(engine),
+        EvolutionPromotionApprovalRequirementTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -1248,6 +1314,7 @@ __all__ = [
     "EvolutionIndependentReviewTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
+    "EvolutionPromotionApprovalRequirementTool",
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
     "EvolutionRewardHackingEvidenceTool",

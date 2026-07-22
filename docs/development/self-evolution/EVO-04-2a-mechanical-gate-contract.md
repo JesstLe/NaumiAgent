@@ -94,5 +94,5 @@ normal 无逐次确认、每会话最多 50 次；任何权限模式都不能覆
 
 EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract；
 EVO-04.4a 至 EVO-04.7a 已实现下游 Evidence、Decision、Resolution 与 Reflection。EVO-05.1a
-Promotion Package Input Contract 与 EVO-05.1b review Package 均已完成；下一步是 EVO-05.2a，任何后续阶段
+Promotion Package Input、review Package 与 EVO-05.2a Approval Requirement 均已完成；下一步是 EVO-05.2b，任何后续阶段
 仍不能覆盖 Mechanical veto。

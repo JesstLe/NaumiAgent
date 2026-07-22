@@ -11,7 +11,9 @@
   accepted Reflection 冻结 patch、baseline、receipts、risk、migration 与 rollback plan，不授予执行权。
 - [EVO-05.1b Promotion Package](EVO-05-1b-promotion-package-contract.md)：已交付；消费仍 eligible 的 Input，
   绑定 exact local target branch、签名域和审批事实，但不审批或执行 Git。
-- EVO-05.2 Approval policy：按风险要求 user/reviewer/signature；protected scope 永远人工。
+- [EVO-05.2a Approval Requirement Policy](EVO-05-2a-approval-requirement-policy.md)：已交付；按风险、target、
+  protected scope 与 migration 冻结角色、签名门、技术门和有效期，不创建交互或作出决定。
+- EVO-05.2b Approval Request Authority：待实现；将角色要求映射为 HAR-10.6 interaction 与签名回执。
 - EVO-05.3 Rebase/revalidate：目标 main 变化后重放 patch 并重新验证，旧结果失效。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
@@ -29,5 +31,6 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b。尚无 approval、签名收集、rebase/revalidate、rollout、monitor、rollback executor 或 Outcome
+当前完成 EVO-05.1a/1b 与 EVO-05.2a。尚无 approval decision、签名收集、rebase/revalidate、rollout、monitor、
+rollback executor 或 Outcome
 authority；因此任何界面和回执都不得宣称已 promotion、merge、push 或发布。

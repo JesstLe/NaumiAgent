@@ -69,8 +69,9 @@
   EVO-04.6b 已把 escalation 用户答案形成不可变 Resolution。`accepted_experiment` 仍只设置
   `promotion_review_ready`，不执行 promotion。EVO-04.7a 已将 Decision/Resolution 投影为非注入、可撤销的
   结构化 Reflection Memory。EVO-05.1a/1b 已进一步冻结不可执行 Promotion Package Input 与 exact-target
-  review Package，但 HAR-09.6 仍需等待显式 promotion/rollback executor 和 Outcome authority，不能把 Decision、
-  Resolution、Reflection、Package Input 或 Package 直接记为 promoted outcome。
+  review Package；EVO-05.2a 又冻结了不可执行 Approval Requirement。但 HAR-09.6 仍需等待显式
+  promotion/rollback executor 和 Outcome authority，不能把 Decision、Resolution、Reflection、Package Input、
+  Package 或 Approval Requirement 直接记为 promoted outcome。
 - HAR-09 仍未实现 defer/merge 交互和 outcome tracking，因此整体
   继续保持 partial。
 

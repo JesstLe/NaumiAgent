@@ -36,7 +36,11 @@ from naumi_agent.evolution.reflection_memories import (
 )
 
 
-def _accepted_reflection(workspace: Path) -> EvolutionReflectionMemory:
+def _accepted_reflection(
+    workspace: Path,
+    *,
+    risk_level: str = "medium",
+) -> EvolutionReflectionMemory:
     decision_id = f"evdecision_{'d' * 24}"
     decision_sha = "d" * 64
     refs = (
@@ -82,7 +86,7 @@ def _accepted_reflection(workspace: Path) -> EvolutionReflectionMemory:
         "resolution_sha256": None,
         "candidate_id": f"evc_{'a' * 24}",
         "candidate_revision": 3,
-        "risk_level": "medium",
+        "risk_level": risk_level,
         "decision_state": EvolutionDecisionStateValue.ACCEPTED_EXPERIMENT.value,
         "resolution_outcome": None,
         "lesson_kind": EvolutionReflectionLessonKind.VALIDATED_EXPERIMENT.value,
@@ -121,16 +125,18 @@ def _package(
     memory: EvolutionReflectionMemory,
     *,
     baseline_commit: str = "a" * 40,
+    patch_path: str = "src/naumi_agent/state/schema.py",
+    api_change: str = "additive",
 ) -> EvolutionPromotionPackageInput:
     mutation_file = SimpleNamespace(
-        path="src/naumi_agent/state/schema.py",
+        path=patch_path,
         operation="modify",
         before_sha256="6" * 64,
         after_sha256="7" * 64,
         unified_diff_sha256="8" * 64,
         added_lines=4,
         deleted_lines=1,
-        api_change="additive",
+        api_change=api_change,
     )
     mutation_file.fact_sha256 = _sha256_payload(vars(mutation_file))
     mutation = SimpleNamespace(
