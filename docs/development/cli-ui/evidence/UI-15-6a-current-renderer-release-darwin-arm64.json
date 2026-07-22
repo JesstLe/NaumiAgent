@@ -1,0 +1,48 @@
+{
+  "schema": "naumi.renderer-benchmark.v1",
+  "renderer": "current-node",
+  "profile": "release",
+  "fixture": {
+    "generator": "terminal-ui-mixed-cjk-v1",
+    "messages": 10000,
+    "tools": 1000,
+    "log_chars": 10000000,
+    "width": 120,
+    "height": 40
+  },
+  "fixture_sha256": "592ea4dcdac04b1a67c19bc3a3701e50950f779b7ab77fae90c858a3eab9e4a2",
+  "runtime": {
+    "node": "v24.12.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "scenarios": [
+    {
+      "name": "tail",
+      "iterations": 3,
+      "cold_render_ms": 7.115,
+      "render_ms": { "min": 0.378, "p50": 0.499, "p95": 0.876, "max": 0.876 },
+      "rss_delta_bytes": 8568832,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    },
+    {
+      "name": "deep_scroll",
+      "iterations": 3,
+      "cold_render_ms": 103.811,
+      "render_ms": { "min": 79.821, "p50": 83.379, "p95": 85.101, "max": 85.101 },
+      "rss_delta_bytes": 175374336,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    },
+    {
+      "name": "large_output",
+      "iterations": 3,
+      "cold_render_ms": 1048.636,
+      "render_ms": { "min": 14.663, "p50": 16.826, "p95": 16.887, "max": 16.887 },
+      "rss_delta_bytes": 371671040,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    }
+  ]
+}
