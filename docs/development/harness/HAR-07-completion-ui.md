@@ -110,4 +110,5 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 
 - HAR-07.4b：断线重连后的 revision/gap 自动补发；显式 `/resume` 恢复已完成。
 - HAR-07.5：`e/r/v` 与复制交互。
-- HAR-07.6：新 UI/TUI 字段集合 snapshot parity。
+- HAR-07.6：已由 UI-17.2c 锁定通用 completion receipt 及其相邻 submit/tool/cancel 生命周期字段；Harness
+  Receipt/Explain/Replay 的完整字段集合 snapshot parity 尚未完成。

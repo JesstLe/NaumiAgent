@@ -19,7 +19,7 @@
     },
     "conversation_submit_streaming": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/index.js", "frontend/terminal-ui/test/index-process.test.js"]
+      "evidence": ["frontend/terminal-ui/src/state.js", "frontend/terminal-ui/test/terminal-run-golden.test.js"]
     },
     "doctor_debug": {
       "state": "supported",
@@ -51,7 +51,7 @@
     },
     "run_cancel": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/index.js", "frontend/terminal-ui/test/flow.test.js"]
+      "evidence": ["frontend/terminal-ui/src/state.js", "frontend/terminal-ui/test/terminal-run-golden.test.js"]
     },
     "terminal_runtime_health": {
       "state": "supported",
@@ -59,7 +59,7 @@
     },
     "tool_lifecycle": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/components/tool-card.js", "frontend/terminal-ui/test/components.test.js"]
+      "evidence": ["frontend/terminal-ui/src/components/tool-card.js", "frontend/terminal-ui/test/terminal-run-golden.test.js"]
     },
     "user_interaction": {
       "state": "supported",

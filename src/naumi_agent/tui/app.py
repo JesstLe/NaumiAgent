@@ -1684,6 +1684,7 @@ class NaumiApp(App):
         self._queue_claim_lost = False
         self._agent_busy = False
         self._agent_worker: Any | None = None
+        self._run_cancel_pending = False
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -2612,6 +2613,7 @@ class NaumiApp(App):
         terminal_state = "failed"
         terminal_reason = "run_failed"
         queue_commit_ok = True
+        self._run_cancel_pending = False
         if self.debug_trace is not None:
             self.debug_trace.event("tui.agent_run_start", {"task": task})
 
@@ -3060,6 +3062,7 @@ class NaumiApp(App):
         except asyncio.CancelledError:
             terminal_state = "cancelled"
             terminal_reason = "run_cancelled"
+            status.status_text = "已取消当前运行。"
             raise
         except Exception as e:
             if "stdout_buf" in locals() and "stderr_buf" in locals():
@@ -3100,6 +3103,7 @@ class NaumiApp(App):
             self._set_input_enabled(True)
             self._agent_busy = False
             self._agent_worker = None
+            self._run_cancel_pending = False
             if queue_commit_ok:
                 await self._start_next_queued_conversation()
 
@@ -3190,6 +3194,24 @@ class NaumiApp(App):
     def action_toggle_activity(self) -> None:
         activity = self.query_one(ActivityPanel)
         activity.show_panel = not activity.show_panel
+
+    def action_request_run_cancel(self) -> None:
+        status = self.query_one(StatusBar)
+        if not self._agent_busy:
+            status.status_text = "当前没有正在运行的任务；使用 Ctrl+Q 退出。"
+            return
+        if self._run_cancel_pending:
+            self.exit()
+            return
+        worker = self._agent_worker
+        if worker is None:
+            status.status_text = "运行状态尚未就绪，无法确认取消；请稍后重试。"
+            return
+        self._run_cancel_pending = True
+        status.status_text = "正在停止当前运行... 再按 Ctrl+C 可强制退出。"
+        if self.debug_trace is not None:
+            self.debug_trace.event("tui.run_cancel_requested", {})
+        worker.cancel()
 
     def action_toggle_inspector(self) -> None:
         current = self.screen
