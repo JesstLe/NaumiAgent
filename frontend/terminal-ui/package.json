@@ -10,9 +10,14 @@
     "start": "node src/index.js",
     "check": "node scripts/check-syntax.js",
     "test": "node scripts/run-tests.js",
-    "benchmark:renderer": "node scripts/benchmark-renderer.js"
+    "benchmark:renderer": "node scripts/benchmark-renderer.js",
+    "benchmark:renderer:ink": "node scripts/benchmark-ink-renderer.js"
   },
   "engines": {
     "node": ">=20.10"
+  },
+  "devDependencies": {
+    "ink": "^6.8.0",
+    "react": "^19.2.8"
   }
 }

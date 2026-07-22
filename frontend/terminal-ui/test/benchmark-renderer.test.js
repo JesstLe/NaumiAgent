@@ -17,6 +17,8 @@ test("current renderer benchmark emits comparable bounded scenario metrics", () 
   assert.equal(result.schema, "naumi.renderer-benchmark.v1");
   assert.equal(result.renderer, "current-node");
   assert.match(result.fixture_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(result.protocol_contract.version, 1);
+  assert.match(result.protocol_contract.registry_sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(result.scenarios.map((item) => item.name), [
     "tail",
     "deep_scroll",

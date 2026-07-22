@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { visibleWidth } from "../src/ansi.js";
+import { PROTOCOL_REGISTRY_SHA256, PROTOCOL_VERSION } from "../src/protocol.js";
 import { renderScreen } from "../src/render.js";
 import { createInitialState } from "../src/state.js";
 
@@ -13,6 +14,24 @@ const PROFILES = Object.freeze({
 });
 
 export function runRendererBenchmark(options = {}) {
+  return runRendererBenchmarkWithAdapter(options, {
+    renderer: "current-node",
+    render: (state, width, height) => renderScreen(
+      state,
+      width,
+      height,
+      { cwd: "/workspace", home: "/home/naumi" },
+    ),
+  });
+}
+
+export function runRendererBenchmarkWithAdapter(options = {}, adapter = {}) {
+  if (typeof adapter.renderer !== "string" || !adapter.renderer.trim()) {
+    throw new Error("benchmark adapter 缺少 renderer 标识");
+  }
+  if (typeof adapter.render !== "function") {
+    throw new Error("benchmark adapter 缺少 render 函数");
+  }
   const profileName = String(options.profile || "smoke");
   const profile = PROFILES[profileName];
   if (!profile) throw new Error(`未知 benchmark profile: ${profileName}`);
@@ -27,34 +46,54 @@ export function runRendererBenchmark(options = {}) {
   const iterations = boundedInteger(options.iterations, profile.iterations, 3, 100);
   const warmup = boundedInteger(options.warmup, profile.warmup, 0, 20);
   const scenarios = [
-    benchmarkScenario("tail", fixture, iterations, warmup, 0),
-    benchmarkScenario("deep_scroll", fixture, iterations, warmup, Math.max(1, fixture.messages * 2)),
-    benchmarkScenario("paged_output", fixture, iterations, warmup, 0, true),
+    benchmarkScenario("tail", fixture, iterations, warmup, 0, false, adapter.render),
+    benchmarkScenario(
+      "deep_scroll",
+      fixture,
+      iterations,
+      warmup,
+      Math.max(1, fixture.messages * 2),
+      false,
+      adapter.render,
+    ),
+    benchmarkScenario("paged_output", fixture, iterations, warmup, 0, true, adapter.render),
   ];
   return {
     schema: "naumi.renderer-benchmark.v1",
-    renderer: "current-node",
+    renderer: adapter.renderer.trim(),
     profile: profileName,
     fixture,
     fixture_sha256: createHash("sha256").update(JSON.stringify(fixture)).digest("hex"),
+    protocol_contract: {
+      version: PROTOCOL_VERSION,
+      registry_sha256: PROTOCOL_REGISTRY_SHA256,
+    },
     runtime: { node: process.version, platform: process.platform, arch: process.arch },
     scenarios,
   };
 }
 
-function benchmarkScenario(name, fixture, iterations, warmup, scrollOffset, includeLargeOutput = false) {
+function benchmarkScenario(
+  name,
+  fixture,
+  iterations,
+  warmup,
+  scrollOffset,
+  includeLargeOutput,
+  render,
+) {
   const state = createBenchmarkState(fixture, { scrollOffset, includeLargeOutput });
   const rssBefore = process.memoryUsage().rss;
   const coldStartedAt = process.hrtime.bigint();
-  let lines = renderScreen(state, fixture.width, fixture.height, { cwd: "/workspace", home: "/home/naumi" });
+  let lines = render(state, fixture.width, fixture.height);
   const coldRenderMs = Number(process.hrtime.bigint() - coldStartedAt) / 1_000_000;
   for (let index = 0; index < warmup; index += 1) {
-    renderScreen(state, fixture.width, fixture.height, { cwd: "/workspace", home: "/home/naumi" });
+    render(state, fixture.width, fixture.height);
   }
   const samples = [];
   for (let index = 0; index < iterations; index += 1) {
     const startedAt = process.hrtime.bigint();
-    lines = renderScreen(state, fixture.width, fixture.height, { cwd: "/workspace", home: "/home/naumi" });
+    lines = render(state, fixture.width, fixture.height);
     samples.push(Number(process.hrtime.bigint() - startedAt) / 1_000_000);
   }
   const ordered = samples.toSorted((left, right) => left - right);
