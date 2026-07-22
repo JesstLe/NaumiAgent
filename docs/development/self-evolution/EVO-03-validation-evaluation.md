@@ -40,6 +40,8 @@ Eval 和真实 Harness 检查产生。
   - EVO-03.7b2 Final Evaluation Receipt 已实现：从 durable Store 重读合同、Interventional lane、全部必需
     平台 Adversarial lane 及其 RED/GREEN completion authority，机械验证完整覆盖并签发候选级最终评测证据；
     回执明确不接受 Candidate 或批准发布。详见 `EVO-03-7b2-final-evaluation-receipt.md`。
+- EVO-GOV-01 已为上述三个非只读 Agent Tool 补齐显式中风险权限规则、strict/lockdown/bypass 语义与会话
+  限流；详见 `EVO-GOV-01-agent-tool-permission-matrix.md`。
 
 ## 验收标准
 

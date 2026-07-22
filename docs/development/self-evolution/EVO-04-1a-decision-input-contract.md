@@ -63,6 +63,12 @@ JSON 任一漂移都会 fail closed。
 8. approved budget 不得超过 Candidate risk policy cap；
 9. Final Receipt ID/digest、非决策状态和 Decision Input identity 不得被覆盖。
 
+## 权限治理补充
+
+`evolution_decision_input` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown 阻断、
+normal 无逐次确认、每会话最多 50 次；bypass 不能跳过四 Store authority 重读。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 验收证据
 
 - 真实 Candidate→Experiment→Mutation→Validation→Final Evaluation 链可生成并从 Store 精确重读；
