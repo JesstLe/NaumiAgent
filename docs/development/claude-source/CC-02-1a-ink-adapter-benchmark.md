@@ -49,6 +49,9 @@ deep-scroll 的优势不能外推为整体优势：当前 Ink adapter 只渲染�
 renderer 的完整卡片高度、fold、Markdown、diff、permission modal 和页面状态。相反，tail/paged 的
 明显退化已经足以阻止当前迁移。
 
+> 后续更正：CC-02.2a 发现本切片的超大 deep-scroll offset 可落到空视口边界，因此这组 deep-scroll
+> 数值只保留为历史证据，不再用于迁移判断。CC-02.2a 已钳制到最早可见内容并重新生成成对结果。
+
 ## 验收证据
 
 - current 与 Ink 的 fixture 对象、SHA-256、协议版本和 registry SHA-256 完全相同；场景均为

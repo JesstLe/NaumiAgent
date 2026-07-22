@@ -7,15 +7,22 @@ import {
   runRendererBenchmark,
 } from "../scripts/benchmark-renderer.js";
 import { runInkRendererBenchmark } from "../scripts/benchmark-ink-renderer.js";
-import { visibleWidth } from "../src/ansi.js";
+import { stripAnsi, visibleWidth } from "../src/ansi.js";
 import { captureInkExperimentGoldenFrame } from "../src/experiments/ink-golden-capture.js";
 import { renderInkExperimentScreen } from "../src/experiments/ink-renderer.js";
+import { normalizeServerRecord } from "../src/protocol.js";
+import { renderScreen } from "../src/render.js";
+import { createInitialState, reduceServerEvent } from "../src/state.js";
 
 const fixturePath = new URL(
   "../../../tests/fixtures/ui17/terminal-run-lifecycle-golden.json",
   import.meta.url,
 );
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
+const coreViewsFixture = JSON.parse(readFileSync(new URL(
+  "../../../tests/fixtures/cc02/ink-core-views-golden.json",
+  import.meta.url,
+), "utf8"));
 const benchmarkOptions = {
   profile: "smoke",
   messages: 20,
@@ -77,4 +84,31 @@ test("Ink experiment captures the shared lifecycle fixture deterministically", (
   assert.deepEqual(first.missing_anchors, []);
   assert.equal(first.text, second.text);
   assert.equal(first.text_sha256, second.text_sha256);
+});
+
+test("Ink and current renderers preserve shared permission task and footer semantics", () => {
+  assert.equal(coreViewsFixture.schema_version, 1);
+  for (const scenario of coreViewsFixture.scenarios) {
+    const state = createInitialState();
+    state.welcome.dismissed = true;
+    for (const rawRecord of scenario.records) {
+      reduceServerEvent(state, normalizeServerRecord(rawRecord));
+    }
+    const currentText = renderScreen(
+      state,
+      coreViewsFixture.width,
+      coreViewsFixture.height,
+      { cwd: "/workspace/naumi", home: "/home/naumi", clockText: "12:34:56" },
+    ).map(stripAnsi).join("\n");
+    const inkText = renderInkExperimentScreen(
+      state,
+      coreViewsFixture.width,
+      coreViewsFixture.height,
+    ).map(stripAnsi).join("\n");
+
+    for (const anchor of scenario.anchors) {
+      assert(currentText.includes(anchor), `${scenario.id} current 缺少语义锚点: ${anchor}`);
+      assert(inkText.includes(anchor), `${scenario.id} Ink 缺少语义锚点: ${anchor}`);
+    }
+  }
 });

@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "width": 100,
+  "height": 24,
+  "scenarios": [
+    {
+      "id": "permission",
+      "records": [
+        {
+          "type": "runtime/status",
+          "seq": 1,
+          "payload": {
+            "mode": "bypass",
+            "permission_mode": "bypass",
+            "model": "openai/test-model",
+            "workspace_root": "/workspace/naumi"
+          }
+        },
+        {
+          "type": "permission/request",
+          "request_id": "call-core-view-1",
+          "seq": 2,
+          "payload": {
+            "request_id": "call-core-view-1",
+            "call_id": "call-core-view-1",
+            "session_id": "session-core-view",
+            "run_id": "",
+            "agent_name": "main",
+            "tool_name": "bash_run",
+            "tool_family": "shell",
+            "arguments_summary": {
+              "command": "pytest -q tests/unit/test_core.py"
+            },
+            "reason": "需要运行定向验证。",
+            "risk_level": "medium",
+            "choices": ["grant_session", "allow_once", "deny", "bypass"],
+            "scope": "session",
+            "expires_at": null,
+            "requires_double_confirm": false,
+            "status": "needs_confirmation"
+          }
+        }
+      ],
+      "anchors": ["需要确认", "bash_run", "需要运行定向验证", "全权限", "openai/test-model"]
+    },
+    {
+      "id": "permission_resolved",
+      "records": [
+        {
+          "type": "permission/request",
+          "request_id": "call-core-view-2",
+          "seq": 1,
+          "payload": {
+            "request_id": "call-core-view-2",
+            "call_id": "call-core-view-2",
+            "session_id": "session-core-view",
+            "run_id": "",
+            "agent_name": "main",
+            "tool_name": "bash_run",
+            "tool_family": "shell",
+            "arguments_summary": {"command": "rm generated.tmp"},
+            "reason": "需要删除生成文件。",
+            "risk_level": "high",
+            "choices": ["grant_session", "allow_once", "deny", "bypass"],
+            "scope": "session",
+            "expires_at": null,
+            "requires_double_confirm": false,
+            "status": "needs_confirmation"
+          }
+        },
+        {
+          "type": "permission/resolved",
+          "seq": 2,
+          "payload": {"request_id": "call-core-view-2", "choice": "deny"}
+        }
+      ],
+      "anchors": ["已拒绝", "bash_run", "结果", "拒绝"]
+    },
+    {
+      "id": "task",
+      "records": [
+        {
+          "type": "runtime/status",
+          "seq": 1,
+          "payload": {
+            "mode": "default",
+            "permission_mode": "moderate",
+            "model": "openai/test-model",
+            "workspace_root": "/workspace/naumi"
+          }
+        },
+        {
+          "type": "ui/message",
+          "seq": 2,
+          "payload": {
+            "type": "system_notice",
+            "title": "tasks",
+            "content": "任务面板\nTodo\n  - #1 [running] 编写页面 | owner=main\nBackground\n  - bg_0001 [running] npm test | cwd=/workspace/naumi",
+            "level": "info"
+          }
+        }
+      ],
+      "anchors": ["tasks", "编写页面", "npm test", "openai/test-model"]
+    },
+    {
+      "id": "task_empty",
+      "records": [
+        {
+          "type": "ui/message",
+          "seq": 1,
+          "payload": {
+            "type": "system_notice",
+            "title": "tasks",
+            "content": "任务面板\n暂无任务",
+            "level": "info"
+          }
+        }
+      ],
+      "anchors": ["tasks", "暂无任务"]
+    }
+  ]
+}
