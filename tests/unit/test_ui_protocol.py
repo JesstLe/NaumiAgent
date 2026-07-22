@@ -365,6 +365,31 @@ def test_protocol_normalizes_harness_eval_baseline_request() -> None:
     assert record["payload"] == {"suite_id": "surface-protocol"}
 
 
+def test_protocol_normalizes_evaluation_lane_request() -> None:
+    comparison_id = "a" * 64
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
+            "payload": {"comparison_id": f"  {comparison_id.upper()}  ", "private": True},
+        }
+    )
+
+    assert record["payload"] == {"comparison_id": comparison_id}
+
+
+@pytest.mark.parametrize("comparison_id", ["", "A" * 63, "../other", "g" * 64])
+def test_protocol_rejects_invalid_evaluation_lane_comparison_id(
+    comparison_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="comparison_id"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
+                "payload": {"comparison_id": comparison_id},
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [

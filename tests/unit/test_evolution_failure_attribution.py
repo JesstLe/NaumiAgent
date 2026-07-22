@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -493,8 +494,14 @@ async def test_evaluation_lane_receipt_reloads_and_summarizes_real_h5_evidence(
     )
     assert tool_rendered == render_evaluation_lane_receipt(receipt)
     assert receipt.receipt_id in slash_rendered
-    assert "不是候选最终 Evaluation Receipt" in tool_rendered
-    assert "tokens 1000" in tool_rendered
+    golden = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "fixtures/ui17/evaluation-lane-receipt-golden.json"
+        ).read_text(encoding="utf-8")
+    )
+    for marker in golden["tui_markers"]:
+        assert marker in tool_rendered
     assert "cost $2.5" in tool_rendered
     other_workspace = tmp_path / "other-workspace"
     other_workspace.mkdir()

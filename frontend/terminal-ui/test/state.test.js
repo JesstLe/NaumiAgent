@@ -18,6 +18,7 @@ import {
   handleHarnessEvalBatchKey,
   handleHarnessEvalPromotionKey,
   handleDoctorHealthKey,
+  handleEvolutionEvaluationLaneKey,
   handleEvolutionReviewKey,
   handleGoalPanelKey,
   handlePermissionCenterKey,
@@ -1977,6 +1978,43 @@ test("evolution command opens typed review route and navigates to detail", () =>
   reduceServerEvent(state, { type: "session/replayed", payload: { session_id: "session-new", title: "新会话", clear: true } });
   assert.equal(state.route.name, "conversation");
   assert.equal(state.evolutionReview.snapshot, null);
+});
+
+test("evaluation lane command opens typed receipt route and stays out of chat", () => {
+  const state = createInitialState();
+  state.scrollOffset = 7;
+  state.followTail = false;
+  const sent = [];
+  const comparisonId = "c".repeat(64);
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, `/evolution evaluation ${comparisonId}`, send);
+  assert.equal(state.route.name, "evolution_evaluation_lane");
+  assert.equal(state.messages.length, 0);
+  assert.deepEqual(sent, [{
+    type: "evolution/evaluation-lane/request",
+    payload: { comparison_id: comparisonId },
+  }]);
+  reduceServerEvent(state, {
+    type: "evolution/evaluation-lane",
+    payload: { receipt_id: `evlane_${"a".repeat(24)}` },
+  });
+  assert.equal(state.evolutionEvaluationLane.loading, false);
+  assert.equal(handleEvolutionEvaluationLaneKey(state, "r", send), true);
+  assert.equal(sent.length, 2);
+  assert.equal(handleEvolutionEvaluationLaneKey(state, INPUT_KEYS.escape, send), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 7);
+  assert.equal(state.followTail, false);
+
+  state.route = { name: "evolution_evaluation_lane", originAnchor: null };
+  state.evolutionEvaluationLane.snapshot = { receipt_id: `evlane_${"a".repeat(24)}` };
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "replacement", title: "新会话", clear: true },
+  });
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.evolutionEvaluationLane.snapshot, null);
 });
 
 test("evolution enqueue sends an explicit bound queue request", () => {

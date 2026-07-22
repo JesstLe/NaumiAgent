@@ -65,6 +65,7 @@ class ClientEventType(StrEnum):
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
+    EVOLUTION_EVALUATION_LANE_REQUEST = "evolution/evaluation-lane/request"
     SET_MODE = "set_mode"
     CYCLE_MODE = "cycle_mode"
     SET_REASONING = "set_reasoning"
@@ -139,6 +140,7 @@ class ServerEventType(StrEnum):
     WORKBENCH_REVIEW = "workbench/review"
     WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
     EVOLUTION_REVIEW = "evolution/review"
+    EVOLUTION_EVALUATION_LANE = "evolution/evaluation-lane"
     SHUTDOWN = "shutdown"
 
 
@@ -484,6 +486,12 @@ def _normalize_client_payload(
             "source_kind": source_kind,
             "limit": _bounded_int(payload.get("limit"), 50, lower=1, upper=100),
         }
+
+    if event_type == ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST:
+        comparison_id = str(payload.get("comparison_id") or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", comparison_id):
+            raise ValueError("Evaluation Lane comparison_id 必须是 64 位小写 SHA-256。")
+        return {"comparison_id": comparison_id}
 
     if event_type == ClientEventType.AGENTS_STOP:
         task_id = str(payload.get("task_id") or "").strip()
