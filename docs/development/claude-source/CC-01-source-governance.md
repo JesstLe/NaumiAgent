@@ -32,5 +32,8 @@
 - `CC-01.1a`（2026-07-18）已完成：v2 identity manifest 记录 source Git 身份、clean/dirty
   摘要、许可证文件证据与 v1 map 摘要；严格 validator 能区分 valid/stale/invalid，并已对当前
   本地 Claude Code checkout 做真实校验。详见 `CC-01-1a-source-identity-manifest.md`。
-- 尚未完成刷新审批历史、许可证适用范围、逐项 v2 mapping、intake classifier、provenance 和
+- `CC-01.1b`（2026-07-23）已完成：平台原生用户状态库保存 hash-chain 审批历史和稳定刷新提案；
+  commit/license/mapping 变化均重新核验，并对 license/mapping 变化要求显式人工确认。详见
+  `CC-01-1b-source-refresh-history.md`。
+- 尚未完成许可证适用范围、逐项 v2 mapping、intake classifier、provenance 和
   review gate，因此 CC-01 保持 `partial`。

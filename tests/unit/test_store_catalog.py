@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.claude_source.refresh import CLAUDE_SOURCE_STORE_SCHEMA_VERSION
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
@@ -52,7 +53,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
 
     definitions = build_store_catalog(_config(tmp_path))
 
-    assert len(definitions) == 16
+    assert len(definitions) == 17
     assert len({item.store_id for item in definitions}) == len(definitions)
     assert len({item.path for item in definitions}) == len(definitions)
     assert all(item.path.is_absolute() for item in definitions)
@@ -97,6 +98,20 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert evolution.supported_schema_version == EVOLUTION_STORE_SCHEMA_VERSION == 1
     assert evolution.retention is RetentionPolicy.AUDIT_LONG_TERM
     assert evolution.sensitivity is DataSensitivity.RESTRICTED
+    source_governance = next(
+        item for item in definitions if item.store_id == "governance.claude_source"
+    )
+    assert source_governance.path == (
+        tmp_path / "user-state" / "claude-source.db"
+    ).resolve()
+    assert source_governance.version_strategy is VersionStrategy.SQLITE_USER_VERSION
+    assert (
+        source_governance.supported_schema_version
+        == CLAUDE_SOURCE_STORE_SCHEMA_VERSION
+        == 1
+    )
+    assert source_governance.retention is RetentionPolicy.AUDIT_LONG_TERM
+    assert source_governance.sensitivity is DataSensitivity.RESTRICTED
 
 
 def test_absent_lazy_stores_are_read_only_and_do_not_create_state(
