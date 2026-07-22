@@ -14,7 +14,9 @@ import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 import {
   applyCommandQuickOpenTaskSnapshot,
+  applyCommandQuickOpenSessionSnapshot,
   failCommandQuickOpenTaskSnapshot,
+  failCommandQuickOpenSessionSnapshot,
   recordRecentCommand,
   resetCommandQuickOpenTaskCache,
 } from "./command-quick-open.js";
@@ -337,6 +339,12 @@ export function createInitialState() {
       taskLoading: false,
       taskError: "",
       taskRequestId: "",
+      sessionItems: [],
+      sessionWarnings: [],
+      sessionLoaded: false,
+      sessionLoading: false,
+      sessionError: "",
+      sessionRequestId: "",
     },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
@@ -750,6 +758,9 @@ export function reduceServerEvent(state, record) {
         applyTaskSnapshot(state, payload);
       }
       break;
+    case "sessions/list":
+      applyCommandQuickOpenSessionSnapshot(state, record.request_id, payload);
+      break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
       break;
@@ -1089,6 +1100,11 @@ export function reduceServerEvent(state, record) {
       }
     case "error": {
       if (failCommandQuickOpenTaskSnapshot(
+        state,
+        record.request_id,
+        payload.message,
+      )) break;
+      if (failCommandQuickOpenSessionSnapshot(
         state,
         record.request_id,
         payload.message,

@@ -309,7 +309,7 @@ export function renderFooterSections(state, width, env = {}) {
       { name: "status", lines: StatusFooter({ state, env }).render(ctx) },
       {
         name: "command-quick-open-help",
-        lines: wrapAnsiLine(color(ANSI.cyan, "QuickOpen · Tab 切换命令/任务 · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消 · 不会自动执行"), ctx.width),
+        lines: wrapAnsiLine(color(ANSI.cyan, "QuickOpen · Tab 切换命令/任务/会话 · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消 · 不会自动执行"), ctx.width),
       },
     ];
   }

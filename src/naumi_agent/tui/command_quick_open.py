@@ -1,4 +1,4 @@
-"""Textual QuickOpen backed by authoritative command and task projections."""
+"""Textual QuickOpen backed by authoritative command, task, and session projections."""
 
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from naumi_agent.ui.command_index import (
     TerminalCommandIndexEntry,
     search_terminal_commands,
     terminal_command_template,
+)
+from naumi_agent.ui.session_list import SessionListItem, build_session_list_snapshot
+from naumi_agent.ui.session_quick_open import (
+    search_terminal_sessions,
+    terminal_session_template,
 )
 from naumi_agent.ui.task_panel import TaskViewItem, build_task_panel_snapshot
 from naumi_agent.ui.task_quick_open import (
@@ -120,12 +125,16 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         self._task_loading = False
         self._task_error = ""
         self._task_warnings: tuple[str, ...] = ()
-        self._results: tuple[TerminalCommandIndexEntry | TaskViewItem, ...] = ()
+        self._session_items: tuple[SessionListItem, ...] = ()
+        self._session_loaded = False
+        self._session_loading = False
+        self._session_error = ""
+        self._results: tuple[TerminalCommandIndexEntry | TaskViewItem | SessionListItem, ...] = ()
 
     def compose(self) -> ComposeResult:
         with Container():
             yield Label(
-                "[bold]命令 QuickOpen[/bold] · Tab 切换任务 · 选择后仅填入输入框",
+                "[bold]命令 QuickOpen[/bold] · Tab 切换任务/会话 · 选择后仅填入输入框",
                 id="command-quick-open-title",
             )
             yield Input(
@@ -136,7 +145,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             yield ListView(id="command-quick-open-results")
             yield Static("", id="command-quick-open-detail")
             yield Static(
-                "Tab 切换命令/任务 · ↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
+                "Tab 切换命令/任务/会话 · ↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
                 id="command-quick-open-help",
             )
 
@@ -188,6 +197,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
     async def _refresh_results(self, query: str) -> None:
         if self._provider == "tasks":
             self._results = search_terminal_tasks(self._task_items, query, limit=50)
+        elif self._provider == "sessions":
+            self._results = search_terminal_sessions(self._session_items, query, limit=100)
         else:
             self._results = search_terminal_commands(
                 self._entries,
@@ -204,7 +215,9 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             results.index = 0
         self._render_detail()
 
-    def _render_entry(self, entry: TerminalCommandIndexEntry | TaskViewItem) -> str:
+    def _render_entry(
+        self, entry: TerminalCommandIndexEntry | TaskViewItem | SessionListItem
+    ) -> str:
         if isinstance(entry, TaskViewItem):
             source = _TASK_SOURCE_LABELS.get(entry.source, entry.source)
             status = _TASK_STATUS_LABELS.get(entry.status, entry.status or "未知")
@@ -214,6 +227,12 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"[bold]{escape(entry.title or entry.task_id)}[/bold] "
                 f"[{style}]{escape(status)}[/] · {escape(source)} · "
                 f"{escape(entry.task_id)}{owner}"
+            )
+        if isinstance(entry, SessionListItem):
+            current = " [cyan]· 当前[/]" if entry.is_current else ""
+            return (
+                f"[bold]{escape(entry.title)}[/bold] · {escape(entry.session_id)} · "
+                f"{escape(entry.model)}{current}"
             )
         syntax = f" {entry.arguments.syntax}" if entry.arguments.syntax else ""
         risk = _RISK_LABELS[entry.permission_risk]
@@ -236,8 +255,12 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 detail.update(
                     "[yellow]没有匹配任务。部分来源不可用，可运行 /doctor 检查。[/yellow]"
                 )
+            elif self._provider == "sessions" and self._session_loading:
+                detail.update("[cyan]正在读取当前工作区会话…[/cyan]")
+            elif self._provider == "sessions" and self._session_error:
+                detail.update(f"[yellow]{escape(self._session_error)}[/yellow]")
             else:
-                label = "任务" if self._provider == "tasks" else "命令"
+                label = {"tasks": "任务", "sessions": "会话"}.get(self._provider, "命令")
                 detail.update(f"[yellow]没有匹配{label}。[/yellow]")
             return
         if isinstance(selected, TaskViewItem):
@@ -248,6 +271,13 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"将填入：[bold]{escape(terminal_task_template(selected))}[/bold]"
             )
             return
+        if isinstance(selected, SessionListItem):
+            detail.update(
+                f"模型：{escape(selected.model or '未知')} · "
+                f"分支：{escape(selected.git_branch or '未知')}\n"
+                f"将填入：[bold]{escape(terminal_session_template(selected))}[/bold]"
+            )
+            return
         aliases = "、".join(selected.aliases) if selected.aliases else "无"
         detail.update(
             f"类别：{escape(selected.category)} · 来源：{escape(selected.source)} · "
@@ -255,7 +285,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             f"将填入：[bold]{escape(terminal_command_template(selected))}[/bold]"
         )
 
-    def _selected_entry(self) -> TerminalCommandIndexEntry | TaskViewItem | None:
+    def _selected_entry(self) -> TerminalCommandIndexEntry | TaskViewItem | SessionListItem | None:
         if not self._results:
             return None
         index = self.query_one("#command-quick-open-results", ListView).index
@@ -267,25 +297,31 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             template = (
                 terminal_task_template(selected)
                 if isinstance(selected, TaskViewItem)
+                else terminal_session_template(selected)
+                if isinstance(selected, SessionListItem)
                 else terminal_command_template(selected)
             )
             self.dismiss(template)
 
     async def _switch_provider(self) -> None:
-        self._provider = "tasks" if self._provider == "commands" else "commands"
+        self._provider = {
+            "commands": "tasks",
+            "tasks": "sessions",
+            "sessions": "commands",
+        }[self._provider]
         query = self.query_one("#command-quick-open-query", Input)
         query.value = ""
         title = self.query_one("#command-quick-open-title", Label)
         if self._provider == "tasks":
-            title.update(
-                "[bold]任务 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框"
-            )
+            title.update("[bold]任务 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框")
             query.placeholder = "搜索任务 ID、标题、Owner、来源或状态…"
             await self._load_tasks()
+        elif self._provider == "sessions":
+            title.update("[bold]会话 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框")
+            query.placeholder = "搜索会话标题、ID、模型或分支…"
+            await self._load_sessions()
         else:
-            title.update(
-                "[bold]命令 QuickOpen[/bold] · Tab 切换任务 · 选择后仅填入输入框"
-            )
+            title.update("[bold]命令 QuickOpen[/bold] · Tab 切换任务/会话 · 选择后仅填入输入框")
             query.placeholder = "搜索命令、别名、说明、类别或风险…"
         await self._refresh_results("")
         query.focus()
@@ -307,6 +343,22 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             self._task_error = "任务快照读取失败，请运行 /doctor 后重试。"
         finally:
             self._task_loading = False
+
+    async def _load_sessions(self) -> None:
+        if self._session_loaded or self._session_loading or self._engine is None:
+            return
+        self._session_loading = True
+        self._session_error = ""
+        try:
+            snapshot = await build_session_list_snapshot(
+                self._engine, page=1, page_size=100, query=""
+            )
+            self._session_items = snapshot.items
+            self._session_loaded = True
+        except Exception:
+            self._session_error = "会话快照读取失败，请稍后重试。"
+        finally:
+            self._session_loading = False
 
 
 __all__ = ["CommandQuickOpenScreen"]

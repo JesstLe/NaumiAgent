@@ -456,6 +456,31 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "sessions/list/request") {
+    emit("sessions/list", {
+      schema_version: 1,
+      generated_at: "2026-07-22T08:00:00+00:00",
+      scope: "workspace",
+      page: 1,
+      page_size: 100,
+      total: 1,
+      query: "",
+      items: [{
+        session_id: "session-history",
+        title: "历史工作会话",
+        model: "openai/kimi-for-coding",
+        updated_at: "2026-07-22T07:00:00+00:00",
+        message_count: 4,
+        user_message_count: 2,
+        git_branch: "main",
+        is_current: false,
+        resumable: true,
+      }],
+      warnings: [],
+    }, record.id);
+    return;
+  }
+
   if (record.type === "goal_panel") {
     emit("goals/snapshot", {
       schema_version: 1,

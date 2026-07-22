@@ -5,7 +5,7 @@ import {
   commandRiskLabel,
   commandTemplate,
 } from "../command-metadata.js";
-import { getCommandQuickOpenItems, taskTemplate } from "../command-quick-open.js";
+import { getCommandQuickOpenItems, sessionTemplate, taskTemplate } from "../command-quick-open.js";
 import { boxLines } from "./core.js";
 
 export function renderCommandQuickOpenPage(state, width, height) {
@@ -18,12 +18,13 @@ export function renderCommandQuickOpenPage(state, width, height) {
   ));
   const visible = items.slice(start, start + visibleCount);
   const query = String(state.commandQuickOpen?.query || "");
-  const provider = state.commandQuickOpen?.provider === "tasks" ? "tasks" : "commands";
+  const provider = ["tasks", "sessions"].includes(state.commandQuickOpen?.provider)
+    ? state.commandQuickOpen.provider : "commands";
   const taskLoading = Boolean(state.commandQuickOpen?.taskLoading);
   const taskError = String(state.commandQuickOpen?.taskError || "");
   const rows = [
-    `${color(ANSI.cyan, "搜索:")} ${query || color(ANSI.dim, provider === "tasks" ? "输入任务 ID、标题、Owner、来源或状态" : "输入命令、别名、说明、类别或风险")}${color(ANSI.yellow, "█")}`,
-    color(ANSI.dim, `Provider ${provider === "tasks" ? "任务" : "命令"} · 结果 ${items.length} · 选择只填入输入框`),
+    `${color(ANSI.cyan, "搜索:")} ${query || color(ANSI.dim, provider === "tasks" ? "输入任务 ID、标题、Owner、来源或状态" : provider === "sessions" ? "输入会话标题、ID、模型或分支" : "输入命令、别名、说明、类别或风险")}${color(ANSI.yellow, "█")}`,
+    color(ANSI.dim, `Provider ${{ commands: "命令", tasks: "任务", sessions: "会话" }[provider]} · 结果 ${items.length} · 选择只填入输入框`),
     "",
   ];
   if (!visible.length) {
@@ -33,8 +34,12 @@ export function renderCommandQuickOpenPage(state, width, height) {
       rows.push(color(ANSI.yellow, compactText(taskError, 160)));
     } else if (provider === "tasks" && state.commandQuickOpen?.taskWarnings?.length) {
       rows.push(color(ANSI.yellow, "没有匹配任务。部分来源不可用，可运行 /doctor 检查。"));
+    } else if (provider === "sessions" && state.commandQuickOpen?.sessionLoading) {
+      rows.push(color(ANSI.cyan, "正在读取当前工作区会话…"));
+    } else if (provider === "sessions" && state.commandQuickOpen?.sessionError) {
+      rows.push(color(ANSI.yellow, compactText(state.commandQuickOpen.sessionError, 160)));
     } else {
-      rows.push(color(ANSI.yellow, `没有匹配${provider === "tasks" ? "任务" : "命令"}。`));
+      rows.push(color(ANSI.yellow, `没有匹配${{ commands: "命令", tasks: "任务", sessions: "会话" }[provider]}。`));
     }
   } else {
     for (const item of visible) {
@@ -42,6 +47,9 @@ export function renderCommandQuickOpenPage(state, width, height) {
       if (provider === "tasks") {
         const taskText = `${marker} ${compactText(item.title || item.task_id, 100)} · ${taskSourceLabel(item.source)} · ${taskStatusLabel(item.status)} · ${compactText(item.task_id, 80)}${item.owner ? ` · ${compactText(item.owner, 60)}` : ""}`;
         rows.push(color(taskStatusColor(item.status, item.selected), taskText));
+      } else if (provider === "sessions") {
+        const current = item.is_current ? " · 当前" : "";
+        rows.push(color(item.selected ? ANSI.cyan : ANSI.dim, `${marker} ${compactText(item.title, 100)} · ${compactText(item.session_id, 80)} · ${compactText(item.model, 80)}${current}`));
       } else {
         const category = commandCategoryLabel(item.category);
         const risk = commandRiskLabel(item.permission_risk);
@@ -54,12 +62,12 @@ export function renderCommandQuickOpenPage(state, width, height) {
     rows.push("");
     rows.push(color(
       ANSI.dim,
-      `将填入: ${provider === "tasks" ? taskTemplate(selected) : commandTemplate(selected)} · 不会自动发送或执行`,
+      `将填入: ${provider === "tasks" ? taskTemplate(selected) : provider === "sessions" ? sessionTemplate(selected) : commandTemplate(selected)} · 不会自动发送或执行`,
     ));
   }
-  rows.push(color(ANSI.dim, "Tab 切换命令/任务 · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消"));
+  rows.push(color(ANSI.dim, "Tab 切换命令/任务/会话 · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消"));
   const boundedHeight = Math.max(1, height);
-  const output = boxLines(provider === "tasks" ? "任务 QuickOpen" : "命令 QuickOpen", rows, width).slice(0, boundedHeight);
+  const output = boxLines({ commands: "命令 QuickOpen", tasks: "任务 QuickOpen", sessions: "会话 QuickOpen" }[provider], rows, width).slice(0, boundedHeight);
   while (output.length < boundedHeight) output.push("");
   return output;
 }

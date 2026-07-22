@@ -881,12 +881,19 @@ function handleCommandQuickOpenKey(chunk) {
   if (chunk === INPUT_KEYS.tab) {
     switchCommandQuickOpenProvider(
       state,
-      () => send("task_panel", {
-        limit: 50,
-        source: "all",
-        status: "all",
-        history: false,
-      }),
+      {
+        tasks: () => send("task_panel", {
+          limit: 50,
+          source: "all",
+          status: "all",
+          history: false,
+        }),
+        sessions: () => send("sessions/list/request", {
+          page: 1,
+          page_size: 100,
+          query: "",
+        }),
+      },
     );
     return true;
   }

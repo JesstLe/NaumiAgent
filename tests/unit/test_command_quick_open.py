@@ -6,6 +6,7 @@ import pytest
 from textual.widgets import Input
 
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tasks.models import Task, TaskStatus
 from naumi_agent.tui.app import NaumiApp
@@ -110,4 +111,39 @@ async def test_tui_quick_open_switches_to_typed_tasks_and_only_fills() -> None:
         await pilot.pause()
 
         assert composer.value == "/tasks detail task-2"
+        assert app._agent_busy is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_tui_quick_open_switches_to_workspace_sessions_and_only_fills() -> None:
+    engine = AgentEngine(AppConfig())
+    session = Session(
+        id="quick-session",
+        title="可恢复会话",
+        workspace_root=str(engine.workspace_root),
+        messages=[{"role": "user", "content": "不应显示的正文"}],
+    )
+    await engine.session_store.save(session)
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        composer = app.query_one("#msg-input", Input)
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandQuickOpenScreen)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        for _ in range(20):
+            if screen._results:  # noqa: SLF001
+                break
+            await pilot.pause(0.05)
+
+        assert screen._provider == "sessions"  # noqa: SLF001
+        assert screen._results[0].session_id == "quick-session"  # noqa: SLF001
+        assert "不应显示的正文" not in screen._render_entry(screen._results[0])  # noqa: SLF001
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert composer.value == "/load quick-session"
         assert app._agent_busy is False  # noqa: SLF001

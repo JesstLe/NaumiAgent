@@ -14,6 +14,8 @@ import {
   recordRecentCommand,
   searchCommandEntries,
   searchTaskEntries,
+  searchSessionEntries,
+  sessionTemplate,
   switchCommandQuickOpenProvider,
 } from "../src/command-quick-open.js";
 import { renderCommandQuickOpenPage } from "../src/components/command-quick-open-page.js";
@@ -229,6 +231,37 @@ test("task QuickOpen keeps correlated load errors inside the overlay", () => {
     stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n")),
     /任务快照暂不可用/,
   );
+});
+
+test("session QuickOpen consumes correlated workspace snapshot and only fills load", () => {
+  const state = createInitialState();
+  openCommandQuickOpen(state);
+  const requests = { tasks: () => "task-request", sessions: () => "session-request" };
+  assert.equal(switchCommandQuickOpenProvider(state, requests), "tasks");
+  assert.equal(switchCommandQuickOpenProvider(state, requests), "sessions");
+  assert.equal(state.commandQuickOpen.sessionLoading, true);
+
+  reduceServerEvent(state, normalizeServerRecord({
+    id: "server-sessions",
+    request_id: "session-request",
+    type: "sessions/list",
+    payload: {
+      schema_version: 1, generated_at: "2026-07-22T08:00:00+00:00",
+      scope: "workspace", page: 1, page_size: 100, total: 2, query: "",
+      items: [
+        { session_id: "older", title: "旧会话", model: "m", updated_at: "2026-07-20", message_count: 2, user_message_count: 1, git_branch: "main", is_current: false, resumable: true },
+        { session_id: "current", title: "当前会话", model: "m", updated_at: "2026-07-19", message_count: 2, user_message_count: 1, git_branch: "main", is_current: true, resumable: true },
+      ], warnings: [],
+    },
+  }));
+
+  assert.deepEqual(searchSessionEntries(state.commandQuickOpen.sessionItems, "当前").map((item) => item.session_id), ["current"]);
+  assert.equal(getCommandQuickOpenItems(state)[0].session_id, "current");
+  assert.match(stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n")), /会话 QuickOpen/);
+  assert.equal(sessionTemplate(getCommandQuickOpenItems(state)[0]), "/load current");
+  assert.equal(acceptCommandQuickOpen(state), true);
+  assert.equal(state.input, "/load current");
+  assert.equal(state.messages.length, 0);
 });
 
 function command(commandName, { aliases = [], risk, description, syntax = "" }) {
