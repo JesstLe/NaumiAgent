@@ -256,6 +256,26 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.reward_hacking_evidence import (
+        EvolutionRewardHackingEvidence,
+        EvolutionRewardHackingEvidenceBuilder,
+        EvolutionRewardHackingEvidenceError,
+        EvolutionRewardHackingEvidenceExecutor,
+        EvolutionRewardHackingEvidenceStore,
+        RewardHackingCheck,
+        RewardHackingCheckStatus,
+        RewardHackingCoverage,
+        RewardHackingFinding,
+        RewardHackingFindingCode,
+        RewardHackingLaneDirection,
+        RewardHackingLaneObservation,
+        RewardHackingRequiredAction,
+        RewardHackingResourceKind,
+        RewardHackingResourceObservation,
+        RewardHackingRule,
+        RewardHackingSeverity,
+        render_reward_hacking_evidence,
+    )
     from naumi_agent.evolution.self_review_comparison import (
         EvolutionSelfReviewComparisonError,
         EvolutionSelfReviewComparisonExecutor,
@@ -388,6 +408,24 @@ __all__ = [
     "EvolutionCounterfactualEvidenceExecutor",
     "EvolutionCounterfactualEvidenceStore",
     "render_counterfactual_evidence",
+    "EvolutionRewardHackingEvidence",
+    "EvolutionRewardHackingEvidenceBuilder",
+    "EvolutionRewardHackingEvidenceError",
+    "EvolutionRewardHackingEvidenceExecutor",
+    "EvolutionRewardHackingEvidenceStore",
+    "RewardHackingCheck",
+    "RewardHackingCheckStatus",
+    "RewardHackingCoverage",
+    "RewardHackingFinding",
+    "RewardHackingFindingCode",
+    "RewardHackingLaneDirection",
+    "RewardHackingLaneObservation",
+    "RewardHackingRequiredAction",
+    "RewardHackingResourceKind",
+    "RewardHackingResourceObservation",
+    "RewardHackingRule",
+    "RewardHackingSeverity",
+    "render_reward_hacking_evidence",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -662,6 +700,26 @@ def __getattr__(name: str) -> object:
         "EvolutionCounterfactualEvidenceStore",
         "render_counterfactual_evidence",
     }
+    reward_hacking_evidence_exports = {
+        "EvolutionRewardHackingEvidence",
+        "EvolutionRewardHackingEvidenceBuilder",
+        "EvolutionRewardHackingEvidenceError",
+        "EvolutionRewardHackingEvidenceExecutor",
+        "EvolutionRewardHackingEvidenceStore",
+        "RewardHackingCheck",
+        "RewardHackingCheckStatus",
+        "RewardHackingCoverage",
+        "RewardHackingFinding",
+        "RewardHackingFindingCode",
+        "RewardHackingLaneDirection",
+        "RewardHackingLaneObservation",
+        "RewardHackingRequiredAction",
+        "RewardHackingResourceKind",
+        "RewardHackingResourceObservation",
+        "RewardHackingRule",
+        "RewardHackingSeverity",
+        "render_reward_hacking_evidence",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -896,6 +954,8 @@ def __getattr__(name: str) -> object:
         module_name = "independent_reviews"
     elif name in counterfactual_evidence_exports:
         module_name = "counterfactual_evidence"
+    elif name in reward_hacking_evidence_exports:
+        module_name = "reward_hacking_evidence"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

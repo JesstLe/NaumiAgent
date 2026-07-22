@@ -101,6 +101,11 @@ from naumi_agent.evolution.patch_recovery import (
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
+from naumi_agent.evolution.reward_hacking_evidence import (
+    EvolutionRewardHackingEvidenceBuilder,
+    EvolutionRewardHackingEvidenceExecutor,
+    EvolutionRewardHackingEvidenceStore,
+)
 from naumi_agent.evolution.self_review_comparison import (
     EvolutionSelfReviewComparisonExecutor,
 )
@@ -275,6 +280,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_counterfactual_evidence_executor,
         EvolutionCounterfactualEvidenceExecutor,
+    )
+    assert isinstance(
+        engine.evolution_reward_hacking_evidence_builder,
+        EvolutionRewardHackingEvidenceBuilder,
+    )
+    assert isinstance(
+        engine.evolution_reward_hacking_evidence_store,
+        EvolutionRewardHackingEvidenceStore,
+    )
+    assert isinstance(
+        engine.evolution_reward_hacking_evidence_executor,
+        EvolutionRewardHackingEvidenceExecutor,
     )
     assert isinstance(
         engine.evolution_validation_planner,

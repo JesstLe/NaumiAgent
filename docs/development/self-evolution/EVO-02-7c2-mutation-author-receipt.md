@@ -65,10 +65,10 @@ Receipt 不保存源码、Prompt 正文、模型正文、reasoning、tool argume
 - EVO-04.3a Reviewer model/provider 选择、author identity 隔离、strict JSON advisory 与 veto 无模型路径已完成；
 - Reviewer structured-output schema、Prompt digest、超时/解析失败和不可变 Review Receipt；
 - Mechanical Gate `veto` 的只读解释路径；
-- EVO-04.4a Counterfactual Evidence 已实现；更深层 reward-hacking detector、最终 decision state 与
+- EVO-04.4a Counterfactual 与 EVO-04.5a Reward-hacking Evidence 已实现；最终 decision state 与
   promotion 尚未实现。
 
 ## 下一步
 
-EVO-04.4a 已沿本 Author Receipt authority 链实现确定性替代解释扫描。下一步实现 EVO-04.5a
-Reward-Hacking Evidence Contract，审查代理指标博弈、选择性样本与资源换分等行为性风险。
+EVO-04.4a 与 EVO-04.5a 已沿本 Author Receipt authority 链实现直接替代解释和行为性风险扫描。下一步实现
+EVO-04.6a Decision State Contract。

@@ -123,6 +123,11 @@ class TestPermissionChecker:
                 "evolution_decision_artifact",
                 50,
             ),
+            (
+                "evolution_reward_hacking_evidence",
+                "evolution_decision_artifact",
+                50,
+            ),
         ],
     )
     def test_evolution_derived_artifacts_have_bounded_permission_rules(

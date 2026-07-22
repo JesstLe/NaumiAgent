@@ -86,11 +86,12 @@ normal 无逐次确认、每会话最多 50 次；任何权限模式都不能覆
 
 - EVO-04.3a independent reviewer identity/model/prompt binding 已完成；
 - EVO-04.4a counterfactual 已完成；
-- EVO-04.5 reward-hacking detector；
+- EVO-04.5a reward-hacking evidence 已完成；
 - EVO-04.6 accept/revise/reject/escalate 最终状态；
 - EVO-04.7 reflection memory 和 EVO-05 promotion。
 
 ## 下一步
 
 EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract；
-EVO-04.4a 已实现真实字节驱动的 Counterfactual Evidence。下一步进入 EVO-04.5a Reward-hacking Evidence。
+EVO-04.4a 与 EVO-04.5a 已实现 Counterfactual 和 Reward-hacking Evidence。下一步进入 EVO-04.6a
+Decision State；任何后续阶段仍不能覆盖 Mechanical veto。

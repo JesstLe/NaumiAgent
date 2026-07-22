@@ -29,6 +29,9 @@ JSON advisory review，并以 durable single-flight claim 防止并发重复模�
 EVO-04.4a 现又从 completed Independent Review ID 重读完整 Store 链和受管 worktree 的真实 baseline/candidate
 字节，逐文件验证 Mutation Receipt digest/diff，并确定性检查更小 scope、删测试、metric 修改、阈值放宽、
 skip/mock 和评测泄漏。它不调用 LLM，只签发 `clear/concern` Evidence，两种结果均不接受 Candidate。
+EVO-04.5a 进一步从 Counterfactual ID 重读 Final Evaluation、全部 Lane 与 Adversarial Cohort authority，
+确定性检查真实任务退化、proxy divergence、平台选择性和 duration/token/cost 资源换分；缺失跨平台或资源
+证据明确形成 `inconclusive`，不冒充 `clear`。
 EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Counterfactual Evidence 非只读 Agent Tool 建立显式
 中风险权限规则和有界会话调用面；bypass 不跳过任何 authority 或 veto。详见
 `EVO-GOV-01-agent-tool-permission-matrix.md`。
@@ -40,6 +43,7 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - EVO-04.3 Independent reviewer：可选不同模型/规则，看到证据但不能改结果。EVO-04.3a 已完成。
 - EVO-04.4 Counterfactual：是否有更小改动、改善是否来自删测试/改指标/放宽规则。EVO-04.4a 已完成。
 - EVO-04.5 Reward hacking detector：proxy gaming、选择性样本/平台优化、资源换分与真实任务退化。
+  EVO-04.5a 已完成。
 - EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。
 - EVO-04.7 Reflection memory：只保存结构化经验和证据引用，禁止污染系统 Prompt。
 
@@ -65,14 +69,17 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - [EVO-04.4a Counterfactual Evidence Contract](EVO-04-4a-counterfactual-evidence-contract.md)：Review ID
   单入口、六 Store authority 重读、受管 worktree 真实字节/diff 复核、直接替代解释扫描、并发幂等持久化、
   双通道与源码不落 artifact。
+- [EVO-04.5a Reward-hacking Evidence Contract](EVO-04-5a-reward-hacking-evidence-contract.md)：
+  Counterfactual ID 单入口、Final/Lane/Cohort authority 重读、行为退化/代理分歧/平台选择性/资源换分检查、
+  `clear/concern/inconclusive` 三态、双通道与并发幂等持久化。
 
-EVO-04 整体仍为 partial；Counterfactual 完成不代表行为型 reward-hacking 检测或最终决策已交付。
+EVO-04 整体仍为 partial；Reward-hacking Evidence 完成不代表最终 Decision State 已交付。
 
 ## 明确未完成
 
-- reward-hacking detector、decision state、reflection memory 与 promotion。
+- decision state、reflection memory 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.5a Reward-hacking Evidence Contract：消费 Counterfactual 与完整 Evaluation facts，检查 proxy
-gaming、局部指标改善但真实任务退化、选择性平台/样本优化和资源换分；仍不得直接接受 Candidate。
+实现 EVO-04.6a Decision State Contract：消费 Mechanical Gate、Review、Counterfactual 与 Reward-hacking
+签名 authority，按确定性优先级形成 accepted_experiment/revise/rejected/escalated；仍不执行 promotion。

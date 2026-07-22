@@ -3068,6 +3068,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionReviewFilter,
         render_evolution_review,
     )
+    from naumi_agent.evolution.reward_hacking_evidence import (
+        EvolutionRewardHackingEvidenceError,
+        render_reward_hacking_evidence,
+    )
     from naumi_agent.evolution.store import EvolutionStoreError
 
     action = "list"
@@ -3191,6 +3195,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_counterfactual_evidence(artifact)))
             return
+        if action == "reward-hacking":
+            if len(parts) != 2:
+                raise ValueError("reward-hacking 需要一个 Counterfactual Evidence ID。")
+            artifact = await (
+                engine.evolution_reward_hacking_evidence_executor.execute(
+                    workspace_root=engine.workspace_root,
+                    counterfactual_evidence_id=parts[1],
+                )
+            )
+            console.print(Markdown(render_reward_hacking_evidence(artifact)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3219,7 +3234,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "仅支持 list、detail、experiment-contract、evaluation、"
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
-                "independent-review、counterfactual 或 enqueue。"
+                "independent-review、counterfactual、reward-hacking 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3274,6 +3289,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "reward-hacking":
+            console.print(
+                f"Evolution Reward-hacking Evidence 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3286,6 +3308,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution mechanical-gate <decision-input-id>；"
             "/evolution independent-review <gate-id> [reviewer-model]；"
             "/evolution counterfactual <independent-review-id>；"
+            "/evolution reward-hacking <counterfactual-evidence-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3344,6 +3367,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionCounterfactualEvidenceError as exc:
         console.print(
             f"Evolution Counterfactual Evidence 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRewardHackingEvidenceError as exc:
+        console.print(
+            f"Evolution Reward-hacking Evidence 未完成：{exc}",
             style="yellow",
             markup=False,
         )
