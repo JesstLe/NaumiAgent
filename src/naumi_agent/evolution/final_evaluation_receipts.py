@@ -379,6 +379,35 @@ class EvolutionFinalEvaluationReceiptStore:
                 "Final Evaluation Receipt 损坏或无法读取。",
             ) from exc
 
+    async def get_by_receipt_id(
+        self,
+        receipt_id: str,
+    ) -> EvolutionFinalEvaluationReceipt | None:
+        """Reload one immutable receipt without trusting caller-supplied contract IDs."""
+        if not isinstance(receipt_id, str) or re.fullmatch(
+            r"evfinal_[0-9a-f]{24}", receipt_id
+        ) is None:
+            raise ValueError("receipt_id 格式无效。")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_final_evaluation_receipts "
+                        "WHERE receipt_id = ?",
+                        (receipt_id,),
+                    )
+                ).fetchone()
+                return _from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionFinalEvaluationReceiptError(
+                "final_evaluation_store_corrupt",
+                "Final Evaluation Receipt 损坏或无法读取。",
+            ) from exc
+
 
 class EvolutionFinalEvaluationReceiptExecutor:
     def __init__(

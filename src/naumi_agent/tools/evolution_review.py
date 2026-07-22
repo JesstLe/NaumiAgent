@@ -7,6 +7,10 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.decision_inputs import (
+    EvolutionDecisionInputError,
+    render_decision_input,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractError,
     render_evaluation_aggregation_contract,
@@ -429,6 +433,59 @@ class EvolutionFinalEvaluationReceiptTool(Tool):
         return render_final_evaluation_receipt(receipt)
 
 
+class EvolutionDecisionInputTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_decision_input"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅凭 Final Evaluation Receipt ID，从四个 durable Store 重读 Candidate、"
+            "Mutation、Experiment constraints 与完整评测证据，冻结防篡改 Decision Input。"
+            "该工具不执行 mechanical gate，不接受候选，也不批准发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "final_evaluation_receipt_id": {
+                    "type": "string",
+                    "pattern": "^evfinal_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["final_evaluation_receipt_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 决策输入",
+            search_hint=(
+                "evolution decision input candidate mutation constraints final receipt "
+                "自进化 决策 输入 证据 约束"
+            ),
+        )
+
+    async def execute(self, final_evaluation_receipt_id: str) -> str:
+        try:
+            artifact = await self._engine.evolution_decision_input_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                final_evaluation_receipt_id=final_evaluation_receipt_id.strip(),
+            )
+        except (EvolutionDecisionInputError, OSError, TypeError, ValueError) as exc:
+            return f"Evolution Decision Input 未冻结：{exc}"
+        return render_decision_input(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -439,12 +496,14 @@ def create_evolution_review_tools(
         EvolutionEvaluationReceiptTool(engine),
         EvolutionEvaluationAggregationContractTool(engine),
         EvolutionFinalEvaluationReceiptTool(engine),
+        EvolutionDecisionInputTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
 
 __all__ = [
     "EvolutionCandidatesTool",
+    "EvolutionDecisionInputTool",
     "EvolutionExperimentContractAuthorityTool",
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
