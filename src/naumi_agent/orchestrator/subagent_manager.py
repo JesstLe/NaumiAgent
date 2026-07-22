@@ -22,6 +22,10 @@ from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
+from naumi_agent.runtime.agent_heartbeat import (
+    AgentExecutionHeartbeatFactory,
+    AgentExecutionHeartbeatLifecycle,
+)
 from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
 
 if TYPE_CHECKING:
@@ -105,6 +109,9 @@ class AgentExecutionRecord:
     finished_at: float | None = None
     elapsed_ms: int = 0
     heartbeat_age_ms: int = 0
+    heartbeat_subject_id: str = ""
+    heartbeat_phase: str = ""
+    heartbeat_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -141,13 +148,28 @@ class _ActiveExecution:
     stop_requested: bool = False
     stop_reason: str = ""
     execute_task: asyncio.Task[AgentResult] | None = None
+    heartbeat_lifecycle: AgentExecutionHeartbeatLifecycle | None = None
+    heartbeat_failure_code: str = ""
 
 
 class SubAgentManager:
     """管理和调度子 Agent（含生命周期状态机 + 自动回收）."""
 
-    def __init__(self, engine: AgentEngine) -> None:
+    def __init__(
+        self,
+        engine: AgentEngine,
+        *,
+        heartbeat_factory: AgentExecutionHeartbeatFactory | None = None,
+    ) -> None:
+        if heartbeat_factory is not None and not isinstance(
+            heartbeat_factory,
+            AgentExecutionHeartbeatFactory,
+        ):
+            raise TypeError(
+                "heartbeat_factory 必须是 AgentExecutionHeartbeatFactory。"
+            )
         self._engine = engine
+        self._heartbeat_factory = heartbeat_factory
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
@@ -503,6 +525,49 @@ class SubAgentManager:
         if should_cancel and not execute_task.done():
             execute_task.cancel()
 
+    async def _start_execution_heartbeat(self, task_id: str) -> None:
+        factory = self._heartbeat_factory
+        if factory is None:
+            return
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                return
+            session_id = execution.session_id
+            agent_name = execution.agent_name
+        try:
+            lifecycle = await factory.create(
+                session_id=session_id,
+                task_id=task_id,
+                agent_name=agent_name,
+            )
+            await lifecycle.start()
+        except Exception as exc:
+            logger.warning(
+                "Agent heartbeat startup failed [%s]: %s",
+                task_id,
+                type(exc).__name__,
+            )
+            async with self._execution_lock:
+                execution = self._active_executions.get(task_id)
+                if execution is not None:
+                    execution.heartbeat_failure_code = (
+                        "agent_heartbeat_start_failed"
+                    )
+            return
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is not None:
+                execution.heartbeat_lifecycle = lifecycle
+                return
+        try:
+            await lifecycle.finish("cancelled")
+        except Exception:
+            logger.warning(
+                "Detached Agent heartbeat terminal write failed [%s]",
+                task_id,
+            )
+
     async def _observe_execution_event(
         self,
         task_id: str,
@@ -538,10 +603,13 @@ class SubAgentManager:
         task_id: str,
         result: AgentResult,
     ) -> None:
+        lifecycle: AgentExecutionHeartbeatLifecycle | None = None
+        execution: _ActiveExecution | None = None
         async with self._execution_lock:
             execution = self._active_executions.pop(task_id, None)
             if execution is None:
                 return
+            lifecycle = execution.heartbeat_lifecycle
             now_mono = time.monotonic()
             record = _execution_record(
                 execution,
@@ -556,13 +624,43 @@ class SubAgentManager:
                 item.agent_name == execution.agent_name
                 for item in self._active_executions.values()
             ):
-                lifecycle = self._lifecycle.get(execution.agent_name)
-                if lifecycle is not None:
-                    lifecycle.state = AgentState.RUNNING
-                    lifecycle.last_updated = time.monotonic()
-                    lifecycle.idle_since = None
+                agent_lifecycle = self._lifecycle.get(execution.agent_name)
+                if agent_lifecycle is not None:
+                    agent_lifecycle.state = AgentState.RUNNING
+                    agent_lifecycle.last_updated = time.monotonic()
+                    agent_lifecycle.idle_since = None
             else:
                 self._transition(execution.agent_name, AgentState.IDLE)
+
+        if lifecycle is None:
+            return
+        try:
+            await lifecycle.finish(result.status)
+        except Exception as exc:
+            logger.warning(
+                "Agent heartbeat terminal write failed [%s]: %s",
+                task_id,
+                type(exc).__name__,
+            )
+            execution.heartbeat_failure_code = "agent_heartbeat_terminal_failed"
+        async with self._execution_lock:
+            record_index = next(
+                (
+                    index
+                    for index in range(len(self._execution_history) - 1, -1, -1)
+                    if self._execution_history[index].task_id == task_id
+                    and self._execution_history[index].started_at
+                    == execution.started_at
+                ),
+                -1,
+            )
+            if record_index >= 0:
+                self._execution_history[record_index] = _execution_record(
+                    execution,
+                    now=time.monotonic(),
+                    result=result,
+                    finished_at=self._execution_history[record_index].finished_at,
+                )
 
     async def delegate(
         self,
@@ -650,6 +748,8 @@ class SubAgentManager:
                 status="error",
                 error=f"Duplicate active sub-agent task id: {task.id}",
             )
+
+        await self._start_execution_heartbeat(task.id)
 
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
@@ -1133,6 +1233,14 @@ def _execution_record(
     elapsed_ms = max(0, round((now - execution.started_mono) * 1000))
     heartbeat_age_ms = max(0, round((now - execution.last_updated_mono) * 1000))
     status = result.status if result is not None else execution.status
+    heartbeat_subject_id = ""
+    heartbeat_phase = ""
+    heartbeat_failure_code = execution.heartbeat_failure_code
+    if execution.heartbeat_lifecycle is not None:
+        heartbeat = execution.heartbeat_lifecycle.snapshot()
+        heartbeat_subject_id = heartbeat.subject_id
+        heartbeat_phase = heartbeat.phase
+        heartbeat_failure_code = heartbeat_failure_code or heartbeat.failure_code
     return AgentExecutionRecord(
         task_id=execution.task_id,
         session_id=execution.session_id,
@@ -1144,6 +1252,9 @@ def _execution_record(
         finished_at=finished_at,
         elapsed_ms=elapsed_ms,
         heartbeat_age_ms=heartbeat_age_ms,
+        heartbeat_subject_id=heartbeat_subject_id,
+        heartbeat_phase=heartbeat_phase,
+        heartbeat_failure_code=heartbeat_failure_code,
         current_tool=execution.current_tool,
         recent_tools=tuple(execution.recent_tools),
         total_tokens=result.total_tokens if result is not None else 0,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 1
+AGENT_CONTROL_SCHEMA_VERSION = 2
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
@@ -29,6 +29,9 @@ _EXECUTION_STATUSES = frozenset({
 })
 _EXECUTION_PHASES = frozenset({
     "starting", "running", "preparing_tool", "running_tool", "stopping", "finished",
+})
+_HEARTBEAT_PHASES = frozenset({
+    "starting", "running", "waiting", "draining", "stopped", "failed",
 })
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
 
@@ -179,6 +182,9 @@ class ExecutionDescriptor:
     finished_at: float | None = None
     elapsed_ms: int = 0
     heartbeat_age_ms: int = 0
+    heartbeat_subject_id: str = ""
+    heartbeat_phase: str = ""
+    heartbeat_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -194,6 +200,7 @@ class ExecutionDescriptor:
         _only(data, {
             "task_id", "session_id", "agent_name", "description", "status", "phase",
             "started_at", "finished_at", "elapsed_ms", "heartbeat_age_ms", "current_tool",
+            "heartbeat_subject_id", "heartbeat_phase", "heartbeat_failure_code",
             "recent_tools", "total_tokens", "total_cost_usd", "turns", "error",
             "stop_supported", "stop_requested",
         }, "execution")
@@ -212,6 +219,23 @@ class ExecutionDescriptor:
             elapsed_ms=_integer(data.get("elapsed_ms", 0), "execution.elapsed_ms"),
             heartbeat_age_ms=_integer(
                 data.get("heartbeat_age_ms", 0), "execution.heartbeat_age_ms"
+            ),
+            heartbeat_subject_id=_text(
+                data.get("heartbeat_subject_id"),
+                "execution.heartbeat_subject_id",
+            ),
+            heartbeat_phase=(
+                _choice(
+                    data.get("heartbeat_phase"),
+                    "execution.heartbeat_phase",
+                    _HEARTBEAT_PHASES,
+                )
+                if data.get("heartbeat_phase")
+                else ""
+            ),
+            heartbeat_failure_code=_text(
+                data.get("heartbeat_failure_code"),
+                "execution.heartbeat_failure_code",
             ),
             current_tool=_text(data.get("current_tool"), "execution.current_tool"),
             recent_tools=_texts(data.get("recent_tools"), "execution.recent_tools", 20),

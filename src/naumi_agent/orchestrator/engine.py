@@ -784,6 +784,9 @@ class AgentEngine:
         self.terminal_runtime_lifecycle_factory = (
             services.terminal_runtime_lifecycle_factory
         )
+        self.agent_execution_heartbeat_factory = (
+            services.agent_execution_heartbeat_factory
+        )
         self.workspace_root = paths.workspace_root
         self._runtime_data_dir = paths.runtime_data_dir
         self.tool_output_archive = ToolOutputArchive(
@@ -1588,7 +1591,10 @@ class AgentEngine:
         from naumi_agent.tools.pursuit import set_pursuit_dependencies
         from naumi_agent.tools.subagent import create_subagent_tools
 
-        self.subagent_manager = SubAgentManager(self)
+        self.subagent_manager = SubAgentManager(
+            self,
+            heartbeat_factory=self.agent_execution_heartbeat_factory,
+        )
         self.agent_control = AgentControlService(
             self,
             session_id_getter=lambda: self._session.id if self._session else "",

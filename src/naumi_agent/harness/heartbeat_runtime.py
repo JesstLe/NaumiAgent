@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -14,6 +15,18 @@ from naumi_agent.harness.run_lease import HarnessRunKind
 NowProvider = Callable[[], str]
 SleepProvider = Callable[[float], Awaitable[None]]
 FailureCallback = Callable[[str], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class HeartbeatLifecycleDetailCodes:
+    """Finite public reason codes emitted by one lifecycle producer family."""
+
+    starting: str = "runtime_starting"
+    running: str = "runtime_ready"
+    alive: str = "runtime_alive"
+    draining: str = "runtime_draining"
+    stopped: str = "runtime_stopped"
+    failed: str = "runtime_shutdown_failed"
 
 
 class HeartbeatProducerPort(Protocol):
@@ -46,12 +59,14 @@ class RuntimeHeartbeatProducer:
         subject_kind: HarnessRunKind,
         subject_id: str,
         instance_id: str,
+        epoch: int = 1,
         interval_seconds: float = 10.0,
         timeout_seconds: int = 30,
         now_provider: NowProvider,
         sleep_provider: SleepProvider = asyncio.sleep,
         on_failure: FailureCallback | None = None,
         auto_pulse: bool = True,
+        detail_codes: HeartbeatLifecycleDetailCodes | None = None,
     ) -> None:
         if (
             isinstance(timeout_seconds, bool)
@@ -62,13 +77,20 @@ class RuntimeHeartbeatProducer:
         interval = float(interval_seconds)
         if not math.isfinite(interval) or not 0 < interval < timeout_seconds:
             raise ValueError("Heartbeat interval 必须大于 0 且小于 timeout。")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("Heartbeat epoch 必须是大于或等于 1 的整数。")
+        codes = detail_codes or HeartbeatLifecycleDetailCodes()
+        if not isinstance(codes, HeartbeatLifecycleDetailCodes):
+            raise TypeError("detail_codes 必须是 HeartbeatLifecycleDetailCodes。")
         self._port = port
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self.subject_kind = subject_kind
         self.subject_id = subject_id
         self.instance_id = instance_id
+        self.epoch = epoch
         self.interval_seconds = interval
         self.timeout_seconds = timeout_seconds
+        self.detail_codes = codes
         self._now = now_provider
         self._sleep = sleep_provider
         self._on_failure = on_failure
@@ -98,10 +120,13 @@ class RuntimeHeartbeatProducer:
             raise RuntimeError("Heartbeat producer 不能重复启动。")
         self._started = True
         try:
-            await self._record(HarnessHeartbeatPhase.STARTING, "runtime_starting")
+            await self._record(
+                HarnessHeartbeatPhase.STARTING,
+                self.detail_codes.starting,
+            )
             heartbeat = await self._record(
                 HarnessHeartbeatPhase.RUNNING,
-                "runtime_ready",
+                self.detail_codes.running,
             )
         except Exception:
             self._failure_code = "heartbeat_start_failed"
@@ -120,7 +145,10 @@ class RuntimeHeartbeatProducer:
             raise RuntimeError("Heartbeat producer 尚未运行。")
         if self._phase is not HarnessHeartbeatPhase.RUNNING:
             raise RuntimeError("只有 running Heartbeat 可以继续 pulse。")
-        return await self._record(HarnessHeartbeatPhase.RUNNING, "runtime_alive")
+        return await self._record(
+            HarnessHeartbeatPhase.RUNNING,
+            self.detail_codes.alive,
+        )
 
     async def begin_draining(self) -> HarnessHeartbeat | None:
         """Stop periodic pulses and persist the shutdown boundary once."""
@@ -131,10 +159,10 @@ class RuntimeHeartbeatProducer:
             return None
         return await self._record(
             HarnessHeartbeatPhase.DRAINING,
-            "runtime_draining",
+            self.detail_codes.draining,
         )
 
-    async def close(self) -> bool:
+    async def close(self, *, detail_code: str | None = None) -> bool:
         """Persist a graceful terminal state; repeated close is idempotent."""
         if self._closed:
             return False
@@ -144,11 +172,11 @@ class RuntimeHeartbeatProducer:
             return False
         heartbeat = await self._record(
             HarnessHeartbeatPhase.STOPPED,
-            "runtime_stopped",
+            detail_code or self.detail_codes.stopped,
         )
         return heartbeat.phase is HarnessHeartbeatPhase.STOPPED
 
-    async def fail(self) -> bool:
+    async def fail(self, *, detail_code: str | None = None) -> bool:
         """Persist a terminal failure when graceful shutdown cannot complete."""
         if self._closed:
             return False
@@ -158,7 +186,7 @@ class RuntimeHeartbeatProducer:
             return False
         heartbeat = await self._record(
             HarnessHeartbeatPhase.FAILED,
-            "runtime_shutdown_failed",
+            detail_code or self.detail_codes.failed,
         )
         return heartbeat.phase is HarnessHeartbeatPhase.FAILED
 
@@ -199,7 +227,7 @@ class RuntimeHeartbeatProducer:
             subject_kind=self.subject_kind,
             subject_id=self.subject_id,
             instance_id=self.instance_id,
-            epoch=1,
+            epoch=self.epoch,
             sequence=self._sequence,
             phase=phase,
             observed_at=self._now(),
@@ -210,4 +238,8 @@ class RuntimeHeartbeatProducer:
         return heartbeat
 
 
-__all__ = ["HeartbeatProducerPort", "RuntimeHeartbeatProducer"]
+__all__ = [
+    "HeartbeatLifecycleDetailCodes",
+    "HeartbeatProducerPort",
+    "RuntimeHeartbeatProducer",
+]

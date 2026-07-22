@@ -76,7 +76,7 @@ class FakeRuntimeInspector:
     async def snapshot(self) -> RuntimeInspectorSnapshot:
         return RuntimeInspectorSnapshot.from_dict(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "session_id": "session-python",
                 "revision": 1,
                 "generated_at": "2026-07-13T00:00:00+00:00",
@@ -189,6 +189,9 @@ class FakeAgentControl:
                         "finished_at": 2.0 if stopped else None,
                         "elapsed_ms": 1000,
                         "heartbeat_age_ms": 30,
+                        "heartbeat_subject_id": "agent-execution-python",
+                        "heartbeat_phase": "stopped" if stopped else "running",
+                        "heartbeat_failure_code": "",
                         "current_tool": "" if stopped else "file_write",
                         "recent_tools": ["file_read", "file_write"],
                         "total_tokens": 64,

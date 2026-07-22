@@ -201,6 +201,22 @@
       "sources": ["runtime", "model", "global", "auto"]
     }
   },
+  "agent_control": {
+    "schema_version": 2,
+    "execution_heartbeat_fields": [
+      "heartbeat_subject_id",
+      "heartbeat_phase",
+      "heartbeat_failure_code"
+    ],
+    "heartbeat_phases": [
+      "starting",
+      "running",
+      "waiting",
+      "draining",
+      "stopped",
+      "failed"
+    ]
+  },
   "harness_receipt": {
     "schema_version": 1,
     "fields": [

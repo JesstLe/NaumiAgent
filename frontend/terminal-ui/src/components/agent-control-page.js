@@ -149,7 +149,12 @@ function renderDetail(view, snapshot, width) {
       `状态 · ${item.status} / ${item.phase}`,
       `当前工具 · ${item.current_tool || "-"}`,
       `最近工具 · ${array(item.recent_tools).join(", ") || "-"}`,
-      `耗时 · ${number(item.elapsed_ms)}ms · 心跳 ${number(item.heartbeat_age_ms)}ms`,
+      item.heartbeat_failure_code
+        ? color(
+          ANSI.yellow,
+          `耗时 · ${number(item.elapsed_ms)}ms · 持久心跳降级 ${item.heartbeat_failure_code}`,
+        )
+        : `耗时 · ${number(item.elapsed_ms)}ms · 心跳 ${number(item.heartbeat_age_ms)}ms · 持久 ${item.heartbeat_phase || "未启用"}`,
       `Token · ${number(item.total_tokens)} · $${Number(item.total_cost_usd || 0).toFixed(4)} · ${number(item.turns)} 轮`,
       `描述 · ${item.description || "-"}`,
       item.error ? color(ANSI.red, `错误 · ${item.error}`) : "",

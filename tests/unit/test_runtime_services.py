@@ -8,6 +8,7 @@ import pytest
 from naumi_agent.config.settings import AppConfig, RuntimeHeartbeatRetentionConfig
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
 from naumi_agent.runtime.composition import (
     build_runtime_paths,
     build_runtime_resources,
@@ -63,6 +64,14 @@ def _factory(tmp_path, *, enabled: bool = False) -> TerminalRuntimeLifecycleFact
     )
 
 
+def _agent_factory(tmp_path) -> AgentExecutionHeartbeatFactory:
+    return AgentExecutionHeartbeatFactory(
+        store=HarnessStore(tmp_path / "agent-harness.db"),
+        workspace_root=tmp_path,
+        auto_pulse=False,
+    )
+
+
 def test_composition_builds_service_from_exact_resources_and_copies_policy(
     tmp_path,
     monkeypatch,
@@ -83,6 +92,8 @@ def test_composition_builds_service_from_exact_resources_and_copies_policy(
     assert factory.store is resources.harness_store
     assert factory.workspace_root == paths.workspace_root
     assert factory.retention_config.enabled is True
+    assert services.agent_execution_heartbeat_factory.store is resources.harness_store
+    assert services.agent_execution_heartbeat_factory.workspace_root == paths.workspace_root
     assert not paths.harness_db_path.exists()
 
 
@@ -91,20 +102,29 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
     paths = build_runtime_paths(config)
     resources = build_runtime_resources(paths)
     factory = _factory(tmp_path)
+    agent_factory = _agent_factory(tmp_path)
 
     services = build_runtime_services(
         config,
         paths=paths,
         resources=resources,
         overrides=RuntimeServiceOverrides(
-            terminal_runtime_lifecycle_factory=factory
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=agent_factory,
         ),
     )
     assert services.terminal_runtime_lifecycle_factory is factory
+    assert services.agent_execution_heartbeat_factory is agent_factory
 
     with pytest.raises(TypeError, match="TerminalRuntimeLifecycleFactory"):
         RuntimeServices(
             terminal_runtime_lifecycle_factory=object(),  # type: ignore[arg-type]
+            agent_execution_heartbeat_factory=agent_factory,
+        )
+    with pytest.raises(TypeError, match="AgentExecutionHeartbeatFactory"):
+        RuntimeServices(
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=object(),  # type: ignore[arg-type]
         )
     with pytest.raises(TypeError, match="RuntimeServiceOverrides"):
         build_runtime_services(
@@ -117,15 +137,19 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
 
 def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     factory = _factory(tmp_path)
+    agent_factory = _agent_factory(tmp_path)
     engine = create_agent_engine(
         _config(tmp_path),
         service_overrides=RuntimeServiceOverrides(
-            terminal_runtime_lifecycle_factory=factory
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=agent_factory,
         ),
     )
 
     assert engine.terminal_runtime_lifecycle_factory is factory
     assert engine._services.terminal_runtime_lifecycle_factory is factory
+    assert engine.agent_execution_heartbeat_factory is agent_factory
+    assert engine.subagent_manager._heartbeat_factory is agent_factory
 
 
 @pytest.mark.asyncio

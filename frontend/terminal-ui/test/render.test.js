@@ -179,13 +179,13 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   state.agents.detailId = "task-1";
   state.agents.revision = 3;
   state.agents.snapshot = {
-    schema_version: 1,
+    schema_version: 2,
     session_id: "session-agents",
     revision: 3,
     generated_at: "2026-07-13T00:00:00+00:00",
     summary: { total_agents: 1, active_agents: 1, attention_agents: 0, stoppable_executions: 1, pending_messages: 0 },
     agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
-    executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
+    executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, heartbeat_subject_id: "agent-execution-test", heartbeat_phase: "running", heartbeat_failure_code: "", current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
     team_messages: [],
     blackboard: [],
     warnings: [],

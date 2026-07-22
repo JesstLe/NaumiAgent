@@ -683,7 +683,7 @@ function statusPayload(overrides = {}) {
 
 function workbenchSnapshot(mission, task, issue) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     stream_id: "fixture-workbench-stream",
     revision: task.status === "completed" ? 2 : 1,
     generated_at: "2026-07-17T14:20:00+08:00",
@@ -832,6 +832,9 @@ function agentControlSnapshot(revision) {
       finished_at: stopped ? 2 : null,
       elapsed_ms: 1000,
       heartbeat_age_ms: 100,
+      heartbeat_subject_id: "agent-execution-fake",
+      heartbeat_phase: stopped ? "stopped" : "running",
+      heartbeat_failure_code: "",
       current_tool: stopped ? "" : "file_read",
       recent_tools: ["file_read"],
       total_tokens: 42,

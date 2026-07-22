@@ -532,7 +532,7 @@ test("only explicit infrastructure notices dismiss welcome", () => {
 
 function agentSnapshot(revision = 1) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     session_id: "session-agents",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -567,6 +567,9 @@ function agentSnapshot(revision = 1) {
       finished_at: null,
       elapsed_ms: 1000,
       heartbeat_age_ms: 100,
+      heartbeat_subject_id: "agent-execution-test",
+      heartbeat_phase: "running",
+      heartbeat_failure_code: "",
       current_tool: "file_read",
       recent_tools: ["file_read"],
       total_tokens: 42,
