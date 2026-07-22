@@ -34,9 +34,11 @@
     [设计](HAR-10-2f2-runtime-retention-bridge-lifecycle.md)。
   - HAR-10.2g 已实现：真实 Agent 委派的稳定脱敏 subject、重跑 epoch、周期 pulse、完整结果终态和 Agent Control
     双端可见降级；见 [设计](HAR-10-2g-agent-execution-heartbeat.md)。
+  - HAR-10.2h 已实现：浏览器 run 的稳定脱敏 subject、并发隔离、持续 waiting pulse、resume/terminal、重启
+    interrupted epoch 和 Task Panel 双端可见降级；见 [设计](HAR-10-2h-browser-execution-heartbeat.md)。
   - UI-13.1c 已实现：New UI Doctor 展示真实 retention 调度状态，TUI fallback 明确显示不可观测边界；见
     [设计](../cli-ui/UI-13-1c-runtime-heartbeat-retention-health.md)。
-  - 未完成：retention 历史详情与控制动作、browser producer、heartbeat 历史统计、跨 kind 批量查询与
+  - 未完成：retention 历史详情与控制动作、heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
@@ -109,7 +111,7 @@ task，HAR-10.5c 已让证据充分的 background action 自动恢复为 waiting
 authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime parity，HAR-10.3a 已交付不打断
 当前事务的 New UI 队列提升，HAR-10.3b1/3b2/3b3 已交付 durable queue Store、New UI Runtime 接入与
 历史 claim 人工处置；HAR-10.2f1/2 已交付 runtime retention 周期核心与默认 Bridge 生命周期，HAR-10.2g 已交付
-Agent 委派 heartbeat producer；同步 shell、browser/runtime 逐域接入、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
+Agent 委派 heartbeat producer，HAR-10.2h 已交付 browser producer；同步 shell/runtime 逐域接入、browser lease/reconcile、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
 接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。
 
 ## 验收标准

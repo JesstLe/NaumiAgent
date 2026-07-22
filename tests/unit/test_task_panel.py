@@ -11,6 +11,7 @@ import pytest
 from naumi_agent.background.models import BackgroundStatus, BackgroundTask
 from naumi_agent.tasks.models import Task, TaskStatus
 from naumi_agent.ui.task_panel import (
+    _browser_status_from_run,
     build_task_panel_snapshot,
     render_task_panel,
     render_task_panel_snapshot,
@@ -152,6 +153,10 @@ class FakeBrowserTaskRunner:
                 "stepCount": 3,
                 "currentStep": "等待用户选择页面元素",
                 "createdAt": "2026-06-01T12:00:00",
+                "heartbeatSubjectId": "browser-execution-test",
+                "heartbeatEpoch": 2,
+                "heartbeatPhase": "waiting",
+                "heartbeatFailureCode": "",
                 "artifacts": {
                     "trace": {"path": "/tmp/browser-trace.zip"},
                     "screenshots": [{"path": "/tmp/screen.png"}],
@@ -177,6 +182,25 @@ class FakeEngine:
                 "reason": "该工具需要确认",
             }
         ][:limit]
+
+
+def test_browser_projection_accepts_real_task_runner_shape() -> None:
+    status = _browser_status_from_run({
+        "id": "run-real",
+        "taskInstruction": "Inspect dashboard",
+        "status": "failed",
+        "result": {"step": 4, "summary": "Checking final assertion"},
+        "error": {"message": "Assertion failed", "stack": None},
+        "heartbeatEpoch": 3,
+        "heartbeatPhase": "failed",
+    })
+
+    assert status.instruction == "Inspect dashboard"
+    assert status.step_count == 4
+    assert status.current_step == "Checking final assertion"
+    assert status.error == "Assertion failed"
+    assert status.heartbeat_epoch == 3
+    assert status.heartbeat_phase == "failed"
 
 
 class FakeCancelledBackgroundEngine(FakeEngine):
@@ -217,6 +241,9 @@ async def test_build_task_panel_snapshot_normalizes_all_sources() -> None:
     assert snapshot.background_details[0].started_at == "2026-01-01T00:00:00"
     assert snapshot.browser_tasks[0].run_id == "run_1"
     assert snapshot.browser_tasks[0].current_step == "等待用户选择页面元素"
+    assert snapshot.browser_tasks[0].heartbeat_subject_id == "browser-execution-test"
+    assert snapshot.browser_tasks[0].heartbeat_epoch == 2
+    assert snapshot.browser_tasks[0].heartbeat_phase == "waiting"
     assert snapshot.browser_tasks[0].record_paths == (
         "/tmp/browser-trace.zip",
         "/tmp/screen.png",
@@ -295,6 +322,7 @@ async def test_render_task_panel_contains_expected_sections() -> None:
     assert "打开页面并检查按钮" in text
     assert "current=等待用户选择页面元素" in text
     assert "records=/tmp/browser-trace.zip" in text
+    assert "heartbeat=waiting@2" in text
 
 
 @pytest.mark.asyncio
@@ -323,6 +351,7 @@ async def test_render_task_panel_detail_matches_task_sources() -> None:
     assert "类型: Browser Run" in browser_text
     assert "ID: run_1" in browser_text
     assert "Current: 等待用户选择页面元素" in browser_text
+    assert "Heartbeat: waiting @ epoch 2" in browser_text
     assert "Records: /tmp/browser-trace.zip, /tmp/screen.png" in browser_text
 
     missing_text = await render_task_panel(

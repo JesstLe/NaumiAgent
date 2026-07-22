@@ -14,6 +14,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.runtime.browser_heartbeat import (
+    BrowserExecutionHeartbeatFactory,
+    BrowserExecutionHeartbeatLifecycle,
+    BrowserExecutionHeartbeatSnapshot,
+)
 from naumi_agent.tools.browser.orchestrator.run_template_store import (
     RunTemplateStore,
 )
@@ -399,6 +404,20 @@ class TaskRunner:
         self._pending_replies: dict[str, asyncio.Future[Any]] = {}
         self._reply_timeouts: dict[str, asyncio.TimerHandle | None] = {}
         self._run_controls: dict[str, dict[str, Any]] = {}
+        heartbeat_factory = options.get("heartbeat_factory")
+        if heartbeat_factory is not None and not isinstance(
+            heartbeat_factory,
+            BrowserExecutionHeartbeatFactory,
+        ):
+            raise ValueError(
+                "heartbeat_factory 必须是 BrowserExecutionHeartbeatFactory"
+            )
+        self._heartbeat_factory = heartbeat_factory
+        self._heartbeat_lifecycles: dict[
+            str, BrowserExecutionHeartbeatLifecycle
+        ] = {}
+        self._interrupted_heartbeat_run_ids: set[str] = set()
+        self._heartbeat_recovery_in_progress = False
         self._handoff_timeout_ms = options.get(
             "handoff_timeout_ms", 5 * 60 * 1000
         )
@@ -489,6 +508,7 @@ class TaskRunner:
 
         for run in self.runs:
             if run["status"] in _INTERRUPTED_STATUSES:
+                self._interrupted_heartbeat_run_ids.add(str(run["id"]))
                 msg = (
                     "Run interrupted because the daemon "
                     "restarted before completion."
@@ -518,8 +538,48 @@ class TaskRunner:
             self._trim_run_history()
             self._store.persist(self.runs)
 
+        if self._interrupted_heartbeat_run_ids and self._heartbeat_factory is not None:
+            if not _safe_create_task(self._reconcile_interrupted_heartbeats):
+                for run_id in self._interrupted_heartbeat_run_ids:
+                    run = self.get_run(run_id)
+                    if run is not None:
+                        run["heartbeatFailureCode"] = (
+                            "browser_heartbeat_recovery_pending"
+                        )
+                self._store.persist(self.runs)
+
         if any(r["status"] == "queued" for r in self.runs):
             _safe_create_task(lambda: self.process_queue())
+
+    async def _reconcile_interrupted_heartbeats(self) -> None:
+        if (
+            self._heartbeat_factory is None
+            or self._heartbeat_recovery_in_progress
+            or not self._interrupted_heartbeat_run_ids
+        ):
+            return
+        self._heartbeat_recovery_in_progress = True
+        try:
+            for run_id in tuple(sorted(self._interrupted_heartbeat_run_ids)):
+                run = self.get_run(run_id)
+                if run is None:
+                    self._interrupted_heartbeat_run_ids.discard(run_id)
+                    continue
+                try:
+                    snapshot = await self._heartbeat_factory.record_interrupted(
+                        run_id=run_id,
+                    )
+                except Exception:
+                    run["heartbeatFailureCode"] = (
+                        "browser_heartbeat_recovery_failed"
+                    )
+                    continue
+                self._apply_heartbeat_snapshot(run, snapshot)
+                self._interrupted_heartbeat_run_ids.discard(run_id)
+                self._emit_update("run_heartbeat_reconciled", run)
+            self._store.persist(self.runs)
+        finally:
+            self._heartbeat_recovery_in_progress = False
 
     # ── Run CRUD ──
 
@@ -599,6 +659,10 @@ class TaskRunner:
             "reports": None,
             "pendingInput": None,
             "templateEvaluation": None,
+            "heartbeatSubjectId": "",
+            "heartbeatEpoch": 0,
+            "heartbeatPhase": "",
+            "heartbeatFailureCode": "",
         }
 
         self.runs.insert(0, run)
@@ -632,6 +696,89 @@ class TaskRunner:
                 "manualRequest": None,
             }
         return self._run_controls[run_id]
+
+    @staticmethod
+    def _apply_heartbeat_snapshot(
+        run: dict[str, Any],
+        snapshot: BrowserExecutionHeartbeatSnapshot,
+    ) -> None:
+        run["heartbeatSubjectId"] = snapshot.subject_id
+        run["heartbeatEpoch"] = snapshot.epoch
+        run["heartbeatPhase"] = snapshot.phase
+        run["heartbeatFailureCode"] = snapshot.failure_code
+
+    async def _heartbeat_degraded(self, run_id: str, failure_code: str) -> None:
+        run = self.get_run(run_id)
+        if run is None:
+            return
+        run["heartbeatFailureCode"] = str(failure_code or "heartbeat_write_failed")
+        self._store.persist(self.runs)
+        self._emit_update("run_heartbeat_degraded", run)
+
+    async def _start_run_heartbeat(
+        self,
+        run: dict[str, Any],
+    ) -> BrowserExecutionHeartbeatLifecycle | None:
+        if self._heartbeat_factory is None:
+            return None
+        run_id = str(run["id"])
+
+        async def on_failure(failure_code: str) -> None:
+            await self._heartbeat_degraded(run_id, failure_code)
+
+        try:
+            lifecycle = await self._heartbeat_factory.create(
+                run_id=run_id,
+                on_failure=on_failure,
+            )
+        except Exception:
+            run["heartbeatFailureCode"] = "browser_heartbeat_create_failed"
+            return None
+        self._heartbeat_lifecycles[run_id] = lifecycle
+        try:
+            await lifecycle.start()
+        except Exception:
+            self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
+            self._heartbeat_lifecycles.pop(run_id, None)
+            return None
+        self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
+        return lifecycle
+
+    async def _set_run_heartbeat_waiting(
+        self,
+        run: dict[str, Any],
+        *,
+        mode: str,
+    ) -> None:
+        lifecycle = self._heartbeat_lifecycles.get(str(run["id"]))
+        if lifecycle is None:
+            return
+        try:
+            await lifecycle.enter_waiting(mode=mode)
+        except Exception:
+            pass
+        self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
+
+    async def _resume_run_heartbeat(self, run: dict[str, Any]) -> None:
+        lifecycle = self._heartbeat_lifecycles.get(str(run["id"]))
+        if lifecycle is None:
+            return
+        try:
+            await lifecycle.resume()
+        except Exception:
+            pass
+        self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
+
+    async def _finish_run_heartbeat(self, run: dict[str, Any]) -> None:
+        run_id = str(run["id"])
+        lifecycle = self._heartbeat_lifecycles.pop(run_id, None)
+        if lifecycle is None:
+            return
+        try:
+            await lifecycle.finish(str(run.get("status") or "failed"))
+        except Exception:
+            pass
+        self._apply_heartbeat_snapshot(run, lifecycle.snapshot())
 
     # ── Run lifecycle ──
 
@@ -688,6 +835,7 @@ class TaskRunner:
             run["result"]["summary"] = run["summary"]
             run["result"]["pendingInput"] = None
 
+        await self._resume_run_heartbeat(run)
         self._store.persist(self.runs)
         self._emit_update("run_resumed", run)
 
@@ -759,6 +907,10 @@ class TaskRunner:
                 run["result"]["status"] = "manual_control"
                 run["result"]["summary"] = pending_input["question"]
                 run["result"]["pendingInput"] = pending_input
+            await self._set_run_heartbeat_waiting(
+                run,
+                mode="manual_control",
+            )
             self._store.persist(self.runs)
             self._emit_update("run_manual_control", run)
             return run
@@ -829,6 +981,7 @@ class TaskRunner:
     # ── Queue processing ──
 
     async def process_queue(self) -> None:
+        await self._reconcile_interrupted_heartbeats()
         if self._processing:
             return
         self._processing = True
@@ -896,6 +1049,7 @@ class TaskRunner:
             "debug": None,
             "templateEvaluation": None,
         }
+        await self._start_run_heartbeat(run)
         self._store.persist(self.runs)
         self._emit_update("run_started", run)
 
@@ -963,6 +1117,10 @@ class TaskRunner:
                 if run.get("result"):
                     run["result"]["status"] = waiting_status
                     run["result"]["pendingInput"] = run["pendingInput"]
+                await self._set_run_heartbeat_waiting(
+                    run,
+                    mode=str(pending_input.get("mode") or "instruction"),
+                )
                 self._store.persist(self.runs)
                 self._emit_update(
                     "run_manual_control"
@@ -1089,6 +1247,7 @@ class TaskRunner:
                     )
 
             run["finishedAt"] = _now_iso()
+            await self._finish_run_heartbeat(run)
 
             timeout_handle = self._reply_timeouts.pop(run["id"], None)
             if timeout_handle:

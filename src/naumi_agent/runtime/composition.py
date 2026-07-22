@@ -27,6 +27,7 @@ from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
+from naumi_agent.runtime.browser_heartbeat import BrowserExecutionHeartbeatFactory
 from naumi_agent.runtime.dependencies import (
     RuntimePortOverrides,
     RuntimePorts,
@@ -263,9 +264,24 @@ def build_runtime_services(
             store=resources.harness_store,
             workspace_root=paths.workspace_root,
         )
+    browser_factory = resolved.browser_execution_heartbeat_factory
+    if browser_factory is not None and not isinstance(
+        browser_factory,
+        BrowserExecutionHeartbeatFactory,
+    ):
+        raise TypeError(
+            "browser_execution_heartbeat_factory 必须是 "
+            "BrowserExecutionHeartbeatFactory。"
+        )
+    if browser_factory is None:
+        browser_factory = BrowserExecutionHeartbeatFactory(
+            store=resources.harness_store,
+            workspace_root=paths.workspace_root,
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
+        browser_execution_heartbeat_factory=browser_factory,
     )
 
 

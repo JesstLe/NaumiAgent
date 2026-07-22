@@ -64,6 +64,10 @@ class BrowserTaskStatus:
     error: str = ""
     created_at: str = ""
     record_paths: tuple[str, ...] = ()
+    heartbeat_subject_id: str = ""
+    heartbeat_epoch: int = 0
+    heartbeat_phase: str = ""
+    heartbeat_failure_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -433,6 +437,14 @@ def render_task_panel_snapshot(snapshot: TaskPanelSnapshot) -> str:
                 details.append(f"error={run.error[:80]}")
             if run.record_paths:
                 details.append(f"records={', '.join(run.record_paths[:3])}")
+            if run.heartbeat_phase:
+                details.append(
+                    f"heartbeat={run.heartbeat_phase}@{run.heartbeat_epoch}"
+                )
+            if run.heartbeat_failure_code:
+                details.append(
+                    f"heartbeat_error={run.heartbeat_failure_code}"
+                )
             lines.append(
                 f"  - {run.run_id or '?'} [{run.status or '?'}] {instruction}"
                 f" | {'; '.join(details)}"
@@ -654,6 +666,12 @@ def _build_timeline_events(
                 steps=str(run.step_count),
                 current=run.current_step[:120] or "-",
                 records=", ".join(run.record_paths[:3]) or "-",
+                heartbeat=(
+                    f"{run.heartbeat_phase}@{run.heartbeat_epoch}"
+                    if run.heartbeat_phase
+                    else "unavailable"
+                ),
+                heartbeat_error=run.heartbeat_failure_code or "-",
             ),
             timestamp=run.created_at,
         ))
@@ -773,6 +791,12 @@ def _browser_view_items(
             detail=_join_attrs(
                 steps=str(run.step_count),
                 current=run.current_step or "-",
+                heartbeat=(
+                    f"{run.heartbeat_phase}@{run.heartbeat_epoch}"
+                    if run.heartbeat_phase
+                    else "unavailable"
+                ),
+                heartbeat_error=run.heartbeat_failure_code or "-",
             ),
             artifact_refs=run.record_paths,
         )
@@ -924,6 +948,9 @@ def _render_detail_section(snapshot: TaskPanelSnapshot) -> list[str]:
                 f"  Current: {run.current_step or '-'}",
                 f"  Error: {run.error or '-'}",
                 f"  Created: {run.created_at or '-'}",
+                f"  Heartbeat: {run.heartbeat_phase or 'unavailable'}"
+                f" @ epoch {run.heartbeat_epoch or '-'}",
+                f"  Heartbeat error: {run.heartbeat_failure_code or '-'}",
                 f"  Records: {', '.join(run.record_paths) or '-'}",
             ]
 
@@ -1090,20 +1117,54 @@ def _render_background_detail(detail: BackgroundTaskDetail) -> str:
 
 
 def _browser_status_from_run(run: dict[str, Any]) -> BrowserTaskStatus:
-    step_count = run.get("stepCount", run.get("steps", 0))
+    result = run.get("result") if isinstance(run.get("result"), dict) else {}
+    step_count = run.get(
+        "stepCount",
+        run.get("steps", result.get("step", 0)),
+    )
     try:
         steps = int(step_count)
     except (TypeError, ValueError):
         steps = 0
+    heartbeat_epoch = run.get("heartbeatEpoch", run.get("heartbeat_epoch", 0))
+    try:
+        epoch = max(0, int(heartbeat_epoch))
+    except (TypeError, ValueError):
+        epoch = 0
+    raw_error = run.get("error")
+    error = (
+        str(raw_error.get("message") or "")
+        if isinstance(raw_error, dict)
+        else str(raw_error or "")
+    )
     return BrowserTaskStatus(
         run_id=str(run.get("id") or ""),
-        instruction=str(run.get("instruction") or ""),
+        instruction=str(
+            run.get("instruction") or run.get("taskInstruction") or ""
+        ),
         status=str(run.get("status") or ""),
         step_count=steps,
-        current_step=str(run.get("currentStep") or run.get("current_step") or ""),
-        error=str(run.get("error") or ""),
+        current_step=str(
+            run.get("currentStep")
+            or run.get("current_step")
+            or result.get("summary")
+            or ""
+        ),
+        error=error,
         created_at=str(run.get("createdAt") or run.get("created_at") or ""),
         record_paths=_extract_browser_record_paths(run),
+        heartbeat_subject_id=str(
+            run.get("heartbeatSubjectId") or run.get("heartbeat_subject_id") or ""
+        ),
+        heartbeat_epoch=epoch,
+        heartbeat_phase=str(
+            run.get("heartbeatPhase") or run.get("heartbeat_phase") or ""
+        ),
+        heartbeat_failure_code=str(
+            run.get("heartbeatFailureCode")
+            or run.get("heartbeat_failure_code")
+            or ""
+        ),
     )
 
 
