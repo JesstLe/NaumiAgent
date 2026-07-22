@@ -33,6 +33,11 @@ Eval 和真实 Harness 检查产生。
     before/after、duration、typed token/cost coverage 与六类 artifact digest；模型强制保持非最终状态，用户
     `/evolution evaluation` 与 Agent Tool 共用同一签发链。详见
     `EVO-03-7a-evaluation-lane-receipt.md`。
+  - EVO-03.7b1 Evaluation Aggregation Contract 已实现：从防篡改 Adversarial Batch Request 冻结
+    required platforms、逐平台 RED/GREEN batch、样本数、Candidate/Plan 与 Interventional 必需性，并以
+    幂等 Store、用户 slash 和 Agent Tool 双通道签发非最终覆盖合同。详见
+    `EVO-03-7b1-evaluation-aggregation-contract.md`。
+  - 未完成：EVO-03.7b2 重读全部必需 lane 并签发候选最终 Evaluation Receipt。
 
 ## 验收标准
 
@@ -130,6 +135,6 @@ Eval 和真实 Harness 检查产生。
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
 Interventional Failure Attribution adapter、Adversarial Probe Contract、Batch Request、单 lane/sample、当前平台
-连续 cohort、同平台 RED/GREEN 比较、Attribution 与单 lane Evaluation Receipt 已完成；跨平台调度与最终聚合
-Evaluation Receipt 仍未实现，
+连续 cohort、同平台 RED/GREEN 比较、Attribution 与单 lane Evaluation Receipt 已完成。跨平台调度与最终
+Evaluation Receipt 仍未实现；EVO-03.7b1 只冻结了完整聚合所需的 authority，
 因此 EVO-03 整体保持 partial。

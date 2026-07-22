@@ -3028,6 +3028,13 @@ async def _run_feedback(engine: Any, arg: str) -> None:
 
 
 async def _run_evolution_review(engine: Any, arg: str) -> None:
+    from naumi_agent.evolution.adversarial_batch_requests import (
+        EvolutionAdversarialBatchRequest,
+    )
+    from naumi_agent.evolution.evaluation_aggregation_contracts import (
+        EvolutionEvaluationAggregationContractError,
+        render_evaluation_aggregation_contract,
+    )
     from naumi_agent.evolution.evaluation_lane_receipts import (
         EvolutionEvaluationLaneReceiptError,
         render_evaluation_lane_receipt,
@@ -3054,6 +3061,43 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evaluation_lane_receipt(receipt)))
             return
+        if action == "evaluation-contract":
+            if len(parts) != 2:
+                raise ValueError(
+                    "evaluation-contract 需要一个工作区内 Batch Request JSON 路径。"
+                )
+            if Path(parts[1]).expanduser().is_absolute():
+                raise ValueError("Batch Request JSON 路径必须相对当前工作区。")
+            try:
+                workspace = Path(engine.workspace_root).expanduser().resolve(strict=True)
+                request_path = (workspace / parts[1]).resolve(strict=True)
+            except OSError as exc:
+                raise ValueError("Batch Request JSON 或当前工作区不存在。") from exc
+            try:
+                request_path.relative_to(workspace)
+            except ValueError as exc:
+                raise ValueError("Batch Request JSON 必须位于当前工作区内。") from exc
+            if not request_path.is_file():
+                raise ValueError("Batch Request JSON 必须是小于等于 1 MiB 的普通文件。")
+            try:
+                with request_path.open("rb") as stream:
+                    encoded = stream.read(1_048_577)
+                if len(encoded) > 1_048_576:
+                    raise ValueError(
+                        "Batch Request JSON 必须是小于等于 1 MiB 的普通文件。"
+                    )
+                payload = json.loads(encoded.decode("utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise ValueError("Batch Request JSON 不可读或格式无效。") from exc
+            request = EvolutionAdversarialBatchRequest.model_validate(payload)
+            contract = await (
+                engine.evolution_evaluation_aggregation_contract_issuer.issue(
+                    workspace_root=workspace,
+                    batch_request=request,
+                )
+            )
+            console.print(Markdown(render_evaluation_aggregation_contract(contract)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3078,15 +3122,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 filters=EvolutionReviewFilter(**options),
             )
         else:
-            raise ValueError("仅支持 list、detail、evaluation 或 enqueue。")
+            raise ValueError(
+                "仅支持 list、detail、evaluation、evaluation-contract 或 enqueue。"
+            )
     except ValueError as exc:
         if action == "enqueue":
             console.print(f"Proposal 未入队：{exc}", style="yellow", markup=False)
+            return
+        if action == "evaluation-contract":
+            console.print(
+                f"Evaluation Aggregation Contract 未签发：{exc}",
+                style="yellow",
+                markup=False,
+            )
             return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
             "/evolution evaluation <comparison-id>；"
+            "/evolution evaluation-contract <workspace-relative-request.json>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3096,6 +3150,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionEvaluationLaneReceiptError as exc:
         console.print(
             f"Evaluation Lane Receipt 未签发：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionEvaluationAggregationContractError as exc:
+        console.print(
+            f"Evaluation Aggregation Contract 未签发：{exc}",
             style="yellow",
             markup=False,
         )

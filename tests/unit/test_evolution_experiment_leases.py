@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ import naumi_agent.evolution.patch_set_writers as patch_set_writer_module
 import naumi_agent.evolution.patch_writers as patch_writer_module
 import naumi_agent.evolution.postflight_guards as postflight_guard_module
 import naumi_agent.evolution.validation_metric_bindings as metric_binding_module
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import (
     PermissionDecisionActor,
@@ -66,6 +68,14 @@ from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
     EvolutionAdversarialSampleReceipt,
     adversarial_lane_authority_key,
+)
+from naumi_agent.evolution.evaluation_aggregation_contracts import (
+    EvolutionEvaluationAggregationContract,
+    EvolutionEvaluationAggregationContractBuilder,
+    EvolutionEvaluationAggregationContractError,
+    EvolutionEvaluationAggregationContractIssuer,
+    EvolutionEvaluationAggregationContractStore,
+    render_evaluation_aggregation_contract,
 )
 from naumi_agent.evolution.experiment_leases import (
     EvolutionExperimentLeaseManager,
@@ -179,6 +189,9 @@ from naumi_agent.streaming.publisher import RuntimeEventPublisher
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolRegistry
 from naumi_agent.tools.builtin import create_builtin_tools
+from naumi_agent.tools.evolution_review import (
+    EvolutionEvaluationAggregationContractTool,
+)
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
@@ -4486,6 +4499,111 @@ async def test_adversarial_batch_request_freezes_real_red_green_platform_matrix(
     tampered_path["probes"][0]["path"] = "/etc/passwd"
     with pytest.raises(ValidationError, match="安全相对路径"):
         EvolutionAdversarialBatchRequest.model_validate(tampered_path)
+
+
+@pytest.mark.asyncio
+async def test_evaluation_aggregation_contract_freezes_and_persists_matrix_authority(
+    tmp_path: Path,
+) -> None:
+    workspace, experiment, _, plan, probes, _ = await _adversarial_probe_fixture(
+        tmp_path
+    )
+    request = EvolutionAdversarialBatchRequestBuilder().build(
+        experiment_contract=experiment,
+        validation_plan=plan,
+        probe_contract=probes,
+    )
+    builder = EvolutionEvaluationAggregationContractBuilder()
+    store = EvolutionEvaluationAggregationContractStore(tmp_path / "aggregation.db")
+    issuer = EvolutionEvaluationAggregationContractIssuer(
+        store=store,
+        builder=builder,
+    )
+
+    first = await issuer.issue(workspace_root=workspace, batch_request=request)
+    repeated = await issuer.issue(workspace_root=workspace, batch_request=request)
+    concurrent = await asyncio.gather(*(
+        issuer.issue(workspace_root=workspace, batch_request=request)
+        for _ in range(8)
+    ))
+    restored = await store.get(first.contract_id)
+
+    assert first == repeated == restored
+    assert all(item == first for item in concurrent)
+    assert first.contract_id == f"evagg_{first.contract_sha256[:24]}"
+    assert first.request_id == request.request_id
+    assert first.required_platforms == ("linux", "macos", "windows")
+    assert tuple(
+        (item.platform, item.red_lane_order, item.green_lane_order)
+        for item in first.adversarial_lanes
+    ) == (("linux", 1, 2), ("macos", 3, 4), ("windows", 5, 6))
+    assert tuple(
+        (item.red_batch_id, item.green_batch_id)
+        for item in first.adversarial_lanes
+    ) == tuple(
+        (request.lanes[index].batch_id, request.lanes[index + 1].batch_id)
+        for index in range(0, len(request.lanes), 2)
+    )
+    assert first.interventional_lane_required is True
+    assert first.candidate_evaluation_complete is False
+    assert first.final_receipt_issued is False
+
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    with pytest.raises(EvolutionEvaluationAggregationContractError) as wrong_source:
+        builder.build(workspace_root=unrelated, batch_request=request)
+    assert wrong_source.value.code == "evaluation_aggregation_source_mismatch"
+
+    tampered = first.model_dump(mode="json")
+    tampered["adversarial_lanes"] = tampered["adversarial_lanes"][:-1]
+    with pytest.raises(ValidationError, match="精确覆盖"):
+        EvolutionEvaluationAggregationContract.model_validate(tampered)
+
+    engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_evaluation_aggregation_contract_issuer=issuer,
+    )
+    tool_output = await EvolutionEvaluationAggregationContractTool(engine).execute(
+        request.model_dump(mode="json")
+    )
+    assert tool_output == render_evaluation_aggregation_contract(first)
+    request_path = workspace / "evaluation-request.json"
+    request_path.write_text(request.model_dump_json(indent=2), encoding="utf-8")
+    slash_output = await execute_slash_command(
+        engine,
+        "/evolution evaluation-contract evaluation-request.json",
+    )
+    assert first.contract_id in slash_output
+    assert "不是候选最终 Evaluation Receipt" in slash_output
+
+    outside = tmp_path / "outside.json"
+    outside.write_text(request.model_dump_json(), encoding="utf-8")
+    denied = await execute_slash_command(
+        engine,
+        "/evolution evaluation-contract ../outside.json",
+    )
+    assert "必须位于当前工作区内" in denied
+    absolute_denied = await execute_slash_command(
+        engine,
+        f"/evolution evaluation-contract {request_path}",
+    )
+    assert "路径必须相对当前工作区" in absolute_denied
+    missing = await execute_slash_command(
+        engine,
+        "/evolution evaluation-contract missing.json",
+    )
+    assert "JSON 或当前工作区不存在" in missing
+
+    with sqlite3.connect(tmp_path / "aggregation.db") as db:
+        db.execute(
+            "UPDATE evolution_evaluation_aggregation_contracts "
+            "SET contract_sha256 = ? WHERE contract_id = ?",
+            ("0" * 64, first.contract_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionEvaluationAggregationContractError) as corrupt:
+        await store.get(first.contract_id)
+    assert corrupt.value.code == "evaluation_aggregation_store_corrupt"
 
 
 @pytest.mark.asyncio
