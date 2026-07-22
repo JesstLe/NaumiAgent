@@ -152,6 +152,13 @@ if TYPE_CHECKING:
         EvolutionInterventionalSampleKernelError,
         EvolutionInterventionalSampleSource,
     )
+    from naumi_agent.evolution.mutation_author_receipts import (
+        EvolutionMutationAuthorReceipt,
+        EvolutionMutationAuthorReceiptBuilder,
+        EvolutionMutationAuthorReceiptError,
+        EvolutionMutationAuthorReceiptStore,
+        MutationAuthorModelCallFact,
+    )
     from naumi_agent.evolution.mutation_generation import (
         EvolutionMutationGenerationError,
         EvolutionMutationGenerationResult,
@@ -362,6 +369,11 @@ __all__ = [
     "EvolutionMutationGenerationSession",
     "EvolutionMutationGenerationTrace",
     "EvolutionMutationGenerationTraceStore",
+    "EvolutionMutationAuthorReceipt",
+    "EvolutionMutationAuthorReceiptBuilder",
+    "EvolutionMutationAuthorReceiptError",
+    "EvolutionMutationAuthorReceiptStore",
+    "MutationAuthorModelCallFact",
     "EvolutionMutationReceipt",
     "EvolutionMutationReceiptConflictError",
     "EvolutionMutationReceiptError",
@@ -609,6 +621,13 @@ def __getattr__(name: str) -> object:
         "MutationGenerationCallFact",
         "MutationGenerationFileFact",
     }
+    mutation_author_receipt_exports = {
+        "EvolutionMutationAuthorReceipt",
+        "EvolutionMutationAuthorReceiptBuilder",
+        "EvolutionMutationAuthorReceiptError",
+        "EvolutionMutationAuthorReceiptStore",
+        "MutationAuthorModelCallFact",
+    }
     mutation_receipt_exports = {
         "EvolutionMutationReceipt",
         "EvolutionMutationReceiptConflictError",
@@ -799,6 +818,8 @@ def __getattr__(name: str) -> object:
         module_name = "mutation_plans"
     elif name in mutation_generation_exports:
         module_name = "mutation_generation"
+    elif name in mutation_author_receipt_exports:
+        module_name = "mutation_author_receipts"
     elif name in mutation_receipt_exports:
         module_name = "mutation_receipts"
     elif name in mutation_turn_exports:

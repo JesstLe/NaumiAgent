@@ -126,6 +126,9 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateExecutor,
     EvolutionMechanicalGateStore,
 )
+from naumi_agent.evolution.mutation_author_receipts import (
+    EvolutionMutationAuthorReceiptStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
     EvolutionMutationGenerationTraceStore,
@@ -944,12 +947,16 @@ class AgentEngine:
         self.evolution_mutation_generation_trace_store = (
             EvolutionMutationGenerationTraceStore(config.memory.session_db_path)
         )
+        self.evolution_mutation_author_receipt_store = (
+            EvolutionMutationAuthorReceiptStore(config.memory.session_db_path)
+        )
         self.evolution_mutation_generation_service = EvolutionMutationGenerationService(
             trace_store=self.evolution_mutation_generation_trace_store,
         )
         self.evolution_mutation_turn_runner = EvolutionMutationTurnRunner(
             model_port=self._model_port,
             generation_service=self.evolution_mutation_generation_service,
+            author_receipt_store=self.evolution_mutation_author_receipt_store,
         )
         self.evolution_validation_planner = EvolutionValidationPlanner()
         self.evolution_validation_profile_binder = EvolutionValidationProfileBinder(

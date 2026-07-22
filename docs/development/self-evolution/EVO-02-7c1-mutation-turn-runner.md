@@ -39,7 +39,8 @@ Generation Session 提供只读、不可变的 `prompt_baseline_contents()`：
 - 只包含 Plan approved paths；
 - modify 文件提供真实 UTF-8 baseline，create 文件为 `null`；
 - prompt 包含 finding、scope、hypothesis、change mode 和 approved path 列表；
-- baseline、模型正文和 reasoning 只存在于当前内存消息，不进入 Trace、Runtime Event 或 SQLite；
+- baseline、模型正文和 reasoning 只存在于当前内存消息，不进入 Trace、Runtime Event 或 SQLite；EVO-02.7c2
+  只持久化 system/user/tool schema 与逐轮 message context 的 SHA-256，不保存正文；
 - Runner 绝不截断某个 approved source。上下文放不下时返回 `mutation_turn_prompt_oversized`，避免模型基于
   残缺源码生成看似合法的补丁。
 
@@ -86,7 +87,7 @@ Runner 使用现有 typed event vocabulary，不新增 UI 私有协议：
 
 - `turn_start`：Plan、attempt、轮数和超时预算；
 - `tool_start/tool_end/tool_error`：工具名、hashed call ID、状态和有限 error code；
-- `response_end`：Trace identity、turn/tool/token 计数；
+- `response_end`：Trace identity、EVO-02.7c2 Author Receipt identity、turn/tool/token 计数；
 - `error`：有限 typed code。
 
 Event 不包含源码、模型正文、reasoning、原始 call ID 或绝对路径。finalize 前 Event Sink 失败会 fail-closed；
@@ -107,12 +108,16 @@ Runner 没有伪造 Harness heartbeat：当前没有独立 Mutation Run Lease/ep
 - 最终 Event Sink 故障不丢失已 finalize 的 proposed contents；
 - Engine 组合真实 `ModelPort` 与 Generation Service，原 Generation/Receipt 聚焦回归保持通过。
 
+EVO-02.7c2 已在后续切片补齐 durable Mutation Author Receipt，详见
+`EVO-02-7c2-mutation-author-receipt.md`。
+
 ## 当前不足与下一步
 
 - 自动化测试使用确定性 ModelPort 协议端，真实 Git/worktree/Guard/Writer/Receipt 均为生产实现；未调用付费或
   需要本机密钥的 live provider，因此不同供应商 tool-call 细节仍需显式 opt-in 的集成矩阵；
 - protocol/cancel/timeout 失败仍没有不可变失败审计 artifact，只有 typed error 与 best-effort Runtime Event；
-- Runner 暂不持久化 prompt 或 proposed contents，Trace finalize 后、Writer 前崩溃仍须下一 attempt 重生成；
+- Runner 不持久化 prompt 正文或 proposed contents；EVO-02.7c2 只保留 Prompt/上下文摘要。Trace finalize 后、
+  Writer 前崩溃仍须由后续恢复编排决定是否重新生成；
 - 没有公开 Slash/Agent Tool，避免在 EVO-03 验证门完成前形成可绕过治理的自修改入口；
 - 下一开发选择应重新比较“失败审计 artifact”与“EVO-03.1 Validation Plan”的依赖价值，优先选择能让
   Mutation Receipt v2 被 HAR-08 真实消费的最小闭环，而不是增加更多生成工具。

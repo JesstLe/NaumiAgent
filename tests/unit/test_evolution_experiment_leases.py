@@ -100,6 +100,11 @@ from naumi_agent.evolution.failure_attribution import (
     FailureAttributionAction,
     FailureAttributionCategory,
 )
+from naumi_agent.evolution.mutation_author_receipts import (
+    EvolutionMutationAuthorReceiptBuilder,
+    EvolutionMutationAuthorReceiptError,
+    EvolutionMutationAuthorReceiptStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationError,
     EvolutionMutationGenerationResult,
@@ -186,7 +191,7 @@ from naumi_agent.harness.sandbox_eval import (
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.trust import HarnessTrustStore
-from naumi_agent.model.router import ModelResponse, TokenUsage
+from naumi_agent.model.router import ModelResponse, ModelRuntimeIdentity, TokenUsage
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType, thaw_event_data
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
@@ -242,6 +247,16 @@ class _ScriptedMutationModel:
     def get_max_output(self, _model: str) -> int:
         return self.max_output
 
+    def get_runtime_identity(self, model: str) -> ModelRuntimeIdentity:
+        return ModelRuntimeIdentity(
+            requested_model=model,
+            canonical_model="scripted/mutation",
+            upstream_model="mutation",
+            provider="scripted",
+            api_format="test",
+            source="unit-test",
+        )
+
     async def call(self, messages, **kwargs) -> ModelResponse:
         self.calls.append({
             "messages": json.loads(json.dumps(messages)),
@@ -271,6 +286,18 @@ class _BlockingMutationModel(_ScriptedMutationModel):
             await asyncio.Event().wait()
         finally:
             self.cancelled.set()
+
+
+class _InvalidIdentityMutationModel(_ScriptedMutationModel):
+    def get_runtime_identity(self, model: str) -> ModelRuntimeIdentity:
+        return ModelRuntimeIdentity(
+            requested_model=model,
+            canonical_model="scripted/mutation",
+            upstream_model="mutation",
+            provider="",
+            api_format="test",
+            source="unit-test",
+        )
 
 
 def _git(root: Path, *args: str) -> str:
@@ -3459,12 +3486,14 @@ async def test_mutation_turn_runner_generates_real_trace_and_typed_events(
         )
     ])
     trace_store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    author_store = EvolutionMutationAuthorReceiptStore(tmp_path / "runtime.db")
     runner = EvolutionMutationTurnRunner(
         model_port=model,  # type: ignore[arg-type]
         generation_service=EvolutionMutationGenerationService(
             trace_store=trace_store,
             clock=lambda: NOW,
         ),
+        author_receipt_store=author_store,
     )
     sink = _MutationEventSink()
     publisher = RuntimeEventPublisher(
@@ -3492,6 +3521,41 @@ async def test_mutation_turn_runner_generates_real_trace_and_typed_events(
     assert result.event_delivery_failed is False
     assert result.generation.proposed_contents[plan.authorized_files[0]] == proposed
     assert trace_store.get(result.generation.trace.trace_id) == result.generation.trace
+    assert result.author_receipt.mutation_trace_id == result.generation.trace.trace_id
+    assert result.author_receipt.provider == "scripted"
+    assert result.author_receipt.canonical_model == "scripted/mutation"
+    assert result.author_receipt.total_model_calls == 1
+    assert result.author_receipt.total_tool_calls == 1
+    assert result.author_receipt.author_identity_ready is True
+    assert result.author_receipt.reviewer_identity_bound is False
+    assert author_store.get_for_trace(result.generation.trace.trace_id) == (
+        result.author_receipt
+    )
+    concurrent = await asyncio.gather(*(
+        asyncio.to_thread(author_store.put, result.author_receipt)
+        for _ in range(4)
+    ))
+    assert all(item == result.author_receipt for item in concurrent)
+    conflicting = EvolutionMutationAuthorReceiptBuilder().build(
+        trace=result.generation.trace,
+        identity=ModelRuntimeIdentity(
+            requested_model="scripted/mutation",
+            canonical_model="other/mutation",
+            upstream_model="mutation",
+            provider="other",
+            api_format="test",
+            source="unit-test",
+        ),
+        initial_messages=model.calls[0]["messages"][:2],  # type: ignore[index]
+        tool_schemas=model.calls[0]["tools"],  # type: ignore[arg-type]
+        model_calls=result.author_receipt.model_calls,
+    )
+    with pytest.raises(EvolutionMutationAuthorReceiptError) as conflict:
+        author_store.put(conflicting)
+    assert conflict.value.code == "mutation_author_receipt_conflict"
+    serialized_authority = result.author_receipt.model_dump_json()
+    assert "return 'baseline'" not in serialized_authority
+    assert "隔离变异生成器" not in serialized_authority
     assert target.read_bytes() == main_before
     assert isolated.read_bytes() == isolated_before
     assert _git(workspace, "status", "--porcelain") == ""
@@ -3503,6 +3567,11 @@ async def test_mutation_turn_runner_generates_real_trace_and_typed_events(
         RuntimeEventType.RESPONSE_END,
     ]
     assert [event.sequence for event in sink.events] == [1, 2, 3, 4]
+    completion_event = thaw_event_data(sink.events[-1].data)
+    assert completion_event["author_receipt_id"] == result.author_receipt.receipt_id
+    assert completion_event["author_receipt_sha256"] == (
+        result.author_receipt.receipt_sha256
+    )
     event_json = json.dumps([
         thaw_event_data(event.data) for event in sink.events
     ])
@@ -3556,6 +3625,18 @@ async def test_mutation_turn_runner_generates_real_trace_and_typed_events(
         result.generation.trace.trace_id
     )
 
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        db.execute(
+            """UPDATE evolution_mutation_author_receipts
+               SET provider = 'tampered'
+               WHERE receipt_id = ?""",
+            (result.author_receipt.receipt_id,),
+        )
+        db.commit()
+    with pytest.raises(EvolutionMutationAuthorReceiptError) as corrupt:
+        author_store.get(result.author_receipt.receipt_id)
+    assert corrupt.value.code == "mutation_author_receipt_corrupt"
+
 
 @pytest.mark.asyncio
 async def test_mutation_turn_runner_retries_recoverable_edit_and_bounds_usage(
@@ -3600,6 +3681,9 @@ async def test_mutation_turn_runner_retries_recoverable_edit_and_bounds_usage(
             ),
             clock=lambda: NOW,
         ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "runtime.db"
+        ),
     )
 
     result = await runner.run(
@@ -3639,6 +3723,9 @@ async def test_mutation_turn_runner_stops_blocked_model_on_all_cancellation_path
         generation_service=EvolutionMutationGenerationService(
             trace_store=store,
             clock=lambda: NOW,
+        ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "runtime.db"
         ),
     )
     cancel_event = asyncio.Event()
@@ -3693,6 +3780,9 @@ async def test_mutation_turn_runner_fails_closed_on_protocol_budget_and_final_ev
             ),
             clock=lambda: NOW,
         ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "malformed.db"
+        ),
     )
     with pytest.raises(EvolutionMutationTurnError) as protocol_error:
         await malformed_runner.run(
@@ -3726,6 +3816,9 @@ async def test_mutation_turn_runner_fails_closed_on_protocol_budget_and_final_ev
         generation_service=EvolutionMutationGenerationService(
             trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "budget.db"),
             clock=lambda: NOW,
+        ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "budget.db"
         ),
     )
     with pytest.raises(EvolutionMutationTurnError) as budget_error:
@@ -3766,6 +3859,9 @@ async def test_mutation_turn_runner_fails_closed_on_protocol_budget_and_final_ev
             trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "limit.db"),
             clock=lambda: NOW,
         ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "limit.db"
+        ),
     )
     with pytest.raises(EvolutionMutationTurnError) as turn_limit_error:
         await turn_limited_runner.run(
@@ -3800,6 +3896,9 @@ async def test_mutation_turn_runner_fails_closed_on_protocol_budget_and_final_ev
                 tmp_path / "event.db"
             ),
             clock=lambda: NOW,
+        ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "event.db"
         ),
     )
     failing_sink = _MutationEventSink(fail_on=RuntimeEventType.RESPONSE_END)
@@ -3840,6 +3939,9 @@ async def test_mutation_turn_runner_refuses_source_truncation_when_prompt_is_ove
             trace_store=store,
             clock=lambda: NOW,
         ),
+        author_receipt_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "runtime.db"
+        ),
     )
 
     with pytest.raises(EvolutionMutationTurnError) as oversized:
@@ -3857,6 +3959,39 @@ async def test_mutation_turn_runner_refuses_source_truncation_when_prompt_is_ove
     assert model.calls == []
     assert store.get_for_attempt(plan.plan_id, 1) is None
     assert Path(lease.worktree_path, plan.authorized_files[0]).read_bytes() == large_source
+
+
+@pytest.mark.asyncio
+async def test_mutation_turn_runner_refuses_unverifiable_author_identity_before_call(
+    tmp_path: Path,
+) -> None:
+    _, _, contract, lease, snapshot, plan, _ = await _guard_fixture(tmp_path)
+    model = _InvalidIdentityMutationModel([])
+    database = tmp_path / "runtime.db"
+    trace_store = EvolutionMutationGenerationTraceStore(database)
+    author_store = EvolutionMutationAuthorReceiptStore(database)
+    runner = EvolutionMutationTurnRunner(
+        model_port=model,  # type: ignore[arg-type]
+        generation_service=EvolutionMutationGenerationService(
+            trace_store=trace_store,
+            clock=lambda: NOW,
+        ),
+        author_receipt_store=author_store,
+    )
+
+    with pytest.raises(EvolutionMutationTurnError) as invalid:
+        await runner.run(
+            contract=contract,
+            lease=lease,
+            source_snapshot=snapshot,
+            mutation_plan=plan,
+            run_id="mutation-turn-invalid-author",
+            attempt=1,
+        )
+
+    assert invalid.value.code == "mutation_turn_model_identity_invalid"
+    assert model.calls == []
+    assert trace_store.get_for_attempt(plan.plan_id, 1) is None
 
 
 async def _validation_receipt_fixture(

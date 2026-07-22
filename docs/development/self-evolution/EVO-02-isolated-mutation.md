@@ -88,5 +88,8 @@
 - EVO-02.7c1 已实现受控 Mutation Turn Runner：生产 `ModelPort` 读取完整 approved baseline，只能调用严格
   schema 的虚拟 `file_edit/file_write`，并受 50 轮上限、总超时、Token/prompt 预算、取消回收和 typed
   Runtime Event 约束；生成阶段仍不写磁盘。详见 `EVO-02-7c1-mutation-turn-runner.md`。
+- EVO-02.7c2 已持久化不可变 Mutation Author Receipt：绑定 Generation Trace、规范化
+  provider/model identity、Prompt/tool schema digest 和逐轮上下文摘要，不保存源码或 Prompt 正文，为
+  EVO-04.3 reviewer/author 隔离提供可重读权威。详见 `EVO-02-7c2-mutation-author-receipt.md`。
 - EVO-03 RED/GREEN 已消费 Mutation Receipt v2；EVO-02 仍只覆盖受治理实验链的已列切片，完整自动编排与后续
   决策/推广闭环尚未完成，因此整体保持 `partial`。

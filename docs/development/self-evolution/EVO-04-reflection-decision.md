@@ -20,6 +20,9 @@ budget/constraints 与最终评测引用，并持久化不可变 `EvolutionDecis
 EVO-04.2a 又从 Decision Input 的签名引用重读完整 Mutation Generation Trace，对 scope、guardrails、
 files/lines/tool calls/duration/attempt 预算和全部评测 failure facts 执行固定 16 条规则，签发不可被 LLM 覆盖的
 `pass/veto` Gate；Gate 仍保持 `candidate_acceptance_decided=false`。
+EVO-02.7c2 现又让成功 Mutation Turn 持久化 Trace-bound Author Receipt，冻结 canonical model、provider、
+API format、identity source、Prompt/tool schema digest 与逐轮上下文摘要。EVO-04.3a 因此不再需要从当前
+router 配置猜测 mutation author。
 
 ## 子模块
 
@@ -45,6 +48,8 @@ files/lines/tool calls/duration/attempt 预算和全部评测 failure facts 执�
   authority 重读、完整交叉绑定、并发幂等持久化、Slash/Agent Tool 双通道与 fail-closed 篡改检测。
 - [EVO-04.2a Mechanical Gate Contract](EVO-04-2a-mechanical-gate-contract.md)：Mutation Trace 预算补强、固定
   16 规则、确定性 pass/veto、不可覆盖 veto 与双通道持久化。
+- [EVO-02.7c2 Mutation Author Receipt](EVO-02-7c2-mutation-author-receipt.md)：为独立 Reviewer 补齐可重读
+  author provider/model、Prompt/tool schema digest 与逐轮调用 authority；不执行审查或最终决策。
 
 EVO-04 整体仍为 partial；Decision Input 完成不代表 mechanical gate、review 或最终决策已交付。
 
@@ -55,5 +60,5 @@ EVO-04 整体仍为 partial；Decision Input 完成不代表 mechanical gate、r
 
 ## 下一步
 
-实现 EVO-04.3a Independent Reviewer Contract：只读取 Gate authority，记录 reviewer/author 隔离、模型、
-provider 与 Prompt digest；`veto` 只能被解释，不能被改写为 `pass`。
+实现 EVO-04.3a Independent Reviewer Contract：从 Gate 与 Mutation Author Receipt 重读权威，记录
+reviewer/author 隔离、reviewer 模型/provider 与 Prompt digest；`veto` 只能被解释，不能被改写为 `pass`。
