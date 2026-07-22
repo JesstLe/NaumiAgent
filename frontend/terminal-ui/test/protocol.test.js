@@ -435,6 +435,7 @@ test("protocol contract drives client and server event validation", () => {
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
       "session_list",
@@ -539,6 +540,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
       "session_list",

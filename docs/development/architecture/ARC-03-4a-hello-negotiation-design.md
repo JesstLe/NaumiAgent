@@ -116,4 +116,6 @@
   ARC-03.2/3.6，不能把 4a 的测试约束误称为完整 registry。
 - 当前仍是整数版本区间，没有 major/minor/patch 兼容分类；本切片没有放宽非 hello envelope 的严格
   version 校验。
-- capability 只覆盖当前启动链真正依赖的三项，不宣称已枚举全部 UI、Harness、Tool 或 Artifact 能力。
+- capability 已扩展为当前 contract 的八项公开启动/typed feature 能力；UI-17.3a 首次把
+  `evolution_evaluation_lane` 交集用于真实 typed→Slash 降级，但仍未枚举全部 UI、Harness、Tool 或 Artifact
+  能力，也尚未形成通用 capability-to-event registry。

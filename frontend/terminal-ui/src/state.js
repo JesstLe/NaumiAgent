@@ -2879,6 +2879,25 @@ export function handleSubmitText(state, text, send) {
   );
   if (evaluationLaneMatch) {
     const comparisonId = evaluationLaneMatch[1];
+    const negotiatedCapabilities = Array.isArray(
+      state.protocolNegotiation?.capabilities,
+    )
+      ? state.protocolNegotiation.capabilities
+      : [];
+    if (
+      !state.protocolNegotiated
+      || !negotiatedCapabilities.includes("evolution_evaluation_lane")
+    ) {
+      pushSystemMessage(
+        state,
+        "兼容模式",
+        state.protocolNegotiated
+          ? "当前 Bridge 不支持 Evaluation Lane 类型化页面，已改用同一斜杠命令通道。"
+          : "协议协商尚未完成，已通过可排队的斜杠命令通道发送。",
+        "warning",
+      );
+      return submitUserMessage(state, commandText, send);
+    }
     const originAnchor = {
       scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
       followTail: Boolean(state.followTail),

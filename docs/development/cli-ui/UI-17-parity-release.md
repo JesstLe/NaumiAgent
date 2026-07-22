@@ -22,7 +22,9 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
   [设计与验收](UI-17-2c-terminal-run-golden.md)；17.2d 将 EVO-03.7a 单 lane 回执接入 New UI typed 专页，
   并以共享 fixture 锁定 TUI fallback 的 RED/GREEN、资源和非最终语义，见
   [设计与验收](UI-17-2d-evaluation-lane-receipt-golden.md)。流式 token/error/retry 等场景仍待实现。
-- UI-17.3 Compatibility negotiation：缺能力时降级或拒绝，不发送未知关键事件。
+- UI-17.3 Compatibility negotiation：partial；17.3a 已让 Evaluation Lane typed event 在新旧 Bridge 组合中按
+  协商能力进入专页或降级到共享 Slash 通道，并阻止未协商请求执行，见
+  [设计与验收](UI-17-3a-typed-feature-downgrade.md)。通用 event-capability registry 与未知关键事件分类仍未完成。
 - UI-17.4 Release matrix：OS、Python、Node、终端、安装方式、升级/回滚。
 - UI-17.5 Deprecation telemetry：仅本地统计 fallback 原因，不上传用户内容。
 - UI-17.6 Release gate：阻断级缺陷、豁免审批和回滚条件。
@@ -31,7 +33,8 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
 
 ARC-01.4c1-4c3 已让 New UI 与 TUI 消费同一个 Composition-owned terminal lifecycle factory，并用真实 Harness
 SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2d 已锁定
-runtime-health、permission/bypass、interaction 与基本 run lifecycle golden；其余 golden scenarios 与 UI-17.3 compatibility negotiation
+runtime-health、permission/bypass、interaction 与基本 run lifecycle golden；UI-17.3a 已交付首个真实 typed feature
+downgrade，其余 golden scenarios 与 UI-17.3 compatibility negotiation
 尚未完成，不能凭局部对照通过发布门。
 
 ## 验收标准
