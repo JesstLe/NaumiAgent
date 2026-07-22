@@ -364,6 +364,14 @@ def _format_execution(snapshot: AgentControlSnapshot, selected_id: str) -> list[
         f"- 当前工具：`{_code(item.current_tool or '-')}`",
         f"- 最近工具：{', '.join(f'`{_code(value)}`' for value in item.recent_tools) or '-'}",
         f"- 耗时：{item.elapsed_ms}ms · heartbeat：{item.heartbeat_age_ms}ms",
+        (
+            f"- 持久心跳：{item.heartbeat_phase or '未启用'}"
+            + (
+                f" · 降级 `{_code(item.heartbeat_failure_code)}`"
+                if item.heartbeat_failure_code
+                else ""
+            )
+        ),
         f"- Token：{item.total_tokens} · ${item.total_cost_usd:.4f} · {item.turns} 轮",
         f"- 描述：{_plain(item.description) or '-'}",
         f"- 操作：{'可停止' if item.stop_supported else '不可停止'}",

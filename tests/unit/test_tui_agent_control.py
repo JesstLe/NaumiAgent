@@ -223,7 +223,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 1,
+        "schema_version": 2,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -258,6 +258,9 @@ def _snapshot() -> AgentControlSnapshot:
             "finished_at": None,
             "elapsed_ms": 1000,
             "heartbeat_age_ms": 100,
+            "heartbeat_subject_id": "agent-execution-test",
+            "heartbeat_phase": "running",
+            "heartbeat_failure_code": "",
             "current_tool": "file_read",
             "recent_tools": ["file_read"],
             "total_tokens": 42,

@@ -1344,11 +1344,13 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.revision, 3);
   assert.equal(normalized.agents[0].name, "coder");
   assert.equal(normalized.executions[0].stop_supported, true);
+  assert.equal(normalized.executions[0].heartbeat_phase, "running");
+  assert.equal(normalized.executions[0].heartbeat_subject_id, "agent-execution-test");
 
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 1,
+      schema_version: 2,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -1406,6 +1408,13 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     /execution.status 无效/,
   );
 
+  const unknownHeartbeat = agentControlSnapshotFixture(1);
+  unknownHeartbeat.executions[0].heartbeat_phase = "guessing";
+  assert.throws(
+    () => normalizeServerRecord({ type: "agents/snapshot", payload: unknownHeartbeat }),
+    /execution.heartbeat_phase 无效/,
+  );
+
   const missingSection = agentControlSnapshotFixture(1);
   delete missingSection.blackboard;
   assert.throws(
@@ -1418,7 +1427,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     () => normalizeServerRecord({
       type: "agents/update",
       payload: {
-        schema_version: 1,
+        schema_version: 2,
         session_id: "session-1",
         revision: 2,
         generated_at: "now",
@@ -1431,7 +1440,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -1466,6 +1475,9 @@ function agentControlSnapshotFixture(revision) {
       finished_at: null,
       elapsed_ms: 10,
       heartbeat_age_ms: 2,
+      heartbeat_subject_id: "agent-execution-test",
+      heartbeat_phase: "running",
+      heartbeat_failure_code: "",
       current_tool: "file_read",
       recent_tools: ["file_read"],
       total_tokens: 0,

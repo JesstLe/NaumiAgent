@@ -154,6 +154,9 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert execution.task_id == "execution-1"
         assert execution.session_id == session.id
         assert execution.stop_supported is True
+        assert execution.heartbeat_subject_id.startswith("agent-execution-")
+        assert execution.heartbeat_phase == "running"
+        assert execution.heartbeat_failure_code == ""
         assert first.team_messages[0].topic == "team.review"
         assert first.team_messages[0].priority == "high"
         assert first.blackboard[0].key == "team/decision"

@@ -16,6 +16,7 @@ const AGENT_KINDS = new Set(["preset", "dynamic"]);
 const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "idle", "destroyed"]);
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
 const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
+const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 const REASONING_EFFORTS = new Set(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"]);
@@ -3370,11 +3371,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 1) {
+  if (payload.schema_version !== 2) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 1,
+    schema_version: 2,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -3423,6 +3424,11 @@ function normalizeExecutionDescriptor(item) {
     finished_at: finishedAt == null ? null : strictNonnegativeNumber(finishedAt, "execution.finished_at"),
     elapsed_ms: strictAgentNonnegativeInteger(item.elapsed_ms ?? 0, "execution.elapsed_ms"),
     heartbeat_age_ms: strictAgentNonnegativeInteger(item.heartbeat_age_ms ?? 0, "execution.heartbeat_age_ms"),
+    heartbeat_subject_id: agentText(item.heartbeat_subject_id),
+    heartbeat_phase: item.heartbeat_phase
+      ? strictChoice(item.heartbeat_phase, "execution.heartbeat_phase", HEARTBEAT_PHASES)
+      : "",
+    heartbeat_failure_code: agentText(item.heartbeat_failure_code),
     current_tool: agentText(item.current_tool),
     recent_tools: agentTextArray(item.recent_tools, "execution.recent_tools", 20),
     total_tokens: strictAgentNonnegativeInteger(item.total_tokens ?? 0, "execution.total_tokens"),
