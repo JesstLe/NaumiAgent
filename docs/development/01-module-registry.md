@@ -36,7 +36,7 @@
 | CC-02 | React/Ink Renderer 可替换性实验 | planned | ARC-03, UI-15 | `claude-source/CC-02-ink-spike.md` |
 | CC-03 | Task/Permission/Doctor 组件迁入 | planned | CC-01, UI-11..13 | `claude-source/CC-03-component-alignment.md` |
 | CC-04 | Plugin/Skill/MCP 机制对齐 | planned | ARC-01 | `claude-source/CC-04-extension-alignment.md` |
-| CC-05 | 上游差异监控与行为回归 | planned | CC-01 | `claude-source/CC-05-upstream-regression.md` |
+| CC-05 | 上游差异监控与行为回归 | partial (5.1) | CC-01 | `claude-source/CC-05-upstream-regression.md` |
 
 ## Future Architecture
 

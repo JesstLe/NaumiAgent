@@ -26,5 +26,12 @@
 ## 当前依赖事实
 
 CC-01.1b 已提供受版本治理的 `claude-source.db`、稳定 refresh proposal 和人工审批历史。CC-05.1
-下一步只建立监控所需的 baseline read model 与 observation receipt；任何候选基线更新仍必须回到
-CC-01.1b 审批，监控自身无权推进 manifest。
+已在此基础上实现只读 baseline read model 与确定性 observation receipt；任何候选基线更新仍必须
+回到 CC-01.1b 审批，监控自身无权推进 manifest。详见
+`CC-05-1-baseline-observation.md`。
+
+## 实现进度
+
+- `CC-05.1`（2026-07-23）已完成：只读加载最新已批准 history，绑定当前 manifest，输出
+  current/change_detected/invalid observation；如实标记 legacy mapping 无显式 schema version。
+- CC-05.2-05.6 尚未实现，因此 CC-05 保持 `partial`。

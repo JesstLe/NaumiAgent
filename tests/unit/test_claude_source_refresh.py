@@ -146,6 +146,16 @@ def test_store_rejects_unknown_schema_and_malformed_v1_without_repair(
         assert [row[1] for row in columns] == ["entry_id"]
 
 
+def test_read_operations_do_not_create_an_absent_store(tmp_path: Path) -> None:
+    store = SourceRefreshStore(tmp_path / "missing" / "source.db")
+
+    assert store.latest("local-claude-code") is None
+    assert store.list_history("local-claude-code") == ()
+    assert store.get_proposal("0" * 64) is None
+    assert not store.db_path.exists()
+    assert not store.db_path.parent.exists()
+
+
 def test_history_rejects_projection_tampering_and_deleted_chain_entry(
     tmp_path: Path,
 ) -> None:
