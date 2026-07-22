@@ -32,3 +32,9 @@
 “更像 Claude Code”作为结论。
 
 当前只完成 current renderer 对照前置，不代表 CC-02 已开始或 Ink 已被采纳。
+
+## 外部参考边界
+
+`theswerd/brainless` 可用于组件信息架构、视觉样本和真实终端 golden capture 方法参考，但它是
+React DOM/shadcn registry，不是 Ink/ANSI/PTY renderer，因此不进入 CC-02 候选实现或默认依赖。
+完整判断见 [CC-02 brainless 参考评估](CC-02-brainless-reference-assessment.md)。
