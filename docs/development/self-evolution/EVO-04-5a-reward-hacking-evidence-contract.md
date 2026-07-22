@@ -123,5 +123,5 @@ Store row index 与 JSON payload 双向校验，单 artifact 上限 24 MiB。
 
 ## 下一步
 
-EVO-04.6a 已消费本 Evidence 并形成四态 Decision State。下一步实现 EVO-04.6b Escalation Resolution，
-把 HAR-10.6 fenced 用户答案绑定到原 Decision State。
+EVO-04.6a 已消费本 Evidence 并形成四态 Decision State，EVO-04.6b 也已把 HAR-10.6 fenced 用户答案绑定为
+独立 Resolution。下一步实现 EVO-04.7a Reflection Memory。

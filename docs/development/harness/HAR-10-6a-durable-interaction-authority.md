@@ -64,8 +64,8 @@ Harness DB v13 新增：
 - Harness/Pursuit 两个 Store 仍无同库原子事务，当前以 authority-first 顺序和 resume reconcile 收敛；
 - New UI 已消费重放的 typed card 与 timeout，UI-18.4b 已补齐 TUI durable parity；Goal 页面
   pending/takeover 状态仍未完成；
-- EVO-04.6a Decision State 的 `escalated` 已生成通过本协议 normalize 的 3 选项+自定义输入合同；
-  EVO-04.6b 尚需把它真正 create 为 Harness pending authority 并绑定 fenced answer；
+- EVO-04.6b 已把 escalated Decision State 真正 create 为 Harness pending authority，并把 fenced answer 绑定为
+  不可变、非 promotion 的 Resolution；
 - cancelled 已保留为合法终态，但显式 cancel authority 尚未开放；
 - 当前正文是脱敏明文而非加密存储；密钥管理与 at-rest encryption 属于 ARC-08/打包安全路线。
 

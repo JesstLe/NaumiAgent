@@ -65,10 +65,10 @@ Receipt 不保存源码、Prompt 正文、模型正文、reasoning、tool argume
 - EVO-04.3a Reviewer model/provider 选择、author identity 隔离、strict JSON advisory 与 veto 无模型路径已完成；
 - Reviewer structured-output schema、Prompt digest、超时/解析失败和不可变 Review Receipt；
 - Mechanical Gate `veto` 的只读解释路径；
-- EVO-04.4a Counterfactual、EVO-04.5a Reward-hacking Evidence 与 EVO-04.6a Decision State 已实现；
-  escalation resolution 与 promotion 尚未实现。
+- EVO-04.4a Counterfactual、EVO-04.5a Reward-hacking Evidence、EVO-04.6a Decision State 与 EVO-04.6b
+  Escalation Resolution 已实现；Reflection Memory 与 promotion 尚未实现。
 
 ## 下一步
 
-EVO-04.4a 至 EVO-04.6a 已沿本 Author Receipt authority 链实现风险扫描和四态决策。下一步实现 EVO-04.6b
-Escalation Resolution。
+EVO-04.4a 至 EVO-04.6b 已沿本 Author Receipt authority 链实现风险扫描、四态决策与持久用户 Resolution。
+下一步实现 EVO-04.7a Reflection Memory。
