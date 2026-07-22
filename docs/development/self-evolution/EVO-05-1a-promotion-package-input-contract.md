@@ -53,7 +53,7 @@ Input 是 append-only 审计记录。Reflection 后续被撤销时不删除 Inpu
 ## 后续依赖
 
 EVO-05.1b 已从仍 eligible 的 Input 构造 exact-target review Package，并补齐 approval policy 所需签名域和
-目标分支信息。EVO-05.2a Approval Requirement 与 EVO-05.2b Role Response 也已完成，下一最小依赖是
-EVO-05.2c1 Principal/Public-Key Authority 也已完成；下一步是 EVO-05.2c2 签名回执；当前仍不得直接
+目标分支信息。EVO-05.2a 至 EVO-05.2c2 的 Requirement、Role Response、Principal 与 Signature Receipt 也已
+完成；下一步是 EVO-05.2d Approval Decision Aggregation；当前仍不得直接
 merge/push，HAR-09.6 Outcome authority 继续等待显式
 promotion/rollback executor。

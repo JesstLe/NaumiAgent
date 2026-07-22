@@ -9,8 +9,8 @@ Ed25519 公钥生命周期。用户可通过 `/evolution approval-principal ...`
 
 本切片只接受 32-byte Ed25519 **公钥**的 canonical standard Base64。Naumi 不生成、不请求、不传输、不保存
 私钥，也不接受助记词、密码或自定义审批文本。Principal authority 不等于角色审批响应，不产生 quorum、最终
-approval decision、Promotion、Git、merge、push 或 publish 权限。密码学签名收集与验证属于独立
-EVO-05.2c2。
+approval decision、Promotion、Git、merge、push 或 publish 权限。密码学签名收集与验证现已由独立
+[EVO-05.2c2](EVO-05-2c2-approval-signature-receipt-authority.md) 交付。
 
 ## Authority 模型
 
@@ -95,12 +95,12 @@ interaction authority，没有第二套 Principal 状态机。
 
 ## 自我审视与剩余边界
 
-本 authority 证明“本地用户明确把角色和某个公钥绑定到 Principal”，还不能证明某次 Approval Response 由该
-私钥持有者签署。Principal name 也不是企业 SSO、证书链或远程身份提供商。EVO-05.2c2 必须：
+本 authority 自身只证明“本地用户明确把角色和某个公钥绑定到 Principal”。Principal name 仍不是企业 SSO、
+证书链或远程身份提供商。EVO-05.2c2 已在此可信根上交付：
 
 1. 定义 domain-separated canonical signable payload，绑定 Requirement、Package、role、response、Principal、
    key ID、nonce 与 expiry；
 2. 用当前 active Principal 公钥验证真实 Ed25519 signature，不保存私钥；
 3. 拒绝旧 generation、撤销后签名、跨 workspace/role/request 重放和过期 signature；
 4. 形成 append-only Identity/Signature Receipt，并动态重读 Principal 与 Approval Requirement authority；
-5. 仍不聚合最终决定；EVO-05.2d 才重读所有技术门、角色响应、身份与签名回执形成非 Git 执行型 Decision。
+5. 仍不聚合最终决定；下一步 EVO-05.2d 重读所有技术门、角色响应、身份与签名回执形成非 Git 执行型 Decision。

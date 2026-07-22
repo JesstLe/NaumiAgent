@@ -474,6 +474,34 @@ class EvolutionPromotionApprovalResponseStore:
                 "Approval Response Receipt 损坏或无法读取。",
             ) from exc
 
+    async def get(
+        self,
+        receipt_id: str,
+    ) -> EvolutionPromotionApprovalResponseReceipt | None:
+        if re.fullmatch(r"evapprovalresp_[0-9a-f]{24}", str(receipt_id)) is None:
+            raise ValueError("approval response receipt id 格式无效。")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_promotion_approval_responses "
+                        "WHERE receipt_id = ?",
+                        (receipt_id,),
+                    )
+                ).fetchone()
+                return None if row is None else _from_row(row)
+        except EvolutionPromotionApprovalRequestError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionPromotionApprovalRequestError(
+                "approval_response_store_corrupt",
+                "Approval Response Receipt 损坏或无法读取。",
+            ) from exc
+
 
 class EvolutionPromotionApprovalRequestService:
     """Ask one exact approval role through HAR-10.6 and freeze its response."""

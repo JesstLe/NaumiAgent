@@ -2092,6 +2092,7 @@ test("reflection commands use the shared slash channel instead of typed review r
   const promotionPackageId = `evpromopkg_${"d".repeat(24)}`;
   const approvalRequirementId = `evapprovalreq_${"e".repeat(24)}`;
   const approvalPrincipalId = `evprincipal_${"f".repeat(24)}`;
+  const approvalSignatureReceiptId = `evsigreceipt_${"1".repeat(24)}`;
   const send = (type, payload) => sent.push({ type, payload });
 
   handleSubmitText(state, `/evolution reflection ${decisionInputId}`, send);
@@ -2119,6 +2120,11 @@ test("reflection commands use the shared slash channel instead of typed review r
   handleSubmitText(
     state,
     `/evolution approval-principal show ${approvalPrincipalId}`,
+    send,
+  );
+  handleSubmitText(
+    state,
+    `/evolution approval-signature show ${approvalSignatureReceiptId}`,
     send,
   );
 
@@ -2159,6 +2165,12 @@ test("reflection commands use the shared slash channel instead of typed review r
       type: "submit",
       payload: {
         text: `/evolution approval-principal show ${approvalPrincipalId}`,
+      },
+    },
+    {
+      type: "submit",
+      payload: {
+        text: `/evolution approval-signature show ${approvalSignatureReceiptId}`,
       },
     },
   ]);

@@ -44,6 +44,11 @@ from naumi_agent.evolution.approval_requirements import (
     EvolutionPromotionApprovalRequirementExecutor,
     EvolutionPromotionApprovalRequirementStore,
 )
+from naumi_agent.evolution.approval_signatures import (
+    EvolutionApprovalSignatureBuilder,
+    EvolutionApprovalSignatureService,
+    EvolutionApprovalSignatureStore,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceBuilder,
     EvolutionCounterfactualEvidenceExecutor,
@@ -439,6 +444,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_approval_principal_service,
         EvolutionApprovalPrincipalService,
+    )
+    assert isinstance(
+        engine.evolution_approval_signature_builder,
+        EvolutionApprovalSignatureBuilder,
+    )
+    assert isinstance(
+        engine.evolution_approval_signature_store,
+        EvolutionApprovalSignatureStore,
+    )
+    assert isinstance(
+        engine.evolution_approval_signature_service,
+        EvolutionApprovalSignatureService,
     )
     assert isinstance(
         engine.evolution_validation_planner,

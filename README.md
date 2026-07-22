@@ -226,6 +226,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | Promotion 审批要求 | `/evolution approval-requirement <promotion-package-id>` | 冻结审批角色、签名门、技术门与有效期；不创建交互、不作出审批 |
 | Promotion 角色审批 | `/evolution approval-request <requirement-id> <role>` | 通过 HAR-10.6 持久交互冻结角色回答；未验证身份/签名不计入最终 quorum，不执行 Git 或发布 |
 | Promotion 审批主体 | `/evolution approval-principal <register|rotate|roles|revoke|show> …` | 经 HAR 人工确认管理角色与 Ed25519 公钥；Naumi 不接收私钥，不形成最终审批或发布权限 |
+| Promotion 审批签名 | `/evolution approval-signature <prepare|submit|show> …` | 生成 nonce/expiry Challenge 并验证外部 Ed25519 signature；动态阻断旧 key、撤销与过期，不形成最终审批或发布权限 |
 | 任务 | `/todo` `/tasks` `/task` `/task-reply` `/task-abort` | 管理 todo、subagent、后台/browser 任务和人工接管 |
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |

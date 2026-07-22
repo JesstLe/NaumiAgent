@@ -20,6 +20,10 @@ from naumi_agent.evolution.approval_requirements import (
     EvolutionPromotionApprovalRequirementError,
     render_evolution_promotion_approval_requirement,
 )
+from naumi_agent.evolution.approval_signatures import (
+    EvolutionApprovalSignatureError,
+    render_evolution_approval_signature,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceError,
     render_counterfactual_evidence,
@@ -1530,6 +1534,163 @@ class EvolutionApprovalPrincipalAuthorityTool(Tool):
         return render_evolution_approval_principal(view)
 
 
+class EvolutionApprovalSignatureTool(Tool):
+    """Prepare and verify exact external Ed25519 approval signatures."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_approval_signature"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为需要签名的 approve Role Response 创建带 nonce/expiry 的 canonical Challenge，"
+            "或提交外部 Ed25519 signature 并形成验证回执。Naumi 不接收私钥；"
+            "回执不聚合最终审批、不执行 Promotion 或 Git。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["prepare", "submit"]},
+                "approval_response_id": {
+                    "type": "string",
+                    "pattern": "^evapprovalresp_[0-9a-f]{24}$",
+                },
+                "principal_id": {
+                    "type": "string",
+                    "pattern": "^evprincipal_[0-9a-f]{24}$",
+                },
+                "challenge_id": {
+                    "type": "string",
+                    "pattern": "^evsigchallenge_[0-9a-f]{24}$",
+                },
+                "signature_base64": {
+                    "type": "string",
+                    "minLength": 88,
+                    "maxLength": 88,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批签名",
+            search_hint=(
+                "evolution approval signature ed25519 challenge verify response "
+                "自进化 审批 签名 挑战 验证 回执"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        approval_response_id: str = "",
+        principal_id: str = "",
+        challenge_id: str = "",
+        signature_base64: str = "",
+    ) -> str:
+        service = self._engine.evolution_approval_signature_service
+        try:
+            if action == "prepare":
+                if not approval_response_id or not principal_id:
+                    return "prepare 需要 approval_response_id 和 principal_id。"
+                result = await service.prepare(
+                    workspace_root=self._engine.workspace_root,
+                    approval_response_id=approval_response_id,
+                    principal_id=principal_id,
+                )
+            elif action == "submit":
+                if not challenge_id or not signature_base64:
+                    return "submit 需要 challenge_id 和 signature_base64。"
+                result = await service.submit(
+                    workspace_root=self._engine.workspace_root,
+                    challenge_id=challenge_id,
+                    signature_base64=signature_base64,
+                )
+            else:
+                return "action 仅支持 prepare 或 submit。"
+        except (
+            AttributeError,
+            EvolutionApprovalSignatureError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Signature 未完成：{exc}"
+        return render_evolution_approval_signature(result)
+
+
+class EvolutionApprovalSignatureAuthorityTool(Tool):
+    """Read one verified signature receipt without changing authority."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_approval_signature_authority"
+
+    @property
+    def description(self) -> str:
+        return (
+            "只读重载已验证的 Approval Signature Receipt，并动态显示 Requirement、target、"
+            "Principal/key/role 当前是否仍可进入未来聚合；不修改 authority。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "receipt_id": {
+                    "type": "string",
+                    "pattern": "^evsigreceipt_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["receipt_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批签名 Authority",
+            search_hint=(
+                "evolution approval signature receipt authority current eligibility "
+                "自进化 审批 签名 回执 状态"
+            ),
+        )
+
+    async def execute(self, receipt_id: str) -> str:
+        try:
+            view = await self._engine.evolution_approval_signature_service.inspect(
+                workspace_root=self._engine.workspace_root,
+                receipt_id=receipt_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionApprovalSignatureError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Signature Authority 不可读取：{exc}"
+        return render_evolution_approval_signature(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1556,6 +1717,8 @@ def create_evolution_review_tools(
         EvolutionPromotionApprovalRequestTool(engine),
         EvolutionApprovalPrincipalAuthorityTool(engine),
         EvolutionApprovalPrincipalTool(engine),
+        EvolutionApprovalSignatureAuthorityTool(engine),
+        EvolutionApprovalSignatureTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -1563,6 +1726,8 @@ def create_evolution_review_tools(
 __all__ = [
     "EvolutionApprovalPrincipalAuthorityTool",
     "EvolutionApprovalPrincipalTool",
+    "EvolutionApprovalSignatureAuthorityTool",
+    "EvolutionApprovalSignatureTool",
     "EvolutionCandidatesTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",

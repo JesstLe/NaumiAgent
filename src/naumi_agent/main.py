@@ -3044,6 +3044,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionPromotionApprovalRequirementError,
         render_evolution_promotion_approval_requirement,
     )
+    from naumi_agent.evolution.approval_signatures import (
+        EvolutionApprovalSignatureError,
+        render_evolution_approval_signature,
+    )
     from naumi_agent.evolution.counterfactual_evidence import (
         EvolutionCounterfactualEvidenceError,
         render_counterfactual_evidence,
@@ -3365,6 +3369,35 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             console.print(Markdown(render_evolution_approval_principal(view)))
             return
+        if action == "approval-signature":
+            if len(parts) < 3:
+                raise ValueError("approval-signature 需要 prepare、submit 或 show。")
+            signature_action = parts[1]
+            service = engine.evolution_approval_signature_service
+            if signature_action == "prepare" and len(parts) == 4:
+                view = await service.prepare(
+                    workspace_root=engine.workspace_root,
+                    approval_response_id=parts[2],
+                    principal_id=parts[3],
+                )
+            elif signature_action == "submit" and len(parts) == 4:
+                view = await service.submit(
+                    workspace_root=engine.workspace_root,
+                    challenge_id=parts[2],
+                    signature_base64=parts[3],
+                )
+            elif signature_action == "show" and len(parts) == 3:
+                view = await service.inspect(
+                    workspace_root=engine.workspace_root,
+                    receipt_id=parts[2],
+                )
+            else:
+                raise ValueError(
+                    "approval-signature 参数无效：prepare <response-id> <principal-id>；"
+                    "submit <challenge-id> <signature-base64>；show <receipt-id>。"
+                )
+            console.print(Markdown(render_evolution_approval_signature(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3396,7 +3429,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "independent-review、counterfactual、reward-hacking、"
                 "decision-state、decision-resolve、reflection、"
                 "reflection-revoke、promotion-input、promotion-package、"
-                "approval-requirement、approval-request、approval-principal 或 enqueue。"
+                "approval-requirement、approval-request、approval-principal、"
+                "approval-signature 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3514,6 +3548,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "approval-signature":
+            console.print(
+                f"Evolution Approval Signature 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3543,6 +3584,11 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<ed25519-public-key-base64>；"
             "/evolution approval-principal roles <principal-id> <role[,role...]>；"
             "/evolution approval-principal revoke|show <principal-id>；"
+            "/evolution approval-signature prepare <approval-response-id> "
+            "<principal-id>；"
+            "/evolution approval-signature submit <challenge-id> "
+            "<ed25519-signature-base64>；"
+            "/evolution approval-signature show <signature-receipt-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3664,6 +3710,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionApprovalPrincipalError as exc:
         console.print(
             f"Evolution Approval Principal 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionApprovalSignatureError as exc:
+        console.print(
+            f"Evolution Approval Signature 未完成：{exc}",
             style="yellow",
             markup=False,
         )
