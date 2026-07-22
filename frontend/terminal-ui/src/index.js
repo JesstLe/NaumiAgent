@@ -624,7 +624,7 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
-  if (state.route?.name === "harness_detail" && handleHarnessDetailKey(state, chunk)) {
+  if (state.route?.name === "harness_detail" && handleHarnessDetailKey(state, chunk, send)) {
     scheduleRedraw();
     return;
   }

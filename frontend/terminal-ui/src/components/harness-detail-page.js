@@ -43,7 +43,10 @@ export function renderHarnessDetailPage(detail, width, height) {
   const value = detail && typeof detail === "object" ? detail : {};
   const logical = [
     color(ANSI.cyan, "Harness 运行详情"),
-    color(ANSI.dim, `Run · ${text(value.runId) || "-"} · ↑/↓ 滚动 · Esc 返回`),
+    color(
+      ANSI.dim,
+      `Run · ${text(value.runId) || "-"} · e 刷新 Explain · r 刷新 Replay · ↑/↓ 滚动 · Esc 返回`,
+    ),
     ...explainLines(value),
     ...replayLines(value),
   ];

@@ -117,7 +117,18 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
   Textual 测试通过真实 app 与 engine sink 验证单卡片合并，而非只比较独立格式化函数。
 - 字段、降级、验收证据和诚实边界见 `HAR-07-6-terminal-parity.md`。
 
+### HAR-07.5a 已实现：详情 Explain / Replay 独立刷新
+
+- New UI 详情页支持 `e/E` 单独刷新 Explain、`r/R` 单独刷新 Replay；首屏显示键位，刷新保留
+  滚动位置和另一分区的权威内容。
+- 每个分区只允许一个 in-flight 请求，重复按键幂等吸收；请求携带精确 run id 与最后接受的
+  revision，相同 revision 仍由 Bridge 重新读取 Store 并补发结果。
+- 刷新只读，不执行模型、Harness check、工具或原任务。TUI fallback 继续通过相同
+  `/harness detail <run-id>` 命令和共享后端查询刷新两类详情。
+- Node 键盘状态机到真实 SQLite Store、Python Bridge、Node normalizer/reducer/renderer 的链路已验证；
+  详细边界见 `HAR-07-5a-detail-refresh-interactions.md`。
+
 ### 尚未完成
 
 - HAR-07.4b：断线重连后的 revision/gap 自动补发；显式 `/resume` 恢复已完成。
-- HAR-07.5：`e/r/v` 与复制交互。
+- HAR-07.5b+：`v` Evidence 焦点、完成卡入口与跨平台复制回执；`e/r` 详情刷新已完成。
