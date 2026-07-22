@@ -16,6 +16,10 @@ from naumi_agent.evolution.adversarial_cohort import EvolutionAdversarialCohortE
 from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonExecutor,
 )
+from naumi_agent.evolution.adversarial_failure_attribution import (
+    EvolutionAdversarialFailureAttributionBuilder,
+    EvolutionAdversarialFailureAttributionExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -223,6 +227,14 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_adversarial_comparison_executor,
         EvolutionAdversarialComparisonExecutor,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_failure_attribution_builder,
+        EvolutionAdversarialFailureAttributionBuilder,
+    )
+    assert isinstance(
+        engine.evolution_adversarial_failure_attribution_executor,
+        EvolutionAdversarialFailureAttributionExecutor,
     )
     assert isinstance(
         engine.evolution_baseline_cohort_request_builder,

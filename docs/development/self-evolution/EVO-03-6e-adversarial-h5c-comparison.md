@@ -37,5 +37,6 @@ ordered H5a evidence，然后复用唯一 `EvolutionComparisonKernel` 形成原�
 ## 当前不足与下一步
 
 当前只比较单个平台的一对 receipt。跨平台 dispatcher、matrix 汇总、通用 Harness Sandbox Eval
-Service/Tool/UI、Failure Attribution adversarial adapter 与 EVO-03.7 最终 Evaluation Receipt 尚未完成。
+Service/Tool/UI 与 EVO-03.7 最终 Evaluation Receipt 尚未完成。EVO-03.5c 已让本切片的同平台 H5c 进入共享
+Failure Attribution authority、机械分类和 durable Store，但尚未完成跨平台 matrix 汇总。
 下一选择应重新横向比较这些依赖，不继续扩张 comparison 内核。

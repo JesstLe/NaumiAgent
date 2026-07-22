@@ -78,11 +78,11 @@ class EvolutionFailureAttributionReceipt(_StrictModel):
     validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
     validation_plan_sha256: str = Field(pattern=_SHA256_RE)
     red_receipt_id: str = Field(
-        pattern=r"^evvred(?:run|cohort)_[0-9a-f]{24}$"
+        pattern=r"^(?:evvred(?:run|cohort)|evadvcohort)_[0-9a-f]{24}$"
     )
     red_receipt_sha256: str = Field(pattern=_SHA256_RE)
     green_receipt_id: str = Field(
-        pattern=r"^evvgreen(?:run|cohort)_[0-9a-f]{24}$"
+        pattern=r"^(?:evvgreen(?:run|cohort)|evadvcohort)_[0-9a-f]{24}$"
     )
     green_receipt_sha256: str = Field(pattern=_SHA256_RE)
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")
@@ -142,11 +142,11 @@ class EvolutionFailureAttributionAuthority(_StrictModel):
     validation_plan_id: str = Field(pattern=r"^evvplan_[0-9a-f]{24}$")
     validation_plan_sha256: str = Field(pattern=_SHA256_RE)
     red_receipt_id: str = Field(
-        pattern=r"^evvred(?:run|cohort)_[0-9a-f]{24}$"
+        pattern=r"^(?:evvred(?:run|cohort)|evadvcohort)_[0-9a-f]{24}$"
     )
     red_receipt_sha256: str = Field(pattern=_SHA256_RE)
     green_receipt_id: str = Field(
-        pattern=r"^evvgreen(?:run|cohort)_[0-9a-f]{24}$"
+        pattern=r"^(?:evvgreen(?:run|cohort)|evadvcohort)_[0-9a-f]{24}$"
     )
     green_receipt_sha256: str = Field(pattern=_SHA256_RE)
     candidate_id: str = Field(pattern=r"^evc_[0-9a-f]{24}$")

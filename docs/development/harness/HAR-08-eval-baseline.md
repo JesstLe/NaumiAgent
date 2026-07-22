@@ -119,5 +119,8 @@
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
+- EVO-03.5c 已把同平台 Adversarial H5c 接入共享 Failure Attribution authority 与 durable Store；Harness
+  仍只提供不可变结果和比较事实，不承担 Evolution 分类策略。见
+  `../self-evolution/EVO-03-5c-adversarial-failure-attribution.md`。
 - HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨 Batch admission/backpressure 与
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
