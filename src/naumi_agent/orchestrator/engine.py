@@ -246,6 +246,7 @@ from naumi_agent.tools.builtin import create_builtin_tools
 from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
+from naumi_agent.ui.tool_output_archive import ToolOutputArchive
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.tools import create_workbench_tools
@@ -689,6 +690,9 @@ class AgentEngine:
         )
         self.workspace_root = paths.workspace_root
         self._runtime_data_dir = paths.runtime_data_dir
+        self.tool_output_archive = ToolOutputArchive(
+            paths.runtime_data_dir / "tool-outputs"
+        )
         self._worktree_storage_dir = paths.worktree_storage_dir
         self._harness_store = resources.harness_store
         self._permission_decision_store = resources.permission_decision_store
@@ -2272,6 +2276,7 @@ class AgentEngine:
 
     def _reconcile_deleted_session_runtime(self, session_id: str) -> None:
         """Invalidate in-memory authority after Session deletion is authoritative."""
+        self.tool_output_archive.delete_session(session_id)
         self._revoke_permission_grants_for_session(
             session_id,
             reason="删除会话时撤销了权限授权。",
@@ -3939,13 +3944,18 @@ class AgentEngine:
             for item in batch.calls:
                 result = outcomes[item.index]
                 registered_tool = self._tool_registry.get(item.call.name)
+                output_fields = self._archive_tool_output_event_fields(
+                    result,
+                    session_id=session_id,
+                )
                 end_payload = {
                     "name": item.call.name,
                     "call_id": item.call.id,
                     "status": result.status,
                     "duration_ms": result.duration_ms,
                     "content": result.content[:2000],
-                    "content_length": len(
+                    "content_length": len(result.content),
+                    "content_bytes": len(
                         result.content.encode("utf-8", errors="replace")
                     ),
                     "read_only": bool(
@@ -3954,6 +3964,7 @@ class AgentEngine:
                     "destructive": bool(
                         registered_tool is not None and registered_tool.is_destructive
                     ),
+                    **output_fields,
                     **metadata,
                 }
                 await self._observe_harness_tool_event("tool_end", end_payload)
@@ -4026,17 +4037,23 @@ class AgentEngine:
                 ),
                 **metadata,
             }
+            output_fields = self._archive_tool_output_event_fields(
+                result,
+                session_id=session_id,
+            )
             end_payload = {
                 "name": tool_name,
                 "call_id": result.call_id,
                 "status": result.status,
                 "duration_ms": result.duration_ms,
                 "content": result.content[:2000],
-                "content_length": len(
+                "content_length": len(result.content),
+                "content_bytes": len(
                     result.content.encode("utf-8", errors="replace")
                 ),
                 "read_only": start_payload["read_only"],
                 "destructive": start_payload["destructive"],
+                **output_fields,
                 **metadata,
             }
             await self._observe_harness_tool_event("tool_start", start_payload)
@@ -4066,6 +4083,30 @@ class AgentEngine:
             )
 
         return signatures
+
+    def _archive_tool_output_event_fields(
+        self,
+        result: ToolResult,
+        *,
+        session_id: str,
+    ) -> dict[str, Any]:
+        """Archive oversized output without allowing archive I/O to fail the tool."""
+        if len(result.content) <= 2_000:
+            return {}
+        try:
+            reference = self.tool_output_archive.archive(
+                result.content,
+                session_id=session_id,
+                tool_call_id=result.call_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to archive oversized tool output: call_id=%s",
+                result.call_id,
+                exc_info=True,
+            )
+            return {}
+        return reference.event_fields()
 
     def _format_plan_as_guidance(self, plan: Plan) -> str | None:
         """Format a plan as system message guidance for decision commitment."""

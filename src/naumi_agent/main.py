@@ -2190,6 +2190,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(Markdown(render_doctor_report(report)))
         case "/harness":
             await _run_harness(engine, arg)
+        case "/tool-output":
+            _show_tool_output_page(engine, arg)
         case "/queue":
             await _run_conversation_queue(engine, arg)
         case "/feedback":
@@ -3122,6 +3124,40 @@ def _parse_evolution_list_options(parts: list[str]) -> dict[str, Any]:
         options[names[name]] = value
         index += 2
     return options
+
+
+def _show_tool_output_page(engine: Any, arg: str) -> None:
+    """Render one session-scoped immutable Tool Output page."""
+    from naumi_agent.ui.tool_output_archive import (
+        ToolOutputArchiveError,
+        render_tool_output_page,
+    )
+
+    try:
+        parts = shlex.split(arg)
+    except ValueError as exc:
+        console.print(f"[yellow]Tool Output 参数解析失败：{exc}[/yellow]")
+        return
+    if not 1 <= len(parts) <= 2:
+        console.print("[yellow]用法：/tool-output <artifact-id> [page][/yellow]")
+        return
+    try:
+        page_number = int(parts[1]) if len(parts) == 2 else 1
+    except ValueError:
+        console.print("[yellow]Tool Output 页码必须是整数。[/yellow]")
+        return
+    session = getattr(engine, "_session", None)
+    session_id = str(getattr(session, "id", ""))
+    archive = getattr(engine, "tool_output_archive", None)
+    if archive is None or not session_id:
+        console.print("[yellow]当前没有可读取 Tool Output 的活动会话。[/yellow]")
+        return
+    try:
+        value = archive.read_page(parts[0], page_number, session_id=session_id)
+    except ToolOutputArchiveError as exc:
+        console.print(f"[yellow]Tool Output 不可用：{exc}[/yellow]")
+        return
+    console.print(Markdown(render_tool_output_page(value)))
 
 
 def _parse_evolution_enqueue_options(parts: list[str]) -> dict[str, str]:

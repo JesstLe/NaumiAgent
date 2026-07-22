@@ -23,7 +23,7 @@
 | UI-12 | 权限策略中心 | partial (12.1a, 12.3a, 12.3b1, 12.3b2) | permission bubbles | `cli-ui/UI-12-permission-center.md` |
 | UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1c) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |
 | UI-14 | QuickOpen、Vim 与完整键位层 | partial (14.1a, 14.2a, 14.2b, 14.2c) | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
-| UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a, 15.6a) | render cache | `cli-ui/UI-15-performance.md` |
+| UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a, 15.4a, 15.6a) | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | partial (16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
 | UI-17 | New UI/TUI parity 与发布门 | partial (17.1, 17.2a-17.2d, 17.3a) | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
 | UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.4b, 18.4c, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |

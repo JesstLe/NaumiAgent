@@ -139,11 +139,17 @@ def _render_tool_result(
     from naumi_agent.main import _tool_label
 
     label = _tool_label(msg.tool_name)
+    preview = _highlightable_tool_preview(msg)
+    if msg.output_artifact_id:
+        preview = (
+            f"{preview}\n\n完整输出：`/tool-output {msg.output_artifact_id} 1` "
+            f"（共 {msg.output_page_count} 页）"
+        ).strip()
     chat.end_tool(
         label,
         msg.status,
         msg.duration_ms,
-        _highlightable_tool_preview(msg),
+        preview,
     )
 
 

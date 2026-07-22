@@ -101,6 +101,26 @@ def test_tool_result_wraps_code_preview_with_language_fence() -> None:
     assert _highlightable_tool_preview(msg) == "```python\nprint('ok')\n```"
 
 
+def test_tool_result_exposes_shared_paged_output_command() -> None:
+    msg = ToolResultMessage(
+        type=MessageType.TOOL_RESULT,
+        tool_name="bash_run",
+        status="success",
+        content_preview="preview",
+        content_truncated=True,
+        output_artifact_id="out_" + "a" * 32,
+        output_page_count=3,
+    )
+    renderer = TUIRenderer()
+    chat = FakeChat()
+
+    renderer.render(msg, chat, FakeStatus(), FakeTodo())
+
+    preview = chat.mounted[0][3]
+    assert "/tool-output out_" in preview
+    assert "共 3 页" in preview
+
+
 def test_recovery_renderer_escapes_markup_sensitive_text() -> None:
     adapter = EngineEventAdapter()
     renderer = TUIRenderer()

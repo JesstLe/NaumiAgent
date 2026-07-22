@@ -13,12 +13,18 @@
   - 未完成：progress/todo/runtime status 领域合并策略、Textual TUI 高频刷新基线和 UI-15.6 SLO benchmark。
 - UI-15.2 Virtual timeline：按 message/card 行高索引和 viewport overscan。
 - UI-15.3 Render cache：语义 revision、主题、宽度、fold/focus 全入 key。
-- UI-15.4 Artifact paging：代码/diff/log/图片引用分页，不把正文塞入状态。
+- UI-15.4 Artifact paging（partial）：代码/diff/log/图片引用分页，不把正文塞入状态。
+  - UI-15.4a 已实现超长文本工具输出的执行时归档、会话隔离、逐页摘要校验、共享
+    `/tool-output` 命令和 New UI/TUI 入口；见
+    [设计与证据](UI-15-4a-tool-output-paging.md)。
+  - 未完成：全屏 artifact viewer、快捷翻页、二进制/图片/diff contract、容量配额与模型历史卸载。
 - UI-15.5 Scroll physics：触摸板限速、亚行累积、无惯性跳跃、follow-tail 状态机。
 - UI-15.6 Bench harness：可重复 fixture、CPU/内存/首帧/输入/滚动指标。
   - UI-15.6a 已实现 current renderer 的 `smoke|release` 可重复 fixture、三场景 JSON 指标与
     fixture digest，作为 UI 优化和 CC-02 Ink 实验的共同对照；见
     [设计与运行方式](UI-15-6a-current-renderer-benchmark.md)。
+  - UI-15.4a 将 release fixture 升级为生产分页协议 v2；原始 10MB 直传 RED 证据继续保留，
+    新增分页 GREEN 证据，避免用修改后的 fixture 覆盖历史基线。
   - 未完成：输入/token/resize、Textual TUI、Ink 对照和跨平台 CI 阈值。
 
 ## 验收标准
@@ -32,5 +38,6 @@
 ## 当前状态
 
 UI-15 保持 partial。现有 redraw scheduler 已限制普通 paint 到约 16ms，UI-15.1a 进一步减少进入 reducer 的
-stream delta 数量；UI-15.6a 已建立 current renderer benchmark 基线，但 virtual timeline、artifact paging、
-完整 cache revision、输入/resize/TUI benchmark 与跨前端性能门仍未完成。
+stream delta 数量；UI-15.4a 已避免超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark
+基线。virtual timeline、非文本 artifact、完整 cache revision、输入/resize/TUI benchmark 与跨前端性能门
+仍未完成。
