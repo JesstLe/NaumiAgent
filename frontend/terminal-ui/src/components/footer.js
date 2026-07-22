@@ -161,7 +161,9 @@ export function StatusFooter({ state, env = {} }) {
       const git = status.git ?? {};
       const lastFirstTokenLatencyMs = Number(state.lastFirstTokenLatencyMs ?? 0);
       const tasks = formatTaskActivity(status.tasks);
-      const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      const time = /^\d{2}:\d{2}:\d{2}$/.test(String(env.clockText ?? ""))
+        ? String(env.clockText)
+        : new Date().toLocaleTimeString("zh-CN", { hour12: false });
       const session = state.currentSessionId ? `会话:${state.currentSessionId.slice(0, 8)}` : "会话:-";
       const firstToken =
         Number.isFinite(lastFirstTokenLatencyMs) && lastFirstTokenLatencyMs > 0

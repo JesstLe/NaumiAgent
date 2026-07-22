@@ -31,7 +31,8 @@
 实验必须产出 benchmark JSON、截图/录屏、失败列表和明确 `adopt|defer|reject`，不得以主观
 “更像 Claude Code”作为结论。
 
-当前只完成 current renderer 对照前置，不代表 CC-02 已开始或 Ink 已被采纳。
+当前已完成 current renderer benchmark 与 UI-17.2f 双端固定视口 ANSI/text capture 前置，不代表 CC-02 已开始或
+Ink 已被采纳。后续 Ink runner 必须消费同一 fixture 和 capture manifest，不能另建只对 Ink 有利的视觉样本。
 
 ## 外部参考边界
 
