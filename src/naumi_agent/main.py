@@ -3031,6 +3031,11 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.adversarial_batch_requests import (
         EvolutionAdversarialBatchRequest,
     )
+    from naumi_agent.evolution.approval_principals import (
+        EvolutionApprovalPrincipalError,
+        parse_approval_roles,
+        render_evolution_approval_principal,
+    )
     from naumi_agent.evolution.approval_requests import (
         EvolutionPromotionApprovalRequestError,
         render_evolution_promotion_approval_response,
@@ -3319,6 +3324,47 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evolution_promotion_approval_response(view)))
             return
+        if action == "approval-principal":
+            if len(parts) < 3:
+                raise ValueError("approval-principal 需要治理动作和参数。")
+            principal_action = parts[1]
+            service = engine.evolution_approval_principal_service
+            if principal_action == "register" and len(parts) == 5:
+                view = await service.register(
+                    workspace_root=engine.workspace_root,
+                    principal_name=parts[2],
+                    public_key_base64=parts[3],
+                    roles=parse_approval_roles(parts[4]),
+                )
+            elif principal_action == "rotate" and len(parts) == 4:
+                view = await service.rotate_key(
+                    workspace_root=engine.workspace_root,
+                    principal_id=parts[2],
+                    public_key_base64=parts[3],
+                )
+            elif principal_action == "roles" and len(parts) == 4:
+                view = await service.update_roles(
+                    workspace_root=engine.workspace_root,
+                    principal_id=parts[2],
+                    roles=parse_approval_roles(parts[3]),
+                )
+            elif principal_action == "revoke" and len(parts) == 3:
+                view = await service.revoke(
+                    workspace_root=engine.workspace_root,
+                    principal_id=parts[2],
+                )
+            elif principal_action == "show" and len(parts) == 3:
+                view = await service.inspect(
+                    workspace_root=engine.workspace_root,
+                    principal_id=parts[2],
+                )
+            else:
+                raise ValueError(
+                    "approval-principal 仅支持 register、rotate、roles、revoke 或 show，"
+                    "且参数必须完整。"
+                )
+            console.print(Markdown(render_evolution_approval_principal(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3350,7 +3396,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "independent-review、counterfactual、reward-hacking、"
                 "decision-state、decision-resolve、reflection、"
                 "reflection-revoke、promotion-input、promotion-package、"
-                "approval-requirement、approval-request 或 enqueue。"
+                "approval-requirement、approval-request、approval-principal 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3461,6 +3507,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "approval-principal":
+            console.print(
+                f"Evolution Approval Principal 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3484,6 +3537,12 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution approval-requirement <promotion-package-id>；"
             "/evolution approval-request <approval-requirement-id> "
             "<user|independent_reviewer|security_reviewer|data_owner|release_manager>；"
+            "/evolution approval-principal register <name> <ed25519-public-key-base64> "
+            "<role[,role...]>；"
+            "/evolution approval-principal rotate <principal-id> "
+            "<ed25519-public-key-base64>；"
+            "/evolution approval-principal roles <principal-id> <role[,role...]>；"
+            "/evolution approval-principal revoke|show <principal-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3598,6 +3657,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionPromotionApprovalRequestError as exc:
         console.print(
             f"Evolution Approval Request 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionApprovalPrincipalError as exc:
+        console.print(
+            f"Evolution Approval Principal 未完成：{exc}",
             style="yellow",
             markup=False,
         )

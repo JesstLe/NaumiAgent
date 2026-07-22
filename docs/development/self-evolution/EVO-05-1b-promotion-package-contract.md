@@ -70,5 +70,6 @@ Migration、Rollback 与 Approval Input 的 exact digest。它不选择签名算
 ## 后续依赖
 
 EVO-05.2a 已从 still-current Package 冻结角色、签名门、protected-scope 人工门和 expiry。下一最小依赖是
-EVO-05.2b Approval Request Authority 也已完成；下一步是 EVO-05.2c 身份/签名回执。EVO-05.3 才负责
+EVO-05.2b Approval Request 与 EVO-05.2c1 Principal/Public-Key Authority 也已完成；下一步是 EVO-05.2c2
+签名回执。EVO-05.3 才负责
 rebase/revalidate，HAR-09.6 仍等待真实 promotion/rollback Outcome authority。

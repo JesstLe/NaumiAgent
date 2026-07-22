@@ -122,4 +122,4 @@ row index 与 JSON payload 双向校验，单 artifact 上限 40 MiB。
 
 EVO-04.7a 已消费本 Resolution 并形成结构化、可撤销、非注入 Reflection。EVO-05.1a Promotion
 Package Input、review Package、EVO-05.2a Requirement 与 EVO-05.2b Role Response 均已完成；下一步是
-EVO-05.2c 身份/签名回执，仍不执行合并或发布。
+EVO-05.2c1 Principal/Public-Key Authority 已完成；下一步是 EVO-05.2c2 签名回执，仍不执行合并或发布。

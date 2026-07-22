@@ -584,6 +584,20 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_promotion_artifact",
     ),
+    "evolution_approval_principal": PermissionRule(
+        tool_name="evolution_approval_principal",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        # Bypass skips permission confirmation, but HAR remains the authority gate.
+        requires_confirmation=False,
+        max_calls_per_session=20,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="evolution_approval_identity",
+    ),
     "workbench_govern_proposal": PermissionRule(
         tool_name="workbench_govern_proposal",
         allowed_modes=[

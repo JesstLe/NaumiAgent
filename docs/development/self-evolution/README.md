@@ -29,8 +29,8 @@ Promotion/Rollback → Feedback`。
 ## Agent Tool 权限治理
 
 [EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7、EVO-04.1-4.7 与
-EVO-05.1a-05.2b 的十六个 durable Tool 建立精确权限规则：十五类派生创建为中风险，append-only
-撤销为高风险治理动作；lockdown 阻断，bypass 全权限且无二次确认。以后新增非只读 Evolution Tool 必须与
+EVO-05.1a-05.2c1 的十七个 durable Tool 建立精确权限规则：十五类派生创建为中风险，append-only
+Reflection 撤销和 Principal 治理为高风险动作；lockdown 阻断，bypass 全权限且无二次确认。以后新增非只读 Evolution Tool 必须与
 权限规则和注册表门同一切片交付。
 
 EVO-04.4a 已交付真实字节驱动的 Counterfactual Evidence：从 completed Independent Review 重读完整
@@ -57,5 +57,6 @@ branch、审批事实和 domain-separated signable digest；target 移动或 Ref
 target/scope、migration 和 data backup 冻结 human roles、signature gates、technical gates 与 expiry。目标移动、
 到期或 Reflection 撤销都会 fail closed。[EVO-05.2b](EVO-05-2b-approval-request-authority.md) 已把每个角色请求
 接入 HAR-10.6 durable interaction，并冻结结构化回答、identity assurance 和独立 signature entry。专业角色在
-身份/签名 authority 完成前不能计入 quorum；当前仍无最终审批决定、签名收集、Git 写入、merge、push、publish
-或 promotion executor。
+身份/签名 authority 完成前不能计入 quorum。[EVO-05.2c1](EVO-05-2c1-approval-principal-authority.md) 已建立
+HAR 人工确认的 Principal、角色与 Ed25519 公钥注册/轮换/撤销 authority，但尚未验证任何 Approval Response
+签名。当前仍无最终审批决定、签名回执、Git 写入、merge、push、publish 或 promotion executor。

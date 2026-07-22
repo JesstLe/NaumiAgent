@@ -29,6 +29,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.approval_principals import (
+    EvolutionApprovalPrincipalEventBuilder,
+    EvolutionApprovalPrincipalService,
+    EvolutionApprovalPrincipalStore,
+)
 from naumi_agent.evolution.approval_requests import (
     EvolutionPromotionApprovalRequestService,
     EvolutionPromotionApprovalResponseBuilder,
@@ -422,6 +427,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_promotion_approval_request_service,
         EvolutionPromotionApprovalRequestService,
+    )
+    assert isinstance(
+        engine.evolution_approval_principal_builder,
+        EvolutionApprovalPrincipalEventBuilder,
+    )
+    assert isinstance(
+        engine.evolution_approval_principal_store,
+        EvolutionApprovalPrincipalStore,
+    )
+    assert isinstance(
+        engine.evolution_approval_principal_service,
+        EvolutionApprovalPrincipalService,
     )
     assert isinstance(
         engine.evolution_validation_planner,
