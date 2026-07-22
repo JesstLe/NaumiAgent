@@ -65,6 +65,11 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptExecutor,
     EvolutionFinalEvaluationReceiptStore,
 )
+from naumi_agent.evolution.mechanical_gates import (
+    EvolutionMechanicalGateBuilder,
+    EvolutionMechanicalGateExecutor,
+    EvolutionMechanicalGateStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
     EvolutionMutationGenerationTraceStore,
@@ -353,6 +358,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_decision_input_executor,
         EvolutionDecisionInputExecutor,
+    )
+    assert isinstance(
+        engine.evolution_mechanical_gate_builder,
+        EvolutionMechanicalGateBuilder,
+    )
+    assert isinstance(
+        engine.evolution_mechanical_gate_store,
+        EvolutionMechanicalGateStore,
+    )
+    assert isinstance(
+        engine.evolution_mechanical_gate_executor,
+        EvolutionMechanicalGateExecutor,
     )
     assert isinstance(
         engine.evolution_mutation_receipt_service,

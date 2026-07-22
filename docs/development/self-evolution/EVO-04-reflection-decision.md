@@ -17,11 +17,14 @@ constraints 可以在决策时独立重读。EVO-04.1a 现已将它与 Candidate
 authority，交叉验证 workspace、Candidate revision/risk/digest、Mutation files/scope、Experiment
 budget/constraints 与最终评测引用，并持久化不可变 `EvolutionDecisionInput`。它仍明确保持
 `mechanical_gate_decided=false` 和 `candidate_acceptance_decided=false`。
+EVO-04.2a 又从 Decision Input 的签名引用重读完整 Mutation Generation Trace，对 scope、guardrails、
+files/lines/tool calls/duration/attempt 预算和全部评测 failure facts 执行固定 16 条规则，签发不可被 LLM 覆盖的
+`pass/veto` Gate；Gate 仍保持 `candidate_acceptance_decided=false`。
 
 ## 子模块
 
 - EVO-04.1 Decision inputs：candidate、mutation receipt、Eval receipt、risk、user constraints。EVO-04.1a 已完成。
-- EVO-04.2 Mechanical gate：checks、guardrails、scope、budget、integrity 先判。
+- EVO-04.2 Mechanical gate：checks、guardrails、scope、budget、integrity 先判。EVO-04.2a 已完成。
 - EVO-04.3 Independent reviewer：可选不同模型/规则，看到证据但不能改结果。
 - EVO-04.4 Counterfactual：是否有更小改动、改善是否来自删测试/改指标/放宽规则。
 - EVO-04.5 Reward hacking detector：测试删除、阈值放宽、skip、mock 替代、数据泄漏。
@@ -40,15 +43,17 @@ budget/constraints 与最终评测引用，并持久化不可变 `EvolutionDecis
 
 - [EVO-04.1a Decision Input Contract](EVO-04-1a-decision-input-contract.md)：Final Receipt ID 单入口、四 Store
   authority 重读、完整交叉绑定、并发幂等持久化、Slash/Agent Tool 双通道与 fail-closed 篡改检测。
+- [EVO-04.2a Mechanical Gate Contract](EVO-04-2a-mechanical-gate-contract.md)：Mutation Trace 预算补强、固定
+  16 规则、确定性 pass/veto、不可覆盖 veto 与双通道持久化。
 
 EVO-04 整体仍为 partial；Decision Input 完成不代表 mechanical gate、review 或最终决策已交付。
 
 ## 明确未完成
 
-- EVO-04.2 mechanical gate、EVO-04.3 independent reviewer；
+- EVO-04.3 independent reviewer；
 - counterfactual、reward-hacking detector、decision state、reflection memory 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.2a Mechanical Gate Contract：只按 Decision Input authority 的完整性、scope、budget、failure facts
-与 rerun facts 产生确定性 `pass/veto`，仍不引入 LLM reviewer 或最终 accept/reject。
+实现 EVO-04.3a Independent Reviewer Contract：只读取 Gate authority，记录 reviewer/author 隔离、模型、
+provider 与 Prompt digest；`veto` 只能被解释，不能被改写为 `pass`。
