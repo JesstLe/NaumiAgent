@@ -212,6 +212,11 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_requests import (
+    EvolutionRevalidationRequestBuilder,
+    EvolutionRevalidationRequestService,
+    EvolutionRevalidationRequestStore,
+)
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
@@ -1424,6 +1429,18 @@ class AgentEngine:
                 decision_store=self.evolution_promotion_approval_decision_store,
                 builder=self.evolution_promotion_approval_decision_builder,
             )
+        )
+        self.evolution_revalidation_request_builder = (
+            EvolutionRevalidationRequestBuilder()
+        )
+        self.evolution_revalidation_request_store = EvolutionRevalidationRequestStore(
+            config.memory.session_db_path
+        )
+        self.evolution_revalidation_request_service = EvolutionRevalidationRequestService(
+            decision_service=self.evolution_promotion_approval_decision_service,
+            package_executor=self.evolution_promotion_package_executor,
+            request_store=self.evolution_revalidation_request_store,
+            builder=self.evolution_revalidation_request_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

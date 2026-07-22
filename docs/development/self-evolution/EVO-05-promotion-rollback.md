@@ -25,7 +25,9 @@
   撤销、旧 generation、过期与跨域重放。
 - [EVO-05.2d Approval Decision Aggregation](EVO-05-2d-approval-decision-aggregation.md)：已交付；重读全部
   角色、身份、签名与技术门，形成 append-only、可动态失效、非 Git 执行型决定。
-- EVO-05.3 Rebase/revalidate：目标 main 变化后重放 patch 并重新验证，旧结果失效。
+- [EVO-05.3a Revalidation Request Authority](EVO-05-3a-revalidation-request-authority.md)：已交付；只把 current
+  approved Decision 与 exact Package 冻结为可动态失效、非执行型隔离请求。
+- EVO-05.3b-05.3d Rebase/revalidate executor/outcome：目标 main 变化后隔离重放 patch、重新验证并使旧结果失效。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -42,7 +44,7 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b 与 EVO-05.2a-2d。已有经用户确认的 Principal/role/public-key authority、真实外部
-Ed25519 Challenge/Signature Receipt，以及 append-only Approval Decision；但尚无 rebase/revalidate、rollout、
-monitor、rollback executor 或 Outcome authority。`approved` 只表示可进入未来 EVO-05.3，任何界面和回执都不得
-宣称已 promotion、merge、push 或发布。
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a。已有经用户确认的 Principal/role/public-key authority、
+真实外部 Ed25519 Challenge/Signature Receipt、append-only Approval Decision，以及 deterministic Revalidation
+Request；但尚无 rebase/revalidate executor/outcome、rollout、monitor、rollback executor 或 Outcome authority。
+`ready` request 只表示可进入未来隔离 replay，任何界面和回执都不得宣称已验证、promotion、merge、push 或发布。

@@ -44,6 +44,8 @@ from naumi_agent.tools.evolution_review import (
     EvolutionProposalQueueTool,
     EvolutionReflectionMemoryRevokeTool,
     EvolutionReflectionMemoryTool,
+    EvolutionRevalidationRequestAuthorityTool,
+    EvolutionRevalidationRequestTool,
     EvolutionRewardHackingEvidenceTool,
     create_evolution_review_tools,
 )
@@ -210,6 +212,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_approval_signature",
         "evolution_approval_decision_authority",
         "evolution_promotion_approval_decision",
+        "evolution_revalidation_request_authority",
+        "evolution_revalidation_request",
         "evolution_proposal_queue",
     ]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
@@ -218,6 +222,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_approval_principal_authority",
         "evolution_approval_signature_authority",
         "evolution_approval_decision_authority",
+        "evolution_revalidation_request_authority",
     }
     assert isinstance(tools[1], EvolutionExperimentContractAuthorityTool)
     assert isinstance(tools[2], EvolutionExperimentContractIssueTool)
@@ -243,7 +248,9 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[22], EvolutionApprovalSignatureTool)
     assert isinstance(tools[23], EvolutionApprovalDecisionAuthorityTool)
     assert isinstance(tools[24], EvolutionPromotionApprovalDecisionTool)
-    assert isinstance(tools[25], EvolutionProposalQueueTool)
+    assert isinstance(tools[25], EvolutionRevalidationRequestAuthorityTool)
+    assert isinstance(tools[26], EvolutionRevalidationRequestTool)
+    assert isinstance(tools[27], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

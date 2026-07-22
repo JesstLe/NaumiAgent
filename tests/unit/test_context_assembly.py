@@ -153,6 +153,11 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_requests import (
+    EvolutionRevalidationRequestBuilder,
+    EvolutionRevalidationRequestService,
+    EvolutionRevalidationRequestStore,
+)
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
     EvolutionRewardHackingEvidenceExecutor,
@@ -473,6 +478,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_promotion_approval_decision_service,
         EvolutionPromotionApprovalDecisionService,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_request_builder,
+        EvolutionRevalidationRequestBuilder,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_request_store,
+        EvolutionRevalidationRequestStore,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_request_service,
+        EvolutionRevalidationRequestService,
     )
     assert isinstance(
         engine.evolution_validation_planner,

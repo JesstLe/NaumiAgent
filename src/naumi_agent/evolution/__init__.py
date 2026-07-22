@@ -415,6 +415,16 @@ if TYPE_CHECKING:
         EvolutionReflectionSignal,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_requests import (
+        EVOLUTION_REVALIDATION_REQUEST_POLICY,
+        EvolutionRevalidationRequest,
+        EvolutionRevalidationRequestBuilder,
+        EvolutionRevalidationRequestError,
+        EvolutionRevalidationRequestService,
+        EvolutionRevalidationRequestStore,
+        EvolutionRevalidationRequestView,
+        render_evolution_revalidation_request,
+    )
     from naumi_agent.evolution.reward_hacking_evidence import (
         EvolutionRewardHackingEvidence,
         EvolutionRewardHackingEvidenceBuilder,
@@ -510,6 +520,14 @@ __all__ = [
     "EvolutionPromotionTechnicalGateDecision",
     "EvolutionPromotionTechnicalGateState",
     "render_evolution_promotion_approval_decision",
+    "EVOLUTION_REVALIDATION_REQUEST_POLICY",
+    "EvolutionRevalidationRequest",
+    "EvolutionRevalidationRequestBuilder",
+    "EvolutionRevalidationRequestError",
+    "EvolutionRevalidationRequestService",
+    "EvolutionRevalidationRequestStore",
+    "EvolutionRevalidationRequestView",
+    "render_evolution_revalidation_request",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -920,6 +938,16 @@ def __getattr__(name: str) -> object:
         "EvolutionPromotionApprovalStep",
         "EvolutionPromotionTechnicalGate",
         "render_evolution_promotion_approval_requirement",
+    }
+    revalidation_request_exports = {
+        "EVOLUTION_REVALIDATION_REQUEST_POLICY",
+        "EvolutionRevalidationRequest",
+        "EvolutionRevalidationRequestBuilder",
+        "EvolutionRevalidationRequestError",
+        "EvolutionRevalidationRequestService",
+        "EvolutionRevalidationRequestStore",
+        "EvolutionRevalidationRequestView",
+        "render_evolution_revalidation_request",
     }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
@@ -1385,6 +1413,8 @@ def __getattr__(name: str) -> object:
     }
     if name in approval_decision_exports:
         module_name = "approval_decisions"
+    elif name in revalidation_request_exports:
+        module_name = "revalidation_requests"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
