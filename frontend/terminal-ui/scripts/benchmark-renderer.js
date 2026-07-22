@@ -17,7 +17,7 @@ export function runRendererBenchmark(options = {}) {
   const profile = PROFILES[profileName];
   if (!profile) throw new Error(`未知 benchmark profile: ${profileName}`);
   const fixture = {
-    generator: "terminal-ui-mixed-cjk-v1",
+    generator: "terminal-ui-mixed-cjk-v2-paged-output",
     messages: boundedInteger(options.messages, profile.messages, 1, 20_000),
     tools: boundedInteger(options.tools, profile.tools, 0, 5_000),
     log_chars: boundedInteger(options.logChars, profile.logChars, 0, 20_000_000),
@@ -29,7 +29,7 @@ export function runRendererBenchmark(options = {}) {
   const scenarios = [
     benchmarkScenario("tail", fixture, iterations, warmup, 0),
     benchmarkScenario("deep_scroll", fixture, iterations, warmup, Math.max(1, fixture.messages * 2)),
-    benchmarkScenario("large_output", fixture, iterations, warmup, 0, true),
+    benchmarkScenario("paged_output", fixture, iterations, warmup, 0, true),
   ];
   return {
     schema: "naumi.renderer-benchmark.v1",
@@ -101,6 +101,9 @@ export function createBenchmarkState(fixture, { scrollOffset = 0, includeLargeOu
     });
   }
   if (includeLargeOutput && fixture.log_chars > 0) {
+    const preview = "日志行 abcdefghijklmnopqrstuvwxyz\n"
+      .repeat(Math.ceil(Math.min(fixture.log_chars, 2_000) / 31))
+      .slice(0, Math.min(fixture.log_chars, 2_000));
     state.messages.push({
       kind: "tool",
       id: "large-output",
@@ -108,7 +111,13 @@ export function createBenchmarkState(fixture, { scrollOffset = 0, includeLargeOu
       name: "bash_run",
       status: "success",
       primary: "large benchmark log",
-      output: "日志行 abcdefghijklmnopqrstuvwxyz\n".repeat(Math.ceil(fixture.log_chars / 31)).slice(0, fixture.log_chars),
+      output: preview,
+      outputLength: fixture.log_chars,
+      outputBytes: fixture.log_chars,
+      outputArtifactId: `out_${"a".repeat(32)}`,
+      outputPageCount: Math.max(1, Math.ceil(fixture.log_chars / 8_192)),
+      outputPageChars: 8_192,
+      outputSha256: "b".repeat(64),
     });
   }
   return state;

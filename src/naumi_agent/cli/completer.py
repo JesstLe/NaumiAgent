@@ -61,6 +61,7 @@ def _build_commands() -> list[CommandMeta]:
         CommandMeta("/feedback", "记录隐私安全的纠正或缺陷候选", takes_arg=True, arg_hint="<correction|defect|preference|cancel|praise> <scope> <topic> <摘要>", readonly=False, category="基础"),
         CommandMeta("/evolution", "审查 Candidate、签发单 Lane 回执或加入 Workbench 队列", takes_arg=True, arg_hint="[list|detail|evaluation|enqueue]", readonly=False, category="基础"),
         CommandMeta("/copy", "复制/导出完整记录、最近一轮或最近错误", takes_arg=True, arg_hint="<all|last|error>", readonly=True, category="基础"),
+        CommandMeta("/tool-output", "分页查看已归档的完整工具输出", takes_arg=True, arg_hint="<artifact-id> [page]", readonly=True, category="基础"),
         CommandMeta("/debug", "显示本次结构化调试日志位置", category="基础"),
         CommandMeta("/debug-replay", "回放 debug-runs 结构化事件", takes_arg=True, arg_hint="<路径>", readonly=True, category="基础"),
         CommandMeta("/diff", "查看本轮结构化 git diff", takes_arg=True, arg_hint="[all|worktree|staged]", readonly=True, category="基础"),

@@ -20,7 +20,7 @@ test("current renderer benchmark emits comparable bounded scenario metrics", () 
   assert.deepEqual(result.scenarios.map((item) => item.name), [
     "tail",
     "deep_scroll",
-    "large_output",
+    "paged_output",
   ]);
   for (const scenario of result.scenarios) {
     assert.equal(scenario.iterations, 3);

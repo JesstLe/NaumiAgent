@@ -504,7 +504,8 @@ class EngineEventAdapter:
         self, event: str, data: dict[str, Any]
     ) -> ToolResultMessage:
         raw_content = data.get("content", "")
-        preview, length = _content_preview(raw_content)
+        preview, preview_length = _content_preview(raw_content)
+        length = max(preview_length, _safe_int(data.get("content_length")))
         preview_format, preview_language = _detect_preview_format(
             _safe_str(data.get("name")),
             preview,
@@ -517,9 +518,14 @@ class EngineEventAdapter:
             duration_ms=_safe_int(data.get("duration_ms")),
             content_preview=preview,
             content_length=length,
+            content_bytes=max(length, _safe_int(data.get("content_bytes"))),
             preview_format=preview_format,
             preview_language=preview_language,
             content_truncated=length > len(preview),
+            output_artifact_id=_safe_str(data.get("output_artifact_id")),
+            output_page_count=_safe_int(data.get("output_page_count")),
+            output_page_chars=_safe_int(data.get("output_page_chars")),
+            output_sha256=_safe_str(data.get("output_sha256")),
             raw_event=event,
             raw_data=None,
         )

@@ -80,6 +80,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/edit", description: "按文本替换更新文件", aliases: ["/file_edit"] },
   { command: "/clear", aliases: ["/c"], description: "清空当前会话显示" },
   { command: "/debug", description: "显示前端与后端调试路径" },
+  { command: "/tool-output", description: "分页查看已归档的完整工具输出" },
   { command: "/pwd", description: "显示工作区与会话库路径" },
   { command: "/tools", description: "列出可用工具" },
   { command: "/model", aliases: ["/m"], description: "查看当前模型配置" },
@@ -2557,8 +2558,13 @@ export function handleToolResult(state, message) {
   target.durationMs = message.duration_ms;
   target.output = message.content_preview ?? "";
   target.outputLength = message.content_length ?? 0;
+  target.outputBytes = message.content_bytes ?? 0;
   target.outputFormat = message.preview_format ?? "text";
   target.outputLanguage = message.preview_language ?? "";
+  target.outputArtifactId = message.output_artifact_id ?? "";
+  target.outputPageCount = message.output_page_count ?? 0;
+  target.outputPageChars = message.output_page_chars ?? 0;
+  target.outputSha256 = message.output_sha256 ?? "";
 }
 
 export function handleTodoStatus(state, message) {

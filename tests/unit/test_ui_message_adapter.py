@@ -285,6 +285,26 @@ class TestToolLifecycle:
         assert msg.content_length == len(big_content)
         assert msg.content_truncated
 
+    def test_tool_end_preserves_paged_output_reference(self, adapter: EngineEventAdapter) -> None:
+        msg = adapter.adapt("tool_end", {
+            "name": "bash_run",
+            "status": "success",
+            "content": "preview",
+            "content_length": 10_000,
+            "content_bytes": 12_000,
+            "output_artifact_id": "out_" + "a" * 32,
+            "output_page_count": 2,
+            "output_page_chars": 8192,
+            "output_sha256": "b" * 64,
+        })
+
+        assert isinstance(msg, ToolResultMessage)
+        assert msg.content_length == 10_000
+        assert msg.content_bytes == 12_000
+        assert msg.content_truncated
+        assert msg.output_artifact_id == "out_" + "a" * 32
+        assert msg.output_page_count == 2
+
     def test_tool_end_detects_fenced_code_preview(
         self,
         adapter: EngineEventAdapter,

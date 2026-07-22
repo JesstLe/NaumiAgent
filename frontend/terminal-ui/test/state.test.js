@@ -1366,6 +1366,42 @@ test("tool result stores preview highlight metadata", () => {
   assert.equal(state.tools[0].outputLanguage, "python");
 });
 
+test("tool result stores bounded paging reference without full output", () => {
+  const state = createInitialState();
+  state.welcome.dismissed = true;
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: { type: "tool_use", tool_call_id: "call-page", tool_name: "bash_run" },
+  });
+  reduceServerEvent(state, {
+    type: "ui/message",
+    payload: {
+      type: "tool_result",
+      tool_call_id: "call-page",
+      tool_name: "bash_run",
+      status: "success",
+      content_preview: "preview only",
+      content_length: 10000,
+      content_bytes: 12000,
+      output_artifact_id: `out_${"a".repeat(32)}`,
+      output_page_count: 2,
+      output_page_chars: 8192,
+      output_sha256: "b".repeat(64),
+    },
+  });
+
+  const tool = state.tools[0];
+  assert.equal(tool.output, "preview only");
+  assert.equal(tool.outputLength, 10000);
+  assert.equal(tool.outputBytes, 12000);
+  assert.equal(tool.outputArtifactId, `out_${"a".repeat(32)}`);
+  assert.equal(tool.outputPageCount, 2);
+  const screen = stripAnsi(renderScreen(state, 120, 30).join("\n"));
+  assert(screen.includes("/tool-output"));
+  assert(screen.includes(tool.outputArtifactId));
+  assert(!screen.includes("a".repeat(1000)));
+});
+
 test("tool prepare creates a durable activity message before tool cards", () => {
   const state = createInitialState();
 

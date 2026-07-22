@@ -40,5 +40,11 @@ export function renderToolCard(tool, width, ctx = { width }) {
   if (tool.outputLength > (tool.output?.length ?? 0)) {
     children.push(line(color(ANSI.dim, `... 已截断，完整输出 ${tool.outputLength} 字符`)));
   }
+  if (tool.outputArtifactId) {
+    children.push(line(color(
+      ANSI.cyan,
+      `完整输出 · /tool-output ${tool.outputArtifactId} 1 · 共 ${Number(tool.outputPageCount) || 1} 页`,
+    )));
+  }
   return renderComponent(boxComponent("tool", children), ctx);
 }
