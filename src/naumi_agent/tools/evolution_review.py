@@ -46,6 +46,10 @@ from naumi_agent.evolution.review import (
     EvolutionReviewService,
     render_evolution_review,
 )
+from naumi_agent.evolution.reward_hacking_evidence import (
+    EvolutionRewardHackingEvidenceError,
+    render_reward_hacking_evidence,
+)
 from naumi_agent.evolution.store import EvolutionStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -753,6 +757,68 @@ class EvolutionCounterfactualEvidenceTool(Tool):
         return render_counterfactual_evidence(artifact)
 
 
+class EvolutionRewardHackingEvidenceTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_reward_hacking_evidence"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅凭 Counterfactual Evidence ID，从 durable Store 重读 Counterfactual、"
+            "Final Evaluation、全部 Lane 与 Adversarial Cohort authority，确定性检查"
+            "真实任务退化、proxy divergence、平台选择性以及 duration/token/cost 资源"
+            "换分。证据缺失返回 inconclusive；不调用 LLM，不接受 Candidate。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "counterfactual_evidence_id": {
+                    "type": "string",
+                    "pattern": "^evcounter_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["counterfactual_evidence_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 奖励投机证据",
+            search_hint=(
+                "evolution reward hacking proxy gaming task degradation platform "
+                "selectivity resource inflation 自进化 奖励投机 资源换分"
+            ),
+        )
+
+    async def execute(self, counterfactual_evidence_id: str) -> str:
+        try:
+            artifact = await (
+                self._engine.evolution_reward_hacking_evidence_executor.execute(
+                    workspace_root=self._engine.workspace_root,
+                    counterfactual_evidence_id=counterfactual_evidence_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionRewardHackingEvidenceError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Reward-hacking Evidence 未完成：{exc}"
+        return render_reward_hacking_evidence(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -768,6 +834,7 @@ def create_evolution_review_tools(
         EvolutionMechanicalGateTool(engine),
         EvolutionIndependentReviewTool(engine),
         EvolutionCounterfactualEvidenceTool(engine),
+        EvolutionRewardHackingEvidenceTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -784,5 +851,6 @@ __all__ = [
     "EvolutionIndependentReviewTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
+    "EvolutionRewardHackingEvidenceTool",
     "create_evolution_review_tools",
 ]

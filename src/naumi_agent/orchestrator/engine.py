@@ -161,6 +161,11 @@ from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
+from naumi_agent.evolution.reward_hacking_evidence import (
+    EvolutionRewardHackingEvidenceBuilder,
+    EvolutionRewardHackingEvidenceExecutor,
+    EvolutionRewardHackingEvidenceStore,
+)
 from naumi_agent.evolution.self_review_comparison import (
     EvolutionSelfReviewComparisonExecutor,
 )
@@ -1202,6 +1207,22 @@ class AgentEngine:
                 evidence_store=self.evolution_counterfactual_evidence_store,
                 worktree_storage_dir=self._worktree_storage_dir,
                 builder=self.evolution_counterfactual_evidence_builder,
+            )
+        )
+        self.evolution_reward_hacking_evidence_builder = (
+            EvolutionRewardHackingEvidenceBuilder()
+        )
+        self.evolution_reward_hacking_evidence_store = (
+            EvolutionRewardHackingEvidenceStore(config.memory.session_db_path)
+        )
+        self.evolution_reward_hacking_evidence_executor = (
+            EvolutionRewardHackingEvidenceExecutor(
+                counterfactual_store=self.evolution_counterfactual_evidence_store,
+                final_store=self.evolution_final_evaluation_receipt_store,
+                lane_store=self.evolution_evaluation_lane_receipt_store,
+                cohort_store=self.evolution_adversarial_cohort_receipt_store,
+                evidence_store=self.evolution_reward_hacking_evidence_store,
+                builder=self.evolution_reward_hacking_evidence_builder,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

@@ -97,6 +97,15 @@ from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationTraceStore,
 )
 from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceiptStore
+from naumi_agent.evolution.reward_hacking_evidence import (
+    EvolutionRewardHackingEvidence,
+    EvolutionRewardHackingEvidenceError,
+    EvolutionRewardHackingEvidenceExecutor,
+    EvolutionRewardHackingEvidenceStore,
+    RewardHackingCheckStatus,
+    RewardHackingRequiredAction,
+    render_reward_hacking_evidence,
+)
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.eval_identity import (
     HarnessEvalConfigurationIdentity,
@@ -130,6 +139,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionRewardHackingEvidenceTool,
 )
 from tests.unit.test_evolution_experiment_leases import (
     _adversarial_probe_fixture,
@@ -997,6 +1007,67 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert counterfactual.evidence_id in slash_output
     assert "不接受 Candidate" in slash_output
 
+    reward_store = EvolutionRewardHackingEvidenceStore(tmp_path / "reward.db")
+    reward_executor = EvolutionRewardHackingEvidenceExecutor(
+        counterfactual_store=counterfactual_store,
+        final_store=final_store,
+        lane_store=lane_store,
+        cohort_store=cohort_store,
+        evidence_store=reward_store,
+    )
+    rewards = await asyncio.gather(*(
+        reward_executor.execute(
+            workspace_root=workspace,
+            counterfactual_evidence_id=counterfactual.evidence_id,
+        )
+        for _ in range(4)
+    ))
+    reward = rewards[0]
+    assert all(item == reward for item in rewards)
+    assert reward.evidence_id == f"evreward_{reward.evidence_sha256[:24]}"
+    assert reward.counterfactual == counterfactual
+    assert reward.outcome == "inconclusive"
+    assert reward.findings == ()
+    assert reward.full_platform_selectivity_assessed is False
+    assert reward.full_resource_tradeoff_assessed is False
+    assert any(
+        check.status is RewardHackingCheckStatus.UNASSESSABLE
+        for check in reward.checks
+    )
+    assert reward.required_actions == (
+        RewardHackingRequiredAction.COLLECT_MISSING_EVIDENCE,
+        RewardHackingRequiredAction.CONTINUE_TO_DECISION_STATE,
+    )
+    assert reward.llm_used is False
+    assert reward.candidate_acceptance_decided is False
+    assert reward.decision_state_input_ready is True
+    assert reward.promotion_ready is False
+    assert await reward_store.get(reward.evidence_id) == reward
+    assert (
+        await reward_store.get_by_counterfactual(counterfactual.evidence_id)
+        == reward
+    )
+
+    reward_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_reward_hacking_evidence_executor=reward_executor,
+    )
+    tool_output = await EvolutionRewardHackingEvidenceTool(reward_engine).execute(
+        counterfactual.evidence_id
+    )
+    slash_output = await execute_slash_command(
+        reward_engine,
+        f"/evolution reward-hacking {counterfactual.evidence_id}",
+    )
+    assert tool_output == render_reward_hacking_evidence(reward)
+    assert reward.evidence_id in slash_output
+    assert "不接受 Candidate" in slash_output
+
+    tampered_reward = reward.model_dump(mode="json")
+    tampered_reward["candidate_acceptance_decided"] = True
+    with pytest.raises(ValueError):
+        EvolutionRewardHackingEvidence.model_validate(tampered_reward)
+
     tampered_counterfactual = counterfactual.model_dump(mode="json")
     tampered_counterfactual["candidate_acceptance_decided"] = True
     with pytest.raises(ValueError):
@@ -1165,6 +1236,63 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
             decision_input_id=decision.decision_input_id,
         )
     assert gate_wrong_workspace.value.code == "mechanical_gate_workspace_mismatch"
+
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as reward_wrong_workspace:
+        await reward_executor.execute(
+            workspace_root=other_workspace,
+            counterfactual_evidence_id=counterfactual.evidence_id,
+        )
+    assert reward_wrong_workspace.value.code == "reward_hacking_workspace_mismatch"
+
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as reward_missing:
+        await reward_executor.execute(
+            workspace_root=workspace,
+            counterfactual_evidence_id=f"evcounter_{'0' * 24}",
+        )
+    assert reward_missing.value.code == "reward_hacking_counterfactual_missing"
+
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as reward_invalid_id:
+        await reward_executor.execute(
+            workspace_root=workspace,
+            counterfactual_evidence_id="bad\nidentifier",
+        )
+    assert reward_invalid_id.value.code == "reward_hacking_counterfactual_id_invalid"
+
+    missing_reward_lane_executor = EvolutionRewardHackingEvidenceExecutor(
+        counterfactual_store=counterfactual_store,
+        final_store=final_store,
+        lane_store=EvolutionEvaluationLaneReceiptStore(
+            tmp_path / "missing-reward-lanes.db"
+        ),
+        cohort_store=cohort_store,
+        evidence_store=EvolutionRewardHackingEvidenceStore(
+            tmp_path / "missing-reward-evidence.db"
+        ),
+    )
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as reward_lane_missing:
+        await missing_reward_lane_executor.execute(
+            workspace_root=workspace,
+            counterfactual_evidence_id=counterfactual.evidence_id,
+        )
+    assert reward_lane_missing.value.code == "reward_hacking_lane_mismatch"
+
+    missing_reward_cohort_executor = EvolutionRewardHackingEvidenceExecutor(
+        counterfactual_store=counterfactual_store,
+        final_store=final_store,
+        lane_store=lane_store,
+        cohort_store=EvolutionAdversarialCohortReceiptStore(
+            tmp_path / "missing-reward-cohorts.db"
+        ),
+        evidence_store=EvolutionRewardHackingEvidenceStore(
+            tmp_path / "missing-reward-cohort-evidence.db"
+        ),
+    )
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as reward_cohort_missing:
+        await missing_reward_cohort_executor.execute(
+            workspace_root=workspace,
+            counterfactual_evidence_id=counterfactual.evidence_id,
+        )
+    assert reward_cohort_missing.value.code == "reward_hacking_cohort_mismatch"
 
     tampered_gate = gate.model_dump(mode="json")
     tampered_gate["llm_override_allowed"] = True
@@ -1432,6 +1560,17 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionCounterfactualEvidenceError) as corrupt_counterfactual:
         await counterfactual_store.get(counterfactual.evidence_id)
     assert corrupt_counterfactual.value.code == "counterfactual_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "reward.db") as db:
+        db.execute(
+            "UPDATE evolution_reward_hacking_evidence SET outcome = ? "
+            "WHERE evidence_id = ?",
+            ("clear", reward.evidence_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionRewardHackingEvidenceError) as corrupt_reward:
+        await reward_store.get(reward.evidence_id)
+    assert corrupt_reward.value.code == "reward_hacking_store_corrupt"
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
         db.execute(

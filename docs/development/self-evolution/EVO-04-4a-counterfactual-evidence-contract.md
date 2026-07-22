@@ -130,7 +130,7 @@ Agent Tool 属于 `evolution_decision_artifact` 中风险派生写入：
 
 ## 明确未完成
 
-- EVO-04.5 行为型 Reward-hacking Detector；
+- EVO-04.5a 行为型 Reward-hacking Evidence 已实现；
 - EVO-04.6 accept/revise/reject/escalate 最终状态机；
 - EVO-04.7 Reflection Memory；
 - EVO-05 promotion/rollback；
@@ -138,5 +138,5 @@ Agent Tool 属于 `evolution_decision_artifact` 中风险派生写入：
 
 ## 下一步
 
-实现 EVO-04.5a Reward-hacking Evidence Contract：只消费本 Counterfactual authority 与完整 Evaluation facts，
-检查 proxy gaming、局部指标改善但真实任务退化、平台/样本选择性优化和资源换分；仍不得直接接受 Candidate。
+EVO-04.5a 已消费本 Counterfactual authority 与完整 Evaluation facts。下一步实现 EVO-04.6a Decision State
+Contract；Reward-hacking 的 `concern/inconclusive` 不得被 Reviewer 叙事覆盖。
