@@ -67,8 +67,8 @@ Migration、Rollback 与 Approval Input 的 exact digest。它不选择签名算
 - Store 索引篡改被检测；公共 lazy export、Engine composition、Tool/Slash、权限和 New UI 透传有聚焦测试；
 - Ruff、py_compile 与小模块测试通过，不运行全量测试。
 
-## 下一最小依赖
+## 后续依赖
 
-EVO-05.2a Approval Requirement Policy：只从 still-current Package 计算所需角色、签名门、protected-scope 人工门和
-expiry；先形成不可执行 requirement authority，不直接实现 merge/push。EVO-05.3 才负责 rebase/revalidate，
-HAR-09.6 仍等待真实 promotion/rollback Outcome authority。
+EVO-05.2a 已从 still-current Package 冻结角色、签名门、protected-scope 人工门和 expiry。下一最小依赖是
+EVO-05.2b Approval Request Authority；EVO-05.3 才负责 rebase/revalidate，HAR-09.6 仍等待真实
+promotion/rollback Outcome authority。

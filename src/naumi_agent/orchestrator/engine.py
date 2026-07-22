@@ -63,6 +63,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.approval_requirements import (
+    EvolutionPromotionApprovalRequirementBuilder,
+    EvolutionPromotionApprovalRequirementExecutor,
+    EvolutionPromotionApprovalRequirementStore,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceBuilder,
     EvolutionCounterfactualEvidenceExecutor,
@@ -1315,6 +1320,22 @@ class AgentEngine:
             package_store=self.evolution_promotion_package_store,
             builder=self.evolution_promotion_package_builder,
             target_probe=self.evolution_promotion_target_probe,
+        )
+        self.evolution_promotion_approval_requirement_builder = (
+            EvolutionPromotionApprovalRequirementBuilder()
+        )
+        self.evolution_promotion_approval_requirement_store = (
+            EvolutionPromotionApprovalRequirementStore(
+                config.memory.session_db_path,
+                target_probe=self.evolution_promotion_target_probe,
+            )
+        )
+        self.evolution_promotion_approval_requirement_executor = (
+            EvolutionPromotionApprovalRequirementExecutor(
+                package_executor=self.evolution_promotion_package_executor,
+                requirement_store=self.evolution_promotion_approval_requirement_store,
+                builder=self.evolution_promotion_approval_requirement_builder,
+            )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

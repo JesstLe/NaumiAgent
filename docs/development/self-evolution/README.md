@@ -53,5 +53,7 @@ rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligib
 
 [EVO-05.1b](EVO-05-1b-promotion-package-contract.md) 已交付完整审查 Package：绑定 exact local target
 branch、审批事实和 domain-separated signable digest；target 移动或 Reflection 撤销都会动态失效。下一最小依赖是
-EVO-05.2a Approval Requirement Policy；当前仍无审批决定、签名收集、Git 写入、merge、push、publish 或
-promotion executor。
+[EVO-05.2a](EVO-05-2a-approval-requirement-policy.md) 已交付 Approval Requirement：按 risk、protected
+target/scope、migration 和 data backup 冻结 human roles、signature gates、technical gates 与 expiry。目标移动、
+到期或 Reflection 撤销都会 fail closed。下一最小依赖是 EVO-05.2b；当前仍无审批决定、签名收集、Git 写入、
+merge、push、publish 或 promotion executor。

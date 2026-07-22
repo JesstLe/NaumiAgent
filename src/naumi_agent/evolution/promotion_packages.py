@@ -1001,6 +1001,58 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
     )
 
 
+async def _require_active_promotion_package(
+    db: aiosqlite.Connection,
+    package: EvolutionPromotionPackage,
+) -> EvolutionPromotionPackageInput:
+    """Validate exact Package and its active Input inside a caller transaction."""
+    row = await (
+        await db.execute(
+            "SELECT * FROM evolution_promotion_packages WHERE package_id = ?",
+            (package.package_id,),
+        )
+    ).fetchone()
+    if row is None:
+        raise EvolutionPromotionPackageError(
+            "promotion_package_missing",
+            "Promotion Package authority 不存在。",
+        )
+    stored = _from_row(row)
+    if stored != package:
+        raise EvolutionPromotionPackageError(
+            "promotion_package_conflict",
+            "Promotion Package authority 已变化。",
+        )
+    input_row = await (
+        await db.execute(
+            "SELECT input_json FROM evolution_promotion_package_inputs "
+            "WHERE input_id = ?",
+            (stored.promotion_input_id,),
+        )
+    ).fetchone()
+    if input_row is None:
+        raise EvolutionPromotionPackageError(
+            "promotion_package_input_missing",
+            "Promotion Package Input authority 不存在。",
+        )
+    try:
+        source = EvolutionPromotionPackageInput.model_validate_json(
+            str(input_row["input_json"])
+        )
+        await _require_active_promotion_input(db, source)
+    except (EvolutionPromotionPackageInputError, TypeError, ValueError) as exc:
+        raise EvolutionPromotionPackageError(
+            "promotion_package_input_ineligible",
+            "Promotion Package Input 已失效或损坏。",
+        ) from exc
+    if not _package_matches_input(stored, source):
+        raise EvolutionPromotionPackageError(
+            "promotion_package_input_mismatch",
+            "Promotion Package 未绑定 exact active Input。",
+        )
+    return source
+
+
 def _from_row(row: aiosqlite.Row) -> EvolutionPromotionPackage:
     encoded = str(row["package_json"])
     if len(encoded.encode("utf-8")) > _MAX_PACKAGE_BYTES:

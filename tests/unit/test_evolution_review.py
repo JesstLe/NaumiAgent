@@ -31,6 +31,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionPromotionApprovalRequirementTool,
     EvolutionPromotionPackageInputTool,
     EvolutionPromotionPackageTool,
     EvolutionProposalQueueTool,
@@ -194,11 +195,13 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_revoke_reflection_memory",
         "evolution_promotion_package_input",
         "evolution_promotion_package",
+        "evolution_promotion_approval_requirement",
         "evolution_proposal_queue",
     ]
     assert [tool.metadata.read_only for tool in tools] == [
         True,
         True,
+        False,
         False,
         False,
         False,
@@ -232,7 +235,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[14], EvolutionReflectionMemoryRevokeTool)
     assert isinstance(tools[15], EvolutionPromotionPackageInputTool)
     assert isinstance(tools[16], EvolutionPromotionPackageTool)
-    assert isinstance(tools[17], EvolutionProposalQueueTool)
+    assert isinstance(tools[17], EvolutionPromotionApprovalRequirementTool)
+    assert isinstance(tools[18], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:
@@ -244,6 +248,9 @@ class _FakeEngine:
         self.evolution_proposal_queue = _FakeQueue()
         self.evolution_promotion_package_input_executor = _FakePromotionInputExecutor()
         self.evolution_promotion_package_executor = _FakePromotionPackageExecutor()
+        self.evolution_promotion_approval_requirement_executor = (
+            _FakeApprovalRequirementExecutor()
+        )
 
 
 class _FakeQueue:
@@ -276,6 +283,15 @@ class _FakePromotionInputExecutor:
 
 
 class _FakePromotionPackageExecutor:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def execute(self, **kwargs):
+        self.calls.append(kwargs)
+        return object()
+
+
+class _FakeApprovalRequirementExecutor:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -428,4 +444,39 @@ async def test_tool_and_slash_share_promotion_package_executor(
             "promotion_input_id": input_id,
             "target_branch": "release/1.0",
         },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_and_slash_share_approval_requirement_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = EvolutionReviewService(EvolutionCandidateStore(tmp_path / "evolution.db"))
+    engine = _FakeEngine(tmp_path, service)
+    package_id = f"evpromopkg_{'c' * 24}"
+    monkeypatch.setattr(
+        "naumi_agent.evolution.approval_requirements."
+        "render_evolution_promotion_approval_requirement",
+        lambda _view: "approval-requirement-rendered",
+    )
+    monkeypatch.setattr(
+        "naumi_agent.tools.evolution_review."
+        "render_evolution_promotion_approval_requirement",
+        lambda _view: "approval-requirement-rendered",
+    )
+
+    tool_result = await EvolutionPromotionApprovalRequirementTool(engine).execute(
+        package_id=package_id
+    )
+    slash_result = await execute_slash_command(
+        engine,
+        f"/evolution approval-requirement {package_id}",
+    )
+
+    assert tool_result == "approval-requirement-rendered"
+    assert "approval-requirement-rendered" in slash_result
+    assert engine.evolution_promotion_approval_requirement_executor.calls == [
+        {"workspace_root": tmp_path, "package_id": package_id},
+        {"workspace_root": tmp_path, "package_id": package_id},
     ]
