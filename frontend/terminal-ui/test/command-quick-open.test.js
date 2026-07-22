@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { stripAnsi } from "../src/ansi.js";
 import {
@@ -10,15 +11,22 @@ import {
   getCommandQuickOpenItems,
   moveCommandQuickOpenSelection,
   openCommandQuickOpen,
+  recordRecentCommand,
   searchCommandEntries,
 } from "../src/command-quick-open.js";
 import { renderCommandQuickOpenPage } from "../src/components/command-quick-open-page.js";
 import { renderScreen } from "../src/render.js";
 import {
   createInitialState,
+  handleSubmitText,
   handleInteractionRequest,
   handlePermissionRequest,
 } from "../src/state.js";
+
+const recencyGolden = JSON.parse(readFileSync(new URL(
+  "../../../tests/fixtures/ui14/command-recency-golden.json",
+  import.meta.url,
+), "utf8"));
 
 const COMMANDS = [
   command("/help", { aliases: ["/h"], risk: "read_only", description: "显示帮助" }),
@@ -111,6 +119,43 @@ test("blocking permission or interaction closes command QuickOpen", () => {
   });
   assert.equal(interactionState.commandQuickOpen.open, false);
   assert.equal(interactionState.interaction.requestId, "ask-1");
+});
+
+test("command QuickOpen recent ranking matches shared privacy-safe golden", () => {
+  let recent = [];
+  for (const submission of recencyGolden.submissions) {
+    recent = recordRecentCommand(COMMANDS, recent, submission);
+  }
+  assert.deepEqual(recent, recencyGolden.expected_recent_commands);
+  assert.doesNotMatch(JSON.stringify(recent), /private/);
+  assert.deepEqual(
+    searchCommandEntries(COMMANDS, "", 10, recent)
+      .slice(0, 2).map((item) => item.command),
+    recencyGolden.empty_query_order_prefix,
+  );
+  assert.deepEqual(
+    searchCommandEntries(COMMANDS, recencyGolden.query, 10, recent)
+      .slice(0, 1).map((item) => item.command),
+    recencyGolden.query_order_prefix,
+  );
+});
+
+test("submitted known commands update bounded recency while unknown text does not", () => {
+  const state = createInitialState();
+  state.slashCommands = COMMANDS;
+  handleSubmitText(state, "/h", () => {});
+  handleSubmitText(state, "/write secret", () => {});
+  handleSubmitText(state, "/unknown secret", () => {});
+
+  assert.deepEqual(state.commandQuickOpen.recentCommands, ["/write", "/help"]);
+  openCommandQuickOpen(state);
+  assert.equal(getCommandQuickOpenItems(state)[0].command, "/write");
+  const rendered = stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n"));
+  assert.match(rendered, /\/write.*最近/);
+  assert.throws(
+    () => recordRecentCommand(COMMANDS, [], "/help", 21),
+    /limit/,
+  );
 });
 
 function command(commandName, { aliases = [], risk, description, syntax = "" }) {

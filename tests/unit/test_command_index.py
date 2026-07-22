@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -11,8 +14,20 @@ from naumi_agent.ui.command_index import (
     CommandArgumentSchema,
     TerminalCommandIndexEntry,
     build_terminal_command_index,
+    record_recent_terminal_command,
     search_terminal_commands,
     terminal_command_template,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RECENCY_GOLDEN = json.loads(
+    (
+        PROJECT_ROOT
+        / "tests"
+        / "fixtures"
+        / "ui14"
+        / "command-recency-golden.json"
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -110,3 +125,42 @@ def test_command_search_is_bounded_and_rejects_invalid_limits() -> None:
     assert len(search_terminal_commands(entries, "", limit=3)) == 3
     with pytest.raises(ValueError, match="limit"):
         search_terminal_commands(entries, "", limit=0)
+
+
+def test_recent_commands_match_shared_golden_without_storing_arguments() -> None:
+    entries = build_terminal_command_index("new_ui")
+    recent: tuple[str, ...] = ()
+    for submission in RECENCY_GOLDEN["submissions"]:
+        recent = record_recent_terminal_command(entries, recent, submission)
+
+    assert list(recent) == RECENCY_GOLDEN["expected_recent_commands"]
+    assert "private" not in json.dumps(recent)
+    empty_results = search_terminal_commands(
+        entries,
+        "",
+        limit=10,
+        recent_commands=recent,
+    )
+    assert [item.command for item in empty_results[:2]] == (
+        RECENCY_GOLDEN["empty_query_order_prefix"]
+    )
+    query_results = search_terminal_commands(
+        entries,
+        RECENCY_GOLDEN["query"],
+        limit=10,
+        recent_commands=recent,
+    )
+    assert [item.command for item in query_results[:1]] == (
+        RECENCY_GOLDEN["query_order_prefix"]
+    )
+
+
+def test_recent_commands_are_deduplicated_bounded_and_validate_limit() -> None:
+    entries = build_terminal_command_index("new_ui")
+    recent = tuple(item.command for item in entries[:20])
+    updated = record_recent_terminal_command(entries, recent, recent[-1], limit=20)
+
+    assert updated[0] == recent[-1]
+    assert len(updated) == len(set(updated)) == 20
+    with pytest.raises(ValueError, match="limit"):
+        record_recent_terminal_command(entries, (), "/help", limit=21)

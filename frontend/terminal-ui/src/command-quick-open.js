@@ -44,10 +44,20 @@ export function backspaceCommandQuickOpenQuery(state) {
 
 export function getCommandQuickOpenItems(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
-  const ranked = searchCommandEntries(state.slashCommands, quickOpen.query, RESULT_LIMIT);
+  const ranked = searchCommandEntries(
+    state.slashCommands,
+    quickOpen.query,
+    RESULT_LIMIT,
+    quickOpen.recentCommands,
+  );
   const maximum = Math.max(0, ranked.length - 1);
   quickOpen.selectedIndex = Math.min(maximum, Math.max(0, Number(quickOpen.selectedIndex) || 0));
-  return ranked.map((entry, index) => ({ ...entry, selected: index === quickOpen.selectedIndex }));
+  const recent = new Set(quickOpen.recentCommands);
+  return ranked.map((entry, index) => ({
+    ...entry,
+    selected: index === quickOpen.selectedIndex,
+    recent: recent.has(entry.command),
+  }));
 }
 
 export function moveCommandQuickOpenSelection(state, direction) {
@@ -68,16 +78,41 @@ export function acceptCommandQuickOpen(state) {
   return true;
 }
 
-export function searchCommandEntries(entries, query, limit = 50) {
+export function searchCommandEntries(entries, query, limit = 50, recentCommands = []) {
   const boundedLimit = Math.max(1, Math.min(RESULT_LIMIT, Math.trunc(Number(limit) || 50)));
   const term = normalizeSearchText(query).slice(0, QUERY_LIMIT).replace(/^\//, "");
+  const recentRank = new Map(
+    (Array.isArray(recentCommands) ? recentCommands : [])
+      .slice(0, 20)
+      .map((command, index) => [String(command), index]),
+  );
   return (Array.isArray(entries) ? entries : [])
     .map((entry) => ({ entry, score: commandSearchScore(entry, term) }))
     .filter((item) => item.score !== null)
     .sort((left, right) => left.score - right.score
+      || (recentRank.get(left.entry.command) ?? 20) - (recentRank.get(right.entry.command) ?? 20)
       || String(left.entry.command).localeCompare(String(right.entry.command)))
     .slice(0, boundedLimit)
     .map((item) => item.entry);
+}
+
+export function recordRecentCommand(entries, recentCommands, submittedText, limit = 20) {
+  const boundedLimit = Math.trunc(Number(limit));
+  if (!Number.isInteger(boundedLimit) || boundedLimit < 1 || boundedLimit > 20) {
+    throw new Error("最近命令 limit 必须在 1 到 20 之间。");
+  }
+  const [rawToken = ""] = String(submittedText ?? "").trim().split(/\s+/, 1);
+  const token = rawToken.toLocaleLowerCase("und");
+  if (!token.startsWith("/")) return sanitizeRecentCommands(recentCommands, boundedLimit);
+  const entry = (Array.isArray(entries) ? entries : []).find((candidate) => {
+    if (String(candidate?.command || "").toLocaleLowerCase("und") === token) return true;
+    return (Array.isArray(candidate?.aliases) ? candidate.aliases : [])
+      .some((alias) => String(alias).toLocaleLowerCase("und") === token);
+  });
+  if (!entry?.command) return sanitizeRecentCommands(recentCommands, boundedLimit);
+  const canonical = String(entry.command);
+  return [canonical, ...sanitizeRecentCommands(recentCommands, boundedLimit)
+    .filter((command) => command !== canonical)].slice(0, boundedLimit);
 }
 
 function commandSearchScore(entry, term) {
@@ -143,7 +178,19 @@ function ensureCommandQuickOpenState(state) {
       selectedIndex: 0,
       draftText: "",
       draftCursor: 0,
+      recentCommands: [],
     };
   }
+  if (!Array.isArray(state.commandQuickOpen.recentCommands)) {
+    state.commandQuickOpen.recentCommands = [];
+  }
   return state.commandQuickOpen;
+}
+
+function sanitizeRecentCommands(value, limit) {
+  const commands = Array.isArray(value) ? value : [];
+  return [...new Set(commands
+    .map((command) => String(command))
+    .filter((command) => /^\/[A-Za-z0-9_-]{1,64}$/.test(command)))]
+    .slice(0, limit);
 }

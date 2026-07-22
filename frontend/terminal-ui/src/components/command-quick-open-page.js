@@ -30,7 +30,8 @@ export function renderCommandQuickOpenPage(state, width, height) {
       const marker = item.selected ? "›" : " ";
       const category = commandCategoryLabel(item.category);
       const risk = commandRiskLabel(item.permission_risk);
-      const text = `${marker} ${commandTemplate(item)} · ${category} · ${risk} · ${compactText(item.description, 120)}`;
+      const recent = item.recent ? " · 最近" : "";
+      const text = `${marker} ${commandTemplate(item)} · ${category} · ${risk}${recent} · ${compactText(item.description, 120)}`;
       rows.push(color(commandRiskColor(item.permission_risk, item.selected), text));
     }
     const selected = items[selectedIndex];

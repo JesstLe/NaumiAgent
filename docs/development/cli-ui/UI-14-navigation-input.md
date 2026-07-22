@@ -10,8 +10,9 @@
   有界 argument syntax schema 与权限风险，New UI/TUI 均从同一 builder 消费；详见
   `UI-14-1a-authoritative-command-index.md`。
 - UI-14.2 QuickOpen：partial；UI-14.2a 已交付 New UI/TUI 命令 provider、fuzzy/中文元数据搜索、
-  键盘导航、取消保留草稿，以及仅填入不执行的选择合同；最近使用、workspace 文件、会话/任务/Agent provider
-  尚未实现。详见 `UI-14-2a-command-quick-open.md`。
+  键盘导航、取消保留草稿，以及仅填入不执行的选择合同；UI-14.2b 已交付本次启动内、只记录规范命令名的
+  隐私安全最近使用排序。workspace 文件、会话/任务/Agent provider 尚未实现。详见
+  `UI-14-2a-command-quick-open.md` 与 `UI-14-2b-recent-command-ranking.md`。
 - UI-14.3 Input mode：insert/normal/visual，可配置关闭，状态明确可见。
 - UI-14.4 Multiline/history：光标、选择、撤销、搜索、IME、Unicode grapheme。
 - UI-14.5 Key conflict resolver：平台/终端能力、用户 override、冲突诊断。
@@ -27,6 +28,6 @@
 
 ## 当前状态
 
-UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a 已提供两端命令 QuickOpen，但尚未实现
-跨 provider 搜索、最近使用排序、typed argument form、Vim mode、完整 composer grapheme 编辑与键冲突诊断，因此
+UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a-14.2b 已提供两端命令 QuickOpen 和
+本次启动的隐私安全最近使用排序，但尚未实现跨 provider 搜索、跨启动历史、typed argument form、Vim mode、完整 composer grapheme 编辑与键冲突诊断，因此
 UI-14 保持 partial。

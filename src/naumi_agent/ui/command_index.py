@@ -251,18 +251,53 @@ def search_terminal_commands(
     query: str,
     *,
     limit: int = 50,
+    recent_commands: Sequence[str] = (),
 ) -> tuple[TerminalCommandIndexEntry, ...]:
     """Rank bounded command metadata without executing or mutating a command."""
     if limit < 1 or limit > 200:
         raise ValueError("命令搜索 limit 必须在 1 到 200 之间。")
     term = _normalize_search_text(query)[:200].removeprefix("/")
+    recent_rank = {
+        command: index
+        for index, command in enumerate(tuple(recent_commands)[:20])
+    }
     ranked = [
-        (score, entry.command, entry)
+        (score, recent_rank.get(entry.command, 20), entry.command, entry)
         for entry in entries
         if (score := _command_search_score(entry, term)) is not None
     ]
-    ranked.sort(key=lambda item: (item[0], item[1]))
-    return tuple(item[2] for item in ranked[:limit])
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    return tuple(item[3] for item in ranked[:limit])
+
+
+def record_recent_terminal_command(
+    entries: Sequence[TerminalCommandIndexEntry],
+    recent_commands: Sequence[str],
+    submitted_text: str,
+    *,
+    limit: int = 20,
+) -> tuple[str, ...]:
+    """Record one known command name without retaining arguments or user text."""
+    if limit < 1 or limit > 20:
+        raise ValueError("最近命令 limit 必须在 1 到 20 之间。")
+    token = submitted_text.strip().split(maxsplit=1)[0].lower()
+    if not token.startswith("/"):
+        return tuple(recent_commands)[:limit]
+    aliases = {
+        alias.lower(): entry.command
+        for entry in entries
+        for alias in entry.aliases
+    }
+    canonical = next(
+        (entry.command for entry in entries if entry.command.lower() == token),
+        aliases.get(token, ""),
+    )
+    if not canonical:
+        return tuple(recent_commands)[:limit]
+    remaining = tuple(
+        command for command in recent_commands if command != canonical
+    )
+    return (canonical, *remaining)[:limit]
 
 
 def terminal_command_template(entry: TerminalCommandIndexEntry) -> str:
