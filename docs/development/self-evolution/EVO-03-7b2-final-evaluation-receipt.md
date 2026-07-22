@@ -88,8 +88,8 @@ Final receipt 写入 `evolution_final_evaluation_receipts`，以 Aggregation Con
 - 默认 Probe Contract 要求 Linux/macOS/Windows 时，跨平台 dispatcher 仍须实际收集三平台回执；本切片不会
   伪造缺失平台，也不会因当前机器只有一个平台而降低合同覆盖要求。
 - A4 的真实 NaumiAgent 小模块 macOS/Linux 对照尚未完成，因此 EVO-03 整体保持 `partial`。
-- EVO-04.1a Decision Input、4.2a Mechanical Gate 与 4.3a Independent Reviewer 已实现；counterfactual、
-  reward-hacking detector 和最终 decision state 尚未实现。
+- EVO-04.1a Decision Input、4.2a Mechanical Gate、4.3a Independent Reviewer 与 4.4a Counterfactual
+  Evidence 已实现；更深层 reward-hacking detector 和最终 decision state 尚未实现。
 - Final Evaluation Receipt 的专用 New UI/TUI typed 页面与 golden 可在 UI-17 后续切片实现；当前共享 slash
   renderer 已可用，但不冒充专用交互页。
 
@@ -101,6 +101,6 @@ acceptance。详见 `EVO-GOV-01-agent-tool-permission-matrix.md`。
 
 ## 下一步
 
-EVO-04.1a 已实现只读取本回执并从四个 Store 重读 authority 的确定性 Decision Input，4.2a 与 4.3a 已依次补齐
-Mechanical Gate 和 advisory-only Independent Reviewer。下一步实现 EVO-04.4a Counterfactual Review Contract；
-在其完成前不引入 reward-hacking detector 或 promotion。
+EVO-04.1a 至 4.4a 已依次补齐 Decision Input、Mechanical Gate、advisory-only Independent Reviewer 和
+Counterfactual Evidence。下一步实现 EVO-04.5a Reward-Hacking Evidence Contract；在其完成前不引入最终
+decision state 或 promotion。

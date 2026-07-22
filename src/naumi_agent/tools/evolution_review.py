@@ -7,6 +7,10 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.counterfactual_evidence import (
+    EvolutionCounterfactualEvidenceError,
+    render_counterfactual_evidence,
+)
 from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputError,
     render_decision_input,
@@ -687,6 +691,68 @@ class EvolutionIndependentReviewTool(Tool):
         return render_independent_review(review)
 
 
+class EvolutionCounterfactualEvidenceTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_counterfactual_evidence"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅凭 completed Independent Review ID，从 durable Store 重读 Review、Gate、"
+            "Decision Input、Mutation Receipt、Experiment Contract 与 Lease，验证真实"
+            "受管 worktree 的 baseline/candidate 字节和 diff 摘要，并机械寻找更小 scope、"
+            "删测试、修改 metric、放宽阈值、skip/mock 与评测泄漏。"
+            "不调用 LLM，不接受 Candidate，也不批准发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "review_id": {
+                    "type": "string",
+                    "pattern": "^evreview_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["review_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 反事实证据",
+            search_hint=(
+                "evolution counterfactual smaller scope test deletion metric threshold "
+                "skip mock leakage 自进化 反事实 替代解释"
+            ),
+        )
+
+    async def execute(self, review_id: str) -> str:
+        try:
+            artifact = await (
+                self._engine.evolution_counterfactual_evidence_executor.execute(
+                    workspace_root=self._engine.workspace_root,
+                    review_id=review_id.strip(),
+                )
+            )
+        except (
+            EvolutionCounterfactualEvidenceError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Counterfactual Evidence 未完成：{exc}"
+        return render_counterfactual_evidence(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -701,12 +767,14 @@ def create_evolution_review_tools(
         EvolutionDecisionInputTool(engine),
         EvolutionMechanicalGateTool(engine),
         EvolutionIndependentReviewTool(engine),
+        EvolutionCounterfactualEvidenceTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
 
 __all__ = [
     "EvolutionCandidatesTool",
+    "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",
     "EvolutionExperimentContractAuthorityTool",
     "EvolutionExperimentContractIssueTool",

@@ -29,6 +29,13 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
     AdversarialProbeDefinition,
     EvolutionAdversarialProbeRegistry,
 )
+from naumi_agent.evolution.counterfactual_evidence import (
+    EvolutionCounterfactualEvidence,
+    EvolutionCounterfactualEvidenceError,
+    EvolutionCounterfactualEvidenceExecutor,
+    EvolutionCounterfactualEvidenceStore,
+    render_counterfactual_evidence,
+)
 from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInput,
     EvolutionDecisionInputBuilder,
@@ -46,6 +53,7 @@ from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptBuilder,
     EvolutionEvaluationLaneReceiptStore,
 )
+from naumi_agent.evolution.experiment_leases import EvolutionExperimentLeaseStore
 from naumi_agent.evolution.experiments import EvolutionExperimentContractStore
 from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionAuthority,
@@ -117,6 +125,7 @@ from naumi_agent.model.router import (
     TokenUsage,
 )
 from naumi_agent.tools.evolution_review import (
+    EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
@@ -466,7 +475,7 @@ def _cohort(
 async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     tmp_path: Path,
 ) -> None:
-    workspace, experiment, _, plan, probes, _ = await _adversarial_probe_fixture(
+    workspace, experiment, lease, plan, probes, _ = await _adversarial_probe_fixture(
         tmp_path,
         registry=_current_only_registry(),
     )
@@ -928,6 +937,71 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert "不接受 Candidate" in slash_output
     assert len(reviewer_model.calls) == 1
 
+    counterfactual_store = EvolutionCounterfactualEvidenceStore(
+        tmp_path / "counterfactual.db"
+    )
+    counterfactual_executor = EvolutionCounterfactualEvidenceExecutor(
+        review_store=review_store,
+        gate_store=gate_store,
+        decision_store=decision_store,
+        mutation_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+        experiment_store=EvolutionExperimentContractStore(tmp_path / "runtime.db"),
+        lease_store=EvolutionExperimentLeaseStore(tmp_path / "runtime.db"),
+        evidence_store=counterfactual_store,
+        worktree_storage_dir=Path(lease.worktree_path).parent,
+    )
+    counterfactuals = await asyncio.gather(*(
+        counterfactual_executor.execute(
+            workspace_root=workspace,
+            review_id=review.review_id,
+        )
+        for _ in range(4)
+    ))
+    counterfactual = counterfactuals[0]
+    assert all(item == counterfactual for item in counterfactuals)
+    assert counterfactual.evidence_id == (
+        f"evcounter_{counterfactual.evidence_sha256[:24]}"
+    )
+    assert counterfactual.review == review
+    assert counterfactual.outcome == "clear"
+    assert counterfactual.findings == ()
+    assert counterfactual.smaller_scope_found is False
+    assert counterfactual.alternative_explanation_found is False
+    assert counterfactual.mechanical_gate_outcome_preserved is True
+    assert counterfactual.reviewer_advisory_only is True
+    assert counterfactual.llm_used is False
+    assert counterfactual.candidate_acceptance_decided is False
+    assert counterfactual.reward_hacking_review_ready is True
+    assert counterfactual.promotion_ready is False
+    assert all(check.passed for check in counterfactual.checks)
+    assert await counterfactual_store.get(counterfactual.evidence_id) == counterfactual
+    assert (
+        await counterfactual_store.get_by_review(review.review_id) == counterfactual
+    )
+    serialized_counterfactual = counterfactual.model_dump_json()
+    assert lease.worktree_path not in serialized_counterfactual
+    assert "test author prompt" not in serialized_counterfactual
+
+    counterfactual_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_counterfactual_evidence_executor=counterfactual_executor,
+    )
+    tool_output = await EvolutionCounterfactualEvidenceTool(
+        counterfactual_engine
+    ).execute(review.review_id)
+    slash_output = await execute_slash_command(
+        counterfactual_engine,
+        f"/evolution counterfactual {review.review_id}",
+    )
+    assert tool_output == render_counterfactual_evidence(counterfactual)
+    assert counterfactual.evidence_id in slash_output
+    assert "不接受 Candidate" in slash_output
+
+    tampered_counterfactual = counterfactual.model_dump(mode="json")
+    tampered_counterfactual["candidate_acceptance_decided"] = True
+    with pytest.raises(ValueError):
+        EvolutionCounterfactualEvidence.model_validate(tampered_counterfactual)
+
     same_author_model = _ScriptedReviewerModel(
         [],
         canonical_model="author/writer",
@@ -1243,6 +1317,23 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert veto_review.counterfactual_review_ready is False
     assert veto_model.calls == []
     assert "未调用任何 Reviewer 模型" in render_independent_review(veto_review)
+    with pytest.raises(EvolutionCounterfactualEvidenceError) as veto_counterfactual:
+        await EvolutionCounterfactualEvidenceExecutor(
+            review_store=veto_review_store,
+            gate_store=EvolutionMechanicalGateStore(tmp_path / "veto-evolution.db"),
+            decision_store=veto_decision_store,
+            mutation_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+            experiment_store=EvolutionExperimentContractStore(tmp_path / "runtime.db"),
+            lease_store=EvolutionExperimentLeaseStore(tmp_path / "runtime.db"),
+            evidence_store=EvolutionCounterfactualEvidenceStore(
+                tmp_path / "veto-counterfactual.db"
+            ),
+            worktree_storage_dir=Path(lease.worktree_path).parent,
+        ).execute(
+            workspace_root=workspace,
+            review_id=veto_review.review_id,
+        )
+    assert veto_counterfactual.value.code == "counterfactual_review_not_ready"
 
     missing_executor = EvolutionDecisionInputExecutor(
         candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
@@ -1330,6 +1421,17 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionIndependentReviewError) as corrupt_review:
         await review_store.get(review.review_id)
     assert corrupt_review.value.code == "independent_review_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "counterfactual.db") as db:
+        db.execute(
+            "UPDATE evolution_counterfactual_evidence SET outcome = ? "
+            "WHERE evidence_id = ?",
+            ("concern", counterfactual.evidence_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionCounterfactualEvidenceError) as corrupt_counterfactual:
+        await counterfactual_store.get(counterfactual.evidence_id)
+    assert corrupt_counterfactual.value.code == "counterfactual_store_corrupt"
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
         db.execute(

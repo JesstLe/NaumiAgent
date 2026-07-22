@@ -118,6 +118,11 @@ class TestPermissionChecker:
                 "evolution_decision_artifact",
                 20,
             ),
+            (
+                "evolution_counterfactual_evidence",
+                "evolution_decision_artifact",
+                50,
+            ),
         ],
     )
     def test_evolution_derived_artifacts_have_bounded_permission_rules(
