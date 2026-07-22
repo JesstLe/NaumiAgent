@@ -25,3 +25,10 @@ Promotion/Rollback → Feedback`。
 - Phase F：只在隔离 worktree 变异，需要明确 scope/budget。
 - Phase G：Eval 与反思决定，默认不合并。
 - Phase H：能力扩展与推广，必须人工或签名治理策略批准。
+
+## Agent Tool 权限治理
+
+[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.3 的六个 durable
+派生 Tool 建立精确权限规则：中风险、normal 无逐次确认、strict 可用、lockdown 阻断、bypass 全权限，
+并按 Evaluation/Decision family 设置会话上限。以后新增非只读 Evolution Tool 必须与权限规则和注册表门
+同一切片交付。

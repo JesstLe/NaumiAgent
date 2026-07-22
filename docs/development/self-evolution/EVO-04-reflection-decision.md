@@ -26,6 +26,9 @@ router 配置猜测 mutation author。
 EVO-04.3a 现已从 Gate ID 重读上述 authority：mechanical pass 才允许不同 canonical model 执行一次严格
 JSON advisory review，并以 durable single-flight claim 防止并发重复模型调用；mechanical veto 完全不调用
 模型，只形成不可覆盖的 veto explanation。两条路径仍固定 `candidate_acceptance_decided=false`。
+EVO-GOV-01 又为 Decision Input、Mechanical Gate 与 Independent Review 三个非只读 Agent Tool 建立显式
+中风险权限规则和有界会话调用面；bypass 不跳过任何 authority 或 veto。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
 
 ## 子模块
 

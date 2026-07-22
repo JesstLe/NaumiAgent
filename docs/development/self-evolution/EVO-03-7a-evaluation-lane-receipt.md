@@ -50,6 +50,12 @@ Harness 新增的 `get_eval_comparison_receipt_by_id()` 必须同时绑定 canon
 
 Renderer 在首屏明确显示“不是候选最终 Evaluation Receipt”，并展示 before/after、资源 coverage、归因和 authority。
 
+## 权限治理补充
+
+`evolution_evaluation_receipt` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown 阻断、
+normal 无逐次确认、每会话最多 200 次；bypass 全权限但仍不能跳过 receipt authority 校验。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 聚焦验收证据
 
 - 在真实临时 workspace/Harness SQLite 中写入 5 个失败 RED 与 5 个通过 GREEN typed H5a；

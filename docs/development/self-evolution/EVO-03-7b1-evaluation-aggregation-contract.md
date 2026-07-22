@@ -48,6 +48,12 @@ Aggregation Contract 写入现有 Evolution/Session SQLite 路径中的独立表
 用户路径必须位于当前 workspace 内、解析符号链接后仍不可逃逸，且必须是最多 1 MiB 的普通 JSON 文件。
 两条通道复用同一个 Issuer、Builder、Store 和 renderer。
 
+## 权限治理补充
+
+`evolution_evaluation_contract` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown 阻断、
+normal 无逐次确认、每会话最多 50 次；bypass 不会把 coverage contract 变成最终评测或执行权限。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 真实验证
 
 聚焦测试从真实 Harness Profile、Trust、Validation Plan 与 Adversarial Probe Contract 构建 Batch Request，

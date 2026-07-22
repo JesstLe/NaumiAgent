@@ -67,6 +67,12 @@ Gate JSON、digest、workspace、Decision Input ID、outcome 或 created_at 任�
 
 两者调用同一 Executor、Builder、Store 和 renderer。输出明确区分“机械通过/机械否决”和“Candidate 最终决定”。
 
+## 权限治理补充
+
+`evolution_mechanical_gate` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown 阻断、
+normal 无逐次确认、每会话最多 50 次；任何权限模式都不能覆盖 mechanical veto。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 验收证据
 
 - 真实 Candidate→Mutation→Evaluation→Decision Input 链产生 16/16 `pass`；

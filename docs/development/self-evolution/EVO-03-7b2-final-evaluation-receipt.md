@@ -93,6 +93,12 @@ Final receipt 写入 `evolution_final_evaluation_receipts`，以 Aggregation Con
 - Final Evaluation Receipt 的专用 New UI/TUI typed 页面与 golden 可在 UI-17 后续切片实现；当前共享 slash
   renderer 已可用，但不冒充专用交互页。
 
+## 权限治理补充
+
+`evolution_final_evaluation_receipt` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown
+阻断、normal 无逐次确认、每会话最多 50 次；bypass 仍不能伪造缺失平台或把 receipt 解释为 Candidate
+acceptance。详见 `EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 下一步
 
 EVO-04.1a 已实现只读取本回执并从四个 Store 重读 authority 的确定性 Decision Input，4.2a 与 4.3a 已依次补齐

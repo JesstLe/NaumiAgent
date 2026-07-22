@@ -59,6 +59,7 @@
 | EVO-02 | 隔离变异与补丁生成 | partial (2.1a-2.1b, 2.2a, 2.3a, 2.4a, 2.4b, 2.5a, 2.5b, 2.5c1, 2.5c2a, 2.5c2b, 2.6a, 2.6b, 2.7a, 2.7b1, 2.7b2, 2.7c1-2.7c2) | EVO-01, Worktree | `self-evolution/EVO-02-isolated-mutation.md` |
 | EVO-03 | 多层验证与 Eval 对照 | partial (3.1a, 3.1b, 3.2a-3.2g, 3.3a-3.3c2c2, 3.4a-3.4b, 3.5a-3.5c, 3.6a-3.6e, 3.7a, 3.7b1-3.7b2) | EVO-02, HAR-08 | `self-evolution/EVO-03-validation-evaluation.md` |
 | EVO-04 | 反思决策与防奖励投机（EVO-04.1a Decision Input、4.2a Mechanical Gate、4.3a Independent Reviewer 已完成） | partial | EVO-03 | `self-evolution/EVO-04-reflection-decision.md` |
+| EVO-GOV-01 | Evolution Agent Tool 权限矩阵 | implemented | EVO-03, EVO-04 | `self-evolution/EVO-GOV-01-agent-tool-permission-matrix.md` |
 | EVO-05 | 提升、回滚与发布治理 | planned | EVO-04, ARC-07 | `self-evolution/EVO-05-promotion-rollback.md` |
 | EVO-06 | 持续学习与能力扩展 | planned | EVO-05, HAR-09 | `self-evolution/EVO-06-continuous-evolution.md` |
 

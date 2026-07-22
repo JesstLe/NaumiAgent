@@ -86,6 +86,76 @@ class TestPermissionChecker:
         assert blocked.code is PermissionReasonCode.MODE_BLOCKED
 
     @pytest.mark.parametrize(
+        ("tool_name", "tool_family", "max_calls"),
+        [
+            (
+                "evolution_evaluation_receipt",
+                "evolution_evaluation_artifact",
+                200,
+            ),
+            (
+                "evolution_evaluation_contract",
+                "evolution_evaluation_artifact",
+                50,
+            ),
+            (
+                "evolution_final_evaluation_receipt",
+                "evolution_evaluation_artifact",
+                50,
+            ),
+            (
+                "evolution_decision_input",
+                "evolution_decision_artifact",
+                50,
+            ),
+            (
+                "evolution_mechanical_gate",
+                "evolution_decision_artifact",
+                50,
+            ),
+            (
+                "evolution_independent_review",
+                "evolution_decision_artifact",
+                20,
+            ),
+        ],
+    )
+    def test_evolution_derived_artifacts_have_bounded_permission_rules(
+        self,
+        tool_name: str,
+        tool_family: str,
+        max_calls: int,
+    ) -> None:
+        for mode in (
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ):
+            allowed = PermissionChecker(mode).check(tool_name, {})
+            assert allowed.allowed
+            assert not allowed.requires_confirmation
+            assert allowed.risk_level is PermissionRiskLevel.MEDIUM
+            assert allowed.tool_family == tool_family
+            assert not allowed.allow_session_grant
+
+        blocked = PermissionChecker(PermissionMode.LOCKDOWN).check(tool_name, {})
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+        capped = PermissionChecker(PermissionMode.MODERATE)
+        for _ in range(max_calls):
+            assert capped.check(tool_name, {}).allowed
+        exhausted = capped.check(tool_name, {})
+        assert not exhausted.allowed
+        assert exhausted.code is PermissionReasonCode.MAX_CALLS_EXCEEDED
+
+        bypass = PermissionChecker(PermissionMode.BYPASS)
+        for _ in range(max_calls + 1):
+            unrestricted = bypass.check(tool_name, {})
+            assert unrestricted.allowed
+            assert not unrestricted.requires_confirmation
+
+    @pytest.mark.parametrize(
         "tool_name",
         [
             "harness_eval_batch",

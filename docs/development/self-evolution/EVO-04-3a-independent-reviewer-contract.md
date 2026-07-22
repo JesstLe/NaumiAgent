@@ -107,6 +107,13 @@ single-flight claim：
 两者调用同一个 Executor、Builder、Store 和 renderer。Renderer 明确显示 author/reviewer identity、Gate 保持
 不变、advisory recommendation，以及“尚未接受 Candidate”。
 
+## 权限治理补充
+
+`evolution_independent_review` 现由 EVO-GOV-01 显式定为中风险派生写入：strict 可用、lockdown 阻断、
+normal 无逐次确认、每会话最多 20 次。较低上限约束不同 Gate 的模型调用面；同一 Gate 的并发仍由 durable
+single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 mechanical veto。详见
+`EVO-GOV-01-agent-tool-permission-matrix.md`。
+
 ## 验收证据
 
 - 真实 Candidate→Mutation→RED/GREEN→Final Receipt→Decision Input→Mechanical Gate authority 上完成审查；
