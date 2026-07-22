@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { stripAnsi } from "../src/ansi.js";
 import { clearRenderCache } from "../src/render-cache.js";
 import { renderScreen } from "../src/render.js";
-import { createInitialState } from "../src/state.js";
+import { createInitialState, handleAssistantStream } from "../src/state.js";
 import {
   ensureTimelineRowIndex,
   findTimelineSegmentAtRow,
@@ -64,6 +64,35 @@ test("deep timeline index reuses warm metadata and rebuilds on semantic invalida
   const resized = timelineRowIndexDebug(state);
   assert.equal(resized.buildCount, invalidated.buildCount + 1);
   assert.equal(resized.width, 72);
+});
+
+test("stream append and token growth update the deep index without a full rebuild", () => {
+  const state = historicalState();
+  state.scrollOffset = 160;
+  const env = { cwd: "/tmp", home: "/Users/lv", clockText: "12:34:56" };
+  renderScreen(state, 84, 18, env);
+  const initial = timelineRowIndexDebug(state);
+
+  handleAssistantStream(state, { phase: "start" });
+  renderScreen(state, 84, 18, env);
+  const appended = timelineRowIndexDebug(state);
+  assert.equal(appended.buildCount, initial.buildCount);
+  assert.equal(appended.appendCount, initial.appendCount + 1);
+
+  handleAssistantStream(state, {
+    phase: "token",
+    content: "这是一段会跨越多行的流式内容。".repeat(20),
+  });
+  handleAssistantStream(state, { phase: "token", content: "第二个尚未渲染的批次" });
+  const indexed = renderScreen(state, 84, 18, env).map(stripAnsi);
+  const updated = timelineRowIndexDebug(state);
+  const legacy = renderScreen(state, 84, 18, {
+    ...env,
+    disableVirtualTimeline: true,
+  }).map(stripAnsi);
+  assert.equal(updated.buildCount, appended.buildCount);
+  assert.equal(updated.partialUpdateCount, appended.partialUpdateCount + 1);
+  assert.deepEqual(indexed, legacy);
 });
 
 test("timeline row lookup handles empty and boundary rows", () => {

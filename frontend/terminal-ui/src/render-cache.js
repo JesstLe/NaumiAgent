@@ -1,4 +1,5 @@
 const DEFAULT_MAX_ENTRIES = 600;
+const MAX_RENDER_MUTATIONS = 1_024;
 
 export function createRenderCache({ maxEntries = DEFAULT_MAX_ENTRIES } = {}) {
   return {
@@ -7,6 +8,9 @@ export function createRenderCache({ maxEntries = DEFAULT_MAX_ENTRIES } = {}) {
     hits: 0,
     misses: 0,
     generation: 0,
+    revision: 0,
+    mutations: [],
+    messageRevisions: new WeakMap(),
   };
 }
 
@@ -14,7 +18,8 @@ export function renderCachedMessage(cache, message, ctx, render) {
   if (!cache) {
     return render();
   }
-  const key = messageRenderKey(message, ctx);
+  const semanticRevision = Math.max(0, Number(cache.messageRevisions?.get(message)) || 0);
+  const key = `${messageRenderKey(message, ctx)}|revision:${semanticRevision}`;
   const cached = cache.entries.get(key);
   if (cached) {
     cache.hits += 1;
@@ -35,6 +40,28 @@ export function clearRenderCache(cache) {
   cache.hits = 0;
   cache.misses = 0;
   cache.generation = Math.max(0, Number(cache.generation) || 0) + 1;
+  recordRenderMutation(cache, { scope: "all" });
+}
+
+export function markMessageRenderDirty(cache, message) {
+  if (!cache || !message || typeof message !== "object") return;
+  if (!(cache.messageRevisions instanceof WeakMap)) cache.messageRevisions = new WeakMap();
+  cache.messageRevisions.set(
+    message,
+    Math.max(0, Number(cache.messageRevisions.get(message)) || 0) + 1,
+  );
+  recordRenderMutation(cache, { scope: "message", message });
+}
+
+export function renderMutationsSince(cache, revision) {
+  const current = Math.max(0, Number(cache?.revision) || 0);
+  const previous = Math.max(0, Number(revision) || 0);
+  if (previous === current) return [];
+  const mutations = Array.isArray(cache?.mutations) ? cache.mutations : [];
+  const first = mutations[0]?.revision;
+  if (!mutations.length || !Number.isInteger(first) || previous < first - 1) return null;
+  const offset = Math.max(0, previous - first + 1);
+  return mutations.slice(offset);
 }
 
 export function messageRenderKey(message, ctx) {
@@ -95,5 +122,15 @@ function evictOldEntries(cache) {
     const first = cache.entries.keys().next().value;
     if (first === undefined) return;
     cache.entries.delete(first);
+  }
+}
+
+function recordRenderMutation(cache, mutation) {
+  cache.revision = Math.max(0, Number(cache.revision) || 0) + 1;
+  const record = { ...mutation, revision: cache.revision };
+  if (!Array.isArray(cache.mutations)) cache.mutations = [];
+  cache.mutations.push(record);
+  if (cache.mutations.length > MAX_RENDER_MUTATIONS) {
+    cache.mutations = [{ scope: "all", revision: cache.revision }];
   }
 }

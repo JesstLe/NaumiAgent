@@ -11,6 +11,7 @@
     "check": "node scripts/check-syntax.js",
     "test": "node scripts/run-tests.js",
     "benchmark:renderer": "node scripts/benchmark-renderer.js",
+    "benchmark:timeline-mutations": "node scripts/benchmark-timeline-mutations.js",
     "benchmark:renderer:ink": "node scripts/benchmark-ink-renderer.js"
   },
   "engines": {

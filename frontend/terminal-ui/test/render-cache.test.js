@@ -1,8 +1,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { stripAnsi } from "../src/ansi.js";
+import {
+  createRenderCache,
+  markMessageRenderDirty,
+  renderMutationsSince,
+} from "../src/render-cache.js";
 import { renderBody, renderBodyWindow, renderFooter, renderScreen } from "../src/render.js";
 import { createInitialState, handleSubmitText, reduceServerEvent } from "../src/state.js";
+
+test("render cache exposes bounded semantic message revisions", () => {
+  const cache = createRenderCache();
+  const message = { id: "stream-1", content: "A" };
+  markMessageRenderDirty(cache, message);
+  assert.equal(cache.revision, 1);
+  assert.deepEqual(renderMutationsSince(cache, 0), [
+    { scope: "message", message, revision: 1 },
+  ]);
+  assert.deepEqual(renderMutationsSince(cache, 1), []);
+});
+
+test("semantic revision invalidates fields outside the structural cache key", () => {
+  const state = createInitialState();
+  const message = { kind: "assistant", id: "assistant-revision", content: "已接收内容" };
+  state.messages.push(message);
+  renderScreen(state, 80, 12, { cwd: "/tmp", home: "/Users/lv" });
+  const misses = state.renderCache.misses;
+
+  message.streamStatus = "interrupted";
+  markMessageRenderDirty(state.renderCache, message);
+  const plain = renderScreen(state, 80, 12, { cwd: "/tmp", home: "/Users/lv" })
+    .map(stripAnsi)
+    .join("\n");
+  assert.equal(state.renderCache.misses, misses + 1);
+  assert(plain.includes("回复流已中断"));
+});
+
+test("semantic mutation journal fails closed after bounded history compaction", () => {
+  const cache = createRenderCache();
+  const message = { id: "stream-overflow" };
+  for (let index = 0; index < 1_025; index += 1) {
+    markMessageRenderDirty(cache, message);
+  }
+  assert.equal(cache.mutations.length, 1);
+  assert.equal(cache.mutations[0].scope, "all");
+  assert.equal(renderMutationsSince(cache, 0), null);
+});
 
 test("render cache reuses stable message render output", () => {
   const state = createInitialState();

@@ -1,0 +1,34 @@
+{
+  "schema": "naumi.timeline-mutation-benchmark.v1",
+  "fixture": {
+    "messages": 10000,
+    "tools": 1000,
+    "log_chars": 0,
+    "width": 120,
+    "height": 40
+  },
+  "fixture_sha256": "69357fee813625ff01752ce0600a82eec6f97e4a9fd7edd2444eda0ae4f27619",
+  "protocol_contract": {
+    "version": 1,
+    "registry_sha256": "47623ecc551b9de2d6f94cc8a6eea090fa979276de32efb800f646259ed85680"
+  },
+  "runtime": {
+    "node": "v24.12.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "iterations": 100,
+  "render_ms": {
+    "min": 0.212,
+    "p50": 0.253,
+    "p95": 0.282,
+    "max": 1.018
+  },
+  "index": {
+    "build_count": 1,
+    "append_count": 1,
+    "partial_update_count": 100,
+    "stores_rendered_lines": false
+  },
+  "legacy_semantic_equivalent": true
+}
