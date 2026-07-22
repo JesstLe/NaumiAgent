@@ -51,6 +51,8 @@ import {
   attachJsonlLineReader,
   createEventSender,
   createHelloPayload,
+  createServerSequenceGuard,
+  isValidServerSequence,
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
@@ -154,6 +156,7 @@ const screenPainter = createScreenPainter({
 });
 const redrawScheduler = createRedrawScheduler({ onRedraw: redraw });
 const protocolEventBatcher = createProtocolEventBatcher({ onRecord: processBridgeRecord });
+const serverSequenceGuard = createServerSequenceGuard();
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
@@ -379,6 +382,13 @@ function handleBridgeLine(line) {
   let rawRecord;
   try {
     rawRecord = JSON.parse(line);
+    if (rawRecord?.seq != null && !isValidServerSequence(rawRecord.seq)) {
+      const decision = serverSequenceGuard.invalidate(rawRecord.seq);
+      if (decision.action !== "accept") {
+        handleServerSequenceDecision(decision, rawRecord);
+        return;
+      }
+    }
     record = normalizeServerRecord(rawRecord);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -395,12 +405,47 @@ function handleBridgeLine(line) {
     scheduleRedraw();
     return;
   }
+  const enablesSequenceIntegrity = record.type === "ack"
+    && record.payload?.event === "hello"
+    && record.payload.negotiation.capabilities.includes("sequence_integrity");
+  const sequenceDecision = enablesSequenceIntegrity
+    ? serverSequenceGuard.enable(record)
+    : serverSequenceGuard.observe(record);
+  if (!handleServerSequenceDecision(sequenceDecision, record)) return;
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
   if (record.type === "pong") {
     processBridgeRecord(record);
     return;
   }
   protocolEventBatcher.push(record);
+}
+
+function handleServerSequenceDecision(decision, record) {
+  if (decision.action === "accept") return true;
+  const details = {
+    code: decision.code,
+    type: record?.type,
+    expected_seq: decision.expectedSeq,
+    received_seq: decision.receivedSeq,
+    last_seq: decision.lastSeq,
+  };
+  if (decision.action === "ignore") {
+    logDebug("protocol.sequence.ignored", details);
+    return false;
+  }
+  if (decision.action === "quarantine") {
+    logDebug("protocol.sequence.quarantined", details);
+    return false;
+  }
+  protocolEventBatcher.flush();
+  logDebug("protocol.sequence.desync", details);
+  const expected = decision.expectedSeq == null ? "有效起始序号" : String(decision.expectedSeq);
+  const received = decision.receivedSeq == null ? "缺失或无效值" : String(decision.receivedSeq);
+  handleFatalError(new Error(
+    `事件流序号不完整（期望 ${expected}，收到 ${received}）。`
+    + "当前运行状态待确认，已隔离后续事件并将切换到 Textual TUI；请使用 /resume 核对。",
+  ));
+  return false;
 }
 
 function processBridgeRecord(record) {

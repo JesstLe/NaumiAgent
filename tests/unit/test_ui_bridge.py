@@ -817,6 +817,41 @@ def _attach_terminal_runtime_factory(
 
 
 @pytest.mark.asyncio
+async def test_bridge_assigns_sequence_in_actual_concurrent_write_order() -> None:
+    class ReverseFirstPairLock:
+        def __init__(self) -> None:
+            self.arrivals = 0
+            self.second_arrived = asyncio.Event()
+            self.mutex = asyncio.Lock()
+
+        async def __aenter__(self) -> None:
+            arrival = self.arrivals
+            self.arrivals += 1
+            if arrival == 0:
+                await self.second_arrived.wait()
+            else:
+                self.second_arrived.set()
+            await self.mutex.acquire()
+
+        async def __aexit__(self, *_args: object) -> None:
+            self.mutex.release()
+
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._writer_lock = ReverseFirstPairLock()  # type: ignore[assignment]
+
+    first = asyncio.create_task(bridge.emit(ServerEventType.STATUS, {"source": "first"}))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(bridge.emit(ServerEventType.STATUS, {"source": "second"}))
+    await asyncio.gather(first, second)
+
+    records = _records(writer)
+    assert [record["seq"] for record in records] == [1, 2]
+    assert [record["payload"]["source"] for record in records] == ["second", "first"]
+
+
+@pytest.mark.asyncio
 async def test_bridge_ping_emits_current_retention_worker_status() -> None:
     writer = io.StringIO()
     engine = _FakeEngine()
@@ -945,6 +980,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "goal_snapshot",
             "heartbeat",
             "session_list",
+            "sequence_integrity",
             "task_snapshot",
             "typed_ui_messages",
             "workbench_snapshot",

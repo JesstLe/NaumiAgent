@@ -30,7 +30,8 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
   协商能力进入专页或降级到共享 Slash 通道，并阻止未协商请求执行，见
   [设计与验收](UI-17-3a-typed-feature-downgrade.md)。17.3b 已将 client/server 事件与协商能力的
   关系收敛到发布合同，Python Bridge 与 Node 共用严格查询和失败校验，见
-  [设计与验收](UI-17-3b-event-capability-registry.md)。未知关键事件分类与 sequence/gap recovery 仍未完成。
+  [设计与验收](UI-17-3b-event-capability-registry.md)。ARC-03.5a 已补充可协商的 JSONL sequence 检测、
+  重复/倒序隔离和缺口后的 TUI fail-closed 回退；未知关键事件分类、cursor 与 snapshot 自动补发仍未完成。
 - UI-17.4 Release matrix：OS、Python、Node、终端、安装方式、升级/回滚。
 - UI-17.5 Deprecation telemetry：仅本地统计 fallback 原因，不上传用户内容。
 - UI-17.6 Release gate：阻断级缺陷、豁免审批和回滚条件。

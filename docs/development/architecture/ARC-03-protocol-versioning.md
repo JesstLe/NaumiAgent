@@ -42,6 +42,11 @@ Artifact、Harness 和 interaction，防止 Python/Node/TUI 各自漂移。
   设计与证据见
   `ARC-03-4a-hello-negotiation-design.md` 与
   `ARC-03-4a-hello-negotiation-implementation-plan.md`。
+- ARC-03.5a JSONL 序号完整性隔离：已实现。Bridge 在真实写锁内分配连续序号；New UI 通过可选能力
+  追溯检查启动序列，忽略并审计重复/倒序，并在缺失、非法或跳号时 fail closed 退出到 TUI fallback。
+  本切片不包含 cursor、Event Store 或 snapshot 自动补发，见
+  `ARC-03-5a-sequence-integrity-quarantine.md`。
 - 其余 Envelope、permission/receipt payload schema、完整机器可读 Schema registry、Compatibility、
-  Ordering、Code generation 与 Conformance suite 仍保持 planned；不得因 3.2a/3.2b1/4a 完成而把
+  Ordering 的 cursor/snapshot recovery、Code generation 与 Conformance suite 仍保持 planned；不得因
+  3.2a/3.2b1/4a/5a 完成而把
   ARC-03 整体标记为完成。
