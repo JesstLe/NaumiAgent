@@ -76,8 +76,9 @@ quorum、technical/blocking gates、UTC issued/expires 与 policy projection dig
 - Slash/Agent Tool/New UI/TUI、权限、Engine composition 与 lazy exports 有聚焦测试；
 - Ruff、py_compile 与小模块测试通过，不运行全量测试。
 
-## 下一最小依赖
+## 后续依赖
 
-EVO-05.2b Approval Request Authority：把 still-eligible Requirement 的每个 role 映射为 HAR-10.6 fenced durable
-interaction，并为 `signature_required=true` 的角色定义独立签名回执入口。用户回答只能形成 approval/rejection
-receipt，不能直接 merge/push；最终 Decision aggregation 应作为后续独立切片。
+[EVO-05.2b](EVO-05-2b-approval-request-authority.md) 已把 still-eligible Requirement 的单个 role 映射为
+HAR-10.6 fenced durable interaction，冻结 approval/rejection/request-changes Receipt，并为每个角色定义独立
+signature entry。下一步是 EVO-05.2c 身份/签名回执 authority；最终 Decision aggregation 仍属于独立
+EVO-05.2d，任何用户回答都不能直接 merge/push。

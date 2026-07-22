@@ -224,6 +224,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | Promotion 输入 | `/evolution promotion-input <reflection-id>` | 从 active accepted Reflection 冻结不可执行的审查输入；不审批、不合并、不发布 |
 | Promotion Package | `/evolution promotion-package <promotion-input-id> [target-branch]` | 绑定目标分支、审批事实和可签名摘要；只读 Git，不审批、不执行发布 |
 | Promotion 审批要求 | `/evolution approval-requirement <promotion-package-id>` | 冻结审批角色、签名门、技术门与有效期；不创建交互、不作出审批 |
+| Promotion 角色审批 | `/evolution approval-request <requirement-id> <role>` | 通过 HAR-10.6 持久交互冻结角色回答；未验证身份/签名不计入最终 quorum，不执行 Git 或发布 |
 | 任务 | `/todo` `/tasks` `/task` `/task-reply` `/task-abort` | 管理 todo、subagent、后台/browser 任务和人工接管 |
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |

@@ -7,6 +7,10 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.approval_requests import (
+    EvolutionPromotionApprovalRequestError,
+    render_evolution_promotion_approval_response,
+)
 from naumi_agent.evolution.approval_requirements import (
     EvolutionPromotionApprovalRequirementError,
     render_evolution_promotion_approval_requirement,
@@ -1273,6 +1277,76 @@ class EvolutionPromotionApprovalRequirementTool(Tool):
         return render_evolution_promotion_approval_requirement(view)
 
 
+class EvolutionPromotionApprovalRequestTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_promotion_approval_request"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 still-eligible Approval Requirement 的一个必需角色创建 HAR-10.6 "
+            "持久审批交互，并把 fenced 选项答案冻结为角色回执。该工具不聚合最终审批、"
+            "不代替身份或签名验证、不写 Git，也不执行 Promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "requirement_id": {
+                    "type": "string",
+                    "pattern": "^evapprovalreq_[0-9a-f]{24}$",
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "independent_reviewer",
+                        "security_reviewer",
+                        "data_owner",
+                        "release_manager",
+                    ],
+                },
+            },
+            "required": ["requirement_id", "role"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 角色审批请求",
+            search_hint=(
+                "evolution promotion approval request response role interaction "
+                "提升 审批 请求 回答 角色 交互"
+            ),
+        )
+
+    async def execute(self, requirement_id: str, role: str) -> str:
+        try:
+            view = await self._engine.evolution_promotion_approval_request_service.execute(
+                workspace_root=self._engine.workspace_root,
+                requirement_id=requirement_id.strip(),
+                role=role.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionApprovalRequestError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Request 未完成：{exc}"
+        return render_evolution_promotion_approval_response(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1296,6 +1370,7 @@ def create_evolution_review_tools(
         EvolutionPromotionPackageInputTool(engine),
         EvolutionPromotionPackageTool(engine),
         EvolutionPromotionApprovalRequirementTool(engine),
+        EvolutionPromotionApprovalRequestTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 

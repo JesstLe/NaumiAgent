@@ -3031,6 +3031,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.adversarial_batch_requests import (
         EvolutionAdversarialBatchRequest,
     )
+    from naumi_agent.evolution.approval_requests import (
+        EvolutionPromotionApprovalRequestError,
+        render_evolution_promotion_approval_response,
+    )
     from naumi_agent.evolution.approval_requirements import (
         EvolutionPromotionApprovalRequirementError,
         render_evolution_promotion_approval_requirement,
@@ -3301,6 +3305,20 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 Markdown(render_evolution_promotion_approval_requirement(view))
             )
             return
+        if action == "approval-request":
+            if len(parts) != 3:
+                raise ValueError(
+                    "approval-request 需要 Approval Requirement ID 和角色。"
+                )
+            view = await (
+                engine.evolution_promotion_approval_request_service.execute(
+                    workspace_root=engine.workspace_root,
+                    requirement_id=parts[1],
+                    role=parts[2],
+                )
+            )
+            console.print(Markdown(render_evolution_promotion_approval_response(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3332,7 +3350,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "independent-review、counterfactual、reward-hacking、"
                 "decision-state、decision-resolve、reflection、"
                 "reflection-revoke、promotion-input、promotion-package、"
-                "approval-requirement 或 enqueue。"
+                "approval-requirement、approval-request 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3436,6 +3454,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "approval-request":
+            console.print(
+                f"Evolution Approval Request 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3457,6 +3482,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution promotion-input <reflection-id>；"
             "/evolution promotion-package <promotion-input-id> [target-branch]；"
             "/evolution approval-requirement <promotion-package-id>；"
+            "/evolution approval-request <approval-requirement-id> "
+            "<user|independent_reviewer|security_reviewer|data_owner|release_manager>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3564,6 +3591,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionPromotionApprovalRequirementError as exc:
         console.print(
             f"Evolution Approval Requirement 未冻结：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionPromotionApprovalRequestError as exc:
+        console.print(
+            f"Evolution Approval Request 未完成：{exc}",
             style="yellow",
             markup=False,
         )
