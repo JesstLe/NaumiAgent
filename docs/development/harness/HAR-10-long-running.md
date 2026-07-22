@@ -101,6 +101,10 @@ ARC-03.5a 已提供长运行 New UI 的最小传输完整性前置：协商后�
 而会隔离并回退到直接读取 Engine 的 TUI。它只保护当前连接的可见真相，不替代 HAR-10 的持久 lease、
 checkpoint、reconcile，也不提供断线事件补发。
 
+UI-15.3a 已补齐长运行可见层的最小性能前置：深历史位置收到 assistant/thinking/tool 高频更新时，
+New UI 使用有界 semantic mutation journal 增量更新单卡，而不重复渲染全部历史。它只保证前端渲染有界，
+不替代本模块的 durable queue、lease、checkpoint 或事件 retention。
+
 ## 已完成前置
 
 ARC-01.4b2e 已把 GoalStore/PursuitStore 的规范路径、lazy initialization 和运行时资源所有权收口，

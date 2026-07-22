@@ -24,6 +24,8 @@
   - UI-15.2a 已把默认 current renderer 的 warm deep-scroll P95 降至 0.235ms，并保留同 fixture/protocol
     digest。后续 Ink 对照必须以该新 baseline 为准，并消除全量 O(n) presentation 投影；不得继续引用
     CC-02.2a 的 92.746ms historical current 值作为替换收益。
+  - UI-15.3a 又建立了 10k+1k 深滚动下的 semantic mutation benchmark：100 次 token render P95
+    0.282ms，索引只 build 1 次。CC-02.4 的 Ink token burst 必须复用该事件路径与等价门，不能只测静态快照。
 - CC-02.5 Packaging：Node version、依赖体积、wheel/binary、offline install。
 - CC-02.6 Decision record：量化收益、缺陷、迁移成本和回退路径。
 

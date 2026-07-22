@@ -10,7 +10,11 @@ import {
   truncateInputText,
 } from "./input-buffer.js";
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
-import { clearRenderCache, createRenderCache } from "./render-cache.js";
+import {
+  clearRenderCache,
+  createRenderCache,
+  markMessageRenderDirty,
+} from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 import { requiredEventCapability } from "./protocol.js";
 import {
@@ -2402,6 +2406,7 @@ export function handleAssistantStream(state, message) {
       return;
     }
     state.activeAssistant.content += message.content ?? "";
+    markMessageRenderDirty(state.renderCache, state.activeAssistant);
   } else if (message.phase === "end") {
     finishAssistantStream(state, "completed");
   }
@@ -2412,7 +2417,7 @@ function finishAssistantStream(state, status) {
   if (!active) return null;
   active.streamStatus = status === "interrupted" ? "interrupted" : "completed";
   state.activeAssistant = null;
-  clearRenderCache(state.renderCache);
+  markMessageRenderDirty(state.renderCache, active);
   return active;
 }
 
@@ -2449,6 +2454,7 @@ export function handleThinking(state, message) {
     if (state.showReasoning) {
       state.activeThinking.content += content;
     }
+    markMessageRenderDirty(state.renderCache, state.activeThinking);
   } else if (message.phase === "end" && state.activeThinking) {
     const content = String(message.content ?? "");
     state.activeThinking.chars += content.length;
@@ -2458,6 +2464,9 @@ export function handleThinking(state, message) {
     state.activeThinking.done = true;
     if (!state.showReasoning) {
       state.messages = state.messages.filter((item) => item !== state.activeThinking);
+      clearRenderCache(state.renderCache);
+    } else {
+      markMessageRenderDirty(state.renderCache, state.activeThinking);
     }
     state.activeThinking = null;
   }
@@ -2483,6 +2492,7 @@ export function handleToolPrepare(state, message) {
   activity.phase = message.phase || activity.phase || "start";
   activity.metrics = buildToolPrepareMetrics(message);
   activity.details = buildToolPrepareDetails(message);
+  markMessageRenderDirty(state.renderCache, activity);
 }
 
 export function handleToolUse(state, message) {
@@ -2551,6 +2561,7 @@ function finishActiveToolPrepare(state, detail, { keepForToolUse = false } = {})
   if (!keepForToolUse) {
     state.activeToolPrepare = null;
   }
+  markMessageRenderDirty(state.renderCache, activity);
   return activity;
 }
 
@@ -2617,6 +2628,7 @@ export function handleToolResult(state, message) {
   target.outputPageCount = message.output_page_count ?? 0;
   target.outputPageChars = message.output_page_chars ?? 0;
   target.outputSha256 = message.output_sha256 ?? "";
+  markMessageRenderDirty(state.renderCache, target);
 }
 
 export function handleTodoStatus(state, message) {
