@@ -32,6 +32,9 @@ skip/mock 和评测泄漏。它不调用 LLM，只签发 `clear/concern` Evidenc
 EVO-04.5a 进一步从 Counterfactual ID 重读 Final Evaluation、全部 Lane 与 Adversarial Cohort authority，
 确定性检查真实任务退化、proxy divergence、平台选择性和 duration/token/cost 资源换分；缺失跨平台或资源
 证据明确形成 `inconclusive`，不冒充 `clear`。
+EVO-04.6a 现以 Decision Input ID 为唯一入口，兼容 mechanical veto 短路与 pass 完整证据链；固定优先级形成
+四态 Decision State，Reviewer 只保留为 advisory audit，不参与状态算法。`escalated` 内置 HAR-10.6 兼容的
+3 个选项和自定义输入，`accepted_experiment` 也只开放 promotion review，不执行 promotion。
 EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Counterfactual Evidence 非只读 Agent Tool 建立显式
 中风险权限规则和有界会话调用面；bypass 不跳过任何 authority 或 veto。详见
 `EVO-GOV-01-agent-tool-permission-matrix.md`。
@@ -44,7 +47,8 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - EVO-04.4 Counterfactual：是否有更小改动、改善是否来自删测试/改指标/放宽规则。EVO-04.4a 已完成。
 - EVO-04.5 Reward hacking detector：proxy gaming、选择性样本/平台优化、资源换分与真实任务退化。
   EVO-04.5a 已完成。
-- EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。
+- EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。EVO-04.6a 已完成状态合同，
+  escalation resolution 尚未完成。
 - EVO-04.7 Reflection memory：只保存结构化经验和证据引用，禁止污染系统 Prompt。
 
 ## 验收标准
@@ -72,14 +76,18 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - [EVO-04.5a Reward-hacking Evidence Contract](EVO-04-5a-reward-hacking-evidence-contract.md)：
   Counterfactual ID 单入口、Final/Lane/Cohort authority 重读、行为退化/代理分歧/平台选择性/资源换分检查、
   `clear/concern/inconclusive` 三态、双通道与并发幂等持久化。
+- [EVO-04.6a Decision State Contract](EVO-04-6a-decision-state-contract.md)：Decision Input ID 单入口、
+  veto/pass 分支 authority 重读、四态确定性优先级、Reviewer advisory 隔离、HAR-10.6 兼容 escalation、
+  并发幂等持久化与非 promotion 边界。
 
-EVO-04 整体仍为 partial；Reward-hacking Evidence 完成不代表最终 Decision State 已交付。
+EVO-04 整体仍为 partial；Decision State 已交付，但 escalation answer 尚未形成 resolution，Reflection Memory
+与 promotion 也未交付。
 
 ## 明确未完成
 
-- decision state、reflection memory 与 promotion。
+- escalation resolution、reflection memory 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.6a Decision State Contract：消费 Mechanical Gate、Review、Counterfactual 与 Reward-hacking
-签名 authority，按确定性优先级形成 accepted_experiment/revise/rejected/escalated；仍不执行 promotion。
+实现 EVO-04.6b Escalation Resolution Contract：复用 HAR-10.6 durable interaction，把 fenced 用户答案绑定
+到不可变 Decision State；仍不直接执行 promotion。

@@ -44,6 +44,14 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputStore,
     render_decision_input,
 )
+from naumi_agent.evolution.decision_states import (
+    EvolutionDecisionState,
+    EvolutionDecisionStateError,
+    EvolutionDecisionStateExecutor,
+    EvolutionDecisionStateStore,
+    EvolutionDecisionStateValue,
+    render_evolution_decision_state,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractIssuer,
     EvolutionEvaluationAggregationContractStore,
@@ -136,6 +144,7 @@ from naumi_agent.model.router import (
 from naumi_agent.tools.evolution_review import (
     EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
+    EvolutionDecisionStateTool,
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
@@ -1068,6 +1077,61 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(ValueError):
         EvolutionRewardHackingEvidence.model_validate(tampered_reward)
 
+    state_store = EvolutionDecisionStateStore(tmp_path / "decision-state.db")
+    state_executor = EvolutionDecisionStateExecutor(
+        gate_store=gate_store,
+        review_store=review_store,
+        counterfactual_store=counterfactual_store,
+        reward_hacking_store=reward_store,
+        decision_store=state_store,
+    )
+    states = await asyncio.gather(*(
+        state_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+        for _ in range(4)
+    ))
+    state = states[0]
+    assert all(item == state for item in states)
+    assert state.decision_id == f"evdecision_{state.decision_sha256[:24]}"
+    assert state.state is EvolutionDecisionStateValue.ESCALATED
+    assert state.requires_user_input is True
+    assert state.escalation is not None
+    assert len(state.escalation.options) == 3
+    assert state.escalation.options[0].value == "collect_missing_evidence"
+    assert state.escalation.allow_custom is True
+    assert state.candidate_acceptance_decided is False
+    assert state.candidate_accepted is False
+    assert state.experiment_accepted is False
+    assert state.promotion_review_ready is False
+    assert state.promotion_executed is False
+    assert state.reviewer_advisory_only is True
+    assert state.llm_decision_authority is False
+    assert await state_store.get(state.decision_id) == state
+    assert await state_store.get_by_decision_input(decision.decision_input_id) == state
+
+    state_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_decision_state_executor=state_executor,
+    )
+    tool_output = await EvolutionDecisionStateTool(state_engine).execute(
+        decision.decision_input_id
+    )
+    slash_output = await execute_slash_command(
+        state_engine,
+        f"/evolution decision-state {decision.decision_input_id}",
+    )
+    assert tool_output == render_evolution_decision_state(state)
+    assert state.decision_id in slash_output
+    assert "需要用户决策" in slash_output
+    assert "其他处理要求" in slash_output
+
+    tampered_state = state.model_dump(mode="json")
+    tampered_state["candidate_accepted"] = True
+    with pytest.raises(ValueError):
+        EvolutionDecisionState.model_validate(tampered_state)
+
     tampered_counterfactual = counterfactual.model_dump(mode="json")
     tampered_counterfactual["candidate_acceptance_decided"] = True
     with pytest.raises(ValueError):
@@ -1294,6 +1358,56 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
         )
     assert reward_cohort_missing.value.code == "reward_hacking_cohort_mismatch"
 
+    with pytest.raises(EvolutionDecisionStateError) as state_wrong_workspace:
+        await state_executor.execute(
+            workspace_root=other_workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert state_wrong_workspace.value.code == "decision_state_workspace_mismatch"
+
+    with pytest.raises(EvolutionDecisionStateError) as state_invalid_id:
+        await state_executor.execute(
+            workspace_root=workspace,
+            decision_input_id="bad\ndecision",
+        )
+    assert state_invalid_id.value.code == "decision_state_input_id_invalid"
+
+    missing_reward_state_executor = EvolutionDecisionStateExecutor(
+        gate_store=gate_store,
+        review_store=review_store,
+        counterfactual_store=counterfactual_store,
+        reward_hacking_store=EvolutionRewardHackingEvidenceStore(
+            tmp_path / "missing-decision-reward.db"
+        ),
+        decision_store=EvolutionDecisionStateStore(
+            tmp_path / "missing-decision-state.db"
+        ),
+    )
+    with pytest.raises(EvolutionDecisionStateError) as state_reward_missing:
+        await missing_reward_state_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert state_reward_missing.value.code == "decision_state_reward_hacking_missing"
+
+    missing_review_state_executor = EvolutionDecisionStateExecutor(
+        gate_store=gate_store,
+        review_store=EvolutionIndependentReviewStore(
+            tmp_path / "missing-decision-review.db"
+        ),
+        counterfactual_store=counterfactual_store,
+        reward_hacking_store=reward_store,
+        decision_store=EvolutionDecisionStateStore(
+            tmp_path / "missing-review-state.db"
+        ),
+    )
+    with pytest.raises(EvolutionDecisionStateError) as state_review_missing:
+        await missing_review_state_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert state_review_missing.value.code == "decision_state_review_missing"
+
     tampered_gate = gate.model_dump(mode="json")
     tampered_gate["llm_override_allowed"] = True
     with pytest.raises(ValueError):
@@ -1445,6 +1559,30 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert veto_review.counterfactual_review_ready is False
     assert veto_model.calls == []
     assert "未调用任何 Reviewer 模型" in render_independent_review(veto_review)
+    veto_state_store = EvolutionDecisionStateStore(tmp_path / "veto-state.db")
+    veto_state = await EvolutionDecisionStateExecutor(
+        gate_store=EvolutionMechanicalGateStore(tmp_path / "veto-evolution.db"),
+        review_store=veto_review_store,
+        counterfactual_store=EvolutionCounterfactualEvidenceStore(
+            tmp_path / "veto-counterfactual.db"
+        ),
+        reward_hacking_store=EvolutionRewardHackingEvidenceStore(
+            tmp_path / "veto-reward.db"
+        ),
+        decision_store=veto_state_store,
+    ).execute(
+        workspace_root=workspace,
+        decision_input_id=veto_decision.decision_input_id,
+    )
+    assert veto_state.state is EvolutionDecisionStateValue.REJECTED
+    assert veto_state.counterfactual is None
+    assert veto_state.reward_hacking is None
+    assert veto_state.escalation is None
+    assert veto_state.requires_user_input is False
+    assert veto_state.candidate_acceptance_decided is True
+    assert veto_state.candidate_accepted is False
+    assert veto_state.promotion_review_ready is False
+    assert await veto_state_store.get(veto_state.decision_id) == veto_state
     with pytest.raises(EvolutionCounterfactualEvidenceError) as veto_counterfactual:
         await EvolutionCounterfactualEvidenceExecutor(
             review_store=veto_review_store,
@@ -1571,6 +1709,16 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionRewardHackingEvidenceError) as corrupt_reward:
         await reward_store.get(reward.evidence_id)
     assert corrupt_reward.value.code == "reward_hacking_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "decision-state.db") as db:
+        db.execute(
+            "UPDATE evolution_decision_states SET state = ? WHERE decision_id = ?",
+            ("accepted_experiment", state.decision_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionDecisionStateError) as corrupt_state:
+        await state_store.get(state.decision_id)
+    assert corrupt_state.value.code == "decision_state_store_corrupt"
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
         db.execute(

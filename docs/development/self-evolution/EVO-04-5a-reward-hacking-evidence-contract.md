@@ -113,7 +113,7 @@ Store row index 与 JSON payload 双向校验，单 artifact 上限 24 MiB。
 
 ## 明确未完成
 
-- EVO-04.6 最终 Decision State；
+- EVO-04.6a Decision State 已实现；Escalation Resolution 尚未实现；
 - 更丰富的业务效用指标与用户定义的资源 tradeoff policy；
 - 单平台实验无法判断跨平台选择性，必须保持 `unassessable`；
 - 当前只证明 RED/GREEN 样本数量、顺序和 digest 成对一致；若要识别语义层面的选择性样本优化，后续 Harness
@@ -123,6 +123,5 @@ Store row index 与 JSON payload 双向校验，单 artifact 上限 24 MiB。
 
 ## 下一步
 
-实现 EVO-04.6a Decision State Contract：只消费 Mechanical Gate、Independent Review、Counterfactual 与本
-Reward-hacking Evidence 的签名 authority，以确定性优先级形成
-`accepted_experiment/revise/rejected/escalated`，并为 `escalated` 生成可交互的用户选项。
+EVO-04.6a 已消费本 Evidence 并形成四态 Decision State。下一步实现 EVO-04.6b Escalation Resolution，
+把 HAR-10.6 fenced 用户答案绑定到原 Decision State。

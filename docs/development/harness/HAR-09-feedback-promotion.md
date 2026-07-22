@@ -65,9 +65,9 @@
   显式转换：同一 Proposal 并发/重复签发单飞，normal 确认、bypass 直接执行，Agent Tool 与 New UI/TUI
   复用同一 issuer；回执固定 `execution_ready=false`。详见
   `HAR-09-5c-explicit-experiment-contract-issuance.md`。
-- EVO-04.5a 已补齐 promotion 前的行为型 Reward-hacking Evidence：真实任务退化、代理 lane 分歧、平台
-  选择性和资源换分都有确定性证据，缺失覆盖明确为 `inconclusive`。HAR-09.6 仍必须等待 EVO-04.6
-  Decision State，不能直接把本 Evidence 当作 promoted outcome。
+- EVO-04.5a 已补齐 promotion 前的 Reward-hacking Evidence，EVO-04.6a 又形成不可变四态 Decision State；
+  `accepted_experiment` 只设置 `promotion_review_ready`，不执行 promotion。HAR-09.6 仍需等待 escalation
+  resolution、Reflection Memory 和显式 promotion/rollback executor，不能把 Decision State 直接记为 outcome。
 - HAR-09 仍未实现 defer/merge 交互和 outcome tracking，因此整体
   继续保持 partial。
 

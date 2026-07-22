@@ -83,10 +83,10 @@ normal 无逐次确认、每会话最多 50 次；bypass 不能跳过四 Store a
 - EVO-04.2a mechanical `pass/veto` gate 已完成；
 - EVO-04.3a independent reviewer 已完成；
 - EVO-04.4a Counterfactual 与 EVO-04.5a Reward-hacking Evidence 已完成；
-- EVO-04.6 accept/revise/reject/escalate state；
+- EVO-04.6a accept/revise/reject/escalate state 已完成；resolution 尚未完成；
 - EVO-04.7 reflection memory 与 EVO-05 promotion。
 
 ## 下一步
 
-EVO-04.2a 至 EVO-04.5a 已实现。下一步实现 EVO-04.6a Decision State Contract；Reviewer、Counterfactual
+EVO-04.2a 至 EVO-04.6a 已实现。下一步实现 EVO-04.6b Escalation Resolution；Reviewer、Counterfactual
 与 Reward-hacking Evidence 均无权覆盖 mechanical veto。
