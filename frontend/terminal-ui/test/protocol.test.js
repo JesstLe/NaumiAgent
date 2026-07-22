@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
+import EVALUATION_LANE_GOLDEN from "../../../tests/fixtures/ui17/evaluation-lane-receipt-golden.json" with { type: "json" };
 import {
   attachJsonlLineReader,
   createHelloPayload,
@@ -138,6 +139,10 @@ function harnessEvalBaselinePayload() {
       private_payload: "must-drop",
     }],
   };
+}
+
+function evaluationLanePayload() {
+  return structuredClone(EVALUATION_LANE_GOLDEN.typed_payload);
 }
 
 function harnessEvalBatchPayload(stage = "evaluating") {
@@ -449,6 +454,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-baseline/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-batch/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-promotion/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("evolution/evaluation-lane/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -462,6 +468,7 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-baseline"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-batch"));
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-promotion"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("evolution/evaluation-lane"));
   assert(PROTOCOL_CONTRACT.server_events.includes("doctor/health"));
   assert(PROTOCOL_CONTRACT.server_events.includes("tasks/snapshot"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
@@ -684,6 +691,37 @@ test("harness eval baseline response is strict and drops private fields", () => 
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-baseline", payload: mismatched }),
     /active/,
+  );
+});
+
+test("evaluation lane response is bounded, linked and cannot claim finality", () => {
+  const normalized = normalizeServerRecord({
+    type: "evolution/evaluation-lane",
+    payload: evaluationLanePayload(),
+  }).payload;
+  assert.equal(normalized.statistical_verdict, "improved");
+  assert.equal(normalized.baseline.failed_samples, 5);
+  assert.equal(normalized.candidate.passed_samples, 5);
+  assert.deepEqual({
+    comparison_decision: normalized.comparison_decision,
+    statistical_verdict: normalized.statistical_verdict,
+    baseline_failed_samples: normalized.baseline.failed_samples,
+    candidate_passed_samples: normalized.candidate.passed_samples,
+    baseline_tokens: normalized.baseline.observed_tokens,
+    candidate_tokens: normalized.candidate.observed_tokens,
+    candidate_evaluation_complete: normalized.candidate_evaluation_complete,
+    aggregation_required: normalized.aggregation_required,
+  }, EVALUATION_LANE_GOLDEN.public_semantics);
+
+  assert.throws(() => normalizeServerRecord({
+    type: "evolution/evaluation-lane",
+    payload: { ...evaluationLanePayload(), candidate_evaluation_complete: true },
+  }), /最终结论/);
+  const broken = evaluationLanePayload();
+  broken.artifacts[3].sha256 = "9".repeat(64);
+  assert.throws(
+    () => normalizeServerRecord({ type: "evolution/evaluation-lane", payload: broken }),
+    /公开摘要/,
   );
 });
 

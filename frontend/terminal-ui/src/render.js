@@ -20,6 +20,7 @@ import { renderDoctorHealthPage } from "./components/doctor-health-page.js";
 import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderGoalPursuitPage } from "./components/goal-pursuit-page.js";
 import { renderEvolutionReviewPage } from "./components/evolution-review-page.js";
+import { renderEvaluationLaneReceiptPage } from "./components/evaluation-lane-receipt-page.js";
 import { renderCommandQuickOpenPage } from "./components/command-quick-open-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
@@ -48,6 +49,8 @@ export function renderScreen(state, width, height, env = {}) {
     ? renderGoalPursuitPage(state.goalPanel, width, bodyHeight)
     : state.route?.name === "evolution_review"
     ? renderEvolutionReviewPage(state.evolutionReview, width, bodyHeight)
+    : state.route?.name === "evolution_evaluation_lane"
+    ? renderEvaluationLaneReceiptPage(state.evolutionEvaluationLane, width, bodyHeight)
     : state.route?.name === "harness_detail"
     ? renderHarnessDetailPage({
       ...state.harnessDetail,

@@ -25,6 +25,11 @@ from naumi_agent.config.settings import (
     MemoryConfig,
     RuntimeHeartbeatRetentionConfig,
 )
+from naumi_agent.evolution.evaluation_lane_receipts import (
+    EvolutionEvaluationArtifactRef,
+    EvolutionEvaluationCohortSummary,
+    EvolutionEvaluationLaneReceiptError,
+)
 from naumi_agent.harness.completion import HarnessCompletionReceipt
 from naumi_agent.harness.conversation_queue_runtime import (
     DurableConversationQueueAuthority,
@@ -1210,6 +1215,171 @@ async def test_bridge_returns_typed_harness_eval_baseline_snapshot() -> None:
     assert response["payload"]["active"]["version"] == 1
     assert response["payload"]["suite_id"] == "surface-protocol"
     assert len(response["payload"]["snapshot_sha256"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_bridge_returns_path_free_typed_evaluation_lane_receipt() -> None:
+    cohort = EvolutionEvaluationCohortSummary(
+        batch_id="red",
+        identity_sha256="1" * 64,
+        samples=5,
+        samples_sha256="2" * 64,
+        passed_samples=0,
+        failed_samples=5,
+        evaluation_error_samples=0,
+        passed_cases=0,
+        implementation_failures=5,
+        evaluation_errors=0,
+        skipped_cases=0,
+        duration_ms=50,
+        observed_tokens=1000,
+        token_samples=5,
+        observed_cost_usd=2.5,
+        cost_samples=5,
+    )
+    candidate_cohort = cohort.model_copy(
+        update={
+            "batch_id": "green",
+            "samples_sha256": "3" * 64,
+            "passed_samples": 5,
+            "failed_samples": 0,
+            "passed_cases": 5,
+            "implementation_failures": 0,
+            "observed_tokens": 500,
+            "observed_cost_usd": 1.25,
+        }
+    )
+    comparison_id = "c" * 64
+    attribution_id = f"evattr_{'d' * 24}"
+    artifact_values = (
+        ("red_completion", f"evvredcohort_{'1' * 24}", "6" * 64),
+        ("green_completion", f"evvgreencohort_{'2' * 24}", "7" * 64),
+        ("baseline_samples", "red", "2" * 64),
+        ("candidate_samples", "green", "3" * 64),
+        ("comparison", comparison_id, "4" * 64),
+        ("failure_attribution", attribution_id, "5" * 64),
+    )
+    receipt = SimpleNamespace(
+        receipt_id=f"evlane_{'a' * 24}",
+        receipt_sha256="a" * 64,
+        lane_kind="interventional",
+        platform="linux",
+        validation_plan_id=f"evvplan_{'b' * 24}",
+        validation_plan_sha256="b" * 64,
+        candidate_id=f"evc_{'e' * 24}",
+        candidate_revision=3,
+        suite_id="attribution",
+        comparison_id=comparison_id,
+        comparison_receipt_sha256="4" * 64,
+        comparison_decision="passed",
+        statistical_verdict="improved",
+        statistical_code="primary_metric_improved",
+        attribution_id=attribution_id,
+        attribution_sha256="5" * 64,
+        failure_category="none",
+        failure_reason_code="comparison_passed",
+        failure_action="continue_to_reflection",
+        candidate_fault=False,
+        retryable=False,
+        requires_rerun=False,
+        reflection_eligible=True,
+        baseline=cohort,
+        candidate=candidate_cohort,
+        artifacts=tuple(
+            EvolutionEvaluationArtifactRef(
+                order=index,
+                kind=kind,
+                artifact_id=artifact_id,
+                sha256=digest,
+            )
+            for index, (kind, artifact_id, digest) in enumerate(
+                artifact_values,
+                start=1,
+            )
+        ),
+        evidence_first_at="2026-07-19T03:58:00+08:00",
+        evidence_last_at="2026-07-19T04:00:00+08:00",
+        candidate_evaluation_complete=False,
+        aggregation_required=True,
+        created_at="2026-07-19T04:01:00+08:00",
+    )
+
+    class Executor:
+        async def execute_by_id(self, *, workspace_root: Path, comparison_id: str):
+            assert workspace_root == engine.workspace_root
+            assert comparison_id == "c" * 64
+            return receipt
+
+    engine = _FakeEngine()
+    engine.evolution_evaluation_lane_receipt_executor = Executor()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "lane-status",
+            "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
+            "payload": {"comparison_id": comparison_id},
+        }
+    )
+
+    response = next(
+        record
+        for record in _records(writer)
+        if record["type"] == "evolution/evaluation-lane"
+    )
+    assert response["request_id"] == "lane-status"
+    assert response["payload"]["candidate_evaluation_complete"] is False
+    assert response["payload"]["aggregation_required"] is True
+    assert "workspace_root" not in response["payload"]
+    assert "comparison_receipt" not in response["payload"]
+    golden = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "fixtures/ui17/evaluation-lane-receipt-golden.json"
+        ).read_text(encoding="utf-8")
+    )["public_semantics"]
+    assert {
+        "comparison_decision": response["payload"]["comparison_decision"],
+        "statistical_verdict": response["payload"]["statistical_verdict"],
+        "baseline_failed_samples": response["payload"]["baseline"]["failed_samples"],
+        "candidate_passed_samples": response["payload"]["candidate"]["passed_samples"],
+        "baseline_tokens": response["payload"]["baseline"]["observed_tokens"],
+        "candidate_tokens": response["payload"]["candidate"]["observed_tokens"],
+        "candidate_evaluation_complete": response["payload"][
+            "candidate_evaluation_complete"
+        ],
+        "aggregation_required": response["payload"]["aggregation_required"],
+    } == golden
+
+
+@pytest.mark.asyncio
+async def test_bridge_redacts_evaluation_lane_authority_failures() -> None:
+    class Executor:
+        async def execute_by_id(self, **kwargs: Any):
+            raise EvolutionEvaluationLaneReceiptError(
+                "evaluation_lane_store_corrupt",
+                "PRIVATE DATABASE PATH",
+            )
+
+    engine = _FakeEngine()
+    engine.evolution_evaluation_lane_receipt_executor = Executor()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "lane-failed",
+            "type": ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST,
+            "payload": {"comparison_id": "c" * 64},
+        }
+    )
+
+    response = next(record for record in _records(writer) if record["type"] == "error")
+    assert response["payload"]["code"] == "evolution_evaluation_lane_failed"
+    assert "PRIVATE" not in response["payload"]["message"]
 
 
 @pytest.mark.asyncio

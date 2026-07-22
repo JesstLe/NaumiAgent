@@ -409,6 +409,13 @@ export function createInitialState() {
       selectedIndex: 0,
       scrollOffset: 0,
     },
+    evolutionEvaluationLane: {
+      comparisonId: "",
+      loading: false,
+      snapshot: null,
+      error: "",
+      scrollOffset: 0,
+    },
     tools: [],
     activeAssistant: null,
     activeThinking: null,
@@ -753,6 +760,11 @@ export function reduceServerEvent(state, record) {
         state.evolutionReview.selectedIndex = Math.min(state.evolutionReview.selectedIndex, maximum);
       }
       break;
+    case "evolution/evaluation-lane":
+      state.evolutionEvaluationLane.snapshot = payload;
+      state.evolutionEvaluationLane.loading = false;
+      state.evolutionEvaluationLane.error = "";
+      break;
     case "tasks/snapshot":
       if (!applyCommandQuickOpenTaskSnapshot(state, record.request_id, payload)) {
         applyTaskSnapshot(state, payload);
@@ -994,6 +1006,7 @@ export function reduceServerEvent(state, record) {
       const wasPermissionRoute = state.route?.name === "permissions";
       const wasGoalRoute = state.route?.name === "goals";
       const wasEvolutionReviewRoute = state.route?.name === "evolution_review";
+      const wasEvolutionEvaluationLaneRoute = state.route?.name === "evolution_evaluation_lane";
       state.harnessDetail = {
         runId: "",
         explainLoading: false,
@@ -1064,6 +1077,16 @@ export function reduceServerEvent(state, record) {
       if (wasEvolutionReviewRoute) {
         state.route = { name: "conversation", originAnchor: null };
       }
+      state.evolutionEvaluationLane = {
+        comparisonId: "",
+        loading: false,
+        snapshot: null,
+        error: "",
+        scrollOffset: 0,
+      };
+      if (wasEvolutionEvaluationLaneRoute) {
+        state.route = { name: "conversation", originAnchor: null };
+      }
       if (payload.clear !== false) {
         resetCommandQuickOpenTaskCache(state);
         state.messages = [];
@@ -1113,6 +1136,12 @@ export function reduceServerEvent(state, record) {
       if (["evolution_review_failed", "evolution_queue_failed"].includes(payload.code)) {
         state.evolutionReview.loading = false;
         state.evolutionReview.error = payload.message ?? "Evolution Candidate 操作失败。";
+        break;
+      }
+      if (payload.code === "evolution_evaluation_lane_failed") {
+        state.evolutionEvaluationLane.loading = false;
+        state.evolutionEvaluationLane.error = payload.message
+          ?? "Evaluation Lane Receipt 加载失败。";
         break;
       }
       if (payload.code === "workbench_review_failed") {
@@ -2845,6 +2874,35 @@ export function handleSubmitText(state, text, send) {
     }
     return;
   }
+  const evaluationLaneMatch = commandText.match(
+    /^\/evolution\s+evaluation\s+([0-9a-f]{64})$/,
+  );
+  if (evaluationLaneMatch) {
+    const comparisonId = evaluationLaneMatch[1];
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.route = { name: "evolution_evaluation_lane", originAnchor };
+    state.evolutionEvaluationLane = {
+      comparisonId,
+      loading: true,
+      snapshot: null,
+      error: "",
+      scrollOffset: 0,
+    };
+    send("evolution/evaluation-lane/request", { comparison_id: comparisonId });
+    return;
+  }
+  if (/^\/evolution\s+evaluation(?:\s|$)/i.test(commandText)) {
+    pushSystemMessage(
+      state,
+      "Evaluation Lane",
+      "用法：/evolution evaluation <64 位 comparison SHA-256>",
+      "warning",
+    );
+    return;
+  }
   if (text === "/evolution" || text.startsWith("/evolution ")) {
     const request = parseEvolutionReviewCommand(text);
     if (!request) {
@@ -3534,6 +3592,32 @@ export function handleEvolutionReviewKey(state, key, send) {
       view.scrollOffset = 0;
       send("evolution/review/request", view.request);
     }
+    return true;
+  }
+  const current = Math.max(0, Number(view.scrollOffset) || 0);
+  if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) view.scrollOffset = Math.max(0, current - 1);
+  else if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) view.scrollOffset = current + 1;
+  else if (key === INPUT_KEYS.pageUp) view.scrollOffset = Math.max(0, current - 10);
+  else if (key === INPUT_KEYS.pageDown) view.scrollOffset = current + 10;
+  else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) view.scrollOffset = 0;
+  else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) view.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+export function handleEvolutionEvaluationLaneKey(state, key, send) {
+  if (state.route?.name !== "evolution_evaluation_lane") return false;
+  const view = state.evolutionEvaluationLane;
+  if (key === INPUT_KEYS.escape) {
+    const anchor = state.route.originAnchor || {};
+    state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+    state.followTail = anchor.followTail !== false;
+    state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (String(key || "").toLowerCase() === "r") {
+    view.loading = true;
+    view.error = "";
+    send("evolution/evaluation-lane/request", { comparison_id: view.comparisonId });
     return true;
   }
   const current = Math.max(0, Number(view.scrollOffset) || 0);

@@ -60,6 +60,17 @@ const HARNESS_EVAL_DECISIONS = new Set([
   "inconclusive",
   "incompatible",
 ]);
+const EVALUATION_LANE_KINDS = new Set(["self_review", "interventional", "adversarial"]);
+const EVALUATION_STATISTICAL_VERDICTS = new Set([
+  "unchanged", "improved", "regressed", "flaky", "inconclusive", "incompatible",
+]);
+const EVALUATION_FAILURE_CATEGORIES = new Set([
+  "none", "objective_not_improved", "candidate_defect", "evaluation_infrastructure",
+  "environment_incompatible", "flaky_evidence", "evidence_incomplete",
+]);
+const EVALUATION_FAILURE_ACTIONS = new Set([
+  "continue_to_reflection", "revise_candidate", "rerun_evaluation", "rebuild_environment",
+]);
 const HARNESS_EVAL_BATCH_STAGES = new Set([
   "preparing",
   "evaluating",
@@ -509,6 +520,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "evolution/review") {
     return normalizeEvolutionReview(payload);
+  }
+  if (type === "evolution/evaluation-lane") {
+    return normalizeEvolutionEvaluationLane(payload);
   }
   if (type === "goals/snapshot") {
     return normalizeGoalSnapshot(payload);
@@ -1529,6 +1543,161 @@ function normalizeHarnessEvalBaseline(payload) {
     active,
     comparisons,
   };
+}
+
+function normalizeEvolutionEvaluationLane(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`evolution/evaluation-lane schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const baseline = normalizeEvaluationCohort(payload.baseline, "baseline");
+  const candidate = normalizeEvaluationCohort(payload.candidate, "candidate");
+  const artifacts = harnessObjectArray(
+    payload.artifacts,
+    "evolution/evaluation-lane artifacts",
+    6,
+  ).map((item, index) => ({
+    order: harnessNonnegativeInteger(item.order, `evolution/evaluation-lane artifacts[${index}].order`),
+    kind: harnessText(item.kind, `evolution/evaluation-lane artifacts[${index}].kind`),
+    artifact_id: harnessText(item.artifact_id, `evolution/evaluation-lane artifacts[${index}].artifact_id`),
+    sha256: harnessSha256(item.sha256, `evolution/evaluation-lane artifacts[${index}].sha256`),
+  }));
+  const expectedKinds = [
+    "red_completion", "green_completion", "baseline_samples", "candidate_samples",
+    "comparison", "failure_attribution",
+  ];
+  if (
+    artifacts.length !== 6
+    || artifacts.some((item, index) => item.order !== index + 1 || item.kind !== expectedKinds[index])
+  ) {
+    throw new Error("evolution/evaluation-lane artifacts 必须完整且顺序固定");
+  }
+  const candidateComplete = harnessBoolean(
+    payload.candidate_evaluation_complete,
+    "evolution/evaluation-lane candidate_evaluation_complete",
+  );
+  const aggregationRequired = harnessBoolean(
+    payload.aggregation_required,
+    "evolution/evaluation-lane aggregation_required",
+  );
+  if (candidateComplete || !aggregationRequired) {
+    throw new Error("evolution/evaluation-lane 不得伪装为候选最终结论");
+  }
+  const comparisonId = harnessSha256(
+    payload.comparison_id,
+    "evolution/evaluation-lane comparison_id",
+  );
+  const attributionId = harnessText(
+    payload.attribution_id,
+    "evolution/evaluation-lane attribution_id",
+  );
+  if (!/^evattr_[0-9a-f]{24}$/.test(attributionId)) {
+    throw new Error("evolution/evaluation-lane attribution_id 无效");
+  }
+  if (
+    artifacts[2].artifact_id !== baseline.batch_id
+    || artifacts[2].sha256 !== baseline.samples_sha256
+    || artifacts[3].artifact_id !== candidate.batch_id
+    || artifacts[3].sha256 !== candidate.samples_sha256
+    || artifacts[4].artifact_id !== comparisonId
+    || artifacts[4].sha256 !== payload.comparison_receipt_sha256
+    || artifacts[5].artifact_id !== attributionId
+    || artifacts[5].sha256 !== payload.attribution_sha256
+  ) {
+    throw new Error("evolution/evaluation-lane artifacts 与公开摘要不一致");
+  }
+  return {
+    schema_version: 1,
+    receipt_id: evaluationId(payload.receipt_id, "evlane", "receipt_id"),
+    receipt_sha256: harnessSha256(payload.receipt_sha256, "evolution/evaluation-lane receipt_sha256"),
+    lane_kind: harnessChoice(payload.lane_kind, "evolution/evaluation-lane lane_kind", EVALUATION_LANE_KINDS),
+    platform: harnessChoice(payload.platform, "evolution/evaluation-lane platform", new Set(["linux", "macos", "windows", "unknown"])),
+    validation_plan_id: evaluationId(payload.validation_plan_id, "evvplan", "validation_plan_id"),
+    validation_plan_sha256: harnessSha256(payload.validation_plan_sha256, "evolution/evaluation-lane validation_plan_sha256"),
+    candidate_id: evaluationId(payload.candidate_id, "evc", "candidate_id"),
+    candidate_revision: harnessPositiveInteger(payload.candidate_revision, "evolution/evaluation-lane candidate_revision"),
+    suite_id: evaluationSuiteId(payload.suite_id),
+    comparison_id: comparisonId,
+    comparison_receipt_sha256: harnessSha256(payload.comparison_receipt_sha256, "evolution/evaluation-lane comparison_receipt_sha256"),
+    comparison_decision: harnessChoice(payload.comparison_decision, "evolution/evaluation-lane comparison_decision", HARNESS_EVAL_DECISIONS),
+    statistical_verdict: harnessChoice(payload.statistical_verdict, "evolution/evaluation-lane statistical_verdict", EVALUATION_STATISTICAL_VERDICTS),
+    statistical_code: harnessText(payload.statistical_code, "evolution/evaluation-lane statistical_code"),
+    attribution_id: attributionId,
+    attribution_sha256: harnessSha256(payload.attribution_sha256, "evolution/evaluation-lane attribution_sha256"),
+    failure_category: harnessChoice(payload.failure_category, "evolution/evaluation-lane failure_category", EVALUATION_FAILURE_CATEGORIES),
+    failure_reason_code: harnessText(payload.failure_reason_code, "evolution/evaluation-lane failure_reason_code"),
+    failure_action: harnessChoice(payload.failure_action, "evolution/evaluation-lane failure_action", EVALUATION_FAILURE_ACTIONS),
+    candidate_fault: harnessBoolean(payload.candidate_fault, "evolution/evaluation-lane candidate_fault"),
+    retryable: harnessBoolean(payload.retryable, "evolution/evaluation-lane retryable"),
+    requires_rerun: harnessBoolean(payload.requires_rerun, "evolution/evaluation-lane requires_rerun"),
+    reflection_eligible: harnessBoolean(payload.reflection_eligible, "evolution/evaluation-lane reflection_eligible"),
+    baseline,
+    candidate,
+    artifacts,
+    evidence_first_at: harnessText(payload.evidence_first_at, "evolution/evaluation-lane evidence_first_at"),
+    evidence_last_at: harnessText(payload.evidence_last_at, "evolution/evaluation-lane evidence_last_at"),
+    candidate_evaluation_complete: false,
+    aggregation_required: true,
+    created_at: harnessText(payload.created_at, "evolution/evaluation-lane created_at"),
+  };
+}
+
+function normalizeEvaluationCohort(value, label) {
+  const item = harnessObject(value, `evolution/evaluation-lane ${label}`);
+  const samples = harnessPositiveInteger(item.samples, `evolution/evaluation-lane ${label}.samples`);
+  const passedSamples = harnessNonnegativeInteger(item.passed_samples, `evolution/evaluation-lane ${label}.passed_samples`);
+  const failedSamples = harnessNonnegativeInteger(item.failed_samples, `evolution/evaluation-lane ${label}.failed_samples`);
+  const errorSamples = harnessNonnegativeInteger(item.evaluation_error_samples, `evolution/evaluation-lane ${label}.evaluation_error_samples`);
+  const tokenSamples = harnessNonnegativeInteger(item.token_samples, `evolution/evaluation-lane ${label}.token_samples`);
+  const costSamples = harnessNonnegativeInteger(item.cost_samples, `evolution/evaluation-lane ${label}.cost_samples`);
+  const observedTokens = item.observed_tokens === null
+    ? null
+    : harnessNonnegativeFiniteNumber(item.observed_tokens, `evolution/evaluation-lane ${label}.observed_tokens`);
+  const observedCost = item.observed_cost_usd === null
+    ? null
+    : harnessNonnegativeFiniteNumber(item.observed_cost_usd, `evolution/evaluation-lane ${label}.observed_cost_usd`);
+  if (
+    passedSamples + failedSamples + errorSamples !== samples
+    || tokenSamples > samples
+    || costSamples > samples
+    || (observedTokens === null) !== (tokenSamples === 0)
+    || (observedCost === null) !== (costSamples === 0)
+  ) {
+    throw new Error(`evolution/evaluation-lane ${label} 计数或资源覆盖不一致`);
+  }
+  return {
+    batch_id: harnessText(item.batch_id, `evolution/evaluation-lane ${label}.batch_id`),
+    identity_sha256: harnessSha256(item.identity_sha256, `evolution/evaluation-lane ${label}.identity_sha256`),
+    samples,
+    samples_sha256: harnessSha256(item.samples_sha256, `evolution/evaluation-lane ${label}.samples_sha256`),
+    passed_samples: passedSamples,
+    failed_samples: failedSamples,
+    evaluation_error_samples: errorSamples,
+    passed_cases: harnessNonnegativeInteger(item.passed_cases, `evolution/evaluation-lane ${label}.passed_cases`),
+    implementation_failures: harnessNonnegativeInteger(item.implementation_failures, `evolution/evaluation-lane ${label}.implementation_failures`),
+    evaluation_errors: harnessNonnegativeInteger(item.evaluation_errors, `evolution/evaluation-lane ${label}.evaluation_errors`),
+    skipped_cases: harnessNonnegativeInteger(item.skipped_cases, `evolution/evaluation-lane ${label}.skipped_cases`),
+    duration_ms: harnessNonnegativeFiniteNumber(item.duration_ms, `evolution/evaluation-lane ${label}.duration_ms`),
+    observed_tokens: observedTokens,
+    token_samples: tokenSamples,
+    observed_cost_usd: observedCost,
+    cost_samples: costSamples,
+  };
+}
+
+function evaluationId(value, prefix, label) {
+  const normalized = harnessText(value, `evolution/evaluation-lane ${label}`);
+  if (!new RegExp(`^${prefix}_[0-9a-f]{24}$`).test(normalized)) {
+    throw new Error(`evolution/evaluation-lane ${label} 无效`);
+  }
+  return normalized;
+}
+
+function evaluationSuiteId(value) {
+  const normalized = harnessText(value, "evolution/evaluation-lane suite_id");
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(normalized)) {
+    throw new Error("evolution/evaluation-lane suite_id 无效");
+  }
+  return normalized;
 }
 
 function normalizeHarnessEvalBatch(payload) {

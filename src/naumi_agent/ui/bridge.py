@@ -23,6 +23,9 @@ from naumi_agent.clipboard import strip_ansi
 from naumi_agent.config.paths import DEFAULT_CONFIG_PATH, resolve_config_path
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.debug_trace import DebugTrace
+from naumi_agent.evolution.evaluation_lane_receipts import (
+    EvolutionEvaluationLaneReceiptError,
+)
 from naumi_agent.harness.conversation_queue_runtime import (
     ConversationQueueClaim,
     ConversationQueueClaimError,
@@ -59,6 +62,7 @@ from naumi_agent.runtime.terminal_runtime import (
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.command_index import build_terminal_command_index
+from naumi_agent.ui.evaluation_lane_receipt import evaluation_lane_receipt_payload
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
     harness_eval_batch_payload,
@@ -1315,6 +1319,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.EVOLUTION_EVALUATION_LANE_REQUEST:
+            await self.show_evolution_evaluation_lane(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.RESUME:
@@ -3537,6 +3544,44 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_evolution_evaluation_lane(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Build and return one workspace-scoped, non-final lane receipt."""
+        executor = getattr(
+            self.engine,
+            "evolution_evaluation_lane_receipt_executor",
+            None,
+        )
+        if executor is None:
+            await self.emit_error(
+                "Evaluation Lane authority 尚未初始化；请运行 /doctor 后重试。",
+                code="evolution_evaluation_lane_failed",
+                request_id=request_id,
+            )
+            return
+        try:
+            receipt = await executor.execute_by_id(
+                workspace_root=self.engine.workspace_root,
+                comparison_id=str(payload["comparison_id"]),
+            )
+            response = evaluation_lane_receipt_payload(receipt)
+        except (EvolutionEvaluationLaneReceiptError, OSError, ValueError):
+            await self.emit_error(
+                "Evaluation Lane Receipt 不可用；请确认 Comparison 属于当前工作区且证据完整。",
+                code="evolution_evaluation_lane_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.EVOLUTION_EVALUATION_LANE,
+            response,
+            request_id=request_id,
+        )
 
     async def show_doctor_report(self, *, request_id: str) -> None:
         """Render deterministic local diagnostics through the UI protocol."""

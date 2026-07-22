@@ -64,6 +64,7 @@ import {
   handleHarnessEvalBatchKey,
   handleHarnessEvalPromotionKey,
   handleDoctorHealthKey,
+  handleEvolutionEvaluationLaneKey,
   handleEvolutionReviewKey,
   handleGoalPanelKey,
   handlePermissionCenterKey,
@@ -652,6 +653,13 @@ function handleSingleKeyInput(chunk) {
     return;
   }
   if (state.route?.name === "evolution_review" && handleEvolutionReviewKey(state, chunk, send)) {
+    scheduleRedraw();
+    return;
+  }
+  if (
+    state.route?.name === "evolution_evaluation_lane"
+    && handleEvolutionEvaluationLaneKey(state, chunk, send)
+  ) {
     scheduleRedraw();
     return;
   }
