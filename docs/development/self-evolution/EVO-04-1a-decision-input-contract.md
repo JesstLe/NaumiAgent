@@ -74,7 +74,7 @@ JSON 任一漂移都会 fail closed。
 
 ## 明确未完成
 
-- EVO-04.2 mechanical `pass/veto` gate；
+- EVO-04.2a mechanical `pass/veto` gate 已完成；
 - EVO-04.3 independent reviewer；
 - EVO-04.4 counterfactual 与 EVO-04.5 reward-hacking detector；
 - EVO-04.6 accept/revise/reject/escalate state；
@@ -82,6 +82,5 @@ JSON 任一漂移都会 fail closed。
 
 ## 下一步
 
-实现 EVO-04.2a Mechanical Gate Contract：只接收 `EvolutionDecisionInput ID`，从 Store 重读本 authority，先对
-integrity、scope、budget、validation completeness、candidate fault 与 rerun requirement 产生确定性的
-`pass/veto` facts；LLM reviewer 不能改变机械结果。
+EVO-04.2a 已实现。下一步实现 EVO-04.3a Independent Reviewer Contract：只允许读取 Gate authority，完整记录
+reviewer identity/model/provider/Prompt digest；Reviewer 无权覆盖 mechanical veto。

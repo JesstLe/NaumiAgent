@@ -50,11 +50,25 @@ from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionKernel,
 )
 from naumi_agent.evolution.final_evaluation_receipts import (
+    EvolutionFinalAdversarialLaneEvidence,
     EvolutionFinalEvaluationReceipt,
+    EvolutionFinalEvaluationReceiptBuilder,
     EvolutionFinalEvaluationReceiptError,
     EvolutionFinalEvaluationReceiptExecutor,
     EvolutionFinalEvaluationReceiptStore,
     render_final_evaluation_receipt,
+)
+from naumi_agent.evolution.mechanical_gates import (
+    EvolutionMechanicalGate,
+    EvolutionMechanicalGateError,
+    EvolutionMechanicalGateExecutor,
+    EvolutionMechanicalGateStore,
+    MechanicalGateRequiredAction,
+    MechanicalGateRule,
+    render_mechanical_gate,
+)
+from naumi_agent.evolution.mutation_generation import (
+    EvolutionMutationGenerationTraceStore,
 )
 from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceiptStore
 from naumi_agent.evolution.store import EvolutionCandidateStore
@@ -80,6 +94,7 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.tools.evolution_review import (
     EvolutionDecisionInputTool,
     EvolutionFinalEvaluationReceiptTool,
+    EvolutionMechanicalGateTool,
 )
 from tests.unit.test_evolution_experiment_leases import (
     _adversarial_probe_fixture,
@@ -167,6 +182,7 @@ async def _lane(
     validation_plan_sha256: str,
     candidate_id: str,
     candidate_revision: int,
+    candidate_status: EvalCaseStatus = EvalCaseStatus.PASSED,
 ) -> EvolutionEvaluationLaneReceipt:
     baseline = tuple(
         _result(
@@ -186,7 +202,7 @@ async def _lane(
             suite_sha256=suite_sha256,
             platform=platform,
             commit_digit="2",
-            status=EvalCaseStatus.PASSED,
+            status=candidate_status,
         )
         for _ in range(5)
     )
@@ -595,6 +611,210 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert decision.decision_input_id in slash_output
     assert "尚未执行 mechanical gate" in slash_output
 
+    gate_store = EvolutionMechanicalGateStore(tmp_path / "evolution.db")
+    gate_executor = EvolutionMechanicalGateExecutor(
+        decision_store=decision_store,
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        gate_store=gate_store,
+    )
+    gates = await asyncio.gather(*(
+        gate_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+        for _ in range(4)
+    ))
+    gate = gates[0]
+    assert all(item == gate for item in gates)
+    assert gate.gate_id == f"evgate_{gate.gate_sha256[:24]}"
+    assert gate.outcome == "pass"
+    assert gate.mechanical_gate_decided is True
+    assert gate.mechanical_gate_passed is True
+    assert gate.mechanical_veto_applied is False
+    assert gate.independent_review_ready is True
+    assert gate.llm_override_allowed is False
+    assert gate.candidate_acceptance_decided is False
+    assert gate.promotion_ready is False
+    assert gate.veto_codes == ()
+    assert gate.required_actions == (
+        MechanicalGateRequiredAction.CONTINUE_TO_INDEPENDENT_REVIEW,
+    )
+    assert all(check.passed for check in gate.checks)
+    assert gate.observed_tool_calls == 1
+    assert await gate_store.get(gate.gate_id) == gate
+    assert await gate_store.get_by_decision_input(decision.decision_input_id) == gate
+
+    gate_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_mechanical_gate_executor=gate_executor,
+    )
+    tool_output = await EvolutionMechanicalGateTool(gate_engine).execute(
+        decision.decision_input_id
+    )
+    slash_output = await execute_slash_command(
+        gate_engine,
+        f"/evolution mechanical-gate {decision.decision_input_id}",
+    )
+    assert tool_output == render_mechanical_gate(gate)
+    assert gate.gate_id in slash_output
+    assert "仍不是 Candidate 接受或发布决定" in slash_output
+
+    missing_trace_executor = EvolutionMechanicalGateExecutor(
+        decision_store=decision_store,
+        trace_store=EvolutionMutationGenerationTraceStore(
+            tmp_path / "missing-trace.db"
+        ),
+        gate_store=EvolutionMechanicalGateStore(tmp_path / "missing-gate.db"),
+    )
+    with pytest.raises(EvolutionMechanicalGateError) as missing_trace:
+        await missing_trace_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert missing_trace.value.code == "mechanical_gate_trace_missing"
+
+    with pytest.raises(EvolutionMechanicalGateError) as missing_gate_input:
+        await gate_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=f"evdin_{'0' * 24}",
+        )
+    assert missing_gate_input.value.code == "mechanical_gate_input_missing"
+
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(EvolutionMechanicalGateError) as gate_wrong_workspace:
+        await gate_executor.execute(
+            workspace_root=other_workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert gate_wrong_workspace.value.code == "mechanical_gate_workspace_mismatch"
+
+    tampered_gate = gate.model_dump(mode="json")
+    tampered_gate["llm_override_allowed"] = True
+    with pytest.raises(ValueError):
+        EvolutionMechanicalGate.model_validate(tampered_gate)
+
+    # Build a second, fully signed evaluation chain whose GREEN cohorts still fail.
+    veto_harness = HarnessStore(tmp_path / "veto-harness.db")
+    veto_adversarial = await _lane(
+        store=veto_harness,
+        workspace=workspace,
+        suite_id=request.suite_id,
+        suite_sha256=request.probe_contract_sha256,
+        platform=platform,
+        red_batch_id=red_lane.batch_id,
+        green_batch_id=green_lane.batch_id,
+        red_completion_id=provisional_red.receipt_id,
+        red_completion_sha256=provisional_red.receipt_sha256,
+        green_completion_id=provisional_green.receipt_id,
+        green_completion_sha256=provisional_green.receipt_sha256,
+        validation_plan_id=plan.validation_plan_id,
+        validation_plan_sha256=plan.validation_plan_sha256,
+        candidate_id=plan.candidate_id,
+        candidate_revision=plan.candidate_revision,
+        candidate_status=EvalCaseStatus.IMPLEMENTATION_FAILURE,
+    )
+    veto_red_records = await veto_harness.list_eval_results(
+        workspace, red_lane.batch_id, request.suite_id
+    )
+    veto_green_records = await veto_harness.list_eval_results(
+        workspace, green_lane.batch_id, request.suite_id
+    )
+    veto_red_completion = completion(red_lane, "red", veto_red_records)
+    veto_green_completion = completion(green_lane, "green", veto_green_records)
+    veto_authority = EvolutionFailureAttributionAuthority(
+        validation_plan_id=plan.validation_plan_id,
+        validation_plan_sha256=plan.validation_plan_sha256,
+        red_receipt_id=veto_red_completion.receipt_id,
+        red_receipt_sha256=veto_red_completion.receipt_sha256,
+        green_receipt_id=veto_green_completion.receipt_id,
+        green_receipt_sha256=veto_green_completion.receipt_sha256,
+        candidate_id=plan.candidate_id,
+        candidate_revision=plan.candidate_revision,
+        suite_id=request.suite_id,
+        red_batch_id=red_lane.batch_id,
+        green_batch_id=green_lane.batch_id,
+        red_samples=5,
+        green_samples=5,
+        red_result_sha256=tuple(item.result_sha256 for item in veto_red_records),
+        green_result_sha256=tuple(item.result_sha256 for item in veto_green_records),
+    )
+    veto_comparison = await veto_harness.get_eval_comparison_receipt_by_id(
+        workspace, veto_adversarial.comparison_id
+    )
+    assert veto_comparison is not None
+    veto_attribution = EvolutionFailureAttributionKernel().build(
+        authority=veto_authority,
+        comparison=veto_comparison,
+    )
+    veto_adversarial = EvolutionEvaluationLaneReceiptBuilder().build(
+        comparison=veto_comparison,
+        attribution=veto_attribution,
+        baseline_records=veto_red_records,
+        candidate_records=veto_green_records,
+    )
+    veto_interventional = await _lane(
+        store=veto_harness,
+        workspace=workspace,
+        suite_id="veto_interventional",
+        suite_sha256="e" * 64,
+        platform=platform,
+        red_batch_id="veto:interventional:red",
+        green_batch_id="veto:interventional:green",
+        red_completion_id=f"evvredcohort_{'5' * 24}",
+        red_completion_sha256="6" * 64,
+        green_completion_id=f"evvgreencohort_{'7' * 24}",
+        green_completion_sha256="8" * 64,
+        validation_plan_id=plan.validation_plan_id,
+        validation_plan_sha256=plan.validation_plan_sha256,
+        candidate_id=plan.candidate_id,
+        candidate_revision=plan.candidate_revision,
+        candidate_status=EvalCaseStatus.IMPLEMENTATION_FAILURE,
+    )
+    veto_final = EvolutionFinalEvaluationReceiptBuilder().build(
+        contract=contract,
+        interventional_lane=veto_interventional,
+        adversarial_evidence=(EvolutionFinalAdversarialLaneEvidence(
+            order=1,
+            platform=platform.system,
+            lane_receipt=veto_adversarial,
+            red_completion=veto_red_completion,
+            green_completion=veto_green_completion,
+        ),),
+    )
+    veto_final_store = EvolutionFinalEvaluationReceiptStore(
+        tmp_path / "veto-evolution.db"
+    )
+    await veto_final_store.record(veto_final)
+    veto_decision_store = EvolutionDecisionInputStore(tmp_path / "veto-evolution.db")
+    veto_decision = await EvolutionDecisionInputExecutor(
+        candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
+        mutation_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+        experiment_store=EvolutionExperimentContractStore(tmp_path / "runtime.db"),
+        final_store=veto_final_store,
+        decision_store=veto_decision_store,
+    ).execute(
+        workspace_root=workspace,
+        final_evaluation_receipt_id=veto_final.receipt_id,
+    )
+    veto_gate = await EvolutionMechanicalGateExecutor(
+        decision_store=veto_decision_store,
+        trace_store=EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db"),
+        gate_store=EvolutionMechanicalGateStore(tmp_path / "veto-evolution.db"),
+    ).execute(
+        workspace_root=workspace,
+        decision_input_id=veto_decision.decision_input_id,
+    )
+    assert veto_gate.outcome == "veto"
+    assert veto_gate.mechanical_gate_passed is False
+    assert veto_gate.mechanical_veto_applied is True
+    assert veto_gate.independent_review_ready is False
+    assert veto_gate.llm_override_allowed is False
+    assert MechanicalGateRule.ALL_LANES_REFLECTION_ELIGIBLE in veto_gate.veto_codes
+    assert MechanicalGateRule.FAILURE_CATEGORIES_CLEAR in veto_gate.veto_codes
+    assert MechanicalGateRule.FAILURE_ACTIONS_CONTINUE in veto_gate.veto_codes
+    assert MechanicalGateRequiredAction.REVISE_CANDIDATE in veto_gate.required_actions
+
     missing_executor = EvolutionDecisionInputExecutor(
         candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
         mutation_store=EvolutionMutationReceiptStore(tmp_path / "missing-runtime.db"),
@@ -610,8 +830,6 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert missing_authority.value.code == "decision_input_authority_missing"
     assert "Mutation Receipt" in str(missing_authority.value)
 
-    other_workspace = tmp_path / "other-workspace"
-    other_workspace.mkdir()
     with pytest.raises(EvolutionDecisionInputError) as wrong_workspace:
         await decision_executor.execute(
             workspace_root=other_workspace,
@@ -662,6 +880,16 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
             adversarial_comparison_ids=(),
         )
     assert missing.value.code == "final_evaluation_platform_coverage_incomplete"
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_mechanical_gates SET outcome = ? WHERE gate_id = ?",
+            ("veto", gate.gate_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionMechanicalGateError) as corrupt_gate:
+        await gate_store.get(gate.gate_id)
+    assert corrupt_gate.value.code == "mechanical_gate_store_corrupt"
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
         db.execute(

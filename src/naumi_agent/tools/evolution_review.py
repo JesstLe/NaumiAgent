@@ -27,6 +27,10 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptError,
     render_final_evaluation_receipt,
 )
+from naumi_agent.evolution.mechanical_gates import (
+    EvolutionMechanicalGateError,
+    render_mechanical_gate,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
@@ -486,6 +490,60 @@ class EvolutionDecisionInputTool(Tool):
         return render_decision_input(artifact)
 
 
+class EvolutionMechanicalGateTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_mechanical_gate"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 durable Store 重读一个 Decision Input 及其签名引用的 Mutation Trace，"
+            "机械复核 scope、guardrails、files/lines/tool calls/duration/attempt "
+            "预算与完整评测事实，"
+            "产生不可被 LLM 覆盖的 pass/veto。该结果仍不是 Candidate 接受或发布决定。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_input_id": {
+                    "type": "string",
+                    "pattern": "^evdin_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["decision_input_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 机械门禁",
+            search_hint=(
+                "evolution mechanical gate pass veto scope budget rerun fault "
+                "自进化 机械 门禁 否决"
+            ),
+        )
+
+    async def execute(self, decision_input_id: str) -> str:
+        try:
+            gate = await self._engine.evolution_mechanical_gate_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                decision_input_id=decision_input_id.strip(),
+            )
+        except (EvolutionMechanicalGateError, OSError, TypeError, ValueError) as exc:
+            return f"Evolution Mechanical Gate 未签发：{exc}"
+        return render_mechanical_gate(gate)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -497,6 +555,7 @@ def create_evolution_review_tools(
         EvolutionEvaluationAggregationContractTool(engine),
         EvolutionFinalEvaluationReceiptTool(engine),
         EvolutionDecisionInputTool(engine),
+        EvolutionMechanicalGateTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -508,6 +567,7 @@ __all__ = [
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
     "EvolutionFinalEvaluationReceiptTool",
+    "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "create_evolution_review_tools",
 ]

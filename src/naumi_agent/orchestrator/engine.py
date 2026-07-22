@@ -121,6 +121,11 @@ from naumi_agent.evolution.interventional_red_cohort import (
 from naumi_agent.evolution.interventional_red_sample import (
     EvolutionInterventionalRedSampleExecutor,
 )
+from naumi_agent.evolution.mechanical_gates import (
+    EvolutionMechanicalGateBuilder,
+    EvolutionMechanicalGateExecutor,
+    EvolutionMechanicalGateStore,
+)
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationService,
     EvolutionMutationGenerationTraceStore,
@@ -1141,6 +1146,16 @@ class AgentEngine:
             final_store=self.evolution_final_evaluation_receipt_store,
             decision_store=self.evolution_decision_input_store,
             builder=self.evolution_decision_input_builder,
+        )
+        self.evolution_mechanical_gate_builder = EvolutionMechanicalGateBuilder()
+        self.evolution_mechanical_gate_store = EvolutionMechanicalGateStore(
+            config.memory.session_db_path
+        )
+        self.evolution_mechanical_gate_executor = EvolutionMechanicalGateExecutor(
+            decision_store=self.evolution_decision_input_store,
+            trace_store=self.evolution_mutation_generation_trace_store,
+            gate_store=self.evolution_mechanical_gate_store,
+            builder=self.evolution_mechanical_gate_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
