@@ -483,10 +483,19 @@ class _FakeEngine:
     async def shutdown(self) -> None:
         self.shutdown_called = True
 
-    async def list_sessions(self, page: int = 1, page_size: int = 20) -> tuple[list[Any], int]:
+    async def list_sessions(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        query: str = "",
+        workspace_root: str | None = None,
+    ) -> tuple[list[Any], int]:
         session = SimpleNamespace(
             id="session-1",
             title="历史会话",
+            model="fake-capable",
+            updated_at=datetime(2026, 7, 22, tzinfo=UTC),
+            git_branch="main",
             messages=[
                 {"role": "user", "content": "旧问题"},
                 {"role": "assistant", "content": "旧回答"},
@@ -5823,6 +5832,57 @@ async def test_bridge_emits_typed_task_snapshot(
     assert fallback["title"] == "tasks"
     assert "暂无任务" in fallback["content"]
     assert any(record["type"] == "runtime/status" for record in records)
+
+
+@pytest.mark.asyncio
+async def test_bridge_emits_correlated_workspace_session_list() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "sessions-1",
+        "type": ClientEventType.SESSIONS_LIST_REQUEST,
+        "payload": {"page": 1, "page_size": 50, "query": "历史"},
+    })
+
+    record = next(
+        record for record in _records(writer) if record["type"] == "sessions/list"
+    )
+    assert record["request_id"] == "sessions-1"
+    assert record["payload"]["scope"] == "workspace"
+    assert record["payload"]["query"] == "历史"
+    assert record["payload"]["items"][0]["session_id"] == "session-1"
+    assert "messages" not in record["payload"]["items"][0]
+
+
+@pytest.mark.asyncio
+async def test_bridge_sanitizes_session_list_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    async def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("database password=must-not-leak")
+
+    monkeypatch.setattr(
+        "naumi_agent.ui.session_list.build_session_list_snapshot",
+        fail,
+    )
+    await bridge.handle_client_record({
+        "id": "sessions-fail",
+        "type": ClientEventType.SESSIONS_LIST_REQUEST,
+        "payload": {},
+    })
+
+    record = next(record for record in _records(writer) if record["type"] == "error")
+    assert record["request_id"] == "sessions-fail"
+    assert record["payload"]["code"] == "session_list_failed"
+    assert "password" not in record["payload"]["message"]
 
 
 @pytest.mark.asyncio

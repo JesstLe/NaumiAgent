@@ -50,6 +50,22 @@ class TestSessionStore:
         sessions2, _ = await store.list_sessions(page=2, page_size=3)
         assert len(sessions2) == 2
 
+    async def test_list_sessions_can_scope_exact_workspace(
+        self, store: SessionStore
+    ) -> None:
+        await store.save(Session(title="项目 A", workspace_root="/workspace/a"))
+        await store.save(Session(title="项目 B", workspace_root="/workspace/b"))
+        await store.save(Session(title="旧版未绑定"))
+
+        sessions, total = await store.list_sessions(
+            page=1,
+            page_size=20,
+            workspace_root="/workspace/a",
+        )
+
+        assert total == 1
+        assert [session.title for session in sessions] == ["项目 A"]
+
     async def test_search_and_archive_sessions(self, store: SessionStore) -> None:
         keep = Session(title="保留会话", workspace_root="/workspace/keep", git_branch="main")
         keep.summary = "包含关键搜索词"

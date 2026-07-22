@@ -25,6 +25,7 @@ PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
     "goal_snapshot",
     "heartbeat",
+    "session_list",
     "task_snapshot",
     "typed_ui_messages",
     "workbench_snapshot",
@@ -72,6 +73,7 @@ class ClientEventType(StrEnum):
     INTERACTION_CANCEL = "interaction_cancel"
     PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
+    SESSIONS_LIST_REQUEST = "sessions/list/request"
     GOAL_PANEL = "goal_panel"
     TASK_PANEL = "task_panel"
     TASK_CANCEL = "task_cancel"
@@ -120,6 +122,7 @@ class ServerEventType(StrEnum):
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
     SESSION_REPLAYED = "session/replayed"
+    SESSIONS_LIST = "sessions/list"
     STATUS = "runtime/status"
     MODE_CHANGED = "mode/changed"
     PERMISSION_REQUEST = "permission/request"
@@ -543,6 +546,18 @@ def _normalize_client_payload(
         if "clear" in payload:
             normalized["clear"] = _to_bool(payload.get("clear"))
         return normalized
+
+    if event_type == ClientEventType.SESSIONS_LIST_REQUEST:
+        query = str(payload.get("query") or "").strip()
+        if len(query) > 200:
+            raise ValueError("会话搜索词不能超过 200 个字符。")
+        return {
+            "page": _bounded_int(payload.get("page"), 1, lower=1, upper=10_000),
+            "page_size": _bounded_int(
+                payload.get("page_size"), 50, lower=1, upper=100
+            ),
+            "query": query,
+        }
 
     if event_type == ClientEventType.GOAL_PANEL:
         return {

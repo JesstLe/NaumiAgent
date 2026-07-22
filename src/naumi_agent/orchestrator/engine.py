@@ -1950,13 +1950,17 @@ class AgentEngine:
         page: int = 1,
         page_size: int = 20,
         query: str = "",
+        workspace_root: str | None = None,
     ) -> tuple[list[Session], int]:
         """列出历史会话."""
-        return await self._session_port.list_sessions(
-            page=page,
-            page_size=page_size,
-            query=query,
-        )
+        kwargs: dict[str, Any] = {
+            "page": page,
+            "page_size": page_size,
+            "query": query,
+        }
+        if workspace_root is not None:
+            kwargs["workspace_root"] = workspace_root
+        return await self._session_port.list_sessions(**kwargs)
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete one session, returning true only after full reconciliation."""

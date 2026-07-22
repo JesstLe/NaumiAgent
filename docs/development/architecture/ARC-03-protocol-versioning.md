@@ -34,6 +34,9 @@ Artifact、Harness 和 interaction，防止 Python/Node/TUI 各自漂移。
 - ARC-03.2b1 Interaction payload boundary：已实现。interaction request/response/resolved 在 Node 发送端、
   Python 入站端和 Node 接收端执行有界字段、字段组合、稳定 ID 与私有字段投影校验；见
   `ARC-03-2b1-interaction-payload-boundary.md`。
+- ARC-03.2b2 Session list payload boundary：已实现。为 UI-14 Session QuickOpen 提供工作区隔离、
+  请求关联、有界公共字段和双端严格投影的 `sessions/list` v1；不包含 QuickOpen UI 本身。见
+  `ARC-03-2b2-session-list-payload-boundary.md`。
 - ARC-03.4a 启动协议协商：已实现。Python/Node 使用同一发布 contract 校验版本区间与能力，
   hello ACK 返回确定性协商结果，失败使用 typed error；新 UI 在成功 ACK 前排队输入且不启动心跳。
   设计与证据见

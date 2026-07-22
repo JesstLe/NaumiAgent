@@ -85,3 +85,6 @@
 ARC-03.2b1 已先完成 interaction request/response/resolved 的双端严格 payload 边界，见
 [设计](ARC-03-2b1-interaction-payload-boundary.md)。permission、Harness receipt、机器可读 JSON Schema、
 类型生成与持久化 redaction executor 仍属于后续 ARC-03.2b 子切片。
+
+ARC-03.2b2 进一步完成 `sessions/list/request` 与 `sessions/list` 的工作区隔离、有界公共投影和
+双端严格边界，见[设计](ARC-03-2b2-session-list-payload-boundary.md)；它仍不代表通用 registry 完成。
