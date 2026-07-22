@@ -11,6 +11,10 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from naumi_agent.claude_source.refresh import (
+    CLAUDE_SOURCE_STORE_SCHEMA_VERSION,
+    resolve_claude_source_db_path,
+)
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
 from naumi_agent.daemons.tool_jobs import TOOL_JOB_SCHEMA_VERSION
@@ -284,6 +288,17 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
             "不可变 Evolution Evidence、候选聚合物与修订审计事件",
+        ),
+        _definition(
+            "governance.claude_source",
+            resolve_claude_source_db_path(),
+            StorageKind.SQLITE,
+            ("claude_source.governance",),
+            VersionStrategy.SQLITE_USER_VERSION,
+            CLAUDE_SOURCE_STORE_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "Claude Code 源身份、刷新提案与人工审批历史",
         ),
         _definition(
             "tasks.background",
