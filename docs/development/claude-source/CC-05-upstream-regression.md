@@ -9,7 +9,9 @@
 
 - CC-05.1 Baseline observation：从 CC-01.1b 已批准 history 派生 commit、map schema、审计结果、
   许可证 digest 的只读比较基线；不得另建第二套身份权威。
-- CC-05.2 Structural diff：新增/删除/移动文件、export、组件/事件/键位变化。
+- CC-05.2 Structural diff：partial；[CC-05.2a](CC-05-2a-git-tree-structural-diff.md) 已交付只读
+  Git tree/path diff、rename/copy 识别、mapped path 影响和 license/dependency risk；export、组件/事件/键位
+  符号级变化留给 05.2b。
 - CC-05.3 Behavioral diff：从 mapped fixtures 比较交互状态机和错误路径。
 - CC-05.4 Impact routing：关联 CC/UI/ARC 模块 owner 和测试。
 - CC-05.5 Review report：adopt/defer/ignore/security_review，每项有证据。
@@ -34,4 +36,6 @@ CC-01.1b 已提供受版本治理的 `claude-source.db`、稳定 refresh proposa
 
 - `CC-05.1`（2026-07-23）已完成：只读加载最新已批准 history，绑定当前 manifest，输出
   current/change_detected/invalid observation；如实标记 legacy mapping 无显式 schema version。
-- CC-05.2-05.6 尚未实现，因此 CC-05 保持 `partial`。
+- `CC-05.2a`（2026-07-23）已完成：从 observation 绑定的 approved commit 产生确定性 Git tree
+  structural diff，并对 dirty approved baseline 失败关闭。
+- CC-05.2b-05.6 尚未实现，因此 CC-05 保持 `partial`。
