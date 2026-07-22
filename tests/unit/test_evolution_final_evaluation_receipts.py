@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import sqlite3
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -58,6 +60,18 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptStore,
     render_final_evaluation_receipt,
 )
+from naumi_agent.evolution.independent_reviews import (
+    EvolutionIndependentReviewBuilder,
+    EvolutionIndependentReviewError,
+    EvolutionIndependentReviewExecutor,
+    EvolutionIndependentReviewStore,
+    IndependentReviewerBudget,
+    IndependentReviewerIdentity,
+    IndependentReviewOpinion,
+    IndependentReviewRecommendation,
+    IndependentReviewStatus,
+    render_independent_review,
+)
 from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGate,
     EvolutionMechanicalGateError,
@@ -66,6 +80,10 @@ from naumi_agent.evolution.mechanical_gates import (
     MechanicalGateRequiredAction,
     MechanicalGateRule,
     render_mechanical_gate,
+)
+from naumi_agent.evolution.mutation_author_receipts import (
+    EvolutionMutationAuthorReceiptBuilder,
+    EvolutionMutationAuthorReceiptStore,
 )
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationTraceStore,
@@ -91,9 +109,17 @@ from naumi_agent.harness.eval_receipt import (
     build_eval_comparison_receipt,
 )
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.model.router import (
+    ModelCapabilityContract,
+    ModelContractStatus,
+    ModelResponse,
+    ModelRuntimeIdentity,
+    TokenUsage,
+)
 from naumi_agent.tools.evolution_review import (
     EvolutionDecisionInputTool,
     EvolutionFinalEvaluationReceiptTool,
+    EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
 )
 from tests.unit.test_evolution_experiment_leases import (
@@ -112,6 +138,79 @@ def _current_only_registry() -> EvolutionAdversarialProbeRegistry:
             platform_scope="current",
         ),
     ))
+
+
+class _ScriptedReviewerModel:
+    def __init__(
+        self,
+        responses: list[ModelResponse],
+        *,
+        canonical_model: str = "reviewer/judge",
+        provider: str = "reviewer",
+        delay_seconds: float = 0.0,
+        supports_structured_output: bool = True,
+        max_output: int = 8_192,
+    ) -> None:
+        self.responses = list(responses)
+        self.canonical_model = canonical_model
+        self.provider = provider
+        self.delay_seconds = delay_seconds
+        self.supports_structured_output = supports_structured_output
+        self.max_output = max_output
+        self.calls: list[dict[str, object]] = []
+
+    def resolve_model(self, _tier) -> str:
+        return self.canonical_model
+
+    def get_runtime_identity(self, model: str) -> ModelRuntimeIdentity:
+        return ModelRuntimeIdentity(
+            requested_model=model,
+            canonical_model=self.canonical_model,
+            upstream_model=self.canonical_model.partition("/")[2] or self.canonical_model,
+            provider=self.provider,
+            api_format="test-json",
+            source="unit-test",
+        )
+
+    def get_model_capability_contract(self, model: str) -> ModelCapabilityContract:
+        return ModelCapabilityContract(
+            requested_model=model,
+            canonical_model=self.canonical_model,
+            upstream_model=self.canonical_model.partition("/")[2] or self.canonical_model,
+            provider=self.provider,
+            api_format="test-json",
+            max_context=124_000,
+            max_output=self.max_output,
+            request_max_tokens=8_192,
+            input_cost_per_million=1.0,
+            output_cost_per_million=2.0,
+            supports_tools=True,
+            supports_streaming=True,
+            supports_parallel_tools=True,
+            supports_structured_output=self.supports_structured_output,
+            supports_reasoning=True,
+            supports_vision=False,
+            input_modalities=("text",),
+            output_modalities=("text",),
+            field_sources={},
+            status=ModelContractStatus.VERIFIED,
+        )
+
+    async def call(self, messages, **kwargs) -> ModelResponse:
+        self.calls.append({
+            "messages": json.loads(json.dumps(messages)),
+            "model": kwargs.get("model"),
+            "tier": kwargs.get("tier"),
+            "max_tokens": kwargs.get("max_tokens"),
+            "temperature": kwargs.get("temperature"),
+            "response_format": kwargs.get("response_format"),
+            "thinking": kwargs.get("thinking"),
+        })
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
+        if not self.responses:
+            raise RuntimeError("reviewer script exhausted")
+        return self.responses.pop(0)
 
 
 def _result(
@@ -659,6 +758,310 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert gate.gate_id in slash_output
     assert "仍不是 Candidate 接受或发布决定" in slash_output
 
+    trace_store = EvolutionMutationGenerationTraceStore(tmp_path / "runtime.db")
+    trace = trace_store.get(gate.mutation_trace_id)
+    assert trace is not None
+    author_builder = EvolutionMutationAuthorReceiptBuilder()
+    author_response = ModelResponse(
+        content="",
+        tool_calls=[{} for _ in range(trace.total_tool_calls)],
+        usage=TokenUsage(input_tokens=20, output_tokens=10, total_tokens=30),
+        model="author/writer",
+        finish_reason="tool_calls",
+    )
+    author_call = author_builder.build_call_fact(
+        order=1,
+        input_messages=(
+            {"role": "system", "content": "test author prompt"},
+            {"role": "user", "content": "test author authority"},
+        ),
+        response=author_response,
+        response_model="author/writer",
+    )
+    author = author_builder.build(
+        trace=trace,
+        identity=ModelRuntimeIdentity(
+            requested_model="author/writer",
+            canonical_model="author/writer",
+            upstream_model="writer",
+            provider="author",
+            api_format="test-json",
+            source="unit-test",
+        ),
+        initial_messages=(
+            {"role": "system", "content": "test author prompt"},
+            {"role": "user", "content": "test author authority"},
+        ),
+        tool_schemas=({"type": "function", "name": "virtual_write"},),
+        model_calls=(author_call,),
+    )
+    author_store = EvolutionMutationAuthorReceiptStore(tmp_path / "runtime.db")
+    assert author_store.put(author) == author
+
+    opinion_payload = {
+        "schema_version": 1,
+        "summary": "机械证据完整，建议进入反事实检查。",
+        "strengths": ["全部固定门禁规则通过。"],
+        "concerns": ["仍需确认是否存在更小改动。"],
+        "evidence_refs": [gate.gate_id],
+        "recommendation": "continue_to_counterfactual",
+        "confidence": "high",
+        "mechanical_gate_override_requested": False,
+        "candidate_acceptance_decided": False,
+    }
+    reviewer_response = ModelResponse(
+        content=json.dumps(opinion_payload, ensure_ascii=False),
+        usage=TokenUsage(
+            input_tokens=200,
+            output_tokens=80,
+            total_tokens=280,
+            cost_usd=0.002,
+        ),
+        model="reviewer/judge",
+        finish_reason="stop",
+    )
+    reviewer_model = _ScriptedReviewerModel(
+        [reviewer_response],
+        delay_seconds=0.05,
+    )
+    review_store = EvolutionIndependentReviewStore(tmp_path / "review.db")
+    review_executor = EvolutionIndependentReviewExecutor(
+        model_port=reviewer_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=review_store,
+        clock=lambda: datetime(2026, 7, 22, 3, 0, tzinfo=UTC),
+    )
+    reviews = await asyncio.gather(*(
+        review_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+        for _ in range(4)
+    ))
+    review = reviews[0]
+    assert all(item == review for item in reviews)
+    assert len(reviewer_model.calls) == 1
+    assert review.review_id == f"evreview_{review.review_sha256[:24]}"
+    assert review.status is IndependentReviewStatus.COMPLETED
+    assert review.gate_outcome == "pass"
+    assert review.gate_outcome_preserved is True
+    assert review.model_called is True
+    assert review.reviewer_author_isolated is True
+    assert review.reviewer is not None
+    assert review.reviewer.canonical_model == "reviewer/judge"
+    assert review.author_canonical_model == "author/writer"
+    assert review.opinion is not None
+    assert review.opinion.recommendation is (
+        IndependentReviewRecommendation.CONTINUE_TO_COUNTERFACTUAL
+    )
+    assert review.llm_override_allowed is False
+    assert review.candidate_acceptance_decided is False
+    assert review.counterfactual_review_ready is True
+    assert review.promotion_ready is False
+    assert await review_store.get(review.review_id) == review
+    assert await review_store.get_by_gate(gate.gate_id) == review
+    call = reviewer_model.calls[0]
+    assert call["response_format"] == "json"
+    assert call["thinking"] == {"type": "disabled"}
+    assert call["temperature"] == 0.0
+    serialized_review = review.model_dump_json()
+    assert "test author prompt" not in serialized_review
+    assert "test author authority" not in serialized_review
+
+    with pytest.raises(ValueError):
+        IndependentReviewerIdentity(
+            requested_model="reviewer/judge\nforged",
+            canonical_model="reviewer/judge",
+            upstream_model="judge",
+            provider="reviewer",
+            api_format="test-json",
+            identity_source="unit-test",
+        )
+    with pytest.raises(ValueError):
+        await review_store.acquire(
+            gate_id=gate.gate_id,
+            owner_token="0" * 32,
+            now=datetime(2026, 7, 22, 3, 0, tzinfo=UTC),
+            lease_seconds=float("inf"),
+        )
+    assert review.opinion is not None and review.reviewer is not None
+    mismatched_opinion = review.opinion.model_copy(
+        update={"summary": "这不是模型原始响应中的意见。"}
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as response_mismatch:
+        EvolutionIndependentReviewBuilder().build_completed(
+            gate=gate,
+            author_receipt=author,
+            reviewer=review.reviewer,
+            messages=call["messages"],
+            response=reviewer_response,
+            opinion=mismatched_opinion,
+            reviewed_at="2026-07-22T03:00:00+00:00",
+        )
+    assert response_mismatch.value.code == "independent_review_response_mismatch"
+    with pytest.raises(EvolutionIndependentReviewError) as invalid_prompt:
+        EvolutionIndependentReviewBuilder().build_completed(
+            gate=gate,
+            author_receipt=author,
+            reviewer=review.reviewer,
+            messages=({"role": "system", "content": "missing authority"},),
+            response=reviewer_response,
+            opinion=IndependentReviewOpinion.model_validate(opinion_payload),
+            reviewed_at="2026-07-22T03:00:00+00:00",
+        )
+    assert invalid_prompt.value.code == "independent_review_prompt_invalid"
+
+    review_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_independent_review_executor=review_executor,
+    )
+    tool_output = await EvolutionIndependentReviewTool(review_engine).execute(
+        gate.gate_id
+    )
+    slash_output = await execute_slash_command(
+        review_engine,
+        f"/evolution independent-review {gate.gate_id}",
+    )
+    assert tool_output == render_independent_review(review)
+    assert review.review_id in slash_output
+    assert "不接受 Candidate" in slash_output
+    assert len(reviewer_model.calls) == 1
+
+    same_author_model = _ScriptedReviewerModel(
+        [],
+        canonical_model="author/writer",
+        provider="author",
+    )
+    identity_conflict_executor = EvolutionIndependentReviewExecutor(
+        model_port=same_author_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=EvolutionIndependentReviewStore(
+            tmp_path / "identity-conflict-review.db"
+        ),
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as identity_conflict:
+        await identity_conflict_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+    assert identity_conflict.value.code == "independent_review_identity_conflict"
+    assert same_author_model.calls == []
+
+    unverified_model = _ScriptedReviewerModel(
+        [],
+        supports_structured_output=False,
+    )
+    unverified_executor = EvolutionIndependentReviewExecutor(
+        model_port=unverified_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=EvolutionIndependentReviewStore(
+            tmp_path / "unverified-review.db"
+        ),
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as unverified:
+        await unverified_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+    assert unverified.value.code == (
+        "independent_review_model_capability_unverified"
+    )
+    assert unverified_model.calls == []
+
+    undersized_output_model = _ScriptedReviewerModel([], max_output=256)
+    undersized_output_executor = EvolutionIndependentReviewExecutor(
+        model_port=undersized_output_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=EvolutionIndependentReviewStore(
+            tmp_path / "undersized-output-review.db"
+        ),
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as undersized_output:
+        await undersized_output_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+    assert undersized_output.value.code == (
+        "independent_review_model_capability_unverified"
+    )
+    assert undersized_output_model.calls == []
+
+    timeout_store = EvolutionIndependentReviewStore(tmp_path / "timeout-review.db")
+    slow_model = _ScriptedReviewerModel(
+        [reviewer_response],
+        delay_seconds=2.0,
+    )
+    timeout_executor = EvolutionIndependentReviewExecutor(
+        model_port=slow_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=timeout_store,
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as timed_out:
+        await timeout_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+            budget=IndependentReviewerBudget(timeout_seconds=1),
+        )
+    assert timed_out.value.code == "independent_review_timeout"
+    assert len(slow_model.calls) == 1
+    recovered_timeout = await EvolutionIndependentReviewExecutor(
+        model_port=_ScriptedReviewerModel([reviewer_response]),  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=timeout_store,
+    ).execute(
+        workspace_root=workspace,
+        gate_id=gate.gate_id,
+    )
+    assert recovered_timeout.status is IndependentReviewStatus.COMPLETED
+
+    retry_model = _ScriptedReviewerModel([
+        ModelResponse(content="{}", model="reviewer/judge"),
+        reviewer_response,
+    ])
+    retry_store = EvolutionIndependentReviewStore(tmp_path / "retry-review.db")
+    retry_executor = EvolutionIndependentReviewExecutor(
+        model_port=retry_model,  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=author_store,
+        review_store=retry_store,
+        clock=lambda: datetime(2026, 7, 22, 3, 1, tzinfo=UTC),
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as invalid_json:
+        await retry_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+    assert invalid_json.value.code == "independent_review_response_invalid"
+    retried_review = await retry_executor.execute(
+        workspace_root=workspace,
+        gate_id=gate.gate_id,
+    )
+    assert retried_review.status is IndependentReviewStatus.COMPLETED
+    assert len(retry_model.calls) == 2
+
+    missing_author_executor = EvolutionIndependentReviewExecutor(
+        model_port=_ScriptedReviewerModel([]),  # type: ignore[arg-type]
+        gate_store=gate_store,
+        author_store=EvolutionMutationAuthorReceiptStore(
+            tmp_path / "missing-author.db"
+        ),
+        review_store=EvolutionIndependentReviewStore(
+            tmp_path / "missing-author-review.db"
+        ),
+    )
+    with pytest.raises(EvolutionIndependentReviewError) as missing_author:
+        await missing_author_executor.execute(
+            workspace_root=workspace,
+            gate_id=gate.gate_id,
+        )
+    assert missing_author.value.code == "independent_review_author_missing"
+
     missing_trace_executor = EvolutionMechanicalGateExecutor(
         decision_store=decision_store,
         trace_store=EvolutionMutationGenerationTraceStore(
@@ -815,6 +1218,32 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert MechanicalGateRule.FAILURE_ACTIONS_CONTINUE in veto_gate.veto_codes
     assert MechanicalGateRequiredAction.REVISE_CANDIDATE in veto_gate.required_actions
 
+    veto_model = _ScriptedReviewerModel([])
+    veto_review_store = EvolutionIndependentReviewStore(
+        tmp_path / "veto-independent-review.db"
+    )
+    veto_review = await EvolutionIndependentReviewExecutor(
+        model_port=veto_model,  # type: ignore[arg-type]
+        gate_store=EvolutionMechanicalGateStore(tmp_path / "veto-evolution.db"),
+        author_store=author_store,
+        review_store=veto_review_store,
+        clock=lambda: datetime(2026, 7, 22, 3, 2, tzinfo=UTC),
+    ).execute(
+        workspace_root=workspace,
+        gate_id=veto_gate.gate_id,
+    )
+    assert veto_review.status is (
+        IndependentReviewStatus.BLOCKED_BY_MECHANICAL_VETO
+    )
+    assert veto_review.gate_outcome == "veto"
+    assert veto_review.model_called is False
+    assert veto_review.reviewer is None
+    assert veto_review.opinion is None
+    assert veto_review.llm_override_allowed is False
+    assert veto_review.counterfactual_review_ready is False
+    assert veto_model.calls == []
+    assert "未调用任何 Reviewer 模型" in render_independent_review(veto_review)
+
     missing_executor = EvolutionDecisionInputExecutor(
         candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
         mutation_store=EvolutionMutationReceiptStore(tmp_path / "missing-runtime.db"),
@@ -890,6 +1319,17 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionMechanicalGateError) as corrupt_gate:
         await gate_store.get(gate.gate_id)
     assert corrupt_gate.value.code == "mechanical_gate_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "review.db") as db:
+        db.execute(
+            "UPDATE evolution_independent_reviews SET review_status = ? "
+            "WHERE review_id = ?",
+            ("blocked_by_mechanical_veto", review.review_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionIndependentReviewError) as corrupt_review:
+        await review_store.get(review.review_id)
+    assert corrupt_review.value.code == "independent_review_store_corrupt"
 
     with sqlite3.connect(tmp_path / "evolution.db") as db:
         db.execute(

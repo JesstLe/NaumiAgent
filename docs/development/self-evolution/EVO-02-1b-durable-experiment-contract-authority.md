@@ -75,9 +75,11 @@ authority digest；它们不重新签发 Contract，也不授予执行或 promot
   authority。
 - EVO-04.1a 已同时从 Candidate Store、Mutation Receipt Store、Experiment Contract Store 和 Final Evaluation
   Receipt Store 重读并交叉验证完整 Decision Input；后续 gate 只能消费该 authority。
-- mechanical gate、reviewer、reward-hacking detector、decision state 与 promotion 均未实现。
+- EVO-04.2a Mechanical Gate 与 4.3a Independent Reviewer 已实现；counterfactual、reward-hacking
+  detector、decision state 与 promotion 尚未实现。
 
 ## 下一步
 
-进入 EVO-04.2a Mechanical Gate Contract：只从 Decision Input Store 重读完整 authority，机械判定 integrity、
-scope、budget、failure 与 rerun facts；仍不做 reviewer 或最终 accept/reject。
+EVO-04.2a 与 4.3a 已依次消费 Decision Input 和 Gate authority。下一步进入 EVO-04.4a Counterfactual
+Evidence Contract：机械寻找更小 scope、删测试、放宽指标、skip/mock 与评测泄漏等替代解释；仍不做最终
+accept/reject。

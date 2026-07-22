@@ -201,14 +201,13 @@ class EvolutionMutationAuthorReceiptBuilder:
         input_messages: Sequence[Mapping[str, Any]],
         response: ModelResponse,
         response_model: str,
-        tool_call_count: int,
     ) -> MutationAuthorModelCallFact:
         payload = {
             "order": order,
             "input_context_sha256": _sha256_payload(list(input_messages)),
             "response_model": response_model,
             "finish_reason": response.finish_reason,
-            "tool_call_count": tool_call_count,
+            "tool_call_count": len(response.tool_calls),
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
             "total_tokens": response.usage.total_tokens,

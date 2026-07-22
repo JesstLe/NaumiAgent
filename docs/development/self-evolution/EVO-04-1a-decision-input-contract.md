@@ -75,12 +75,12 @@ JSON 任一漂移都会 fail closed。
 ## 明确未完成
 
 - EVO-04.2a mechanical `pass/veto` gate 已完成；
-- EVO-04.3 independent reviewer；
+- EVO-04.3a independent reviewer 已完成；
 - EVO-04.4 counterfactual 与 EVO-04.5 reward-hacking detector；
 - EVO-04.6 accept/revise/reject/escalate state；
 - EVO-04.7 reflection memory 与 EVO-05 promotion。
 
 ## 下一步
 
-EVO-04.2a 已实现。下一步实现 EVO-04.3a Independent Reviewer Contract：只允许读取 Gate authority，完整记录
-reviewer identity/model/provider/Prompt digest；Reviewer 无权覆盖 mechanical veto。
+EVO-04.2a 与 EVO-04.3a 已实现。下一步实现 EVO-04.4a Counterfactual Review Contract：只读取 Gate 与
+Independent Review authority，系统化寻找回归、替代解释和证据盲区；Reviewer 仍无权覆盖 mechanical veto。

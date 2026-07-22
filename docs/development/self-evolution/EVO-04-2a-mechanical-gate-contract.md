@@ -78,7 +78,7 @@ Gate JSON、digest、workspace、Decision Input ID、outcome 或 created_at 任�
 
 ## 明确未完成
 
-- EVO-04.3 independent reviewer identity/model/prompt binding；
+- EVO-04.3a independent reviewer identity/model/prompt binding 已完成；
 - EVO-04.4 counterfactual；
 - EVO-04.5 reward-hacking detector；
 - EVO-04.6 accept/revise/reject/escalate 最终状态；
@@ -86,7 +86,6 @@ Gate JSON、digest、workspace、Decision Input ID、outcome 或 created_at 任�
 
 ## 下一步
 
-EVO-02.7c2 已先补齐 Trace-bound Mutation Author Receipt。下一步实现 EVO-04.3a Independent Reviewer
-Contract：只允许 `outcome=pass` 的 Gate 进入模型审查；从 Author Receipt 机械验证 reviewer 与 author 的
-身份隔离，并记录 reviewer 模型/provider、system prompt digest 和结构化意见。若 Gate 为 `veto`，只显示
-veto 与 required actions，不能将其改为 pass。
+EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract：
+只允许 `outcome=pass` 进入不同 canonical model 的 strict JSON advisory，`veto` 路径完全不调用模型。下一步
+进入 EVO-04.4a Counterfactual Evidence Contract。
