@@ -16,4 +16,5 @@
 ## 模块顺序
 
 CC-01 治理先行；CC-02 是 Ink 决策实验；CC-03/04 按产品优先级迁入；CC-05.1 已提供只读批准
-基线 observation，后续 CC-05 模块持续维护差异，但不得绕过 source refresh approval。
+基线 observation，CC-05.2a 已提供 Git tree 与 mapped path 结构差异；后续符号/行为差异仍不得
+绕过 source refresh approval。
