@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,6 +27,14 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
     AdversarialProbeDefinition,
     EvolutionAdversarialProbeRegistry,
 )
+from naumi_agent.evolution.decision_inputs import (
+    EvolutionDecisionInput,
+    EvolutionDecisionInputBuilder,
+    EvolutionDecisionInputError,
+    EvolutionDecisionInputExecutor,
+    EvolutionDecisionInputStore,
+    render_decision_input,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractIssuer,
     EvolutionEvaluationAggregationContractStore,
@@ -35,6 +44,7 @@ from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptBuilder,
     EvolutionEvaluationLaneReceiptStore,
 )
+from naumi_agent.evolution.experiments import EvolutionExperimentContractStore
 from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionAuthority,
     EvolutionFailureAttributionKernel,
@@ -46,6 +56,8 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptStore,
     render_final_evaluation_receipt,
 )
+from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceiptStore
+from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.eval_identity import (
     HarnessEvalConfigurationIdentity,
     HarnessEvalPlatformIdentity,
@@ -65,7 +77,10 @@ from naumi_agent.harness.eval_receipt import (
     build_eval_comparison_receipt,
 )
 from naumi_agent.harness.store import HarnessStore
-from naumi_agent.tools.evolution_review import EvolutionFinalEvaluationReceiptTool
+from naumi_agent.tools.evolution_review import (
+    EvolutionDecisionInputTool,
+    EvolutionFinalEvaluationReceiptTool,
+)
 from tests.unit.test_evolution_experiment_leases import (
     _adversarial_probe_fixture,
 )
@@ -511,6 +526,7 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert receipt.lane_count == 2
     assert receipt.receipt_id == f"evfinal_{receipt.receipt_sha256[:24]}"
     assert await final_store.get(contract.contract_id) == receipt
+    assert await final_store.get_by_receipt_id(receipt.receipt_id) == receipt
 
     engine = SimpleNamespace(evolution_final_evaluation_receipt_executor=executor)
     tool_output = await EvolutionFinalEvaluationReceiptTool(engine).execute(
@@ -528,6 +544,117 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert receipt.receipt_id in slash_output
     assert "不是 Candidate 接受或发布决定" in slash_output
 
+    decision_store = EvolutionDecisionInputStore(tmp_path / "evolution.db")
+    decision_executor = EvolutionDecisionInputExecutor(
+        candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
+        mutation_store=EvolutionMutationReceiptStore(tmp_path / "runtime.db"),
+        experiment_store=EvolutionExperimentContractStore(tmp_path / "runtime.db"),
+        final_store=final_store,
+        decision_store=decision_store,
+    )
+    decisions = await asyncio.gather(*(
+        decision_executor.execute(
+            workspace_root=workspace,
+            final_evaluation_receipt_id=receipt.receipt_id,
+        )
+        for _ in range(4)
+    ))
+    decision = decisions[0]
+    assert all(item == decision for item in decisions)
+    assert decision.decision_input_id == f"evdin_{decision.decision_input_sha256[:24]}"
+    assert decision.candidate_id == receipt.candidate_id
+    assert decision.candidate_sha256 == experiment.source.candidate_sha256
+    assert decision.mutation_receipt_id == request.mutation_receipt_id
+    assert decision.experiment_contract_id == experiment.contract_id
+    assert decision.constraints.allowed_files == experiment.scope.allowed_files
+    assert decision.constraints.required_metrics == tuple(
+        item.metric_name for item in experiment.allowed_checks
+    )
+    assert decision.decision_input_complete is True
+    assert decision.mechanical_gate_ready is True
+    assert decision.mechanical_gate_decided is False
+    assert decision.candidate_acceptance_decided is False
+    assert decision.promotion_ready is False
+    assert await decision_store.get(decision.decision_input_id) == decision
+    assert (
+        await decision_store.get_by_final_receipt(receipt.receipt_id) == decision
+    )
+
+    decision_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_decision_input_executor=decision_executor,
+    )
+    tool_output = await EvolutionDecisionInputTool(decision_engine).execute(
+        receipt.receipt_id
+    )
+    slash_output = await execute_slash_command(
+        decision_engine,
+        f"/evolution decision-input {receipt.receipt_id}",
+    )
+    assert tool_output == render_decision_input(decision)
+    assert decision.decision_input_id in slash_output
+    assert "尚未执行 mechanical gate" in slash_output
+
+    missing_executor = EvolutionDecisionInputExecutor(
+        candidate_store=EvolutionCandidateStore(tmp_path / "evolution.db"),
+        mutation_store=EvolutionMutationReceiptStore(tmp_path / "missing-runtime.db"),
+        experiment_store=EvolutionExperimentContractStore(tmp_path / "runtime.db"),
+        final_store=final_store,
+        decision_store=EvolutionDecisionInputStore(tmp_path / "missing-decision.db"),
+    )
+    with pytest.raises(EvolutionDecisionInputError) as missing_authority:
+        await missing_executor.execute(
+            workspace_root=workspace,
+            final_evaluation_receipt_id=receipt.receipt_id,
+        )
+    assert missing_authority.value.code == "decision_input_authority_missing"
+    assert "Mutation Receipt" in str(missing_authority.value)
+
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(EvolutionDecisionInputError) as wrong_workspace:
+        await decision_executor.execute(
+            workspace_root=other_workspace,
+            final_evaluation_receipt_id=receipt.receipt_id,
+        )
+    assert wrong_workspace.value.code == "decision_input_workspace_mismatch"
+
+    with pytest.raises(EvolutionDecisionInputError) as missing_final:
+        await decision_executor.execute(
+            workspace_root=workspace,
+            final_evaluation_receipt_id=f"evfinal_{'0' * 24}",
+        )
+    assert missing_final.value.code == "decision_input_final_missing"
+
+    stored_candidate = await EvolutionCandidateStore(
+        tmp_path / "evolution.db"
+    ).get_candidate(workspace, receipt.candidate_id)
+    stored_mutation = EvolutionMutationReceiptStore(tmp_path / "runtime.db").get(
+        request.mutation_receipt_id
+    )
+    stored_experiment = await EvolutionExperimentContractStore(
+        tmp_path / "runtime.db"
+    ).get(workspace, experiment.contract_id)
+    assert stored_candidate is not None
+    assert stored_mutation is not None
+    assert stored_experiment is not None
+    with pytest.raises(EvolutionDecisionInputError) as revision_drift:
+        EvolutionDecisionInputBuilder().build(
+            stored_candidate=replace(
+                stored_candidate,
+                revision=stored_candidate.revision + 1,
+            ),
+            mutation=stored_mutation,
+            experiment=stored_experiment,
+            final_evaluation=receipt,
+        )
+    assert revision_drift.value.code == "decision_input_authority_mismatch"
+
+    tampered_decision = decision.model_dump(mode="json")
+    tampered_decision["mechanical_gate_decided"] = True
+    with pytest.raises(ValueError):
+        EvolutionDecisionInput.model_validate(tampered_decision)
+
     with pytest.raises(EvolutionFinalEvaluationReceiptError) as missing:
         await executor.execute(
             aggregation_contract_id=contract.contract_id,
@@ -535,6 +662,17 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
             adversarial_comparison_ids=(),
         )
     assert missing.value.code == "final_evaluation_platform_coverage_incomplete"
+
+    with sqlite3.connect(tmp_path / "evolution.db") as db:
+        db.execute(
+            "UPDATE evolution_decision_inputs SET decision_input_sha256 = ? "
+            "WHERE decision_input_id = ?",
+            ("0" * 64, decision.decision_input_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionDecisionInputError) as corrupt_decision:
+        await decision_store.get(decision.decision_input_id)
+    assert corrupt_decision.value.code == "decision_input_store_corrupt"
 
     tampered = receipt.model_dump(mode="json")
     tampered["promotion_ready"] = True

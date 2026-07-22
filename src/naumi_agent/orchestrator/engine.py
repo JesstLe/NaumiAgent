@@ -63,6 +63,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.decision_inputs import (
+    EvolutionDecisionInputBuilder,
+    EvolutionDecisionInputExecutor,
+    EvolutionDecisionInputStore,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractBuilder,
     EvolutionEvaluationAggregationContractIssuer,
@@ -1124,6 +1129,18 @@ class AgentEngine:
                 receipt_store=self.evolution_final_evaluation_receipt_store,
                 builder=self.evolution_final_evaluation_receipt_builder,
             )
+        )
+        self.evolution_decision_input_builder = EvolutionDecisionInputBuilder()
+        self.evolution_decision_input_store = EvolutionDecisionInputStore(
+            config.memory.session_db_path
+        )
+        self.evolution_decision_input_executor = EvolutionDecisionInputExecutor(
+            candidate_store=self.evolution_candidate_store,
+            mutation_store=self.evolution_mutation_receipt_store,
+            experiment_store=self.evolution_experiment_contract_store,
+            final_store=self.evolution_final_evaluation_receipt_store,
+            decision_store=self.evolution_decision_input_store,
+            builder=self.evolution_decision_input_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

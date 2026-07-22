@@ -73,12 +73,11 @@ authority digest；它们不重新签发 Contract，也不授予执行或 promot
 
 - 本切片不新增 Proposal approve/Contract issue UI；签发仍由受治理 workflow 触发，新增通道只负责审查 durable
   authority。
-- EVO-04.1 仍需同时从 Candidate Store、Mutation Receipt Store、Experiment Contract Store 和 Final Evaluation
-  Receipt Store 重读并交叉验证完整 Decision Input。
+- EVO-04.1a 已同时从 Candidate Store、Mutation Receipt Store、Experiment Contract Store 和 Final Evaluation
+  Receipt Store 重读并交叉验证完整 Decision Input；后续 gate 只能消费该 authority。
 - mechanical gate、reviewer、reward-hacking detector、decision state 与 promotion 均未实现。
 
 ## 下一步
 
-现在可以实现 EVO-04.1a Decision Input Contract：只接收 workspace、Final Evaluation Receipt ID 和必要 artifact
-ID，从四个 Store 重读完整 authority，验证 Candidate revision/risk、Mutation files/scope、Experiment constraints
-与 Final Evaluation Plan/Candidate 全部一致；仍不做 accept/reject。
+进入 EVO-04.2a Mechanical Gate Contract：只从 Decision Input Store 重读完整 authority，机械判定 integrity、
+scope、budget、failure 与 rerun facts；仍不做 reviewer 或最终 accept/reject。
