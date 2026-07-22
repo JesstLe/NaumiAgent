@@ -42,3 +42,24 @@ async def test_tui_quick_open_cancels_or_fills_without_submitting() -> None:
         assert composer.value.startswith("/write ")
         assert "<path>" in composer.value
         assert app._agent_busy is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_tui_quick_open_ranks_recent_submitted_command_first() -> None:
+    app = NaumiApp(AgentEngine(AppConfig()))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        composer = app.query_one("#msg-input", Input)
+        composer.value = "/h"
+        composer.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app._recent_commands[0] == "/help"  # noqa: SLF001
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandQuickOpenScreen)
+        assert screen._results[0].command == "/help"  # noqa: SLF001
+        assert "最近" in screen._render_entry(screen._results[0])  # noqa: SLF001
+        await pilot.press("escape")

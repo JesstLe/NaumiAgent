@@ -12,6 +12,7 @@ import {
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
+import { recordRecentCommand } from "./command-quick-open.js";
 
 const MAX_OUTBOX_MESSAGES = 20;
 const MAX_OUTBOX_ERROR_CHARS = 500;
@@ -323,6 +324,7 @@ export function createInitialState() {
       selectedIndex: 0,
       draftText: "",
       draftCursor: 0,
+      recentCommands: [],
     },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
@@ -2556,6 +2558,11 @@ function parseGoalPanelCommand(commandText) {
 
 export function handleSubmitText(state, text, send) {
   const commandText = String(text ?? "").trim();
+  state.commandQuickOpen.recentCommands = recordRecentCommand(
+    state.slashCommands,
+    state.commandQuickOpen.recentCommands,
+    commandText,
+  );
   if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
     return { type: "exit" };
   }

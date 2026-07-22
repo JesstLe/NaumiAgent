@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "submissions": [
+    "/write private-token-do-not-store",
+    "/h",
+    "/write another-private-value",
+    "/unknown ignored"
+  ],
+  "expected_recent_commands": [
+    "/write",
+    "/help"
+  ],
+  "empty_query_order_prefix": [
+    "/write",
+    "/help"
+  ],
+  "query": "h",
+  "query_order_prefix": [
+    "/help"
+  ]
+}

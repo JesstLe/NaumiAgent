@@ -70,7 +70,10 @@ from naumi_agent.tui.working_indicator import (
 )
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
-from naumi_agent.ui.command_index import build_terminal_command_index
+from naumi_agent.ui.command_index import (
+    build_terminal_command_index,
+    record_recent_terminal_command,
+)
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.doctor_health import (
     render_doctor_health_item_markdown,
@@ -1685,6 +1688,7 @@ class NaumiApp(App):
         self._agent_busy = False
         self._agent_worker: Any | None = None
         self._run_cancel_pending = False
+        self._recent_commands: tuple[str, ...] = ()
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -2304,9 +2308,11 @@ class NaumiApp(App):
         if text.startswith("/"):
             command, _, argument = text.partition(" ")
             if command.lower() == "/cancel-queued":
+                self._record_recent_command(text)
                 self._cancel_queued_conversation(argument.strip())
                 return
             if self._agent_busy and command.lower() == "/send-now":
+                self._record_recent_command(text)
                 self._promote_queued_conversation(argument.strip())
                 return
             if self._agent_busy and command.lower() not in {"/q", "/quit", "/exit"}:
@@ -2318,6 +2324,7 @@ class NaumiApp(App):
                     )
                 )
                 return
+            self._record_recent_command(text)
             self._handle_slash_command(text)
             return
 
@@ -2332,6 +2339,13 @@ class NaumiApp(App):
         self._agent_busy = True
         self.query_one(Spinner)._active = True
         self._agent_worker = self._run_agent(msg.content)
+
+    def _record_recent_command(self, text: str) -> None:
+        self._recent_commands = record_recent_terminal_command(
+            _TUI_COMMAND_INDEX,
+            self._recent_commands,
+            text,
+        )
 
     async def _ensure_conversation_session(self, text: str) -> str:
         async with self._conversation_session_lock:
@@ -3259,7 +3273,13 @@ class NaumiApp(App):
             input_widget.cursor_position = len(template)
             input_widget.focus()
 
-        self.push_screen(CommandQuickOpenScreen(_TUI_COMMAND_INDEX), on_selected)
+        self.push_screen(
+            CommandQuickOpenScreen(
+                _TUI_COMMAND_INDEX,
+                recent_commands=self._recent_commands,
+            ),
+            on_selected,
+        )
 
     def action_cycle_runtime_mode(self) -> None:
         mode = self.engine.cycle_runtime_mode()

@@ -75,9 +75,15 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
     }
     """
 
-    def __init__(self, entries: Sequence[TerminalCommandIndexEntry]) -> None:
+    def __init__(
+        self,
+        entries: Sequence[TerminalCommandIndexEntry],
+        *,
+        recent_commands: Sequence[str] = (),
+    ) -> None:
         super().__init__()
         self._entries = tuple(entries)
+        self._recent_commands = tuple(recent_commands)[:20]
         self._results: tuple[TerminalCommandIndexEntry, ...] = ()
 
     def compose(self) -> ComposeResult:
@@ -136,7 +142,12 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         event.stop()
 
     async def _refresh_results(self, query: str) -> None:
-        self._results = search_terminal_commands(self._entries, query, limit=50)
+        self._results = search_terminal_commands(
+            self._entries,
+            query,
+            limit=50,
+            recent_commands=self._recent_commands,
+        )
         results = self.query_one("#command-quick-open-results", ListView)
         await results.clear()
         if self._results:
@@ -150,9 +161,10 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         syntax = f" {entry.arguments.syntax}" if entry.arguments.syntax else ""
         risk = _RISK_LABELS[entry.permission_risk]
         style = _RISK_STYLES[entry.permission_risk]
+        recent = " [cyan]· 最近[/]" if entry.command in self._recent_commands else ""
         return (
             f"[bold]{escape(entry.command + syntax)}[/bold] "
-            f"[{style}]{risk}[/] · {escape(entry.description)}"
+            f"[{style}]{risk}[/]{recent} · {escape(entry.description)}"
         )
 
     def _render_detail(self) -> None:
