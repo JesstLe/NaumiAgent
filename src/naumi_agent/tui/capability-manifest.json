@@ -31,7 +31,7 @@
     },
     "harness_receipt_explain": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/completion_receipt.py", "tests/unit/test_tui.py"]
+      "evidence": ["src/naumi_agent/tui/completion_receipt.py", "tests/unit/test_harness_terminal_parity.py"]
     },
     "history_resume": {
       "state": "supported",

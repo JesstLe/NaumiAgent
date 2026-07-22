@@ -31,7 +31,7 @@
     },
     "harness_receipt_explain": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/components/harness-detail-page.js", "frontend/terminal-ui/test/harness-detail-page.test.js"]
+      "evidence": ["frontend/terminal-ui/src/components/harness-detail-page.js", "frontend/terminal-ui/test/harness-terminal-parity.test.js"]
     },
     "history_resume": {
       "state": "supported",

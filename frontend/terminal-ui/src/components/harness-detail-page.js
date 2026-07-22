@@ -30,6 +30,7 @@ const STATUS_LABELS = Object.freeze({
   passed: "通过",
   failed: "失败",
   recorded: "已记录",
+  verified: "已验证",
   reproduced: "已复现",
   changed: "已变化",
   digest_mismatch: "摘要不一致",
@@ -78,32 +79,34 @@ function explainLines(detail) {
     `目标 · ${text(value.objective) || "未记录"}`,
     `${status(value.status)} · ${text(value.summary) || "无摘要"}`,
     section("准则"),
-    criteria.length
+    ...(criteria.length
       ? criteria.map((item) => (
-        `${status(item.status)} · ${text(item.description) || text(item.id)}`
+        `${status(item.status)} · ${text(item.id) || "未命名准则"} · ${text(item.description) || "未记录描述"}`
         + ` · 证据 ${texts(item.evidence_ids, 100).length}`
-      )).join("；")
-      : color(ANSI.dim, "未记录验收准则"),
+      ))
+      : [color(ANSI.dim, "未记录验收准则")]),
     section("失败分类"),
     failures.length
       ? color(ANSI.red, failures.map((item) => FAILURE_LABELS[item] || item).join(" · "))
       : color(ANSI.green, "无已分类失败"),
-    ...findings.slice(0, 2).map((item) => color(
+    ...findings.map((item) => color(
       ANSI.yellow,
       `${FAILURE_LABELS[item.failure_class] || item.failure_class} · ${text(item.message)}`
+      + (item.source ? ` · 来源 ${text(item.source)}` : "")
       + (item.next_step ? ` → ${text(item.next_step)}` : ""),
     )),
     section("检查"),
-    checks.length
-      ? checks.map((item) => `${text(item.id)} ${status(item.status)} ${Number(item.duration_ms) || 0}ms`).join(" · ")
-      : color(ANSI.dim, "未记录检查"),
+    ...(checks.length
+      ? checks.map((item) => `${text(item.id)} ${status(item.status)} ${Number(item.duration_ms) || 0}ms`)
+      : [color(ANSI.dim, "未记录检查")]),
     section("证据"),
-    evidence.length
-      ? evidence.slice(0, 4).map((item) => (
+    ...(evidence.length
+      ? evidence.map((item) => (
         `${text(item.id)} ${text(item.kind)} ${status(item.status)}`
+        + (item.digest_prefix ? ` digest ${text(item.digest_prefix)}` : "")
         + (item.uri ? ` ${text(item.uri)}` : "")
-      )).join(" · ")
-      : color(ANSI.dim, "未记录证据"),
+      ))
+      : [color(ANSI.dim, "未记录证据")]),
   ];
 }
 
@@ -127,17 +130,18 @@ function replayLines(detail) {
   return [
     section("Replay"),
     `${status(value.status)} · Timeline ${objects(value.timeline, 200).length} · 异常 ${texts(value.anomalies, 50).length}`,
+    ...texts(value.anomalies, 50).map((item) => color(ANSI.yellow, `异常 · ${item}`)),
     section("差异"),
-    differences.length
-      ? differences.slice(0, 3).map((item) => `${text(item.field)}: ${text(item.baseline)} → ${text(item.current)}`).join("；")
-      : color(ANSI.green, "无差异"),
+    ...(differences.length
+      ? differences.map((item) => `${text(item.field)}: ${text(item.baseline)} → ${text(item.current)}`)
+      : [color(ANSI.green, "无差异")]),
     section("Artifact"),
-    artifacts.length
-      ? artifacts.slice(0, 4).map((item) => (
+    ...(artifacts.length
+      ? artifacts.map((item) => (
         `${text(item.id)} ${text(item.kind)} ${status(item.status)}`
         + (item.reference ? ` ${text(item.reference)}` : "")
-      )).join(" · ")
-      : color(ANSI.dim, "无 Artifact"),
+      ))
+      : [color(ANSI.dim, "无 Artifact")]),
   ];
 }
 
@@ -148,7 +152,7 @@ function section(label) {
 function status(value) {
   const raw = text(value);
   const label = STATUS_LABELS[raw] || raw || "未知";
-  if (["completed_verified", "satisfied", "passed", "recorded", "reproduced"].includes(raw)) {
+  if (["completed_verified", "satisfied", "passed", "recorded", "verified", "reproduced"].includes(raw)) {
     return color(ANSI.green, label);
   }
   if (["failed", "digest_mismatch", "missing"].includes(raw)) return color(ANSI.red, label);

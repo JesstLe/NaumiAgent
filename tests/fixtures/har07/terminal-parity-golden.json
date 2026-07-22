@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "completion_receipt": {
+    "schema_version": 1,
+    "receipt_id": "receipt-parity-1",
+    "run_id": "run-parity-1",
+    "outcome": "completed",
+    "summary": "完成跨表面验证。",
+    "changes": [],
+    "validations": [],
+    "git_state": {
+      "available": true,
+      "dirty": false,
+      "branch": "main"
+    },
+    "duration_ms": 25
+  },
+  "harness_receipt": {
+    "schema_version": 1,
+    "revision": 1,
+    "run_id": "run-parity-1",
+    "status": "completed_unverified",
+    "checks": [
+      {"id": "unit", "status": "passed", "tree_fingerprint": "tree-a"},
+      {"id": "integration", "status": "infrastructure_error", "tree_fingerprint": "tree-a"}
+    ],
+    "criteria": [
+      {"id": "tests", "status": "satisfied", "evidence_ids": ["ev-1", "ev-2"]},
+      {"id": "integration", "status": "unsatisfied", "evidence_ids": ["ev-2"]}
+    ],
+    "warnings": ["集成环境暂不可用"]
+  },
+  "explain": {
+    "schema_version": 1,
+    "revision": 1,
+    "run_id": "run-parity-1",
+    "lookup_status": "ok",
+    "message": "",
+    "explanation": {
+      "status": "completed_unverified",
+      "verified": false,
+      "running": false,
+      "objective": "验证所有公开详情字段",
+      "started_at": "2026-07-22T08:00:00Z",
+      "completed_at": "2026-07-22T08:00:01Z",
+      "summary": "保留完整有界字段集合",
+      "criteria": [
+        {"id": "criterion-all", "description": "所有字段可见", "status": "unsatisfied", "evidence_ids": ["ev-5"]}
+      ],
+      "failure_classes": ["verification_failure"],
+      "findings": [
+        {"failure_class": "verification_failure", "source": "check:one", "message": "发现一", "next_step": "处理一", "check_ids": ["check-one"], "evidence_ids": ["ev-1"]},
+        {"failure_class": "environment_error", "source": "check:two", "message": "发现二", "next_step": "处理二", "check_ids": ["check-two"], "evidence_ids": ["ev-2"]},
+        {"failure_class": "implementation_error", "source": "check:three", "message": "发现三", "next_step": "处理三", "check_ids": [], "evidence_ids": ["ev-5"]}
+      ],
+      "checks": [
+        {"id": "check-one", "status": "passed", "duration_ms": 10},
+        {"id": "check-two", "status": "failed", "duration_ms": 20}
+      ],
+      "evidence": [
+        {"id": "ev-1", "kind": "test_report", "status": "recorded", "digest_prefix": "digest-1", "uri": "artifact://ev-1"},
+        {"id": "ev-2", "kind": "log", "status": "recorded", "digest_prefix": "digest-2", "uri": "artifact://ev-2"},
+        {"id": "ev-3", "kind": "diff", "status": "recorded", "digest_prefix": "digest-3", "uri": "artifact://ev-3"},
+        {"id": "ev-4", "kind": "trace", "status": "recorded", "digest_prefix": "digest-4", "uri": "artifact://ev-4"},
+        {"id": "ev-5", "kind": "artifact", "status": "recorded", "digest_prefix": "digest-5", "uri": "artifact://ev-5"}
+      ]
+    }
+  },
+  "replay": {
+    "schema_version": 1,
+    "revision": 1,
+    "run_id": "run-parity-1",
+    "lookup_status": "ok",
+    "message": "",
+    "result": {
+      "status": "changed",
+      "baseline_manifest_sha256": "baseline-manifest",
+      "current_manifest_sha256": "current-manifest",
+      "baseline_rule_version": "rule-1",
+      "current_rule_version": "rule-1",
+      "baseline_explanation_sha256": "baseline-explain",
+      "current_explanation_sha256": "current-explain",
+      "anomalies": ["tree_changed", "late_event"],
+      "differences": [
+        {"field": "field-1", "baseline": "before-1", "current": "after-1"},
+        {"field": "field-2", "baseline": "before-2", "current": "after-2"},
+        {"field": "field-3", "baseline": "before-3", "current": "after-3"},
+        {"field": "field-4", "baseline": "before-4", "current": "after-4"}
+      ],
+      "artifacts": [
+        {"id": "artifact-1", "kind": "log", "reference": "artifact://one", "status": "verified", "expected_sha256": "sha-one", "actual_sha256": "sha-one"},
+        {"id": "artifact-2", "kind": "log", "reference": "artifact://two", "status": "verified", "expected_sha256": "sha-two", "actual_sha256": "sha-two"},
+        {"id": "artifact-3", "kind": "log", "reference": "artifact://three", "status": "verified", "expected_sha256": "sha-three", "actual_sha256": "sha-three"},
+        {"id": "artifact-4", "kind": "log", "reference": "artifact://four", "status": "verified", "expected_sha256": "sha-four", "actual_sha256": "sha-four"},
+        {"id": "artifact-5", "kind": "log", "reference": "artifact://five", "status": "verified", "expected_sha256": "sha-five", "actual_sha256": "sha-five"}
+      ],
+      "timeline": [
+        {"kind": "check", "id": "check-one", "timestamp": "2026-07-22T08:00:00Z", "status": "passed"},
+        {"kind": "check", "id": "check-two", "timestamp": "2026-07-22T08:00:01Z", "status": "failed"}
+      ],
+      "legacy_baseline_created": false
+    }
+  },
+  "expected_receipt_fragments": [
+    "完成回执",
+    "Harness 未验证",
+    "检查 1/2",
+    "准则 1/2",
+    "证据 2",
+    "基础设施异常 · integration",
+    "集成环境暂不可用"
+  ],
+  "expected_detail_fragments": [
+    "criterion-all",
+    "所有字段可见",
+    "发现三",
+    "来源 check:three",
+    "处理三",
+    "ev-5",
+    "digest-5",
+    "artifact://ev-5",
+    "late_event",
+    "field-4",
+    "artifact-5",
+    "artifact://five",
+    "Timeline 2"
+  ]
+}
