@@ -120,5 +120,5 @@ row index 与 JSON payload 双向校验，单 artifact 上限 40 MiB。
 
 ## 下一步
 
-EVO-04.7a 已消费本 Resolution 并形成结构化、可撤销、非注入 Reflection。下一步进入 EVO-05.1a Promotion
-Package Input Contract；仍不执行合并或发布。
+EVO-04.7a 已消费本 Resolution 并形成结构化、可撤销、非注入 Reflection。EVO-05.1a Promotion
+Package Input Contract 也已完成；下一步是 EVO-05.1b，仍不执行合并或发布。

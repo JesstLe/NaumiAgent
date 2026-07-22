@@ -88,5 +88,5 @@ normal 无逐次确认、每会话最多 50 次；bypass 不能跳过四 Store a
 
 ## 下一步
 
-EVO-04.2a 至 EVO-04.7a 已实现。下一步实现 EVO-05.1a Promotion Package Input Contract；Reviewer、
+EVO-04.2a 至 EVO-04.7a 已实现。EVO-05.1a Promotion Package Input Contract 也已完成；Reviewer、
 Counterfactual、Reward-hacking Evidence、Resolution 与 Reflection 均无权覆盖 mechanical veto。

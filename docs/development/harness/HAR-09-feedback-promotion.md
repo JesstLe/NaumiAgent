@@ -68,8 +68,9 @@
 - EVO-04.5a 已补齐 promotion 前的 Reward-hacking Evidence，EVO-04.6a 又形成不可变四态 Decision State；
   EVO-04.6b 已把 escalation 用户答案形成不可变 Resolution。`accepted_experiment` 仍只设置
   `promotion_review_ready`，不执行 promotion。EVO-04.7a 已将 Decision/Resolution 投影为非注入、可撤销的
-  结构化 Reflection Memory。HAR-09.6 现在仍需等待显式 promotion/rollback executor 和 Outcome authority，
-  不能把 Decision、Resolution 或 Reflection 直接记为 promoted outcome。
+  结构化 Reflection Memory。EVO-05.1a 已进一步冻结不可执行 Promotion Package Input，但 HAR-09.6 仍需等待
+  显式 promotion/rollback executor 和 Outcome authority，不能把 Decision、Resolution、Reflection 或 Package
+  Input 直接记为 promoted outcome。
 - HAR-09 仍未实现 defer/merge 交互和 outcome tracking，因此整体
   继续保持 partial。
 

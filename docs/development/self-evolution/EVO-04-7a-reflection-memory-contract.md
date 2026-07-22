@@ -102,8 +102,8 @@ workspace、状态或冲突验证。
 - 不提供自由文本搜索或向量召回，这是安全边界而非缺失实现；
 - Outcome tracking 仍属于 HAR-09.6，promotion/rollback 属于 EVO-05。
 
-## 下一依赖
+## 后续依赖
 
-跨文档最小后续不是直接完成整个 EVO-05，而是先定义 EVO-05.1a Promotion Package Input Contract：仅允许
-`accepted_experiment` 且 active 的 Reflection 进入显式 promotion review，并冻结 patch、baseline、全部
-receipts、risk、migration 与 rollback plan 引用；它仍不得合并、推送或发布。
+EVO-05.1a Promotion Package Input Contract 已按上述边界交付：仅允许 `accepted_experiment` 且 active 的
+Reflection 冻结 patch、baseline、全部 receipts、risk、migration 与 rollback plan。下一最小依赖是
+EVO-05.1b 完整 Package；当前仍不得审批、合并、推送或发布。

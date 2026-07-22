@@ -48,6 +48,10 @@ from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
 )
+from naumi_agent.evolution.promotion_package_inputs import (
+    EvolutionPromotionPackageInputError,
+    render_evolution_promotion_package_input,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryError,
@@ -1071,6 +1075,65 @@ class EvolutionReflectionMemoryRevokeTool(Tool):
         return render_evolution_reflection_memory(view)
 
 
+class EvolutionPromotionPackageInputTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_promotion_package_input"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 accepted_experiment 且仍 active 的 Reflection 冻结 Promotion Package 输入。"
+            "包含 patch manifest、baseline、完整 receipt 引用、迁移评估和 rollback plan；"
+            "不审批、不写 Git、不合并、不推送也不发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "reflection_id": {
+                    "type": "string",
+                    "pattern": "^evreflection_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["reflection_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution Promotion 输入",
+            search_hint=(
+                "evolution promotion package input patch baseline receipts migration "
+                "rollback 提升 发布 输入 回滚"
+            ),
+        )
+
+    async def execute(self, reflection_id: str) -> str:
+        try:
+            view = await self._engine.evolution_promotion_package_input_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                reflection_id=reflection_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionPackageInputError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Promotion Package Input 未完成：{exc}"
+        return render_evolution_promotion_package_input(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1091,6 +1154,7 @@ def create_evolution_review_tools(
         EvolutionDecisionResolutionTool(engine),
         EvolutionReflectionMemoryTool(engine),
         EvolutionReflectionMemoryRevokeTool(engine),
+        EvolutionPromotionPackageInputTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -1109,6 +1173,7 @@ __all__ = [
     "EvolutionIndependentReviewTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
+    "EvolutionPromotionPackageInputTool",
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

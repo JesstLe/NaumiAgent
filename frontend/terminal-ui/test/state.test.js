@@ -2096,6 +2096,7 @@ test("reflection commands use the shared slash channel instead of typed review r
     `/evolution reflection-revoke ${reflectionId} superseded`,
     send,
   );
+  handleSubmitText(state, `/evolution promotion-input ${reflectionId}`, send);
 
   assert.deepEqual(sent, [
     {
@@ -2107,6 +2108,10 @@ test("reflection commands use the shared slash channel instead of typed review r
       payload: {
         text: `/evolution reflection-revoke ${reflectionId} superseded`,
       },
+    },
+    {
+      type: "submit",
+      payload: { text: `/evolution promotion-input ${reflectionId}` },
     },
   ]);
   assert.equal(
