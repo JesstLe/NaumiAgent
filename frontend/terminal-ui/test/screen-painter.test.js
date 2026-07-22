@@ -6,7 +6,10 @@ import { createScreenPainter } from "../src/screen-painter.js";
 
 test("screen painter clears once then updates only changed rows", () => {
   const writes = [];
-  const painter = createScreenPainter({ write: (value) => writes.push(value) });
+  const painter = createScreenPainter({
+    write: (value) => writes.push(value),
+    synchronizedOutput: true,
+  });
 
   const initial = painter.paint(["header", "working-0", "footer"], 80, 3);
   const animated = painter.paint(["header", "working-1", "footer"], 80, 3);
@@ -33,7 +36,10 @@ test("screen painter clears once then updates only changed rows", () => {
 
 test("screen painter reinitializes after terminal dimensions change", () => {
   const writes = [];
-  const painter = createScreenPainter({ write: (value) => writes.push(value) });
+  const painter = createScreenPainter({
+    write: (value) => writes.push(value),
+    synchronizedOutput: true,
+  });
 
   painter.paint(["one", "two"], 80, 2);
   const resized = painter.paint(["one", "two", "three"], 100, 3);
@@ -47,7 +53,10 @@ test("screen painter reinitializes after terminal dimensions change", () => {
 
 test("screen painter validates complete frames before writing", () => {
   const writes = [];
-  const painter = createScreenPainter({ write: (value) => writes.push(value) });
+  const painter = createScreenPainter({
+    write: (value) => writes.push(value),
+    synchronizedOutput: true,
+  });
 
   assert.throws(() => painter.paint(["only one"], 80, 2), /画面行数/);
   assert.throws(() => painter.paint("not-lines", 80, 2), /画面必须/);
@@ -58,6 +67,7 @@ test("screen painter retries a full frame after a failed write", () => {
   const writes = [];
   let fail = true;
   const painter = createScreenPainter({
+    synchronizedOutput: true,
     write(value) {
       writes.push(value);
       if (fail) {
@@ -77,6 +87,17 @@ test("screen painter retries a full frame after a failed write", () => {
     (value) => value.startsWith(`${ANSI.synchronizedOutputOn}${ANSI.clear}`)
       && value.endsWith(ANSI.synchronizedOutputOff),
   ));
+});
+
+test("screen painter omits synchronized-output controls when unsupported", () => {
+  const writes = [];
+  const painter = createScreenPainter({ write: (value) => writes.push(value) });
+
+  painter.paint(["plain"], 80, 1);
+
+  assert.equal(writes[0], `${ANSI.clear}plain`);
+  assert.equal(writes[0].includes(ANSI.synchronizedOutputOn), false);
+  assert.equal(writes[0].includes(ANSI.synchronizedOutputOff), false);
 });
 
 function count(value, needle) {

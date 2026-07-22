@@ -11,7 +11,8 @@ export function createTerminalSession({ stdin, stdout, capabilities }) {
     inputListener = onInput;
     resizeListener = onResize;
     try {
-      stdout.write(enableSequence(capabilities));
+      const sequence = enableSequence(capabilities);
+      if (sequence) stdout.write(sequence);
       if (stdin.isTTY && typeof stdin.setRawMode === "function") {
         stdin.setRawMode(true);
       }
@@ -41,7 +42,8 @@ export function createTerminalSession({ stdin, stdout, capabilities }) {
       }
     }
     try {
-      stdout.write(disableSequence(capabilities));
+      const sequence = disableSequence(capabilities);
+      if (sequence) stdout.write(sequence);
     } catch {
       // Output may already be closed during process teardown.
     }
@@ -58,18 +60,18 @@ export function createTerminalSession({ stdin, stdout, capabilities }) {
 }
 
 function enableSequence(capabilities) {
-  return ANSI.altOn
-    + ANSI.bracketedPasteOn
+  return (capabilities.alternateScreen ? ANSI.altOn : "")
+    + (capabilities.bracketedPaste ? ANSI.bracketedPasteOn : "")
     + (capabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOn : "")
-    + ANSI.hideCursor;
+    + (capabilities.cursorControl ? ANSI.hideCursor : "");
 }
 
 function disableSequence(capabilities) {
   return (capabilities.enhancedKeyboard ? ANSI.keyboardDisambiguateOff : "")
-    + ANSI.bracketedPasteOff
-    + ANSI.showCursor
-    + ANSI.altOff
-    + ANSI.reset;
+    + (capabilities.bracketedPaste ? ANSI.bracketedPasteOff : "")
+    + (capabilities.cursorControl ? ANSI.showCursor : "")
+    + (capabilities.alternateScreen ? ANSI.altOff : "")
+    + (capabilities.ansiControl ? ANSI.reset : "");
 }
 
 function removeListenerQuietly(stream, event, listener) {

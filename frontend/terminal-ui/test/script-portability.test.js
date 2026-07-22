@@ -45,6 +45,35 @@ test("terminal UI rejects non-TTY launches before starting the bridge", () => {
   assert.equal(result.stdout, "");
 });
 
+test("terminal UI rejects unknown full-screen capabilities without ANSI output", () => {
+  const entry = fileURLToPath(new URL("../src/index.js", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [
+      entry,
+      "--bridge-command-json",
+      JSON.stringify([process.execPath, "-e", "process.exit(9)"]),
+    ],
+    {
+      cwd: tmpdir(),
+      env: {
+        ...process.env,
+        TERM: "unknown-terminal",
+        NAUMI_TERMINAL_UI_ALLOW_NON_TTY: "1",
+        NAUMI_ALT_SCREEN: "1",
+        NAUMI_SYNCHRONIZED_OUTPUT: "1",
+        NAUMI_TERMINAL_UI_DEBUG_LOG: "0",
+      },
+      encoding: "utf8",
+      timeout: 3000,
+    },
+  );
+
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /未通过 Naumi 全屏控制能力检测/);
+  assert.equal(result.stdout, "");
+});
+
 test("bridge spawn failure restores the terminal before reporting the error", () => {
   const entry = fileURLToPath(new URL("../src/index.js", import.meta.url));
   const env = {

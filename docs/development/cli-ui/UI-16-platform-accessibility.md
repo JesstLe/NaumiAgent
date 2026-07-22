@@ -7,6 +7,9 @@
 ## 子模块
 
 - UI-16.1 Capability probe：color、truecolor、mouse、unicode、alternate screen、signals。
+  - UI-16.1a 已建立 Python/Node 共用的版本化 capability contract，并让 New UI 按能力逐项启停 ANSI
+    控制序列、失败关闭到 Textual fallback；TUI `/doctor` 消费同一检测语义。详见
+    [UI-16.1a 终端能力合同与安全协商](UI-16-1a-terminal-capability-contract.md)。
 - UI-16.2 Width engine：wcwidth、emoji、CJK、组合字符、ANSI 截断。
 - UI-16.3 Platform lifecycle：POSIX signal、Windows console、PowerShell/cmd、路径与换行。
 - UI-16.4 No-color/plain：所有状态有文字/符号冗余，不依赖红绿色。
@@ -27,5 +30,5 @@
 
 ## 当前状态
 
-UI-16 为 partial（16.6a）。终端矩阵、完整 capability probe、平台生命周期、文案 key 与系统化无障碍 QA
-仍未交付，不能据此宣称跨平台发布门已经通过。
+UI-16 为 partial（16.1a、16.6a）。共享 capability contract 与控制序列协商已交付；SGR mouse 输入、
+三平台真实终端矩阵、平台生命周期、文案 key 与系统化无障碍 QA 仍未交付，不能据此宣称跨平台发布门已经通过。

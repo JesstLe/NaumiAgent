@@ -1817,6 +1817,7 @@ function launchTerminalUi(fixtureName = "fake-bridge.js", options = {}) {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
+        TERM: "xterm-256color",
         FORCE_COLOR: "0",
         NAUMI_TERMINAL_UI_ALLOW_NON_TTY: "1",
         NAUMI_TERMINAL_UI_STATE_PATH: options.statePath

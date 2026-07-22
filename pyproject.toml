@@ -77,6 +77,7 @@ packages = ["src/naumi_agent"]
 "frontend/terminal-ui/package.json" = "naumi_agent/frontend/terminal-ui/package.json"
 "frontend/terminal-ui/protocol-contract.json" = "naumi_agent/frontend/terminal-ui/protocol-contract.json"
 "frontend/terminal-ui/capability-manifest.json" = "naumi_agent/frontend/terminal-ui/capability-manifest.json"
+"frontend/terminal-ui/terminal-capability-contract.json" = "naumi_agent/frontend/terminal-ui/terminal-capability-contract.json"
 "frontend/terminal-ui/src" = "naumi_agent/frontend/terminal-ui/src"
 "src/naumi_agent/tui/capability-manifest.json" = "naumi_agent/tui/capability-manifest.json"
 

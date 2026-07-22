@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "profile_fields": [
+    "interactive",
+    "fullScreen",
+    "ansiControl",
+    "colorLevel",
+    "colors",
+    "unicode",
+    "mouseProtocol",
+    "alternateScreen",
+    "bracketedPaste",
+    "cursorControl",
+    "synchronizedOutput",
+    "enhancedKeyboard",
+    "animate",
+    "signalMode",
+    "home",
+    "terminal",
+    "terminalProgram"
+  ],
+  "color_levels": ["none", "ansi16", "ansi256", "truecolor"],
+  "mouse_protocols": ["none", "sgr"],
+  "signal_modes": ["none", "posix", "windows"],
+  "required_matchers": [
+    "ansi_control",
+    "enhanced_keyboard",
+    "mouse_sgr",
+    "synchronized_output",
+    "windows_unicode"
+  ],
+  "matcher_fields": [
+    "term_exact",
+    "term_prefixes",
+    "program_contains",
+    "presence_env",
+    "windows_env"
+  ],
+  "matchers": {
+    "ansi_control": {
+      "term_prefixes": ["ansi", "cygwin", "foot", "linux", "rxvt", "screen", "tmux", "vt", "xterm"],
+      "program_contains": ["apple_terminal", "ghostty", "iterm", "kitty", "vscode", "wezterm"],
+      "windows_env": ["ANSICON", "ConEmuANSI", "WT_SESSION"]
+    },
+    "enhanced_keyboard": {
+      "term_exact": ["foot", "xterm-kitty"],
+      "term_prefixes": ["foot-"],
+      "program_contains": ["ghostty", "kitty", "wezterm"],
+      "presence_env": ["KITTY_WINDOW_ID"]
+    },
+    "mouse_sgr": {
+      "term_prefixes": ["foot", "rxvt", "screen", "tmux", "xterm"],
+      "program_contains": ["ghostty", "iterm", "kitty", "vscode", "wezterm"],
+      "windows_env": ["WT_SESSION"]
+    },
+    "synchronized_output": {
+      "term_exact": ["foot", "xterm-kitty"],
+      "term_prefixes": ["foot-"],
+      "program_contains": ["ghostty", "iterm", "kitty", "wezterm"]
+    },
+    "windows_unicode": {
+      "program_contains": ["ghostty", "vscode", "wezterm"],
+      "windows_env": ["ANSICON", "ConEmuANSI", "WT_SESSION"]
+    }
+  }
+}

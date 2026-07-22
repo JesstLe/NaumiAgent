@@ -602,6 +602,9 @@ def test_terminal_ui_runtime_assets_are_included_in_wheel() -> None:
     assert force_include["frontend/terminal-ui/capability-manifest.json"] == (
         "naumi_agent/frontend/terminal-ui/capability-manifest.json"
     )
+    assert force_include["frontend/terminal-ui/terminal-capability-contract.json"] == (
+        "naumi_agent/frontend/terminal-ui/terminal-capability-contract.json"
+    )
     assert force_include["frontend/terminal-ui/src"] == (
         "naumi_agent/frontend/terminal-ui/src"
     )
