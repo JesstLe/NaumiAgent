@@ -50,7 +50,8 @@ Input 是 append-only 审计记录。Reflection 后续被撤销时不删除 Inpu
 - Agent Tool、Slash、新 UI 透传、权限和 Engine composition 有聚焦测试；
 - Ruff、py_compile 与上述小模块测试通过，不以全量测试代替本切片证据。
 
-## 下一最小依赖
+## 后续依赖
 
-EVO-05.1b 从仍 eligible 的 Input 构造完整 Promotion Package，补充 approval policy 所需签名域和目标分支信息。
-它仍不得直接 merge/push；HAR-09.6 Outcome authority 要等待显式 promotion/rollback executor。
+EVO-05.1b 已从仍 eligible 的 Input 构造 exact-target review Package，并补齐 approval policy 所需签名域和
+目标分支信息。下一最小依赖是 EVO-05.2a；当前仍不得直接 merge/push，HAR-09.6 Outcome authority 继续等待
+显式 promotion/rollback executor。

@@ -71,4 +71,5 @@ Receipt 不保存源码、Prompt 正文、模型正文、reasoning、tool argume
 ## 下一步
 
 EVO-04.4a 至 EVO-04.7a 已沿本 Author Receipt authority 链实现风险扫描、四态决策、持久 Resolution 与
-非注入 Reflection。EVO-05.1a Promotion Package Input Contract 已完成，下一步是 EVO-05.1b 完整 Package。
+非注入 Reflection。EVO-05.1a Input 与 EVO-05.1b review Package 已完成，下一步是 EVO-05.2a Approval
+Requirement Policy。

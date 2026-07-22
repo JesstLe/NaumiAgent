@@ -116,6 +116,12 @@ from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputExecutor,
     EvolutionPromotionPackageInputStore,
 )
+from naumi_agent.evolution.promotion_packages import (
+    EvolutionPromotionPackageBuilder,
+    EvolutionPromotionPackageExecutor,
+    EvolutionPromotionPackageStore,
+    EvolutionPromotionTargetProbe,
+)
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryBuilder,
     EvolutionReflectionMemoryExecutor,
@@ -366,6 +372,22 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_promotion_package_input_executor,
         EvolutionPromotionPackageInputExecutor,
+    )
+    assert isinstance(
+        engine.evolution_promotion_package_builder,
+        EvolutionPromotionPackageBuilder,
+    )
+    assert isinstance(
+        engine.evolution_promotion_package_store,
+        EvolutionPromotionPackageStore,
+    )
+    assert isinstance(
+        engine.evolution_promotion_target_probe,
+        EvolutionPromotionTargetProbe,
+    )
+    assert isinstance(
+        engine.evolution_promotion_package_executor,
+        EvolutionPromotionPackageExecutor,
     )
     assert isinstance(
         engine.evolution_validation_planner,

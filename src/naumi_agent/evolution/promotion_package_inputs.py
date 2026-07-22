@@ -1295,6 +1295,35 @@ async def _reflection_active_for_input(
     return revoked is None
 
 
+async def _require_active_promotion_input(
+    db: aiosqlite.Connection,
+    item: EvolutionPromotionPackageInput,
+) -> None:
+    """Validate an exact, still-eligible Input inside a caller-owned transaction."""
+    row = await (
+        await db.execute(
+            "SELECT * FROM evolution_promotion_package_inputs WHERE input_id = ?",
+            (item.input_id,),
+        )
+    ).fetchone()
+    if row is None:
+        raise EvolutionPromotionPackageInputError(
+            "promotion_input_missing",
+            "Promotion Package Input authority 不存在。",
+        )
+    stored = _from_row(row)
+    if stored != item:
+        raise EvolutionPromotionPackageInputError(
+            "promotion_input_conflict",
+            "Promotion Package Input authority 已变化。",
+        )
+    if not await _reflection_active_for_input(db, stored):
+        raise EvolutionPromotionPackageInputError(
+            "promotion_input_reflection_revoked",
+            "Promotion Package Input 的 Reflection 已撤销。",
+        )
+
+
 def _from_row(row: aiosqlite.Row) -> EvolutionPromotionPackageInput:
     encoded = str(row["input_json"])
     if len(encoded.encode("utf-8")) > _MAX_ARTIFACT_BYTES:

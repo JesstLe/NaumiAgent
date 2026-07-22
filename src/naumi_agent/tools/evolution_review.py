@@ -52,6 +52,10 @@ from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputError,
     render_evolution_promotion_package_input,
 )
+from naumi_agent.evolution.promotion_packages import (
+    EvolutionPromotionPackageError,
+    render_evolution_promotion_package,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryError,
@@ -1134,6 +1138,76 @@ class EvolutionPromotionPackageInputTool(Tool):
         return render_evolution_promotion_package_input(view)
 
 
+class EvolutionPromotionPackageTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_promotion_package"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从仍 eligible 的 Promotion Package Input 冻结完整审查 Package，"
+            "绑定 exact local target branch、审批事实与可签名摘要域。"
+            "只读 Git，不审批、不签名、不 rebase、不合并、不推送也不发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "promotion_input_id": {
+                    "type": "string",
+                    "pattern": "^evpromoin_[0-9a-f]{24}$",
+                },
+                "target_branch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "default": "main",
+                },
+            },
+            "required": ["promotion_input_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution Promotion Package",
+            search_hint=(
+                "evolution promotion package target branch signature approval "
+                "提升 发布 审批 签名 目标分支"
+            ),
+        )
+
+    async def execute(
+        self,
+        promotion_input_id: str,
+        target_branch: str = "main",
+    ) -> str:
+        try:
+            view = await self._engine.evolution_promotion_package_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                promotion_input_id=promotion_input_id.strip(),
+                target_branch=target_branch.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionPackageError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Promotion Package 未完成：{exc}"
+        return render_evolution_promotion_package(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1155,6 +1229,7 @@ def create_evolution_review_tools(
         EvolutionReflectionMemoryTool(engine),
         EvolutionReflectionMemoryRevokeTool(engine),
         EvolutionPromotionPackageInputTool(engine),
+        EvolutionPromotionPackageTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -1174,6 +1249,7 @@ __all__ = [
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "EvolutionPromotionPackageInputTool",
+    "EvolutionPromotionPackageTool",
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

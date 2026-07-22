@@ -116,7 +116,12 @@ def _accepted_reflection(workspace: Path) -> EvolutionReflectionMemory:
     )
 
 
-def _package(workspace: Path, memory: EvolutionReflectionMemory) -> EvolutionPromotionPackageInput:
+def _package(
+    workspace: Path,
+    memory: EvolutionReflectionMemory,
+    *,
+    baseline_commit: str = "a" * 40,
+) -> EvolutionPromotionPackageInput:
     mutation_file = SimpleNamespace(
         path="src/naumi_agent/state/schema.py",
         operation="modify",
@@ -140,7 +145,7 @@ def _package(workspace: Path, memory: EvolutionReflectionMemory) -> EvolutionPro
     )
     patch = _patch_manifest(mutation)
     request = SimpleNamespace(
-        baseline_commit="a" * 40,
+        baseline_commit=baseline_commit,
         source_snapshot_id=f"evs_{'7' * 24}",
         source_snapshot_sha256="7" * 64,
         baseline_tree_sha256="8" * 64,

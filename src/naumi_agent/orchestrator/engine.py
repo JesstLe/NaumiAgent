@@ -174,6 +174,12 @@ from naumi_agent.evolution.promotion_package_inputs import (
     EvolutionPromotionPackageInputExecutor,
     EvolutionPromotionPackageInputStore,
 )
+from naumi_agent.evolution.promotion_packages import (
+    EvolutionPromotionPackageBuilder,
+    EvolutionPromotionPackageExecutor,
+    EvolutionPromotionPackageStore,
+    EvolutionPromotionTargetProbe,
+)
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryBuilder,
@@ -1297,6 +1303,18 @@ class AgentEngine:
                 package_store=self.evolution_promotion_package_input_store,
                 builder=self.evolution_promotion_package_input_builder,
             )
+        )
+        self.evolution_promotion_package_builder = EvolutionPromotionPackageBuilder()
+        self.evolution_promotion_target_probe = EvolutionPromotionTargetProbe()
+        self.evolution_promotion_package_store = EvolutionPromotionPackageStore(
+            config.memory.session_db_path,
+            target_probe=self.evolution_promotion_target_probe,
+        )
+        self.evolution_promotion_package_executor = EvolutionPromotionPackageExecutor(
+            input_store=self.evolution_promotion_package_input_store,
+            package_store=self.evolution_promotion_package_store,
+            builder=self.evolution_promotion_package_builder,
+            target_probe=self.evolution_promotion_target_probe,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

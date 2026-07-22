@@ -2088,6 +2088,7 @@ test("reflection commands use the shared slash channel instead of typed review r
   const sent = [];
   const decisionInputId = `evdin_${"a".repeat(24)}`;
   const reflectionId = `evreflection_${"b".repeat(24)}`;
+  const promotionInputId = `evpromoin_${"c".repeat(24)}`;
   const send = (type, payload) => sent.push({ type, payload });
 
   handleSubmitText(state, `/evolution reflection ${decisionInputId}`, send);
@@ -2097,6 +2098,11 @@ test("reflection commands use the shared slash channel instead of typed review r
     send,
   );
   handleSubmitText(state, `/evolution promotion-input ${reflectionId}`, send);
+  handleSubmitText(
+    state,
+    `/evolution promotion-package ${promotionInputId} main`,
+    send,
+  );
 
   assert.deepEqual(sent, [
     {
@@ -2112,6 +2118,12 @@ test("reflection commands use the shared slash channel instead of typed review r
     {
       type: "submit",
       payload: { text: `/evolution promotion-input ${reflectionId}` },
+    },
+    {
+      type: "submit",
+      payload: {
+        text: `/evolution promotion-package ${promotionInputId} main`,
+      },
     },
   ]);
   assert.equal(
