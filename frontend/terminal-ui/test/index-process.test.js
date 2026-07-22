@@ -103,6 +103,31 @@ test("terminal UI task QuickOpen loads typed tasks and fills detail without subm
   }
 });
 
+test("terminal UI session QuickOpen fills load without resuming or submitting", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("\x10");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("\t\t");
+    await waitForLatestScreen(output, "会话 QuickOpen", 7000);
+    await waitForLatestScreen(output, "历史工作会话", 7000);
+    app.stdin.write("\n");
+    await waitForLatestScreenWithout(output, "会话 QuickOpen", 7000);
+    await waitForLatestScreen(output, "/load session-history▌", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    assert(events.some((record) => record.event === "protocol.send"
+      && record.payload.record.type === "sessions/list/request"));
+    assert.equal(events.filter((record) => record.event === "protocol.send"
+      && ["submit", "resume"].includes(record.payload.record.type)).length, 0);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI animates active work without repeatedly clearing the screen", async () => {
   const app = launchTerminalUi("fake-bridge.js", {
     env: {

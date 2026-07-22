@@ -12,9 +12,10 @@
 - UI-14.2 QuickOpen：partial；UI-14.2a 已交付 New UI/TUI 命令 provider、fuzzy/中文元数据搜索、
   键盘导航、取消保留草稿，以及仅填入不执行的选择合同；UI-14.2b 已交付本次启动内、只记录规范命令名的
   隐私安全最近使用排序；UI-14.2c 已复用 UI-11 权威 `TaskViewItem` 增加两端任务 provider、关联快照隔离、
-  每次打开刷新与只填入 `/tasks detail <id>` 的安全合同。workspace 文件、会话/Agent provider 尚未实现。
+  每次打开刷新与只填入 `/tasks detail <id>` 的安全合同；UI-14.2d 已复用 ARC-03.2b2 工作区会话快照
+  增加两端会话 provider，选择只填入 `/load <id>`。workspace 文件、Agent 和页面 provider 尚未实现。
   详见 `UI-14-2a-command-quick-open.md`、`UI-14-2b-recent-command-ranking.md` 与
-  `UI-14-2c-task-quick-open.md`。
+  `UI-14-2c-task-quick-open.md`、`UI-14-2d-session-quick-open.md`。
 - UI-14.3 Input mode：insert/normal/visual，可配置关闭，状态明确可见。
 - UI-14.4 Multiline/history：光标、选择、撤销、搜索、IME、Unicode grapheme。
 - UI-14.5 Key conflict resolver：平台/终端能力、用户 override、冲突诊断。
@@ -30,7 +31,7 @@
 
 ## 当前状态
 
-UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a-14.2c 已提供两端命令/任务
-QuickOpen、本次启动的隐私安全最近命令排序和实时权威任务快照，但尚未实现其余 provider、跨启动历史、
+UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a-14.2d 已提供两端命令/任务/会话
+QuickOpen、本次启动的隐私安全最近命令排序和实时权威任务/会话快照，但尚未实现其余 provider、跨启动历史、
 typed argument form、Vim mode、完整 composer grapheme 编辑与键冲突诊断，因此
 UI-14 保持 partial。

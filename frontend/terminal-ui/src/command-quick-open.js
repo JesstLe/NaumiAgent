@@ -4,6 +4,7 @@ import { setInputText } from "./input-buffer.js";
 const QUERY_LIMIT = 200;
 const RESULT_LIMIT = 200;
 const TASK_RESULT_LIMIT = 50;
+const SESSION_RESULT_LIMIT = 100;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 const TASK_STATUS_ORDER = Object.freeze({
   running: 0,
@@ -27,6 +28,13 @@ export function openCommandQuickOpen(state) {
     quickOpen.taskLoaded = false;
     quickOpen.taskError = "";
     quickOpen.taskRequestId = "";
+  }
+  if (!quickOpen.sessionLoading) {
+    quickOpen.sessionItems = [];
+    quickOpen.sessionWarnings = [];
+    quickOpen.sessionLoaded = false;
+    quickOpen.sessionError = "";
+    quickOpen.sessionRequestId = "";
   }
   quickOpen.draftText = String(state.input ?? "");
   quickOpen.draftCursor = state.inputCursor;
@@ -64,6 +72,8 @@ export function getCommandQuickOpenItems(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
   const ranked = quickOpen.provider === "tasks"
     ? searchTaskEntries(quickOpen.taskItems, quickOpen.query, TASK_RESULT_LIMIT)
+    : quickOpen.provider === "sessions"
+      ? searchSessionEntries(quickOpen.sessionItems, quickOpen.query, SESSION_RESULT_LIMIT)
     : searchCommandEntries(
       state.slashCommands,
       quickOpen.query,
@@ -81,17 +91,18 @@ export function getCommandQuickOpenItems(state) {
   }));
 }
 
-export function switchCommandQuickOpenProvider(state, requestTaskSnapshot = null) {
+export function switchCommandQuickOpenProvider(state, requests = null) {
   const quickOpen = ensureCommandQuickOpenState(state);
-  quickOpen.provider = quickOpen.provider === "tasks" ? "commands" : "tasks";
+  quickOpen.provider = ({ commands: "tasks", tasks: "sessions", sessions: "commands" })[quickOpen.provider];
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
   if (
     quickOpen.provider === "tasks"
     && !quickOpen.taskLoaded
     && !quickOpen.taskLoading
-    && typeof requestTaskSnapshot === "function"
+    && typeof (typeof requests === "function" ? requests : requests?.tasks) === "function"
   ) {
+    const requestTaskSnapshot = typeof requests === "function" ? requests : requests.tasks;
     quickOpen.taskLoading = true;
     quickOpen.taskError = "";
     quickOpen.taskRequestId = String(requestTaskSnapshot() || "");
@@ -100,7 +111,39 @@ export function switchCommandQuickOpenProvider(state, requestTaskSnapshot = null
       quickOpen.taskError = "任务快照请求未发送。";
     }
   }
+  if (quickOpen.provider === "sessions" && !quickOpen.sessionLoaded && !quickOpen.sessionLoading
+    && typeof requests?.sessions === "function") {
+    quickOpen.sessionLoading = true;
+    quickOpen.sessionError = "";
+    quickOpen.sessionRequestId = String(requests.sessions() || "");
+    if (!quickOpen.sessionRequestId) {
+      quickOpen.sessionLoading = false;
+      quickOpen.sessionError = "会话快照请求未发送。";
+    }
+  }
   return quickOpen.provider;
+}
+
+export function applyCommandQuickOpenSessionSnapshot(state, requestId, payload) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.sessionRequestId || quickOpen.sessionRequestId !== String(requestId || "")) return false;
+  quickOpen.sessionItems = Array.isArray(payload?.items) ? payload.items.slice(0, SESSION_RESULT_LIMIT) : [];
+  quickOpen.sessionWarnings = Array.isArray(payload?.warnings) ? payload.warnings.slice(0, 10) : [];
+  quickOpen.sessionLoaded = true;
+  quickOpen.sessionLoading = false;
+  quickOpen.sessionError = "";
+  quickOpen.sessionRequestId = "";
+  quickOpen.selectedIndex = 0;
+  return true;
+}
+
+export function failCommandQuickOpenSessionSnapshot(state, requestId, message = "") {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.sessionRequestId || quickOpen.sessionRequestId !== String(requestId || "")) return false;
+  quickOpen.sessionLoading = false;
+  quickOpen.sessionError = String(message || "会话快照读取失败，请稍后重试。").slice(0, 500);
+  quickOpen.sessionRequestId = "";
+  return true;
 }
 
 export function applyCommandQuickOpenTaskSnapshot(state, requestId, payload) {
@@ -133,6 +176,12 @@ export function resetCommandQuickOpenTaskCache(state) {
   quickOpen.taskLoading = false;
   quickOpen.taskError = "";
   quickOpen.taskRequestId = "";
+  quickOpen.sessionItems = [];
+  quickOpen.sessionWarnings = [];
+  quickOpen.sessionLoaded = false;
+  quickOpen.sessionLoading = false;
+  quickOpen.sessionError = "";
+  quickOpen.sessionRequestId = "";
   quickOpen.provider = "commands";
   quickOpen.selectedIndex = 0;
 }
@@ -152,10 +201,27 @@ export function acceptCommandQuickOpen(state) {
   const selected = items.find((item) => item.selected) || items[0];
   setInputText(
     state,
-    selected.provider === "tasks" ? taskTemplate(selected) : commandTemplate(selected),
+    selected.provider === "tasks" ? taskTemplate(selected)
+      : selected.provider === "sessions" ? sessionTemplate(selected)
+        : commandTemplate(selected),
   );
   closeCommandQuickOpen(state);
   return true;
+}
+
+export function searchSessionEntries(entries, query, limit = SESSION_RESULT_LIMIT) {
+  const term = normalizeSearchText(query).slice(0, QUERY_LIMIT);
+  return (Array.isArray(entries) ? entries : []).filter((entry) => entry?.resumable && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(String(entry.session_id || "")))
+    .map((entry) => ({ entry, text: normalizeSearchText([entry.session_id, entry.title, entry.model, entry.git_branch].join(" ")) }))
+    .filter(({ text }) => !term || text.includes(term) || subsequenceGap(term, text) !== null)
+    .sort((a, b) => Number(b.entry.is_current) - Number(a.entry.is_current) || String(b.entry.updated_at).localeCompare(String(a.entry.updated_at)))
+    .slice(0, Math.max(1, Math.min(SESSION_RESULT_LIMIT, Number(limit) || SESSION_RESULT_LIMIT)))
+    .map(({ entry }) => entry);
+}
+
+export function sessionTemplate(entry) {
+  if (!entry?.resumable || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(String(entry.session_id || ""))) throw new Error("会话 ID 无法安全填入 QuickOpen。");
+  return `/load ${entry.session_id}`;
 }
 
 export function searchTaskEntries(entries, query, limit = TASK_RESULT_LIMIT) {
@@ -335,6 +401,8 @@ function ensureCommandQuickOpenState(state) {
       taskLoading: false,
       taskError: "",
       taskRequestId: "",
+      sessionItems: [], sessionWarnings: [], sessionLoaded: false, sessionLoading: false,
+      sessionError: "", sessionRequestId: "",
     };
   }
   if (!Array.isArray(state.commandQuickOpen.recentCommands)) {
@@ -342,7 +410,9 @@ function ensureCommandQuickOpenState(state) {
   }
   if (!Array.isArray(state.commandQuickOpen.taskItems)) state.commandQuickOpen.taskItems = [];
   if (!Array.isArray(state.commandQuickOpen.taskWarnings)) state.commandQuickOpen.taskWarnings = [];
-  if (!["commands", "tasks"].includes(state.commandQuickOpen.provider)) {
+  if (!Array.isArray(state.commandQuickOpen.sessionItems)) state.commandQuickOpen.sessionItems = [];
+  if (!Array.isArray(state.commandQuickOpen.sessionWarnings)) state.commandQuickOpen.sessionWarnings = [];
+  if (!["commands", "tasks", "sessions"].includes(state.commandQuickOpen.provider)) {
     state.commandQuickOpen.provider = "commands";
   }
   return state.commandQuickOpen;
