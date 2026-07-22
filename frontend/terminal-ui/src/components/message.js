@@ -25,7 +25,17 @@ export function renderMessage(message, width, ctx = { width }) {
     return renderUserMessage(message, width);
   }
   if (message.kind === "assistant") {
-    return ["", ...renderComponent(MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }), ctx)];
+    const lines = [
+      "",
+      ...renderComponent(
+        MarkdownExcerpt({ text: message.content, foldKey: `message:${message.id ?? ""}` }),
+        ctx,
+      ),
+    ];
+    if (message.streamStatus === "interrupted") {
+      lines.push(color(ANSI.yellow, "回复流已中断，已保留已接收内容。"));
+    }
+    return lines;
   }
   if (message.kind === "thinking") {
     const content = compactText(message.content || "");

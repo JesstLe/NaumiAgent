@@ -37,6 +37,6 @@ JSON 边界规范化，业务字段不得因此被省略或放宽。
 
 ## 5. 边界与下一步
 
-本切片不宣称 UI-17.2 或 HAR-07.6 全部完成。流式 token 合并、断流、发送失败/不确定、retry、权限中断后的恢复，以及
-Harness Receipt/Explain/Replay 完整字段 snapshot 仍需独立 golden。下一切片应从这些缺口与 CC-02、HAR-07 的依赖中选择
-最小用户可见前置，而不是扩展 ARC 范围。
+本切片不宣称 UI-17.2 或 HAR-07.6 全部完成。流式 token 合并、相关 error 断流与本地发送 retry 后续已由
+[UI-17.2e](UI-17-2e-terminal-stream-recovery-golden.md) 锁定；进程断开后的 uncertain 恢复、权限中断后的恢复，以及
+Harness Receipt/Explain/Replay 完整字段 snapshot 仍需独立 golden。

@@ -53,5 +53,6 @@ TUI fallback 仍渲染共享 Markdown 回执，明确写出“不是候选最终
 
 本切片不证明 UI-17.2 全部完成，也不证明 Candidate 已通过完整 Evaluation。后续 EVO-03.7b1/3.7b2 已完成
 Interventional 与必需平台 Adversarial lane 的后端聚合 authority，但专用 Final Evaluation typed 页面/golden
-仍未实现；UI-17 也仍缺流式断流/error/retry golden、兼容协商、发布矩阵与 release gate。不得用页面颜色或
+仍未实现；流式断流/error/retry golden 后续已由 UI-17.2e 完成，但 UI-17 仍缺断连/权限恢复、兼容协商、发布矩阵与
+release gate。不得用页面颜色或
 单 lane `passed` 替代聚合 authority。

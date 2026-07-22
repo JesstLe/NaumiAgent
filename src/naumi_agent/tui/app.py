@@ -2985,6 +2985,7 @@ class NaumiApp(App):
                     chat.start_response()
                     chat.add_response_token(f"**错误**: {data['message']}")
                     chat.finalize(0, 0.0, engine=self.engine)
+                    status.status_text = "执行失败"
 
         # Calculate token speed
         def _get_token_speed() -> float:
@@ -3085,7 +3086,8 @@ class NaumiApp(App):
             ctx = self.engine.get_context_info()
             ctx_pct = ctx["percentage"]
             status_parts.append(f"上下文: {ctx_pct}%")
-            status.status_text = "✅ " + " | ".join(status_parts)
+            status_prefix = "✅" if terminal_state == "completed" else "❌"
+            status.status_text = f"{status_prefix} " + " | ".join(status_parts)
         except asyncio.CancelledError:
             terminal_state = "cancelled"
             terminal_reason = "run_cancelled"

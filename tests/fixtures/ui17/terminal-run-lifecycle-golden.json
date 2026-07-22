@@ -100,9 +100,14 @@
           "duration_ms": 12,
           "content_preview": "ok\n",
           "content_length": 3,
+          "content_bytes": 3,
           "preview_format": "text",
           "preview_language": "",
-          "content_truncated": false
+          "content_truncated": false,
+          "output_sha256": "",
+          "output_artifact_id": "",
+          "output_page_count": 0,
+          "output_page_chars": 0
         }
       }
     ]

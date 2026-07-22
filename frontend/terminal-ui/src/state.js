@@ -924,6 +924,10 @@ export function reduceServerEvent(state, record) {
     case "run/completed": {
       if (!matchesActiveRunActivity(state, record.request_id)) break;
       const terminalStatus = deriveRunCompletionStatus(payload.status);
+      finishStreamingOutput(
+        state,
+        terminalStatus === "completed" ? "completed" : "interrupted",
+      );
       state.running = false;
       state.workingAnimationFrame = 0;
       resetRunCancellation(state);
@@ -957,6 +961,7 @@ export function reduceServerEvent(state, record) {
     }
     case "run/cancelled":
       if (!matchesActiveRunActivity(state, runCancelledTargetRequestId(record, payload))) break;
+      finishStreamingOutput(state, "interrupted");
       state.running = false;
       state.workingAnimationFrame = 0;
       resetRunCancellation(state);
@@ -1216,6 +1221,16 @@ export function reduceServerEvent(state, record) {
       }
       if (hasActiveRunActivity && (matchesActiveRun || isCorrelatedCancelError)) {
         finishRunActivity(state, "failed");
+      }
+      if (matchesActiveRun) {
+        finishStreamingOutput(state, "interrupted");
+        finishActiveToolPrepare(state, "本轮执行异常终止");
+        state.activeToolPrepare = null;
+        state.activeRuntimePhase = "";
+        state.permission = null;
+        clearPendingInteractions(state, "cancelled");
+        state.currentTurnStartedAtMs = null;
+        state.currentTurnFirstTokenAtMs = null;
       }
       failUserMessage(state, record.request_id, {
         code: payload.code ?? "error",
@@ -2353,7 +2368,13 @@ export function handleAssistantStream(state, message) {
       state.currentTurnFirstTokenAtMs = Date.now();
       state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
     }
-    state.activeAssistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: "" };
+    finishAssistantStream(state, "interrupted");
+    state.activeAssistant = {
+      kind: "assistant",
+      id: nextMessageId(state, "assistant"),
+      content: "",
+      streamStatus: "streaming",
+    };
     state.messages.push(state.activeAssistant);
   } else if (message.phase === "token") {
     if (state.currentTurnStartedAtMs && !state.currentTurnFirstTokenAtMs) {
@@ -2361,7 +2382,12 @@ export function handleAssistantStream(state, message) {
       state.lastFirstTokenLatencyMs = state.currentTurnFirstTokenAtMs - state.currentTurnStartedAtMs;
     }
     if (!state.activeAssistant) {
-      const assistant = { kind: "assistant", id: nextMessageId(state, "assistant"), content: message.content ?? "" };
+      const assistant = {
+        kind: "assistant",
+        id: nextMessageId(state, "assistant"),
+        content: message.content ?? "",
+        streamStatus: state.running ? "streaming" : "completed",
+      };
       state.messages.push(assistant);
       if (state.running) {
         state.activeAssistant = assistant;
@@ -2370,7 +2396,23 @@ export function handleAssistantStream(state, message) {
     }
     state.activeAssistant.content += message.content ?? "";
   } else if (message.phase === "end") {
-    state.activeAssistant = null;
+    finishAssistantStream(state, "completed");
+  }
+}
+
+function finishAssistantStream(state, status) {
+  const active = state.activeAssistant;
+  if (!active) return null;
+  active.streamStatus = status === "interrupted" ? "interrupted" : "completed";
+  state.activeAssistant = null;
+  clearRenderCache(state.renderCache);
+  return active;
+}
+
+function finishStreamingOutput(state, assistantStatus) {
+  finishAssistantStream(state, assistantStatus);
+  if (state.activeThinking) {
+    handleThinking(state, { phase: "end", content: "" });
   }
 }
 
