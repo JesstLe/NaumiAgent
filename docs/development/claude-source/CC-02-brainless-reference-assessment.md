@@ -59,10 +59,14 @@ tool/exec、diff、permission、prompt、slash menu、todo 等组件，以及组
 
 当前只借鉴公开设计和测试方法，不复制源码，因此不新增运行时依赖或第三方代码。
 
-## 后续最小动作
+## 已落实的最小动作
 
-在 UI-17 后续切片中实现一个 Naumi 自有的 terminal golden-capture prototype：固定尺寸、同一事件 fixture、
-ANSI/text 两种输出、New UI/TUI 双 surface。先验证捕获稳定性，再决定是否扩展为跨平台发布门。
+UI-17.2f 已实现 Naumi 自有的 terminal golden-capture prototype：固定尺寸、同一事件 fixture、ANSI/text 两种
+输出、New UI/TUI 双 surface、fixture/frame digest 和缺失锚点失败。实现与验收见
+[UI-17.2f 双端终端 Golden Capture](../cli-ui/UI-17-2f-terminal-golden-capture.md)。
+
+下一步只把该入口用于 CC-02 current/Ink 同 fixture 对照和 UI-16 跨平台真实 PTY 扩展；本评估仍保持
+`reference`，不因 capture 落地而采用 Brainless renderer。
 
 ## 来源
 

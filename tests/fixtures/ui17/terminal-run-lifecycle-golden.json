@@ -208,5 +208,15 @@
       }
     },
     "expected_terminal_status": "cancelled"
+  },
+  "capture": {
+    "schema_version": 1,
+    "width": 100,
+    "height": 40,
+    "required_anchors": [
+      "执行定向验证",
+      "bash_run",
+      "定向验证通过"
+    ]
   }
 }

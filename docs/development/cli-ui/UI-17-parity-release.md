@@ -15,7 +15,7 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
 
 - UI-17.1 Capability manifest：已实现；每个前端声明协议版本、14 项产品 capability 与真实证据，见
   [设计与验收](UI-17-1-capability-manifest.md)。
-- UI-17.2 Golden scenarios：partial (17.2a-17.2e)；runtime-health 已使用同一 fixture 对 Bridge、TUI 与 Node reducer
+- UI-17.2 Golden scenarios：partial (17.2a-17.2f)；runtime-health 已使用同一 fixture 对 Bridge、TUI 与 Node reducer
   断言语义字段，见 [设计与验收](UI-17-2a-runtime-health-golden.md)；permission/bypass 与 model-initiated interaction 已
   锁定脱敏请求、canonical choice/answer 和终态，见 [设计与验收](UI-17-2b-permission-interaction-golden.md)；
   submit/tool/receipt/cancel 已锁定统一输入、类型化消息、完成终态和 Ctrl+C 行为，见
@@ -23,7 +23,9 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
   并以共享 fixture 锁定 TUI fallback 的 RED/GREEN、资源和非最终语义，见
   [设计与验收](UI-17-2d-evaluation-lane-receipt-golden.md)；17.2e 锁定 token 合并、相关 error 的断流收尾、TUI 失败状态与
   New UI 本地发送 retry identity，见 [设计与验收](UI-17-2e-terminal-stream-recovery-golden.md)。进程断连后的 uncertain
-  恢复、权限中断恢复与完整 Harness snapshot 仍待实现。
+  恢复、权限中断恢复与完整 Harness snapshot 仍待实现。17.2f 已用同一 terminal lifecycle fixture 生成 New UI 与
+  Textual production compositor 的固定尺寸 ANSI/text frame、digest 与共享语义锚点，见
+  [设计与验收](UI-17-2f-terminal-golden-capture.md)；它是 capture 原型而非跨平台发布门。
 - UI-17.3 Compatibility negotiation：partial；17.3a 已让 Evaluation Lane typed event 在新旧 Bridge 组合中按
   协商能力进入专页或降级到共享 Slash 通道，并阻止未协商请求执行，见
   [设计与验收](UI-17-3a-typed-feature-downgrade.md)。17.3b 已将 client/server 事件与协商能力的
@@ -36,8 +38,9 @@ history/resume、doctor/debug、模型/provider identity、budget/context、退�
 ## 已交付前置
 
 ARC-01.4c1-4c3 已让 New UI 与 TUI 消费同一个 Composition-owned terminal lifecycle factory，并用真实 Harness
-SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2e 已锁定
-runtime-health、permission/bypass、interaction、基本 run lifecycle 与 stream/error/retry golden；UI-17.3a-17.3b 已交付首个真实 typed feature
+SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2f 已锁定
+runtime-health、permission/bypass、interaction、基本 run lifecycle、stream/error/retry golden 与双端固定视口
+capture；UI-17.3a-17.3b 已交付首个真实 typed feature
 downgrade 与通用 event-capability registry，其余 golden scenarios 与 UI-17.3 compatibility negotiation
 尚未完成，不能凭局部对照通过发布门。
 
