@@ -1746,6 +1746,40 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("Eval Comparison receipt 损坏或无法读取。") from exc
 
+    async def get_eval_comparison_receipt_by_id(
+        self,
+        workspace_root: str | Path,
+        comparison_id: str,
+    ) -> HarnessStoredEvalComparisonReceipt | None:
+        """Read one comparison by its immutable ID within one workspace."""
+        workspace = _canonical_workspace(workspace_root)
+        receipt_id = _validate_sha256(comparison_id, field="comparison_id")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_eval_comparison_receipts
+                    WHERE workspace_root = ? AND id = ?
+                    """,
+                    (workspace, receipt_id),
+                )
+                row = await cursor.fetchone()
+                return (
+                    _eval_comparison_receipt_from_row(row)
+                    if row is not None
+                    else None
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法按 ID 读取 Eval Comparison receipt。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Eval Comparison receipt 损坏或无法读取。"
+            ) from exc
+
     async def list_eval_comparison_receipts(
         self,
         workspace_root: str | Path,

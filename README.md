@@ -218,6 +218,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | Harness | `/harness status` `/harness eval … --repeat 5` `/harness baseline <suite>` `/harness baseline promote …` `/harness baseline compare …` `/harness explain` `/harness replay` | 实时显示 Candidate 评测/保存进度，在 typed 状态页查看 Baseline，以理由和最终确认引导晋升，再比较、解释并安全回放运行 |
 | 反馈 | `/feedback <category> <scope> <topic> <摘要>` | 将用户纠正或缺陷报告脱敏写入不可执行候选；偏好、取消和赞扬不会计为缺陷 |
 | 候选审阅 | `/evolution [list|detail <id>]` | 只读检查 Candidate、时间趋势、模型/平台分布、证据、审计链和资格 Gate |
+| 单 Lane 评测回执 | `/evolution evaluation <comparison-id>` | 从 H5a/H5c/归因权威事实签发并显示明确非最终的 before/after 回执 |
 | 任务 | `/todo` `/tasks` `/task` `/task-reply` `/task-abort` | 管理 todo、subagent、后台/browser 任务和人工接管 |
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |

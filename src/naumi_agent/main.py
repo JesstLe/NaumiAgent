@@ -2752,7 +2752,10 @@ def _print_help() -> None:
             "/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>",
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
-        ("/evolution [list|detail|enqueue]", "审查 Candidate 或加入 Workbench 队列"),
+        (
+            "/evolution [list|detail|evaluation|enqueue]",
+            "审查 Candidate、签发单 Lane 回执或加入 Workbench 队列",
+        ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
@@ -3023,6 +3026,10 @@ async def _run_feedback(engine: Any, arg: str) -> None:
 
 
 async def _run_evolution_review(engine: Any, arg: str) -> None:
+    from naumi_agent.evolution.evaluation_lane_receipts import (
+        EvolutionEvaluationLaneReceiptError,
+        render_evaluation_lane_receipt,
+    )
     from naumi_agent.evolution.queue import render_queue_result
     from naumi_agent.evolution.review import (
         EvolutionReviewFilter,
@@ -3034,6 +3041,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     try:
         parts = shlex.split(arg)
         action = parts[0].lower() if parts else "list"
+        if action == "evaluation":
+            if len(parts) != 2:
+                raise ValueError("evaluation 需要一个 H5c Comparison ID。")
+            receipt = await (
+                engine.evolution_evaluation_lane_receipt_executor.execute_by_id(
+                    workspace_root=engine.workspace_root,
+                    comparison_id=parts[1],
+                )
+            )
+            console.print(Markdown(render_evaluation_lane_receipt(receipt)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3058,7 +3076,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 filters=EvolutionReviewFilter(**options),
             )
         else:
-            raise ValueError("仅支持 list、detail 或 enqueue。")
+            raise ValueError("仅支持 list、detail、evaluation 或 enqueue。")
     except ValueError as exc:
         if action == "enqueue":
             console.print(f"Proposal 未入队：{exc}", style="yellow", markup=False)
@@ -3066,8 +3084,16 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
+            "/evolution evaluation <comparison-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionEvaluationLaneReceiptError as exc:
+        console.print(
+            f"Evaluation Lane Receipt 未签发：{exc}",
             style="yellow",
             markup=False,
         )

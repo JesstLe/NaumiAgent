@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.evolution.evaluation_lane_receipts import (
+    EvolutionEvaluationLaneReceiptError,
+    render_evaluation_lane_receipt,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
@@ -163,15 +167,75 @@ class EvolutionProposalQueueTool(Tool):
         return render_queue_result(result)
 
 
+class EvolutionEvaluationReceiptTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_evaluation_receipt"
+
+    @property
+    def description(self) -> str:
+        return (
+            "根据当前工作区已有的 H5c Comparison 与 Failure Attribution，"
+            "签发并显示一个防篡改 Evaluation Lane Receipt。"
+            "该收据明确保持非最终状态，不能代替跨 lane 与跨平台聚合。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "comparison_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+            },
+            "required": ["comparison_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 单 Lane 回执",
+            search_hint=(
+                "evolution evaluation receipt H5c attribution before after "
+                "自进化 评测 回执"
+            ),
+        )
+
+    async def execute(self, comparison_id: str) -> str:
+        try:
+            receipt = await (
+                self._engine.evolution_evaluation_lane_receipt_executor.execute_by_id(
+                    workspace_root=self._engine.workspace_root,
+                    comparison_id=comparison_id.strip(),
+                )
+            )
+        except (EvolutionEvaluationLaneReceiptError, OSError, ValueError) as exc:
+            return f"Evaluation Lane Receipt 未签发：{exc}"
+        return render_evaluation_lane_receipt(receipt)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
 ) -> list[Tool]:
-    return [EvolutionCandidatesTool(engine, service), EvolutionProposalQueueTool(engine)]
+    return [
+        EvolutionCandidatesTool(engine, service),
+        EvolutionEvaluationReceiptTool(engine),
+        EvolutionProposalQueueTool(engine),
+    ]
 
 
 __all__ = [
     "EvolutionCandidatesTool",
+    "EvolutionEvaluationReceiptTool",
     "EvolutionProposalQueueTool",
     "create_evolution_review_tools",
 ]

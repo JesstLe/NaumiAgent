@@ -78,4 +78,5 @@ HAR-08.4f 读取父权限、获取 Runtime lease 并签发可撤销 Run Grant。
 EVO-03.6c 已实现单 lane/sample authority adapter：精确 RED revision 与 GREEN candidate overlay 可通过
 HAR-08.4e 真实执行，并写入带 lifecycle、Run Grant 和 `exit_zero` observation 的 adversarial H5a。详见
 `EVO-03-6c-adversarial-lane-sample.md`。尚未实现的是 HAR-08.4f 连续 sample 接线、RED/GREEN H5c、跨平台
-dispatcher 和最终 Evaluation Receipt；不得在 Evolution 内复制 Batch coordinator。
+dispatcher 和 EVO-03.7b 最终聚合；EVO-03.6c..6e、5c、7a 已完成当前平台执行到单 lane receipt，不得在
+Evolution 内复制 Batch coordinator。
