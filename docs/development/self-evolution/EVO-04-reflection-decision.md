@@ -5,6 +5,12 @@
 基于结构化 before/after 证据决定 accept experiment、revise、reject 或 escalate，不让生成补丁的
 同一个模型用叙事覆盖失败结果。
 
+## 当前前置状态
+
+EVO-03.7b1 已能冻结最终评测所需的 Interventional lane、必需平台和 Adversarial RED/GREEN pairs，避免
+Reflection 从“当前收到的部分证据”自行推断完整性。EVO-03.7b2 最终 Evaluation Receipt 仍未完成；在其
+交付前，EVO-04 mechanical gate 不得把单 lane receipt 或 Aggregation Contract 当作完整决策输入。
+
 ## 子模块
 
 - EVO-04.1 Decision inputs：candidate、mutation receipt、Eval receipt、risk、user constraints。

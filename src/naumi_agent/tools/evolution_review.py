@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.evolution.adversarial_batch_requests import (
+    EvolutionAdversarialBatchRequest,
+)
+from naumi_agent.evolution.evaluation_aggregation_contracts import (
+    EvolutionEvaluationAggregationContractError,
+    render_evaluation_aggregation_contract,
+)
 from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptError,
     render_evaluation_lane_receipt,
@@ -222,6 +229,66 @@ class EvolutionEvaluationReceiptTool(Tool):
         return render_evaluation_lane_receipt(receipt)
 
 
+class EvolutionEvaluationAggregationContractTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_evaluation_contract"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把一个防篡改 Adversarial Batch Request 注册为最终 Evaluation 的覆盖合同。"
+            "合同冻结必需平台和 RED/GREEN lane，但不会签发最终回执或批准候选。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "batch_request": {
+                    "type": "object",
+                    "description": "完整 EvolutionAdversarialBatchRequest JSON。",
+                },
+            },
+            "required": ["batch_request"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 最终评测覆盖合同",
+            search_hint=(
+                "evolution evaluation aggregation contract platforms lanes "
+                "自进化 最终评测 聚合 合同"
+            ),
+        )
+
+    async def execute(self, batch_request: dict[str, Any]) -> str:
+        try:
+            request = EvolutionAdversarialBatchRequest.model_validate(batch_request)
+            artifact = await (
+                self._engine.evolution_evaluation_aggregation_contract_issuer.issue(
+                    workspace_root=self._engine.workspace_root,
+                    batch_request=request,
+                )
+            )
+        except (
+            EvolutionEvaluationAggregationContractError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evaluation Aggregation Contract 未签发：{exc}"
+        return render_evaluation_aggregation_contract(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -229,12 +296,14 @@ def create_evolution_review_tools(
     return [
         EvolutionCandidatesTool(engine, service),
         EvolutionEvaluationReceiptTool(engine),
+        EvolutionEvaluationAggregationContractTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
 
 __all__ = [
     "EvolutionCandidatesTool",
+    "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
     "EvolutionProposalQueueTool",
     "create_evolution_review_tools",

@@ -20,6 +20,7 @@ from naumi_agent.harness.feedback import (
 )
 from naumi_agent.tools.evolution_review import (
     EvolutionCandidatesTool,
+    EvolutionEvaluationAggregationContractTool,
     EvolutionEvaluationReceiptTool,
     EvolutionProposalQueueTool,
     create_evolution_review_tools,
@@ -164,10 +165,12 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert [tool.name for tool in tools] == [
         "evolution_candidates",
         "evolution_evaluation_receipt",
+        "evolution_evaluation_contract",
         "evolution_proposal_queue",
     ]
-    assert [tool.metadata.read_only for tool in tools] == [True, False, False]
+    assert [tool.metadata.read_only for tool in tools] == [True, False, False, False]
     assert isinstance(tools[1], EvolutionEvaluationReceiptTool)
+    assert isinstance(tools[2], EvolutionEvaluationAggregationContractTool)
 
 
 class _FakeEngine:
