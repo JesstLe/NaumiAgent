@@ -106,9 +106,18 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
   真实 Store→Bridge→Node→renderer 链路和 80/120/200 列中文宽字符边界已验证。
 - 详细边界与验收见 `HAR-07-3-detail-view-design.md`。
 
+### HAR-07.6 已实现：New UI / TUI 完整字段一致性
+
+- TUI 现在按 `run_id` 合并先到的权威 Harness Receipt 与通用 completion receipt，一次运行只
+  产生一张可见完成卡片；没有 Harness 同伴时仍保持原有通用回执行为。
+- 两端详情投影都展示协议允许的完整有界字段集合，包括 criterion id/description、finding
+  source/next step、evidence digest/URI、具体 anomaly、全部有界 difference 与 artifact；视口
+  继续有界并通过滚动访问后续内容。
+- 两端共用 `terminal-parity-golden.json`，New UI 样例必须先经过真实 protocol normalizer；
+  Textual 测试通过真实 app 与 engine sink 验证单卡片合并，而非只比较独立格式化函数。
+- 字段、降级、验收证据和诚实边界见 `HAR-07-6-terminal-parity.md`。
+
 ### 尚未完成
 
 - HAR-07.4b：断线重连后的 revision/gap 自动补发；显式 `/resume` 恢复已完成。
 - HAR-07.5：`e/r/v` 与复制交互。
-- HAR-07.6：已由 UI-17.2c 锁定通用 completion receipt 及其相邻 submit/tool/cancel 生命周期字段；Harness
-  Receipt/Explain/Replay 的完整字段集合 snapshot parity 尚未完成。

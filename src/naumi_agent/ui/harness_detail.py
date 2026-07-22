@@ -27,6 +27,7 @@ _STATUS_LABELS = {
     "passed": "通过",
     "failed": "失败",
     "recorded": "已记录",
+    "verified": "已验证",
     "reproduced": "已复现",
     "changed": "已变化",
     "digest_mismatch": "摘要不一致",
@@ -66,7 +67,8 @@ def _render_explain(payload: dict[str, Any]) -> list[str]:
     lines.extend(
         (
             f"- [{_status(item.get('status'))}] "
-            f"{_text(item.get('description')) or _text(item.get('id')) or '未命名准则'}"
+            f"`{_code(item.get('id'))}` · "
+            f"{_text(item.get('description')) or '未命名准则'}"
             f" · 证据 {len(_texts(item.get('evidence_ids'), 100))}"
         )
         for item in criteria
@@ -84,7 +86,11 @@ def _render_explain(payload: dict[str, Any]) -> list[str]:
     for item in findings:
         failure_class = _text(item.get("failure_class"))
         label = _FAILURE_LABELS.get(failure_class, failure_class)
-        lines.append(f"- {label or '发现'}：{_text(item.get('message')) or '无说明'}")
+        source = _text(item.get("source"))
+        suffix = f" · 来源 {source}" if source else ""
+        lines.append(
+            f"- {label or '发现'}：{_text(item.get('message')) or '无说明'}{suffix}"
+        )
         next_step = _text(item.get("next_step"))
         if next_step:
             lines.append(f"  - 下一步：{next_step}")
@@ -107,6 +113,11 @@ def _render_explain(payload: dict[str, Any]) -> list[str]:
         (
             f"- `{_code(item.get('id'))}` · {_text(item.get('kind')) or 'unknown'} · "
             f"{_status(item.get('status'))}"
+            + (
+                f" · digest {_text(item.get('digest_prefix'))}"
+                if _text(item.get("digest_prefix"))
+                else ""
+            )
         )
         + (f" · {_text(item.get('uri'))}" if _text(item.get("uri")) else "")
         for item in evidence
@@ -150,7 +161,7 @@ def _render_replay(payload: dict[str, Any]) -> list[str]:
     if not artifacts:
         lines.append("- 无 Artifact")
     timeline = _objects(value.get("timeline"), 200)
-    lines.extend(["", f"- Timeline：{len(timeline)} 条事件"])
+    lines.extend(["", f"- Timeline {len(timeline)} 条事件"])
     return lines
 
 

@@ -11,6 +11,7 @@ from naumi_agent.runs.models import CompletionReceipt
 
 def format_completion_receipt_text(
     value: CompletionReceipt | dict[str, Any],
+    harness_receipt: dict[str, Any] | None = None,
 ) -> Text:
     """Render a semantic Rich completion receipt for Textual."""
     receipt = (
@@ -29,6 +30,7 @@ def format_completion_receipt_text(
     rows = [_rich_row(("完成回执 · ", "bold cyan"), outcome)]
     if receipt.summary:
         rows.append(Text(_plain(receipt.summary)))
+    rows.extend(_harness_receipt_rows(harness_receipt))
 
     if receipt.validations:
         for item in receipt.validations[:2]:
@@ -88,6 +90,102 @@ def format_completion_receipt_text(
     for item in receipt.next_actions[:3]:
         rows.append(_rich_row((f"下一步 · {_plain(item.label)}", "cyan")))
     return Text("\n").join(rows)
+
+
+def _harness_receipt_rows(value: dict[str, Any] | None) -> list[Text]:
+    if not isinstance(value, dict):
+        return []
+    raw_checks = value.get("checks")
+    checks = tuple(
+        item
+        for item in (raw_checks[:50] if isinstance(raw_checks, (list, tuple)) else ())
+        if isinstance(item, dict)
+    )
+    raw_criteria = value.get("criteria")
+    criteria = tuple(
+        item
+        for item in (
+            raw_criteria[:100] if isinstance(raw_criteria, (list, tuple)) else ()
+        )
+        if isinstance(item, dict)
+    )
+    raw_warnings = value.get("warnings")
+    warnings = tuple(
+        str(item)
+        for item in (
+            raw_warnings[:20] if isinstance(raw_warnings, (list, tuple)) else ()
+        )
+        if str(item)
+    )
+    status = str(value.get("status") or "")
+    status_label, status_style = {
+        "completed_verified": ("Harness 已验证", "green"),
+        "completed_unverified": ("Harness 未验证", "yellow"),
+        "blocked": ("Harness 阻塞", "red"),
+    }.get(status, ("Harness 状态未知", "dim"))
+    passed = sum(item.get("status") == "passed" for item in checks)
+    satisfied = sum(item.get("status") == "satisfied" for item in criteria)
+    evidence_ids = {
+        str(evidence_id)
+        for item in criteria
+        for evidence_id in _harness_evidence_ids(item)
+        if str(evidence_id)
+    }
+    rows = [
+        _rich_row(
+            (status_label, status_style),
+            (
+                f" · 检查 {passed}/{len(checks)} · 准则 "
+                f"{satisfied}/{len(criteria)} · 证据 {len(evidence_ids)}",
+                None,
+            ),
+        )
+    ]
+    failed = tuple(item for item in checks if item.get("status") != "passed")
+    for item in failed[:2]:
+        rows.append(
+            _rich_row(
+                (
+                    f"{_harness_check_label(str(item.get('status') or ''))} · "
+                    f"{_plain(item.get('id') or '未知检查')}",
+                    "red" if item.get("status") == "failed" else "yellow",
+                )
+            )
+        )
+    if len(failed) > 2:
+        rows.append(_rich_row((f"另有 {len(failed) - 2} 项未通过检查", "dim")))
+    if satisfied < len(criteria):
+        rows.append(
+            _rich_row(
+                (
+                    f"准则未满足 · {satisfied}/{len(criteria)}",
+                    "red" if status == "blocked" else "yellow",
+                )
+            )
+        )
+    rows.extend(_rich_row((f"Harness 警告 · {_plain(item)}", "yellow")) for item in warnings[:2])
+    if len(warnings) > 2:
+        rows.append(_rich_row((f"另有 {len(warnings) - 2} 条 Harness 警告", "dim")))
+    return rows
+
+
+def _harness_evidence_ids(item: dict[str, Any]) -> tuple[Any, ...]:
+    value = item.get("evidence_ids")
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(value[:100])
+
+
+def _harness_check_label(status: str) -> str:
+    return {
+        "failed": "检查失败",
+        "timed_out": "检查超时",
+        "cancelled": "检查取消",
+        "blocked_by_policy": "策略阻止",
+        "infrastructure_error": "基础设施异常",
+        "stale": "结果失效",
+        "missing": "缺少检查",
+    }.get(status, f"检查状态 {status or '未知'}")
 
 
 def format_completion_receipt_markdown(

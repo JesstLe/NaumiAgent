@@ -1689,6 +1689,7 @@ class NaumiApp(App):
         self._agent_worker: Any | None = None
         self._run_cancel_pending = False
         self._recent_commands: tuple[str, ...] = ()
+        self._pending_harness_receipts: dict[str, dict[str, Any]] = {}
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -2628,6 +2629,7 @@ class NaumiApp(App):
         terminal_reason = "run_failed"
         queue_commit_ok = True
         self._run_cancel_pending = False
+        self._pending_harness_receipts.clear()
         if self.debug_trace is not None:
             self.debug_trace.event("tui.agent_run_start", {"task": task})
 
@@ -2727,9 +2729,16 @@ class NaumiApp(App):
                     pass
                 case "completion_receipt":
                     receipt = CompletionReceipt.from_dict(data)
+                    harness_receipt = self._pending_harness_receipts.pop(
+                        receipt.run_id,
+                        None,
+                    )
                     chat.mount(
                         Static(
-                            format_completion_receipt_text(receipt),
+                            format_completion_receipt_text(
+                                receipt,
+                                harness_receipt,
+                            ),
                             classes="agent-msg",
                         )
                     )
@@ -2738,6 +2747,10 @@ class NaumiApp(App):
                     )
                     if isinstance(self.screen, RuntimeInspectorScreen):
                         self.screen.refresh_snapshot()
+                case "harness_completion_receipt":
+                    run_id = str(data.get("run_id") or "")
+                    if run_id:
+                        self._pending_harness_receipts[run_id] = dict(data)
                 case "tool_prepare_start" | "tool_prepare_snapshot":
                     prepare_text = format_tool_prepare_status(data)
                     chat.update_tool_prepare(prepare_text)
