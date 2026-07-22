@@ -11,6 +11,8 @@
 - CC-02.2 Core views：conversation、tool、permission、footer、task 五个代表组件。
 - CC-02.3 Input：multiline、IME、paste、key parsing、permission modal 优先级。
 - CC-02.4 Performance：1k cards、token burst、resize、scroll、memory、startup。
+  - 前置 UI-15.6a 已提供 `naumi.renderer-benchmark.v1` current renderer runner 与
+    `smoke|release` fixture；Ink runner 必须复用同一 fixture 参数、digest 和三场景指标合同。
 - CC-02.5 Packaging：Node version、依赖体积、wheel/binary、offline install。
 - CC-02.6 Decision record：量化收益、缺陷、迁移成本和回退路径。
 
@@ -28,3 +30,5 @@
 
 实验必须产出 benchmark JSON、截图/录屏、失败列表和明确 `adopt|defer|reject`，不得以主观
 “更像 Claude Code”作为结论。
+
+当前只完成 current renderer 对照前置，不代表 CC-02 已开始或 Ink 已被采纳。

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/index.js",
     "check": "node scripts/check-syntax.js",
-    "test": "node scripts/run-tests.js"
+    "test": "node scripts/run-tests.js",
+    "benchmark:renderer": "node scripts/benchmark-renderer.js"
   },
   "engines": {
     "node": ">=20.10"

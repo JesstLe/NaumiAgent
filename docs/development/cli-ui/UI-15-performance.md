@@ -16,6 +16,10 @@
 - UI-15.4 Artifact paging：代码/diff/log/图片引用分页，不把正文塞入状态。
 - UI-15.5 Scroll physics：触摸板限速、亚行累积、无惯性跳跃、follow-tail 状态机。
 - UI-15.6 Bench harness：可重复 fixture、CPU/内存/首帧/输入/滚动指标。
+  - UI-15.6a 已实现 current renderer 的 `smoke|release` 可重复 fixture、三场景 JSON 指标与
+    fixture digest，作为 UI 优化和 CC-02 Ink 实验的共同对照；见
+    [设计与运行方式](UI-15-6a-current-renderer-benchmark.md)。
+  - 未完成：输入/token/resize、Textual TUI、Ink 对照和跨平台 CI 阈值。
 
 ## 验收标准
 
@@ -28,4 +32,5 @@
 ## 当前状态
 
 UI-15 保持 partial。现有 redraw scheduler 已限制普通 paint 到约 16ms，UI-15.1a 进一步减少进入 reducer 的
-stream delta 数量，但 virtual timeline、artifact paging、完整 cache revision、benchmark 与跨前端性能门仍未完成。
+stream delta 数量；UI-15.6a 已建立 current renderer benchmark 基线，但 virtual timeline、artifact paging、
+完整 cache revision、输入/resize/TUI benchmark 与跨前端性能门仍未完成。
