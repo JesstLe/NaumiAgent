@@ -23,7 +23,8 @@ TUI 现在也能用 Ctrl+C 取消当前运行，空闲时不会误退出。
 UI-14.1a 已建立 New UI/TUI 共用的严格 command index，现有补全可以展示参数 syntax、来源、category 和权限风险；
 UI-14.2a 已进一步交付两端 `Ctrl+P` 命令 QuickOpen，支持别名、说明、类别、风险和 fuzzy 搜索，选择只填入 composer；
 UI-14.2b 已增加本次启动内的隐私安全最近命令排序，只记录规范命令名且新启动重置；
-文件/会话/任务/Agent provider、跨启动历史与 Vim/input mode 尚未实现。
+UI-14.2c 已复用 UI-11 类型化任务快照增加两端任务 provider，`Tab` 切换并只填入只读详情命令；
+文件/会话/Agent provider、跨启动历史与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。
 后续模块不得绕开这些路径重建新状态层。
 

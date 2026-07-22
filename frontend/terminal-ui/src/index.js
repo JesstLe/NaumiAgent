@@ -45,6 +45,7 @@ import {
   closeCommandQuickOpen,
   moveCommandQuickOpenSelection,
   openCommandQuickOpen,
+  switchCommandQuickOpenProvider,
 } from "./command-quick-open.js";
 import {
   attachJsonlLineReader,
@@ -877,7 +878,19 @@ function handleCommandQuickOpenKey(chunk) {
     return closeCommandQuickOpen(state);
   }
   if (chunk === INPUT_KEYS.up) return moveCommandQuickOpenSelection(state, "previous") || true;
-  if (chunk === INPUT_KEYS.down || chunk === INPUT_KEYS.tab) {
+  if (chunk === INPUT_KEYS.tab) {
+    switchCommandQuickOpenProvider(
+      state,
+      () => send("task_panel", {
+        limit: 50,
+        source: "all",
+        status: "all",
+        history: false,
+      }),
+    );
+    return true;
+  }
+  if (chunk === INPUT_KEYS.down) {
     return moveCommandQuickOpenSelection(state, "next") || true;
   }
   if (chunk === "\r" || chunk === "\n" || chunk === INPUT_KEYS.ctrlEnter) {

@@ -1,8 +1,9 @@
-"""Textual command QuickOpen backed by the authoritative terminal index."""
+"""Textual QuickOpen backed by authoritative command and task projections."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from rich.markup import escape
 from textual import on
@@ -16,6 +17,11 @@ from naumi_agent.ui.command_index import (
     TerminalCommandIndexEntry,
     search_terminal_commands,
     terminal_command_template,
+)
+from naumi_agent.ui.task_panel import TaskViewItem, build_task_panel_snapshot
+from naumi_agent.ui.task_quick_open import (
+    search_terminal_tasks,
+    terminal_task_template,
 )
 
 _RISK_LABELS = {
@@ -33,6 +39,28 @@ _RISK_STYLES = {
     "workspace_write": "yellow",
     "tool_execution": "red",
     "destructive": "bold red",
+}
+_TASK_SOURCE_LABELS = {
+    "todo": "待办",
+    "subagent": "子智能体",
+    "background": "后台任务",
+    "browser": "浏览器",
+}
+_TASK_STATUS_LABELS = {
+    "pending": "等待",
+    "running": "运行中",
+    "blocked": "阻塞",
+    "completed": "已完成",
+    "failed": "失败",
+    "cancelled": "已取消",
+}
+_TASK_STATUS_STYLES = {
+    "pending": "dim",
+    "running": "cyan",
+    "blocked": "yellow",
+    "completed": "green",
+    "failed": "red",
+    "cancelled": "red",
 }
 
 
@@ -80,15 +108,26 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         entries: Sequence[TerminalCommandIndexEntry],
         *,
         recent_commands: Sequence[str] = (),
+        engine: Any | None = None,
     ) -> None:
         super().__init__()
         self._entries = tuple(entries)
         self._recent_commands = tuple(recent_commands)[:20]
-        self._results: tuple[TerminalCommandIndexEntry, ...] = ()
+        self._engine = engine
+        self._provider = "commands"
+        self._task_items: tuple[TaskViewItem, ...] = ()
+        self._task_loaded = False
+        self._task_loading = False
+        self._task_error = ""
+        self._task_warnings: tuple[str, ...] = ()
+        self._results: tuple[TerminalCommandIndexEntry | TaskViewItem, ...] = ()
 
     def compose(self) -> ComposeResult:
         with Container():
-            yield Label("[bold]命令 QuickOpen[/bold] · 选择后仅填入输入框")
+            yield Label(
+                "[bold]命令 QuickOpen[/bold] · Tab 切换任务 · 选择后仅填入输入框",
+                id="command-quick-open-title",
+            )
             yield Input(
                 placeholder="搜索命令、别名、说明、类别或风险…",
                 id="command-quick-open-query",
@@ -97,7 +136,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             yield ListView(id="command-quick-open-results")
             yield Static("", id="command-quick-open-detail")
             yield Static(
-                "↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
+                "Tab 切换命令/任务 · ↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
                 id="command-quick-open-help",
             )
 
@@ -121,9 +160,14 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
     def on_result_highlighted(self, _event: ListView.Highlighted) -> None:
         self._render_detail()
 
-    def on_key(self, event: Key) -> None:
+    async def on_key(self, event: Key) -> None:
         if event.key == "escape":
             self.dismiss(None)
+            event.prevent_default()
+            event.stop()
+            return
+        if event.key == "tab":
+            await self._switch_provider()
             event.prevent_default()
             event.stop()
             return
@@ -142,12 +186,15 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         event.stop()
 
     async def _refresh_results(self, query: str) -> None:
-        self._results = search_terminal_commands(
-            self._entries,
-            query,
-            limit=50,
-            recent_commands=self._recent_commands,
-        )
+        if self._provider == "tasks":
+            self._results = search_terminal_tasks(self._task_items, query, limit=50)
+        else:
+            self._results = search_terminal_commands(
+                self._entries,
+                query,
+                limit=50,
+                recent_commands=self._recent_commands,
+            )
         results = self.query_one("#command-quick-open-results", ListView)
         await results.clear()
         if self._results:
@@ -157,7 +204,17 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             results.index = 0
         self._render_detail()
 
-    def _render_entry(self, entry: TerminalCommandIndexEntry) -> str:
+    def _render_entry(self, entry: TerminalCommandIndexEntry | TaskViewItem) -> str:
+        if isinstance(entry, TaskViewItem):
+            source = _TASK_SOURCE_LABELS.get(entry.source, entry.source)
+            status = _TASK_STATUS_LABELS.get(entry.status, entry.status or "未知")
+            style = _TASK_STATUS_STYLES.get(entry.status, "dim")
+            owner = f" · {escape(entry.owner)}" if entry.owner else ""
+            return (
+                f"[bold]{escape(entry.title or entry.task_id)}[/bold] "
+                f"[{style}]{escape(status)}[/] · {escape(source)} · "
+                f"{escape(entry.task_id)}{owner}"
+            )
         syntax = f" {entry.arguments.syntax}" if entry.arguments.syntax else ""
         risk = _RISK_LABELS[entry.permission_risk]
         style = _RISK_STYLES[entry.permission_risk]
@@ -171,7 +228,25 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         detail = self.query_one("#command-quick-open-detail", Static)
         selected = self._selected_entry()
         if selected is None:
-            detail.update("[yellow]没有匹配命令。[/yellow]")
+            if self._provider == "tasks" and self._task_loading:
+                detail.update("[cyan]正在读取权威任务快照…[/cyan]")
+            elif self._provider == "tasks" and self._task_error:
+                detail.update(f"[yellow]{escape(self._task_error)}[/yellow]")
+            elif self._provider == "tasks" and self._task_warnings:
+                detail.update(
+                    "[yellow]没有匹配任务。部分来源不可用，可运行 /doctor 检查。[/yellow]"
+                )
+            else:
+                label = "任务" if self._provider == "tasks" else "命令"
+                detail.update(f"[yellow]没有匹配{label}。[/yellow]")
+            return
+        if isinstance(selected, TaskViewItem):
+            detail.update(
+                f"来源：{escape(_TASK_SOURCE_LABELS.get(selected.source, selected.source))} · "
+                f"状态：{escape(_TASK_STATUS_LABELS.get(selected.status, selected.status))} · "
+                f"Owner：{escape(selected.owner or '无')}\n"
+                f"将填入：[bold]{escape(terminal_task_template(selected))}[/bold]"
+            )
             return
         aliases = "、".join(selected.aliases) if selected.aliases else "无"
         detail.update(
@@ -180,7 +255,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             f"将填入：[bold]{escape(terminal_command_template(selected))}[/bold]"
         )
 
-    def _selected_entry(self) -> TerminalCommandIndexEntry | None:
+    def _selected_entry(self) -> TerminalCommandIndexEntry | TaskViewItem | None:
         if not self._results:
             return None
         index = self.query_one("#command-quick-open-results", ListView).index
@@ -189,7 +264,49 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
     def _accept_selected(self) -> None:
         selected = self._selected_entry()
         if selected is not None:
-            self.dismiss(terminal_command_template(selected))
+            template = (
+                terminal_task_template(selected)
+                if isinstance(selected, TaskViewItem)
+                else terminal_command_template(selected)
+            )
+            self.dismiss(template)
+
+    async def _switch_provider(self) -> None:
+        self._provider = "tasks" if self._provider == "commands" else "commands"
+        query = self.query_one("#command-quick-open-query", Input)
+        query.value = ""
+        title = self.query_one("#command-quick-open-title", Label)
+        if self._provider == "tasks":
+            title.update(
+                "[bold]任务 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框"
+            )
+            query.placeholder = "搜索任务 ID、标题、Owner、来源或状态…"
+            await self._load_tasks()
+        else:
+            title.update(
+                "[bold]命令 QuickOpen[/bold] · Tab 切换任务 · 选择后仅填入输入框"
+            )
+            query.placeholder = "搜索命令、别名、说明、类别或风险…"
+        await self._refresh_results("")
+        query.focus()
+
+    async def _load_tasks(self) -> None:
+        if self._task_loaded or self._task_loading or self._engine is None:
+            return
+        self._task_loading = True
+        self._task_error = ""
+        self._results = ()
+        await self.query_one("#command-quick-open-results", ListView).clear()
+        self._render_detail()
+        try:
+            snapshot = await build_task_panel_snapshot(self._engine, limit=50)
+            self._task_items = snapshot.view_items
+            self._task_warnings = snapshot.warnings
+            self._task_loaded = True
+        except Exception:
+            self._task_error = "任务快照读取失败，请运行 /doctor 后重试。"
+        finally:
+            self._task_loading = False
 
 
 __all__ = ["CommandQuickOpenScreen"]

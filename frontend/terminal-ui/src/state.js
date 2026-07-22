@@ -12,7 +12,12 @@ import {
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
-import { recordRecentCommand } from "./command-quick-open.js";
+import {
+  applyCommandQuickOpenTaskSnapshot,
+  failCommandQuickOpenTaskSnapshot,
+  recordRecentCommand,
+  resetCommandQuickOpenTaskCache,
+} from "./command-quick-open.js";
 
 const MAX_OUTBOX_MESSAGES = 20;
 const MAX_OUTBOX_ERROR_CHARS = 500;
@@ -325,6 +330,13 @@ export function createInitialState() {
       draftText: "",
       draftCursor: 0,
       recentCommands: [],
+      provider: "commands",
+      taskItems: [],
+      taskWarnings: [],
+      taskLoaded: false,
+      taskLoading: false,
+      taskError: "",
+      taskRequestId: "",
     },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
@@ -734,7 +746,9 @@ export function reduceServerEvent(state, record) {
       }
       break;
     case "tasks/snapshot":
-      applyTaskSnapshot(state, payload);
+      if (!applyCommandQuickOpenTaskSnapshot(state, record.request_id, payload)) {
+        applyTaskSnapshot(state, payload);
+      }
       break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
@@ -1040,6 +1054,7 @@ export function reduceServerEvent(state, record) {
         state.route = { name: "conversation", originAnchor: null };
       }
       if (payload.clear !== false) {
+        resetCommandQuickOpenTaskCache(state);
         state.messages = [];
         state.tools = [];
         state.harnessReceipts = Object.create(null);
@@ -1073,6 +1088,11 @@ export function reduceServerEvent(state, record) {
         return actions;
       }
     case "error": {
+      if (failCommandQuickOpenTaskSnapshot(
+        state,
+        record.request_id,
+        payload.message,
+      )) break;
       dismissWelcome(state);
       if (["evolution_review_failed", "evolution_queue_failed"].includes(payload.code)) {
         state.evolutionReview.loading = false;
