@@ -25,7 +25,9 @@
     [设计与运行方式](UI-15-6a-current-renderer-benchmark.md)。
   - UI-15.4a 将 release fixture 升级为生产分页协议 v2；原始 10MB 直传 RED 证据继续保留，
     新增分页 GREEN 证据，避免用修改后的 fixture 覆盖历史基线。
-  - 未完成：输入/token/resize、Textual TUI、Ink 对照和跨平台 CI 阈值。
+  - CC-02.1a 已让实验 Ink renderer 复用相同 v2 fixture、digest 和三场景 JSON 合同；首轮结果显示
+    deep-scroll 的 viewport slicing 方向有价值，但 tail/paged P95 明显退化，因此没有替换默认 renderer。
+  - 未完成：输入/token/resize、Textual TUI、达到 production 语义 parity 后的 Ink 对照和跨平台 CI 阈值。
 
 ## 验收标准
 
@@ -39,5 +41,5 @@
 
 UI-15 保持 partial。现有 redraw scheduler 已限制普通 paint 到约 16ms，UI-15.1a 进一步减少进入 reducer 的
 stream delta 数量；UI-15.4a 已避免超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark
-基线。virtual timeline、非文本 artifact、完整 cache revision、输入/resize/TUI benchmark 与跨前端性能门
-仍未完成。
+基线；CC-02.1a 已加入首个同合同 Ink 实验对照。virtual timeline、非文本 artifact、完整 cache revision、
+输入/resize/TUI benchmark 与达到语义 parity 后的跨前端性能门仍未完成。

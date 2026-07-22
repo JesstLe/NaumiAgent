@@ -30,7 +30,7 @@ export function captureNewUiGoldenFrame(fixture, options = {}) {
     MIN_HEIGHT,
     MAX_HEIGHT,
   );
-  const state = createCaptureState(fixture);
+  const state = createGoldenCaptureState(fixture);
   const lines = renderScreen(state, width, height, {
     cwd: "/workspace/naumi",
     home: "/home/naumi",
@@ -102,7 +102,7 @@ export function validateCaptureFixture(fixture) {
   };
 }
 
-function createCaptureState(fixture) {
+export function createGoldenCaptureState(fixture) {
   const state = createInitialState();
   submitUserMessage(state, fixture.submission.text, () => {});
   const requestId = String(fixture.submission.request_id);

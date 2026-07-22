@@ -20,7 +20,8 @@ npm run benchmark:renderer -- --profile release --output /tmp/naumi-renderer-rel
 
 ## 可比较合同
 
-- 输出 schema 固定为 `naumi.renderer-benchmark.v1`，renderer 标识为 `current-node`。
+- 输出 schema 固定为 `naumi.renderer-benchmark.v1`，renderer 标识为 `current-node`；CC-02.1a 后新增
+  `protocol_contract.version/registry_sha256`，让 current/Ink 对照显式绑定同一发布协议。
 - fixture generator 版本、消息数、工具数、日志字符数、宽高进入 SHA-256；后续 Ink runner 必须
   复用相同字段与内容生成规则，禁止用更轻 fixture 制造优势。
 - Node 版本、平台和架构写入 runtime；跨机器结果不能直接混作性能回归。
