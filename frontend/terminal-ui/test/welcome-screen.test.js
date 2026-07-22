@@ -95,6 +95,9 @@ test("welcome visibility is pure and excludes other pages", () => {
   state.route = { name: "agents" };
   assert.equal(shouldRenderWelcome(state), false);
   state.route = { name: "conversation" };
+  state.messages.push({ kind: "assistant", id: "async-first", content: "运行时已返回内容" });
+  assert.equal(shouldRenderWelcome(state), false);
+  state.messages.length = 0;
   state.welcome = { phase: "dismissed", dismissed: true };
   assert.equal(shouldRenderWelcome(state), false);
 });

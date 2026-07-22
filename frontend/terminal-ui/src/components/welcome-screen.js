@@ -38,7 +38,8 @@ export function selectWelcomeLayout(width, bodyHeight) {
 export function shouldRenderWelcome(state) {
   return state?.route?.name === "conversation"
     && state?.inspector?.open !== true
-    && state?.welcome?.dismissed !== true;
+    && state?.welcome?.dismissed !== true
+    && (!Array.isArray(state?.messages) || state.messages.length === 0);
 }
 
 export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {

@@ -28,6 +28,10 @@ import {
   shouldRenderWelcome,
 } from "./components/welcome-screen.js";
 import { renderCachedMessage } from "./render-cache.js";
+import {
+  ensureTimelineRowIndex,
+  findTimelineSegmentAtRow,
+} from "./timeline-row-index.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 
 export { boxLines } from "./components/core.js";
@@ -96,12 +100,80 @@ function renderMainViewport(state, width, bodyHeight, env) {
   }
   const ctx = createRenderContext({ width, env, state });
   ctx.bodyHeight = bodyHeight;
+  if (
+    env.disableVirtualTimeline !== true
+    && Number(state.scrollOffset) > bodyHeight * 4
+    && state.messages.length > 0
+  ) {
+    return renderIndexedBodyViewport(
+      state,
+      width,
+      bodyHeight,
+      state.scrollOffset,
+      ctx,
+    );
+  }
   const bodyLines = renderBodyWindow(state, width, bodyHeight, state.scrollOffset, ctx);
   const target = bodyHeight + state.scrollOffset;
   const start = Math.max(0, bodyLines.length - target);
   const visible = bodyLines.slice(start, start + bodyHeight);
   while (visible.length < bodyHeight) visible.push("");
   return visible;
+}
+
+export function renderIndexedBodyViewport(
+  state,
+  width,
+  bodyHeight,
+  scrollOffset,
+  ctx = createRenderContext({ width, env: {}, state }),
+) {
+  const safeHeight = Math.max(1, Math.trunc(Number(bodyHeight) || 1));
+  const tail = renderBodyTail(state, width, { bodyHeight: safeHeight, env: ctx.env });
+  const renderMessage = (message) => renderCachedMessage(
+    state.renderCache,
+    message,
+    ctx,
+    () => renderComponent(Message({ message }), ctx),
+  );
+  const index = ensureTimelineRowIndex(state, ctx, renderMessage);
+  const totalLines = index.totalLines + tail.length;
+  const maximumStart = Math.max(0, totalLines - safeHeight);
+  const viewportStart = Math.min(
+    maximumStart,
+    Math.max(0, totalLines - safeHeight - Math.max(0, Number(scrollOffset) || 0)),
+  );
+  const viewportEnd = Math.min(totalLines, viewportStart + safeHeight);
+  const visible = [];
+  const messageEnd = Math.min(index.totalLines, viewportEnd);
+
+  if (viewportStart < messageEnd) {
+    const first = findTimelineSegmentAtRow(index, viewportStart);
+    const last = findTimelineSegmentAtRow(index, messageEnd - 1);
+    if (first >= 0 && last >= first) {
+      const overscanStart = Math.max(0, first - 1);
+      const overscanEnd = Math.min(index.segments.length - 1, last + 1);
+      index.lastRenderedRange = { first, last, overscanStart, overscanEnd };
+      for (let position = overscanStart; position <= overscanEnd; position += 1) {
+        const segment = index.segments[position];
+        const lines = renderMessage(state.messages[segment.messageIndex]);
+        if (position < first || position > last || segment.height <= 0) continue;
+        const localStart = Math.max(0, viewportStart - segment.start);
+        const localEnd = Math.min(segment.height, messageEnd - segment.start);
+        visible.push(...lines.slice(localStart, localEnd));
+      }
+    }
+  } else {
+    index.lastRenderedRange = null;
+  }
+
+  if (viewportEnd > index.totalLines) {
+    const tailStart = Math.max(0, viewportStart - index.totalLines);
+    const tailEnd = Math.max(tailStart, viewportEnd - index.totalLines);
+    visible.push(...tail.slice(tailStart, tailEnd));
+  }
+  while (visible.length < safeHeight) visible.push("");
+  return visible.slice(0, safeHeight);
 }
 
 function renderInspectorLayout(state, width, bodyHeight, env) {
@@ -194,16 +266,18 @@ export function captureViewportAnchor(state, width, height, env = {}) {
     0,
     layout.totalBodyLines - layout.bodyHeight - Math.max(0, Number(state.scrollOffset) || 0),
   );
-  let segmentStart = 0;
-  for (const segment of layout.segments) {
-    const segmentEnd = segmentStart + segment.lines.length;
-    if (firstVisibleLine < segmentEnd) {
-      return {
-        messageId: segment.messageId,
-        messageIndex: segment.messageIndex,
-      };
-    }
-    segmentStart = segmentEnd;
+  const visibleSegment = firstVisibleLine < layout.messageLines
+    ? findTimelineSegmentAtRow(
+      { segments: layout.segments, totalLines: layout.messageLines },
+      firstVisibleLine,
+    )
+    : -1;
+  if (visibleSegment >= 0) {
+    const segment = layout.segments[visibleSegment];
+    return {
+      messageId: segment.messageId,
+      messageIndex: segment.messageIndex,
+    };
   }
 
   const last = layout.segments.at(-1);
@@ -232,9 +306,7 @@ export function restoreViewportAnchor(state, anchor, width, height, env = {}) {
     return state.scrollOffset;
   }
 
-  const anchorSegmentStart = layout.segments
-    .slice(0, targetIndex)
-    .reduce((total, segment) => total + segment.lines.length, 0);
+  const anchorSegmentStart = layout.segments[targetIndex]?.start ?? 0;
   const nextOffset = Math.min(
     maxOffset,
     Math.max(0, layout.totalBodyLines - layout.bodyHeight - anchorSegmentStart),
@@ -256,22 +328,22 @@ function renderViewportLayout(state, width, height, env) {
   const footer = clampFooterSections(renderFooterSections(state, safeWidth, env), safeHeight);
   const bodyHeight = Math.max(1, safeHeight - footer.length);
   ctx.bodyHeight = bodyHeight;
-  const segments = state.messages.map((message, messageIndex) => ({
-    messageId: message.id === null || message.id === undefined ? "" : String(message.id),
-    messageIndex,
-    lines: renderCachedMessage(
+  const index = ensureTimelineRowIndex(
+    state,
+    ctx,
+    (message) => renderCachedMessage(
       state.renderCache,
       message,
       ctx,
       () => renderComponent(Message({ message }), ctx),
     ),
-  }));
-  const messageLines = segments.reduce((total, segment) => total + segment.lines.length, 0);
+  );
   const tailLines = renderBodyTail(state, safeWidth, { bodyHeight, env }).length;
   return {
-    segments,
+    segments: index.segments,
     bodyHeight,
-    totalBodyLines: messageLines + tailLines,
+    messageLines: index.totalLines,
+    totalBodyLines: index.totalLines + tailLines,
   };
 }
 

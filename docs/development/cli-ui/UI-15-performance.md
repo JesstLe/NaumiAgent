@@ -11,7 +11,11 @@
     控制屏障和关键控制事件立即 differential paint；见
     [设计](UI-15-1a-stream-delta-coalescing.md)。
   - 未完成：progress/todo/runtime status 领域合并策略、Textual TUI 高频刷新基线和 UI-15.6 SLO benchmark。
-- UI-15.2 Virtual timeline：按 message/card 行高索引和 viewport overscan。
+- UI-15.2 Virtual timeline（partial）：
+  - UI-15.2a 已为默认 New UI 增加共享 message/card 行高前缀索引、二分 viewport 定位、单卡 overscan、
+    generation/resize 失效和 legacy 等价诊断；10k+1k release fixture 的 warm deep-scroll P95 从历史
+    92.746ms 降至 0.235ms。见[设计与证据](UI-15-2a-virtual-timeline-row-index.md)。
+  - 未完成：增量 append/update 索引、显式 semantic revision、Textual TUI 对照和冷建索引后台化。
 - UI-15.3 Render cache：语义 revision、主题、宽度、fold/focus 全入 key。
 - UI-15.4 Artifact paging（partial）：代码/diff/log/图片引用分页，不把正文塞入状态。
   - UI-15.4a 已实现超长文本工具输出的执行时归档、会话隔离、逐页摘要校验、共享
@@ -42,6 +46,7 @@
 ## 当前状态
 
 UI-15 保持 partial。现有 redraw scheduler 已限制普通 paint 到约 16ms，UI-15.1a 进一步减少进入 reducer 的
-stream delta 数量；UI-15.4a 已避免超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark
-基线；CC-02.1a/2.2a 已加入同合同 Ink 实验与核心视图对照。virtual timeline、非文本 artifact、完整 cache revision、
-输入/resize/TUI benchmark 与达到语义 parity 后的跨前端性能门仍未完成。
+stream delta 数量；UI-15.2a 已让默认 New UI 的 warm deep-scroll 进入有界可见窗口渲染；UI-15.4a 已避免
+超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark 基线；CC-02.1a/2.2a 已加入同合同
+Ink 实验与核心视图对照。增量 virtual index、非文本 artifact、完整 cache revision、输入/resize/TUI benchmark
+与达到语义 parity 后的跨前端性能门仍未完成。

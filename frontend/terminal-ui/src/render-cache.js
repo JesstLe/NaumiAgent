@@ -6,6 +6,7 @@ export function createRenderCache({ maxEntries = DEFAULT_MAX_ENTRIES } = {}) {
     entries: new Map(),
     hits: 0,
     misses: 0,
+    generation: 0,
   };
 }
 
@@ -33,6 +34,7 @@ export function clearRenderCache(cache) {
   cache.entries.clear();
   cache.hits = 0;
   cache.misses = 0;
+  cache.generation = Math.max(0, Number(cache.generation) || 0) + 1;
 }
 
 export function messageRenderKey(message, ctx) {

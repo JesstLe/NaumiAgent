@@ -21,6 +21,9 @@
     因直接 viewport slice 明显更快。当前 adapter 尚未达到组件语义 parity，因此结论是 `defer`。
   - CC-02.2a 修正超大 scroll 空视口，并加入 permission/task 多行语义后重新测量：tail/paged P95
     分别约慢 25.6/52.8 倍；deep-scroll 约快 81.4%，但仍有 O(n) presentation 投影。结论保持 `defer`。
+  - UI-15.2a 已把默认 current renderer 的 warm deep-scroll P95 降至 0.235ms，并保留同 fixture/protocol
+    digest。后续 Ink 对照必须以该新 baseline 为准，并消除全量 O(n) presentation 投影；不得继续引用
+    CC-02.2a 的 92.746ms historical current 值作为替换收益。
 - CC-02.5 Packaging：Node version、依赖体积、wheel/binary、offline install。
 - CC-02.6 Decision record：量化收益、缺陷、迁移成本和回退路径。
 
