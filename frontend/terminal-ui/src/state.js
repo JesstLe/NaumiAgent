@@ -3377,13 +3377,21 @@ function setWorkbenchSelectionIndex(workbench, value) {
   workbench.selected_worktree_name = String(worktrees[index]?.name || "");
 }
 
-export function handleHarnessDetailKey(state, key) {
+export function handleHarnessDetailKey(state, key, send) {
   if (state.route?.name !== "harness_detail") return false;
   if (key === INPUT_KEYS.escape) {
     const anchor = state.route.originAnchor || {};
     state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
     state.followTail = anchor.followTail !== false;
     state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  if (["e", "E"].includes(key)) {
+    requestHarnessDetailSection(state, "explain", send);
+    return true;
+  }
+  if (["r", "R"].includes(key)) {
+    requestHarnessDetailSection(state, "replay", send);
     return true;
   }
   const current = Math.max(0, Number(state.harnessDetail.scrollOffset) || 0);
@@ -3393,6 +3401,21 @@ export function handleHarnessDetailKey(state, key) {
   else if (key === INPUT_KEYS.pageDown) state.harnessDetail.scrollOffset = current + 10;
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.harnessDetail.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.harnessDetail.scrollOffset = Number.MAX_SAFE_INTEGER;
+  return true;
+}
+
+function requestHarnessDetailSection(state, section, send) {
+  if (typeof send !== "function") return false;
+  const runId = String(state.harnessDetail.runId || "");
+  if (!runId || !["explain", "replay"].includes(section)) return false;
+  const loadingField = section === "explain" ? "explainLoading" : "replayLoading";
+  if (state.harnessDetail[loadingField]) return false;
+  const cache = section === "explain" ? state.harnessExplanations : state.harnessReplays;
+  state.harnessDetail[loadingField] = true;
+  send(`harness/${section}/request`, {
+    run_id: runId,
+    known_revision: Number(cache[runId]?.revision) || 0,
+  });
   return true;
 }
 

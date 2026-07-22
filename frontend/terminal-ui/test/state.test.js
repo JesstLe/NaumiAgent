@@ -3953,6 +3953,53 @@ test("Harness detail command opens one route and requests exact typed details", 
   assert.equal(state.followTail, false);
 });
 
+test("Harness detail e/r independently refresh durable detail without duplicate in-flight requests", () => {
+  const state = createInitialState();
+  state.route = { name: "harness_detail", originAnchor: null };
+  state.harnessDetail = {
+    runId: "detail-refresh-run",
+    explainLoading: false,
+    replayLoading: false,
+    scrollOffset: 9,
+  };
+  state.harnessExplanations["detail-refresh-run"] = { revision: 3 };
+  state.harnessReplays["detail-refresh-run"] = { revision: 5 };
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleHarnessDetailKey(state, "e", send), true);
+  assert.equal(handleHarnessDetailKey(state, "e", send), true);
+  assert.equal(handleHarnessDetailKey(state, "R", send), true);
+  assert.equal(handleHarnessDetailKey(state, "r", send), true);
+
+  assert.deepEqual(sent, [
+    {
+      type: "harness/explain/request",
+      payload: { run_id: "detail-refresh-run", known_revision: 3 },
+    },
+    {
+      type: "harness/replay/request",
+      payload: { run_id: "detail-refresh-run", known_revision: 5 },
+    },
+  ]);
+  assert.equal(state.harnessDetail.explainLoading, true);
+  assert.equal(state.harnessDetail.replayLoading, true);
+  assert.equal(state.harnessDetail.scrollOffset, 9);
+
+  reduceServerEvent(state, {
+    type: "harness/explain",
+    payload: {
+      schema_version: 1,
+      revision: 3,
+      run_id: "detail-refresh-run",
+      lookup_status: "not_found",
+      message: "未找到",
+    },
+  });
+  assert.equal(state.harnessDetail.explainLoading, false);
+  assert.equal(state.harnessDetail.replayLoading, true);
+});
+
 test("Harness detail command rejects missing latest run without backend traffic", () => {
   const state = createInitialState();
   const sent = [];

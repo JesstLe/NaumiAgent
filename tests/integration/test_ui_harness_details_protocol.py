@@ -120,6 +120,41 @@ process.stdout.write(JSON.stringify(normalized));
     return json.loads(completed.stdout)
 
 
+def _detail_refresh_requests_with_real_node(repo_root: Path) -> list[dict[str, object]]:
+    source = r"""
+import {
+  createInitialState,
+  handleHarnessDetailKey,
+} from "./frontend/terminal-ui/src/state.js";
+const state = createInitialState();
+state.route = { name: "harness_detail", originAnchor: null };
+state.harnessDetail = {
+  runId: "detail-real-run",
+  explainLoading: false,
+  replayLoading: false,
+  scrollOffset: 0,
+};
+state.harnessExplanations["detail-real-run"] = { revision: 1 };
+state.harnessReplays["detail-real-run"] = { revision: 1 };
+const requests = [];
+const send = (type, payload) => {
+  requests.push({ id: `refresh-${requests.length + 1}`, type, payload });
+};
+handleHarnessDetailKey(state, "e", send);
+handleHarnessDetailKey(state, "r", send);
+process.stdout.write(JSON.stringify(requests));
+"""
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", source],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=20,
+    )
+    return json.loads(completed.stdout)
+
+
 def _render_detail_with_real_node(
     repo_root: Path,
     records: list[dict[str, object]],
@@ -246,20 +281,14 @@ async def test_real_store_bridge_and_node_recover_harness_details(
     bridge = JsonlEngineBridge(_BridgeEngine(service), config_path="config.yaml")  # type: ignore[arg-type]
     bridge.bind_writer(writer)
 
-    await bridge.handle_client_record(
-        {
-            "id": "real-explain",
-            "type": ClientEventType.HARNESS_EXPLAIN_REQUEST,
-            "payload": {"run_id": "detail-real-run", "known_revision": 0},
-        }
-    )
-    await bridge.handle_client_record(
-        {
-            "id": "real-replay",
-            "type": ClientEventType.HARNESS_REPLAY_REQUEST,
-            "payload": {"run_id": "detail-real-run", "known_revision": 0},
-        }
-    )
+    refresh_requests = _detail_refresh_requests_with_real_node(repo_root)
+    assert [request["type"] for request in refresh_requests] == [
+        ClientEventType.HARNESS_EXPLAIN_REQUEST,
+        ClientEventType.HARNESS_REPLAY_REQUEST,
+    ]
+    assert all(request["payload"]["known_revision"] == 1 for request in refresh_requests)  # type: ignore[index]
+    for request in refresh_requests:
+        await bridge.handle_client_record(request)
     await bridge.handle_client_record(
         {
             "id": "cross-workspace",
@@ -274,8 +303,8 @@ async def test_real_store_bridge_and_node_recover_harness_details(
         if record["type"] in {"harness/explain", "harness/replay"}
     ]
     assert [record["request_id"] for record in emitted] == [
-        "real-explain",
-        "real-replay",
+        "refresh-1",
+        "refresh-2",
         "cross-workspace",
     ]
     assert emitted[0]["payload"]["explanation"]["verified"] is True  # type: ignore[index]

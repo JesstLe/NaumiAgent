@@ -44,6 +44,8 @@ test("Harness detail page renders bounded semantic sections at common widths", (
     for (const expected of ["Harness 运行详情", "准则", "失败分类", "检查", "证据", "Replay", "差异", "Artifact"]) {
       assert(plain.includes(expected));
     }
+    assert(plain.includes("e 刷新 Explain"));
+    assert(plain.includes("r 刷新 Replay"));
   }
 });
 
