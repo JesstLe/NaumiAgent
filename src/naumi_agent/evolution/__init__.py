@@ -306,6 +306,27 @@ if TYPE_CHECKING:
         EvolutionPromotionRollbackStep,
         render_evolution_promotion_package_input,
     )
+    from naumi_agent.evolution.promotion_packages import (
+        EVOLUTION_PROMOTION_APPROVAL_INPUT_POLICY,
+        EVOLUTION_PROMOTION_PACKAGE_POLICY,
+        EVOLUTION_PROMOTION_SIGNATURE_DOMAIN,
+        EVOLUTION_PROMOTION_TARGET_POLICY,
+        EvolutionPromotionApprovalInput,
+        EvolutionPromotionApprovalSignal,
+        EvolutionPromotionPackage,
+        EvolutionPromotionPackageBuilder,
+        EvolutionPromotionPackageError,
+        EvolutionPromotionPackageExecutor,
+        EvolutionPromotionPackageStore,
+        EvolutionPromotionPackageView,
+        EvolutionPromotionProtectedPath,
+        EvolutionPromotionProtectedScope,
+        EvolutionPromotionSignatureEnvelope,
+        EvolutionPromotionTargetProbe,
+        EvolutionPromotionTargetRelation,
+        EvolutionPromotionTargetSnapshot,
+        render_evolution_promotion_package,
+    )
     from naumi_agent.evolution.reflection_memories import (
         EvolutionReflectionAction,
         EvolutionReflectionEvidenceKind,
@@ -552,6 +573,25 @@ __all__ = [
     "EvolutionPromotionRollbackPlan",
     "EvolutionPromotionRollbackStep",
     "render_evolution_promotion_package_input",
+    "EVOLUTION_PROMOTION_APPROVAL_INPUT_POLICY",
+    "EVOLUTION_PROMOTION_PACKAGE_POLICY",
+    "EVOLUTION_PROMOTION_SIGNATURE_DOMAIN",
+    "EVOLUTION_PROMOTION_TARGET_POLICY",
+    "EvolutionPromotionApprovalInput",
+    "EvolutionPromotionApprovalSignal",
+    "EvolutionPromotionPackage",
+    "EvolutionPromotionPackageBuilder",
+    "EvolutionPromotionPackageError",
+    "EvolutionPromotionPackageExecutor",
+    "EvolutionPromotionPackageStore",
+    "EvolutionPromotionPackageView",
+    "EvolutionPromotionProtectedPath",
+    "EvolutionPromotionProtectedScope",
+    "EvolutionPromotionSignatureEnvelope",
+    "EvolutionPromotionTargetProbe",
+    "EvolutionPromotionTargetRelation",
+    "EvolutionPromotionTargetSnapshot",
+    "render_evolution_promotion_package",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -913,6 +953,27 @@ def __getattr__(name: str) -> object:
         "EvolutionPromotionRollbackStep",
         "render_evolution_promotion_package_input",
     }
+    promotion_package_exports = {
+        "EVOLUTION_PROMOTION_APPROVAL_INPUT_POLICY",
+        "EVOLUTION_PROMOTION_PACKAGE_POLICY",
+        "EVOLUTION_PROMOTION_SIGNATURE_DOMAIN",
+        "EVOLUTION_PROMOTION_TARGET_POLICY",
+        "EvolutionPromotionApprovalInput",
+        "EvolutionPromotionApprovalSignal",
+        "EvolutionPromotionPackage",
+        "EvolutionPromotionPackageBuilder",
+        "EvolutionPromotionPackageError",
+        "EvolutionPromotionPackageExecutor",
+        "EvolutionPromotionPackageStore",
+        "EvolutionPromotionPackageView",
+        "EvolutionPromotionProtectedPath",
+        "EvolutionPromotionProtectedScope",
+        "EvolutionPromotionSignatureEnvelope",
+        "EvolutionPromotionTargetProbe",
+        "EvolutionPromotionTargetRelation",
+        "EvolutionPromotionTargetSnapshot",
+        "render_evolution_promotion_package",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -1157,6 +1218,8 @@ def __getattr__(name: str) -> object:
         module_name = "reflection_memories"
     elif name in promotion_package_input_exports:
         module_name = "promotion_package_inputs"
+    elif name in promotion_package_exports:
+        module_name = "promotion_packages"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

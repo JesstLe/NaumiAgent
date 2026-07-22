@@ -49,5 +49,9 @@ Reviewer 叙事和源码不落库；记录不进入向量索引、自动召回�
 
 [EVO-05.1a](EVO-05-1a-promotion-package-input-contract.md) 已交付 Promotion Package Input：仅 active 的
 `accepted_experiment` Reflection 可冻结 patch、baseline、完整 receipt refs、risk、migration assessment 和
-rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligibility。下一最小依赖是 EVO-05.1b；当前仍无
-approval、Git 写入、merge、push、publish 或 promotion executor。
+rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligibility。
+
+[EVO-05.1b](EVO-05-1b-promotion-package-contract.md) 已交付完整审查 Package：绑定 exact local target
+branch、审批事实和 domain-separated signable digest；target 移动或 Reflection 撤销都会动态失效。下一最小依赖是
+EVO-05.2a Approval Requirement Policy；当前仍无审批决定、签名收集、Git 写入、merge、push、publish 或
+promotion executor。

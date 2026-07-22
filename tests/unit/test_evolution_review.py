@@ -32,6 +32,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
     EvolutionPromotionPackageInputTool,
+    EvolutionPromotionPackageTool,
     EvolutionProposalQueueTool,
     EvolutionReflectionMemoryRevokeTool,
     EvolutionReflectionMemoryTool,
@@ -192,11 +193,13 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_reflection_memory",
         "evolution_revoke_reflection_memory",
         "evolution_promotion_package_input",
+        "evolution_promotion_package",
         "evolution_proposal_queue",
     ]
     assert [tool.metadata.read_only for tool in tools] == [
         True,
         True,
+        False,
         False,
         False,
         False,
@@ -228,7 +231,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[13], EvolutionReflectionMemoryTool)
     assert isinstance(tools[14], EvolutionReflectionMemoryRevokeTool)
     assert isinstance(tools[15], EvolutionPromotionPackageInputTool)
-    assert isinstance(tools[16], EvolutionProposalQueueTool)
+    assert isinstance(tools[16], EvolutionPromotionPackageTool)
+    assert isinstance(tools[17], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:
@@ -239,6 +243,7 @@ class _FakeEngine:
         self._session = SimpleNamespace(id="session-review")
         self.evolution_proposal_queue = _FakeQueue()
         self.evolution_promotion_package_input_executor = _FakePromotionInputExecutor()
+        self.evolution_promotion_package_executor = _FakePromotionPackageExecutor()
 
 
 class _FakeQueue:
@@ -262,6 +267,15 @@ class _FakeQueue:
 
 
 class _FakePromotionInputExecutor:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def execute(self, **kwargs):
+        self.calls.append(kwargs)
+        return object()
+
+
+class _FakePromotionPackageExecutor:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -372,4 +386,46 @@ async def test_tool_and_slash_share_promotion_input_executor(
     assert engine.evolution_promotion_package_input_executor.calls == [
         {"workspace_root": tmp_path, "reflection_id": reflection_id},
         {"workspace_root": tmp_path, "reflection_id": reflection_id},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_and_slash_share_promotion_package_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = EvolutionReviewService(EvolutionCandidateStore(tmp_path / "evolution.db"))
+    engine = _FakeEngine(tmp_path, service)
+    input_id = f"evpromoin_{'b' * 24}"
+    monkeypatch.setattr(
+        "naumi_agent.evolution.promotion_packages.render_evolution_promotion_package",
+        lambda _view: "promotion-package-rendered",
+    )
+    monkeypatch.setattr(
+        "naumi_agent.tools.evolution_review.render_evolution_promotion_package",
+        lambda _view: "promotion-package-rendered",
+    )
+
+    tool_result = await EvolutionPromotionPackageTool(engine).execute(
+        promotion_input_id=input_id,
+        target_branch="release/1.0",
+    )
+    slash_result = await execute_slash_command(
+        engine,
+        f"/evolution promotion-package {input_id} release/1.0",
+    )
+
+    assert tool_result == "promotion-package-rendered"
+    assert "promotion-package-rendered" in slash_result
+    assert engine.evolution_promotion_package_executor.calls == [
+        {
+            "workspace_root": tmp_path,
+            "promotion_input_id": input_id,
+            "target_branch": "release/1.0",
+        },
+        {
+            "workspace_root": tmp_path,
+            "promotion_input_id": input_id,
+            "target_branch": "release/1.0",
+        },
     ]

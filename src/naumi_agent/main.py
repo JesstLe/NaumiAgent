@@ -3075,6 +3075,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionPromotionPackageInputError,
         render_evolution_promotion_package_input,
     )
+    from naumi_agent.evolution.promotion_packages import (
+        EvolutionPromotionPackageError,
+        render_evolution_promotion_package,
+    )
     from naumi_agent.evolution.queue import render_queue_result
     from naumi_agent.evolution.reflection_memories import (
         EvolutionReflectionMemoryError,
@@ -3268,6 +3272,18 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evolution_promotion_package_input(view)))
             return
+        if action == "promotion-package":
+            if len(parts) not in {2, 3}:
+                raise ValueError(
+                    "promotion-package 需要 Promotion Input ID，可选 target branch。"
+                )
+            view = await engine.evolution_promotion_package_executor.execute(
+                workspace_root=engine.workspace_root,
+                promotion_input_id=parts[1],
+                target_branch=parts[2] if len(parts) == 3 else "main",
+            )
+            console.print(Markdown(render_evolution_promotion_package(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3298,7 +3314,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "evaluation-final、decision-input、mechanical-gate、"
                 "independent-review、counterfactual、reward-hacking、"
                 "decision-state、decision-resolve、reflection、"
-                "reflection-revoke、promotion-input 或 enqueue。"
+                "reflection-revoke、promotion-input、promotion-package 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3388,6 +3404,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "promotion-package":
+            console.print(
+                f"Evolution Promotion Package 未冻结：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3407,6 +3430,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution reflection-revoke <reflection-id> "
             "<incorrect_evidence|superseded|privacy|user_request|policy_change>；"
             "/evolution promotion-input <reflection-id>；"
+            "/evolution promotion-package <promotion-input-id> [target-branch]；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3500,6 +3524,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionPromotionPackageInputError as exc:
         console.print(
             f"Evolution Promotion Package Input 未冻结：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionPromotionPackageError as exc:
+        console.print(
+            f"Evolution Promotion Package 未冻结：{exc}",
             style="yellow",
             markup=False,
         )

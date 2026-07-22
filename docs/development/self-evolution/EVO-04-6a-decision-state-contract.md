@@ -129,5 +129,5 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 ## 下一步
 
 EVO-04.7a 已只保存结构化 Decision/Resolution 经验与证据引用。EVO-05.1a Promotion Package
-Input Contract 也已完成；下一步是 EVO-05.1b，用户自定义文本或 Reviewer 叙事仍不得进入系统 Prompt 或
-promotion authority。
+Input Contract 与 EVO-05.1b review Package 均已完成；下一步是 EVO-05.2a，用户自定义文本或 Reviewer 叙事
+仍不得进入系统 Prompt 或 promotion authority。
