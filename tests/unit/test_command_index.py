@@ -11,6 +11,8 @@ from naumi_agent.ui.command_index import (
     CommandArgumentSchema,
     TerminalCommandIndexEntry,
     build_terminal_command_index,
+    search_terminal_commands,
+    terminal_command_template,
 )
 
 
@@ -85,3 +87,26 @@ def test_command_index_models_reject_false_safety_metadata() -> None:
 def test_command_index_rejects_unknown_surface() -> None:
     with pytest.raises(ValueError, match="surface"):
         build_terminal_command_index("legacy")  # type: ignore[arg-type]
+
+
+def test_command_search_ranks_alias_fuzzy_and_localized_risk() -> None:
+    entries = build_terminal_command_index("new_ui")
+
+    assert search_terminal_commands(entries, "/h", limit=5)[0].command == "/help"
+    assert search_terminal_commands(entries, "wr", limit=5)[0].command == "/write"
+    write_results = search_terminal_commands(entries, "工作区写入", limit=50)
+    assert write_results
+    assert all(item.permission_risk == "workspace_write" for item in write_results)
+
+    write = next(item for item in entries if item.command == "/write")
+    assert terminal_command_template(write) == f"/write {write.arguments.syntax}"
+    help_entry = next(item for item in entries if item.command == "/help")
+    assert terminal_command_template(help_entry) == "/help"
+
+
+def test_command_search_is_bounded_and_rejects_invalid_limits() -> None:
+    entries = build_terminal_command_index("new_ui")
+
+    assert len(search_terminal_commands(entries, "", limit=3)) == 3
+    with pytest.raises(ValueError, match="limit"):
+        search_terminal_commands(entries, "", limit=0)

@@ -20,6 +20,7 @@ import { renderDoctorHealthPage } from "./components/doctor-health-page.js";
 import { renderPermissionCenterPage } from "./components/permission-center-page.js";
 import { renderGoalPursuitPage } from "./components/goal-pursuit-page.js";
 import { renderEvolutionReviewPage } from "./components/evolution-review-page.js";
+import { renderCommandQuickOpenPage } from "./components/command-quick-open-page.js";
 import { renderWorkingIndicator } from "./components/working-indicator.js";
 import {
   renderWelcomeScreen,
@@ -39,7 +40,9 @@ export function renderScreen(state, width, height, env = {}) {
   const footer = clampFooterSections(renderFooterSections(state, width, env), height);
   const footerHeight = footer.length;
   const bodyHeight = Math.max(1, height - footerHeight);
-  const visible = state.route?.name === "permissions"
+  const visible = state.commandQuickOpen?.open
+    ? renderCommandQuickOpenPage(state, width, bodyHeight)
+    : state.route?.name === "permissions"
     ? renderPermissionCenterPage(state.permissionCenter, width, bodyHeight)
     : state.route?.name === "goals"
     ? renderGoalPursuitPage(state.goalPanel, width, bodyHeight)

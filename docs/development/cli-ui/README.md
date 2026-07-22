@@ -20,7 +20,8 @@ Composition 注入时明确标记不可观测，而不是伪造调度健康。UI
 UI-17.2a-17.2b 已用共享 fixture 锁定 Bridge、TUI 与 Node reducer 的 runtime-health 八字段语义，以及权限脱敏、
 bypass/session grant 四选择、模型主动询问和 canonical answer。
 UI-14.1a 已建立 New UI/TUI 共用的严格 command index，现有补全可以展示参数 syntax、来源、category 和权限风险；
-QuickOpen 多 provider 与 Vim/input mode 尚未实现。
+UI-14.2a 已进一步交付两端 `Ctrl+P` 命令 QuickOpen，支持别名、说明、类别、风险和 fuzzy 搜索，选择只填入 composer；
+文件/会话/任务/Agent provider、最近使用与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。
 后续模块不得绕开这些路径重建新状态层。
 
