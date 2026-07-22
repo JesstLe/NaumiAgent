@@ -92,6 +92,7 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractIssuer,
+    EvolutionExperimentContractStore,
 )
 from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionError,
@@ -391,6 +392,7 @@ async def _lease_fixture(
     contract = await EvolutionExperimentContractIssuer(
         review_service=review_service,
         workbench_service=service,
+        store=EvolutionExperimentContractStore(runtime_db),
     ).issue(
         workspace,
         session_id="session-1",

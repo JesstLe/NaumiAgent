@@ -65,9 +65,10 @@
 - nested repository path 拒绝，clean/dirty baseline 可区分；
 - Proposal Queue 改为复用同一 validation binding 函数，避免签发方复制字符串契约。
 
-## 明确未包含
+## 当时未包含与后续状态
 
-- Contract 持久化、列表、UI、斜杠命令或 Agent Tool；
+- 本切片当时未包含 Contract 持久化、列表、UI、斜杠命令或 Agent Tool；后续 EVO-02.1b 已增加
+  workspace-bound durable authority、强制 Store，以及 slash/Agent 只读检查通道；
 - EVO-02.5 patch writer、02.6 完整 static guard、02.7 mutation receipt；
 - EVO-03 验证执行和 HAR-09.6 outcome tracking。
 

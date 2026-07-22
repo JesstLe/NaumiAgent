@@ -10,7 +10,10 @@
 EVO-03.7b1 已冻结最终评测所需的 Interventional lane、必需平台和 Adversarial RED/GREEN pairs；
 EVO-03.7b2 已从 durable Store 重读并验证全部要求，签发 `mechanical_gate_input_ready=true` 且明确
 `candidate_acceptance_decided=false` 的 Final Evaluation Receipt。EVO-04 mechanical gate 只能消费这类最终
-回执，不得把单 lane receipt、Aggregation Contract 或调用方自然语言当作完整决策输入。
+回执，不得把单 lane receipt、Aggregation Contract 或调用方自然语言当作完整决策输入。EVO-02.1b 又补齐了
+workspace-bound Experiment Contract Store，使 approved scope、budget、tools/checks 与 network/dependency
+constraints 可以在决策时独立重读；下一步是 EVO-04.1a 将其与 Candidate、Mutation、Final Evaluation authority
+组成一个确定性输入合同。
 
 ## 子模块
 

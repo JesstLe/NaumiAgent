@@ -1,24 +1,32 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
+from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContract,
     EvolutionExperimentContractIssuer,
+    EvolutionExperimentContractStore,
+    EvolutionExperimentContractStoreError,
     ExperimentBudget,
     ExperimentScope,
     GitExperimentBaselineReader,
+    render_experiment_contract_authority,
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
 from naumi_agent.tasks.store import TaskStore
+from naumi_agent.tools.evolution_review import EvolutionExperimentContractAuthorityTool
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
@@ -112,18 +120,29 @@ async def _approved_fixture(
             now=NOW + timedelta(minutes=5),
         )
         assert governed is not None
+    contract_store = EvolutionExperimentContractStore(runtime_db)
     issuer = EvolutionExperimentContractIssuer(
         review_service=review_service,
         workbench_service=service,
+        store=contract_store,
     )
-    return workspace, evolution_store, service, issuer, queued.proposal["id"]
+    return (
+        workspace,
+        evolution_store,
+        service,
+        contract_store,
+        issuer,
+        queued.proposal["id"],
+    )
 
 
 @pytest.mark.asyncio
 async def test_approved_proposal_issues_stable_non_executable_contract(
     tmp_path: Path,
 ) -> None:
-    workspace, _store, _service, issuer, proposal_id = await _approved_fixture(tmp_path)
+    workspace, _store, _service, contract_store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path)
+    )
     baseline = _git(workspace, "rev-parse", "HEAD")
     before = (workspace / "src/naumi_agent/ui/footer.py").read_bytes()
 
@@ -133,12 +152,16 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
         proposal_id=proposal_id,
         seed=42,
     )
-    second = await issuer.issue(
-        workspace,
-        session_id="session-1",
-        proposal_id=proposal_id,
-        seed=42,
-    )
+    repeated = await asyncio.gather(*(
+        issuer.issue(
+            workspace,
+            session_id="session-1",
+            proposal_id=proposal_id,
+            seed=42,
+        )
+        for _ in range(4)
+    ))
+    second = repeated[0]
 
     assert first == second
     assert first.contract_id.startswith("evx_")
@@ -158,13 +181,49 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
     assert first.requires_static_guard is True
     assert first.execution_ready is False
     assert first.state == "contract"
+    assert all(item == first for item in repeated)
+    authority = await contract_store.get(workspace, first.contract_id)
+    assert authority is not None
+    assert authority.contract == first
+    assert authority.workspace_root == str(workspace.resolve())
+    assert authority.authority_id == f"evxauth_{authority.authority_sha256[:24]}"
+    assert await contract_store.get(tmp_path / "other-workspace", first.contract_id) is None
+    engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_experiment_contract_store=contract_store,
+    )
+    tool_output = await EvolutionExperimentContractAuthorityTool(engine).execute(
+        first.contract_id
+    )
+    slash_output = await execute_slash_command(
+        engine,
+        f"/evolution experiment-contract {first.contract_id}",
+    )
+    assert tool_output == render_experiment_contract_authority(authority)
+    assert authority.authority_id in slash_output
+    assert "不是执行或推广许可" in slash_output
+    tampered_authority = authority.model_dump(mode="json")
+    tampered_authority["workspace_root"] = str((tmp_path / "forged").resolve())
+    with pytest.raises(ValidationError, match="Authority 摘要不一致"):
+        type(authority).model_validate(tampered_authority)
     assert (workspace / "src/naumi_agent/ui/footer.py").read_bytes() == before
     assert _git(workspace, "status", "--porcelain") == ""
+
+    with sqlite3.connect(tmp_path / "runtime.db") as db:
+        db.execute(
+            "UPDATE evolution_experiment_contracts SET manifest_sha256 = ? "
+            "WHERE workspace_root = ? AND contract_id = ?",
+            ("0" * 64, str(workspace.resolve()), first.contract_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionExperimentContractStoreError) as corrupt:
+        await contract_store.get(workspace, first.contract_id)
+    assert corrupt.value.code == "experiment_contract_authority_store_corrupt"
 
 
 @pytest.mark.asyncio
 async def test_contract_issuer_rejects_open_or_stale_proposal(tmp_path: Path) -> None:
-    workspace, store, _service, issuer, proposal_id = await _approved_fixture(
+    workspace, store, _service, _contract_store, issuer, proposal_id = await _approved_fixture(
         tmp_path / "open",
         approve=False,
     )
@@ -175,7 +234,7 @@ async def test_contract_issuer_rejects_open_or_stale_proposal(tmp_path: Path) ->
             proposal_id=proposal_id,
             seed=1,
         )
-    workspace, store, _service, issuer, proposal_id = await _approved_fixture(
+    workspace, store, _service, _contract_store, issuer, proposal_id = await _approved_fixture(
         tmp_path / "stale"
     )
     intake = FeedbackIntakeService(store)
@@ -202,7 +261,7 @@ async def test_contract_issuer_rejects_open_or_stale_proposal(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_approved_multi_file_proposal_issues_bounded_contract(tmp_path: Path) -> None:
     scope = "files:src/naumi_agent/ui/footer.py,src/naumi_agent/ui/header.py"
-    workspace, _store, _service, issuer, proposal_id = await _approved_fixture(
+    workspace, _store, _service, _contract_store, issuer, proposal_id = await _approved_fixture(
         tmp_path,
         scope=scope,
     )
@@ -237,7 +296,9 @@ def test_experiment_scope_rejects_multi_file_display_authority_mismatch() -> Non
 
 @pytest.mark.asyncio
 async def test_contract_budget_cannot_expand_risk_policy(tmp_path: Path) -> None:
-    workspace, _store, _service, issuer, proposal_id = await _approved_fixture(tmp_path)
+    workspace, _store, _service, _contract_store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path)
+    )
     oversized = ExperimentBudget(
         max_changed_files=16,
         max_changed_lines=2_000,
@@ -258,7 +319,9 @@ async def test_contract_budget_cannot_expand_risk_policy(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_contract_identity_rejects_manifest_tampering(tmp_path: Path) -> None:
-    workspace, _store, _service, issuer, proposal_id = await _approved_fixture(tmp_path)
+    workspace, _store, _service, _contract_store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path)
+    )
     contract = await issuer.issue(
         workspace,
         session_id="session-1",

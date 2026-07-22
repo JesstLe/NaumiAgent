@@ -46,7 +46,10 @@ from naumi_agent.evolution.experiment_leases import (
 from naumi_agent.evolution.experiment_snapshots import (
     EvolutionExperimentSourceSnapshotBuilder,
 )
-from naumi_agent.evolution.experiments import EvolutionExperimentContractIssuer
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContractIssuer,
+    EvolutionExperimentContractStore,
+)
 from naumi_agent.evolution.failure_attribution import (
     EvolutionFailureAttributionBuilder,
     EvolutionFailureAttributionExecutor,
@@ -185,6 +188,10 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_experiment_contract_issuer,
         EvolutionExperimentContractIssuer,
+    )
+    assert isinstance(
+        engine.evolution_experiment_contract_store,
+        EvolutionExperimentContractStore,
     )
     assert isinstance(
         engine.evolution_experiment_lease_store,

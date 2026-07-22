@@ -2755,8 +2755,8 @@ def _print_help() -> None:
             "记录隐私安全的反馈候选；偏好、取消和赞扬不会计入缺陷",
         ),
         (
-            "/evolution [list|detail|evaluation|enqueue]",
-            "审查 Candidate、签发单 Lane 回执或加入 Workbench 队列",
+            "/evolution [list|detail|experiment-contract|evaluation|enqueue]",
+            "审查 Candidate、实验约束 authority、评测回执或 Workbench 队列",
         ),
         ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
@@ -3039,6 +3039,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionEvaluationLaneReceiptError,
         render_evaluation_lane_receipt,
     )
+    from naumi_agent.evolution.experiments import (
+        EvolutionExperimentContractStoreError,
+        render_experiment_contract_authority,
+    )
     from naumi_agent.evolution.final_evaluation_receipts import (
         EvolutionFinalEvaluationReceiptError,
         render_final_evaluation_receipt,
@@ -3054,6 +3058,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     try:
         parts = shlex.split(arg)
         action = parts[0].lower() if parts else "list"
+        if action == "experiment-contract":
+            if len(parts) != 2:
+                raise ValueError("experiment-contract 需要一个 Contract ID。")
+            authority = await engine.evolution_experiment_contract_store.get(
+                engine.workspace_root,
+                parts[1],
+            )
+            if authority is None:
+                raise ValueError("当前工作区不存在该 Experiment Contract Authority。")
+            console.print(Markdown(render_experiment_contract_authority(authority)))
+            return
         if action == "evaluation":
             if len(parts) != 2:
                 raise ValueError("evaluation 需要一个 H5c Comparison ID。")
@@ -3142,12 +3157,20 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
         else:
             raise ValueError(
-                "仅支持 list、detail、evaluation、evaluation-contract、"
+                "仅支持 list、detail、experiment-contract、evaluation、"
+                "evaluation-contract、"
                 "evaluation-final 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
             console.print(f"Proposal 未入队：{exc}", style="yellow", markup=False)
+            return
+        if action == "experiment-contract":
+            console.print(
+                f"Experiment Contract Authority 不可读取：{exc}",
+                style="yellow",
+                markup=False,
+            )
             return
         if action == "evaluation-contract":
             console.print(
@@ -3166,12 +3189,20 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
+            "/evolution experiment-contract <contract-id>；"
             "/evolution evaluation <comparison-id>；"
             "/evolution evaluation-contract <workspace-relative-request.json>；"
             "/evolution evaluation-final <contract-id> <interventional-h5c-id> "
             "<adversarial-h5c-id...>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionExperimentContractStoreError:
+        console.print(
+            "Experiment Contract Authority 不可读取；请运行 /doctor 后重试。",
             style="yellow",
             markup=False,
         )
