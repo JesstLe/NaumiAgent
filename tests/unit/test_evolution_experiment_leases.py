@@ -5,6 +5,7 @@ import hashlib
 import json
 import sqlite3
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -51,6 +52,9 @@ from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonError,
     EvolutionAdversarialComparisonExecutor,
 )
+from naumi_agent.evolution.adversarial_failure_attribution import (
+    EvolutionAdversarialFailureAttributionExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContract,
     EvolutionAdversarialProbeContractBuilder,
@@ -75,6 +79,12 @@ from naumi_agent.evolution.experiment_snapshots import (
 )
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractIssuer,
+)
+from naumi_agent.evolution.failure_attribution import (
+    EvolutionFailureAttributionError,
+    EvolutionFailureAttributionStore,
+    FailureAttributionAction,
+    FailureAttributionCategory,
 )
 from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationError,
@@ -4811,6 +4821,61 @@ async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_au
         item.mechanical_verdict == "unchanged"
         for item in comparison.receipt.sample_evidence
     )
+    attribution_store = EvolutionFailureAttributionStore(
+        runtime / "adversarial-failure-attributions.db"
+    )
+    attribution_executor = EvolutionAdversarialFailureAttributionExecutor(
+        harness_store=store,
+        attribution_store=attribution_store,
+    )
+    with pytest.raises(EvolutionFailureAttributionError) as forged_h5c:
+        await attribution_executor.execute(
+            batch_request=request,
+            validation_plan=plan,
+            red_receipt=red_cohort,
+            green_receipt=green_cohort,
+            comparison=replace(comparison, decision="failed"),
+        )
+    assert (
+        forged_h5c.value.code
+        == "adversarial_attribution_comparison_not_authoritative"
+    )
+    with pytest.raises(EvolutionFailureAttributionError) as wrong_pair:
+        await attribution_executor.execute(
+            batch_request=request,
+            validation_plan=plan,
+            red_receipt=red_cohort,
+            green_receipt=red_cohort,
+            comparison=comparison,
+        )
+    assert wrong_pair.value.code == "adversarial_attribution_authority_mismatch"
+    attribution = await attribution_executor.execute(
+        batch_request=request,
+        validation_plan=plan,
+        red_receipt=red_cohort,
+        green_receipt=green_cohort,
+        comparison=comparison,
+    )
+    repeated_attribution = await attribution_executor.execute(
+        batch_request=request,
+        validation_plan=plan,
+        red_receipt=red_cohort,
+        green_receipt=green_cohort,
+        comparison=comparison,
+    )
+    restored_attribution = await EvolutionFailureAttributionStore(
+        runtime / "adversarial-failure-attributions.db"
+    ).get(comparison.id)
+    assert attribution == repeated_attribution == restored_attribution
+    assert attribution.category is FailureAttributionCategory.OBJECTIVE_NOT_IMPROVED
+    assert attribution.action is FailureAttributionAction.REVISE_CANDIDATE
+    assert attribution.reason_code == "objective_metric_unchanged"
+    assert not attribution.candidate_fault
+    assert not attribution.retryable
+    assert not attribution.requires_rerun
+    assert not attribution.reflection_eligible
+    assert attribution.red_receipt_id == red_cohort.receipt_id
+    assert attribution.green_receipt_id == green_cohort.receipt_id
     with pytest.raises(EvolutionAdversarialComparisonError) as wrong_phase:
         await comparison_executor.execute(
             workspace_root=workspace,

@@ -44,6 +44,6 @@ Attribution 合同。该切片不复制分类表、不引入模型判断、不�
 
 ## 当前边界与后续依赖
 
-本切片只完成 H5c 后的可信归因，不实现 adversarial/security/platform matrix、最终 Evaluation Receipt、
-EVO-04 reflection decision 或自动晋升。下一步应横向核对 EVO-03.6 与 HAR-08.4 Suite/Batch 隔离：先补能让
-adversarial suite 复用同一 H5a/H5c authority 的最小前置，再实现 adversarial evidence，不另造 Evolution runner。
+本切片只完成 Interventional H5c 后的可信归因，不实现最终 Evaluation Receipt、EVO-04 reflection decision
+或自动晋升。EVO-03.6a..6e 与 EVO-03.5c 已让当前平台 Adversarial RED/GREEN 复用同一 H5a/H5c/Attribution
+authority；跨平台 matrix dispatcher、HAR-08 通用 surface 与最终 Evaluation Receipt 仍未完成。

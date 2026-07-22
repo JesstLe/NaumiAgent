@@ -50,6 +50,10 @@ from naumi_agent.evolution.adversarial_cohort import (
 from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonExecutor,
 )
+from naumi_agent.evolution.adversarial_failure_attribution import (
+    EvolutionAdversarialFailureAttributionBuilder,
+    EvolutionAdversarialFailureAttributionExecutor,
+)
 from naumi_agent.evolution.adversarial_probe_contracts import (
     EvolutionAdversarialProbeContractBuilder,
 )
@@ -1035,6 +1039,16 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 attribution_store=self.evolution_failure_attribution_store,
                 builder=self.evolution_interventional_failure_attribution_builder,
+            )
+        )
+        self.evolution_adversarial_failure_attribution_builder = (
+            EvolutionAdversarialFailureAttributionBuilder()
+        )
+        self.evolution_adversarial_failure_attribution_executor = (
+            EvolutionAdversarialFailureAttributionExecutor(
+                harness_store=self._harness_store,
+                attribution_store=self.evolution_failure_attribution_store,
+                builder=self.evolution_adversarial_failure_attribution_builder,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

@@ -24,6 +24,10 @@ if TYPE_CHECKING:
         EvolutionAdversarialComparisonError,
         EvolutionAdversarialComparisonExecutor,
     )
+    from naumi_agent.evolution.adversarial_failure_attribution import (
+        EvolutionAdversarialFailureAttributionBuilder,
+        EvolutionAdversarialFailureAttributionExecutor,
+    )
     from naumi_agent.evolution.adversarial_probe_contracts import (
         AdversarialProbeBlocker,
         AdversarialProbeCheckBinding,
@@ -282,6 +286,8 @@ __all__ = [
     "EvolutionAdversarialCohortReceipt",
     "EvolutionAdversarialComparisonError",
     "EvolutionAdversarialComparisonExecutor",
+    "EvolutionAdversarialFailureAttributionBuilder",
+    "EvolutionAdversarialFailureAttributionExecutor",
     "EvolutionAdversarialSampleError",
     "EvolutionAdversarialSampleExecutor",
     "EvolutionAdversarialSampleReceipt",
@@ -470,6 +476,10 @@ def __getattr__(name: str) -> object:
     adversarial_comparison_exports = {
         "EvolutionAdversarialComparisonError",
         "EvolutionAdversarialComparisonExecutor",
+    }
+    adversarial_failure_attribution_exports = {
+        "EvolutionAdversarialFailureAttributionBuilder",
+        "EvolutionAdversarialFailureAttributionExecutor",
     }
     adversarial_probe_contract_exports = {
         "AdversarialProbeBlocker",
@@ -709,6 +719,8 @@ def __getattr__(name: str) -> object:
     }
     if name in adversarial_comparison_exports:
         module_name = "adversarial_comparison"
+    elif name in adversarial_failure_attribution_exports:
+        module_name = "adversarial_failure_attribution"
     elif name in adversarial_cohort_exports:
         module_name = "adversarial_cohort"
     elif name in adversarial_sample_exports:
