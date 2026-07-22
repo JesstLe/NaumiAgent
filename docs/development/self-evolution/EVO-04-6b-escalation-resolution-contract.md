@@ -114,11 +114,11 @@ row index 与 JSON payload 双向校验，单 artifact 上限 40 MiB。
 - `evidence_required` 尚未自动调度新 Evaluation lane；
 - `human_review_required` 尚未建立独立人工审查签名 artifact；
 - custom instruction 只被记录，尚未进入受策略约束的任务规划器；
-- EVO-04.7 Reflection Memory；
+- EVO-04.7a Reflection Memory 已完成；
 - EVO-05 promotion/rollback 与 HAR-09.6 outcome tracking；
 - 跨 Harness/Resolution 两个 Store 仍非单事务，使用 authority-first 与重读恢复收敛；原子 outbox 属于 ARC-05。
 
 ## 下一步
 
-实现 EVO-04.7a Reflection Memory Contract：只消费不可变 Decision/Resolution 与证据引用，形成结构化、可撤销、
-不注入系统 Prompt 的经验记录；仍不执行 promotion。
+EVO-04.7a 已消费本 Resolution 并形成结构化、可撤销、非注入 Reflection。下一步进入 EVO-05.1a Promotion
+Package Input Contract；仍不执行合并或发布。

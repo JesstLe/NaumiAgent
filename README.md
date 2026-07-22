@@ -219,6 +219,8 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | 反馈 | `/feedback <category> <scope> <topic> <摘要>` | 将用户纠正或缺陷报告脱敏写入不可执行候选；偏好、取消和赞扬不会计为缺陷 |
 | 候选审阅 | `/evolution [list|detail <id>]` | 只读检查 Candidate、时间趋势、模型/平台分布、证据、审计链和资格 Gate |
 | 单 Lane 评测回执 | `/evolution evaluation <comparison-id>` | 从 H5a/H5c/归因权威事实签发并显示明确非最终的 before/after 回执 |
+| 结构化反思 | `/evolution reflection <decision-input-id>` | 从 Decision/Resolution 生成非向量、非自动注入、可撤销的结构化经验 |
+| 撤销反思 | `/evolution reflection-revoke <reflection-id> <reason>` | 以 append-only 回执停用 Reflection；normal 确认，bypass 直接执行 |
 | 任务 | `/todo` `/tasks` `/task` `/task-reply` `/task-abort` | 管理 todo、subagent、后台/browser 任务和人工接管 |
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |

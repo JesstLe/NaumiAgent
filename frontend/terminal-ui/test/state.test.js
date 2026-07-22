@@ -2083,6 +2083,38 @@ test("evaluation lane command downgrades before or without typed capability", ()
   }
 });
 
+test("reflection commands use the shared slash channel instead of typed review rejection", () => {
+  const state = createInitialState();
+  const sent = [];
+  const decisionInputId = `evdin_${"a".repeat(24)}`;
+  const reflectionId = `evreflection_${"b".repeat(24)}`;
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, `/evolution reflection ${decisionInputId}`, send);
+  handleSubmitText(
+    state,
+    `/evolution reflection-revoke ${reflectionId} superseded`,
+    send,
+  );
+
+  assert.deepEqual(sent, [
+    {
+      type: "submit",
+      payload: { text: `/evolution reflection ${decisionInputId}` },
+    },
+    {
+      type: "submit",
+      payload: {
+        text: `/evolution reflection-revoke ${reflectionId} superseded`,
+      },
+    },
+  ]);
+  assert.equal(
+    state.messages.some((item) => item.title === "Evolution"),
+    false,
+  );
+});
+
 test("evolution enqueue sends an explicit bound queue request", () => {
   const state = createInitialState();
   const sent = [];

@@ -32,6 +32,8 @@ from naumi_agent.tools.evolution_review import (
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
     EvolutionProposalQueueTool,
+    EvolutionReflectionMemoryRevokeTool,
+    EvolutionReflectionMemoryTool,
     EvolutionRewardHackingEvidenceTool,
     create_evolution_review_tools,
 )
@@ -186,11 +188,15 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_reward_hacking_evidence",
         "evolution_decision_state",
         "evolution_decision_resolution",
+        "evolution_reflection_memory",
+        "evolution_revoke_reflection_memory",
         "evolution_proposal_queue",
     ]
     assert [tool.metadata.read_only for tool in tools] == [
         True,
         True,
+        False,
+        False,
         False,
         False,
         False,
@@ -216,6 +222,9 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[10], EvolutionRewardHackingEvidenceTool)
     assert isinstance(tools[11], EvolutionDecisionStateTool)
     assert isinstance(tools[12], EvolutionDecisionResolutionTool)
+    assert isinstance(tools[13], EvolutionReflectionMemoryTool)
+    assert isinstance(tools[14], EvolutionReflectionMemoryRevokeTool)
+    assert isinstance(tools[15], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

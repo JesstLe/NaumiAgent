@@ -111,6 +111,12 @@ from naumi_agent.evolution.patch_recovery import (
 from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
+from naumi_agent.evolution.reflection_memories import (
+    EvolutionReflectionMemoryBuilder,
+    EvolutionReflectionMemoryExecutor,
+    EvolutionReflectionMemoryRevoker,
+    EvolutionReflectionMemoryStore,
+)
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
     EvolutionRewardHackingEvidenceExecutor,
@@ -327,6 +333,23 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
         engine.evolution_decision_resolution_service,
         EvolutionDecisionResolutionService,
     )
+    assert isinstance(
+        engine.evolution_reflection_memory_builder,
+        EvolutionReflectionMemoryBuilder,
+    )
+    assert isinstance(
+        engine.evolution_reflection_memory_store,
+        EvolutionReflectionMemoryStore,
+    )
+    assert isinstance(
+        engine.evolution_reflection_memory_executor,
+        EvolutionReflectionMemoryExecutor,
+    )
+    assert isinstance(
+        engine.evolution_reflection_memory_revoker,
+        EvolutionReflectionMemoryRevoker,
+    )
+    assert engine.evolution_reflection_memory_store is not engine.long_term_memory
     assert isinstance(
         engine.evolution_validation_planner,
         EvolutionValidationPlanner,

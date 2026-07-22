@@ -120,7 +120,7 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 ## 明确未完成
 
 - EVO-04.6b Escalation Resolution 已完成；
-- EVO-04.7 Reflection Memory；
+- EVO-04.7a Reflection Memory 已完成；
 - EVO-05 promotion/rollback 与 HAR-09.6 outcome tracking；
 - `accepted_experiment` 不会自动修改 baseline、Git 分支或生产配置；
 - 当前 Decision artifact 沿用既有嵌套 authority，体积较大；后续可在保持 digest 可重放的前提下引入内容寻址
@@ -128,5 +128,5 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 
 ## 下一步
 
-继续 EVO-04.7a Reflection Memory Contract：只保存结构化 Decision/Resolution 经验与证据引用，禁止把用户
-自定义文本或 Reviewer 叙事直接注入系统 Prompt。
+EVO-04.7a 已只保存结构化 Decision/Resolution 经验与证据引用。下一步实现 EVO-05.1a Promotion Package
+Input Contract；用户自定义文本或 Reviewer 叙事仍不得进入系统 Prompt 或 promotion authority。

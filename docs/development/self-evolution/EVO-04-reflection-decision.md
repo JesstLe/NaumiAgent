@@ -38,6 +38,9 @@ EVO-04.6a 现以 Decision Input ID 为唯一入口，兼容 mechanical veto 短�
 EVO-04.6b 已把 escalation 接入真实 HAR-10.6 create-before-display 与 fenced answer：重启可复用
 pending/answered authority，Resolution 只允许补证据、人工审查、修订、拒绝或自定义后续动作，任何路径都不
 接受 Candidate 或执行 promotion。
+EVO-04.7a 已把 Decision/Resolution 确定性投影为最小 Reflection Memory：只保存枚举 lesson/action/signal 与
+typed authority ID/digest，自定义用户文本和 Reviewer 叙事不落库；独立 SQLite 表不进入向量索引、自动召回或
+系统 Prompt。记录可通过 append-only authority 撤销，仍不执行 promotion。
 EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Counterfactual Evidence 非只读 Agent Tool 建立显式
 中风险权限规则和有界会话调用面；bypass 不跳过任何 authority 或 veto。详见
 `EVO-GOV-01-agent-tool-permission-matrix.md`。
@@ -52,7 +55,7 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
   EVO-04.5a 已完成。
 - EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。EVO-04.6a 状态合同与 EVO-04.6b
   escalation resolution 均已完成。
-- EVO-04.7 Reflection memory：只保存结构化经验和证据引用，禁止污染系统 Prompt。
+- EVO-04.7 Reflection memory：只保存结构化经验和证据引用，禁止污染系统 Prompt。EVO-04.7a 已完成。
 
 ## 验收标准
 
@@ -85,15 +88,18 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - [EVO-04.6b Escalation Resolution Contract](EVO-04-6b-escalation-resolution-contract.md)：真实
   create-before-display、answer-before-resolution、重启重读、冲突答案 fail closed、双通道与不可变非 promotion
   用户回执。
+- [EVO-04.7a Reflection Memory Contract](EVO-04-7a-reflection-memory-contract.md)：Decision Input 单入口、
+  Decision/Resolution exact authority 重读、八类确定性 lesson/action 投影、非向量/非自动召回安全边界、
+  append-only 撤销、并发幂等和 Slash/Agent Tool 双通道。
 
-EVO-04 整体仍为 partial；Decision State 与 escalation resolution 已交付，但 Reflection Memory 与 promotion
-尚未交付。
+EVO-04 的决策与 Reflection Memory 闭环已交付。它有意止于 `promotion_review_ready`；实际 promotion、发布与
+rollback 属于 EVO-05，不是 EVO-04 的隐式完成条件。
 
 ## 明确未完成
 
-- reflection memory 与 promotion。
+- Promotion Package、审批、rebase/revalidate、分阶段发布、监控与 rollback（EVO-05）。
 
 ## 下一步
 
-实现 EVO-04.7a Reflection Memory Contract：只消费签名证据、Decision 与 Resolution，保存结构化经验和撤销
-依据；禁止直接污染系统 Prompt，仍不执行 promotion。
+实现 EVO-05.1a Promotion Package Input Contract：只允许 `accepted_experiment` 且 active 的 Reflection 进入
+显式 promotion review，冻结 patch/baseline/receipts/risk/migration/rollback 引用；仍不合并或发布。

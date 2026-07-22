@@ -49,6 +49,11 @@ from naumi_agent.evolution.mechanical_gates import (
     render_mechanical_gate,
 )
 from naumi_agent.evolution.queue import render_queue_result
+from naumi_agent.evolution.reflection_memories import (
+    EvolutionReflectionMemoryError,
+    EvolutionReflectionRevocationReason,
+    render_evolution_reflection_memory,
+)
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
     EvolutionReviewService,
@@ -947,6 +952,125 @@ class EvolutionDecisionResolutionTool(Tool):
         return render_evolution_decision_resolution(artifact)
 
 
+class EvolutionReflectionMemoryTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_reflection_memory"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从不可变 Evolution Decision State 和可选用户 Resolution 派生结构化反思记忆。"
+            "只保存枚举信号与 authority ID/digest，不保存 Reviewer 叙事、用户自定义文本或源码，"
+            "不写向量库、不自动召回、不注入系统 Prompt，也不执行 promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_input_id": {
+                    "type": "string",
+                    "pattern": "^evdin_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["decision_input_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 结构化反思记忆",
+            search_hint=(
+                "evolution reflection memory structured lesson evidence refs "
+                "自进化 反思 结构化经验"
+            ),
+        )
+
+    async def execute(self, decision_input_id: str) -> str:
+        try:
+            view = await self._engine.evolution_reflection_memory_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                decision_input_id=decision_input_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionReflectionMemoryError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Reflection Memory 未完成：{exc}"
+        return render_evolution_reflection_memory(view)
+
+
+class EvolutionReflectionMemoryRevokeTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revoke_reflection_memory"
+
+    @property
+    def description(self) -> str:
+        return (
+            "以 append-only 撤销回执停用一条 Evolution Reflection Memory。"
+            "不会删除原证据；revoked 记录只保留审计，不参与后续 policy learning 或 promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "reflection_id": {
+                    "type": "string",
+                    "pattern": "^evreflection_[0-9a-f]{24}$",
+                },
+                "reason": {
+                    "type": "string",
+                    "enum": [item.value for item in EvolutionReflectionRevocationReason],
+                },
+            },
+            "required": ["reflection_id", "reason"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="撤销 Evolution 反思记忆",
+            search_hint="evolution revoke reflection memory 撤销 反思记忆",
+        )
+
+    async def execute(self, reflection_id: str, reason: str) -> str:
+        try:
+            view = await self._engine.evolution_reflection_memory_revoker.execute(
+                workspace_root=self._engine.workspace_root,
+                reflection_id=reflection_id.strip(),
+                reason=reason.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionReflectionMemoryError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Reflection Memory 撤销未完成：{exc}"
+        return render_evolution_reflection_memory(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -965,6 +1089,8 @@ def create_evolution_review_tools(
         EvolutionRewardHackingEvidenceTool(engine),
         EvolutionDecisionStateTool(engine),
         EvolutionDecisionResolutionTool(engine),
+        EvolutionReflectionMemoryTool(engine),
+        EvolutionReflectionMemoryRevokeTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -984,5 +1110,7 @@ __all__ = [
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "EvolutionRewardHackingEvidenceTool",
+    "EvolutionReflectionMemoryRevokeTool",
+    "EvolutionReflectionMemoryTool",
     "create_evolution_review_tools",
 ]

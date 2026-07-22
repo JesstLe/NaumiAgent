@@ -3072,6 +3072,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         render_mechanical_gate,
     )
     from naumi_agent.evolution.queue import render_queue_result
+    from naumi_agent.evolution.reflection_memories import (
+        EvolutionReflectionMemoryError,
+        render_evolution_reflection_memory,
+    )
     from naumi_agent.evolution.review import (
         EvolutionReviewFilter,
         render_evolution_review,
@@ -3232,6 +3236,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evolution_decision_resolution(artifact)))
             return
+        if action == "reflection":
+            if len(parts) != 2:
+                raise ValueError("reflection 需要一个 Decision Input ID。")
+            view = await engine.evolution_reflection_memory_executor.execute(
+                workspace_root=engine.workspace_root,
+                decision_input_id=parts[1],
+            )
+            console.print(Markdown(render_evolution_reflection_memory(view)))
+            return
+        if action == "reflection-revoke":
+            if len(parts) != 3:
+                raise ValueError("reflection-revoke 需要 Reflection ID 和结构化 reason。")
+            view = await engine.evolution_reflection_memory_revoker.execute(
+                workspace_root=engine.workspace_root,
+                reflection_id=parts[1],
+                reason=parts[2],
+            )
+            console.print(Markdown(render_evolution_reflection_memory(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3261,7 +3284,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "evaluation-contract、"
                 "evaluation-final、decision-input、mechanical-gate、"
                 "independent-review、counterfactual、reward-hacking、"
-                "decision-state、decision-resolve 或 enqueue。"
+                "decision-state、decision-resolve、reflection、"
+                "reflection-revoke 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3337,6 +3361,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action in {"reflection", "reflection-revoke"}:
+            console.print(
+                f"Evolution Reflection Memory 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3352,6 +3383,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution reward-hacking <counterfactual-evidence-id>；"
             "/evolution decision-state <decision-input-id>；"
             "/evolution decision-resolve <decision-input-id>；"
+            "/evolution reflection <decision-input-id>；"
+            "/evolution reflection-revoke <reflection-id> "
+            "<incorrect_evidence|superseded|privacy|user_request|policy_change>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3431,6 +3465,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionDecisionResolutionError as exc:
         console.print(
             f"Evolution Escalation Resolution 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionReflectionMemoryError as exc:
+        console.print(
+            f"Evolution Reflection Memory 未完成：{exc}",
             style="yellow",
             markup=False,
         )

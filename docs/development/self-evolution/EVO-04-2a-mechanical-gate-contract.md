@@ -88,10 +88,10 @@ normal 无逐次确认、每会话最多 50 次；任何权限模式都不能覆
 - EVO-04.4a counterfactual 已完成；
 - EVO-04.5a reward-hacking evidence 已完成；
 - EVO-04.6a Decision State 与 EVO-04.6b Escalation Resolution 已完成；
-- EVO-04.7 reflection memory 和 EVO-05 promotion。
+- EVO-04.7a reflection memory 已完成；EVO-05 promotion 尚未实现。
 
 ## 下一步
 
 EVO-02.7c2 已补齐 Trace-bound Mutation Author Receipt；EVO-04.3a 已实现 Independent Reviewer Contract；
-EVO-04.4a 至 EVO-04.6b 已实现下游 Evidence、Decision State 与持久用户 Resolution。下一步进入 EVO-04.7a
-Reflection Memory；任何后续阶段仍不能覆盖 Mechanical veto。
+EVO-04.4a 至 EVO-04.7a 已实现下游 Evidence、Decision、Resolution 与 Reflection。下一步进入 EVO-05.1a
+Promotion Package Input Contract；任何后续阶段仍不能覆盖 Mechanical veto。
