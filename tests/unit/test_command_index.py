@@ -117,6 +117,9 @@ def test_command_search_ranks_alias_fuzzy_and_localized_risk() -> None:
     assert terminal_command_template(write) == f"/write {write.arguments.syntax}"
     help_entry = next(item for item in entries if item.command == "/help")
     assert terminal_command_template(help_entry) == "/help"
+    tasks = next(item for item in entries if item.command == "/tasks")
+    assert tasks.arguments.syntax == "[detail <id>]"
+    assert tasks.readonly is True
 
 
 def test_command_search_is_bounded_and_rejects_invalid_limits() -> None:

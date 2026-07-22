@@ -2611,7 +2611,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/bdaemon":
             await _run_browser_daemon(engine, arg)
         case "/tasks":
-            await _run_tasks_list(engine)
+            await _run_tasks_list(engine, arg)
         case "/task":
             await _run_task_detail(engine, arg)
         case "/task-reply":
@@ -5505,13 +5505,32 @@ async def _run_browser_daemon(engine: Any, arg: str) -> None:
             )
 
 
-async def _run_tasks_list(engine: Any) -> None:
+async def _run_tasks_list(engine: Any, arg: str = "") -> None:
     """显示 todo / subagent / background / browser 综合任务面板."""
+    import shlex
+
     from rich.text import Text
 
     from naumi_agent.ui.task_panel import render_task_panel
 
-    console.print(Text.from_ansi(await render_task_panel(engine, limit=20)))
+    try:
+        parts = shlex.split(arg)
+    except ValueError:
+        console.print(Text("用法: /tasks [detail <id>]", style="yellow"))
+        return
+    if parts and (len(parts) != 2 or parts[0].lower() != "detail"):
+        console.print(Text("用法: /tasks [detail <id>]", style="yellow"))
+        return
+    detail_id = parts[1] if parts else ""
+    console.print(
+        Text.from_ansi(
+            await render_task_panel(
+                engine,
+                limit=50 if detail_id else 20,
+                detail_id=detail_id,
+            )
+        )
+    )
 
 
 async def _run_task_detail(engine: Any, arg: str) -> None:

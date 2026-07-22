@@ -448,7 +448,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         taskTimeline("browser", "run_7", "blocked", "打开页面"),
       ],
       warnings: [],
-    });
+    }, record.id);
     const tasks = payload.pinned
       ? { background_running: 1, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 0 }
       : { background_running: 0, background_attention: 0, subagents_active: 0, browser_active: 0, permissions_pending: 0 };

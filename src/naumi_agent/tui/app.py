@@ -3290,6 +3290,7 @@ class NaumiApp(App):
             CommandQuickOpenScreen(
                 _TUI_COMMAND_INDEX,
                 recent_commands=self._recent_commands,
+                engine=self.engine,
             ),
             on_selected,
         )

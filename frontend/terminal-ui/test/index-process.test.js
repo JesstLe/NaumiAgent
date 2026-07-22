@@ -70,6 +70,39 @@ test("terminal UI command QuickOpen fills composer without submitting", async ()
   }
 });
 
+test("terminal UI task QuickOpen loads typed tasks and fills detail without submitting", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("\x10");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("\t");
+    await waitForLatestScreen(output, "任务 QuickOpen", 7000);
+    await waitForLatestScreen(output, "探索项目结构", 7000);
+    app.stdin.write("Explore");
+    await waitForLatestScreen(output, "sub_1", 7000);
+    app.stdin.write("\n");
+    await waitForLatestScreenWithout(output, "任务 QuickOpen", 7000);
+    await waitForLatestScreen(output, "/tasks detail sub_1▌", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    assert(events.some(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "task_panel"
+        && record.payload.record.payload.limit === 50,
+    ));
+    assert.equal(events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    ).length, 0);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI animates active work without repeatedly clearing the screen", async () => {
   const app = launchTerminalUi("fake-bridge.js", {
     env: {

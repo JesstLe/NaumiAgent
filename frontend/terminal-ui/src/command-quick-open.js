@@ -3,13 +3,31 @@ import { setInputText } from "./input-buffer.js";
 
 const QUERY_LIMIT = 200;
 const RESULT_LIMIT = 200;
+const TASK_RESULT_LIMIT = 50;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
+const TASK_STATUS_ORDER = Object.freeze({
+  running: 0,
+  blocked: 1,
+  pending: 2,
+  failed: 3,
+  cancelled: 4,
+  completed: 5,
+});
+const TASK_SOURCE_ORDER = Object.freeze({ todo: 0, subagent: 1, background: 2, browser: 3 });
 
 export function openCommandQuickOpen(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
   quickOpen.open = true;
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
+  quickOpen.provider = "commands";
+  if (!quickOpen.taskLoading) {
+    quickOpen.taskItems = [];
+    quickOpen.taskWarnings = [];
+    quickOpen.taskLoaded = false;
+    quickOpen.taskError = "";
+    quickOpen.taskRequestId = "";
+  }
   quickOpen.draftText = String(state.input ?? "");
   quickOpen.draftCursor = state.inputCursor;
   return true;
@@ -44,20 +62,79 @@ export function backspaceCommandQuickOpenQuery(state) {
 
 export function getCommandQuickOpenItems(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
-  const ranked = searchCommandEntries(
-    state.slashCommands,
-    quickOpen.query,
-    RESULT_LIMIT,
-    quickOpen.recentCommands,
-  );
+  const ranked = quickOpen.provider === "tasks"
+    ? searchTaskEntries(quickOpen.taskItems, quickOpen.query, TASK_RESULT_LIMIT)
+    : searchCommandEntries(
+      state.slashCommands,
+      quickOpen.query,
+      RESULT_LIMIT,
+      quickOpen.recentCommands,
+    );
   const maximum = Math.max(0, ranked.length - 1);
   quickOpen.selectedIndex = Math.min(maximum, Math.max(0, Number(quickOpen.selectedIndex) || 0));
   const recent = new Set(quickOpen.recentCommands);
   return ranked.map((entry, index) => ({
     ...entry,
+    provider: quickOpen.provider,
     selected: index === quickOpen.selectedIndex,
-    recent: recent.has(entry.command),
+    recent: quickOpen.provider === "commands" && recent.has(entry.command),
   }));
+}
+
+export function switchCommandQuickOpenProvider(state, requestTaskSnapshot = null) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  quickOpen.provider = quickOpen.provider === "tasks" ? "commands" : "tasks";
+  quickOpen.query = "";
+  quickOpen.selectedIndex = 0;
+  if (
+    quickOpen.provider === "tasks"
+    && !quickOpen.taskLoaded
+    && !quickOpen.taskLoading
+    && typeof requestTaskSnapshot === "function"
+  ) {
+    quickOpen.taskLoading = true;
+    quickOpen.taskError = "";
+    quickOpen.taskRequestId = String(requestTaskSnapshot() || "");
+    if (!quickOpen.taskRequestId) {
+      quickOpen.taskLoading = false;
+      quickOpen.taskError = "任务快照请求未发送。";
+    }
+  }
+  return quickOpen.provider;
+}
+
+export function applyCommandQuickOpenTaskSnapshot(state, requestId, payload) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.taskRequestId || quickOpen.taskRequestId !== String(requestId || "")) return false;
+  quickOpen.taskItems = Array.isArray(payload?.items) ? payload.items.slice(0, RESULT_LIMIT) : [];
+  quickOpen.taskWarnings = Array.isArray(payload?.warnings) ? payload.warnings.slice(0, 20) : [];
+  quickOpen.taskLoaded = true;
+  quickOpen.taskLoading = false;
+  quickOpen.taskError = "";
+  quickOpen.taskRequestId = "";
+  quickOpen.selectedIndex = 0;
+  return true;
+}
+
+export function failCommandQuickOpenTaskSnapshot(state, requestId, message = "") {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.taskRequestId || quickOpen.taskRequestId !== String(requestId || "")) return false;
+  quickOpen.taskLoading = false;
+  quickOpen.taskError = String(message || "任务快照读取失败，请运行 /doctor 后重试。").slice(0, 500);
+  quickOpen.taskRequestId = "";
+  return true;
+}
+
+export function resetCommandQuickOpenTaskCache(state) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  quickOpen.taskItems = [];
+  quickOpen.taskWarnings = [];
+  quickOpen.taskLoaded = false;
+  quickOpen.taskLoading = false;
+  quickOpen.taskError = "";
+  quickOpen.taskRequestId = "";
+  quickOpen.provider = "commands";
+  quickOpen.selectedIndex = 0;
 }
 
 export function moveCommandQuickOpenSelection(state, direction) {
@@ -73,9 +150,32 @@ export function acceptCommandQuickOpen(state) {
   const items = getCommandQuickOpenItems(state);
   if (!items.length) return false;
   const selected = items.find((item) => item.selected) || items[0];
-  setInputText(state, commandTemplate(selected));
+  setInputText(
+    state,
+    selected.provider === "tasks" ? taskTemplate(selected) : commandTemplate(selected),
+  );
   closeCommandQuickOpen(state);
   return true;
+}
+
+export function searchTaskEntries(entries, query, limit = TASK_RESULT_LIMIT) {
+  const boundedLimit = Math.max(1, Math.min(TASK_RESULT_LIMIT, Math.trunc(Number(limit) || TASK_RESULT_LIMIT)));
+  const term = normalizeSearchText(query).slice(0, QUERY_LIMIT);
+  return (Array.isArray(entries) ? entries : []).slice(0, RESULT_LIMIT)
+    .filter(isSafeTaskEntry)
+    .map((entry) => ({ entry, score: taskSearchScore(entry, term) }))
+    .filter((item) => item.score !== null)
+    .sort((left, right) => left.score - right.score
+      || (TASK_STATUS_ORDER[left.entry.status] ?? 9) - (TASK_STATUS_ORDER[right.entry.status] ?? 9)
+      || (TASK_SOURCE_ORDER[left.entry.source] ?? 9) - (TASK_SOURCE_ORDER[right.entry.source] ?? 9)
+      || String(left.entry.view_id).localeCompare(String(right.entry.view_id)))
+    .slice(0, boundedLimit)
+    .map((item) => item.entry);
+}
+
+export function taskTemplate(entry) {
+  if (!isSafeTaskEntry(entry)) throw new Error("任务 ID 无法安全填入 QuickOpen。");
+  return `/tasks detail ${entry.task_id}`;
 }
 
 export function searchCommandEntries(entries, query, limit = 50, recentCommands = []) {
@@ -150,6 +250,55 @@ function commandSearchScore(entry, term) {
   return metadataGap === null ? null : 100_000 + metadataGap;
 }
 
+function taskSearchScore(entry, term) {
+  if (!term) return 0;
+  const taskId = normalizeSearchText(entry.task_id);
+  const viewId = normalizeSearchText(entry.view_id);
+  const title = normalizeSearchText(entry.title);
+  const owner = normalizeSearchText(entry.owner);
+  if (term === taskId || term === viewId) return 0;
+  if (taskId.startsWith(term) || viewId.startsWith(term)) return 10_000;
+  if (title.startsWith(term)) return 20_000;
+  if (taskId.includes(term) || viewId.includes(term)) return 30_000;
+  if (title.includes(term)) return 40_000;
+  const metadata = normalizeSearchText([
+    entry.source,
+    entry.status,
+    entry.owner,
+    entry.detail,
+    taskSourceLabel(entry.source),
+    taskStatusLabel(entry.status),
+  ].join(" "));
+  if (metadata.includes(term)) return 50_000;
+  const gap = subsequenceGap(term, [taskId, title, owner, metadata].join(" "));
+  return gap === null ? null : 100_000 + gap;
+}
+
+function isSafeTaskEntry(entry) {
+  return Boolean(
+    entry
+    && typeof entry === "object"
+    && Object.hasOwn(TASK_SOURCE_ORDER, String(entry.source || ""))
+    && String(entry.view_id || "")
+    && /^[A-Za-z0-9._:/-]{1,256}$/.test(String(entry.task_id || ""))
+  );
+}
+
+function taskSourceLabel(source) {
+  return ({ todo: "待办", subagent: "子智能体", background: "后台任务", browser: "浏览器" })[source] || source;
+}
+
+function taskStatusLabel(status) {
+  return ({
+    pending: "等待",
+    running: "运行中",
+    blocked: "阻塞",
+    completed: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+  })[status] || status;
+}
+
 function subsequenceGap(term, target) {
   let position = -1;
   let score = 0;
@@ -179,10 +328,22 @@ function ensureCommandQuickOpenState(state) {
       draftText: "",
       draftCursor: 0,
       recentCommands: [],
+      provider: "commands",
+      taskItems: [],
+      taskWarnings: [],
+      taskLoaded: false,
+      taskLoading: false,
+      taskError: "",
+      taskRequestId: "",
     };
   }
   if (!Array.isArray(state.commandQuickOpen.recentCommands)) {
     state.commandQuickOpen.recentCommands = [];
+  }
+  if (!Array.isArray(state.commandQuickOpen.taskItems)) state.commandQuickOpen.taskItems = [];
+  if (!Array.isArray(state.commandQuickOpen.taskWarnings)) state.commandQuickOpen.taskWarnings = [];
+  if (!["commands", "tasks"].includes(state.commandQuickOpen.provider)) {
+    state.commandQuickOpen.provider = "commands";
   }
   return state.commandQuickOpen;
 }

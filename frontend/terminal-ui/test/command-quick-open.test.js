@@ -13,6 +13,8 @@ import {
   openCommandQuickOpen,
   recordRecentCommand,
   searchCommandEntries,
+  searchTaskEntries,
+  switchCommandQuickOpenProvider,
 } from "../src/command-quick-open.js";
 import { renderCommandQuickOpenPage } from "../src/components/command-quick-open-page.js";
 import { renderScreen } from "../src/render.js";
@@ -21,10 +23,16 @@ import {
   handleSubmitText,
   handleInteractionRequest,
   handlePermissionRequest,
+  reduceServerEvent,
 } from "../src/state.js";
+import { normalizeServerRecord } from "../src/protocol.js";
 
 const recencyGolden = JSON.parse(readFileSync(new URL(
   "../../../tests/fixtures/ui14/command-recency-golden.json",
+  import.meta.url,
+), "utf8"));
+const taskGolden = JSON.parse(readFileSync(new URL(
+  "../../../tests/fixtures/ui14/task-quick-open-golden.json",
   import.meta.url,
 ), "utf8"));
 
@@ -155,6 +163,71 @@ test("submitted known commands update bounded recency while unknown text does no
   assert.throws(
     () => recordRecentCommand(COMMANDS, [], "/help", 21),
     /limit/,
+  );
+});
+
+test("task QuickOpen consumes correlated typed snapshot without opening task panel", () => {
+  const state = createInitialState();
+  state.input = "保留草稿";
+  openCommandQuickOpen(state);
+  assert.equal(switchCommandQuickOpenProvider(state, () => "quick-task-1"), "tasks");
+  assert.equal(state.commandQuickOpen.taskLoading, true);
+
+  const record = normalizeServerRecord({
+    id: "server-task-1",
+    request_id: "quick-task-1",
+    type: "tasks/snapshot",
+    version: 1,
+    payload: taskGolden,
+  });
+  reduceServerEvent(state, record);
+
+  assert.equal(state.commandQuickOpen.taskLoaded, true);
+  assert.equal(state.taskPanel.snapshot, null);
+  assert.equal(state.messages.length, 0);
+  assert.deepEqual(
+    getCommandQuickOpenItems(state).map((item) => item.task_id),
+    taskGolden.expected_empty_order,
+  );
+  assert.deepEqual(
+    searchTaskEntries(taskGolden.items, taskGolden.expected_localized_query)
+      .map((item) => item.task_id),
+    [taskGolden.expected_localized_result],
+  );
+  appendCommandQuickOpenQuery(state, taskGolden.expected_localized_query);
+  const rendered = stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n"));
+  assert.match(rendered, /任务 QuickOpen/);
+  assert.match(rendered, /子智能体/);
+  assert.match(rendered, /不会自动发送或执行/);
+  assert.equal(acceptCommandQuickOpen(state), true);
+  assert.equal(state.input, taskGolden.expected_template);
+  assert.equal(state.commandQuickOpen.open, false);
+
+  openCommandQuickOpen(state);
+  assert.equal(state.commandQuickOpen.taskLoaded, false);
+  assert.equal(state.commandQuickOpen.taskItems.length, 0);
+  assert.equal(switchCommandQuickOpenProvider(state, () => "quick-task-2"), "tasks");
+  assert.equal(state.commandQuickOpen.taskRequestId, "quick-task-2");
+});
+
+test("task QuickOpen keeps correlated load errors inside the overlay", () => {
+  const state = createInitialState();
+  openCommandQuickOpen(state);
+  switchCommandQuickOpenProvider(state, () => "quick-task-error");
+
+  reduceServerEvent(state, {
+    id: "server-error",
+    request_id: "quick-task-error",
+    type: "error",
+    payload: { code: "task_panel_failed", message: "任务快照暂不可用" },
+  });
+
+  assert.equal(state.commandQuickOpen.taskLoading, false);
+  assert.match(state.commandQuickOpen.taskError, /暂不可用/);
+  assert.equal(state.messages.length, 0);
+  assert.match(
+    stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n")),
+    /任务快照暂不可用/,
   );
 });
 
