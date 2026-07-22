@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import naumi_agent.evolution.adversarial_cohort as adversarial_cohort_module
+import naumi_agent.evolution.reflection_memories as reflection_module
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
@@ -46,6 +47,7 @@ from naumi_agent.evolution.decision_inputs import (
 )
 from naumi_agent.evolution.decision_resolutions import (
     EvolutionDecisionResolution,
+    EvolutionDecisionResolutionBuilder,
     EvolutionDecisionResolutionError,
     EvolutionDecisionResolutionOutcome,
     EvolutionDecisionResolutionService,
@@ -113,6 +115,18 @@ from naumi_agent.evolution.mutation_generation import (
     EvolutionMutationGenerationTraceStore,
 )
 from naumi_agent.evolution.mutation_receipts import EvolutionMutationReceiptStore
+from naumi_agent.evolution.reflection_memories import (
+    EvolutionReflectionLessonKind,
+    EvolutionReflectionMemory,
+    EvolutionReflectionMemoryBuilder,
+    EvolutionReflectionMemoryError,
+    EvolutionReflectionMemoryExecutor,
+    EvolutionReflectionMemoryRevoker,
+    EvolutionReflectionMemoryStore,
+    EvolutionReflectionRevocationReason,
+    EvolutionReflectionSignal,
+    render_evolution_reflection_memory,
+)
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidence,
     EvolutionRewardHackingEvidenceError,
@@ -158,6 +172,8 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionReflectionMemoryRevokeTool,
+    EvolutionReflectionMemoryTool,
     EvolutionRewardHackingEvidenceTool,
 )
 from naumi_agent.user_interaction import normalize_interaction_request
@@ -1219,6 +1235,174 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert resolution.resolution_id in slash_output
     assert "不会接受或发布 Candidate" in slash_output
 
+    reflection_store = EvolutionReflectionMemoryStore(tmp_path / "reflection.db")
+    reflection_executor = EvolutionReflectionMemoryExecutor(
+        decision_store=state_store,
+        resolution_store=resolution_store,
+        memory_store=reflection_store,
+    )
+    reflection_views = await asyncio.gather(*(
+        reflection_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+        for _ in range(4)
+    ))
+    reflection_view = reflection_views[0]
+    reflection = reflection_view.memory
+    assert all(item == reflection_view for item in reflection_views)
+    assert reflection_view.active is True
+    assert reflection.reflection_id == f"evreflection_{reflection.reflection_sha256[:24]}"
+    assert reflection.lesson_kind is EvolutionReflectionLessonKind.EVIDENCE_GAP
+    assert reflection.signals[-1] is EvolutionReflectionSignal.USER_REQUESTED_EVIDENCE
+    assert len(reflection.evidence_refs) == 7
+    assert reflection.candidate_acceptance_decided is False
+    assert reflection.candidate_accepted is False
+    assert reflection.promotion_review_ready is False
+    assert reflection.promotion_executed is False
+    assert reflection.promotion_authority is False
+    assert reflection.vector_indexed is False
+    assert reflection.automatic_recall_allowed is False
+    assert reflection.system_prompt_injection_allowed is False
+    assert reflection.contains_freeform_narrative is False
+    assert reflection.contains_user_custom_text is False
+    assert reflection.llm_generated is False
+    assert reflection.revocable is True
+    assert await reflection_store.get(reflection.reflection_id) == reflection_view
+    assert (
+        await reflection_store.get_by_decision_state(state.decision_id)
+        == reflection_view
+    )
+    serialized_reflection = reflection.model_dump_json()
+    assert review.opinion is not None
+    assert review.opinion.summary not in serialized_reflection
+    assert all(
+        concern not in serialized_reflection for concern in review.opinion.concerns
+    )
+
+    reflection_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_reflection_memory_executor=reflection_executor,
+    )
+    tool_output = await EvolutionReflectionMemoryTool(reflection_engine).execute(
+        decision.decision_input_id
+    )
+    slash_output = await execute_slash_command(
+        reflection_engine,
+        f"/evolution reflection {decision.decision_input_id}",
+    )
+    assert tool_output == render_evolution_reflection_memory(reflection_view)
+    assert reflection.reflection_id in slash_output
+    assert "不会进入向量记忆或系统 Prompt" in slash_output
+
+    decision_suffix = state.decision_id.removeprefix("evdecision_")
+    custom_record = await interaction_authority.create(
+        request=normalize_interaction_request(state.escalation.to_public_dict()),
+        interaction_id=f"ask-evolution-{decision_suffix}-99",
+        subject_kind="tool",
+        subject_id=state.decision_id,
+        session_id="session-custom-reflection",
+        agent_name="main",
+    )
+    custom_text = "只在隔离工作树检查 issue-492，禁止进入记忆"
+    custom_record, _custom_response = await interaction_authority.answer(
+        record=custom_record,
+        response={"kind": "custom", "custom_text": custom_text},
+    )
+    custom_resolution = EvolutionDecisionResolutionBuilder().build(
+        decision=state,
+        interaction=custom_record,
+    )
+    custom_reflection = EvolutionReflectionMemoryBuilder().build(
+        decision=state,
+        resolution=custom_resolution,
+    )
+    assert custom_reflection.lesson_kind is EvolutionReflectionLessonKind.CUSTOM_FOLLOW_UP
+    assert custom_reflection.eligible_for_policy_learning is False
+    assert custom_reflection.contains_user_custom_text is False
+    assert custom_text not in custom_reflection.model_dump_json()
+
+    tampered_reflection = reflection.model_dump(mode="json")
+    tampered_reflection["system_prompt_injection_allowed"] = True
+    with pytest.raises(ValueError):
+        EvolutionReflectionMemory.model_validate(tampered_reflection)
+    forged_projection = reflection.model_dump(mode="json")
+    forged_projection["lesson_kind"] = "validated_experiment"
+    forged_digest = reflection_module._sha256_payload({  # noqa: SLF001
+        key: value
+        for key, value in forged_projection.items()
+        if key not in {"reflection_id", "reflection_sha256"}
+    })
+    forged_projection["reflection_sha256"] = forged_digest
+    forged_projection["reflection_id"] = f"evreflection_{forged_digest[:24]}"
+    with pytest.raises(ValueError, match="投影不一致"):
+        EvolutionReflectionMemory.model_validate(forged_projection)
+
+    missing_resolution_executor = EvolutionReflectionMemoryExecutor(
+        decision_store=state_store,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "missing-reflection-resolution.db"
+        ),
+        memory_store=EvolutionReflectionMemoryStore(
+            tmp_path / "missing-reflection-memory.db"
+        ),
+    )
+    with pytest.raises(EvolutionReflectionMemoryError) as missing_reflection_resolution:
+        await missing_resolution_executor.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert missing_reflection_resolution.value.code == "reflection_memory_resolution_missing"
+    other_workspace = tmp_path / "other-reflection-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(EvolutionReflectionMemoryError) as reflection_workspace_mismatch:
+        await reflection_executor.execute(
+            workspace_root=other_workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert reflection_workspace_mismatch.value.code == "reflection_memory_workspace_mismatch"
+    with pytest.raises(EvolutionReflectionMemoryError) as reflection_invalid_id:
+        await reflection_executor.execute(
+            workspace_root=workspace,
+            decision_input_id="evdin_invalid",
+        )
+    assert reflection_invalid_id.value.code == "reflection_memory_input_id_invalid"
+
+    revoker = EvolutionReflectionMemoryRevoker(
+        store=reflection_store,
+        clock=lambda: datetime(2026, 7, 22, 12, 0, tzinfo=UTC),
+    )
+    revoked_views = await asyncio.gather(*(
+        revoker.execute(
+            workspace_root=workspace,
+            reflection_id=reflection.reflection_id,
+            reason=EvolutionReflectionRevocationReason.SUPERSEDED,
+        )
+        for _ in range(4)
+    ))
+    revoked = revoked_views[0]
+    assert all(item == revoked for item in revoked_views)
+    assert revoked.active is False
+    assert revoked.revocation is not None
+    assert revoked.revocation.reason is EvolutionReflectionRevocationReason.SUPERSEDED
+    assert revoked.revocation.append_only is True
+
+    revoke_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_reflection_memory_revoker=revoker,
+    )
+    tool_output = await EvolutionReflectionMemoryRevokeTool(revoke_engine).execute(
+        reflection.reflection_id,
+        EvolutionReflectionRevocationReason.SUPERSEDED.value,
+    )
+    slash_output = await execute_slash_command(
+        revoke_engine,
+        f"/evolution reflection-revoke {reflection.reflection_id} superseded",
+    )
+    assert tool_output == render_evolution_reflection_memory(revoked)
+    assert "revoked" in slash_output
+    assert "superseded" in slash_output
+
     tampered_resolution = resolution.model_dump(mode="json")
     tampered_resolution["promotion_review_ready"] = True
     with pytest.raises(ValueError):
@@ -1230,7 +1414,6 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
         workspace_root=workspace,
         owner_id="pending-resolution-owner",
     )
-    decision_suffix = state.decision_id.removeprefix("evdecision_")
     pending_record = await pending_authority.create(
         request=normalize_interaction_request(state.escalation.to_public_dict()),
         interaction_id=f"ask-evolution-{decision_suffix}-1",
@@ -1833,6 +2016,26 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
         )
     assert not_escalated.value.code == "decision_resolution_not_escalated"
 
+    veto_reflection_store = EvolutionReflectionMemoryStore(
+        tmp_path / "veto-reflection.db"
+    )
+    veto_reflection = await EvolutionReflectionMemoryExecutor(
+        decision_store=veto_state_store,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "veto-resolution.db"
+        ),
+        memory_store=veto_reflection_store,
+    ).execute(
+        workspace_root=workspace,
+        decision_input_id=veto_decision.decision_input_id,
+    )
+    assert veto_reflection.memory.lesson_kind is (
+        EvolutionReflectionLessonKind.MECHANICAL_REJECTION
+    )
+    assert veto_reflection.memory.candidate_acceptance_decided is True
+    assert len(veto_reflection.memory.evidence_refs) == 4
+    assert veto_reflection.memory.resolution_id is None
+
     with pytest.raises(EvolutionCounterfactualEvidenceError) as veto_counterfactual:
         await EvolutionCounterfactualEvidenceExecutor(
             review_store=veto_review_store,
@@ -1970,6 +2173,35 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionDecisionResolutionError) as corrupt_resolution:
         await resolution_store.get(resolution.resolution_id)
     assert corrupt_resolution.value.code == "decision_resolution_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "reflection.db") as db:
+        db.execute(
+            "UPDATE evolution_reflection_revocations SET reason = ? "
+            "WHERE reflection_id = ?",
+            ("user_request", reflection.reflection_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionReflectionMemoryError) as corrupt_revocation:
+        await reflection_store.get(reflection.reflection_id)
+    assert corrupt_revocation.value.code == "reflection_memory_store_corrupt"
+    with sqlite3.connect(tmp_path / "reflection.db") as db:
+        db.execute(
+            "UPDATE evolution_reflection_revocations SET reason = ? "
+            "WHERE reflection_id = ?",
+            ("superseded", reflection.reflection_id),
+        )
+        db.commit()
+
+    with sqlite3.connect(tmp_path / "reflection.db") as db:
+        db.execute(
+            "UPDATE evolution_reflection_memories SET lesson_kind = ? "
+            "WHERE reflection_id = ?",
+            ("validated_experiment", reflection.reflection_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionReflectionMemoryError) as corrupt_reflection:
+        await reflection_store.get(reflection.reflection_id)
+    assert corrupt_reflection.value.code == "reflection_memory_store_corrupt"
 
     with sqlite3.connect(tmp_path / "decision-state.db") as db:
         db.execute(

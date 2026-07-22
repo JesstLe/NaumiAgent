@@ -283,6 +283,23 @@ if TYPE_CHECKING:
         EvolutionPostflightGuardReceipt,
         PostflightDiffFact,
     )
+    from naumi_agent.evolution.reflection_memories import (
+        EvolutionReflectionAction,
+        EvolutionReflectionEvidenceKind,
+        EvolutionReflectionEvidenceRef,
+        EvolutionReflectionLessonKind,
+        EvolutionReflectionMemory,
+        EvolutionReflectionMemoryBuilder,
+        EvolutionReflectionMemoryError,
+        EvolutionReflectionMemoryExecutor,
+        EvolutionReflectionMemoryRevocation,
+        EvolutionReflectionMemoryRevoker,
+        EvolutionReflectionMemoryStore,
+        EvolutionReflectionMemoryView,
+        EvolutionReflectionRevocationReason,
+        EvolutionReflectionSignal,
+        render_evolution_reflection_memory,
+    )
     from naumi_agent.evolution.reward_hacking_evidence import (
         EvolutionRewardHackingEvidence,
         EvolutionRewardHackingEvidenceBuilder,
@@ -476,6 +493,21 @@ __all__ = [
     "RewardHackingRule",
     "RewardHackingSeverity",
     "render_reward_hacking_evidence",
+    "EvolutionReflectionAction",
+    "EvolutionReflectionEvidenceKind",
+    "EvolutionReflectionEvidenceRef",
+    "EvolutionReflectionLessonKind",
+    "EvolutionReflectionMemory",
+    "EvolutionReflectionMemoryBuilder",
+    "EvolutionReflectionMemoryError",
+    "EvolutionReflectionMemoryExecutor",
+    "EvolutionReflectionMemoryRevocation",
+    "EvolutionReflectionMemoryRevoker",
+    "EvolutionReflectionMemoryStore",
+    "EvolutionReflectionMemoryView",
+    "EvolutionReflectionRevocationReason",
+    "EvolutionReflectionSignal",
+    "render_evolution_reflection_memory",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -797,6 +829,23 @@ def __getattr__(name: str) -> object:
         "RewardHackingSeverity",
         "render_reward_hacking_evidence",
     }
+    reflection_memory_exports = {
+        "EvolutionReflectionAction",
+        "EvolutionReflectionEvidenceKind",
+        "EvolutionReflectionEvidenceRef",
+        "EvolutionReflectionLessonKind",
+        "EvolutionReflectionMemory",
+        "EvolutionReflectionMemoryBuilder",
+        "EvolutionReflectionMemoryError",
+        "EvolutionReflectionMemoryExecutor",
+        "EvolutionReflectionMemoryRevocation",
+        "EvolutionReflectionMemoryRevoker",
+        "EvolutionReflectionMemoryStore",
+        "EvolutionReflectionMemoryView",
+        "EvolutionReflectionRevocationReason",
+        "EvolutionReflectionSignal",
+        "render_evolution_reflection_memory",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -1037,6 +1086,8 @@ def __getattr__(name: str) -> object:
         module_name = "decision_states"
     elif name in reward_hacking_evidence_exports:
         module_name = "reward_hacking_evidence"
+    elif name in reflection_memory_exports:
+        module_name = "reflection_memories"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

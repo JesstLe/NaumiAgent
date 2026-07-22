@@ -29,9 +29,9 @@ Promotion/Rollback → Feedback`。
 ## Agent Tool 权限治理
 
 [EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.6 的十个 durable
-派生 Tool 建立精确权限规则：中风险、normal 无逐次确认、strict 可用、lockdown 阻断、bypass 全权限，
-并按 Evaluation/Decision family 设置会话上限。以后新增非只读 Evolution Tool 必须与权限规则和注册表门
-同一切片交付。
+派生 Tool，以及 EVO-04.7a 的 Reflection 创建/撤销 Tool 建立精确权限规则：派生创建为中风险，append-only
+撤销为高风险治理动作；lockdown 阻断，bypass 全权限且无二次确认。以后新增非只读 Evolution Tool 必须与
+权限规则和注册表门同一切片交付。
 
 EVO-04.4a 已交付真实字节驱动的 Counterfactual Evidence：从 completed Independent Review 重读完整
 authority 链，对受管 worktree 的 baseline/candidate/diff 与 Mutation Receipt 做逐文件复核，并检查更小
@@ -43,3 +43,7 @@ EVO-04.5a 已交付行为型 Reward-hacking Evidence：从 Counterfactual 重读
 EVO-04.6a 已交付四态 Decision State：mechanical veto 固定 rejected，结构化 concern 固定 revise，证据不足或
 高风险进入 escalated，全部 clear 才 accepted_experiment。EVO-04.6b 已让 escalated 通过 HAR-10.6 真实持久
 交互形成不可变 Resolution；用户答案仍不能直接接受 Candidate 或执行 promotion。
+
+EVO-04.7a 已交付 Reflection Memory：只保存确定性 lesson/action/signal 和 authority ID/digest，自定义用户文本、
+Reviewer 叙事和源码不落库；记录不进入向量索引、自动召回或系统 Prompt，并支持 append-only 撤销。EVO-04
+至此闭合反思决策链，下一最小依赖是 EVO-05.1a Promotion Package Input Contract。

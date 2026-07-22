@@ -2931,6 +2931,13 @@ export function handleSubmitText(state, text, send) {
     );
     return;
   }
+  if (
+    /^\/evolution\s+(?:experiment-contract|evaluation-contract|evaluation-final|decision-input|mechanical-gate|independent-review|counterfactual|reward-hacking|decision-state|decision-resolve|reflection|reflection-revoke)(?:\s|$)/i.test(
+      commandText,
+    )
+  ) {
+    return submitUserMessage(state, commandText, send);
+  }
   if (text === "/evolution" || text.startsWith("/evolution ")) {
     const request = parseEvolutionReviewCommand(text);
     if (!request) {

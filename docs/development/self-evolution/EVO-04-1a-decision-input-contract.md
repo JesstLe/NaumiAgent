@@ -84,9 +84,9 @@ normal 无逐次确认、每会话最多 50 次；bypass 不能跳过四 Store a
 - EVO-04.3a independent reviewer 已完成；
 - EVO-04.4a Counterfactual 与 EVO-04.5a Reward-hacking Evidence 已完成；
 - EVO-04.6a Decision State 与 EVO-04.6b Escalation Resolution 已完成；
-- EVO-04.7 reflection memory 与 EVO-05 promotion。
+- EVO-04.7a reflection memory 已完成；EVO-05 promotion 尚未实现。
 
 ## 下一步
 
-EVO-04.2a 至 EVO-04.6b 已实现。下一步实现 EVO-04.7a Reflection Memory；Reviewer、Counterfactual、
-Reward-hacking Evidence 与用户 Resolution 均无权覆盖 mechanical veto。
+EVO-04.2a 至 EVO-04.7a 已实现。下一步实现 EVO-05.1a Promotion Package Input Contract；Reviewer、
+Counterfactual、Reward-hacking Evidence、Resolution 与 Reflection 均无权覆盖 mechanical veto。

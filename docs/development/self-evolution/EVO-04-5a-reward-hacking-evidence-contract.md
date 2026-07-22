@@ -113,7 +113,7 @@ Store row index 与 JSON payload 双向校验，单 artifact 上限 24 MiB。
 
 ## 明确未完成
 
-- EVO-04.6a Decision State 已实现；Escalation Resolution 尚未实现；
+- EVO-04.6a Decision State、EVO-04.6b Escalation Resolution 与 EVO-04.7a Reflection 已实现；
 - 更丰富的业务效用指标与用户定义的资源 tradeoff policy；
 - 单平台实验无法判断跨平台选择性，必须保持 `unassessable`；
 - 当前只证明 RED/GREEN 样本数量、顺序和 digest 成对一致；若要识别语义层面的选择性样本优化，后续 Harness
@@ -123,5 +123,5 @@ Store row index 与 JSON payload 双向校验，单 artifact 上限 24 MiB。
 
 ## 下一步
 
-EVO-04.6a 已消费本 Evidence 并形成四态 Decision State，EVO-04.6b 也已把 HAR-10.6 fenced 用户答案绑定为
-独立 Resolution。下一步实现 EVO-04.7a Reflection Memory。
+EVO-04.6a 至 EVO-04.7a 已消费本 Evidence 并形成 Decision、Resolution 与 Reflection。下一步实现
+EVO-05.1a Promotion Package Input Contract。

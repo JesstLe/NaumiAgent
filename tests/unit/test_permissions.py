@@ -138,6 +138,11 @@ class TestPermissionChecker:
                 "evolution_decision_artifact",
                 50,
             ),
+            (
+                "evolution_reflection_memory",
+                "evolution_reflection_memory",
+                50,
+            ),
         ],
     )
     def test_evolution_derived_artifacts_have_bounded_permission_rules(
@@ -197,6 +202,24 @@ class TestPermissionChecker:
         assert allowed.allowed
         assert not allowed.requires_confirmation
         assert allowed.risk_level is PermissionRiskLevel.MEDIUM
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
+    def test_reflection_revocation_is_guarded_but_bypass_is_unrestricted(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        bypass = PermissionChecker(PermissionMode.BYPASS)
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN)
+
+        guarded = moderate.check("evolution_revoke_reflection_memory", {})
+        unrestricted = bypass.check("evolution_revoke_reflection_memory", {})
+        blocked = lockdown.check("evolution_revoke_reflection_memory", {})
+
+        assert guarded.allowed
+        assert guarded.requires_confirmation
+        assert guarded.risk_level is PermissionRiskLevel.HIGH
+        assert guarded.tool_family == "evolution_reflection_memory"
+        assert unrestricted.allowed
+        assert not unrestricted.requires_confirmation
         assert not blocked.allowed
         assert blocked.code is PermissionReasonCode.MODE_BLOCKED
 

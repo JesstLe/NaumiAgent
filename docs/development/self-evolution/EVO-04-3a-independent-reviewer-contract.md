@@ -131,10 +131,10 @@ single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 me
   skip/mock 和评测泄漏替代解释扫描；
 - EVO-04.5a reward-hacking evidence 已完成；
 - EVO-04.6a Decision State 与 EVO-04.6b Escalation Resolution 已完成；
-- EVO-04.7 reflection memory 与 EVO-05 promotion；
+- EVO-04.7a reflection memory 已完成；EVO-05 promotion 尚未实现；
 - 需要真实 provider 密钥的多供应商 structured-output 集成矩阵仍是显式 opt-in 验证，不在单元测试中触发。
 
 ## 下一步
 
-EVO-04.4a 至 EVO-04.6b 已实现。下一步实现 EVO-04.7a Reflection Memory；Reviewer 意见没有进入
-Decision State/Resolution 算法，仍不能直接成为最终 decision。
+EVO-04.4a 至 EVO-04.7a 已实现。下一步实现 EVO-05.1a Promotion Package Input Contract；Reviewer 意见没有
+进入 Decision/Resolution/Reflection 状态算法，仍不能成为 promotion authority。

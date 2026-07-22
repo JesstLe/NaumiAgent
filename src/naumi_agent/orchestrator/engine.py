@@ -170,6 +170,12 @@ from naumi_agent.evolution.patch_set_writers import EvolutionPatchSetWriter
 from naumi_agent.evolution.patch_sets import EvolutionPatchSetStore
 from naumi_agent.evolution.patch_writers import EvolutionPatchWriter
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
+from naumi_agent.evolution.reflection_memories import (
+    EvolutionReflectionMemoryBuilder,
+    EvolutionReflectionMemoryExecutor,
+    EvolutionReflectionMemoryRevoker,
+    EvolutionReflectionMemoryStore,
+)
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
@@ -1259,6 +1265,19 @@ class AgentEngine:
             resolution_store=self.evolution_decision_resolution_store,
             request_user_input=self.request_user_input,
             builder=self.evolution_decision_resolution_builder,
+        )
+        self.evolution_reflection_memory_builder = EvolutionReflectionMemoryBuilder()
+        self.evolution_reflection_memory_store = EvolutionReflectionMemoryStore(
+            config.memory.session_db_path
+        )
+        self.evolution_reflection_memory_executor = EvolutionReflectionMemoryExecutor(
+            decision_store=self.evolution_decision_state_store,
+            resolution_store=self.evolution_decision_resolution_store,
+            memory_store=self.evolution_reflection_memory_store,
+            builder=self.evolution_reflection_memory_builder,
+        )
+        self.evolution_reflection_memory_revoker = EvolutionReflectionMemoryRevoker(
+            store=self.evolution_reflection_memory_store,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
