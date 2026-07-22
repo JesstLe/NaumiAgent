@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.evolution.approval_requirements import (
+    EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
+    EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1,
     EvolutionPromotionApprovalRequirement,
     EvolutionPromotionApprovalRequirementBuilder,
     EvolutionPromotionApprovalRequirementError,
@@ -118,11 +120,12 @@ async def test_requirement_is_singleflight_and_stales_with_package(
         EvolutionPromotionApprovalRole.RELEASE_MANAGER,
     )
     assert requirement.signature_required_roles == (
+        EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER,
         EvolutionPromotionApprovalRole.DATA_OWNER,
         EvolutionPromotionApprovalRole.RELEASE_MANAGER,
     )
     assert requirement.minimum_approvals == 4
-    assert requirement.minimum_signatures == 2
+    assert requirement.minimum_signatures == 3
     assert requirement.protected_scope_human_gate
     assert not requirement.automatic_approval_allowed
     assert requirement.validity_seconds == 24 * 60 * 60
@@ -154,7 +157,15 @@ async def test_requirement_is_singleflight_and_stales_with_package(
     for index, step in enumerate(downgraded_payload["steps"], start=1):
         step["order"] = index
     downgraded_payload["required_roles"] = [step["role"] for step in downgraded_payload["steps"]]
+    downgraded_payload["signature_required_roles"] = [
+        role
+        for role in downgraded_payload["signature_required_roles"]
+        if role != EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER.value
+    ]
     downgraded_payload["minimum_approvals"] = len(downgraded_payload["steps"])
+    downgraded_payload["minimum_signatures"] = len(
+        downgraded_payload["signature_required_roles"]
+    )
     policy_payload = {
         key: value
         for key, value in downgraded_payload.items()
@@ -308,11 +319,77 @@ async def test_authorization_scope_requires_human_security_signature(
         EvolutionPromotionApprovalRole.RELEASE_MANAGER,
     )
     assert view.requirement.signature_required_roles == (
+        EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER,
         EvolutionPromotionApprovalRole.SECURITY_REVIEWER,
         EvolutionPromotionApprovalRole.RELEASE_MANAGER,
     )
     assert view.requirement.protected_scope_human_gate
     assert view.requirement.validity_seconds == 7 * 24 * 60 * 60
+
+
+@pytest.mark.asyncio
+async def test_policy_v2_closes_professional_identity_gap_and_keeps_v1_readable(
+    tmp_path: Path,
+) -> None:
+    _reflection_store, package_executor, package_view = await _authority_chain(tmp_path)
+    db_path = tmp_path / ".naumi" / "state.db"
+    clock = datetime(2026, 7, 23, 11, 30, tzinfo=UTC)
+    store = EvolutionPromotionApprovalRequirementStore(db_path)
+    legacy = EvolutionPromotionApprovalRequirementBuilder(
+        clock=lambda: clock,
+        policy_version=EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1,
+    ).build(package=package_view.package)
+    stored_legacy = await store.record(legacy, package=package_view.package)
+
+    current = await EvolutionPromotionApprovalRequirementExecutor(
+        package_executor=package_executor,
+        requirement_store=store,
+        clock=lambda: clock,
+    ).execute(
+        workspace_root=tmp_path,
+        package_id=package_view.package.package_id,
+    )
+
+    assert stored_legacy.policy_version == EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1
+    assert current.requirement.policy_version == EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY
+    assert stored_legacy.requirement_id != current.requirement.requirement_id
+    assert EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER not in (
+        stored_legacy.signature_required_roles
+    )
+    assert EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER in (
+        current.requirement.signature_required_roles
+    )
+    assert await store.get(stored_legacy.requirement_id) == stored_legacy
+    assert (
+        await store.get_by_package(
+            package_view.package.package_id,
+            policy_version=EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1,
+        )
+        == stored_legacy
+    )
+    isolated_store = EvolutionPromotionApprovalRequirementStore(
+        tmp_path / ".naumi" / "legacy-only.db"
+    )
+    with pytest.raises(EvolutionPromotionApprovalRequirementError) as outdated:
+        await EvolutionPromotionApprovalRequirementExecutor(
+            package_executor=package_executor,
+            requirement_store=isolated_store,
+            builder=EvolutionPromotionApprovalRequirementBuilder(
+                clock=lambda: clock,
+                policy_version=EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1,
+            ),
+            clock=lambda: clock,
+        ).execute(
+            workspace_root=tmp_path,
+            package_id=package_view.package.package_id,
+        )
+    assert outdated.value.code == "approval_requirement_policy_outdated"
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM evolution_promotion_approval_requirements "
+            "WHERE package_id = ?",
+            (package_view.package.package_id,),
+        ).fetchone() == (2,)
 
 
 def test_requirement_rejects_recomputed_approval_or_execution(tmp_path: Path) -> None:

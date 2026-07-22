@@ -31,7 +31,12 @@ from naumi_agent.evolution.promotion_packages import (
     _ensure_schema as _ensure_package_schema,
 )
 
-EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY = "evolution-promotion-approval-requirement-v1"
+EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1 = (
+    "evolution-promotion-approval-requirement-v1"
+)
+EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY = (
+    "evolution-promotion-approval-requirement-v2"
+)
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_REQUIREMENT_BYTES = 256 * 1_024
 
@@ -100,7 +105,10 @@ class EvolutionPromotionApprovalStep(_StrictModel):
 
 class EvolutionPromotionApprovalRequirement(_StrictModel):
     schema_version: Literal[1] = 1
-    policy_version: Literal["evolution-promotion-approval-requirement-v1"] = (
+    policy_version: Literal[
+        "evolution-promotion-approval-requirement-v1",
+        "evolution-promotion-approval-requirement-v2",
+    ] = (
         EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY
     )
     requirement_id: str = Field(pattern=r"^evapprovalreq_[0-9a-f]{24}$")
@@ -168,6 +176,14 @@ class EvolutionPromotionApprovalRequirement(_StrictModel):
         signatures = tuple(item.role for item in self.steps if item.signature_required)
         if signatures != self.signature_required_roles:
             raise ValueError("Approval signature roles 投影不一致。")
+        if self.policy_version == EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY:
+            expected_signatures = tuple(
+                role
+                for role in self.required_roles
+                if role is not EvolutionPromotionApprovalRole.USER
+            )
+            if signatures != expected_signatures:
+                raise ValueError("Approval Requirement v2 必须验证每个专业角色签名。")
         if not (
             self.minimum_approvals == len(self.steps) and self.minimum_signatures == len(signatures)
         ):
@@ -233,8 +249,17 @@ class EvolutionPromotionApprovalRequirementError(RuntimeError):
 
 
 class EvolutionPromotionApprovalRequirementBuilder:
-    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        policy_version: Literal[
+            "evolution-promotion-approval-requirement-v1",
+            "evolution-promotion-approval-requirement-v2",
+        ] = EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
+    ) -> None:
         self._clock = clock or (lambda: datetime.now(UTC))
+        self._policy_version = policy_version
 
     def build(
         self,
@@ -243,7 +268,7 @@ class EvolutionPromotionApprovalRequirementBuilder:
     ) -> EvolutionPromotionApprovalRequirement:
         try:
             item = EvolutionPromotionPackage.model_validate_json(package.model_dump_json())
-            steps = _approval_steps(item)
+            steps = _approval_steps(item, policy_version=self._policy_version)
             gates, blocking = _technical_gates(item)
             validity = _validity_seconds(item)
             issued = self._clock()
@@ -258,7 +283,7 @@ class EvolutionPromotionApprovalRequirementBuilder:
             ) from exc
         core = {
             "schema_version": 1,
-            "policy_version": EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
+            "policy_version": self._policy_version,
             "workspace_root": item.workspace_root,
             "package_id": item.package_id,
             "package_sha256": item.package_sha256,
@@ -351,7 +376,8 @@ class EvolutionPromotionApprovalRequirementStore:
                 "Approval Requirement 未绑定 exact Package。",
             )
         expected = EvolutionPromotionApprovalRequirementBuilder(
-            clock=lambda: _aware(item.issued_at)
+            clock=lambda: _aware(item.issued_at),
+            policy_version=item.policy_version,
         ).build(package=source)
         if expected != item:
             raise EvolutionPromotionApprovalRequirementError(
@@ -455,13 +481,40 @@ class EvolutionPromotionApprovalRequirementStore:
     async def get_by_package(
         self,
         package_id: str,
+        *,
+        policy_version: str = EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
     ) -> EvolutionPromotionApprovalRequirement | None:
         if (
             not isinstance(package_id, str)
             or re.fullmatch(r"evpromopkg_[0-9a-f]{24}", package_id) is None
         ):
             raise ValueError("promotion package id 格式无效。")
-        return await self._read("package_id", package_id)
+        if policy_version not in {
+            EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1,
+            EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
+        }:
+            raise ValueError("approval requirement policy version 无效。")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_schema(db)
+                row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_promotion_approval_requirements "
+                        "WHERE package_id = ? AND policy_version = ?",
+                        (package_id, policy_version),
+                    )
+                ).fetchone()
+                return None if row is None else _from_row(row)
+        except EvolutionPromotionApprovalRequirementError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionPromotionApprovalRequirementError(
+                "approval_requirement_store_corrupt",
+                "Approval Requirement 损坏或无法读取。",
+            ) from exc
 
     async def _read(
         self,
@@ -517,9 +570,20 @@ class EvolutionPromotionApprovalRequirementExecutor:
                 "approval_requirement_package_ineligible",
                 "只有 still-current 的 active Package 可生成审批要求。",
             )
-        existing = await self._requirement_store.get_by_package(package_id)
+        existing = await self._requirement_store.get_by_package(
+            package_id,
+            policy_version=EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
+        )
         if existing is None:
             proposed = self._builder.build(package=package_view.package)
+            if (
+                proposed.policy_version
+                != EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY
+            ):
+                raise EvolutionPromotionApprovalRequirementError(
+                    "approval_requirement_policy_outdated",
+                    "新 Approval Requirement 必须使用 current v2 身份签名策略。",
+                )
             existing = await self._requirement_store.record(
                 proposed,
                 package=package_view.package,
@@ -621,14 +685,16 @@ def render_evolution_promotion_approval_requirement(
         "- Git/Promotion：`false`",
         f"- Requirement SHA-256：`{requirement.requirement_sha256}`",
         "",
-        "下一步：EVO-05.2b 将 eligible Requirement 映射为 fenced durable interactions 与签名回执；"
-        "本命令本身不能批准 Package。",
+        "下一步：为每个 required role 收集 fenced Response；专业角色还必须提交真实 Ed25519 "
+        "Signature Receipt，之后由 EVO-05.2d 聚合。本命令本身不能批准 Package。",
     ]
     return "\n".join(lines)
 
 
 def _approval_steps(
     package: EvolutionPromotionPackage,
+    *,
+    policy_version: str = EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
 ) -> tuple[EvolutionPromotionApprovalStep, ...]:
     reasons: dict[EvolutionPromotionApprovalRole, set[EvolutionPromotionApprovalReason]] = {
         EvolutionPromotionApprovalRole.USER: {
@@ -702,18 +768,23 @@ def _approval_steps(
         role_reasons = reasons.get(role)
         if not role_reasons:
             continue
-        signature_required = bool(
-            role
-            in {
-                EvolutionPromotionApprovalRole.SECURITY_REVIEWER,
-                EvolutionPromotionApprovalRole.DATA_OWNER,
-                EvolutionPromotionApprovalRole.RELEASE_MANAGER,
-            }
-            or (
-                role is EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER
-                and risk in {"high", "critical"}
+        if policy_version == EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY:
+            signature_required = role is not EvolutionPromotionApprovalRole.USER
+        elif policy_version == EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1:
+            signature_required = bool(
+                role
+                in {
+                    EvolutionPromotionApprovalRole.SECURITY_REVIEWER,
+                    EvolutionPromotionApprovalRole.DATA_OWNER,
+                    EvolutionPromotionApprovalRole.RELEASE_MANAGER,
+                }
+                or (
+                    role is EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER
+                    and risk in {"high", "critical"}
+                )
             )
-        )
+        else:
+            raise ValueError("approval requirement policy version 无效。")
         steps.append(
             EvolutionPromotionApprovalStep(
                 order=len(steps) + 1,
@@ -879,6 +950,7 @@ def _sha256_payload(payload: object) -> str:
 
 __all__ = [
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
+    "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY_V1",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
     "EvolutionPromotionApprovalRequirementBuilder",
