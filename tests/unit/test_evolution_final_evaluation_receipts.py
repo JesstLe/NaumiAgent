@@ -44,6 +44,14 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputStore,
     render_decision_input,
 )
+from naumi_agent.evolution.decision_resolutions import (
+    EvolutionDecisionResolution,
+    EvolutionDecisionResolutionError,
+    EvolutionDecisionResolutionOutcome,
+    EvolutionDecisionResolutionService,
+    EvolutionDecisionResolutionStore,
+    render_evolution_decision_resolution,
+)
 from naumi_agent.evolution.decision_states import (
     EvolutionDecisionState,
     EvolutionDecisionStateError,
@@ -133,6 +141,7 @@ from naumi_agent.harness.eval_receipt import (
     EvalReceiptSample,
     build_eval_comparison_receipt,
 )
+from naumi_agent.harness.interaction_runtime import DurableInteractionAuthorityClient
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.model.router import (
     ModelCapabilityContract,
@@ -144,12 +153,14 @@ from naumi_agent.model.router import (
 from naumi_agent.tools.evolution_review import (
     EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
+    EvolutionDecisionResolutionTool,
     EvolutionDecisionStateTool,
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
     EvolutionRewardHackingEvidenceTool,
 )
+from naumi_agent.user_interaction import normalize_interaction_request
 from tests.unit.test_evolution_experiment_leases import (
     _adversarial_probe_fixture,
 )
@@ -1127,6 +1138,210 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert "需要用户决策" in slash_output
     assert "其他处理要求" in slash_output
 
+    interaction_authority = DurableInteractionAuthorityClient(
+        store=harness_store,
+        workspace_root=workspace,
+        owner_id="test-evolution-resolution",
+    )
+    interaction_observations: list[str] = []
+
+    async def answer_escalation(payload: dict[str, object]) -> dict[str, str]:
+        interaction_id = str(payload["_interaction_id"])
+        request = state.escalation
+        assert request is not None
+        record = await interaction_authority.create(
+            request=normalize_interaction_request(request.to_public_dict()),
+            interaction_id=interaction_id,
+            subject_kind=str(payload["_durable_subject_kind"]),
+            subject_id=str(payload["_durable_subject_id"]),
+            session_id="session-evolution-resolution",
+            agent_name="main",
+        )
+        persisted = await harness_store.get_interaction(
+            workspace_root=workspace,
+            interaction_id=interaction_id,
+        )
+        assert persisted == record
+        interaction_observations.append(record.state)
+        record, response = await interaction_authority.answer(
+            record=record,
+            response={"kind": "option", "value": "collect_missing_evidence"},
+        )
+        interaction_observations.append(record.state)
+        return response
+
+    resolution_store = EvolutionDecisionResolutionStore(tmp_path / "resolution.db")
+    resolution_service = EvolutionDecisionResolutionService(
+        decision_store=state_store,
+        interaction_store=harness_store,
+        resolution_store=resolution_store,
+        request_user_input=answer_escalation,
+    )
+    resolutions = await asyncio.gather(*(
+        resolution_service.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+        for _ in range(4)
+    ))
+    resolution = resolutions[0]
+    assert all(item == resolution for item in resolutions)
+    assert interaction_observations == ["pending", "answered"]
+    assert resolution.resolution_id == (
+        f"evresolution_{resolution.resolution_sha256[:24]}"
+    )
+    assert resolution.outcome is EvolutionDecisionResolutionOutcome.EVIDENCE_REQUIRED
+    assert resolution.requires_follow_up is True
+    assert resolution.candidate_acceptance_decided is False
+    assert resolution.candidate_accepted is False
+    assert resolution.promotion_review_ready is False
+    assert resolution.promotion_executed is False
+    assert resolution.interaction.state == "answered"
+    assert resolution.interaction.subject_id == state.decision_id
+    assert await resolution_store.get(resolution.resolution_id) == resolution
+    assert (
+        await resolution_store.get_by_decision_state(state.decision_id)
+        == resolution
+    )
+
+    resolution_engine = SimpleNamespace(
+        workspace_root=workspace,
+        evolution_decision_resolution_service=resolution_service,
+    )
+    tool_output = await EvolutionDecisionResolutionTool(resolution_engine).execute(
+        decision.decision_input_id
+    )
+    slash_output = await execute_slash_command(
+        resolution_engine,
+        f"/evolution decision-resolve {decision.decision_input_id}",
+    )
+    assert tool_output == render_evolution_decision_resolution(resolution)
+    assert resolution.resolution_id in slash_output
+    assert "不会接受或发布 Candidate" in slash_output
+
+    tampered_resolution = resolution.model_dump(mode="json")
+    tampered_resolution["promotion_review_ready"] = True
+    with pytest.raises(ValueError):
+        EvolutionDecisionResolution.model_validate(tampered_resolution)
+
+    pending_harness = HarnessStore(tmp_path / "pending-resolution-harness.db")
+    pending_authority = DurableInteractionAuthorityClient(
+        store=pending_harness,
+        workspace_root=workspace,
+        owner_id="pending-resolution-owner",
+    )
+    decision_suffix = state.decision_id.removeprefix("evdecision_")
+    pending_record = await pending_authority.create(
+        request=normalize_interaction_request(state.escalation.to_public_dict()),
+        interaction_id=f"ask-evolution-{decision_suffix}-1",
+        subject_kind="tool",
+        subject_id=state.decision_id,
+        session_id="session-pending-resolution",
+        agent_name="main",
+    )
+
+    async def duplicate_ask(_payload: dict[str, object]) -> dict[str, str]:
+        raise AssertionError("已有 pending authority 时不得重复显示问题")
+
+    pending_resolution_service = EvolutionDecisionResolutionService(
+        decision_store=state_store,
+        interaction_store=pending_harness,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "pending-resolution.db"
+        ),
+        request_user_input=duplicate_ask,
+    )
+    with pytest.raises(EvolutionDecisionResolutionError) as pending_resolution:
+        await pending_resolution_service.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert pending_resolution.value.code == "decision_resolution_interaction_pending"
+    assert pending_record.interaction_id in str(pending_resolution.value)
+
+    ambiguous_harness = HarnessStore(tmp_path / "ambiguous-resolution-harness.db")
+    ambiguous_authority = DurableInteractionAuthorityClient(
+        store=ambiguous_harness,
+        workspace_root=workspace,
+        owner_id="ambiguous-resolution-owner",
+    )
+    for attempt, value in ((1, "revise_candidate"), (2, "reject_candidate")):
+        ambiguous_record = await ambiguous_authority.create(
+            request=normalize_interaction_request(state.escalation.to_public_dict()),
+            interaction_id=f"ask-evolution-{decision_suffix}-{attempt}",
+            subject_kind="tool",
+            subject_id=state.decision_id,
+            session_id="session-ambiguous-resolution",
+            agent_name="main",
+        )
+        await ambiguous_authority.answer(
+            record=ambiguous_record,
+            response={"kind": "option", "value": value},
+        )
+    ambiguous_resolution_service = EvolutionDecisionResolutionService(
+        decision_store=state_store,
+        interaction_store=ambiguous_harness,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "ambiguous-resolution.db"
+        ),
+        request_user_input=duplicate_ask,
+    )
+    with pytest.raises(EvolutionDecisionResolutionError) as ambiguous_resolution:
+        await ambiguous_resolution_service.execute(
+            workspace_root=workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert ambiguous_resolution.value.code == "decision_resolution_answer_ambiguous"
+
+    retry_harness = HarnessStore(tmp_path / "retry-resolution-harness.db")
+    retry_authority = DurableInteractionAuthorityClient(
+        store=retry_harness,
+        workspace_root=workspace,
+        owner_id="retry-resolution-owner",
+    )
+    cancelled_record = await retry_authority.create(
+        request=normalize_interaction_request(state.escalation.to_public_dict()),
+        interaction_id=f"ask-evolution-{decision_suffix}-1",
+        subject_kind="tool",
+        subject_id=state.decision_id,
+        session_id="session-retry-resolution",
+        agent_name="main",
+    )
+    await retry_authority.cancel(record=cancelled_record)
+
+    async def answer_retry(payload: dict[str, object]) -> dict[str, str]:
+        assert payload["_interaction_id"] == (
+            f"ask-evolution-{decision_suffix}-2"
+        )
+        retry_record = await retry_authority.create(
+            request=normalize_interaction_request(state.escalation.to_public_dict()),
+            interaction_id=str(payload["_interaction_id"]),
+            subject_kind=str(payload["_durable_subject_kind"]),
+            subject_id=str(payload["_durable_subject_id"]),
+            session_id="session-retry-resolution",
+            agent_name="main",
+        )
+        _answered_record, response = await retry_authority.answer(
+            record=retry_record,
+            response={"kind": "option", "value": "revise_candidate"},
+        )
+        return response
+
+    retry_resolution = await EvolutionDecisionResolutionService(
+        decision_store=state_store,
+        interaction_store=retry_harness,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "retry-resolution.db"
+        ),
+        request_user_input=answer_retry,
+    ).execute(
+        workspace_root=workspace,
+        decision_input_id=decision.decision_input_id,
+    )
+    assert retry_resolution.outcome is EvolutionDecisionResolutionOutcome.REVISE
+    assert retry_resolution.candidate_acceptance_decided is True
+    assert retry_resolution.candidate_accepted is False
+
     tampered_state = state.model_dump(mode="json")
     tampered_state["candidate_accepted"] = True
     with pytest.raises(ValueError):
@@ -1294,6 +1509,22 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
 
     other_workspace = tmp_path / "other-workspace"
     other_workspace.mkdir()
+    with pytest.raises(EvolutionDecisionResolutionError) as resolution_wrong_workspace:
+        await resolution_service.execute(
+            workspace_root=other_workspace,
+            decision_input_id=decision.decision_input_id,
+        )
+    assert resolution_wrong_workspace.value.code == (
+        "decision_resolution_workspace_mismatch"
+    )
+
+    with pytest.raises(EvolutionDecisionResolutionError) as resolution_invalid_id:
+        await resolution_service.execute(
+            workspace_root=workspace,
+            decision_input_id="bad\ndecision",
+        )
+    assert resolution_invalid_id.value.code == "decision_resolution_input_id_invalid"
+
     with pytest.raises(EvolutionMechanicalGateError) as gate_wrong_workspace:
         await gate_executor.execute(
             workspace_root=other_workspace,
@@ -1583,6 +1814,25 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     assert veto_state.candidate_accepted is False
     assert veto_state.promotion_review_ready is False
     assert await veto_state_store.get(veto_state.decision_id) == veto_state
+
+    async def should_not_ask(_payload: dict[str, object]) -> dict[str, str]:
+        raise AssertionError("rejected Decision State 不得询问用户")
+
+    rejected_resolution_service = EvolutionDecisionResolutionService(
+        decision_store=veto_state_store,
+        interaction_store=veto_harness,
+        resolution_store=EvolutionDecisionResolutionStore(
+            tmp_path / "veto-resolution.db"
+        ),
+        request_user_input=should_not_ask,
+    )
+    with pytest.raises(EvolutionDecisionResolutionError) as not_escalated:
+        await rejected_resolution_service.execute(
+            workspace_root=workspace,
+            decision_input_id=veto_decision.decision_input_id,
+        )
+    assert not_escalated.value.code == "decision_resolution_not_escalated"
+
     with pytest.raises(EvolutionCounterfactualEvidenceError) as veto_counterfactual:
         await EvolutionCounterfactualEvidenceExecutor(
             review_store=veto_review_store,
@@ -1709,6 +1959,17 @@ async def test_final_evaluation_receipt_reloads_exact_complete_authority(
     with pytest.raises(EvolutionRewardHackingEvidenceError) as corrupt_reward:
         await reward_store.get(reward.evidence_id)
     assert corrupt_reward.value.code == "reward_hacking_store_corrupt"
+
+    with sqlite3.connect(tmp_path / "resolution.db") as db:
+        db.execute(
+            "UPDATE evolution_decision_resolutions SET outcome = ? "
+            "WHERE resolution_id = ?",
+            ("rejected", resolution.resolution_id),
+        )
+        db.commit()
+    with pytest.raises(EvolutionDecisionResolutionError) as corrupt_resolution:
+        await resolution_store.get(resolution.resolution_id)
+    assert corrupt_resolution.value.code == "decision_resolution_store_corrupt"
 
     with sqlite3.connect(tmp_path / "decision-state.db") as db:
         db.execute(

@@ -88,7 +88,7 @@ Final receipt 写入 `evolution_final_evaluation_receipts`，以 Aggregation Con
 - 默认 Probe Contract 要求 Linux/macOS/Windows 时，跨平台 dispatcher 仍须实际收集三平台回执；本切片不会
   伪造缺失平台，也不会因当前机器只有一个平台而降低合同覆盖要求。
 - A4 的真实 NaumiAgent 小模块 macOS/Linux 对照尚未完成，因此 EVO-03 整体保持 `partial`。
-- EVO-04.1a Decision Input 至 4.6a Decision State 已实现；escalation resolution 尚未实现。
+- EVO-04.1a Decision Input 至 4.6b Escalation Resolution 已实现；Reflection Memory 尚未实现。
 - Final Evaluation Receipt 的专用 New UI/TUI typed 页面与 golden 可在 UI-17 后续切片实现；当前共享 slash
   renderer 已可用，但不冒充专用交互页。
 
@@ -100,5 +100,5 @@ acceptance。详见 `EVO-GOV-01-agent-tool-permission-matrix.md`。
 
 ## 下一步
 
-EVO-04.1a 至 4.6a 已补齐完整证据和四态 Decision State。下一步实现 EVO-04.6b Escalation Resolution；
-仍不执行 promotion。
+EVO-04.1a 至 4.6b 已补齐完整证据、四态 Decision State 与持久用户 Resolution。下一步实现 EVO-04.7a
+Reflection Memory；仍不执行 promotion。

@@ -72,8 +72,8 @@ recommendation、confidence、summary、strengths 和 concerns 均不进入此�
 模型在构建时调用 `normalize_interaction_request()` 复核，保证其 public payload 可被现有 HAR-10.6 durable
 interaction、New UI 和 Textual TUI 直接消费。非 escalated 状态禁止携带 escalation payload。
 
-本切片生成交互合同，但不代替用户作答，也不把答案写回原有不可变 Decision State；显式 resolution authority
-属于后续 EVO-04.6b。
+本切片生成交互合同，但不代替用户作答，也不把答案写回原有不可变 Decision State；EVO-04.6b 已以独立
+Resolution authority 接入真实 HAR-10.6 回答，不会改写本 artifact。
 
 ## Artifact 与 readiness
 
@@ -119,7 +119,7 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 
 ## 明确未完成
 
-- EVO-04.6b Escalation Resolution：把用户 option/custom answer 绑定到 Decision State 并形成新的 resolution；
+- EVO-04.6b Escalation Resolution 已完成；
 - EVO-04.7 Reflection Memory；
 - EVO-05 promotion/rollback 与 HAR-09.6 outcome tracking；
 - `accepted_experiment` 不会自动修改 baseline、Git 分支或生产配置；
@@ -128,6 +128,5 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 
 ## 下一步
 
-实现 EVO-04.6b Escalation Resolution Contract：复用 HAR-10.6 durable interaction，先持久化 pending 问题，
-再把 fenced option/custom answer 绑定到原 Decision State；用户答案可以形成 revise/rejected 或补证据动作，
-但仍不能直接执行 promotion。
+继续 EVO-04.7a Reflection Memory Contract：只保存结构化 Decision/Resolution 经验与证据引用，禁止把用户
+自定义文本或 Reviewer 叙事直接注入系统 Prompt。

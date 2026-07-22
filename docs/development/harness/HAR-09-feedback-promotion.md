@@ -66,8 +66,9 @@
   复用同一 issuer；回执固定 `execution_ready=false`。详见
   `HAR-09-5c-explicit-experiment-contract-issuance.md`。
 - EVO-04.5a 已补齐 promotion 前的 Reward-hacking Evidence，EVO-04.6a 又形成不可变四态 Decision State；
-  `accepted_experiment` 只设置 `promotion_review_ready`，不执行 promotion。HAR-09.6 仍需等待 escalation
-  resolution、Reflection Memory 和显式 promotion/rollback executor，不能把 Decision State 直接记为 outcome。
+  EVO-04.6b 已把 escalation 用户答案形成不可变 Resolution。`accepted_experiment` 仍只设置
+  `promotion_review_ready`，不执行 promotion。HAR-09.6 还需等待 Reflection Memory 和显式
+  promotion/rollback executor，不能把 Decision/Resolution 直接记为 promoted outcome。
 - HAR-09 仍未实现 defer/merge 交互和 outcome tracking，因此整体
   继续保持 partial。
 

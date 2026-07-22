@@ -15,6 +15,10 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputError,
     render_decision_input,
 )
+from naumi_agent.evolution.decision_resolutions import (
+    EvolutionDecisionResolutionError,
+    render_evolution_decision_resolution,
+)
 from naumi_agent.evolution.decision_states import (
     EvolutionDecisionStateError,
     render_evolution_decision_state,
@@ -883,6 +887,66 @@ class EvolutionDecisionStateTool(Tool):
         return render_evolution_decision_state(artifact)
 
 
+class EvolutionDecisionResolutionTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_decision_resolution"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅对 escalated Evolution Decision State 发起持久用户交互。问题先写入 "
+            "Harness authority，option/custom 答案经 owner/epoch/sequence fencing 后才形成"
+            "不可变 Resolution。结果只能要求补证据、人工审查、修订、拒绝或受约束的"
+            "自定义后续动作，不接受 Candidate，也不执行 promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_input_id": {
+                    "type": "string",
+                    "pattern": "^evdin_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["decision_input_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 用户决策回执",
+            search_hint=(
+                "evolution escalation resolution durable user interaction answer "
+                "自进化 用户选择 决策回执"
+            ),
+        )
+
+    async def execute(self, decision_input_id: str) -> str:
+        try:
+            artifact = await self._engine.evolution_decision_resolution_service.execute(
+                workspace_root=self._engine.workspace_root,
+                decision_input_id=decision_input_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionDecisionResolutionError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Escalation Resolution 未完成：{exc}"
+        return render_evolution_decision_resolution(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -900,6 +964,7 @@ def create_evolution_review_tools(
         EvolutionCounterfactualEvidenceTool(engine),
         EvolutionRewardHackingEvidenceTool(engine),
         EvolutionDecisionStateTool(engine),
+        EvolutionDecisionResolutionTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -908,6 +973,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",
+    "EvolutionDecisionResolutionTool",
     "EvolutionDecisionStateTool",
     "EvolutionExperimentContractAuthorityTool",
     "EvolutionExperimentContractIssueTool",

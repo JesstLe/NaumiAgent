@@ -73,6 +73,11 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputExecutor,
     EvolutionDecisionInputStore,
 )
+from naumi_agent.evolution.decision_resolutions import (
+    EvolutionDecisionResolutionBuilder,
+    EvolutionDecisionResolutionService,
+    EvolutionDecisionResolutionStore,
+)
 from naumi_agent.evolution.decision_states import (
     EvolutionDecisionStateBuilder,
     EvolutionDecisionStateExecutor,
@@ -1242,6 +1247,19 @@ class AgentEngine:
             decision_store=self.evolution_decision_state_store,
             builder=self.evolution_decision_state_builder,
         )
+        self.evolution_decision_resolution_builder = (
+            EvolutionDecisionResolutionBuilder()
+        )
+        self.evolution_decision_resolution_store = EvolutionDecisionResolutionStore(
+            config.memory.session_db_path
+        )
+        self.evolution_decision_resolution_service = EvolutionDecisionResolutionService(
+            decision_store=self.evolution_decision_state_store,
+            interaction_store=self._harness_store,
+            resolution_store=self.evolution_decision_resolution_store,
+            request_user_input=self.request_user_input,
+            builder=self.evolution_decision_resolution_builder,
+        )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
             patch_set_store=self.evolution_patch_set_store,
@@ -1649,9 +1667,22 @@ class AgentEngine:
             current_pursuit_interaction_context,
         )
 
-        interaction_id = f"ask-{uuid.uuid4().hex}"
         context = current_pursuit_interaction_context()
         session_id = self._session.id if self._session else ""
+        requested_interaction_id = str(payload.get("_interaction_id") or "").strip()
+        if requested_interaction_id and re.fullmatch(
+            r"ask-[A-Za-z0-9._:-]{1,128}", requested_interaction_id
+        ) is None:
+            raise ValueError("内部用户交互 ID 格式无效。")
+        interaction_id = requested_interaction_id or f"ask-{uuid.uuid4().hex}"
+        requested_subject_kind = str(
+            payload.get("_durable_subject_kind") or "runtime"
+        ).strip()
+        if requested_subject_kind not in {"tool", "browser", "agent", "runtime"}:
+            raise ValueError("内部用户交互 subject kind 无效。")
+        requested_subject_id = str(
+            payload.get("_durable_subject_id") or session_id or "runtime-sessionless"
+        ).strip()
         enriched: dict[str, Any] = {
             **payload,
             "_interaction_id": interaction_id,
@@ -1659,9 +1690,11 @@ class AgentEngine:
             "_durable_subject_id": (
                 context.run_id
                 if context is not None
-                else session_id or "runtime-sessionless"
+                else requested_subject_id
             ),
         }
+        if context is None:
+            enriched["_durable_subject_kind"] = requested_subject_kind
         if context is not None:
             enriched["_pursuit_begin"] = context.begin
             enriched["_pursuit_resolve"] = context.resolve

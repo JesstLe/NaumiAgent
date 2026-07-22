@@ -35,6 +35,9 @@ EVO-04.5a 进一步从 Counterfactual ID 重读 Final Evaluation、全部 Lane �
 EVO-04.6a 现以 Decision Input ID 为唯一入口，兼容 mechanical veto 短路与 pass 完整证据链；固定优先级形成
 四态 Decision State，Reviewer 只保留为 advisory audit，不参与状态算法。`escalated` 内置 HAR-10.6 兼容的
 3 个选项和自定义输入，`accepted_experiment` 也只开放 promotion review，不执行 promotion。
+EVO-04.6b 已把 escalation 接入真实 HAR-10.6 create-before-display 与 fenced answer：重启可复用
+pending/answered authority，Resolution 只允许补证据、人工审查、修订、拒绝或自定义后续动作，任何路径都不
+接受 Candidate 或执行 promotion。
 EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Counterfactual Evidence 非只读 Agent Tool 建立显式
 中风险权限规则和有界会话调用面；bypass 不跳过任何 authority 或 veto。详见
 `EVO-GOV-01-agent-tool-permission-matrix.md`。
@@ -47,8 +50,8 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - EVO-04.4 Counterfactual：是否有更小改动、改善是否来自删测试/改指标/放宽规则。EVO-04.4a 已完成。
 - EVO-04.5 Reward hacking detector：proxy gaming、选择性样本/平台优化、资源换分与真实任务退化。
   EVO-04.5a 已完成。
-- EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。EVO-04.6a 已完成状态合同，
-  escalation resolution 尚未完成。
+- EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。EVO-04.6a 状态合同与 EVO-04.6b
+  escalation resolution 均已完成。
 - EVO-04.7 Reflection memory：只保存结构化经验和证据引用，禁止污染系统 Prompt。
 
 ## 验收标准
@@ -79,15 +82,18 @@ EVO-GOV-01 又为 Decision Input、Mechanical Gate、Independent Review 与 Coun
 - [EVO-04.6a Decision State Contract](EVO-04-6a-decision-state-contract.md)：Decision Input ID 单入口、
   veto/pass 分支 authority 重读、四态确定性优先级、Reviewer advisory 隔离、HAR-10.6 兼容 escalation、
   并发幂等持久化与非 promotion 边界。
+- [EVO-04.6b Escalation Resolution Contract](EVO-04-6b-escalation-resolution-contract.md)：真实
+  create-before-display、answer-before-resolution、重启重读、冲突答案 fail closed、双通道与不可变非 promotion
+  用户回执。
 
-EVO-04 整体仍为 partial；Decision State 已交付，但 escalation answer 尚未形成 resolution，Reflection Memory
-与 promotion 也未交付。
+EVO-04 整体仍为 partial；Decision State 与 escalation resolution 已交付，但 Reflection Memory 与 promotion
+尚未交付。
 
 ## 明确未完成
 
-- escalation resolution、reflection memory 与 promotion。
+- reflection memory 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.6b Escalation Resolution Contract：复用 HAR-10.6 durable interaction，把 fenced 用户答案绑定
-到不可变 Decision State；仍不直接执行 promotion。
+实现 EVO-04.7a Reflection Memory Contract：只消费签名证据、Decision 与 Resolution，保存结构化经验和撤销
+依据；禁止直接污染系统 Prompt，仍不执行 promotion。

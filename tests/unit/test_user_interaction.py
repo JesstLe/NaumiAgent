@@ -162,5 +162,25 @@ async def test_engine_registers_user_interaction_tool_and_callback(tmp_path: Pat
         )
         assert result["value"] == "safe"
         assert received[0]["options"][0]["value"] == "safe"
+        await engine.request_user_input(
+            {
+                "header": "Evolution 决策升级",
+                "question": "请选择后续动作",
+                "options": _options(),
+                "allow_custom": True,
+                "custom_label": "其他",
+                "timeout_seconds": None,
+                "_interaction_id": "ask-evolution-aaaaaaaaaaaaaaaaaaaaaaaa-1",
+                "_durable_subject_kind": "tool",
+                "_durable_subject_id": "evdecision_aaaaaaaaaaaaaaaaaaaaaaaa",
+            }
+        )
+        assert received[1]["_interaction_id"] == (
+            "ask-evolution-aaaaaaaaaaaaaaaaaaaaaaaa-1"
+        )
+        assert received[1]["_durable_subject_kind"] == "tool"
+        assert received[1]["_durable_subject_id"] == (
+            "evdecision_aaaaaaaaaaaaaaaaaaaaaaaa"
+        )
     finally:
         await engine.shutdown()
