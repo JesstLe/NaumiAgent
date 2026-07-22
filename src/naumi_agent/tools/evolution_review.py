@@ -27,6 +27,10 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptError,
     render_final_evaluation_receipt,
 )
+from naumi_agent.evolution.independent_reviews import (
+    EvolutionIndependentReviewError,
+    render_independent_review,
+)
 from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateError,
     render_mechanical_gate,
@@ -544,6 +548,68 @@ class EvolutionMechanicalGateTool(Tool):
         return render_mechanical_gate(gate)
 
 
+class EvolutionIndependentReviewTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_independent_review"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅凭 Mechanical Gate ID 重读 Gate 与 Trace-bound Mutation Author Receipt。"
+            "机械通过时使用与 author canonical identity 不同的模型产生严格结构化 advisory；"
+            "机械否决时不调用模型，只返回不可覆盖的 veto 与 required actions。"
+            "该工具不接受 Candidate，也不批准发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "gate_id": {
+                    "type": "string",
+                    "pattern": "^evgate_[0-9a-f]{24}$",
+                },
+                "reviewer_model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "default": "",
+                    "description": "可选独立 Reviewer model；空值使用 reasoning tier。",
+                },
+            },
+            "required": ["gate_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 独立审查",
+            search_hint=(
+                "evolution independent reviewer author identity advisory gate "
+                "自进化 独立 审查 模型 隔离"
+            ),
+        )
+
+    async def execute(self, gate_id: str, reviewer_model: str = "") -> str:
+        try:
+            review = await self._engine.evolution_independent_review_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                gate_id=gate_id.strip(),
+                reviewer_model=reviewer_model.strip() or None,
+            )
+        except (EvolutionIndependentReviewError, OSError, TypeError, ValueError) as exc:
+            return f"Evolution Independent Review 未完成：{exc}"
+        return render_independent_review(review)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -556,6 +622,7 @@ def create_evolution_review_tools(
         EvolutionFinalEvaluationReceiptTool(engine),
         EvolutionDecisionInputTool(engine),
         EvolutionMechanicalGateTool(engine),
+        EvolutionIndependentReviewTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -567,6 +634,7 @@ __all__ = [
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
     "EvolutionFinalEvaluationReceiptTool",
+    "EvolutionIndependentReviewTool",
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "create_evolution_review_tools",

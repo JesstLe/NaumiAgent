@@ -62,13 +62,12 @@ Receipt 不保存源码、Prompt 正文、模型正文、reasoning、tool argume
 
 ## 明确未完成
 
-- EVO-04.3a Reviewer model/provider 选择与 author identity 隔离判定；
+- EVO-04.3a Reviewer model/provider 选择、author identity 隔离、strict JSON advisory 与 veto 无模型路径已完成；
 - Reviewer structured-output schema、Prompt digest、超时/解析失败和不可变 Review Receipt；
 - Mechanical Gate `veto` 的只读解释路径；
 - counterfactual、reward-hacking detector、最终 decision state 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.3a Independent Reviewer Contract：只从 durable Gate、Decision Input、Generation Trace 与本
-Author Receipt 重建审查输入；`pass` 才允许执行 reviewer，reviewer canonical identity 不得等于 author；
-`veto` 只能显示机械事实和 required actions，任何模型输出都不能改写 Gate。
+EVO-04.3a 已消费本 Author Receipt 并实现独立审查。下一步实现 EVO-04.4a Counterfactual Evidence
+Contract，检查更小 scope 与 reward-hacking 替代解释。

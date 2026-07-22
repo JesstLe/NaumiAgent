@@ -245,7 +245,6 @@ class EvolutionMutationTurnRunner:
                             input_messages=messages,
                             response=response,
                             response_model=response.model or resolved_model,
-                            tool_call_count=len(calls),
                         )
                     )
                 except EvolutionMutationAuthorReceiptError as exc:

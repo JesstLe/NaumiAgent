@@ -3051,6 +3051,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionFinalEvaluationReceiptError,
         render_final_evaluation_receipt,
     )
+    from naumi_agent.evolution.independent_reviews import (
+        EvolutionIndependentReviewError,
+        render_independent_review,
+    )
     from naumi_agent.evolution.mechanical_gates import (
         EvolutionMechanicalGateError,
         render_mechanical_gate,
@@ -3160,6 +3164,18 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_mechanical_gate(gate)))
             return
+        if action == "independent-review":
+            if not 2 <= len(parts) <= 3:
+                raise ValueError(
+                    "independent-review 需要 Gate ID 和可选 Reviewer model。"
+                )
+            review = await engine.evolution_independent_review_executor.execute(
+                workspace_root=engine.workspace_root,
+                gate_id=parts[1],
+                reviewer_model=parts[2] if len(parts) == 3 else None,
+            )
+            console.print(Markdown(render_independent_review(review)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3187,7 +3203,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             raise ValueError(
                 "仅支持 list、detail、experiment-contract、evaluation、"
                 "evaluation-contract、"
-                "evaluation-final、decision-input、mechanical-gate 或 enqueue。"
+                "evaluation-final、decision-input、mechanical-gate、"
+                "independent-review 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3228,6 +3245,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "independent-review":
+            console.print(
+                f"Evolution Independent Review 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3238,6 +3262,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "<adversarial-h5c-id...>；"
             "/evolution decision-input <final-evaluation-receipt-id>；"
             "/evolution mechanical-gate <decision-input-id>；"
+            "/evolution independent-review <gate-id> [reviewer-model]；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3282,6 +3307,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionMechanicalGateError as exc:
         console.print(
             f"Evolution Mechanical Gate 未签发：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionIndependentReviewError as exc:
+        console.print(
+            f"Evolution Independent Review 未完成：{exc}",
             style="yellow",
             markup=False,
         )

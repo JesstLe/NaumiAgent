@@ -65,6 +65,11 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptExecutor,
     EvolutionFinalEvaluationReceiptStore,
 )
+from naumi_agent.evolution.independent_reviews import (
+    EvolutionIndependentReviewBuilder,
+    EvolutionIndependentReviewExecutor,
+    EvolutionIndependentReviewStore,
+)
 from naumi_agent.evolution.mechanical_gates import (
     EvolutionMechanicalGateBuilder,
     EvolutionMechanicalGateExecutor,
@@ -241,6 +246,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_mutation_turn_runner,
         EvolutionMutationTurnRunner,
+    )
+    assert isinstance(
+        engine.evolution_independent_review_builder,
+        EvolutionIndependentReviewBuilder,
+    )
+    assert isinstance(
+        engine.evolution_independent_review_store,
+        EvolutionIndependentReviewStore,
+    )
+    assert isinstance(
+        engine.evolution_independent_review_executor,
+        EvolutionIndependentReviewExecutor,
     )
     assert isinstance(
         engine.evolution_validation_planner,

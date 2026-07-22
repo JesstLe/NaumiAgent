@@ -100,6 +100,20 @@ if TYPE_CHECKING:
         FailureAttributionAction,
         FailureAttributionCategory,
     )
+    from naumi_agent.evolution.independent_reviews import (
+        EvolutionIndependentReview,
+        EvolutionIndependentReviewBuilder,
+        EvolutionIndependentReviewError,
+        EvolutionIndependentReviewExecutor,
+        EvolutionIndependentReviewStore,
+        IndependentReviewConfidence,
+        IndependentReviewerBudget,
+        IndependentReviewerIdentity,
+        IndependentReviewOpinion,
+        IndependentReviewRecommendation,
+        IndependentReviewStatus,
+        render_independent_review,
+    )
     from naumi_agent.evolution.interventional_cohort_kernel import (
         EvolutionInterventionalCohortKernel,
         EvolutionInterventionalCohortKernelError,
@@ -332,6 +346,18 @@ __all__ = [
     "EvolutionFailureAttributionStore",
     "FailureAttributionAction",
     "FailureAttributionCategory",
+    "EvolutionIndependentReview",
+    "EvolutionIndependentReviewBuilder",
+    "EvolutionIndependentReviewError",
+    "EvolutionIndependentReviewExecutor",
+    "EvolutionIndependentReviewStore",
+    "IndependentReviewConfidence",
+    "IndependentReviewOpinion",
+    "IndependentReviewRecommendation",
+    "IndependentReviewStatus",
+    "IndependentReviewerBudget",
+    "IndependentReviewerIdentity",
+    "render_independent_review",
     "EvolutionCandidateDraft",
     "EvolutionCandidateSnapshotError",
     "EvolutionCandidateSourceBlob",
@@ -576,6 +602,20 @@ def __getattr__(name: str) -> object:
         "FailureAttributionAction",
         "FailureAttributionCategory",
     }
+    independent_review_exports = {
+        "EvolutionIndependentReview",
+        "EvolutionIndependentReviewBuilder",
+        "EvolutionIndependentReviewError",
+        "EvolutionIndependentReviewExecutor",
+        "EvolutionIndependentReviewStore",
+        "IndependentReviewConfidence",
+        "IndependentReviewOpinion",
+        "IndependentReviewRecommendation",
+        "IndependentReviewStatus",
+        "IndependentReviewerBudget",
+        "IndependentReviewerIdentity",
+        "render_independent_review",
+    }
     proposal_exports = {
         "EvolutionProposalPreview",
         "classify_proposal_kind",
@@ -806,6 +846,8 @@ def __getattr__(name: str) -> object:
         module_name = "evaluation_lane_receipts"
     elif name in failure_attribution_exports:
         module_name = "failure_attribution"
+    elif name in independent_review_exports:
+        module_name = "independent_reviews"
     elif name in proposal_exports:
         module_name = "proposal"
     elif name in experiment_exports:

@@ -23,12 +23,15 @@ files/lines/tool calls/duration/attempt 预算和全部评测 failure facts 执�
 EVO-02.7c2 现又让成功 Mutation Turn 持久化 Trace-bound Author Receipt，冻结 canonical model、provider、
 API format、identity source、Prompt/tool schema digest 与逐轮上下文摘要。EVO-04.3a 因此不再需要从当前
 router 配置猜测 mutation author。
+EVO-04.3a 现已从 Gate ID 重读上述 authority：mechanical pass 才允许不同 canonical model 执行一次严格
+JSON advisory review，并以 durable single-flight claim 防止并发重复模型调用；mechanical veto 完全不调用
+模型，只形成不可覆盖的 veto explanation。两条路径仍固定 `candidate_acceptance_decided=false`。
 
 ## 子模块
 
 - EVO-04.1 Decision inputs：candidate、mutation receipt、Eval receipt、risk、user constraints。EVO-04.1a 已完成。
 - EVO-04.2 Mechanical gate：checks、guardrails、scope、budget、integrity 先判。EVO-04.2a 已完成。
-- EVO-04.3 Independent reviewer：可选不同模型/规则，看到证据但不能改结果。
+- EVO-04.3 Independent reviewer：可选不同模型/规则，看到证据但不能改结果。EVO-04.3a 已完成。
 - EVO-04.4 Counterfactual：是否有更小改动、改善是否来自删测试/改指标/放宽规则。
 - EVO-04.5 Reward hacking detector：测试删除、阈值放宽、skip、mock 替代、数据泄漏。
 - EVO-04.6 Decision state：accepted_experiment/revise/rejected/escalated。
@@ -50,15 +53,18 @@ router 配置猜测 mutation author。
   16 规则、确定性 pass/veto、不可覆盖 veto 与双通道持久化。
 - [EVO-02.7c2 Mutation Author Receipt](EVO-02-7c2-mutation-author-receipt.md)：为独立 Reviewer 补齐可重读
   author provider/model、Prompt/tool schema digest 与逐轮调用 authority；不执行审查或最终决策。
+- [EVO-04.3a Independent Reviewer Contract](EVO-04-3a-independent-reviewer-contract.md)：Gate ID 单入口、
+  reviewer/author canonical identity 隔离、strict JSON advisory、veto 无模型路径、durable single-flight、
+  Slash/Agent Tool 双通道与不可变 Review artifact。
 
-EVO-04 整体仍为 partial；Decision Input 完成不代表 mechanical gate、review 或最终决策已交付。
+EVO-04 整体仍为 partial；Mechanical Gate 与 Independent Review 完成不代表 counterfactual、reward-hacking
+检测或最终决策已交付。
 
 ## 明确未完成
 
-- EVO-04.3 independent reviewer；
 - counterfactual、reward-hacking detector、decision state、reflection memory 与 promotion。
 
 ## 下一步
 
-实现 EVO-04.3a Independent Reviewer Contract：从 Gate 与 Mutation Author Receipt 重读权威，记录
-reviewer/author 隔离、reviewer 模型/provider 与 Prompt digest；`veto` 只能被解释，不能被改写为 `pass`。
+实现 EVO-04.4a Counterfactual Evidence Contract：检查更小 scope 与“改善来自删测试、修改 metric、放宽
+阈值、skip/mock 或泄漏”的替代解释；Independent Reviewer advisory 不得直接成为最终 decision。

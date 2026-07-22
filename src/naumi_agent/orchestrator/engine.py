@@ -99,6 +99,11 @@ from naumi_agent.evolution.final_evaluation_receipts import (
     EvolutionFinalEvaluationReceiptExecutor,
     EvolutionFinalEvaluationReceiptStore,
 )
+from naumi_agent.evolution.independent_reviews import (
+    EvolutionIndependentReviewBuilder,
+    EvolutionIndependentReviewExecutor,
+    EvolutionIndependentReviewStore,
+)
 from naumi_agent.evolution.interventional_comparison import (
     EvolutionInterventionalComparisonExecutor,
 )
@@ -1163,6 +1168,17 @@ class AgentEngine:
             trace_store=self.evolution_mutation_generation_trace_store,
             gate_store=self.evolution_mechanical_gate_store,
             builder=self.evolution_mechanical_gate_builder,
+        )
+        self.evolution_independent_review_builder = EvolutionIndependentReviewBuilder()
+        self.evolution_independent_review_store = EvolutionIndependentReviewStore(
+            config.memory.session_db_path
+        )
+        self.evolution_independent_review_executor = EvolutionIndependentReviewExecutor(
+            model_port=self._model_port,
+            gate_store=self.evolution_mechanical_gate_store,
+            author_store=self.evolution_mutation_author_receipt_store,
+            review_store=self.evolution_independent_review_store,
+            builder=self.evolution_independent_review_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
