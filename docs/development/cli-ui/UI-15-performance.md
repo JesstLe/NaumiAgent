@@ -27,6 +27,8 @@
     新增分页 GREEN 证据，避免用修改后的 fixture 覆盖历史基线。
   - CC-02.1a 已让实验 Ink renderer 复用相同 v2 fixture、digest 和三场景 JSON 合同；首轮结果显示
     deep-scroll 的 viewport slicing 方向有价值，但 tail/paged P95 明显退化，因此没有替换默认 renderer。
+  - CC-02.2a 已修正超大 offset 空视口、加入五类核心视图语义并重新测量；Ink deep-scroll P95 仍更快，
+    但 tail/paged 分别约慢 25.6/52.8 倍，且全量 presentation 投影仍为 O(n)。
   - 未完成：输入/token/resize、Textual TUI、达到 production 语义 parity 后的 Ink 对照和跨平台 CI 阈值。
 
 ## 验收标准
@@ -41,5 +43,5 @@
 
 UI-15 保持 partial。现有 redraw scheduler 已限制普通 paint 到约 16ms，UI-15.1a 进一步减少进入 reducer 的
 stream delta 数量；UI-15.4a 已避免超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark
-基线；CC-02.1a 已加入首个同合同 Ink 实验对照。virtual timeline、非文本 artifact、完整 cache revision、
+基线；CC-02.1a/2.2a 已加入同合同 Ink 实验与核心视图对照。virtual timeline、非文本 artifact、完整 cache revision、
 输入/resize/TUI benchmark 与达到语义 parity 后的跨前端性能门仍未完成。

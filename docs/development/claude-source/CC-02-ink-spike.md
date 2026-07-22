@@ -10,13 +10,17 @@
 - CC-02.1 Adapter（partial）：CC-02.1a 已实现真实 Ink 6 adapter、共享 production state/lifecycle fixture、
   golden anchor 与同 digest benchmark；见
   [CC-02.1a 实验与证据](CC-02-1a-ink-adapter-benchmark.md)。尚未接入交互式 Ink runtime。
-- CC-02.2 Core views：conversation、tool、permission、footer、task 五个代表组件。
+- CC-02.2 Core views（partial）：CC-02.2a 已让 conversation、tool、permission、footer、task 五类代表
+  视图消费同一 production reducer state，并以 current/Ink 共享语义锚点验收；见
+  [CC-02.2a 核心视图 parity](CC-02-2a-core-view-semantic-parity.md)。完整 Markdown/diff/fold/专页仍待实现。
 - CC-02.3 Input：multiline、IME、paste、key parsing、permission modal 优先级。
 - CC-02.4 Performance：1k cards、token burst、resize、scroll、memory、startup。
   - 前置 UI-15.6a 已提供 `naumi.renderer-benchmark.v1` current renderer runner 与
     `smoke|release` fixture；Ink runner 必须复用同一 fixture 参数、digest 和三场景指标合同。
   - CC-02.1a 已交付首轮同机 release 对照：Ink tail/paged P95 分别约慢 9.2/20.5 倍，deep-scroll
     因直接 viewport slice 明显更快。当前 adapter 尚未达到组件语义 parity，因此结论是 `defer`。
+  - CC-02.2a 修正超大 scroll 空视口，并加入 permission/task 多行语义后重新测量：tail/paged P95
+    分别约慢 25.6/52.8 倍；deep-scroll 约快 81.4%，但仍有 O(n) presentation 投影。结论保持 `defer`。
 - CC-02.5 Packaging：Node version、依赖体积、wheel/binary、offline install。
 - CC-02.6 Decision record：量化收益、缺陷、迁移成本和回退路径。
 
@@ -35,9 +39,9 @@
 实验必须产出 benchmark JSON、截图/录屏、失败列表和明确 `adopt|defer|reject`，不得以主观
 “更像 Claude Code”作为结论。
 
-当前已完成 current renderer benchmark、UI-17.2f 双端固定视口 ANSI/text capture 前置和 CC-02.1a
-实验 adapter。Ink 未被采纳；CC-02.2-2.6 仍需按同一 fixture/capture manifest 继续，不能另建只对 Ink
-有利的视觉样本。
+当前已完成 current renderer benchmark、UI-17.2f 双端固定视口 ANSI/text capture、CC-02.1a 实验
+adapter 和 CC-02.2a 五类核心视图语义 parity。Ink 未被采纳；CC-02.2 剩余项与 2.3-2.6 仍需按同一
+fixture/capture manifest 继续，不能另建只对 Ink 有利的视觉样本。
 
 ## 外部参考边界
 
