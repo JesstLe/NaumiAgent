@@ -12,6 +12,7 @@ import {
 import { isFoldExpanded, setFoldExpanded } from "./components/folds.js";
 import { clearRenderCache, createRenderCache } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
+import { requiredEventCapability } from "./protocol.js";
 import {
   applyCommandQuickOpenTaskSnapshot,
   applyCommandQuickOpenSessionSnapshot,
@@ -2916,6 +2917,10 @@ export function handleSubmitText(state, text, send) {
   );
   if (evaluationLaneMatch) {
     const comparisonId = evaluationLaneMatch[1];
+    const requiredCapability = requiredEventCapability(
+      "client",
+      "evolution/evaluation-lane/request",
+    );
     const negotiatedCapabilities = Array.isArray(
       state.protocolNegotiation?.capabilities,
     )
@@ -2923,7 +2928,8 @@ export function handleSubmitText(state, text, send) {
       : [];
     if (
       !state.protocolNegotiated
-      || !negotiatedCapabilities.includes("evolution_evaluation_lane")
+      || !requiredCapability
+      || !negotiatedCapabilities.includes(requiredCapability)
     ) {
       pushSystemMessage(
         state,

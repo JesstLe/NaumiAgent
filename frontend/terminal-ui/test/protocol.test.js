@@ -15,8 +15,10 @@ import {
   PROTOCOL_CONTRACT,
   PROTOCOL_REGISTRY_SHA256,
   PROTOCOL_VERSION,
+  requiredEventCapability,
   splitShellLike,
   validateEventRegistry,
+  validateEventCapabilities,
 } from "../src/protocol.js";
 
 function harnessExplainPayload(revision = 1) {
@@ -513,6 +515,47 @@ test("event governance registry exactly covers all published events", () => {
   assert.equal(eventPolicy("server", "permission/request").owner, "safety");
   assert.equal(eventPolicy("server", "run/completed").criticality, "terminal");
   assert.equal(eventPolicy("client", "ping").persistence, "never");
+});
+
+test("event capability registry governs typed feature events", () => {
+  assert.equal(validateEventCapabilities(structuredClone(PROTOCOL_CONTRACT)), true);
+  assert.equal(
+    requiredEventCapability("client", "evolution/evaluation-lane/request"),
+    "evolution_evaluation_lane",
+  );
+  assert.equal(
+    requiredEventCapability("server", "evolution/evaluation-lane"),
+    "evolution_evaluation_lane",
+  );
+  assert.equal(requiredEventCapability("client", "submit"), null);
+  assert.throws(() => requiredEventCapability("sideways", "submit"), /未知事件方向/);
+});
+
+test("event capability registry rejects unknown duplicate and empty bindings", () => {
+  const unknownCapability = structuredClone(PROTOCOL_CONTRACT);
+  unknownCapability.event_capabilities.future = {
+    client_events: ["ping"],
+    server_events: [],
+  };
+  assert.throws(() => validateEventCapabilities(unknownCapability), /未发布能力/);
+
+  const unknownEvent = structuredClone(PROTOCOL_CONTRACT);
+  unknownEvent.event_capabilities.evolution_evaluation_lane.client_events.push("future/request");
+  assert.throws(() => validateEventCapabilities(unknownEvent), /未注册 client 事件/);
+
+  const duplicate = structuredClone(PROTOCOL_CONTRACT);
+  duplicate.event_capabilities.goal_snapshot = {
+    client_events: ["evolution/evaluation-lane/request"],
+    server_events: [],
+  };
+  assert.throws(() => validateEventCapabilities(duplicate), /多个能力重复绑定/);
+
+  const empty = structuredClone(PROTOCOL_CONTRACT);
+  empty.event_capabilities.evolution_evaluation_lane = {
+    client_events: [],
+    server_events: [],
+  };
+  assert.throws(() => validateEventCapabilities(empty), /至少需要一个事件/);
 });
 
 test("event governance registry rejects gaps and unredacted sensitive fields", () => {

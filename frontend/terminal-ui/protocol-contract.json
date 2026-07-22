@@ -18,6 +18,12 @@
       "typed_ui_messages"
     ]
   },
+  "event_capabilities": {
+    "evolution_evaluation_lane": {
+      "client_events": ["evolution/evaluation-lane/request"],
+      "server_events": ["evolution/evaluation-lane"]
+    }
+  },
   "client_events": [
     "hello",
     "submit",

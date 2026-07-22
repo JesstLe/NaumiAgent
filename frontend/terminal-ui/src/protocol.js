@@ -221,6 +221,7 @@ function loadProtocolContract() {
     throw new Error("protocol-contract.json required_capabilities 必须是 capabilities 的子集");
   }
   validateEventRegistry(contract);
+  validateEventCapabilities(contract);
   return contract;
 }
 
@@ -284,9 +285,63 @@ export function eventPolicy(direction, eventType) {
   return structuredClone(policy);
 }
 
+export function validateEventCapabilities(contract) {
+  const registry = contract?.event_capabilities;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    throw new Error("protocol-contract.json 缺少 event_capabilities 对象");
+  }
+  const publishedCapabilities = new Set(contract?.negotiation?.capabilities ?? []);
+  const publishedEvents = {
+    client: new Set(contract?.client_events ?? []),
+    server: new Set(contract?.server_events ?? []),
+  };
+  const owners = { client: new Map(), server: new Map() };
+  for (const [capability, binding] of Object.entries(registry)) {
+    if (!publishedCapabilities.has(capability)) {
+      throw new Error(`event_capabilities 包含未发布能力: ${capability}`);
+    }
+    if (!binding || typeof binding !== "object" || Array.isArray(binding)
+      || JSON.stringify(Object.keys(binding).sort()) !== JSON.stringify(["client_events", "server_events"])) {
+      throw new Error(`event_capabilities ${capability} 字段不完整`);
+    }
+    let boundCount = 0;
+    for (const direction of ["client", "server"]) {
+      const field = `${direction}_events`;
+      const events = binding[field];
+      if (!Array.isArray(events) || events.some((item) => typeof item !== "string" || !item)
+        || new Set(events).size !== events.length) {
+        throw new Error(`event_capabilities ${capability}.${field} 必须是无重复事件数组`);
+      }
+      boundCount += events.length;
+      for (const eventType of events) {
+        if (!publishedEvents[direction].has(eventType)) {
+          throw new Error(`event_capabilities ${capability} 引用未注册 ${direction} 事件: ${eventType}`);
+        }
+        if (owners[direction].has(eventType)) {
+          throw new Error(`${direction} 事件 ${eventType} 被多个能力重复绑定`);
+        }
+        owners[direction].set(eventType, capability);
+      }
+    }
+    if (!boundCount) throw new Error(`event_capabilities ${capability} 至少需要一个事件`);
+  }
+  return true;
+}
+
+export function requiredEventCapability(direction, eventType) {
+  if (!new Set(["client", "server"]).has(direction)) {
+    throw new Error(`未知事件方向: ${direction}`);
+  }
+  for (const [capability, binding] of Object.entries(PROTOCOL_CONTRACT.event_capabilities)) {
+    if (binding[`${direction}_events`].includes(String(eventType ?? ""))) return capability;
+  }
+  return null;
+}
+
 function protocolRegistryDigest(contract) {
   const canonical = canonicalJson({
     client: contract.event_registry.client,
+    event_capabilities: contract.event_capabilities,
     server: contract.event_registry.server,
   });
   return createHash("sha256").update(canonical, "utf8").digest("hex");

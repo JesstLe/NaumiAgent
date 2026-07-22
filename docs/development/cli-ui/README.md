@@ -35,5 +35,5 @@ UI-14.2d 已复用 ARC-03.2b2 工作区会话快照增加两端会话 provider�
 UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-18 按 Goal/Pursuit 后端依赖分段推进；
 UI-17 是统一发布门；17.1 manifest 已完成，17.2a runtime-health、17.2b permission/interaction 与
 17.2c terminal run lifecycle、17.2d Evaluation Lane Receipt 与 17.2e stream recovery golden 已完成；17.3a 已验证
-New UI 对旧 Bridge 的 Evaluation Lane typed→Slash 降级。仍需断连 uncertain/权限恢复 golden、通用 capability registry
-和 17.3b-17.6。
+New UI 对旧 Bridge 的 Evaluation Lane typed→Slash 降级，17.3b 已建立发布合同驱动的通用
+event-capability registry。仍需断连 uncertain/权限恢复 golden、未知关键事件分类和 17.3c-17.6。
