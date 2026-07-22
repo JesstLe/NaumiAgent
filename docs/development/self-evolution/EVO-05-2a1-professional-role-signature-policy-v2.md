@@ -28,8 +28,8 @@ authority 与 EVO-05.2c2 真实 Ed25519 Signature Receipt 完成身份绑定。
 v2。
 
 Store 重放 v1 时使用 v1 确定性 Builder，重放 v2 时使用 v2 Builder；调用方不能把 v1 的 role/signature projection
-改写成 v2，也不能让新执行回退到 legacy policy。现有 v1 Response/Signature 审计事实保留，但 EVO-05.2d 对
-缺少专业角色可验证身份的 legacy Requirement 必须返回 pending/stale，不得宣称 approved。
+改写成 v2，也不能让新执行回退到 legacy policy。现有 v1 Response/Signature 审计事实保留；EVO-05.2d 已验证
+缺少专业角色可验证身份的 legacy Requirement 返回 pending，不会宣称 approved。
 
 ## 验收证据
 
@@ -43,5 +43,6 @@ Store 重放 v1 时使用 v1 确定性 Builder，重放 v2 时使用 v2 Builder�
 
 ## 边界
 
-本切片只关闭专业角色的正向身份验证缺口，不聚合决定、不创建 Principal、不持有私钥、不执行 Git。下一步
-EVO-05.2d 必须只把 local user approval 或 current eligible Signature Receipt 计入正向 quorum。
+本切片只关闭专业角色的正向身份验证缺口，不创建 Principal、不持有私钥、不执行 Git。EVO-05.2d 已只把 local
+user approval 或 current eligible Signature Receipt 计入正向 quorum；下一步 EVO-05.3 仍必须重新验证 current
+Decision 与 target。

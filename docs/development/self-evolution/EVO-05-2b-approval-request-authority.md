@@ -90,6 +90,5 @@ Receipt 不保存源码、自由文本、用户自定义输入、签名值、密
 
 EVO-05.2c1 已交付 trusted Principal/role/Ed25519 public-key authority；EVO-05.2c2 已把 role response 绑定
 current active key，并验证 domain-separated payload、nonce、expiry 与 replay protection，私钥不进入 Naumi。
-下一步 EVO-05.2d 做
-Approval Decision aggregation，必须动态重查 Requirement、target、所有 technical gates、role identity 和签名回执；
-聚合通过仍只授予进入 EVO-05.3 rebase/revalidate 的资格，不直接执行 Git 或发布。
+EVO-05.2d 已完成 Approval Decision aggregation，并动态重查 Requirement、target、所有 technical gates、role
+identity 和签名回执；聚合通过仍只授予进入 EVO-05.3 rebase/revalidate 的资格，不直接执行 Git 或发布。

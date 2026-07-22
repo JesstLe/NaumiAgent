@@ -128,6 +128,6 @@ accepted/revise/rejected 设置 `candidate_acceptance_decided=true`；escalated 
 
 ## 下一步
 
-EVO-04.7a 已只保存结构化 Decision/Resolution 经验与证据引用。EVO-05.1a 至 EVO-05.2c2 的 Package、
-Requirement、Role Response、Principal 与 Signature Receipt authority 均已完成；下一步是 EVO-05.2d
-Approval Decision 聚合。用户自定义文本或 Reviewer 叙事仍不得进入系统 Prompt 或 promotion authority。
+EVO-04.7a 已只保存结构化 Decision/Resolution 经验与证据引用。EVO-05.1a 至 EVO-05.2d 的 Package、
+Requirement、Role Response、Principal、Signature Receipt 与 Approval Decision authority 均已完成；下一步是
+EVO-05.3 rebase/revalidate。用户自定义文本或 Reviewer 叙事仍不得进入系统 Prompt 或 promotion authority。
