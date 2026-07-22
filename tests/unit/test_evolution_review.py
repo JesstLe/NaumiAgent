@@ -24,6 +24,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionEvaluationAggregationContractTool,
     EvolutionEvaluationReceiptTool,
     EvolutionExperimentContractAuthorityTool,
+    EvolutionExperimentContractIssueTool,
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
@@ -170,6 +171,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert [tool.name for tool in tools] == [
         "evolution_candidates",
         "evolution_experiment_contract_authority",
+        "evolution_issue_experiment_contract",
         "evolution_evaluation_receipt",
         "evolution_evaluation_contract",
         "evolution_final_evaluation_receipt",
@@ -188,14 +190,16 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         False,
         False,
         False,
+        False,
     ]
     assert isinstance(tools[1], EvolutionExperimentContractAuthorityTool)
-    assert isinstance(tools[2], EvolutionEvaluationReceiptTool)
-    assert isinstance(tools[3], EvolutionEvaluationAggregationContractTool)
-    assert isinstance(tools[4], EvolutionFinalEvaluationReceiptTool)
-    assert isinstance(tools[5], EvolutionDecisionInputTool)
-    assert isinstance(tools[6], EvolutionMechanicalGateTool)
-    assert isinstance(tools[7], EvolutionIndependentReviewTool)
+    assert isinstance(tools[2], EvolutionExperimentContractIssueTool)
+    assert isinstance(tools[3], EvolutionEvaluationReceiptTool)
+    assert isinstance(tools[4], EvolutionEvaluationAggregationContractTool)
+    assert isinstance(tools[5], EvolutionFinalEvaluationReceiptTool)
+    assert isinstance(tools[6], EvolutionDecisionInputTool)
+    assert isinstance(tools[7], EvolutionMechanicalGateTool)
+    assert isinstance(tools[8], EvolutionIndependentReviewTool)
 
 
 class _FakeEngine:

@@ -71,8 +71,8 @@ authority digest；它们不重新签发 Contract，也不授予执行或 promot
 
 ## 明确未完成
 
-- 本切片不新增 Proposal approve/Contract issue UI；签发仍由受治理 workflow 触发，新增通道只负责审查 durable
-  authority。
+- EVO-02.1b 原切片不新增 Proposal approve/Contract issue UI；该产品断点现已由 HAR-09.5c/UI-10.6c 补齐，
+  New UI、TUI 与 Agent Tool 复用本 Store/Issuer，并保持 Contract 不可执行。
 - EVO-04.1a 已同时从 Candidate Store、Mutation Receipt Store、Experiment Contract Store 和 Final Evaluation
   Receipt Store 重读并交叉验证完整 Decision Input；后续 gate 只能消费该 authority。
 - EVO-04.2a Mechanical Gate 与 4.3a Independent Reviewer 已实现；counterfactual、reward-hacking

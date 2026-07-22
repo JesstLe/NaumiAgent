@@ -364,6 +364,18 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="workbench_proposal_queue",
     ),
+    "evolution_issue_experiment_contract": PermissionRule(
+        tool_name="evolution_issue_experiment_contract",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        risk_level=PermissionRiskLevel.HIGH,
+        tool_family="evolution_experiment_governance",
+    ),
     "workbench_govern_proposal": PermissionRule(
         tool_name="workbench_govern_proposal",
         allowed_modes=[

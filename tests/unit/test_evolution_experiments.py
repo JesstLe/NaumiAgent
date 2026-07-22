@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -19,14 +21,21 @@ from naumi_agent.evolution.experiments import (
     ExperimentBudget,
     ExperimentScope,
     GitExperimentBaselineReader,
+    default_experiment_seed,
     render_experiment_contract_authority,
 )
 from naumi_agent.evolution.queue import EvolutionProposalQueueAdapter
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.store import EvolutionCandidateStore
 from naumi_agent.harness.feedback import FeedbackIntakeService, build_direct_user_feedback
+from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.tasks.store import TaskStore
-from naumi_agent.tools.evolution_review import EvolutionExperimentContractAuthorityTool
+from naumi_agent.tools.evolution_review import (
+    EvolutionExperimentContractAuthorityTool,
+    EvolutionExperimentContractIssueTool,
+)
+from naumi_agent.ui.bridge import JsonlEngineBridge
+from naumi_agent.ui.protocol import ClientEventType
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
@@ -136,6 +145,36 @@ async def _approved_fixture(
     )
 
 
+class _ExperimentContractBridgeEngine:
+    def __init__(
+        self,
+        *,
+        workspace: Path,
+        service: WorkbenchService,
+        store: EvolutionExperimentContractStore,
+        issuer: EvolutionExperimentContractIssuer,
+        mode: PermissionMode,
+    ) -> None:
+        self.workspace_root = workspace
+        self.workbench_service = service
+        self.evolution_experiment_contract_store = store
+        self.evolution_experiment_contract_issuer = issuer
+        self._permission_checker = PermissionChecker(
+            mode,
+            workspace_root=str(workspace),
+        )
+        self._session = SimpleNamespace(id="session-1")
+
+    def set_permission_confirmer(self, confirmer) -> None:
+        self.permission_confirmer = confirmer
+
+    def set_user_interaction_handler(self, handler) -> None:
+        self.user_interaction_handler = handler
+
+    async def get_or_create_session(self):
+        return self._session
+
+
 @pytest.mark.asyncio
 async def test_approved_proposal_issues_stable_non_executable_contract(
     tmp_path: Path,
@@ -146,22 +185,22 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
     baseline = _git(workspace, "rev-parse", "HEAD")
     before = (workspace / "src/naumi_agent/ui/footer.py").read_bytes()
 
-    first = await issuer.issue(
-        workspace,
-        session_id="session-1",
-        proposal_id=proposal_id,
-        seed=42,
-    )
     repeated = await asyncio.gather(*(
         issuer.issue(
             workspace,
             session_id="session-1",
             proposal_id=proposal_id,
-            seed=42,
+            seed=default_experiment_seed(proposal_id) + index,
         )
-        for _ in range(4)
+        for index in range(5)
     ))
-    second = repeated[0]
+    first = repeated[0]
+    second = await issuer.issue(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+        seed=42,
+    )
 
     assert first == second
     assert first.contract_id.startswith("evx_")
@@ -187,10 +226,17 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
     assert authority.contract == first
     assert authority.workspace_root == str(workspace.resolve())
     assert authority.authority_id == f"evxauth_{authority.authority_sha256[:24]}"
+    assert await contract_store.get_by_proposal(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+    ) == authority
     assert await contract_store.get(tmp_path / "other-workspace", first.contract_id) is None
     engine = SimpleNamespace(
         workspace_root=workspace,
         evolution_experiment_contract_store=contract_store,
+        evolution_experiment_contract_issuer=issuer,
+        _session=SimpleNamespace(id="session-1"),
     )
     tool_output = await EvolutionExperimentContractAuthorityTool(engine).execute(
         first.contract_id
@@ -200,6 +246,9 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
         f"/evolution experiment-contract {first.contract_id}",
     )
     assert tool_output == render_experiment_contract_authority(authority)
+    issue_output = await EvolutionExperimentContractIssueTool(engine).execute(proposal_id)
+    assert issue_output == render_experiment_contract_authority(authority)
+    assert "不是执行或推广许可" in issue_output
     assert authority.authority_id in slash_output
     assert "不是执行或推广许可" in slash_output
     tampered_authority = authority.model_dump(mode="json")
@@ -219,6 +268,149 @@ async def test_approved_proposal_issues_stable_non_executable_contract(
     with pytest.raises(EvolutionExperimentContractStoreError) as corrupt:
         await contract_store.get(workspace, first.contract_id)
     assert corrupt.value.code == "experiment_contract_authority_store_corrupt"
+
+
+@pytest.mark.asyncio
+async def test_bridge_requires_confirmation_then_returns_contract_authority(
+    tmp_path: Path,
+) -> None:
+    workspace, _candidate_store, service, store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path)
+    )
+    before = (workspace / "src/naumi_agent/ui/footer.py").read_bytes()
+    engine = _ExperimentContractBridgeEngine(
+        workspace=workspace,
+        service=service,
+        store=store,
+        issuer=issuer,
+        mode=PermissionMode.MODERATE,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")  # type: ignore[arg-type]
+    bridge.bind_writer(writer)
+    base = {
+        "session_id": "session-1",
+        "proposal_id": proposal_id,
+        "action": "issue_contract",
+        "decision_note": "",
+    }
+
+    await bridge.handle_client_record(
+        {
+            "id": "contract-preview",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {**base, "confirmed": False},
+        }
+    )
+    preview = [
+        json.loads(line)
+        for line in writer.getvalue().splitlines()
+        if line.strip()
+    ][-1]
+    assert preview["payload"]["status"] == "needs_confirmation"
+    assert await store.get_by_proposal(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+    ) is None
+
+    await bridge.handle_client_record(
+        {
+            "id": "contract-confirm",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {**base, "confirmed": True},
+        }
+    )
+    records = [
+        json.loads(line)
+        for line in writer.getvalue().splitlines()
+        if line.strip()
+    ]
+    completed = [
+        record
+        for record in records
+        if record["type"] == "workbench/proposal/action_result"
+    ][-1]
+    summary = completed["payload"]["experiment_contract"]
+    assert completed["payload"]["status"] == "completed"
+    assert summary["proposal_id"] == proposal_id
+    assert summary["contract_id"].startswith("evx_")
+    assert summary["authority_id"].startswith("evxauth_")
+    assert summary["execution_ready"] is False
+    assert summary["promotion_ready"] is False
+    assert completed["payload"]["workbench_snapshot"]["counts"]["reviews"] == 1
+    assert (workspace / "src/naumi_agent/ui/footer.py").read_bytes() == before
+    assert _git(workspace, "status", "--porcelain") == ""
+
+
+@pytest.mark.asyncio
+async def test_contract_store_migrates_legacy_authority_projection(tmp_path: Path) -> None:
+    workspace, _candidate_store, _service, source_store, issuer, proposal_id = (
+        await _approved_fixture(tmp_path / "source")
+    )
+    contract = await issuer.issue(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+        seed=default_experiment_seed(proposal_id),
+    )
+    authority = await source_store.get(workspace, contract.contract_id)
+    assert authority is not None
+    legacy_path = tmp_path / "legacy.db"
+    with sqlite3.connect(legacy_path) as db:
+        db.execute(
+            """
+            CREATE TABLE evolution_experiment_contracts (
+                workspace_root TEXT NOT NULL,
+                contract_id TEXT NOT NULL,
+                manifest_sha256 TEXT NOT NULL,
+                authority_id TEXT NOT NULL,
+                authority_sha256 TEXT NOT NULL,
+                authority_json TEXT NOT NULL,
+                approved_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_root, contract_id)
+            )
+            """
+        )
+        db.execute(
+            "INSERT INTO evolution_experiment_contracts VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                authority.workspace_root,
+                authority.contract_id,
+                authority.contract_manifest_sha256,
+                authority.authority_id,
+                authority.authority_sha256,
+                json.dumps(
+                    authority.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                authority.approved_at,
+            ),
+        )
+        db.commit()
+
+    restored = await EvolutionExperimentContractStore(legacy_path).get_by_proposal(
+        workspace,
+        session_id="session-1",
+        proposal_id=proposal_id,
+    )
+
+    assert restored == authority
+    with sqlite3.connect(legacy_path) as db:
+        columns = {
+            row[1]
+            for row in db.execute(
+                "PRAGMA table_info(evolution_experiment_contracts)"
+            ).fetchall()
+        }
+        projection = db.execute(
+            "SELECT source_session_id, workbench_proposal_id "
+            "FROM evolution_experiment_contracts"
+        ).fetchone()
+    assert {"source_session_id", "workbench_proposal_id"} <= columns
+    assert projection == ("session-1", proposal_id)
 
 
 @pytest.mark.asyncio

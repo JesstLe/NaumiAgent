@@ -14,6 +14,10 @@ from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Input, Label, Markdown, Static
 
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContractStoreError,
+    default_experiment_seed,
+)
 from naumi_agent.workbench.proposal_governance import (
     ProposalAction,
     ProposalGovernanceConflictError,
@@ -37,7 +41,7 @@ def format_workbench_overview_markdown(value: Mapping[str, Any]) -> str:
             f"revision {_integer(snapshot.get('revision'))} · "
             f"任务 {_integer(counts.get('tasks'))} · "
             f"worktree {_integer(counts.get('worktrees'))} · "
-            f"待审 {_integer(counts.get('reviews'))} · "
+            f"审阅项 {_integer(counts.get('reviews'))} · "
             f"失败 {_integer(counts.get('failures'))}"
         ),
         f"最后更新：{_plain(snapshot.get('generated_at')) or '-'}",
@@ -214,11 +218,15 @@ def format_workbench_reviews_markdown(
     error: str = "",
     notice: str = "",
 ) -> str:
-    """Render waiting approvals and open Proposals from the shared service."""
+    """Render waiting approvals plus actionable open/approved Proposals."""
     snapshot = _validate_snapshot(value)
     reviews = _review_records(snapshot)
     if not reviews:
-        lines = ["## Reviews", "", "当前没有待审 Approval 或开放 Proposal。"]
+        lines = [
+            "## Reviews",
+            "",
+            "当前没有待审 Approval、开放 Proposal 或待转换的 approved Proposal。",
+        ]
         if notice:
             lines.extend(["", f"**{_plain(notice)}**"])
         if error:
@@ -352,14 +360,27 @@ def _append_proposal_review(
     lines.extend(f"- {_plain(step)}" for step in validation[:8])
     if not validation:
         lines.append("- 未声明")
-    lines.extend(
-        [
-            "",
-            "> 批准只进入下一 policy gate，不执行代码，也不授予实验资格。",
-            "",
-            "`a` 批准 · `x` 拒绝 · `r` 刷新 · `Esc` 返回",
-        ]
-    )
+    if _normalized(proposal.get("state")) == "approved":
+        lines.extend(
+            [
+                "",
+                (
+                    "> Proposal 已批准，但尚未执行代码；Experiment Contract 只冻结 "
+                    "baseline、scope、预算和验证约束，不会修改代码、运行实验或授予发布权限。"
+                ),
+                "",
+                "`c` 签发或重开 Experiment Contract · `r` 刷新 · `Esc` 返回",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "> 批准只进入下一 policy gate，不执行代码，也不授予实验资格。",
+                "",
+                "`a` 批准 · `x` 拒绝 · `r` 刷新 · `Esc` 返回",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -453,6 +474,39 @@ class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
         self.dismiss({"action": self.proposal_action.value, "decision_note": note})
 
 
+class ExperimentContractIssueScreen(ModalScreen[bool]):
+    """Confirm the separate approved Proposal to Contract transition."""
+
+    BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
+    DEFAULT_CSS = ProposalDecisionScreen.DEFAULT_CSS
+
+    def __init__(self, *, title: str) -> None:
+        super().__init__()
+        self.proposal_title = title
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label("[bold]签发不可执行 Experiment Contract？[/bold]")
+            yield Label(_plain(self.proposal_title) or "未命名 Proposal")
+            yield Label(
+                "该操作只冻结 baseline、scope、预算和验证约束；"
+                "不会修改代码、运行实验或批准发布。"
+            )
+            with Horizontal():
+                yield Button("确认签发", variant="warning", id="contract-confirm")
+                yield Button("取消", variant="primary", id="contract-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#contract-confirm", Button).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    @on(Button.Pressed)
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "contract-confirm")
+
+
 class WorkbenchOverviewScreen(Screen[None]):
     """Full-page TUI view backed by ``WorkbenchService.dashboard_snapshot``."""
 
@@ -468,6 +522,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("down", "select_next", "下一项", show=False),
         Binding("a", "approve_proposal", "批准 Proposal", show=False),
         Binding("x", "reject_proposal", "拒绝 Proposal", show=False),
+        Binding("c", "issue_experiment_contract", "签发实验契约", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -669,6 +724,109 @@ class WorkbenchOverviewScreen(Screen[None]):
 
     def action_reject_proposal(self) -> None:
         self._begin_proposal_action(ProposalAction.REJECT)
+
+    def action_issue_experiment_contract(self) -> None:
+        if self.proposal_action_pending:
+            return
+        selected = self._selected_review()
+        if not (
+            selected is not None
+            and selected.get("review_kind") == "proposal"
+            and _normalized(selected.get("state")) == "approved"
+            and _normalized(selected.get("source_kind")) == "evolution_candidate"
+        ):
+            return
+        proposal_id = _normalized(selected.get("id"))
+        decision = self.engine._permission_checker.check(
+            "evolution_issue_experiment_contract",
+            {"proposal_id": proposal_id},
+        )
+        if not decision.allowed:
+            self.review_error = "当前权限模式不允许签发 Experiment Contract。"
+            self._render_snapshot()
+            return
+        if not decision.requires_confirmation:
+            self.submit_experiment_contract(proposal_id, confirmed=False)
+            return
+
+        def on_confirmed(confirmed: bool) -> None:
+            if confirmed:
+                self.submit_experiment_contract(proposal_id, confirmed=True)
+
+        self.app.push_screen(
+            ExperimentContractIssueScreen(
+                title=_plain(selected.get("title") or proposal_id),
+            ),
+            on_confirmed,
+        )
+
+    @work(exclusive=True, group="workbench-contract-issue", exit_on_error=False)
+    async def submit_experiment_contract(
+        self,
+        proposal_id: str,
+        *,
+        confirmed: bool,
+    ) -> None:
+        if self.proposal_action_pending:
+            return
+        self.proposal_action_pending = True
+        try:
+            decision = self.engine._permission_checker.check(
+                "evolution_issue_experiment_contract",
+                {"proposal_id": proposal_id},
+            )
+            if not decision.allowed:
+                raise WorkbenchSnapshotError(
+                    "当前权限模式不允许签发 Experiment Contract。"
+                )
+            if decision.requires_confirmation and not confirmed:
+                raise WorkbenchSnapshotError("签发 Experiment Contract 需要明确确认。")
+            if self.snapshot is None:
+                raise WorkbenchSnapshotError("Workbench 权威快照不可用。")
+            session_id = _normalized(self.snapshot.get("session_id"))
+            self.review_error = ""
+            self.review_notice = "正在签发或重开 durable Experiment Contract…"
+            self._render_snapshot()
+            contract = await self.engine.evolution_experiment_contract_issuer.issue(
+                self.engine.workspace_root,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                seed=default_experiment_seed(proposal_id),
+            )
+            authority = await self.engine.evolution_experiment_contract_store.get(
+                self.engine.workspace_root,
+                contract.contract_id,
+            )
+            if authority is None:
+                raise RuntimeError("Experiment Contract authority 未持久化。")
+            self.snapshot = _validate_snapshot(
+                await self.engine.workbench_service.dashboard_snapshot(session_id),
+                session_id=session_id,
+            )
+        except EvolutionExperimentContractStoreError as exc:
+            logger.warning("TUI Experiment Contract store failed (%s)", exc.code)
+            self.review_error = "Experiment Contract 状态库损坏或暂不可用。"
+            self.review_notice = ""
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "TUI Experiment Contract issue failed (%s)",
+                type(exc).__name__,
+            )
+            self.review_error = (
+                _plain(exc)
+                if isinstance(exc, ValueError)
+                else "Experiment Contract 签发暂时失败。"
+            )
+            self.review_notice = ""
+        else:
+            self.review_error = ""
+            self.review_notice = (
+                f"Experiment Contract {authority.contract_id} 已持久化；"
+                "execution_ready=false，尚未修改代码或批准发布。"
+            )
+        finally:
+            self.proposal_action_pending = False
+            self._render_snapshot()
 
     def _begin_proposal_action(self, action: ProposalAction) -> None:
         if self.proposal_action_pending:
@@ -877,7 +1035,13 @@ def _review_records(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
     proposals = [
         {**item, "review_kind": "proposal"}
         for item in _records(snapshot.get("proposals"))
-        if _normalized(item.get("state")) == "open"
+        if (
+            _normalized(item.get("state")) == "open"
+            or (
+                _normalized(item.get("state")) == "approved"
+                and _normalized(item.get("source_kind")) == "evolution_candidate"
+            )
+        )
     ]
     return [*approvals, *proposals]
 

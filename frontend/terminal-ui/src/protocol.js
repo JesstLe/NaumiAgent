@@ -784,22 +784,151 @@ function normalizeWorkbenchProposalActionResult(payload) {
     "workbench/proposal/action_result status",
     new Set(["needs_confirmation", "completed", "blocked", "conflict", "not_found", "error"]),
   );
+  const proposalId = harnessText(payload.proposal_id, "workbench/proposal/action_result proposal_id");
+  const action = harnessChoice(
+    payload.action,
+    "workbench/proposal/action_result action",
+    new Set(["approve", "reject", "issue_contract"]),
+  );
+  const experimentContract = payload.experiment_contract == null
+    ? null
+    : normalizeExperimentContractSummary(payload.experiment_contract);
+  if (
+    (action === "issue_contract" && status === "completed" && experimentContract == null)
+    || (experimentContract != null && (action !== "issue_contract" || status !== "completed"))
+    || (experimentContract != null && experimentContract.proposal_id !== proposalId)
+  ) {
+    throw new Error("workbench/proposal/action_result Experiment Contract 绑定无效");
+  }
   return {
     schema_version: 1,
     session_id: harnessText(payload.session_id, "workbench/proposal/action_result session_id"),
-    proposal_id: harnessText(payload.proposal_id, "workbench/proposal/action_result proposal_id"),
-    action: harnessChoice(
-      payload.action,
-      "workbench/proposal/action_result action",
-      new Set(["approve", "reject"]),
-    ),
+    proposal_id: proposalId,
+    action,
     status,
     message: workbenchText(payload.message, "workbench/proposal/action_result message", 2_000),
     proposal: payload.proposal == null ? null : normalizeWorkbenchProposal(payload.proposal),
+    experiment_contract: experimentContract,
     workbench_snapshot: payload.workbench_snapshot == null
       ? null
       : normalizeServerPayload("workbench/snapshot", payload.workbench_snapshot),
   };
+}
+
+function normalizeExperimentContractSummary(value) {
+  const item = harnessObject(value, "experiment contract summary");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("experiment contract summary schema_version 不兼容");
+  }
+  const authorityId = harnessText(item.authority_id, "experiment contract authority_id");
+  const contractId = harnessText(item.contract_id, "experiment contract contract_id");
+  const candidateId = harnessText(item.candidate_id, "experiment contract candidate_id");
+  const proposalId = harnessText(item.proposal_id, "experiment contract proposal_id");
+  const authoritySha = harnessText(item.authority_sha256, "experiment contract authority_sha256");
+  const manifestSha = harnessText(item.manifest_sha256, "experiment contract manifest_sha256");
+  if (!/^evxauth_[0-9a-f]{24}$/.test(authorityId)) throw new Error("experiment contract authority_id 格式无效");
+  if (!/^evx_[0-9a-f]{24}$/.test(contractId)) throw new Error("experiment contract contract_id 格式无效");
+  if (!/^evc_[0-9a-f]{24}$/.test(candidateId)) throw new Error("experiment contract candidate_id 格式无效");
+  if (!proposalId || proposalId.length > 128) throw new Error("experiment contract proposal_id 格式无效");
+  if (!/^[0-9a-f]{64}$/.test(authoritySha) || !/^[0-9a-f]{64}$/.test(manifestSha)) {
+    throw new Error("experiment contract digest 格式无效");
+  }
+  const budget = harnessObject(item.budget, "experiment contract budget");
+  const normalized = {
+    schema_version: 1,
+    authority_id: authorityId,
+    authority_sha256: authoritySha,
+    contract_id: contractId,
+    manifest_sha256: manifestSha,
+    proposal_id: proposalId,
+    candidate_id: candidateId,
+    candidate_revision: harnessPositiveInteger(
+      item.candidate_revision,
+      "experiment contract candidate_revision",
+    ),
+    impact_scope: normalizeExperimentImpactScope(item.impact_scope),
+    allowed_files: normalizeExperimentAllowedFiles(item.allowed_files),
+    budget: {
+      policy_version: harnessChoice(
+        budget.policy_version,
+        "experiment contract budget policy_version",
+        new Set(["evolution-experiment-budget-v1"]),
+      ),
+      max_changed_files: boundedPositiveInteger(budget.max_changed_files, 1, 16, "max_changed_files"),
+      max_changed_lines: boundedPositiveInteger(budget.max_changed_lines, 1, 2_000, "max_changed_lines"),
+      max_tool_calls: boundedPositiveInteger(budget.max_tool_calls, 1, 200, "max_tool_calls"),
+      max_duration_seconds: boundedPositiveInteger(
+        budget.max_duration_seconds,
+        60,
+        3_600,
+        "max_duration_seconds",
+      ),
+      max_attempts: boundedPositiveInteger(budget.max_attempts, 1, 3, "max_attempts"),
+    },
+    execution_ready: harnessBoolean(item.execution_ready, "experiment contract execution_ready"),
+    promotion_ready: harnessBoolean(item.promotion_ready, "experiment contract promotion_ready"),
+  };
+  if (
+    normalized.execution_ready
+    || normalized.promotion_ready
+    || normalized.budget.max_changed_files < normalized.allowed_files.length
+  ) {
+    throw new Error("experiment contract safety projection 无效");
+  }
+  return normalized;
+}
+
+function boundedPositiveInteger(value, minimum, maximum, name) {
+  const parsed = harnessPositiveInteger(value, `experiment contract ${name}`);
+  if (parsed < minimum || parsed > maximum) {
+    throw new Error(`experiment contract ${name} 超出范围`);
+  }
+  return parsed;
+}
+
+function normalizeExperimentAllowedFiles(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 16) {
+    throw new Error("experiment contract allowed_files 必须包含 1..16 个路径");
+  }
+  const normalized = value.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error("experiment contract allowed_files 必须是字符串数组");
+    }
+    const path = item.trim().replaceAll("\\", "/");
+    if (
+      !path
+      || path.length > 1_024
+      || path.startsWith("/")
+      || /^[A-Za-z]:\//.test(path)
+      || path.split("/").includes("..")
+      || /[\0\r\n]/.test(path)
+    ) {
+      throw new Error("experiment contract allowed_files 必须是安全相对路径");
+    }
+    return path;
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("experiment contract allowed_files 不得重复");
+  }
+  return normalized;
+}
+
+function normalizeExperimentImpactScope(value) {
+  if (typeof value !== "string") {
+    throw new Error("experiment contract impact_scope 必须是字符串");
+  }
+  const scope = value.trim().replaceAll("\\", "/");
+  if (
+    !scope
+    || scope.length > 1_024
+    || scope.startsWith("/")
+    || /^[A-Za-z]:\//.test(scope)
+    || scope.split(/[/:]/).includes("..")
+    || /[\0\r\n]/.test(scope)
+  ) {
+    throw new Error("experiment contract impact_scope 格式无效");
+  }
+  return scope;
 }
 
 function normalizeWorkbenchReview(payload) {

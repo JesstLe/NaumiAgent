@@ -16,8 +16,10 @@ from naumi_agent.workbench.models import (
     FailureKind,
     LeaseState,
     ParallelMode,
+    ProposalSourceKind,
     RiskLevel,
 )
+from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
@@ -129,6 +131,62 @@ async def test_dashboard_snapshot_versions_content_and_exposes_navigation_summar
         "review_kind": "approval",
     }
     assert first["proposals"][0]["id"] == proposal.id
+
+
+@pytest.mark.asyncio
+async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) -> None:
+    database = str(tmp_path / "workbench.db")
+    task_store = TaskStore(database)
+    task_store.set_session("s")
+    service = WorkbenchService(
+        task_store=task_store,
+        workbench_store=WorkbenchStore(database),
+    )
+    mission = await service.create_mission(
+        session_id="s",
+        title="Evolution 治理",
+        goal="显式签发实验契约",
+    )
+    task = await task_store.create_task("审阅 Candidate")
+    await service.attach_issue(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        acceptance_criteria=[],
+    )
+    proposal = await service.create_proposal(
+        session_id="s",
+        mission_id=mission.id,
+        task_id=task.id,
+        agent_id="Evolution-Agent",
+        title="修复 Footer",
+        impact_scope="src/footer.py:render_footer",
+        intended_files=["src/footer.py"],
+        validation_plan=["pytest test_footer.py"],
+        source_kind=ProposalSourceKind.EVOLUTION_CANDIDATE,
+        source_id=f"evc_{'a' * 24}",
+        source_revision=2,
+        source_occurrence_count=3,
+        source_sha256="b" * 64,
+        source_proposal_id=f"evp_{'c' * 24}",
+        generator_version="evolution-proposal-v1",
+        proposal_kind="code",
+        idempotency_key=f"evolution:evp_{'c' * 24}",
+    )
+    await service.govern_proposal(
+        "s",
+        proposal["id"],
+        action=ProposalAction.APPROVE,
+        reviewer="Human",
+        decision_note="允许进入契约阶段",
+    )
+
+    snapshot = await service.dashboard_snapshot("s")
+
+    assert snapshot["counts"]["reviews"] == 1
+    assert snapshot["active_selection"]["review_id"] == proposal["id"]
+    assert snapshot["active_selection"]["review_kind"] == "proposal"
+    assert snapshot["proposals"][0]["state"] == "approved"
 
 
 @pytest.mark.asyncio

@@ -116,6 +116,7 @@ function createEmptyWorkbenchState() {
     review_error: "",
     review_detail: null,
     proposal_action: null,
+    experiment_contract: null,
     action_notice: "",
     action_error: "",
     missions: [],
@@ -565,6 +566,7 @@ function applyWorkbenchSnapshot(state, payload) {
     : "overview";
   const previousReviewDetail = state.workbench.review_detail;
   const previousProposalAction = state.workbench.proposal_action;
+  const previousExperimentContract = state.workbench.experiment_contract;
   const previousActionNotice = state.workbench.action_notice;
   const previousActionError = state.workbench.action_error;
   state.workbench = {
@@ -588,6 +590,7 @@ function applyWorkbenchSnapshot(state, payload) {
     state.workbench.review_detail = previousReviewDetail;
   }
   state.workbench.proposal_action = previousProposalAction;
+  state.workbench.experiment_contract = previousExperimentContract;
   state.workbench.action_notice = previousActionNotice;
   state.workbench.action_error = previousActionError;
   return true;
@@ -1239,7 +1242,7 @@ export function reduceServerEvent(state, record) {
         pushSystemMessage(
           state,
           "Workbench",
-          `已同步：任务 ${counts.tasks} · worktree ${counts.worktrees} · 待审 ${counts.reviews}`,
+          `已同步：任务 ${counts.tasks} · worktree ${counts.worktrees} · 审阅项 ${counts.reviews}`,
           "info",
         );
       }
@@ -3089,12 +3092,29 @@ export function handleWorkbenchOverviewKey(state, key, send) {
   }
   if (state.workbench.selected_tab === "reviews") {
     const selected = selectedWorkbenchReview(state.workbench);
-    if (selected?.review_kind === "proposal" && normalized === "a") {
+    if (
+      selected?.review_kind === "proposal"
+      && selected.state === "open"
+      && normalized === "a"
+    ) {
       beginWorkbenchProposalAction(state, selected, "approve", send);
       return true;
     }
-    if (selected?.review_kind === "proposal" && normalized === "x") {
+    if (
+      selected?.review_kind === "proposal"
+      && selected.state === "open"
+      && normalized === "x"
+    ) {
       beginWorkbenchProposalAction(state, selected, "reject", send);
+      return true;
+    }
+    if (
+      selected?.review_kind === "proposal"
+      && selected.state === "approved"
+      && selected.source_kind === "evolution_candidate"
+      && normalized === "c"
+    ) {
+      beginWorkbenchProposalAction(state, selected, "issue_contract", send);
       return true;
     }
     let delta = 0;
@@ -3188,7 +3208,10 @@ function setWorkbenchReviewSelectionIndex(workbench, value) {
 function workbenchReviewItems(workbench) {
   const approvals = Array.isArray(workbench.approvals) ? workbench.approvals : [];
   const proposals = Array.isArray(workbench.proposals)
-    ? workbench.proposals.filter((item) => item?.state === "open")
+    ? workbench.proposals.filter((item) => (
+      item?.state === "open"
+      || (item?.state === "approved" && item?.source_kind === "evolution_candidate")
+    ))
     : [];
   return [
     ...approvals.map((item) => ({ ...item, review_kind: "approval" })),
@@ -3219,7 +3242,10 @@ function beginWorkbenchProposalAction(state, proposal, action, send) {
     inputCursor: 0,
     inputPreferredColumn: null,
   };
-  if (action === "approve" && state.status?.permission_mode === "bypass") {
+  if (
+    ["approve", "issue_contract"].includes(action)
+    && state.status?.permission_mode === "bypass"
+  ) {
     sendWorkbenchProposalAction(state, send, false);
   }
 }
@@ -3234,14 +3260,14 @@ function handleWorkbenchProposalActionKey(state, key, send) {
       sendWorkbenchProposalAction(state, send, true);
     } else if (normalized === "n" || key === INPUT_KEYS.escape) {
       state.workbench.proposal_action = null;
-      state.workbench.action_notice = "已取消 Proposal 决策，未写入任何变更。";
+      state.workbench.action_notice = "已取消操作，未写入任何变更。";
     }
     return true;
   }
   if (action.phase !== "note") return true;
   if (key === INPUT_KEYS.escape) {
     state.workbench.proposal_action = null;
-    state.workbench.action_notice = "已取消 Proposal 决策，未写入任何变更。";
+    state.workbench.action_notice = "已取消操作，未写入任何变更。";
     return true;
   }
   if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
@@ -3318,6 +3344,9 @@ function applyWorkbenchProposalActionResult(state, payload) {
   if (payload.status === "completed") {
     state.workbench.action_notice = String(payload.message || "Proposal 决策已完成。");
     state.workbench.action_error = "";
+    if (payload.action === "issue_contract") {
+      state.workbench.experiment_contract = payload.experiment_contract;
+    }
   } else {
     state.workbench.action_notice = "";
     state.workbench.action_error = String(payload.message || "Proposal 决策失败。");

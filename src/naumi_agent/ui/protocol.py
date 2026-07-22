@@ -446,14 +446,18 @@ def _normalize_client_payload(
             char in proposal_id for char in ("\x00", "\r", "\n")
         ):
             raise ValueError("Workbench proposal_id 格式无效。")
-        if action not in {"approve", "reject"}:
-            raise ValueError("Proposal UI action 仅支持 approve/reject。")
+        if action not in {"approve", "reject", "issue_contract"}:
+            raise ValueError(
+                "Proposal UI action 仅支持 approve/reject/issue_contract。"
+            )
         if len(decision_note) > 2_000 or any(
             char in decision_note for char in ("\x00", "\r")
         ):
             raise ValueError("Proposal decision_note 格式无效。")
         if action == "reject" and not decision_note:
             raise ValueError("拒绝 Proposal 时必须填写原因。")
+        if action == "issue_contract" and decision_note:
+            raise ValueError("签发 Experiment Contract 不接受 decision_note。")
         if not isinstance(confirmed, bool):
             raise ValueError("Proposal confirmed 必须是布尔值。")
         return {

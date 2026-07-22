@@ -2188,6 +2188,87 @@ test("normalizes strict workbench proposal action results", () => {
     type: "workbench/proposal/action_result",
     payload: { ...payload, status: "invented" },
   }), /status/);
+
+  const contract = {
+    schema_version: 1,
+    authority_id: `evxauth_${"a".repeat(24)}`,
+    authority_sha256: "b".repeat(64),
+    contract_id: `evx_${"c".repeat(24)}`,
+    manifest_sha256: "d".repeat(64),
+    proposal_id: "proposal-1",
+    candidate_id: `evc_${"e".repeat(24)}`,
+    candidate_revision: 3,
+    impact_scope: "frontend/terminal-ui/src/components/footer.js:renderFooter",
+    allowed_files: ["frontend/terminal-ui/src/components/footer.js"],
+    budget: {
+      policy_version: "evolution-experiment-budget-v1",
+      max_changed_files: 1,
+      max_changed_lines: 120,
+      max_tool_calls: 20,
+      max_duration_seconds: 600,
+      max_attempts: 2,
+    },
+    execution_ready: false,
+    promotion_ready: false,
+  };
+  const issued = normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1,
+      session_id: "s",
+      proposal_id: "proposal-1",
+      action: "issue_contract",
+      status: "completed",
+      message: "Experiment Contract 已持久化。",
+      proposal: null,
+      experiment_contract: contract,
+      workbench_snapshot: null,
+    },
+  }).payload;
+  assert.deepEqual(issued.experiment_contract, contract);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1, session_id: "s", proposal_id: "proposal-1",
+      action: "issue_contract", status: "completed", message: "missing",
+      proposal: null, experiment_contract: null, workbench_snapshot: null,
+    },
+  }), /绑定无效/);
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1, session_id: "s", proposal_id: "other-proposal",
+      action: "issue_contract", status: "completed", message: "mismatch",
+      proposal: null, experiment_contract: contract, workbench_snapshot: null,
+    },
+  }), /绑定无效/);
+  for (const invalid of [
+    { ...contract, execution_ready: true },
+    { ...contract, allowed_files: ["../secret"] },
+    { ...contract, impact_scope: "/private/secret" },
+    { ...contract, allowed_files: Array.from({ length: 17 }, (_, index) => `src/f${index}.py`) },
+    { ...contract, allowed_files: ["src/a.py", "src/a.py"] },
+    {
+      ...contract,
+      allowed_files: ["src/a.py", "src/b.py"],
+      budget: { ...contract.budget, max_changed_files: 1 },
+    },
+  ]) {
+    assert.throws(() => normalizeServerRecord({
+      type: "workbench/proposal/action_result",
+      payload: {
+        schema_version: 1,
+        session_id: "s",
+        proposal_id: "proposal-1",
+        action: "issue_contract",
+        status: "completed",
+        message: "invalid",
+        proposal: null,
+        experiment_contract: invalid,
+        workbench_snapshot: null,
+      },
+    }), /experiment contract/);
+  }
 });
 
 test("normalizes workbench event payloads", () => {
