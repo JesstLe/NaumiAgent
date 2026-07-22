@@ -45,6 +45,21 @@ if TYPE_CHECKING:
         EvolutionAdversarialSampleReceipt,
         adversarial_lane_authority_key,
     )
+    from naumi_agent.evolution.approval_decisions import (
+        EVOLUTION_PROMOTION_APPROVAL_DECISION_POLICY,
+        EvolutionPromotionApprovalDecisionBuilder,
+        EvolutionPromotionApprovalDecisionError,
+        EvolutionPromotionApprovalDecisionReceipt,
+        EvolutionPromotionApprovalDecisionService,
+        EvolutionPromotionApprovalDecisionStatus,
+        EvolutionPromotionApprovalDecisionStore,
+        EvolutionPromotionApprovalDecisionView,
+        EvolutionPromotionApprovalRoleDecision,
+        EvolutionPromotionApprovalRoleOutcome,
+        EvolutionPromotionTechnicalGateDecision,
+        EvolutionPromotionTechnicalGateState,
+        render_evolution_promotion_approval_decision,
+    )
     from naumi_agent.evolution.approval_principals import (
         EVOLUTION_APPROVAL_PRINCIPAL_POLICY,
         EvolutionApprovalPrincipalAction,
@@ -482,6 +497,19 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "EVOLUTION_PROMOTION_APPROVAL_DECISION_POLICY",
+    "EvolutionPromotionApprovalDecisionBuilder",
+    "EvolutionPromotionApprovalDecisionError",
+    "EvolutionPromotionApprovalDecisionReceipt",
+    "EvolutionPromotionApprovalDecisionService",
+    "EvolutionPromotionApprovalDecisionStatus",
+    "EvolutionPromotionApprovalDecisionStore",
+    "EvolutionPromotionApprovalDecisionView",
+    "EvolutionPromotionApprovalRoleDecision",
+    "EvolutionPromotionApprovalRoleOutcome",
+    "EvolutionPromotionTechnicalGateDecision",
+    "EvolutionPromotionTechnicalGateState",
+    "render_evolution_promotion_approval_decision",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -864,6 +892,21 @@ __all__ = [
 def __getattr__(name: str) -> object:
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    approval_decision_exports = {
+        "EVOLUTION_PROMOTION_APPROVAL_DECISION_POLICY",
+        "EvolutionPromotionApprovalDecisionBuilder",
+        "EvolutionPromotionApprovalDecisionError",
+        "EvolutionPromotionApprovalDecisionReceipt",
+        "EvolutionPromotionApprovalDecisionService",
+        "EvolutionPromotionApprovalDecisionStatus",
+        "EvolutionPromotionApprovalDecisionStore",
+        "EvolutionPromotionApprovalDecisionView",
+        "EvolutionPromotionApprovalRoleDecision",
+        "EvolutionPromotionApprovalRoleOutcome",
+        "EvolutionPromotionTechnicalGateDecision",
+        "EvolutionPromotionTechnicalGateState",
+        "render_evolution_promotion_approval_decision",
+    }
     approval_requirement_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
         "EvolutionPromotionApprovalReason",
@@ -1340,7 +1383,9 @@ def __getattr__(name: str) -> object:
         "EvolutionSelfReviewComparisonError",
         "EvolutionSelfReviewComparisonExecutor",
     }
-    if name in approval_requirement_exports:
+    if name in approval_decision_exports:
+        module_name = "approval_decisions"
+    elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
         module_name = "approval_requests"

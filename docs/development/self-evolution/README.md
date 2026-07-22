@@ -63,4 +63,6 @@ target/scope、migration 和 data backup 冻结 human roles、signature gates、
 HAR 人工确认的 Principal、角色与 Ed25519 公钥注册/轮换/撤销 authority；
 [EVO-05.2c2](EVO-05-2c2-approval-signature-receipt-authority.md) 已通过带 nonce/expiry 的 domain-separated
 Challenge 验证真实外部 Ed25519 signature，并让轮换、撤销、过期或 target 漂移后的历史 Receipt 动态失去未来
-聚合资格。当前仍无最终审批决定、Git 写入、merge、push、publish 或 promotion executor。
+聚合资格。[EVO-05.2d](EVO-05-2d-approval-decision-aggregation.md) 已重读全部角色、签名、身份与技术门，形成
+append-only 的 `approved|rejected|changes_requested|pending|stale` Decision Receipt；approved 只允许进入未来
+rebase/revalidate。当前仍无 Git 写入、merge、push、publish 或 promotion executor。

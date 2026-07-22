@@ -118,6 +118,7 @@ permissive/moderate/strict 允许且不做额外 PermissionChecker 确认，lock
 Principal 仍是工作区本地治理身份，不等于企业 SSO、硬件证书或远程 CA。Receipt 也只是一项角色证据，不能单独
 授权发布。
 
-EVO-05.2d 必须重读完整 Decision/technical gate、Approval Requirement、所有 required Role Response、current
-Principal 与 eligible Signature Receipt，明确区分 `approved|rejected|changes_requested|pending|stale`，形成
-不可执行的 Approval Decision Receipt。它仍不得直接执行 Git；EVO-05.3 才处理 target 变化后的 rebase/revalidate。
+[EVO-05.2d](EVO-05-2d-approval-decision-aggregation.md) 已重读完整 technical gate、Approval Requirement、所有
+required Role Response、current Principal 与 eligible Signature Receipt，形成明确区分
+`approved|rejected|changes_requested|pending|stale` 的不可执行 Decision Receipt。它仍不得直接执行 Git；
+EVO-05.3 才处理 approved Decision 的 rebase/revalidate。

@@ -19,6 +19,7 @@ from naumi_agent.harness.feedback import (
     build_direct_user_feedback,
 )
 from naumi_agent.tools.evolution_review import (
+    EvolutionApprovalDecisionAuthorityTool,
     EvolutionApprovalPrincipalAuthorityTool,
     EvolutionApprovalPrincipalTool,
     EvolutionApprovalSignatureAuthorityTool,
@@ -35,6 +36,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionPromotionApprovalDecisionTool,
     EvolutionPromotionApprovalRequestTool,
     EvolutionPromotionApprovalRequirementTool,
     EvolutionPromotionPackageInputTool,
@@ -206,6 +208,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_approval_principal",
         "evolution_approval_signature_authority",
         "evolution_approval_signature",
+        "evolution_approval_decision_authority",
+        "evolution_promotion_approval_decision",
         "evolution_proposal_queue",
     ]
     assert {tool.name for tool in tools if tool.metadata.read_only} == {
@@ -213,6 +217,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_experiment_contract_authority",
         "evolution_approval_principal_authority",
         "evolution_approval_signature_authority",
+        "evolution_approval_decision_authority",
     }
     assert isinstance(tools[1], EvolutionExperimentContractAuthorityTool)
     assert isinstance(tools[2], EvolutionExperimentContractIssueTool)
@@ -236,7 +241,9 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[20], EvolutionApprovalPrincipalTool)
     assert isinstance(tools[21], EvolutionApprovalSignatureAuthorityTool)
     assert isinstance(tools[22], EvolutionApprovalSignatureTool)
-    assert isinstance(tools[23], EvolutionProposalQueueTool)
+    assert isinstance(tools[23], EvolutionApprovalDecisionAuthorityTool)
+    assert isinstance(tools[24], EvolutionPromotionApprovalDecisionTool)
+    assert isinstance(tools[25], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:

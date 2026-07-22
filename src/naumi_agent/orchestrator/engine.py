@@ -63,6 +63,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.approval_decisions import (
+    EvolutionPromotionApprovalDecisionBuilder,
+    EvolutionPromotionApprovalDecisionService,
+    EvolutionPromotionApprovalDecisionStore,
+)
 from naumi_agent.evolution.approval_principals import (
     EvolutionApprovalPrincipalEventBuilder,
     EvolutionApprovalPrincipalService,
@@ -1397,6 +1402,25 @@ class AgentEngine:
             principal_service=self.evolution_approval_principal_service,
             signature_store=self.evolution_approval_signature_store,
             builder=self.evolution_approval_signature_builder,
+        )
+        self.evolution_promotion_approval_decision_builder = (
+            EvolutionPromotionApprovalDecisionBuilder()
+        )
+        self.evolution_promotion_approval_decision_store = (
+            EvolutionPromotionApprovalDecisionStore(config.memory.session_db_path)
+        )
+        self.evolution_promotion_approval_decision_service = (
+            EvolutionPromotionApprovalDecisionService(
+                requirement_executor=(
+                    self.evolution_promotion_approval_requirement_executor
+                ),
+                package_executor=self.evolution_promotion_package_executor,
+                response_store=self.evolution_promotion_approval_response_store,
+                signature_store=self.evolution_approval_signature_store,
+                signature_service=self.evolution_approval_signature_service,
+                decision_store=self.evolution_promotion_approval_decision_store,
+                builder=self.evolution_promotion_approval_decision_builder,
+            )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

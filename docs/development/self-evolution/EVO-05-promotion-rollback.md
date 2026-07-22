@@ -23,7 +23,8 @@
 - [EVO-05.2c2 Approval Signature Receipt Authority](EVO-05-2c2-approval-signature-receipt-authority.md)：已交付；
   通过 nonce/expiry Challenge 验证 current active key 对 exact domain payload 的真实 Ed25519 签名，并动态阻断
   撤销、旧 generation、过期与跨域重放。
-- EVO-05.2d Approval Decision Aggregation：重读全部角色、身份、签名与技术门，形成非 Git 执行型决定。
+- [EVO-05.2d Approval Decision Aggregation](EVO-05-2d-approval-decision-aggregation.md)：已交付；重读全部
+  角色、身份、签名与技术门，形成 append-only、可动态失效、非 Git 执行型决定。
 - EVO-05.3 Rebase/revalidate：目标 main 变化后重放 patch 并重新验证，旧结果失效。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
@@ -41,7 +42,7 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a/2b 与 EVO-05.2c1/2c2。已有经用户确认的 Principal/role/public-key
-authority，以及真实外部 Ed25519 Challenge/Signature Receipt；但尚无最终 approval decision、
-rebase/revalidate、rollout、monitor、rollback executor 或 Outcome authority；因此任何界面和回执都不得宣称已
-promotion、merge、push 或发布。
+当前完成 EVO-05.1a/1b 与 EVO-05.2a-2d。已有经用户确认的 Principal/role/public-key authority、真实外部
+Ed25519 Challenge/Signature Receipt，以及 append-only Approval Decision；但尚无 rebase/revalidate、rollout、
+monitor、rollback executor 或 Outcome authority。`approved` 只表示可进入未来 EVO-05.3，任何界面和回执都不得
+宣称已 promotion、merge、push 或发布。

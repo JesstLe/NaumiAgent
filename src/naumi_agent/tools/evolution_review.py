@@ -7,6 +7,10 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.approval_decisions import (
+    EvolutionPromotionApprovalDecisionError,
+    render_evolution_promotion_approval_decision,
+)
 from naumi_agent.evolution.approval_principals import (
     EvolutionApprovalPrincipalError,
     parse_approval_roles,
@@ -1691,6 +1695,133 @@ class EvolutionApprovalSignatureAuthorityTool(Tool):
         return render_evolution_approval_signature(view)
 
 
+class EvolutionPromotionApprovalDecisionTool(Tool):
+    """Aggregate exact current approval evidence without promotion authority."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_promotion_approval_decision"
+
+    @property
+    def description(self) -> str:
+        return (
+            "重读 exact Approval Requirement、Package、所有 required Role Response、"
+            "Ed25519 Signature Receipt 与当前身份/target authority，形成 append-only "
+            "非执行型审批决定。即使 approved 也只允许进入未来 rebase/revalidate，"
+            "不授予 Git、merge、push、publish 或 Promotion 权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "requirement_id": {
+                    "type": "string",
+                    "pattern": "^evapprovalreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["requirement_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批决策聚合",
+            search_hint=(
+                "evolution promotion approval decision aggregate quorum signature "
+                "自进化 提升 审批 决策 聚合 法定人数 签名"
+            ),
+        )
+
+    async def execute(self, requirement_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_promotion_approval_decision_service.execute(
+                    workspace_root=self._engine.workspace_root,
+                    requirement_id=requirement_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionApprovalDecisionError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Decision 未完成：{exc}"
+        return render_evolution_promotion_approval_decision(view)
+
+
+class EvolutionApprovalDecisionAuthorityTool(Tool):
+    """Inspect one historical decision against current upstream authority."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_approval_decision_authority"
+
+    @property
+    def description(self) -> str:
+        return (
+            "只读重载 Approval Decision Receipt，并重新检查 Requirement 有效期、"
+            "Package、target、Principal/key/role 与 Signature 是否仍 current。"
+            "不修改 authority，不执行 Git 或 Promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_id": {
+                    "type": "string",
+                    "pattern": "^evapprovaldecision_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["decision_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批决定 Authority",
+            search_hint=(
+                "evolution approval decision authority current stale receipt "
+                "自进化 审批 决定 当前 过期 回执"
+            ),
+        )
+
+    async def execute(self, decision_id: str) -> str:
+        try:
+            view = await (
+                self._engine.evolution_promotion_approval_decision_service.inspect(
+                    workspace_root=self._engine.workspace_root,
+                    decision_id=decision_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionPromotionApprovalDecisionError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Decision Authority 不可读取：{exc}"
+        return render_evolution_promotion_approval_decision(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1719,11 +1850,14 @@ def create_evolution_review_tools(
         EvolutionApprovalPrincipalTool(engine),
         EvolutionApprovalSignatureAuthorityTool(engine),
         EvolutionApprovalSignatureTool(engine),
+        EvolutionApprovalDecisionAuthorityTool(engine),
+        EvolutionPromotionApprovalDecisionTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
 
 __all__ = [
+    "EvolutionApprovalDecisionAuthorityTool",
     "EvolutionApprovalPrincipalAuthorityTool",
     "EvolutionApprovalPrincipalTool",
     "EvolutionApprovalSignatureAuthorityTool",
@@ -1742,6 +1876,7 @@ __all__ = [
     "EvolutionMechanicalGateTool",
     "EvolutionProposalQueueTool",
     "EvolutionPromotionApprovalRequirementTool",
+    "EvolutionPromotionApprovalDecisionTool",
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
     "EvolutionRewardHackingEvidenceTool",

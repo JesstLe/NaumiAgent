@@ -3031,6 +3031,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.adversarial_batch_requests import (
         EvolutionAdversarialBatchRequest,
     )
+    from naumi_agent.evolution.approval_decisions import (
+        EvolutionPromotionApprovalDecisionError,
+        render_evolution_promotion_approval_decision,
+    )
     from naumi_agent.evolution.approval_principals import (
         EvolutionApprovalPrincipalError,
         parse_approval_roles,
@@ -3398,6 +3402,27 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             console.print(Markdown(render_evolution_approval_signature(view)))
             return
+        if action == "approval-decision":
+            service = engine.evolution_promotion_approval_decision_service
+            if len(parts) == 2:
+                view = await service.execute(
+                    workspace_root=engine.workspace_root,
+                    requirement_id=parts[1],
+                )
+            elif len(parts) == 3 and parts[1] == "show":
+                view = await service.inspect(
+                    workspace_root=engine.workspace_root,
+                    decision_id=parts[2],
+                )
+            else:
+                raise ValueError(
+                    "approval-decision 参数无效：<requirement-id>；"
+                    "show <decision-id>。"
+                )
+            console.print(
+                Markdown(render_evolution_promotion_approval_decision(view))
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3430,7 +3455,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "decision-state、decision-resolve、reflection、"
                 "reflection-revoke、promotion-input、promotion-package、"
                 "approval-requirement、approval-request、approval-principal、"
-                "approval-signature 或 enqueue。"
+                "approval-signature、approval-decision 或 enqueue。"
             )
     except ValueError as exc:
         if action == "enqueue":
@@ -3555,6 +3580,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 markup=False,
             )
             return
+        if action == "approval-decision":
+            console.print(
+                f"Evolution Approval Decision 未完成：{exc}",
+                style="yellow",
+                markup=False,
+            )
+            return
         console.print(
             "用法：/evolution list [--query 词 --risk level --source kind --limit N]；"
             "/evolution detail <candidate-id>；"
@@ -3589,6 +3621,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution approval-signature submit <challenge-id> "
             "<ed25519-signature-base64>；"
             "/evolution approval-signature show <signature-receipt-id>；"
+            "/evolution approval-decision <approval-requirement-id>；"
+            "/evolution approval-decision show <approval-decision-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3717,6 +3751,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionApprovalSignatureError as exc:
         console.print(
             f"Evolution Approval Signature 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionPromotionApprovalDecisionError as exc:
+        console.print(
+            f"Evolution Approval Decision 未完成：{exc}",
             style="yellow",
             markup=False,
         )

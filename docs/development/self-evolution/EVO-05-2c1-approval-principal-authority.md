@@ -103,4 +103,5 @@ interaction authority，没有第二套 Principal 状态机。
 2. 用当前 active Principal 公钥验证真实 Ed25519 signature，不保存私钥；
 3. 拒绝旧 generation、撤销后签名、跨 workspace/role/request 重放和过期 signature；
 4. 形成 append-only Identity/Signature Receipt，并动态重读 Principal 与 Approval Requirement authority；
-5. 仍不聚合最终决定；下一步 EVO-05.2d 重读所有技术门、角色响应、身份与签名回执形成非 Git 执行型 Decision。
+5. EVO-05.2d 已重读所有技术门、角色响应、身份与签名回执形成非 Git 执行型 Decision；下一步 EVO-05.3
+   rebase/revalidate 仍需重新验证 current authority。
