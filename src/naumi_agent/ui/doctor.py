@@ -31,6 +31,10 @@ from naumi_agent.persistence.store_catalog import (
 from naumi_agent.tools.browser.runtime.chrome_launcher import (
     find_system_browser_executable,
 )
+from naumi_agent.ui.terminal_capabilities import (
+    TerminalCapabilities,
+    detect_terminal_capabilities,
+)
 
 if TYPE_CHECKING:
     from naumi_agent.model.router import ModelResponse
@@ -662,18 +666,45 @@ def _check_debug_log(config: AppConfig) -> DoctorCheck:
         )
 
 
-def _check_terminal() -> DoctorCheck:
-    width = shutil.get_terminal_size((80, 24)).columns
-    term = os.getenv("TERM", "unknown")
-    color = os.getenv("COLORTERM", "")
+def _check_terminal(
+    profile: TerminalCapabilities | None = None,
+    *,
+    width: int | None = None,
+) -> DoctorCheck:
+    profile = profile or detect_terminal_capabilities()
+    if width is None:
+        width = shutil.get_terminal_size((80, 24)).columns
+    term = profile.terminal or "unknown"
+    program = f" program={profile.terminal_program}" if profile.terminal_program else ""
+    detail = (
+        f"TERM={term}{program} width={width} color={profile.color_level} "
+        f"unicode={'yes' if profile.unicode else 'no'} "
+        f"fullscreen={'yes' if profile.full_screen else 'no'} "
+        f"sync={'yes' if profile.synchronized_output else 'no'} "
+        f"keyboard={'enhanced' if profile.enhanced_keyboard else 'baseline'} "
+        f"mouse={profile.mouse_protocol} signal={profile.signal_mode}"
+    )
+    if not profile.interactive:
+        return DoctorCheck(
+            "terminal capability",
+            "warn",
+            detail,
+            "当前不是交互式 TTY；New UI 不会发送控制序列，请在终端中运行或使用 Textual fallback。",
+        )
+    if not profile.full_screen:
+        return DoctorCheck(
+            "terminal capability",
+            "warn",
+            detail,
+            "终端未通过安全全屏能力检测；New UI 会拒绝启动，可使用 `naumi --tui`。",
+        )
     if width < 60:
         return DoctorCheck(
             "terminal capability",
             "warn",
-            f"TERM={term} width={width}",
+            detail,
             "窗口过窄会影响表格和 diff 显示，建议至少 80 列。",
         )
-    detail = f"TERM={term} width={width}" + (f" COLORTERM={color}" if color else "")
     return DoctorCheck("terminal capability", "pass", detail)
 
 

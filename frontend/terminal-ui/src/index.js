@@ -150,6 +150,7 @@ const terminalSession = createTerminalSession({
 });
 const screenPainter = createScreenPainter({
   write: (value) => process.stdout.write(value),
+  synchronizedOutput: terminalCapabilities.synchronizedOutput,
 });
 const redrawScheduler = createRedrawScheduler({ onRedraw: redraw });
 const protocolEventBatcher = createProtocolEventBatcher({ onRecord: processBridgeRecord });
@@ -174,6 +175,13 @@ function main() {
   if (!terminalCapabilities.interactive) {
     process.stderr.write(
       "Naumi 新终端 UI 需要交互式 TTY；请在 Terminal、iTerm2、Kitty、WezTerm、Windows Terminal 或常见 Linux 终端中运行。\n",
+    );
+    process.exitCode = 2;
+    return;
+  }
+  if (!terminalCapabilities.fullScreen) {
+    process.stderr.write(
+      "当前终端未通过 Naumi 全屏控制能力检测，已拒绝发送备用屏幕或光标控制序列；请使用常见现代终端，或改用 `naumi --tui`。\n",
     );
     process.exitCode = 2;
     return;

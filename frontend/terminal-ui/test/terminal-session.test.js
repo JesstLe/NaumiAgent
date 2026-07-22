@@ -27,7 +27,13 @@ test("terminal session negotiates controls and restores exactly once", () => {
   const session = createTerminalSession({
     stdin,
     stdout,
-    capabilities: { enhancedKeyboard: false },
+    capabilities: {
+      ansiControl: true,
+      alternateScreen: true,
+      bracketedPaste: true,
+      cursorControl: true,
+      enhancedKeyboard: false,
+    },
   });
 
   assert.equal(session.setup({ onInput, onResize }), true);
@@ -60,7 +66,13 @@ test("terminal session emits enhanced keyboard controls only when supported", ()
   const session = createTerminalSession({
     stdin: stream,
     stdout: stream,
-    capabilities: { enhancedKeyboard: true },
+    capabilities: {
+      ansiControl: true,
+      alternateScreen: true,
+      bracketedPaste: true,
+      cursorControl: true,
+      enhancedKeyboard: true,
+    },
   });
 
   session.setup({ onInput() {}, onResize() {} });
@@ -92,7 +104,13 @@ test("terminal setup failure rolls back screen controls and raw mode", () => {
   const session = createTerminalSession({
     stdin,
     stdout,
-    capabilities: { enhancedKeyboard: false },
+    capabilities: {
+      ansiControl: true,
+      alternateScreen: true,
+      bracketedPaste: true,
+      cursorControl: true,
+      enhancedKeyboard: false,
+    },
   });
 
   assert.throws(
@@ -102,6 +120,41 @@ test("terminal setup failure rolls back screen controls and raw mode", () => {
   assert.equal(session.active, false);
   assert.deepEqual(rawModes, [true, false]);
   assert.equal(writes.filter((value) => value.includes(ANSI.altOff)).length, 1);
+});
+
+test("terminal session emits no ANSI controls for a disabled profile", () => {
+  const writes = [];
+  const rawModes = [];
+  const stdin = {
+    isTTY: true,
+    setRawMode(value) { rawModes.push(value); },
+    resume() {},
+    setEncoding() {},
+    on() {},
+    off() {},
+  };
+  const stdout = {
+    write(value) { writes.push(value); },
+    on() {},
+    off() {},
+  };
+  const session = createTerminalSession({
+    stdin,
+    stdout,
+    capabilities: {
+      ansiControl: false,
+      alternateScreen: false,
+      bracketedPaste: false,
+      cursorControl: false,
+      enhancedKeyboard: false,
+    },
+  });
+
+  session.setup({ onInput() {}, onResize() {} });
+  session.restore();
+
+  assert.deepEqual(writes, []);
+  assert.deepEqual(rawModes, [true, false]);
 });
 
 function escapeRegex(value) {

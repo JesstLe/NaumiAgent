@@ -1,8 +1,11 @@
 import { ANSI } from "./ansi.js";
 
-export function createScreenPainter({ write }) {
+export function createScreenPainter({ write, synchronizedOutput = false }) {
   if (typeof write !== "function") {
     throw new TypeError("屏幕绘制器需要 write 回调");
+  }
+  if (typeof synchronizedOutput !== "boolean") {
+    throw new TypeError("synchronizedOutput 必须是布尔值");
   }
 
   let previous = null;
@@ -39,7 +42,9 @@ export function createScreenPainter({ write }) {
   }
 
   function commit(output) {
-    write(`${ANSI.synchronizedOutputOn}${output}${ANSI.synchronizedOutputOff}`);
+    write(synchronizedOutput
+      ? `${ANSI.synchronizedOutputOn}${output}${ANSI.synchronizedOutputOff}`
+      : output);
   }
 
   function remember(frame) {
