@@ -41,20 +41,115 @@ export function renderHarnessDetailPage(detail, width, height) {
   const safeWidth = Math.max(1, Number(width) || 1);
   const safeHeight = Math.max(1, Number(height) || 1);
   const value = detail && typeof detail === "object" ? detail : {};
+  const evidenceFocused = value.focus === "evidence";
   const logical = [
-    color(ANSI.cyan, "Harness 运行详情"),
+    color(ANSI.cyan, evidenceFocused ? "Harness 证据焦点" : "Harness 运行详情"),
     color(
       ANSI.dim,
-      `Run · ${text(value.runId) || "-"} · e 刷新 Explain · r 刷新 Replay · ↑/↓ 滚动 · Esc 返回`,
+      evidenceFocused
+        ? `Run · ${text(value.runId) || "-"} · v 返回全部 · e 刷新 Evidence · ↑/↓ 滚动 · Esc 返回`
+        : `Run · ${text(value.runId) || "-"} · v 聚焦 Evidence · e 刷新 Explain · r 刷新 Replay · ↑/↓ 滚动 · Esc 返回`,
     ),
-    ...explainLines(value),
-    ...replayLines(value),
+    ...(evidenceFocused
+      ? evidenceFocusLines(value)
+      : [...explainLines(value), ...replayLines(value)]),
   ];
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const offset = Math.min(Math.max(0, Number(value.scrollOffset) || 0), Math.max(0, wrapped.length - 1));
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.slice(0, safeHeight).map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function evidenceFocusLines(detail) {
+  const payload = object(detail.explain);
+  if (detail.explainLoading) {
+    return [
+      section("权威证据记录"),
+      color(ANSI.cyan, "正在加载 Evidence 权威详情…"),
+      ...(payload.lookup_status && payload.lookup_status !== "ok"
+        ? [color(ANSI.yellow, text(payload.message) || "Harness 证据详情不可用。")] : []),
+    ];
+  }
+  if (payload.lookup_status !== "ok" || !payload.explanation) {
+    return [
+      section("权威证据记录"),
+      color(ANSI.yellow, text(payload.message) || "Harness 证据详情不可用。"),
+    ];
+  }
+  const value = object(payload.explanation);
+  const criteria = objects(value.criteria, 100);
+  const findings = objects(value.findings, 20);
+  const evidence = objects(value.evidence, 100);
+  const references = evidenceReferences(criteria, findings);
+  const knownIds = new Set(evidence.map((item) => text(item.id)).filter(Boolean));
+  const missingIds = references.order.filter((item) => !knownIds.has(item));
+  const lines = [
+    section("概览"),
+    `${status(value.status)} · ${text(value.objective) || "未记录目标"}`,
+    text(value.summary) || color(ANSI.dim, "无摘要"),
+    section("权威证据记录"),
+  ];
+  if (!evidence.length) lines.push(color(ANSI.dim, "未记录证据"));
+  for (const item of evidence) {
+    const evidenceId = text(item.id);
+    const relatedCriteria = references.criteria.get(evidenceId) || [];
+    const relatedFindings = references.findings.get(evidenceId) || [];
+    lines.push(section(`证据 ${evidenceId || "未命名"}`));
+    lines.push(
+      `${text(item.kind) || "unknown"} · ${status(item.status)}`
+      + (item.digest_prefix ? ` · digest ${text(item.digest_prefix)}` : "")
+      + (item.uri ? ` · ${text(item.uri)}` : ""),
+    );
+    for (const criterion of relatedCriteria) {
+      lines.push(
+        `准则 · ${status(criterion.status)} · ${text(criterion.id) || "未命名准则"}`
+        + ` · ${text(criterion.description) || "未记录描述"}`,
+      );
+    }
+    for (const finding of relatedFindings) {
+      const checks = uniqueTexts(finding.check_ids, 50);
+      lines.push(color(
+        ANSI.yellow,
+        `发现 · ${FAILURE_LABELS[finding.failure_class] || text(finding.failure_class) || "未分类"}`
+        + ` · ${text(finding.message) || "无说明"}`
+        + (finding.source ? ` · 来源 ${text(finding.source)}` : "")
+        + (checks.length ? ` · 检查 ${checks.join(", ")}` : "")
+        + (finding.next_step ? ` → ${text(finding.next_step)}` : ""),
+      ));
+    }
+    if (!relatedCriteria.length && !relatedFindings.length) {
+      lines.push(color(ANSI.dim, "关联 · 未被准则或发现引用"));
+    }
+  }
+  if (missingIds.length) {
+    lines.push(section("引用缺口"));
+    lines.push(...missingIds.map((item) => color(
+      ANSI.red,
+      `${item} · 引用存在但权威证据记录缺失`,
+    )));
+  }
+  return lines;
+}
+
+function evidenceReferences(criteria, findings) {
+  const criterionRefs = new Map();
+  const findingRefs = new Map();
+  const order = [];
+  const seen = new Set();
+  for (const [target, items] of [[criterionRefs, criteria], [findingRefs, findings]]) {
+    for (const item of items) {
+      for (const evidenceId of uniqueTexts(item.evidence_ids, 100)) {
+        if (!target.has(evidenceId)) target.set(evidenceId, []);
+        target.get(evidenceId).push(item);
+        if (!seen.has(evidenceId)) {
+          seen.add(evidenceId);
+          order.push(evidenceId);
+        }
+      }
+    }
+  }
+  return { criteria: criterionRefs, findings: findingRefs, order };
 }
 
 function explainLines(detail) {
@@ -173,6 +268,10 @@ function objects(value, limit) {
 
 function texts(value, limit) {
   return Array.isArray(value) ? value.slice(0, limit).map(text).filter(Boolean) : [];
+}
+
+function uniqueTexts(value, limit) {
+  return [...new Set(texts(value, limit))];
 }
 
 function text(value) {

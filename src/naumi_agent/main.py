@@ -2742,7 +2742,7 @@ def _print_help() -> None:
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
         ("/doctor", "运行环境诊断"),
         (
-            "/harness [status|doctor|explain|replay|detail|eval|baseline|"
+            "/harness [status|doctor|explain|replay|detail|evidence|eval|baseline|"
             "knowledge|check|trust|untrust]",
             "管理仓库 Harness Profile、离线评测、运行解释、知识与验证检查",
         ),
@@ -3864,18 +3864,22 @@ async def _run_harness(engine: Any, arg: str) -> None:
         render_harness_status,
     )
     from naumi_agent.harness.trust import HarnessTrustStoreError
-    from naumi_agent.ui.harness_detail import render_harness_detail_markdown
+    from naumi_agent.ui.harness_detail import (
+        render_harness_detail_markdown,
+        render_harness_evidence_markdown,
+    )
     from naumi_agent.ui.harness_protocol import (
         harness_explain_payload,
         harness_replay_payload,
     )
 
     usage = (
-        "用法：/harness [status|doctor|explain|replay|detail|eval|baseline|"
+        "用法：/harness [status|doctor|explain|replay|detail|evidence|eval|baseline|"
         "knowledge|check|trust|untrust]\n"
         "      /harness explain [run-id|latest]\n"
         "      /harness replay [run-id|latest]\n"
         "      /harness detail [run-id|latest]\n"
+        "      /harness evidence [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness eval replay [run-id|latest]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
@@ -3939,6 +3943,21 @@ async def _run_harness(engine: Any, arg: str) -> None:
         console.print(
             Markdown(render_harness_detail_markdown(explain_payload, replay_payload))
         )
+        return
+    if subcommand == "evidence" and len(parts) <= 2:
+        target = parts[1] if len(parts) == 2 else "latest"
+        try:
+            explanation = await service.explain_run(target)
+            exact_run_id = (
+                explanation.explanation.run_id
+                if explanation.status == "ok" and explanation.explanation is not None
+                else target
+            )
+            explain_payload = harness_explain_payload(exact_run_id, explanation)
+        except ValueError as exc:
+            console.print(f"[yellow]Harness 证据参数无效：{exc}[/yellow]")
+            return
+        console.print(Markdown(render_harness_evidence_markdown(explain_payload)))
         return
     if (
         subcommand == "eval"

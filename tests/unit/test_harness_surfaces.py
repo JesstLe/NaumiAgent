@@ -19,9 +19,15 @@ from naumi_agent.daemons.shell_worker import (
 from naumi_agent.harness.checks import HarnessCheckResult, HarnessCheckStatus
 from naumi_agent.harness.completion import (
     HarnessCompletionReceipt,
+    HarnessEvidenceRef,
     HarnessReceiptCheck,
+    HarnessReceiptCriterion,
 )
-from naumi_agent.harness.models import HarnessCompletionContract, HarnessTaskKind
+from naumi_agent.harness.models import (
+    HarnessAcceptanceCriterion,
+    HarnessCompletionContract,
+    HarnessTaskKind,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
@@ -724,6 +730,12 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         session_id="slash-session",
         task_kind=HarnessTaskKind.CHANGE,
         objective="通过命令解释失败检查",
+        acceptance_criteria=(
+            HarnessAcceptanceCriterion(
+                id="focused_evidence",
+                description="可以聚焦真实持久化证据",
+            ),
+        ),
         required_checks=("unit",),
     )
     try:
@@ -751,6 +763,32 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
             started_at="2026-07-15T10:00:01+00:00",
             completed_at="2026-07-15T10:00:02+00:00",
         )
+        evidence_artifact = (
+            engine.workspace_root / "slash-failed-run" / "tool-failure.json"
+        )
+        evidence_artifact.parent.mkdir(parents=True)
+        evidence_artifact.write_text(
+            '{"status":"failed","tool":"focused_test_tool"}\n',
+            encoding="utf-8",
+        )
+        await store.record_evidence(
+            run_id=contract.run_id,
+            evidence=HarnessEvidenceRef(
+                id="tool-failure-evidence",
+                kind="tool_execution",
+                summary="真实持久化工具执行失败证据",
+                criterion_ids=("focused_evidence",),
+            ),
+            uri="artifact://slash-failed-run/tool-failure.json",
+            sha256=hashlib.sha256(evidence_artifact.read_bytes()).hexdigest(),
+            summary={
+                "tool_name": "focused_test_tool",
+                "status": "failed",
+                "permission_status": "approved",
+            },
+            producer="focused_surface_test",
+            created_at="2026-07-15T10:00:02+00:00",
+        )
         await store.finish_run(
             run_id=contract.run_id,
             receipt=HarnessCompletionReceipt(
@@ -765,7 +803,13 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
                         tree_fingerprint="b" * 64,
                     ),
                 ),
-                criteria=(),
+                criteria=(
+                    HarnessReceiptCriterion(
+                        id="focused_evidence",
+                        status="satisfied",
+                        evidence_ids=("tool-failure-evidence",),
+                    ),
+                ),
                 warnings=("必需检查 unit 状态为 failed，不能作为通过证据。",),
                 tree_fingerprint="b" * 64,
             ),
@@ -789,6 +833,9 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         detailed = _plain(
             await execute_slash_command(engine, "/harness detail latest")
         )
+        evidence_focused = _plain(
+            await execute_slash_command(engine, "/harness evidence latest")
+        )
         explain_tool = engine.tool_registry.get("harness_explain")
         assert explain_tool is not None
         tool_explained = await explain_tool.execute(run_id=contract.run_id)
@@ -803,6 +850,9 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         )
         invalid_detail = _plain(
             await execute_slash_command(engine, "/harness detail one two")
+        )
+        invalid_evidence = _plain(
+            await execute_slash_command(engine, "/harness evidence one two")
         )
 
         assert "slash-failed-run" in explained
@@ -822,8 +872,17 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         assert "验证失败" in detailed
         assert "Replay" in detailed
         assert "raw output must not be rendered" not in detailed
+        assert "Harness 证据焦点" in evidence_focused
+        assert "slash-failed-run" in evidence_focused
+        assert "tool-failure-evidence" in evidence_focused
+        assert "focused_evidence" in evidence_focused
+        assert "可以聚焦真实持久化证据" in evidence_focused
+        assert "focused_test_tool" in evidence_focused
+        assert "artifact://slash-failed-run/tool-failure.json" in evidence_focused
+        assert "raw output must not be rendered" not in evidence_focused
         assert "用法" in invalid
         assert "用法" in invalid_replay
         assert "用法" in invalid_detail
+        assert "用法" in invalid_evidence
     finally:
         await engine.shutdown()

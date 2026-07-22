@@ -4176,6 +4176,7 @@ test("Harness detail command opens one route and requests exact typed details", 
   assert.equal(state.harnessDetail.runId, "detail-run");
   assert.equal(state.harnessDetail.explainLoading, true);
   assert.equal(state.harnessDetail.replayLoading, true);
+  assert.equal(state.harnessDetail.focus, "all");
   assert.deepEqual(sent.map((item) => item.type), [
     "harness/explain/request",
     "harness/replay/request",
@@ -4244,6 +4245,50 @@ test("Harness detail e/r independently refresh durable detail without duplicate 
   });
   assert.equal(state.harnessDetail.explainLoading, false);
   assert.equal(state.harnessDetail.replayLoading, true);
+});
+
+test("Harness evidence command and v toggle preserve independent scroll positions", () => {
+  const state = createInitialState();
+  state.scrollOffset = 5;
+  state.followTail = false;
+  state.messages.push({
+    kind: "completion_receipt",
+    id: "receipt-evidence",
+    runId: "evidence-run",
+    receipt: { run_id: "evidence-run" },
+  });
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleSubmitText(state, "/harness evidence latest", send);
+
+  assert.equal(state.route.name, "harness_detail");
+  assert.equal(state.harnessDetail.runId, "evidence-run");
+  assert.equal(state.harnessDetail.focus, "evidence");
+  assert.equal(state.harnessDetail.explainLoading, true);
+  assert.equal(state.harnessDetail.replayLoading, false);
+  assert.deepEqual(sent.map((item) => item.type), ["harness/explain/request"]);
+
+  state.harnessDetail.explainLoading = false;
+  state.harnessExplanations["evidence-run"] = { revision: 1 };
+  handleHarnessDetailKey(state, INPUT_KEYS.pageDown, send);
+  assert.equal(state.harnessDetail.scrollOffset, 10);
+  assert.equal(state.harnessDetail.evidenceScrollOffset, 10);
+
+  handleHarnessDetailKey(state, "v", send);
+  assert.equal(state.harnessDetail.focus, "all");
+  assert.equal(state.harnessDetail.scrollOffset, 0);
+  assert.equal(state.harnessDetail.replayLoading, true);
+  assert.equal(sent.at(-1).type, "harness/replay/request");
+
+  state.harnessDetail.replayLoading = false;
+  state.harnessReplays["evidence-run"] = { revision: 1 };
+  handleHarnessDetailKey(state, INPUT_KEYS.down, send);
+  assert.equal(state.harnessDetail.detailScrollOffset, 1);
+  handleHarnessDetailKey(state, "V", send);
+  assert.equal(state.harnessDetail.focus, "evidence");
+  assert.equal(state.harnessDetail.scrollOffset, 10);
+  assert.equal(sent.filter((item) => item.type === "harness/replay/request").length, 1);
 });
 
 test("Harness detail command rejects missing latest run without backend traffic", () => {

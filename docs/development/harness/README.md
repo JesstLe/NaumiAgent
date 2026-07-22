@@ -36,6 +36,8 @@ HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/term
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
+HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
+Explain authority；完成卡直达、复制回执与 reconnect gap recovery 仍未完成。
 
 ## 后续顺序
 

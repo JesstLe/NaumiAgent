@@ -128,7 +128,17 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 - Node 键盘状态机到真实 SQLite Store、Python Bridge、Node normalizer/reducer/renderer 的链路已验证；
   详细边界见 `HAR-07-5a-detail-refresh-interactions.md`。
 
+### HAR-07.5b 已实现：Evidence 焦点与跨表面入口
+
+- New UI 支持 `/harness evidence [run-id|latest]` 和详情页 `v` 切换，只消费已有类型化 Explain，按 Evidence ID
+  展示关联准则、失败发现、孤立记录和缺失引用，不重新推断失败或验证结论。
+- 完整详情与 Evidence 焦点分别保存滚动位置；Evidence 入口不提前请求 Replay，首次返回全部详情时才按需补发。
+- CLI/Textual TUI 通过共享 `/harness evidence` 和相同 Harness Service 展示同一公开字段集合；not found 与
+  unavailable 不会被伪装为成功。
+- Python/Node 共用 HAR-07 golden fixture，并以真实 SQLite Store → 重建 Service → slash router 验证；详细边界见
+  `HAR-07-5b-evidence-focus.md`。
+
 ### 尚未完成
 
 - HAR-07.4b：断线重连后的 revision/gap 自动补发；显式 `/resume` 恢复已完成。
-- HAR-07.5b+：`v` Evidence 焦点、完成卡入口与跨平台复制回执；`e/r` 详情刷新已完成。
+- HAR-07.5c+：完成卡入口与跨平台复制回执；`e/r` 刷新和 `v` Evidence 焦点已完成。

@@ -45,7 +45,7 @@
       "completed_at": "2026-07-22T08:00:01Z",
       "summary": "保留完整有界字段集合",
       "criteria": [
-        {"id": "criterion-all", "description": "所有字段可见", "status": "unsatisfied", "evidence_ids": ["ev-5"]}
+        {"id": "criterion-all", "description": "所有字段可见", "status": "unsatisfied", "evidence_ids": ["ev-5", "ev-missing"]}
       ],
       "failure_classes": ["verification_failure"],
       "findings": [
@@ -124,5 +124,18 @@
     "artifact-5",
     "artifact://five",
     "Timeline 2"
+  ],
+  "expected_evidence_focus_fragments": [
+    "Harness 证据焦点",
+    "criterion-all",
+    "所有字段可见",
+    "检查 check-one",
+    "发现三",
+    "来源 check:three",
+    "处理三",
+    "ev-3",
+    "未被准则或发现引用",
+    "ev-missing",
+    "引用存在但权威证据记录缺失"
   ]
 }

@@ -1,6 +1,9 @@
 """Shared TUI detail projection for HAR-07.3."""
 
-from naumi_agent.ui.harness_detail import render_harness_detail_markdown
+from naumi_agent.ui.harness_detail import (
+    render_harness_detail_markdown,
+    render_harness_evidence_markdown,
+)
 
 
 def _explain() -> dict:
@@ -105,4 +108,48 @@ def test_harness_detail_markdown_handles_unavailable_without_fabrication() -> No
 
     assert "状态库暂不可用" in rendered
     assert "Replay 不存在" in rendered
+
+
+def test_harness_evidence_markdown_links_references_and_reports_gaps() -> None:
+    explain = _explain()
+    explain["explanation"]["criteria"][0]["evidence_ids"].append("missing-evidence")
+    explain["explanation"]["evidence"].append(
+        {
+            "id": "orphan-evidence",
+            "kind": "trace",
+            "status": "recorded",
+            "digest_prefix": "orphan-digest",
+            "uri": "artifact://orphan",
+        }
+    )
+
+    rendered = render_harness_evidence_markdown(explain)
+
+    for expected in (
+        "Harness 证据焦点",
+        "evidence-test",
+        "准则",
+        "发现",
+        "orphan-evidence",
+        "未被准则或发现引用",
+        "missing-evidence",
+        "引用存在但权威证据记录缺失",
+    ):
+        assert expected in rendered
+
+
+def test_harness_evidence_markdown_preserves_unavailable_state() -> None:
+    rendered = render_harness_evidence_markdown(
+        {
+            "schema_version": 1,
+            "revision": 1,
+            "run_id": "missing-run",
+            "lookup_status": "not_found",
+            "message": "未找到该运行",
+        }
+    )
+
+    assert "Harness 证据焦点" in rendered
+    assert "未找到该运行" in rendered
+    assert "已验证" not in rendered
     assert "已验证" not in rendered
