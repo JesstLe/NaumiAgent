@@ -745,7 +745,7 @@ test("screen renderer stays stable after resume replay then a new run starts", (
   assert.equal(lines.length, 10);
   assert.equal(plain.filter((line) => line.includes("mode: default")).length, 1);
   assert(plain.some((line) => line.includes("chat running")));
-  assert(plain.some((line) => line.includes("运行中")));
+  assert(plain.some((line) => line.includes("运行: 进行中")));
   assert(!plain.some((line) => line.includes("todo:")));
   assert(lines.every((line) => visibleWidth(line) <= 72));
 });
