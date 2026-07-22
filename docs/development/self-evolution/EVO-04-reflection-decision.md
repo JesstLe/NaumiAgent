@@ -7,9 +7,10 @@
 
 ## 当前前置状态
 
-EVO-03.7b1 已能冻结最终评测所需的 Interventional lane、必需平台和 Adversarial RED/GREEN pairs，避免
-Reflection 从“当前收到的部分证据”自行推断完整性。EVO-03.7b2 最终 Evaluation Receipt 仍未完成；在其
-交付前，EVO-04 mechanical gate 不得把单 lane receipt 或 Aggregation Contract 当作完整决策输入。
+EVO-03.7b1 已冻结最终评测所需的 Interventional lane、必需平台和 Adversarial RED/GREEN pairs；
+EVO-03.7b2 已从 durable Store 重读并验证全部要求，签发 `mechanical_gate_input_ready=true` 且明确
+`candidate_acceptance_decided=false` 的 Final Evaluation Receipt。EVO-04 mechanical gate 只能消费这类最终
+回执，不得把单 lane receipt、Aggregation Contract 或调用方自然语言当作完整决策输入。
 
 ## 子模块
 

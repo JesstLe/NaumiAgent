@@ -62,6 +62,6 @@ Renderer 在首屏明确显示“不是候选最终 Evaluation Receipt”，并�
 
 ## 当前边界与后续依赖
 
-本切片没有签发候选最终回执，也不会驱动 EVO-04。下一步 `EVO-03.7b` 必须按 Validation Plan 与 Adversarial
-Batch Request 聚合必要 lanes，机械证明 Interventional、当前要求的静态证据以及 Linux/macOS/Windows 必需平台均
-完整；缺任一 authority 时只能生成 blocked/incomplete 聚合结果。跨平台 dispatcher 仍是全矩阵完成的外部前置。
+本切片自身没有签发候选最终回执，也不会驱动 EVO-04。后续 EVO-03.7b1/3.7b2 已按 Validation Plan 与
+Adversarial Batch Request 冻结并重读必要 lanes，只有 Interventional 与全部 required platforms 完整时才签发
+Final Evaluation Receipt。跨平台 dispatcher 仍是默认三平台真实矩阵完成的外部前置。

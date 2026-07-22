@@ -37,7 +37,9 @@ Eval 和真实 Harness 检查产生。
     required platforms、逐平台 RED/GREEN batch、样本数、Candidate/Plan 与 Interventional 必需性，并以
     幂等 Store、用户 slash 和 Agent Tool 双通道签发非最终覆盖合同。详见
     `EVO-03-7b1-evaluation-aggregation-contract.md`。
-  - 未完成：EVO-03.7b2 重读全部必需 lane 并签发候选最终 Evaluation Receipt。
+  - EVO-03.7b2 Final Evaluation Receipt 已实现：从 durable Store 重读合同、Interventional lane、全部必需
+    平台 Adversarial lane 及其 RED/GREEN completion authority，机械验证完整覆盖并签发候选级最终评测证据；
+    回执明确不接受 Candidate 或批准发布。详见 `EVO-03-7b2-final-evaluation-receipt.md`。
 
 ## 验收标准
 
@@ -126,15 +128,20 @@ Eval 和真实 Harness 检查产生。
 - EVO-03.7a Evaluation Lane Receipt：已实现。共享 executor 从 durable Store 重读一条完整 H5a→H5c→
   Attribution authority，签发带 before/after、资源 coverage 与 artifact manifest 的防篡改单 lane receipt；
   Slash/Agent 双通道明确显示它不是候选最终回执。详见 `EVO-03-7a-evaluation-lane-receipt.md`。
+- EVO-03.7b1/3.7b2 Final Evaluation Aggregation：已实现。合同先冻结完整 lane/platform matrix，最终执行器
+  再从 durable Store 重读全部 lane 和 Adversarial RED/GREEN completion，签发不可变 `evfinal_*` 证据回执；
+  Slash/Agent 双通道明确显示其不是接受或发布决定。详见
+  `EVO-03-7b1-evaluation-aggregation-contract.md` 与 `EVO-03-7b2-final-evaluation-receipt.md`。
 - HAR-08.4a..4f 与 ARC-04.3a..3c 已实现精确 revision/overlay、成组 Check execution、连续 Batch
   lease/grant/恢复/partial checkpoint；Interventional RED/GREEN 已完整消费这些共享前置。EVO-03.6a/6b/6c
   已冻结 adversarial Registry/Profile/check/Batch authority，并完成单 lane/sample、当前平台 RED/GREEN 连续
-  lane cohort 的真实 H5a 执行、同平台 H5b2/H5c 比较与 Failure Attribution。下一步应重新比较跨平台
-  dispatcher、HAR-08 通用 surface 与 EVO-03.7b 最终聚合的依赖，不得复制 worker、Batch 状态机或评分器。
+  lane cohort 的真实 H5a 执行、同平台 H5b2/H5c 比较、Failure Attribution 与完整 Evaluation 聚合器。
+  下一步应在 EVO-04 mechanical gate 与跨平台 dispatcher/A4 之间继续按最小依赖推进，不得复制 worker、
+  Batch 状态机或评分器。
 
 UI-12.3b3/3b4 与 ARC-04.3c 的运行委托已由 EVO-03.2e/2f/2g 接入完整 interventional RED cohort；
 EVO-03.3b 已冻结 candidate Request，EVO-03.3c2c2/3.4b 已完成连续 candidate cohort 与原生 H5c 比较。
 Interventional Failure Attribution adapter、Adversarial Probe Contract、Batch Request、单 lane/sample、当前平台
-连续 cohort、同平台 RED/GREEN 比较、Attribution 与单 lane Evaluation Receipt 已完成。跨平台调度与最终
-Evaluation Receipt 仍未实现；EVO-03.7b1 只冻结了完整聚合所需的 authority，
-因此 EVO-03 整体保持 partial。
+连续 cohort、同平台 RED/GREEN 比较、Attribution、单 lane receipt 与 Final Evaluation Receipt 聚合器已完成。
+跨平台 dispatcher、默认三平台真实回执和 A4 macOS/Linux 小模块对照仍未实现，因此 EVO-03 整体保持
+`partial`。

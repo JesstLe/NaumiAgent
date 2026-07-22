@@ -15,6 +15,10 @@ from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptError,
     render_evaluation_lane_receipt,
 )
+from naumi_agent.evolution.final_evaluation_receipts import (
+    EvolutionFinalEvaluationReceiptError,
+    render_final_evaluation_receipt,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
@@ -289,6 +293,84 @@ class EvolutionEvaluationAggregationContractTool(Tool):
         return render_evaluation_aggregation_contract(artifact)
 
 
+class EvolutionFinalEvaluationReceiptTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_final_evaluation_receipt"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 durable Store 重读 Aggregation Contract、一个 Interventional lane、"
+            "全部必需平台的 Adversarial lane 与 completion receipts，签发最终评测回执。"
+            "回执只完成证据聚合，不接受候选或批准发布。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "aggregation_contract_id": {
+                    "type": "string",
+                    "pattern": "^evagg_[0-9a-f]{24}$",
+                },
+                "interventional_comparison_id": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "adversarial_comparison_ids": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    "minItems": 1,
+                    "maxItems": 3,
+                    "uniqueItems": True,
+                },
+            },
+            "required": [
+                "aggregation_contract_id",
+                "interventional_comparison_id",
+                "adversarial_comparison_ids",
+            ],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 最终评测回执",
+            search_hint=(
+                "evolution final evaluation receipt aggregate platforms lanes "
+                "自进化 最终评测 回执 聚合"
+            ),
+        )
+
+    async def execute(
+        self,
+        aggregation_contract_id: str,
+        interventional_comparison_id: str,
+        adversarial_comparison_ids: list[str],
+    ) -> str:
+        try:
+            receipt = await (
+                self._engine.evolution_final_evaluation_receipt_executor.execute(
+                    aggregation_contract_id=aggregation_contract_id.strip(),
+                    interventional_comparison_id=interventional_comparison_id.strip(),
+                    adversarial_comparison_ids=tuple(
+                        item.strip() for item in adversarial_comparison_ids
+                    ),
+                )
+            )
+        except (EvolutionFinalEvaluationReceiptError, OSError, TypeError, ValueError) as exc:
+            return f"Final Evaluation Receipt 未签发：{exc}"
+        return render_final_evaluation_receipt(receipt)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -297,6 +379,7 @@ def create_evolution_review_tools(
         EvolutionCandidatesTool(engine, service),
         EvolutionEvaluationReceiptTool(engine),
         EvolutionEvaluationAggregationContractTool(engine),
+        EvolutionFinalEvaluationReceiptTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -305,6 +388,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
+    "EvolutionFinalEvaluationReceiptTool",
     "EvolutionProposalQueueTool",
     "create_evolution_review_tools",
 ]

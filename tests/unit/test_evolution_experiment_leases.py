@@ -50,6 +50,9 @@ from naumi_agent.evolution.adversarial_cohort import (
     EvolutionAdversarialCohortExecutor,
     EvolutionAdversarialCohortReceipt,
 )
+from naumi_agent.evolution.adversarial_cohort_receipts import (
+    EvolutionAdversarialCohortReceiptStore,
+)
 from naumi_agent.evolution.adversarial_comparison import (
     EvolutionAdversarialComparisonError,
     EvolutionAdversarialComparisonExecutor,
@@ -4402,6 +4405,7 @@ async def _adversarial_probe_fixture(
     tmp_path: Path,
     *,
     profile_text: str = ADVERSARIAL_BINDING_PROFILE,
+    registry: EvolutionAdversarialProbeRegistry | None = None,
 ):
     workspace, contract, lease, snapshot, receipt = await _validation_receipt_fixture(
         tmp_path,
@@ -4420,7 +4424,8 @@ async def _adversarial_probe_fixture(
         workspace_root=workspace,
     )
     probe_contract = await EvolutionAdversarialProbeContractBuilder(
-        trust_store
+        trust_store,
+        registry=registry,
     ).build(
         validation_plan=plan,
         profile_binding=binding,
@@ -4873,12 +4878,16 @@ async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_au
             for case in stored.result.cases
         )
 
+    cohort_receipt_store = EvolutionAdversarialCohortReceiptStore(
+        tmp_path / "cohort-receipts.db"
+    )
     cohort_executor = EvolutionAdversarialCohortExecutor(
         workspace_root=workspace,
         store=store,
         permission_store=permissions,
         run_grant_authority=run_authority,
         sample_executor=executor,
+        receipt_store=cohort_receipt_store,
     )
     cohorts: list[EvolutionAdversarialCohortReceipt] = []
     for lane in (red_lane, green_lane):
@@ -4891,6 +4900,7 @@ async def test_adversarial_sample_executes_real_red_and_green_lane_with_batch_au
             lease=lease,
         )
         cohorts.append(cohort)
+        assert await cohort_receipt_store.get(cohort.receipt_id) == cohort
         assert cohort.persisted_samples == cohort.requested_samples == 5
         assert cohort.sample_seeds == request.sample_seeds
         assert len(cohort.sample_receipt_sha256) == 5
@@ -5131,6 +5141,9 @@ async def test_adversarial_sample_rejects_wrong_platform_before_permission_read(
         permission_store=permission_store,  # type: ignore[arg-type]
         run_grant_authority=run_authority,  # type: ignore[arg-type]
         sample_executor=executor,
+        receipt_store=EvolutionAdversarialCohortReceiptStore(
+            tmp_path / "cohort-receipts.db"
+        ),
     )
     with pytest.raises(EvolutionAdversarialCohortError) as cohort_blocked:
         await cohort.execute(

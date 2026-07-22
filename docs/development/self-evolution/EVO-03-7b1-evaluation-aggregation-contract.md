@@ -62,11 +62,11 @@ Aggregation Contract 写入现有 Evolution/Session SQLite 路径中的独立表
 - `../` 与解析后 workspace 外路径拒绝；
 - SQLite column 篡改后读取失败关闭。
 
-## 明确未完成
+## 边界与后续状态
 
 - 本合同不是最终 Evaluation Receipt，字段强制保持
   `candidate_evaluation_complete=false`、`final_receipt_issued=false`。
-- EVO-03.7b2 仍需从 Store 重读一个 Interventional lane 和合同声明的全部 Adversarial lane，重新验证
-  platform/batch/sample/Plan/Candidate/digest 后签发最终 receipt。
+- 后续 EVO-03.7b2 已从 Store 重读一个 Interventional lane、合同声明的全部 Adversarial lane 及 durable
+  RED/GREEN completion receipts，重新验证 platform/batch/sample/Plan/Candidate/digest 后签发最终 receipt。
 - 跨平台 dispatcher 尚未交付；三平台合同只能表达完整要求，不能证明 Windows/Linux worker 已执行。
-- EVO-04 不得消费本合同直接作 accept/reject；只能消费后续最终 receipt。
+- EVO-04 不得消费本合同直接作 accept/reject；只能消费 EVO-03.7b2 的最终 receipt。
