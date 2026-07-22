@@ -78,6 +78,11 @@ from naumi_agent.evolution.approval_requirements import (
     EvolutionPromotionApprovalRequirementExecutor,
     EvolutionPromotionApprovalRequirementStore,
 )
+from naumi_agent.evolution.approval_signatures import (
+    EvolutionApprovalSignatureBuilder,
+    EvolutionApprovalSignatureService,
+    EvolutionApprovalSignatureStore,
+)
 from naumi_agent.evolution.counterfactual_evidence import (
     EvolutionCounterfactualEvidenceBuilder,
     EvolutionCounterfactualEvidenceExecutor,
@@ -1379,6 +1384,19 @@ class AgentEngine:
             interaction_store=self._harness_store,
             request_user_input=self.request_user_input,
             builder=self.evolution_approval_principal_builder,
+        )
+        self.evolution_approval_signature_builder = EvolutionApprovalSignatureBuilder()
+        self.evolution_approval_signature_store = EvolutionApprovalSignatureStore(
+            config.memory.session_db_path
+        )
+        self.evolution_approval_signature_service = EvolutionApprovalSignatureService(
+            response_store=self.evolution_promotion_approval_response_store,
+            requirement_executor=(
+                self.evolution_promotion_approval_requirement_executor
+            ),
+            principal_service=self.evolution_approval_principal_service,
+            signature_store=self.evolution_approval_signature_store,
+            builder=self.evolution_approval_signature_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

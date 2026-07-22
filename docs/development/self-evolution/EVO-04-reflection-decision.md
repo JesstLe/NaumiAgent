@@ -97,9 +97,9 @@ rollback 属于 EVO-05，不是 EVO-04 的隐式完成条件。
 
 ## 明确未完成
 
-- EVO-05 已交付 Package、Requirement 和 role response；专业角色身份/签名、最终聚合、rebase/revalidate、
+- EVO-05 已交付 Package、Requirement、role response、Principal 与签名回执；最终聚合、rebase/revalidate、
   分阶段发布、监控与 rollback 仍未完成。
 
 ## 下一步
 
-EVO-05.2c1 Principal/Public-Key Authority 已完成；下一步实现 EVO-05.2c2 Signature Receipt Authority；仍不合并或发布。
+EVO-05.2c2 Signature Receipt Authority 已完成；下一步实现 EVO-05.2d Approval Decision Aggregation；仍不合并或发布。

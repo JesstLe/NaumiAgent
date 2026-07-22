@@ -71,5 +71,5 @@ Receipt 不保存源码、Prompt 正文、模型正文、reasoning、tool argume
 ## 下一步
 
 EVO-04.4a 至 EVO-04.7a 已沿本 Author Receipt authority 链实现风险扫描、四态决策、持久 Resolution 与
-非注入 Reflection。EVO-05.1a Input、EVO-05.1b Package 与 EVO-05.2a Approval Requirement 已完成，下一步是
-EVO-05.2b Approval Request 与 EVO-05.2c1 Principal/Public-Key Authority 已完成；下一步是 EVO-05.2c2 签名回执。
+非注入 Reflection。EVO-05.1a 至 EVO-05.2c2 已完成 Package、Requirement、Role Response、Principal 与真实
+Ed25519 Signature Receipt authority；下一步是 EVO-05.2d 非 Git 执行型 Approval Decision 聚合。

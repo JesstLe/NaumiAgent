@@ -86,6 +86,21 @@ if TYPE_CHECKING:
         EvolutionPromotionTechnicalGate,
         render_evolution_promotion_approval_requirement,
     )
+    from naumi_agent.evolution.approval_signatures import (
+        EVOLUTION_APPROVAL_SIGNATURE_DOMAIN,
+        EVOLUTION_APPROVAL_SIGNATURE_POLICY,
+        EvolutionApprovalSignatureBuilder,
+        EvolutionApprovalSignatureChallenge,
+        EvolutionApprovalSignatureChallengeStatus,
+        EvolutionApprovalSignatureChallengeView,
+        EvolutionApprovalSignatureError,
+        EvolutionApprovalSignaturePayload,
+        EvolutionApprovalSignatureReceipt,
+        EvolutionApprovalSignatureReceiptView,
+        EvolutionApprovalSignatureService,
+        EvolutionApprovalSignatureStore,
+        render_evolution_approval_signature,
+    )
     from naumi_agent.evolution.candidate import EvolutionCandidateDraft
     from naumi_agent.evolution.candidate_snapshots import (
         EvolutionCandidateSnapshotError,
@@ -490,6 +505,19 @@ __all__ = [
     "EvolutionPromotionApprovalResponseView",
     "EvolutionPromotionSignatureReceiptEntry",
     "render_evolution_promotion_approval_response",
+    "EVOLUTION_APPROVAL_SIGNATURE_DOMAIN",
+    "EVOLUTION_APPROVAL_SIGNATURE_POLICY",
+    "EvolutionApprovalSignatureBuilder",
+    "EvolutionApprovalSignatureChallenge",
+    "EvolutionApprovalSignatureChallengeStatus",
+    "EvolutionApprovalSignatureChallengeView",
+    "EvolutionApprovalSignatureError",
+    "EvolutionApprovalSignaturePayload",
+    "EvolutionApprovalSignatureReceipt",
+    "EvolutionApprovalSignatureReceiptView",
+    "EvolutionApprovalSignatureService",
+    "EvolutionApprovalSignatureStore",
+    "render_evolution_approval_signature",
     "EVOLUTION_APPROVAL_PRINCIPAL_POLICY",
     "EvolutionApprovalPrincipalAction",
     "EvolutionApprovalPrincipalError",
@@ -862,6 +890,21 @@ def __getattr__(name: str) -> object:
         "EvolutionPromotionApprovalResponseView",
         "EvolutionPromotionSignatureReceiptEntry",
         "render_evolution_promotion_approval_response",
+    }
+    approval_signature_exports = {
+        "EVOLUTION_APPROVAL_SIGNATURE_DOMAIN",
+        "EVOLUTION_APPROVAL_SIGNATURE_POLICY",
+        "EvolutionApprovalSignatureBuilder",
+        "EvolutionApprovalSignatureChallenge",
+        "EvolutionApprovalSignatureChallengeStatus",
+        "EvolutionApprovalSignatureChallengeView",
+        "EvolutionApprovalSignatureError",
+        "EvolutionApprovalSignaturePayload",
+        "EvolutionApprovalSignatureReceipt",
+        "EvolutionApprovalSignatureReceiptView",
+        "EvolutionApprovalSignatureService",
+        "EvolutionApprovalSignatureStore",
+        "render_evolution_approval_signature",
     }
     approval_principal_exports = {
         "EVOLUTION_APPROVAL_PRINCIPAL_POLICY",
@@ -1301,6 +1344,8 @@ def __getattr__(name: str) -> object:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
         module_name = "approval_requests"
+    elif name in approval_signature_exports:
+        module_name = "approval_signatures"
     elif name in approval_principal_exports:
         module_name = "approval_principals"
     elif name in adversarial_comparison_exports:

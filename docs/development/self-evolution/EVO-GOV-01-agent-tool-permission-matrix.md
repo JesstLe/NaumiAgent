@@ -2,7 +2,7 @@
 
 ## 问题与目标
 
-EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a/1b/2a/2b/2c1 已注册十七个非只读 Agent Tool。它们拥有真实的 durable
+EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a/1b/2a/2b/2c1/2c2 已注册十八个非只读 Agent Tool。它们拥有真实的 durable
 写入，但此前没有精确 `PermissionRule`，因此 normal runtime 将其判为 `UNKNOWN_TOOL`，Engine 的“所有注册
 工具均受治理”门也会失败。
 
@@ -11,7 +11,7 @@ Store、Slash 命令或后续 decision 语义。
 
 ## 风险分类依据
 
-其中十五个 Tool 只能从已有签名 authority 派生并持久化不可变证据、决策、用户 Resolution、Reflection、
+其中十六个 Tool 只能从已有 authority 派生并持久化不可变证据、决策、用户 Resolution、Reflection、
 Promotion Input、review-only Package、不可执行 Approval Requirement 或 role response。新增 Principal 治理是
 独立 `HIGH` authority 动作：它变更未来签名验证的可信身份、公钥或角色，但必须经过 HAR 人工确认，且绝不接收
 私钥：
@@ -23,7 +23,8 @@ Promotion Input、review-only Package、不可执行 Approval Requirement 或 ro
   baseline 更新或 Git 写入；其他 Tool 不接受 Candidate；
 - 重复调用由各 Store/Executor 幂等或 single-flight 收敛。
 
-因此十五类派生创建为 `MEDIUM`：高于只读查询，但不逐次要求确认。Reflection 撤销与 Principal 治理均为
+Signature Tool 只创建 nonce Challenge 或验证外部 public signature；不接收私钥、不聚合最终决定。因此十六类
+派生创建为 `MEDIUM`：高于只读查询，但不逐次要求确认。Reflection 撤销与 Principal 治理均为
 `HIGH`：normal 由 PermissionChecker 确认；Principal 变更还必须完成 HAR durable interaction。bypass 按全权限
 语义跳过 PermissionChecker 确认，但不会代答 HAR。
 
@@ -48,14 +49,15 @@ Promotion Input、review-only Package、不可执行 Approval Requirement 或 ro
 | `evolution_promotion_approval_requirement` | approval roles/signature gates | `evolution_promotion_artifact` | 50 |
 | `evolution_promotion_approval_request` | HAR-fenced role response | `evolution_promotion_artifact` | 50 |
 | `evolution_approval_principal` | HAR-fenced Principal/role/public-key authority | `evolution_approval_identity` | 20 |
+| `evolution_approval_signature` | nonce Challenge / verified Ed25519 Receipt | `evolution_approval_signature` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
 
 ## 模式语义
 
-- permissive/moderate/strict：十五类派生创建允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
-- lockdown：阻断所有十七类写入；已有只读 Authority Tool 仍按各自只读规则工作。
+- permissive/moderate/strict：十六类派生创建允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
+- lockdown：阻断所有十八类写入；已有只读 Authority Tool 仍按各自只读规则工作。
 - bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制。
 
 bypass 只绕过交互 PermissionChecker；executor 仍必须重读 authority、验证 workspace/identity/digest/budget，
@@ -63,7 +65,7 @@ Store 冲突与 mechanical veto 仍不可被绕过。
 
 ## 验收
 
-- 十五个派生 Tool 在 permissive/moderate/strict 返回 `ALLOW + MEDIUM`，family 精确匹配；
+- 十六个派生 Tool 在 permissive/moderate/strict 返回 `ALLOW + MEDIUM`，family 精确匹配；
 - Reflection 撤销与 Principal 治理在 normal 返回 `ALLOW + HIGH + confirmation`，bypass 无 PermissionChecker 确认；
 - lockdown 返回 `MODE_BLOCKED`；
 - normal 模式达到各自上限后返回 `MAX_CALLS_EXCEEDED`；

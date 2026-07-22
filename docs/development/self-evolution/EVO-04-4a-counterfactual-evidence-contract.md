@@ -138,6 +138,6 @@ Agent Tool 属于 `evolution_decision_artifact` 中风险派生写入：
 
 ## 下一步
 
-EVO-04.5a 至 EVO-04.7a 已消费本 authority 并形成四态 Decision、持久 Resolution 与非注入 Reflection。下一步
-EVO-05.1a 至 EVO-05.2c1 已完成；下一步实现 EVO-05.2c2 Identity/Signature Receipt Authority。
+EVO-04.5a 至 EVO-04.7a 已消费本 authority 并形成四态 Decision、持久 Resolution 与非注入 Reflection。
+EVO-05.1a 至 EVO-05.2c2 已完成；下一步实现 EVO-05.2d Approval Decision Aggregation。
 `concern/inconclusive` 仍不得被 Reviewer 叙事覆盖。
