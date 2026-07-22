@@ -19,10 +19,14 @@ Store 还会以 artifact 的 `issued_at` 重新运行当前确定性 Builder，�
 
 ## 角色策略
 
+当前签发策略为 v2，详见
+[EVO-05.2a1 Professional Role Signature Policy v2](EVO-05-2a1-professional-role-signature-policy-v2.md)。v1
+artifact 保持可读，但新签发不再使用 v1。
+
 | 条件 | 新增角色 | 签名要求 |
 | --- | --- | --- |
 | 所有 Package | `user` | durable interaction，非密码学签名 |
-| medium/high/critical 或 protected scope | `independent_reviewer` | high/critical 需要签名 |
+| medium/high/critical 或 protected scope | `independent_reviewer` | 需要签名 |
 | critical 或 authorization/security scope | `security_reviewer` | 需要签名 |
 | persistence、migration review 或 data backup | `data_owner` | 需要签名 |
 | protected target、CI/release/dependency scope 或 high/critical | `release_manager` | 需要签名 |
@@ -68,9 +72,10 @@ quorum、technical/blocking gates、UTC issued/expires 与 policy projection dig
 ## 验收证据
 
 - 真实 Git + SQLite：8 路并发只形成一个 Requirement；不同 issue time 仍返回首个 authority；
-- medium persistence/main 映射为 user、reviewer、data owner、release manager 和两个签名；
+- medium persistence/main 映射为 user、reviewer、data owner、release manager 和三个专业角色签名；
 - critical 增加 security reviewer，并要求 reviewer/security/data/release 四个签名；
-- low authorization scope 仍强制 independent/security/release human roles 与 security/release 签名；
+- low authorization scope 仍强制 independent/security/release human roles，三个专业角色全部签名；
+- 同一 Package 的 legacy v1 与 current v2 Requirement 可并存、分别重放；新 execute 只签发 v2；
 - expiry、target move、advanced rebase gate、Reflection revocation 全部 fail closed；
 - 重算 digest 也不能伪造 approval/signature/Git execution；Store 索引篡改被检测；
 - Slash/Agent Tool/New UI/TUI、权限、Engine composition 与 lazy exports 有聚焦测试；

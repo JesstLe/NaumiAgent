@@ -13,6 +13,8 @@
   绑定 exact local target branch、签名域和审批事实，但不审批或执行 Git。
 - [EVO-05.2a Approval Requirement Policy](EVO-05-2a-approval-requirement-policy.md)：已交付；按风险、target、
   protected scope 与 migration 冻结角色、签名门、技术门和有效期，不创建交互或作出决定。
+- [EVO-05.2a1 Professional Role Signature Policy v2](EVO-05-2a1-professional-role-signature-policy-v2.md)：
+  已交付；所有非 user 专业角色必须用 current Principal key 签署 exact Response，legacy v1 保持只读兼容。
 - [EVO-05.2b Approval Request Authority](EVO-05-2b-approval-request-authority.md)：已交付；把单个 required
   role 映射为 HAR-10.6 fenced interaction，并冻结 approval/rejection/request-changes Receipt 与独立签名入口。
   未验证的专业角色不能计入 quorum。

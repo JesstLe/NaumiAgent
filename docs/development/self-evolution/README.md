@@ -54,7 +54,9 @@ rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligib
 [EVO-05.1b](EVO-05-1b-promotion-package-contract.md) 已交付完整审查 Package：绑定 exact local target
 branch、审批事实和 domain-separated signable digest；target 移动或 Reflection 撤销都会动态失效。
 [EVO-05.2a](EVO-05-2a-approval-requirement-policy.md) 已交付 Approval Requirement：按 risk、protected
-target/scope、migration 和 data backup 冻结 human roles、signature gates、technical gates 与 expiry。目标移动、
+target/scope、migration 和 data backup 冻结 human roles、signature gates、technical gates 与 expiry；
+[EVO-05.2a1](EVO-05-2a1-professional-role-signature-policy-v2.md) 已升级 current policy，要求所有非 user
+专业角色提供真实 Ed25519 签名，同时保留 v1 artifact 可读。目标移动、
 到期或 Reflection 撤销都会 fail closed。[EVO-05.2b](EVO-05-2b-approval-request-authority.md) 已把每个角色请求
 接入 HAR-10.6 durable interaction，并冻结结构化回答、identity assurance 和独立 signature entry。专业角色在
 身份/签名 authority 完成前不能计入 quorum。[EVO-05.2c1](EVO-05-2c1-approval-principal-authority.md) 已建立
