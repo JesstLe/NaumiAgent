@@ -158,6 +158,11 @@ class TestPermissionChecker:
                 "evolution_promotion_artifact",
                 50,
             ),
+            (
+                "evolution_promotion_approval_request",
+                "evolution_promotion_artifact",
+                50,
+            ),
         ],
     )
     def test_evolution_derived_artifacts_have_bounded_permission_rules(

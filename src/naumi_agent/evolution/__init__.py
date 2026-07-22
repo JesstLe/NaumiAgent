@@ -45,6 +45,19 @@ if TYPE_CHECKING:
         EvolutionAdversarialSampleReceipt,
         adversarial_lane_authority_key,
     )
+    from naumi_agent.evolution.approval_requests import (
+        EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY,
+        EvolutionPromotionApprovalIdentityAssurance,
+        EvolutionPromotionApprovalRequestError,
+        EvolutionPromotionApprovalRequestService,
+        EvolutionPromotionApprovalResponse,
+        EvolutionPromotionApprovalResponseBuilder,
+        EvolutionPromotionApprovalResponseReceipt,
+        EvolutionPromotionApprovalResponseStore,
+        EvolutionPromotionApprovalResponseView,
+        EvolutionPromotionSignatureReceiptEntry,
+        render_evolution_promotion_approval_response,
+    )
     from naumi_agent.evolution.approval_requirements import (
         EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY,
         EvolutionPromotionApprovalReason,
@@ -452,6 +465,17 @@ __all__ = [
     "EvolutionPromotionApprovalStep",
     "EvolutionPromotionTechnicalGate",
     "render_evolution_promotion_approval_requirement",
+    "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
+    "EvolutionPromotionApprovalIdentityAssurance",
+    "EvolutionPromotionApprovalRequestError",
+    "EvolutionPromotionApprovalRequestService",
+    "EvolutionPromotionApprovalResponse",
+    "EvolutionPromotionApprovalResponseBuilder",
+    "EvolutionPromotionApprovalResponseReceipt",
+    "EvolutionPromotionApprovalResponseStore",
+    "EvolutionPromotionApprovalResponseView",
+    "EvolutionPromotionSignatureReceiptEntry",
+    "render_evolution_promotion_approval_response",
     "AdversarialBatchCheckCase",
     "AdversarialBatchLane",
     "AdversarialBatchProbeCase",
@@ -799,6 +823,19 @@ def __getattr__(name: str) -> object:
         "EvolutionPromotionApprovalStep",
         "EvolutionPromotionTechnicalGate",
         "render_evolution_promotion_approval_requirement",
+    }
+    approval_request_exports = {
+        "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
+        "EvolutionPromotionApprovalIdentityAssurance",
+        "EvolutionPromotionApprovalRequestError",
+        "EvolutionPromotionApprovalRequestService",
+        "EvolutionPromotionApprovalResponse",
+        "EvolutionPromotionApprovalResponseBuilder",
+        "EvolutionPromotionApprovalResponseReceipt",
+        "EvolutionPromotionApprovalResponseStore",
+        "EvolutionPromotionApprovalResponseView",
+        "EvolutionPromotionSignatureReceiptEntry",
+        "render_evolution_promotion_approval_response",
     }
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
     adversarial_batch_request_exports = {
@@ -1222,6 +1259,8 @@ def __getattr__(name: str) -> object:
     }
     if name in approval_requirement_exports:
         module_name = "approval_requirements"
+    elif name in approval_request_exports:
+        module_name = "approval_requests"
     elif name in adversarial_comparison_exports:
         module_name = "adversarial_comparison"
     elif name in adversarial_failure_attribution_exports:

@@ -28,8 +28,8 @@ Promotion/Rollback → Feedback`。
 
 ## Agent Tool 权限治理
 
-[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.6 的十个 durable
-派生 Tool，以及 EVO-04.7a 的 Reflection 创建/撤销 Tool 建立精确权限规则：派生创建为中风险，append-only
+[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7、EVO-04.1-4.7 与
+EVO-05.1a-05.2b 的十六个 durable Tool 建立精确权限规则：十五类派生创建为中风险，append-only
 撤销为高风险治理动作；lockdown 阻断，bypass 全权限且无二次确认。以后新增非只读 Evolution Tool 必须与
 权限规则和注册表门同一切片交付。
 
@@ -52,8 +52,10 @@ Reviewer 叙事和源码不落库；记录不进入向量索引、自动召回�
 rollback plan。Reflection 被撤销后 Input 保留审计但动态失去 eligibility。
 
 [EVO-05.1b](EVO-05-1b-promotion-package-contract.md) 已交付完整审查 Package：绑定 exact local target
-branch、审批事实和 domain-separated signable digest；target 移动或 Reflection 撤销都会动态失效。下一最小依赖是
+branch、审批事实和 domain-separated signable digest；target 移动或 Reflection 撤销都会动态失效。
 [EVO-05.2a](EVO-05-2a-approval-requirement-policy.md) 已交付 Approval Requirement：按 risk、protected
 target/scope、migration 和 data backup 冻结 human roles、signature gates、technical gates 与 expiry。目标移动、
-到期或 Reflection 撤销都会 fail closed。下一最小依赖是 EVO-05.2b；当前仍无审批决定、签名收集、Git 写入、
-merge、push、publish 或 promotion executor。
+到期或 Reflection 撤销都会 fail closed。[EVO-05.2b](EVO-05-2b-approval-request-authority.md) 已把每个角色请求
+接入 HAR-10.6 durable interaction，并冻结结构化回答、identity assurance 和独立 signature entry。专业角色在
+身份/签名 authority 完成前不能计入 quorum；当前仍无最终审批决定、签名收集、Git 写入、merge、push、publish
+或 promotion executor。

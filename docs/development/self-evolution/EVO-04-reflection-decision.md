@@ -97,9 +97,9 @@ rollback 属于 EVO-05，不是 EVO-04 的隐式完成条件。
 
 ## 明确未完成
 
-- Promotion Package、审批、rebase/revalidate、分阶段发布、监控与 rollback（EVO-05）。
+- EVO-05 已交付 Package、Requirement 和 role response；专业角色身份/签名、最终聚合、rebase/revalidate、
+  分阶段发布、监控与 rollback 仍未完成。
 
 ## 下一步
 
-实现 EVO-05.1a Promotion Package Input Contract：只允许 `accepted_experiment` 且 active 的 Reflection 进入
-显式 promotion review，冻结 patch/baseline/receipts/risk/migration/rollback 引用；仍不合并或发布。
+实现 EVO-05.2c Identity/Signature Receipt Authority；仍不合并或发布。

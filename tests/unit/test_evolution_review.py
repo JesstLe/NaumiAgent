@@ -31,6 +31,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionFinalEvaluationReceiptTool,
     EvolutionIndependentReviewTool,
     EvolutionMechanicalGateTool,
+    EvolutionPromotionApprovalRequestTool,
     EvolutionPromotionApprovalRequirementTool,
     EvolutionPromotionPackageInputTool,
     EvolutionPromotionPackageTool,
@@ -196,11 +197,13 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_promotion_package_input",
         "evolution_promotion_package",
         "evolution_promotion_approval_requirement",
+        "evolution_promotion_approval_request",
         "evolution_proposal_queue",
     ]
     assert [tool.metadata.read_only for tool in tools] == [
         True,
         True,
+        False,
         False,
         False,
         False,
@@ -236,7 +239,8 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[15], EvolutionPromotionPackageInputTool)
     assert isinstance(tools[16], EvolutionPromotionPackageTool)
     assert isinstance(tools[17], EvolutionPromotionApprovalRequirementTool)
-    assert isinstance(tools[18], EvolutionProposalQueueTool)
+    assert isinstance(tools[18], EvolutionPromotionApprovalRequestTool)
+    assert isinstance(tools[19], EvolutionProposalQueueTool)
 
 
 class _FakeEngine:
