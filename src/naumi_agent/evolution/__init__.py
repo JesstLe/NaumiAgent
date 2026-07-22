@@ -73,6 +73,22 @@ if TYPE_CHECKING:
         EvolutionCounterfactualEvidenceStore,
         render_counterfactual_evidence,
     )
+    from naumi_agent.evolution.decision_states import (
+        EvolutionDecisionCheck,
+        EvolutionDecisionCheckStatus,
+        EvolutionDecisionEscalationOption,
+        EvolutionDecisionEscalationRequest,
+        EvolutionDecisionReason,
+        EvolutionDecisionRule,
+        EvolutionDecisionState,
+        EvolutionDecisionStateBuilder,
+        EvolutionDecisionStateError,
+        EvolutionDecisionStateExecutor,
+        EvolutionDecisionStateStore,
+        EvolutionDecisionStateValue,
+        render_evolution_decision_state,
+        resolve_evolution_decision_state,
+    )
     from naumi_agent.evolution.evaluation_lane_receipts import (
         EvaluationLaneKind,
         EvolutionEvaluationArtifactRef,
@@ -408,6 +424,20 @@ __all__ = [
     "EvolutionCounterfactualEvidenceExecutor",
     "EvolutionCounterfactualEvidenceStore",
     "render_counterfactual_evidence",
+    "EvolutionDecisionCheck",
+    "EvolutionDecisionCheckStatus",
+    "EvolutionDecisionEscalationOption",
+    "EvolutionDecisionEscalationRequest",
+    "EvolutionDecisionReason",
+    "EvolutionDecisionRule",
+    "EvolutionDecisionState",
+    "EvolutionDecisionStateBuilder",
+    "EvolutionDecisionStateError",
+    "EvolutionDecisionStateExecutor",
+    "EvolutionDecisionStateStore",
+    "EvolutionDecisionStateValue",
+    "render_evolution_decision_state",
+    "resolve_evolution_decision_state",
     "EvolutionRewardHackingEvidence",
     "EvolutionRewardHackingEvidenceBuilder",
     "EvolutionRewardHackingEvidenceError",
@@ -700,6 +730,22 @@ def __getattr__(name: str) -> object:
         "EvolutionCounterfactualEvidenceStore",
         "render_counterfactual_evidence",
     }
+    decision_state_exports = {
+        "EvolutionDecisionCheck",
+        "EvolutionDecisionCheckStatus",
+        "EvolutionDecisionEscalationOption",
+        "EvolutionDecisionEscalationRequest",
+        "EvolutionDecisionReason",
+        "EvolutionDecisionRule",
+        "EvolutionDecisionState",
+        "EvolutionDecisionStateBuilder",
+        "EvolutionDecisionStateError",
+        "EvolutionDecisionStateExecutor",
+        "EvolutionDecisionStateStore",
+        "EvolutionDecisionStateValue",
+        "render_evolution_decision_state",
+        "resolve_evolution_decision_state",
+    }
     reward_hacking_evidence_exports = {
         "EvolutionRewardHackingEvidence",
         "EvolutionRewardHackingEvidenceBuilder",
@@ -954,6 +1000,8 @@ def __getattr__(name: str) -> object:
         module_name = "independent_reviews"
     elif name in counterfactual_evidence_exports:
         module_name = "counterfactual_evidence"
+    elif name in decision_state_exports:
+        module_name = "decision_states"
     elif name in reward_hacking_evidence_exports:
         module_name = "reward_hacking_evidence"
     elif name in proposal_exports:

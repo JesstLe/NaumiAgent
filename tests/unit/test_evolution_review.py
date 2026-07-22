@@ -22,6 +22,7 @@ from naumi_agent.tools.evolution_review import (
     EvolutionCandidatesTool,
     EvolutionCounterfactualEvidenceTool,
     EvolutionDecisionInputTool,
+    EvolutionDecisionStateTool,
     EvolutionEvaluationAggregationContractTool,
     EvolutionEvaluationReceiptTool,
     EvolutionExperimentContractAuthorityTool,
@@ -182,11 +183,13 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
         "evolution_independent_review",
         "evolution_counterfactual_evidence",
         "evolution_reward_hacking_evidence",
+        "evolution_decision_state",
         "evolution_proposal_queue",
     ]
     assert [tool.metadata.read_only for tool in tools] == [
         True,
         True,
+        False,
         False,
         False,
         False,
@@ -208,6 +211,7 @@ def test_agent_tools_keep_read_and_write_authority_separate(tmp_path: Path) -> N
     assert isinstance(tools[8], EvolutionIndependentReviewTool)
     assert isinstance(tools[9], EvolutionCounterfactualEvidenceTool)
     assert isinstance(tools[10], EvolutionRewardHackingEvidenceTool)
+    assert isinstance(tools[11], EvolutionDecisionStateTool)
 
 
 class _FakeEngine:

@@ -73,6 +73,11 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputExecutor,
     EvolutionDecisionInputStore,
 )
+from naumi_agent.evolution.decision_states import (
+    EvolutionDecisionStateBuilder,
+    EvolutionDecisionStateExecutor,
+    EvolutionDecisionStateStore,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractBuilder,
     EvolutionEvaluationAggregationContractIssuer,
@@ -1224,6 +1229,18 @@ class AgentEngine:
                 evidence_store=self.evolution_reward_hacking_evidence_store,
                 builder=self.evolution_reward_hacking_evidence_builder,
             )
+        )
+        self.evolution_decision_state_builder = EvolutionDecisionStateBuilder()
+        self.evolution_decision_state_store = EvolutionDecisionStateStore(
+            config.memory.session_db_path
+        )
+        self.evolution_decision_state_executor = EvolutionDecisionStateExecutor(
+            gate_store=self.evolution_mechanical_gate_store,
+            review_store=self.evolution_independent_review_store,
+            counterfactual_store=self.evolution_counterfactual_evidence_store,
+            reward_hacking_store=self.evolution_reward_hacking_evidence_store,
+            decision_store=self.evolution_decision_state_store,
+            builder=self.evolution_decision_state_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

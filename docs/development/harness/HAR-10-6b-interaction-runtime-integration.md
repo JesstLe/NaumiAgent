@@ -70,6 +70,8 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
   interaction ledger 与显式 cancel；UI-18.4 仍因手动 takeover、cursor 和详情页未完成而保持 partial；
 - replay 回答后不会擅自启动一个新 Pursuit 执行器，用户需显式 `/pursue resume`，避免隐藏并发 owner；
 - cancelled authority 已由 UI-18.4c 开放 sequence-fenced 显式用户动作；
+- EVO-04.6a 已让 escalated Decision State 生成 runtime-compatible request payload，但尚未自动调用本 adapter；
+  EVO-04.6b 必须 create-before-display、answer-before-resolution，不能只渲染静态选项；
 - pending 列表目前上限 50，无 cursor 与优先级；这应与 HAR-10.3 durable queue 一起设计；
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
 

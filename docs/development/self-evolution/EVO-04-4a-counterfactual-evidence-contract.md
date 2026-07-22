@@ -85,7 +85,7 @@ finding code、严重度、机械统计和代表性 finding evidence digest。�
 - 固定 `candidate_acceptance_decided=false`、`promotion_ready=false`。
 
 `concern` 不是 Mechanical veto，也不是最终 reject；`clear` 也不是 accept。EVO-04.5 必须继续检查更隐蔽的行为型
-reward hacking，EVO-04.6 才能综合形成最终 decision state。
+reward hacking；EVO-04.6a 现已综合形成 Decision State，但尚未消费 escalation answer。
 
 ## 持久化、幂等与并发
 
@@ -131,12 +131,12 @@ Agent Tool 属于 `evolution_decision_artifact` 中风险派生写入：
 ## 明确未完成
 
 - EVO-04.5a 行为型 Reward-hacking Evidence 已实现；
-- EVO-04.6 accept/revise/reject/escalate 最终状态机；
+- EVO-04.6a accept/revise/reject/escalate Decision State 已完成；resolution 尚未完成；
 - EVO-04.7 Reflection Memory；
 - EVO-05 promotion/rollback；
 - 对已在首次扫描前清理的 worktree 提供独立 encrypted content archive；当前严格失败关闭，不从 digest 反推。
 
 ## 下一步
 
-EVO-04.5a 已消费本 Counterfactual authority 与完整 Evaluation facts。下一步实现 EVO-04.6a Decision State
-Contract；Reward-hacking 的 `concern/inconclusive` 不得被 Reviewer 叙事覆盖。
+EVO-04.5a 与 EVO-04.6a 已消费本 authority 并形成四态决策。下一步实现 EVO-04.6b Escalation Resolution；
+Reward-hacking 的 `concern/inconclusive` 仍不得被 Reviewer 叙事覆盖。

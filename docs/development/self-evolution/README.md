@@ -28,7 +28,7 @@ Promotion/Rollback → Feedback`。
 
 ## Agent Tool 权限治理
 
-[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.5 的八个 durable
+[EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7 与 EVO-04.1-4.6 的九个 durable
 派生 Tool 建立精确权限规则：中风险、normal 无逐次确认、strict 可用、lockdown 阻断、bypass 全权限，
 并按 Evaluation/Decision family 设置会话上限。以后新增非只读 Evolution Tool 必须与权限规则和注册表门
 同一切片交付。
@@ -39,3 +39,7 @@ scope、删测试、metric/threshold、skip/mock 与评测泄漏。它不调用�
 
 EVO-04.5a 已交付行为型 Reward-hacking Evidence：从 Counterfactual 重读 Final/Lane/Cohort authority，检查
 真实任务退化、proxy divergence、平台选择性与资源换分；资源或平台证据不足时明确返回 `inconclusive`。
+
+EVO-04.6a 已交付四态 Decision State：mechanical veto 固定 rejected，结构化 concern 固定 revise，证据不足或
+高风险进入 escalated，全部 clear 才 accepted_experiment。Reviewer 不参与状态算法；escalated 生成 HAR-10.6
+兼容选项和自定义输入，但用户答案 resolution 尚未实现。

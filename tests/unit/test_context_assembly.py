@@ -39,6 +39,11 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputExecutor,
     EvolutionDecisionInputStore,
 )
+from naumi_agent.evolution.decision_states import (
+    EvolutionDecisionStateBuilder,
+    EvolutionDecisionStateExecutor,
+    EvolutionDecisionStateStore,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractBuilder,
     EvolutionEvaluationAggregationContractIssuer,
@@ -292,6 +297,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_reward_hacking_evidence_executor,
         EvolutionRewardHackingEvidenceExecutor,
+    )
+    assert isinstance(
+        engine.evolution_decision_state_builder,
+        EvolutionDecisionStateBuilder,
+    )
+    assert isinstance(
+        engine.evolution_decision_state_store,
+        EvolutionDecisionStateStore,
+    )
+    assert isinstance(
+        engine.evolution_decision_state_executor,
+        EvolutionDecisionStateExecutor,
     )
     assert isinstance(
         engine.evolution_validation_planner,

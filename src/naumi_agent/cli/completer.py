@@ -63,7 +63,7 @@ def _build_commands() -> list[CommandMeta]:
             "/evolution",
             "审查 Candidate、签发评测/决策证据或加入 Workbench 队列",
             takes_arg=True,
-            arg_hint="[list|detail|evaluation|counterfactual|reward-hacking|enqueue]",
+            arg_hint="[list|detail|evaluation|counterfactual|reward-hacking|decision-state|enqueue]",
             readonly=False,
             category="基础",
         ),

@@ -130,11 +130,11 @@ single-flight 收敛。bypass 不能绕过 author/reviewer identity 隔离或 me
 - EVO-04.4a counterfactual 已完成：真实 baseline/candidate/diff 复核，以及更小改动、删测试、metric/threshold、
   skip/mock 和评测泄漏替代解释扫描；
 - EVO-04.5a reward-hacking evidence 已完成；
-- EVO-04.6 accept/revise/reject/escalate 最终状态；
+- EVO-04.6a accept/revise/reject/escalate Decision State 已完成；resolution 尚未完成；
 - EVO-04.7 reflection memory 与 EVO-05 promotion；
 - 需要真实 provider 密钥的多供应商 structured-output 集成矩阵仍是显式 opt-in 验证，不在单元测试中触发。
 
 ## 下一步
 
-EVO-04.4a 与 EVO-04.5a 已实现，详见对应 Counterfactual/Reward-hacking 文档。下一步实现 EVO-04.6a
-Decision State；Reviewer 意见仍不能直接成为最终 decision。
+EVO-04.4a 至 EVO-04.6a 已实现。下一步实现 EVO-04.6b Escalation Resolution；Reviewer 意见没有进入
+Decision State 算法，仍不能直接成为最终 decision。

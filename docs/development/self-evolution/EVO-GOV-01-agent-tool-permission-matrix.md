@@ -2,7 +2,7 @@
 
 ## 问题与目标
 
-EVO-03.7a/3.7b1/3.7b2 与 EVO-04.1a/4.2a/4.3a/4.4a/4.5a 已注册八个非只读 Agent Tool。它们拥有真实的 durable
+EVO-03.7a/3.7b1/3.7b2 与 EVO-04.1a/4.2a/4.3a/4.4a/4.5a/4.6a 已注册九个非只读 Agent Tool。它们拥有真实的 durable
 写入，但此前没有精确 `PermissionRule`，因此 normal runtime 将其判为 `UNKNOWN_TOOL`，Engine 的“所有注册
 工具均受治理”门也会失败。
 
@@ -11,12 +11,13 @@ Store、Slash 命令或后续 decision 语义。
 
 ## 风险分类依据
 
-八个 Tool 都只能从已有签名 authority 派生并持久化不可变证据：
+九个 Tool 都只能从已有签名 authority 派生并持久化不可变证据或决策：
 
 - 不运行项目代码或 Shell；
 - 不修改 Candidate/worktree/main；
 - 不扩大 Experiment scope、budget、network 或 dependency 权限；
-- 不接受 Candidate，不产生最终 promotion；
+- 只有 `evolution_decision_state` 可按固定机械 policy 标记 `accepted_experiment`，且仍不产生 promotion、
+  baseline 更新或 Git 写入；其他 Tool 不接受 Candidate；
 - 重复调用由各 Store/Executor 幂等或 single-flight 收敛。
 
 因此它们统一为 `MEDIUM`：高于只读查询，但不应像 Contract human-governance、baseline promotion 或仓库写入
@@ -34,6 +35,7 @@ Store、Slash 命令或后续 decision 语义。
 | `evolution_independent_review` | Independent Review | `evolution_decision_artifact` | 20 |
 | `evolution_counterfactual_evidence` | Counterfactual Evidence | `evolution_decision_artifact` | 50 |
 | `evolution_reward_hacking_evidence` | Reward-hacking Evidence | `evolution_decision_artifact` | 50 |
+| `evolution_decision_state` | Final Decision State | `evolution_decision_artifact` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
@@ -41,7 +43,7 @@ Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 
 ## 模式语义
 
 - permissive/moderate/strict：允许，无逐次确认，不创建 session grant。
-- lockdown：阻断所有八类派生写入；已有只读 Authority Tool 仍按各自只读规则工作。
+- lockdown：阻断所有九类派生写入；已有只读 Authority Tool 仍按各自只读规则工作。
 - bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制。
 
 bypass 只绕过交互 PermissionChecker；executor 仍必须重读 authority、验证 workspace/identity/digest/budget，
@@ -49,7 +51,7 @@ Store 冲突与 mechanical veto 仍不可被绕过。
 
 ## 验收
 
-- 八个 Tool 在 permissive/moderate/strict 均返回 `ALLOW + MEDIUM`，family 精确匹配；
+- 九个 Tool 在 permissive/moderate/strict 均返回 `ALLOW + MEDIUM`，family 精确匹配；
 - lockdown 返回 `MODE_BLOCKED`；
 - normal 模式达到各自上限后返回 `MAX_CALLS_EXCEEDED`；
 - bypass 在超过同一上限后仍直接允许且无确认；

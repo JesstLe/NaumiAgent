@@ -15,6 +15,10 @@ from naumi_agent.evolution.decision_inputs import (
     EvolutionDecisionInputError,
     render_decision_input,
 )
+from naumi_agent.evolution.decision_states import (
+    EvolutionDecisionStateError,
+    render_evolution_decision_state,
+)
 from naumi_agent.evolution.evaluation_aggregation_contracts import (
     EvolutionEvaluationAggregationContractError,
     render_evaluation_aggregation_contract,
@@ -819,6 +823,66 @@ class EvolutionRewardHackingEvidenceTool(Tool):
         return render_reward_hacking_evidence(artifact)
 
 
+class EvolutionDecisionStateTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_decision_state"
+
+    @property
+    def description(self) -> str:
+        return (
+            "仅凭 Decision Input ID，从 durable Store 重读 Mechanical Gate、Independent "
+            "Review、Counterfactual 与 Reward-hacking authority，按固定优先级形成 "
+            "accepted_experiment/revise/rejected/escalated。Reviewer 仅为 advisory；"
+            "escalated 生成兼容 New UI/TUI 的选项与自定义输入，不执行 promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "decision_input_id": {
+                    "type": "string",
+                    "pattern": "^evdin_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["decision_input_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 最终决策状态",
+            search_hint=(
+                "evolution decision state accept revise reject escalate user choice "
+                "自进化 最终决策 用户选择"
+            ),
+        )
+
+    async def execute(self, decision_input_id: str) -> str:
+        try:
+            artifact = await self._engine.evolution_decision_state_executor.execute(
+                workspace_root=self._engine.workspace_root,
+                decision_input_id=decision_input_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionDecisionStateError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Decision State 未完成：{exc}"
+        return render_evolution_decision_state(artifact)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -835,6 +899,7 @@ def create_evolution_review_tools(
         EvolutionIndependentReviewTool(engine),
         EvolutionCounterfactualEvidenceTool(engine),
         EvolutionRewardHackingEvidenceTool(engine),
+        EvolutionDecisionStateTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -843,6 +908,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",
+    "EvolutionDecisionStateTool",
     "EvolutionExperimentContractAuthorityTool",
     "EvolutionExperimentContractIssueTool",
     "EvolutionEvaluationAggregationContractTool",
