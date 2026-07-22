@@ -294,6 +294,25 @@ def test_protocol_normalizes_workbench_proposal_actions() -> None:
         "confirmed": True,
     }
 
+    contract_record = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": " session-1 ",
+                "proposal_id": " proposal-1 ",
+                "action": " ISSUE_CONTRACT ",
+                "confirmed": False,
+            },
+        }
+    )
+    assert contract_record["payload"] == {
+        "session_id": "session-1",
+        "proposal_id": "proposal-1",
+        "action": "issue_contract",
+        "decision_note": "",
+        "confirmed": False,
+    }
+
 
 @pytest.mark.parametrize(
     "payload",
@@ -302,6 +321,11 @@ def test_protocol_normalizes_workbench_proposal_actions() -> None:
         {"proposal_id": "proposal-1", "action": "reject", "decision_note": ""},
         {"proposal_id": "", "action": "approve"},
         {"proposal_id": "proposal-1", "action": "approve", "confirmed": "yes"},
+        {
+            "proposal_id": "proposal-1",
+            "action": "issue_contract",
+            "decision_note": "不可夹带决定",
+        },
     ],
 )
 def test_protocol_rejects_invalid_workbench_proposal_actions(payload: dict) -> None:

@@ -61,12 +61,15 @@
   展示 open Proposal，normal 模式确认、bypass 无二次确认，并复用既有治理状态机和审计。当前只开放
   approve/reject/cancel，批准不执行代码、不授予实验资格。详见
   `../cli-ui/UI-10-6a-proposal-actions.md`。
-- HAR-09 仍未实现 defer/merge 交互、approved 到 EVO-02 的显式转换和 outcome tracking，因此整体
+- HAR-09.5c/UI-10.6c 已实现 approved Evolution Proposal 到 durable Experiment Contract Authority 的
+  显式转换：同一 Proposal 并发/重复签发单飞，normal 确认、bypass 直接执行，Agent Tool 与 New UI/TUI
+  复用同一 issuer；回执固定 `execution_ready=false`。详见
+  `HAR-09-5c-explicit-experiment-contract-issuance.md`。
+- HAR-09 仍未实现 defer/merge 交互和 outcome tracking，因此整体
   继续保持 partial。
 
-EVO-02.1a 已补上 approved Proposal 到不可执行 Experiment Contract 的内部签发器；它会重新验证当前
-Candidate/Preview 与 Proposal provenance，并固定 `execution_ready=false`。由于 Contract 尚未持久化或
-暴露为用户动作，HAR-09 的“显式转换”产品闭环仍未完成。
+EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
+Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。
 
 EVO-02.2a 已进一步把 Contract 绑定到持久、可恢复的唯一 Worktree Lease；Lease 仍不授予写 patch 或
 执行检查的权限，且尚未暴露为用户动作，因此不改变 HAR-09 的 partial 结论。

@@ -21,6 +21,7 @@ from naumi_agent.evolution.evaluation_lane_receipts import (
 )
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractStoreError,
+    default_experiment_seed,
     render_experiment_contract_authority,
 )
 from naumi_agent.evolution.final_evaluation_receipts import (
@@ -179,10 +180,86 @@ class EvolutionExperimentContractAuthorityTool(Tool):
                 self._engine.workspace_root,
                 contract_id.strip(),
             )
-        except (EvolutionExperimentContractStoreError, OSError, TypeError, ValueError):
+        except (
+            EvolutionExperimentContractStoreError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
             return "Experiment Contract Authority 不可读取；请运行 /doctor 后重试。"
         if authority is None:
             return "当前工作区不存在该 Experiment Contract Authority。"
+        return render_experiment_contract_authority(authority)
+
+
+class EvolutionExperimentContractIssueTool(Tool):
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_issue_experiment_contract"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把当前会话中一个已由用户批准的 Evolution Proposal 显式转换为 durable "
+            "Experiment Contract。该操作只冻结 baseline、scope、预算和验证约束，"
+            "不修改代码、不执行实验，也不授予发布权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "proposal_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                },
+            },
+            "required": ["proposal_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="签发 Evolution 实验契约",
+            search_hint=(
+                "evolution issue experiment contract approved proposal scope budget "
+                "自进化 签发 实验 契约"
+            ),
+        )
+
+    async def execute(self, proposal_id: str) -> str:
+        session = getattr(self._engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "").strip()
+        if not session_id:
+            return "当前没有活动会话，无法绑定 Experiment Contract。"
+        clean_proposal = proposal_id.strip()
+        try:
+            contract = await self._engine.evolution_experiment_contract_issuer.issue(
+                self._engine.workspace_root,
+                session_id=session_id,
+                proposal_id=clean_proposal,
+                seed=default_experiment_seed(clean_proposal),
+            )
+            authority = await self._engine.evolution_experiment_contract_store.get(
+                self._engine.workspace_root,
+                contract.contract_id,
+            )
+        except (EvolutionExperimentContractStoreError, OSError, TypeError, ValueError):
+            return (
+                "Experiment Contract 未签发：Proposal 未批准、会话绑定无效，"
+                "或 authority 状态库不可用。"
+            )
+        if authority is None:
+            return "Experiment Contract 未签发：authority 未持久化，请运行 /doctor。"
         return render_experiment_contract_authority(authority)
 
 
@@ -617,6 +694,7 @@ def create_evolution_review_tools(
     return [
         EvolutionCandidatesTool(engine, service),
         EvolutionExperimentContractAuthorityTool(engine),
+        EvolutionExperimentContractIssueTool(engine),
         EvolutionEvaluationReceiptTool(engine),
         EvolutionEvaluationAggregationContractTool(engine),
         EvolutionFinalEvaluationReceiptTool(engine),
@@ -631,6 +709,7 @@ __all__ = [
     "EvolutionCandidatesTool",
     "EvolutionDecisionInputTool",
     "EvolutionExperimentContractAuthorityTool",
+    "EvolutionExperimentContractIssueTool",
     "EvolutionEvaluationAggregationContractTool",
     "EvolutionEvaluationReceiptTool",
     "EvolutionFinalEvaluationReceiptTool",

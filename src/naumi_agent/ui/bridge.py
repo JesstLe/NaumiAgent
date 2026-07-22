@@ -26,6 +26,11 @@ from naumi_agent.debug_trace import DebugTrace
 from naumi_agent.evolution.evaluation_lane_receipts import (
     EvolutionEvaluationLaneReceiptError,
 )
+from naumi_agent.evolution.experiments import (
+    EvolutionExperimentContractAuthority,
+    EvolutionExperimentContractStoreError,
+    default_experiment_seed,
+)
 from naumi_agent.harness.conversation_queue_runtime import (
     ConversationQueueClaim,
     ConversationQueueClaimError,
@@ -118,6 +123,30 @@ _MAX_QUEUED_CONVERSATIONS = 20
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
+
+
+def _experiment_contract_public_payload(
+    authority: EvolutionExperimentContractAuthority,
+) -> dict[str, Any]:
+    item = EvolutionExperimentContractAuthority.model_validate(
+        authority.model_dump(mode="json")
+    )
+    contract = item.contract
+    return {
+        "schema_version": 1,
+        "authority_id": item.authority_id,
+        "authority_sha256": item.authority_sha256,
+        "contract_id": item.contract_id,
+        "manifest_sha256": item.contract_manifest_sha256,
+        "proposal_id": contract.source.workbench_proposal_id,
+        "candidate_id": item.candidate_id,
+        "candidate_revision": item.candidate_revision,
+        "impact_scope": contract.scope.impact_scope,
+        "allowed_files": list(contract.scope.allowed_files),
+        "budget": contract.budget.model_dump(mode="json"),
+        "execution_ready": False,
+        "promotion_ready": False,
+    }
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -2628,7 +2657,15 @@ class JsonlEngineBridge:
         session_id = str(getattr(session, "id", "") or "")
         requested_session_id = str(payload.get("session_id") or "")
         proposal_id = str(payload.get("proposal_id") or "")
-        action = ProposalAction(str(payload.get("action") or ""))
+        action_name = str(payload.get("action") or "")
+        if action_name == "issue_contract":
+            await self.issue_workbench_proposal_contract(
+                payload,
+                request_id=request_id,
+                session_id=session_id,
+            )
+            return
+        action = ProposalAction(action_name)
         decision_note = str(payload.get("decision_note") or "")
         confirmed = payload.get("confirmed") is True
         if requested_session_id and requested_session_id != session_id:
@@ -2733,6 +2770,148 @@ class JsonlEngineBridge:
                 snapshot,
                 request_id=request_id,
             )
+
+    async def issue_workbench_proposal_contract(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+        session_id: str,
+    ) -> None:
+        """Issue or reopen one durable, non-executable Experiment Contract."""
+        requested_session_id = str(payload.get("session_id") or "")
+        proposal_id = str(payload.get("proposal_id") or "")
+        confirmed = payload.get("confirmed") is True
+        if requested_session_id and requested_session_id != session_id:
+            await self.emit_error(
+                "Workbench 只能转换当前会话的 approved Proposal。",
+                code="workbench_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        issuer = getattr(self.engine, "evolution_experiment_contract_issuer", None)
+        store = getattr(self.engine, "evolution_experiment_contract_store", None)
+        service = getattr(self.engine, "workbench_service", None)
+        if issuer is None or store is None or service is None:
+            await self.emit_error(
+                "Experiment Contract 签发服务暂不可用。",
+                code="experiment_contract_issuer_unavailable",
+                request_id=request_id,
+            )
+            return
+        decision = self.engine._permission_checker.check(
+            "evolution_issue_experiment_contract",
+            {"proposal_id": proposal_id},
+        )
+        if not decision.allowed:
+            await self._emit_experiment_contract_action_result(
+                request_id=request_id,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                status="blocked",
+                message="当前权限模式不允许签发 Experiment Contract。",
+            )
+            return
+        if decision.requires_confirmation and not confirmed:
+            await self._emit_experiment_contract_action_result(
+                request_id=request_id,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                status="needs_confirmation",
+                message="请确认签发不可执行的 Experiment Contract。",
+            )
+            return
+        try:
+            contract = await issuer.issue(
+                self.engine.workspace_root,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                seed=default_experiment_seed(proposal_id),
+            )
+            authority = await store.get(
+                self.engine.workspace_root,
+                contract.contract_id,
+            )
+            if authority is None:
+                raise RuntimeError("Experiment Contract authority 未持久化。")
+            proposal = await service.get_proposal(session_id, proposal_id)
+            snapshot = await service.dashboard_snapshot(session_id)
+        except EvolutionExperimentContractStoreError as exc:
+            logger.warning("Experiment Contract store failed (%s)", exc.code)
+            await self._emit_experiment_contract_action_result(
+                request_id=request_id,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                status="error",
+                message="Experiment Contract 状态库损坏或暂不可用。",
+            )
+            return
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning(
+                "Experiment Contract issue failed (%s)",
+                type(exc).__name__,
+            )
+            message = str(exc) if isinstance(exc, ValueError) else (
+                "Experiment Contract 签发暂时失败。"
+            )
+            await self._emit_experiment_contract_action_result(
+                request_id=request_id,
+                session_id=session_id,
+                proposal_id=proposal_id,
+                status="error",
+                message=message,
+            )
+            return
+        await self._emit_experiment_contract_action_result(
+            request_id=request_id,
+            session_id=session_id,
+            proposal_id=proposal_id,
+            status="completed",
+            message=(
+                f"Experiment Contract {contract.contract_id} 已持久化；"
+                "尚未执行代码或授予发布权限。"
+            ),
+            proposal=proposal,
+            snapshot=snapshot,
+            authority=authority,
+        )
+        await self.emit(
+            ServerEventType.WORKBENCH_SNAPSHOT,
+            snapshot,
+            request_id=request_id,
+        )
+
+    async def _emit_experiment_contract_action_result(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        proposal_id: str,
+        status: str,
+        message: str,
+        proposal: dict[str, Any] | None = None,
+        snapshot: dict[str, Any] | None = None,
+        authority: EvolutionExperimentContractAuthority | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.WORKBENCH_PROPOSAL_ACTION_RESULT,
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "proposal_id": proposal_id,
+                "action": "issue_contract",
+                "status": status,
+                "message": message,
+                "proposal": proposal,
+                "workbench_snapshot": snapshot,
+                "experiment_contract": (
+                    _experiment_contract_public_payload(authority)
+                    if authority is not None
+                    else None
+                ),
+            },
+            request_id=request_id,
+        )
 
     async def show_agents(
         self,

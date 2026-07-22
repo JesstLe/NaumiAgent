@@ -12,6 +12,7 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
+    ExperimentContractIssueScreen,
     ProposalDecisionScreen,
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
@@ -152,6 +153,16 @@ def test_reviews_formatter_renders_open_proposal_actions_and_policy_boundary() -
     assert "harness/judge.py" in rendered
     assert "批准只进入下一 policy gate" in rendered
     assert "`a` 批准 · `x` 拒绝" in rendered
+
+
+def test_reviews_formatter_renders_approved_proposal_contract_boundary() -> None:
+    snapshot = _approved_proposal_snapshot()
+
+    rendered = format_workbench_reviews_markdown(snapshot)
+
+    assert "Proposal 已批准，但尚未执行代码" in rendered
+    assert "`c` 签发或重开 Experiment Contract" in rendered
+    assert "不会修改代码、运行实验或授予发布权限" in rendered
 
 
 def test_workbench_formatter_escapes_store_markdown_and_control_characters() -> None:
@@ -337,6 +348,74 @@ async def test_textual_workbench_bypass_approves_proposal_without_modal() -> Non
             reviewer="Human",
             decision_note="",
         )
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_issues_approved_contract_after_confirmation() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _approved_proposal_snapshot()
+    refreshed = {**initial, "revision": 4}
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, refreshed]
+    )
+    contract = SimpleNamespace(contract_id=f"evx_{'a' * 24}")
+    authority = SimpleNamespace(contract_id=contract.contract_id)
+    engine.evolution_experiment_contract_issuer.issue = AsyncMock(  # type: ignore[method-assign]
+        return_value=contract
+    )
+    engine.evolution_experiment_contract_store.get = AsyncMock(  # type: ignore[method-assign]
+        return_value=authority
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "c")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, ExperimentContractIssueScreen)
+        await pilot.press("enter")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        engine.evolution_experiment_contract_issuer.issue.assert_awaited_once()
+        call = engine.evolution_experiment_contract_issuer.issue.await_args
+        assert call.kwargs["session_id"] == "session-workbench-tui"
+        assert call.kwargs["proposal_id"] == "proposal-1"
+        assert isinstance(call.kwargs["seed"], int)
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert contract.contract_id.replace("_", "\\_") in rendered
+        assert "execution\\_ready=false" in rendered
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_bypass_issues_contract_without_modal() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine.set_runtime_mode("bypass")
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _approved_proposal_snapshot()
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, {**initial, "revision": 4}]
+    )
+    contract = SimpleNamespace(contract_id=f"evx_{'b' * 24}")
+    engine.evolution_experiment_contract_issuer.issue = AsyncMock(  # type: ignore[method-assign]
+        return_value=contract
+    )
+    engine.evolution_experiment_contract_store.get = AsyncMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace(contract_id=contract.contract_id)
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "c")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        engine.evolution_experiment_contract_issuer.issue.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -541,4 +620,11 @@ def _proposal_snapshot() -> dict[str, object]:
         "source_revision": 2,
         "proposal_kind": "harness_policy",
     }]
+    return snapshot
+
+
+def _approved_proposal_snapshot() -> dict[str, object]:
+    snapshot = _proposal_snapshot()
+    proposal = snapshot["proposals"][0]  # type: ignore[index]
+    proposal["state"] = "approved"
     return snapshot

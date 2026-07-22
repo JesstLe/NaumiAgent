@@ -339,7 +339,30 @@ class EvolutionExperimentContractStore:
             async with aiosqlite.connect(self._db_path) as db:
                 db.row_factory = aiosqlite.Row
                 await _ensure_contract_store_schema(db)
+                await db.commit()
                 await db.execute("BEGIN IMMEDIATE")
+                proposal_row = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_experiment_contracts "
+                        "WHERE workspace_root = ? AND source_session_id = ? "
+                        "AND workbench_proposal_id = ?",
+                        (
+                            authority.workspace_root,
+                            authority.contract.source.session_id,
+                            authority.contract.source.workbench_proposal_id,
+                        ),
+                    )
+                ).fetchone()
+                if proposal_row is not None:
+                    restored = _contract_authority_from_row(proposal_row)
+                    if restored != authority:
+                        await db.rollback()
+                        raise EvolutionExperimentContractStoreError(
+                            "experiment_contract_proposal_conflict",
+                            "同一 approved Proposal 只能签发一个 Experiment Contract。",
+                        )
+                    await db.rollback()
+                    return restored
                 row = await (
                     await db.execute(
                         "SELECT * FROM evolution_experiment_contracts "
@@ -360,8 +383,8 @@ class EvolutionExperimentContractStore:
                 await db.execute(
                     "INSERT INTO evolution_experiment_contracts "
                     "(workspace_root, contract_id, manifest_sha256, authority_id, "
-                    "authority_sha256, authority_json, approved_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "authority_sha256, authority_json, approved_at, source_session_id, "
+                    "workbench_proposal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         authority.workspace_root,
                         authority.contract_id,
@@ -370,6 +393,8 @@ class EvolutionExperimentContractStore:
                         authority.authority_sha256,
                         encoded,
                         authority.approved_at,
+                        authority.contract.source.session_id,
+                        authority.contract.source.workbench_proposal_id,
                     ),
                 )
                 await db.commit()
@@ -398,6 +423,7 @@ class EvolutionExperimentContractStore:
             async with aiosqlite.connect(self._db_path) as db:
                 db.row_factory = aiosqlite.Row
                 await _ensure_contract_store_schema(db)
+                await db.commit()
                 row = await (
                     await db.execute(
                         "SELECT * FROM evolution_experiment_contracts "
@@ -410,6 +436,42 @@ class EvolutionExperimentContractStore:
             raise EvolutionExperimentContractStoreError(
                 "experiment_contract_authority_store_corrupt",
                 "Experiment Contract Authority 损坏或无法读取。",
+            ) from exc
+
+    async def get_by_proposal(
+        self,
+        workspace_root: str | Path,
+        *,
+        session_id: str,
+        proposal_id: str,
+    ) -> EvolutionExperimentContractAuthority | None:
+        workspace = _canonical_workspace_root(workspace_root)
+        clean_session = _safe_id(session_id, "session")
+        clean_proposal = _safe_id(proposal_id, "Proposal")
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with aiosqlite.connect(self._db_path) as db:
+                db.row_factory = aiosqlite.Row
+                await _ensure_contract_store_schema(db)
+                await db.commit()
+                rows = await (
+                    await db.execute(
+                        "SELECT * FROM evolution_experiment_contracts "
+                        "WHERE workspace_root = ? AND source_session_id = ? "
+                        "AND workbench_proposal_id = ? LIMIT 2",
+                        (workspace, clean_session, clean_proposal),
+                    )
+                ).fetchall()
+                if len(rows) > 1:
+                    raise ValueError("approved Proposal 映射到多个 Experiment Contract。")
+                return _contract_authority_from_row(rows[0]) if rows else None
+        except EvolutionExperimentContractStoreError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise EvolutionExperimentContractStoreError(
+                "experiment_contract_authority_store_corrupt",
+                "Experiment Contract Proposal authority 损坏或无法读取。",
             ) from exc
 
 
@@ -568,6 +630,13 @@ class EvolutionExperimentContractIssuer:
         if proposal is None:
             raise ValueError("Workbench Proposal 不存在。")
         _require_approved_evolution_proposal(proposal)
+        existing = await self._store.get_by_proposal(
+            workspace_root,
+            session_id=clean_session,
+            proposal_id=clean_proposal,
+        )
+        if existing is not None:
+            return existing.contract
         snapshot = await self._review_service.detail_snapshot(
             workspace_root,
             str(proposal["source_id"]),
@@ -628,10 +697,21 @@ class EvolutionExperimentContractIssuer:
             manifest_sha256=manifest_sha256,
             **plain,
         )
-        authority = await self._store.record(
-            workspace_root=workspace_root,
-            contract=contract,
-        )
+        try:
+            authority = await self._store.record(
+                workspace_root=workspace_root,
+                contract=contract,
+            )
+        except EvolutionExperimentContractStoreError as exc:
+            if exc.code != "experiment_contract_proposal_conflict":
+                raise
+            authority = await self._store.get_by_proposal(
+                workspace_root,
+                session_id=clean_session,
+                proposal_id=clean_proposal,
+            )
+            if authority is None:
+                raise
         return authority.contract
 
 
@@ -778,9 +858,41 @@ async def _ensure_contract_store_schema(db: aiosqlite.Connection) -> None:
             authority_sha256 TEXT NOT NULL,
             authority_json TEXT NOT NULL,
             approved_at TEXT NOT NULL,
+            source_session_id TEXT,
+            workbench_proposal_id TEXT,
             PRIMARY KEY (workspace_root, contract_id)
         )
         """
+    )
+    columns = {
+        str(row[1])
+        for row in await (await db.execute(
+            "PRAGMA table_info(evolution_experiment_contracts)"
+        )).fetchall()
+    }
+    if "source_session_id" not in columns:
+        await db.execute(
+            "ALTER TABLE evolution_experiment_contracts "
+            "ADD COLUMN source_session_id TEXT"
+        )
+    if "workbench_proposal_id" not in columns:
+        await db.execute(
+            "ALTER TABLE evolution_experiment_contracts "
+            "ADD COLUMN workbench_proposal_id TEXT"
+        )
+    await db.execute(
+        "UPDATE evolution_experiment_contracts "
+        "SET source_session_id = json_extract(authority_json, "
+        "'$.contract.source.session_id'), "
+        "workbench_proposal_id = json_extract(authority_json, "
+        "'$.contract.source.workbench_proposal_id') "
+        "WHERE source_session_id IS NULL OR workbench_proposal_id IS NULL"
+    )
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "idx_evolution_contract_source_proposal ON evolution_experiment_contracts "
+        "(workspace_root, source_session_id, workbench_proposal_id) "
+        "WHERE source_session_id IS NOT NULL AND workbench_proposal_id IS NOT NULL"
     )
 
 
@@ -801,6 +913,9 @@ def _contract_authority_from_row(
         and row["authority_id"] == authority.authority_id
         and row["authority_sha256"] == authority.authority_sha256
         and row["approved_at"] == authority.approved_at
+        and row["source_session_id"] == authority.contract.source.session_id
+        and row["workbench_proposal_id"]
+        == authority.contract.source.workbench_proposal_id
     ):
         raise ValueError("Experiment Contract Authority row 与 payload 不一致。")
     return authority
@@ -832,6 +947,14 @@ def _contract_id(manifest_sha256: str) -> str:
     return f"evx_{manifest_sha256[:24]}"
 
 
+def default_experiment_seed(proposal_id: str) -> int:
+    clean = _safe_id(proposal_id, "Proposal")
+    digest = hashlib.sha256(
+        f"{EXPERIMENT_CONTRACT_POLICY}:{clean}".encode()
+    ).digest()
+    return int.from_bytes(digest[:8], "big") & 0x7FFF_FFFF_FFFF_FFFF
+
+
 __all__ = [
     "EXPERIMENT_CONTRACT_AUTHORITY_POLICY",
     "EvolutionExperimentContract",
@@ -847,5 +970,6 @@ __all__ = [
     "GitExperimentBaselineReader",
     "build_experiment_contract_authority",
     "default_experiment_budget",
+    "default_experiment_seed",
     "render_experiment_contract_authority",
 ]

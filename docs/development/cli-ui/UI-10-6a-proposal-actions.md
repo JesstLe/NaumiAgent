@@ -58,9 +58,14 @@
 
 - waiting Approval 的 approve/reject 动作；
 - Proposal `defer` 日期/原因表单与 `merge` 目标选择器；
-- approved Proposal 到 EVO-02 Experiment Contract 或 Workbench Issue 的显式转换；
+- approved Proposal 到 EVO-02 Experiment Contract 或 Workbench Issue 的显式转换（前者后由 UI-10.6c 交付）；
 - HAR-09.6 before/after outcome tracking；
 - UI-10.5 Timeline 与 revisioned domain patch。
 
-下一切片应优先实现 approved Proposal 到 EVO-02 隔离实验契约的显式转换前置；在该契约完成前，
-不要把批准扩展成代码执行。`defer/merge` 交互可以作为独立的 UI-10.6b 跟进。
+后续切片不得把批准扩展成代码执行。`defer/merge` 交互继续由独立的 UI-10.6b 跟进。
+
+## 后续进展
+
+UI-10.6c/HAR-09.5c 已实现上述 approved Evolution Proposal → durable Experiment Contract 显式转换，
+仍固定为不可执行、不可 promotion。原 UI-10.6a 的 approve/reject 边界和验收不被追溯扩大；新动作的
+协议、确认、bypass、回执与测试见 `UI-10-6c-experiment-contract-action.md`。

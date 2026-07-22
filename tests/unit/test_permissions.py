@@ -64,6 +64,27 @@ class TestPermissionChecker:
         assert unrestricted.allowed
         assert not unrestricted.requires_confirmation
 
+    def test_experiment_contract_issuance_confirms_except_in_bypass(self) -> None:
+        moderate = PermissionChecker(PermissionMode.MODERATE)
+        bypass = PermissionChecker(PermissionMode.BYPASS)
+        lockdown = PermissionChecker(PermissionMode.LOCKDOWN)
+        arguments = {"proposal_id": "proposal-1"}
+
+        guarded = moderate.check("evolution_issue_experiment_contract", arguments)
+        unrestricted = bypass.check(
+            "evolution_issue_experiment_contract",
+            arguments,
+        )
+        blocked = lockdown.check("evolution_issue_experiment_contract", arguments)
+
+        assert guarded.allowed
+        assert guarded.requires_confirmation
+        assert guarded.risk_level is PermissionRiskLevel.HIGH
+        assert unrestricted.allowed
+        assert not unrestricted.requires_confirmation
+        assert not blocked.allowed
+        assert blocked.code is PermissionReasonCode.MODE_BLOCKED
+
     @pytest.mark.parametrize(
         "tool_name",
         [

@@ -11,14 +11,14 @@
 | HAR-06 | Session 生命周期与派生数据清理 | implemented | HAR-05 | `harness/HAR-06-session-lifecycle.md` |
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a, 7.5a, 7.6) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.4a-8.4f, 8.6a, 8.6b, 8.7a-8.7e, H5a-H5c, H5b2, 8.8a-8.8e3) | HAR-05, ARC-03, ARC-04 | `harness/HAR-08-eval-baseline.md` |
-| HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a, 9.2a, 9.3a) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
+| HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a-9.5c) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
 | HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2f2, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a, 10.6b, 10.8a) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
 ## CLI/TUI/New UI
 
 | ID | 名称 | 状态 | 依赖 | 文档 |
 | --- | --- | --- | --- | --- |
-| UI-10 | `/workbench` 命令页 | partial (10.1-10.3, 10.7) | UI 协议、Runtime Inspector | `cli-ui/UI-10-workbench-page.md` |
+| UI-10 | `/workbench` 命令页 | partial (10.1-10.4, 10.6a, 10.6c, 10.7) | UI 协议、Runtime Inspector | `cli-ui/UI-10-workbench-page.md` |
 | UI-11 | 全屏任务与 Timeline 导航 | partial (11.1a, 11.2a) | Agent Control Center | `cli-ui/UI-11-task-navigation.md` |
 | UI-12 | 权限策略中心 | partial (12.1a, 12.3a, 12.3b1, 12.3b2) | permission bubbles | `cli-ui/UI-12-permission-center.md` |
 | UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1c) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |

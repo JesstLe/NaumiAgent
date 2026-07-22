@@ -122,6 +122,19 @@
 - Textual fallback 使用同一 Service/PermissionChecker，支持 normal 拒绝原因与确认、bypass 直接批准。
 - 完整契约、验收证据和未完成边界见 `UI-10-6a-proposal-actions.md`。
 
+### UI-10.6c 已实现：approved Proposal → Experiment Contract
+
+- Reviews 继续展示 approved Evolution Proposal，并使用独立 `c` 动作签发或重开不可执行 Contract；
+  open Proposal 的 `a/x` 行为保持不变。
+- New UI/Bridge/TUI/Agent Tool 复用 EVO-02.1b issuer。Store 按 workspace/session/Proposal 单飞，重复和
+  不同 seed 并发调用都收敛到同一 durable Authority。
+- normal 模式一次确认，bypass 直接执行；任何模式都不跳过 Candidate provenance、approved state、scope、
+  budget、Git baseline 和 Store 校验。
+- 成功回执显示 Contract/Authority identity 并固定 `execution_ready=false`、`promotion_ready=false`；前端
+  严格拒绝绝对/越界/重复文件路径、非法 digest、越界预算和 readiness 提权。
+- 完整用户状态机见 `UI-10-6c-experiment-contract-action.md`，后端契约见
+  `../harness/HAR-09-5c-explicit-experiment-contract-issuance.md`。
+
 ### 尚未完成
 
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。

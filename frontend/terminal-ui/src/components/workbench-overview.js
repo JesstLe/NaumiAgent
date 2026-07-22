@@ -61,7 +61,7 @@ function renderSummary(snapshot) {
     `rev ${number(snapshot.revision)}`,
     `任务 ${number(counts.tasks)}`,
     `worktree ${number(counts.worktrees)}`,
-    `待审 ${number(counts.reviews)}`,
+    `审阅项 ${number(counts.reviews)}`,
     `失败 ${number(counts.failures)}`,
     snapshot.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
@@ -76,7 +76,7 @@ function renderPageState(snapshot) {
     return color(ANSI.yellow, "拒绝原因 · 输入文字后 Enter 继续 · Esc 取消");
   }
   if (snapshot.proposal_action?.phase === "confirm") {
-    return color(ANSI.yellow, "确认决策 · y/Enter 确认 · n/Esc 取消");
+    return color(ANSI.yellow, "确认操作 · y/Enter 确认 · n/Esc 取消");
   }
   if (snapshot.proposal_action?.phase === "loading") {
     return color(ANSI.cyan, "正在写入 Proposal 决策与审计…");
@@ -91,8 +91,8 @@ function renderReviews(snapshot, width, height) {
   const reviews = reviewItems(snapshot);
   if (!reviews.length) {
     return [
-      color(ANSI.green, "当前没有待审请求。"),
-      color(ANSI.dim, "当前没有 waiting Approval 或 open Proposal。"),
+      color(ANSI.green, "当前没有待审 Approval、开放 Proposal 或可转换的 approved Proposal。"),
+      color(ANSI.dim, "当前没有 waiting Approval、open Proposal 或待转换的 approved Proposal。"),
     ];
   }
   const selectedIndex = selectedReviewIndex(snapshot, reviews);
@@ -207,8 +207,12 @@ function renderProposalDetail(snapshot, proposal, width) {
     ...array(proposal.intended_files).slice(0, 8).map((path) => color(ANSI.dim, `• ${compactText(path, 900)}`)),
     color(ANSI.cyan, `验证计划 · ${array(proposal.validation_plan).length}`),
     ...array(proposal.validation_plan).slice(0, 8).map((step) => color(ANSI.dim, `• ${compactText(step, 1_000)}`)),
-    color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
-    color(ANSI.dim, "a 批准 · x 拒绝 · r 刷新 · Esc 返回"),
+    proposal.state === "approved"
+      ? color(ANSI.yellow, "approved 仍未执行代码；可显式签发不可执行 Experiment Contract。")
+      : color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
+    proposal.state === "approved"
+      ? color(ANSI.dim, "c 签发/重开 Contract · r 刷新 · Esc 返回")
+      : color(ANSI.dim, "a 批准 · x 拒绝 · r 刷新 · Esc 返回"),
   ];
   if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
   if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
@@ -220,15 +224,31 @@ function renderProposalDetail(snapshot, proposal, width) {
         `> ${compactText(action.input || "", 2_000)}${color(ANSI.cyan, "▌")}`,
       );
     } else if (action.phase === "confirm") {
-      const label = action.action === "approve" ? "批准" : "拒绝";
+      const label = action.action === "approve"
+        ? "批准"
+        : action.action === "issue_contract"
+          ? "签发不可执行 Experiment Contract"
+          : "拒绝";
       lines.push(
         color(ANSI.yellow, `确认${label}此 Proposal？`),
         action.decision_note ? color(ANSI.dim, `原因 · ${compactText(action.decision_note, 1_000)}`) : "",
         color(ANSI.yellow, "y/Enter 确认 · n/Esc 取消"),
       );
     } else if (action.phase === "loading") {
-      lines.push(color(ANSI.cyan, "正在提交决策并等待权威快照…"));
+      lines.push(color(
+        ANSI.cyan,
+        action.action === "issue_contract"
+          ? "正在签发或重开 durable Experiment Contract…"
+          : "正在提交决策并等待权威快照…",
+      ));
     }
+  }
+  const contract = snapshot.experiment_contract;
+  if (contract?.proposal_id === proposal.id) {
+    lines.push(
+      color(ANSI.green, `Contract · ${compactText(contract.contract_id, 128)}`),
+      color(ANSI.dim, `Authority · ${compactText(contract.authority_id, 128)} · execution_ready=false`),
+    );
   }
   return lines.filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
 }
@@ -237,7 +257,10 @@ function reviewItems(snapshot) {
   return [
     ...array(snapshot.approvals).map((item) => ({ ...item, review_kind: "approval" })),
     ...array(snapshot.proposals)
-      .filter((item) => item?.state === "open")
+      .filter((item) => (
+        item?.state === "open"
+        || (item?.state === "approved" && item?.source_kind === "evolution_candidate")
+      ))
       .map((item) => ({ ...item, review_kind: "proposal" })),
   ];
 }

@@ -2857,6 +2857,7 @@ test("initial state includes empty workbench bucket", () => {
     review_error: "",
     review_detail: null,
     proposal_action: null,
+    experiment_contract: null,
     action_notice: "",
     action_error: "",
     missions: [],
@@ -3006,7 +3007,7 @@ test("workbench slash command requests a read-only current-session snapshot", ()
   });
   assert.equal(state.workbench.loading, false);
   assert.equal(
-    state.messages.some((message) => message.content?.includes("任务 3 · worktree 1 · 待审 2")),
+    state.messages.some((message) => message.content?.includes("任务 3 · worktree 1 · 审阅项 2")),
     true,
   );
 
@@ -3243,6 +3244,92 @@ test("workbench bypass approves Proposal without a second confirmation", () => {
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "workbench/proposal/action");
   assert.equal(sent[0].payload.confirmed, false);
+});
+
+test("approved Evolution Proposal explicitly issues and displays a durable Contract", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "moderate";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "approved", title: "优化 footer",
+    source_kind: "evolution_candidate", intended_files: ["src/footer.js"],
+    validation_plan: ["node --test footer.test.js"],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "c", send);
+  assert.equal(state.workbench.proposal_action.phase, "confirm");
+  assert.equal(sent.length, 0);
+  handleWorkbenchOverviewKey(state, "y", send);
+  assert.deepEqual(sent[0], {
+    type: "workbench/proposal/action",
+    payload: {
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "issue_contract",
+      decision_note: "",
+      confirmed: true,
+    },
+  });
+
+  const contract = {
+    proposal_id: "proposal-1",
+    contract_id: `evx_${"a".repeat(24)}`,
+    authority_id: `evxauth_${"b".repeat(24)}`,
+    execution_ready: false,
+  };
+  reduceServerEvent(state, {
+    type: "workbench/proposal/action_result",
+    payload: {
+      schema_version: 1,
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "issue_contract",
+      status: "completed",
+      message: "Experiment Contract 已持久化。",
+      proposal: state.workbench.proposals[0],
+      experiment_contract: contract,
+      workbench_snapshot: null,
+    },
+  });
+  assert.equal(state.workbench.proposal_action, null);
+  assert.deepEqual(state.workbench.experiment_contract, contract);
+  assert.match(state.workbench.action_notice, /已持久化/);
+});
+
+test("workbench bypass issues an approved Evolution Contract without confirmation", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "approved", title: "优化 footer",
+    source_kind: "evolution_candidate", intended_files: ["src/footer.js"],
+    validation_plan: [],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "c", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.proposal_action.phase, "loading");
+  assert.deepEqual(sent[0], {
+    type: "workbench/proposal/action",
+    payload: {
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "issue_contract",
+      decision_note: "",
+      confirmed: false,
+    },
+  });
 });
 
 test("session replay keeps an open Workbench route but requests new authority", () => {

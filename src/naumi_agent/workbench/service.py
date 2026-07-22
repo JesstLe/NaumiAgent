@@ -79,7 +79,13 @@ def _workbench_navigation_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     proposals = [
         proposal
         for proposal in list(snapshot.get("proposals") or [])
-        if _status_text(proposal.get("state")) == ProposalState.OPEN.value
+        if (
+            _status_text(proposal.get("state")) == ProposalState.OPEN.value
+            or (
+                _status_text(proposal.get("state")) == ProposalState.APPROVED.value
+                and _status_text(proposal.get("source_kind")) == "evolution_candidate"
+            )
+        )
     ]
     failures = list(snapshot.get("failures") or [])
 
