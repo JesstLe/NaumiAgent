@@ -7,6 +7,11 @@ from typing import Any
 from naumi_agent.evolution.adversarial_batch_requests import (
     EvolutionAdversarialBatchRequest,
 )
+from naumi_agent.evolution.approval_principals import (
+    EvolutionApprovalPrincipalError,
+    parse_approval_roles,
+    render_evolution_approval_principal,
+)
 from naumi_agent.evolution.approval_requests import (
     EvolutionPromotionApprovalRequestError,
     render_evolution_promotion_approval_response,
@@ -1347,6 +1352,184 @@ class EvolutionPromotionApprovalRequestTool(Tool):
         return render_evolution_promotion_approval_response(view)
 
 
+class EvolutionApprovalPrincipalTool(Tool):
+    """Govern trusted approval identities without ever accepting private keys."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_approval_principal"
+
+    @property
+    def description(self) -> str:
+        return (
+            "通过 HAR 持久人工确认注册、轮换、更新角色或撤销 Evolution 审批主体。"
+            "仅接收 Ed25519 公钥，绝不请求或保存私钥；"
+            "该工具不产生审批决定、Promotion 或 Git 写权限。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["register", "rotate_key", "update_roles", "revoke"],
+                },
+                "principal_name": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{1,63}$"},
+                "principal_id": {"type": "string", "pattern": "^evprincipal_[0-9a-f]{24}$"},
+                "public_key_base64": {"type": "string", "minLength": 44, "maxLength": 44},
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "user",
+                            "independent_reviewer",
+                            "security_reviewer",
+                            "data_owner",
+                            "release_manager",
+                        ],
+                    },
+                    "minItems": 1,
+                    "maxItems": 5,
+                    "uniqueItems": True,
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批主体治理",
+            search_hint=(
+                "evolution approval principal identity public key ed25519 rotate revoke "
+                "自进化 审批 主体 身份 公钥 轮换 撤销"
+            ),
+        )
+
+    async def execute(
+        self,
+        action: str,
+        principal_name: str = "",
+        principal_id: str = "",
+        public_key_base64: str = "",
+        roles: list[str] | None = None,
+    ) -> str:
+        service = self._engine.evolution_approval_principal_service
+        try:
+            if action == "register":
+                if not principal_name or not public_key_base64 or not roles:
+                    return "register 需要 principal_name、public_key_base64 和 roles。"
+                result = await service.register(
+                    workspace_root=self._engine.workspace_root,
+                    principal_name=principal_name,
+                    public_key_base64=public_key_base64,
+                    roles=parse_approval_roles(roles),
+                )
+            elif action == "rotate_key":
+                if not principal_id or not public_key_base64:
+                    return "rotate_key 需要 principal_id 和 public_key_base64。"
+                result = await service.rotate_key(
+                    workspace_root=self._engine.workspace_root,
+                    principal_id=principal_id,
+                    public_key_base64=public_key_base64,
+                )
+            elif action == "update_roles":
+                if not principal_id or not roles:
+                    return "update_roles 需要 principal_id 和 roles。"
+                result = await service.update_roles(
+                    workspace_root=self._engine.workspace_root,
+                    principal_id=principal_id,
+                    roles=parse_approval_roles(roles),
+                )
+            elif action == "revoke":
+                if not principal_id:
+                    return "revoke 需要 principal_id。"
+                result = await service.revoke(
+                    workspace_root=self._engine.workspace_root,
+                    principal_id=principal_id,
+                )
+            else:
+                return "action 仅支持 register、rotate_key、update_roles 或 revoke。"
+        except (
+            AttributeError,
+            EvolutionApprovalPrincipalError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Principal 未完成：{exc}"
+        return render_evolution_approval_principal(result)
+
+
+class EvolutionApprovalPrincipalAuthorityTool(Tool):
+    """Read one current approval principal projection without changing authority."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_approval_principal_authority"
+
+    @property
+    def description(self) -> str:
+        return (
+            "只读重载当前工作区的 Evolution Approval Principal、角色、当前 Ed25519 "
+            "公钥指纹、generation 与撤销状态；不请求私钥、不创建交互、不修改 authority。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "principal_id": {
+                    "type": "string",
+                    "pattern": "^evprincipal_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["principal_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="Evolution 审批主体 Authority",
+            search_hint=(
+                "evolution approval principal authority identity public key status "
+                "自进化 审批 主体 身份 公钥 状态"
+            ),
+        )
+
+    async def execute(self, principal_id: str) -> str:
+        try:
+            view = await self._engine.evolution_approval_principal_service.inspect(
+                workspace_root=self._engine.workspace_root,
+                principal_id=principal_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionApprovalPrincipalError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Approval Principal Authority 不可读取：{exc}"
+        return render_evolution_approval_principal(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1371,11 +1554,15 @@ def create_evolution_review_tools(
         EvolutionPromotionPackageTool(engine),
         EvolutionPromotionApprovalRequirementTool(engine),
         EvolutionPromotionApprovalRequestTool(engine),
+        EvolutionApprovalPrincipalAuthorityTool(engine),
+        EvolutionApprovalPrincipalTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
 
 __all__ = [
+    "EvolutionApprovalPrincipalAuthorityTool",
+    "EvolutionApprovalPrincipalTool",
     "EvolutionCandidatesTool",
     "EvolutionCounterfactualEvidenceTool",
     "EvolutionDecisionInputTool",

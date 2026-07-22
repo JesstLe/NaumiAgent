@@ -63,6 +63,11 @@ from naumi_agent.evolution.adversarial_probe_contracts import (
 from naumi_agent.evolution.adversarial_samples import (
     EvolutionAdversarialSampleExecutor,
 )
+from naumi_agent.evolution.approval_principals import (
+    EvolutionApprovalPrincipalEventBuilder,
+    EvolutionApprovalPrincipalService,
+    EvolutionApprovalPrincipalStore,
+)
 from naumi_agent.evolution.approval_requests import (
     EvolutionPromotionApprovalRequestService,
     EvolutionPromotionApprovalResponseBuilder,
@@ -1361,6 +1366,19 @@ class AgentEngine:
                 request_user_input=self.request_user_input,
                 builder=self.evolution_promotion_approval_response_builder,
             )
+        )
+        self.evolution_approval_principal_builder = (
+            EvolutionApprovalPrincipalEventBuilder()
+        )
+        self.evolution_approval_principal_store = EvolutionApprovalPrincipalStore(
+            config.memory.session_db_path,
+            interaction_store=self._harness_store,
+        )
+        self.evolution_approval_principal_service = EvolutionApprovalPrincipalService(
+            store=self.evolution_approval_principal_store,
+            interaction_store=self._harness_store,
+            request_user_input=self.request_user_input,
+            builder=self.evolution_approval_principal_builder,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

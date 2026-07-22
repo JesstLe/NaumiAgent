@@ -88,7 +88,8 @@ Receipt 不保存源码、自由文本、用户自定义输入、签名值、密
 
 ## 当前不足与下一步
 
-EVO-05.2c 应实现独立 Identity/Signature Receipt Authority：可信 principal registry、role assignment、签名算法和
-key-id allowlist、签名 payload domain separation、撤销/轮换、到期与 replay protection。随后另开 EVO-05.2d 做
+EVO-05.2c1 已交付独立 trusted Principal/role/Ed25519 public-key authority，包括 HAR 人工注册、角色更新、公钥
+轮换、撤销与 append-only hash chain；私钥不进入 Naumi。下一步 EVO-05.2c2 应把 role response 绑定 current
+active key，验证 domain-separated payload、expiry 与 replay protection。随后另开 EVO-05.2d 做
 Approval Decision aggregation，必须动态重查 Requirement、target、所有 technical gates、role identity 和签名回执；
 聚合通过仍只授予进入 EVO-05.3 rebase/revalidate 的资格，不直接执行 Git 或发布。

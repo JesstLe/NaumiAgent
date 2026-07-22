@@ -102,4 +102,4 @@ rollback 属于 EVO-05，不是 EVO-04 的隐式完成条件。
 
 ## 下一步
 
-实现 EVO-05.2c Identity/Signature Receipt Authority；仍不合并或发布。
+EVO-05.2c1 Principal/Public-Key Authority 已完成；下一步实现 EVO-05.2c2 Signature Receipt Authority；仍不合并或发布。

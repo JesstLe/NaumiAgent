@@ -45,6 +45,20 @@ if TYPE_CHECKING:
         EvolutionAdversarialSampleReceipt,
         adversarial_lane_authority_key,
     )
+    from naumi_agent.evolution.approval_principals import (
+        EVOLUTION_APPROVAL_PRINCIPAL_POLICY,
+        EvolutionApprovalPrincipalAction,
+        EvolutionApprovalPrincipalError,
+        EvolutionApprovalPrincipalEvent,
+        EvolutionApprovalPrincipalEventBuilder,
+        EvolutionApprovalPrincipalGovernanceResult,
+        EvolutionApprovalPrincipalService,
+        EvolutionApprovalPrincipalState,
+        EvolutionApprovalPrincipalStore,
+        EvolutionApprovalPrincipalView,
+        parse_approval_roles,
+        render_evolution_approval_principal,
+    )
     from naumi_agent.evolution.approval_requests import (
         EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY,
         EvolutionPromotionApprovalIdentityAssurance,
@@ -476,6 +490,18 @@ __all__ = [
     "EvolutionPromotionApprovalResponseView",
     "EvolutionPromotionSignatureReceiptEntry",
     "render_evolution_promotion_approval_response",
+    "EVOLUTION_APPROVAL_PRINCIPAL_POLICY",
+    "EvolutionApprovalPrincipalAction",
+    "EvolutionApprovalPrincipalError",
+    "EvolutionApprovalPrincipalEvent",
+    "EvolutionApprovalPrincipalEventBuilder",
+    "EvolutionApprovalPrincipalGovernanceResult",
+    "EvolutionApprovalPrincipalService",
+    "EvolutionApprovalPrincipalState",
+    "EvolutionApprovalPrincipalStore",
+    "EvolutionApprovalPrincipalView",
+    "parse_approval_roles",
+    "render_evolution_approval_principal",
     "AdversarialBatchCheckCase",
     "AdversarialBatchLane",
     "AdversarialBatchProbeCase",
@@ -836,6 +862,20 @@ def __getattr__(name: str) -> object:
         "EvolutionPromotionApprovalResponseView",
         "EvolutionPromotionSignatureReceiptEntry",
         "render_evolution_promotion_approval_response",
+    }
+    approval_principal_exports = {
+        "EVOLUTION_APPROVAL_PRINCIPAL_POLICY",
+        "EvolutionApprovalPrincipalAction",
+        "EvolutionApprovalPrincipalError",
+        "EvolutionApprovalPrincipalEvent",
+        "EvolutionApprovalPrincipalEventBuilder",
+        "EvolutionApprovalPrincipalGovernanceResult",
+        "EvolutionApprovalPrincipalService",
+        "EvolutionApprovalPrincipalState",
+        "EvolutionApprovalPrincipalStore",
+        "EvolutionApprovalPrincipalView",
+        "parse_approval_roles",
+        "render_evolution_approval_principal",
     }
     candidate_exports = {"EvolutionCandidateDraft", "build_candidate_draft"}
     adversarial_batch_request_exports = {
@@ -1261,6 +1301,8 @@ def __getattr__(name: str) -> object:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
         module_name = "approval_requests"
+    elif name in approval_principal_exports:
+        module_name = "approval_principals"
     elif name in adversarial_comparison_exports:
         module_name = "adversarial_comparison"
     elif name in adversarial_failure_attribution_exports:

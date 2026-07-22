@@ -80,5 +80,5 @@ quorum、technical/blocking gates、UTC issued/expires 与 policy projection dig
 
 [EVO-05.2b](EVO-05-2b-approval-request-authority.md) 已把 still-eligible Requirement 的单个 role 映射为
 HAR-10.6 fenced durable interaction，冻结 approval/rejection/request-changes Receipt，并为每个角色定义独立
-signature entry。下一步是 EVO-05.2c 身份/签名回执 authority；最终 Decision aggregation 仍属于独立
+signature entry。EVO-05.2c1 Principal/Public-Key Authority 已完成；下一步是 EVO-05.2c2 签名回执；最终 Decision aggregation 仍属于独立
 EVO-05.2d，任何用户回答都不能直接 merge/push。
