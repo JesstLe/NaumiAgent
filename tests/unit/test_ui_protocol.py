@@ -352,6 +352,56 @@ def test_protocol_rejects_inexact_harness_sandbox_cancel_request(
         )
 
 
+def test_protocol_normalizes_exact_harness_sandbox_retry_request() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.HARNESS_EVAL_SANDBOX_RETRY,
+            "payload": {
+                "action_id": f"hsar_{'a' * 24}",
+                "cancel_receipt_id": f"hsacr_{'b' * 24}",
+                "cancel_receipt_sha256": "c" * 64,
+                "reason": "  用户恢复原请求  ",
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "action_id": f"hsar_{'a' * 24}",
+        "cancel_receipt_id": f"hsacr_{'b' * 24}",
+        "cancel_receipt_sha256": "c" * 64,
+        "reason": "用户恢复原请求",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("action_id", "bad"),
+        ("cancel_receipt_id", "bad"),
+        ("cancel_receipt_sha256", "x" * 64),
+        ("reason", ""),
+    ],
+)
+def test_protocol_rejects_inexact_harness_sandbox_retry_request(
+    field: str,
+    value: object,
+) -> None:
+    payload: dict[str, object] = {
+        "action_id": f"hsar_{'a' * 24}",
+        "cancel_receipt_id": f"hsacr_{'b' * 24}",
+        "cancel_receipt_sha256": "c" * 64,
+        "reason": "用户恢复",
+    }
+    payload[field] = value
+    with pytest.raises(ValueError, match="Sandbox retry"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_EVAL_SANDBOX_RETRY,
+                "payload": payload,
+            }
+        )
+
+
 def test_protocol_normalizes_harness_eval_promotion_request() -> None:
     record = normalize_client_record(
         {

@@ -1091,6 +1091,63 @@ test("harness sandbox cancel result preserves exact fence and durable receipt", 
   );
 });
 
+test("harness sandbox retry result preserves receipt dispatch and H5a authority", () => {
+  const payload = normalizeServerRecord({
+    type: "harness/eval-sandbox/retry-result",
+    payload: {
+      schema_version: 1,
+      receipt_id: `hsarr_${"a".repeat(24)}`,
+      receipt_sha256: "a".repeat(64),
+      action_id: `hsar_${"b".repeat(24)}`,
+      cancel_receipt_id: `hsacr_${"c".repeat(24)}`,
+      cancel_receipt_sha256: "c".repeat(64),
+      source_ticket_id: `hsadm_${"d".repeat(24)}`,
+      eval_request_sha256: "e".repeat(64),
+      execution_authority_key: "f".repeat(64),
+      decision: "accepted",
+      outcome: "completed",
+      code: "sandbox_batch_retry_authorized",
+      actor_id: "new-ui",
+      reason: "用户恢复",
+      created_at: "2026-07-23T12:00:00+00:00",
+      dispatch: {
+        dispatch_id: `hsard_${"1".repeat(24)}`,
+        retry_action_id: `hsar_${"b".repeat(24)}`,
+        retry_receipt_id: `hsarr_${"a".repeat(24)}`,
+        retry_receipt_sha256: "a".repeat(64),
+        execution_authority_key: "f".repeat(64),
+        state: "completed",
+        epoch: 1,
+        ticket_id: `hsadm_${"2".repeat(24)}`,
+        ticket_epoch: 1,
+        updated_at: "2026-07-23T12:01:00+00:00",
+        terminal_code: "",
+      },
+      batch_id: "sandbox-retry",
+      requested: 5,
+      persisted: 5,
+      message: "已完成",
+    },
+  }).payload;
+
+  assert.equal(payload.outcome, "completed");
+  assert.equal(payload.dispatch.ticket_id, `hsadm_${"2".repeat(24)}`);
+  assert.equal(payload.persisted, 5);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/eval-sandbox/retry-result",
+      payload: {
+        ...payload,
+        dispatch: {
+          ...payload.dispatch,
+          execution_authority_key: "0".repeat(64),
+        },
+      },
+    }),
+    /dispatch 与 decision\/action/,
+  );
+});
+
 test("harness eval promotion response validates guided and authoritative state", () => {
   const waiting = normalizeServerRecord({
     type: "harness/eval-promotion",

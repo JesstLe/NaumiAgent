@@ -4733,6 +4733,7 @@ test("Harness Sandbox page submits an exact cancel action and applies durable re
     type: "harness/eval-sandbox/cancel-result",
     payload: {
       receipt_id: `hsacr_${"c".repeat(24)}`,
+      receipt_sha256: "c".repeat(64),
       ticket_id: `hsadm_${"a".repeat(24)}`,
       decision: "accepted",
       code: "sandbox_batch_cancelled_by_user",
@@ -4755,6 +4756,39 @@ test("Harness Sandbox page submits an exact cancel action and applies durable re
     state.harnessEvalBatches["sandbox-cancel"].admission_state,
     "cancelled",
   );
+
+  assert.equal(handleHarnessEvalBatchKey(state, "r", (type, payload) => {
+    sent.push({ type, payload });
+    return "retry-request";
+  }), true);
+  assert.equal(state.harnessEvalBatch.retryPending, true);
+  assert.equal(state.harnessEvalBatch.retryRequestId, "retry-request");
+  assert.equal(sent[1].type, "harness/eval-sandbox/retry");
+  assert.match(sent[1].payload.action_id, /^hsar_[0-9a-f]{24}$/u);
+  assert.equal(
+    sent[1].payload.cancel_receipt_id,
+    `hsacr_${"c".repeat(24)}`,
+  );
+  assert.equal(sent[1].payload.cancel_receipt_sha256, "c".repeat(64));
+
+  reduceServerEvent(state, {
+    type: "harness/eval-sandbox/retry-result",
+    payload: {
+      receipt_id: `hsarr_${"d".repeat(24)}`,
+      decision: "accepted",
+      outcome: "completed",
+      code: "sandbox_batch_retry_authorized",
+      requested: 5,
+      persisted: 5,
+      dispatch: {
+        ticket_id: `hsadm_${"e".repeat(24)}`,
+        epoch: 1,
+      },
+    },
+  });
+  assert.equal(state.harnessEvalBatch.retryPending, false);
+  assert.equal(state.harnessEvalBatch.retryRequestId, "");
+  assert.equal(state.harnessEvalBatch.retryResult.outcome, "completed");
 });
 
 test("Harness Sandbox cancel transport rejection clears single-flight state", () => {
@@ -4774,6 +4808,25 @@ test("Harness Sandbox cancel transport rejection clears single-flight state", ()
   assert.equal(state.harnessEvalBatch.cancelPending, false);
   assert.equal(state.harnessEvalBatch.cancelRequestId, "");
   assert.equal(state.harnessEvalBatch.cancelReceipt.decision, "rejected");
+});
+
+test("Harness Sandbox retry transport rejection clears single-flight state", () => {
+  const state = createInitialState();
+  state.harnessEvalBatch.retryPending = true;
+  state.harnessEvalBatch.retryRequestId = "retry-failed";
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "retry-failed",
+    payload: {
+      code: "sandbox_eval_retry_unavailable",
+      message: "恢复权威暂不可用。",
+    },
+  });
+
+  assert.equal(state.harnessEvalBatch.retryPending, false);
+  assert.equal(state.harnessEvalBatch.retryRequestId, "");
+  assert.equal(state.harnessEvalBatch.retryResult.decision, "rejected");
 });
 
 test("Harness Baseline promotion command opens guided typed route and restores origin", () => {

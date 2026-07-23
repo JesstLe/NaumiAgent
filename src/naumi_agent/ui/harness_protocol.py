@@ -19,7 +19,9 @@ from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplay
 from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchCheckpoint
 from naumi_agent.harness.store import (
     HarnessSandboxAdmissionCancelReceipt,
+    HarnessSandboxAdmissionRetryReceipt,
     HarnessSandboxAdmissionTicket,
+    HarnessSandboxRetryDispatch,
 )
 
 HARNESS_DETAIL_SCHEMA_VERSION = 1
@@ -150,6 +152,109 @@ def harness_sandbox_cancel_receipt_payload(
             if ticket is not None
             else None
         ),
+    }
+
+
+def harness_sandbox_retry_result_payload(
+    receipt: HarnessSandboxAdmissionRetryReceipt,
+    dispatch: HarnessSandboxRetryDispatch | None,
+    *,
+    batch_id: str,
+    requested_samples: int,
+    persisted_samples: int,
+    message: str,
+) -> dict[str, Any]:
+    """Project one retry attempt from durable receipt, dispatch, and H5a facts."""
+    if batch_id and re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+        batch_id,
+    ) is None:
+        raise ValueError("Sandbox retry batch_id 格式无效。")
+    if (
+        isinstance(requested_samples, bool)
+        or not 0 <= requested_samples <= 100
+        or isinstance(persisted_samples, bool)
+        or not 0 <= persisted_samples <= requested_samples
+    ):
+        raise ValueError("Sandbox retry H5a 计数无效。")
+    if receipt.decision not in {"accepted", "rejected"}:
+        raise ValueError("Sandbox retry decision 无效。")
+    if (
+        dispatch is not None
+        and dispatch.state == "completed"
+        and (
+            requested_samples == 0
+            or persisted_samples != requested_samples
+        )
+    ):
+        raise ValueError("completed Sandbox retry dispatch 缺少完整 H5a。")
+    if receipt.decision == "rejected":
+        outcome = "rejected"
+    elif requested_samples > 0 and persisted_samples == requested_samples:
+        outcome = "completed"
+    elif dispatch is None or dispatch.state in {"pending", "claimed"}:
+        outcome = "blocked"
+    else:
+        outcome = dispatch.state
+    if outcome not in {
+        "completed",
+        "failed",
+        "cancelled",
+        "rejected",
+        "blocked",
+    }:
+        raise ValueError("Sandbox retry outcome 无效。")
+    if receipt.decision == "rejected" and dispatch is not None:
+        raise ValueError("rejected Sandbox retry 不得包含 dispatch。")
+    if dispatch is not None and (
+        dispatch.retry_action_id != receipt.action_id
+        or dispatch.retry_receipt_id != receipt.receipt_id
+        or dispatch.retry_receipt_sha256 != receipt.receipt_sha256
+        or dispatch.eval_request_sha256 != receipt.eval_request_sha256
+        or dispatch.execution_authority_key != receipt.execution_authority_key
+    ):
+        raise ValueError("Sandbox retry dispatch 未绑定同一 receipt authority。")
+    return {
+        "schema_version": 1,
+        "receipt_id": receipt.receipt_id,
+        "receipt_sha256": receipt.receipt_sha256,
+        "action_id": receipt.action_id,
+        "cancel_receipt_id": receipt.cancel_receipt_id,
+        "cancel_receipt_sha256": receipt.cancel_receipt_sha256,
+        "source_ticket_id": receipt.source_ticket_id,
+        "eval_request_sha256": receipt.eval_request_sha256,
+        "execution_authority_key": receipt.execution_authority_key,
+        "decision": receipt.decision,
+        "outcome": outcome,
+        "code": (
+            dispatch.terminal_code
+            if dispatch is not None and dispatch.terminal_code
+            else receipt.code
+        ),
+        "actor_id": _text(receipt.actor_id),
+        "reason": _text(receipt.reason),
+        "created_at": receipt.created_at,
+        "dispatch": (
+            {
+                "dispatch_id": dispatch.dispatch_id,
+                "retry_action_id": dispatch.retry_action_id,
+                "retry_receipt_id": dispatch.retry_receipt_id,
+                "retry_receipt_sha256": dispatch.retry_receipt_sha256,
+                "execution_authority_key": dispatch.execution_authority_key,
+                "state": dispatch.state,
+                "epoch": dispatch.epoch,
+                "ticket_id": dispatch.ticket_id,
+                "ticket_epoch": dispatch.ticket_epoch,
+                "updated_at": dispatch.updated_at,
+                "terminal_code": dispatch.terminal_code,
+            }
+            if dispatch is not None
+            else None
+        ),
+        "batch_id": batch_id,
+        "requested": requested_samples,
+        "persisted": persisted_samples,
+        "message": _text(message),
     }
 
 

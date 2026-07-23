@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,6 +36,7 @@ from naumi_agent.ui.harness_protocol import (
     harness_explain_payload,
     harness_replay_payload,
     harness_sandbox_eval_progress_payload,
+    harness_sandbox_retry_result_payload,
 )
 
 
@@ -246,6 +248,71 @@ def test_harness_sandbox_admission_payload_preserves_durable_capacity_facts() ->
     assert payload["queue_position"] == 2
     assert payload["active_count"] == 1
     assert payload["queued_count"] == 3
+
+
+def test_harness_sandbox_retry_result_binds_receipt_dispatch_and_h5a() -> None:
+    receipt = SimpleNamespace(
+        receipt_id=f"hsarr_{'1' * 24}",
+        receipt_sha256="1" * 64,
+        action_id=f"hsar_{'2' * 24}",
+        cancel_receipt_id=f"hsacr_{'3' * 24}",
+        cancel_receipt_sha256="3" * 64,
+        source_ticket_id=f"hsadm_{'4' * 24}",
+        eval_request_sha256="5" * 64,
+        execution_authority_key="6" * 64,
+        decision="accepted",
+        code="sandbox_batch_retry_authorized",
+        actor_id="new-ui",
+        reason="用户恢复",
+        created_at="2026-07-23T10:00:00+08:00",
+    )
+    dispatch = SimpleNamespace(
+        dispatch_id=f"hsard_{'7' * 24}",
+        retry_action_id=receipt.action_id,
+        retry_receipt_id=receipt.receipt_id,
+        retry_receipt_sha256=receipt.receipt_sha256,
+        eval_request_sha256=receipt.eval_request_sha256,
+        execution_authority_key=receipt.execution_authority_key,
+        state="completed",
+        epoch=1,
+        ticket_id=f"hsadm_{'8' * 24}",
+        ticket_epoch=1,
+        updated_at="2026-07-23T10:01:00+08:00",
+        terminal_code="",
+    )
+
+    payload = harness_sandbox_retry_result_payload(
+        receipt,
+        dispatch,
+        batch_id="sandbox-retry-1",
+        requested_samples=5,
+        persisted_samples=5,
+        message="已完成",
+    )
+
+    assert payload["decision"] == "accepted"
+    assert payload["outcome"] == "completed"
+    assert payload["persisted"] == 5
+    assert payload["dispatch"]["ticket_id"] == dispatch.ticket_id
+    assert payload["dispatch"]["execution_authority_key"] == (
+        receipt.execution_authority_key
+    )
+    assert "workspace_root" not in payload
+
+    with pytest.raises(ValueError, match="同一 receipt authority"):
+        harness_sandbox_retry_result_payload(
+            receipt,
+            SimpleNamespace(
+                **{
+                    **dispatch.__dict__,
+                    "execution_authority_key": "9" * 64,
+                }
+            ),
+            batch_id="sandbox-retry-1",
+            requested_samples=5,
+            persisted_samples=5,
+            message="已完成",
+        )
 
 
 def test_harness_eval_promotion_payload_preserves_guided_and_terminal_state() -> None:

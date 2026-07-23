@@ -1717,6 +1717,144 @@ async def test_bridge_emits_durable_harness_sandbox_cancel_receipt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_runs_sandbox_retry_through_tool_and_emits_typed_result() -> None:
+    retry = SimpleNamespace(
+        receipt_id=f"hsarr_{'d' * 24}",
+        receipt_sha256="d" * 64,
+        action_id=f"hsar_{'a' * 24}",
+        cancel_receipt_id=f"hsacr_{'b' * 24}",
+        cancel_receipt_sha256="b" * 64,
+        source_ticket_id=f"hsadm_{'c' * 24}",
+        source_authority_key="c" * 64,
+        eval_request_sha256="e" * 64,
+        execution_authority_key="f" * 64,
+        decision="accepted",
+        code="sandbox_batch_retry_authorized",
+        actor_id="new-ui",
+        reason="用户恢复",
+        created_at="2026-07-23T12:00:00+00:00",
+    )
+    dispatch = SimpleNamespace(
+        dispatch_id=f"hsard_{'1' * 24}",
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+        eval_request_sha256=retry.eval_request_sha256,
+        execution_authority_key=retry.execution_authority_key,
+        state="completed",
+        owner_id="owner",
+        epoch=1,
+        ticket_id=f"hsadm_{'2' * 24}",
+        ticket_epoch=1,
+        created_at="2026-07-23T12:00:00+00:00",
+        updated_at="2026-07-23T12:01:00+00:00",
+        terminal_code="",
+        request_sha256="3" * 64,
+    )
+
+    class RetryStore:
+        async def get_sandbox_admission_retry(self, **kwargs):
+            assert kwargs["action_id"] == retry.action_id
+            return retry
+
+        async def get_sandbox_retry_dispatch(self, **kwargs):
+            assert kwargs["retry_action_id"] == retry.action_id
+            return dispatch
+
+        async def get_sandbox_eval_request(self, workspace_root, request_sha256):
+            assert request_sha256 == retry.eval_request_sha256
+            return SimpleNamespace(
+                request=SimpleNamespace(
+                    batch_id="sandbox-retry-ui",
+                    suite_id="harness_sandbox_ui",
+                    requested_samples=5,
+                )
+            )
+
+        async def list_eval_results(self, *args, **kwargs):
+            assert kwargs["limit"] == 6
+            return tuple(object() for _ in range(5))
+
+    class RetryEngine(_FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.harness_service = SimpleNamespace(store=RetryStore())
+            self.tool_calls: list[dict[str, Any]] = []
+
+        async def get_or_create_session(self):
+            self._session = SimpleNamespace(id="session-retry")
+            return self._session
+
+        async def execute_tool(self, tool_call, **kwargs):
+            arguments = json.loads(tool_call.arguments)
+            self.tool_calls.append(arguments)
+            assert tool_call.name == "harness_eval_sandbox_retry"
+            assert arguments["run_id"] == "manual:session-retry"
+            await kwargs["on_event"](
+                "harness_sandbox_eval_progress",
+                {
+                    "schema_version": 1,
+                    "kind": "sandbox",
+                    "stage": "completed",
+                    "batch_id": "sandbox-retry-ui",
+                    "requested": 5,
+                    "persisted": 5,
+                },
+            )
+            return ToolResult(
+                call_id=tool_call.id,
+                status="success",
+                content="Harness Sandbox Eval 已完成。",
+            )
+
+    engine = RetryEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "retry-request",
+            "type": ClientEventType.HARNESS_EVAL_SANDBOX_RETRY,
+            "payload": {
+                "action_id": retry.action_id,
+                "cancel_receipt_id": retry.cancel_receipt_id,
+                "cancel_receipt_sha256": retry.cancel_receipt_sha256,
+                "reason": retry.reason,
+            },
+        }
+    )
+    tasks = tuple(bridge._harness_eval_retry_tasks.values())
+    assert len(tasks) == 1
+    await asyncio.gather(*tasks)
+
+    records = _records(writer)
+    progress = next(
+        item for item in records
+        if item["type"] == "harness/eval-batch"
+    )
+    result = next(
+        item for item in records
+        if item["type"] == "harness/eval-sandbox/retry-result"
+    )
+    assert progress["request_id"] == "retry-request"
+    assert result["request_id"] == "retry-request"
+    assert result["payload"]["decision"] == "accepted"
+    assert result["payload"]["outcome"] == "completed"
+    assert result["payload"]["persisted"] == 5
+    assert result["payload"]["dispatch"]["ticket_id"] == dispatch.ticket_id
+    assert engine.tool_calls == [
+        {
+            "retry_action_id": retry.action_id,
+            "cancel_receipt_id": retry.cancel_receipt_id,
+            "cancel_receipt_sha256": retry.cancel_receipt_sha256,
+            "reason": retry.reason,
+            "run_id": "manual:session-retry",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_bridge_runs_guided_harness_eval_promotion_through_interaction_protocol() -> None:
     class PromotionService:
         def __init__(self) -> None:
