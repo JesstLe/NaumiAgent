@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { stripAnsi } from "../src/ansi.js";
 import {
   acceptCommandQuickOpen,
+  applyCommandQuickOpenFileSnapshot,
   appendCommandQuickOpenQuery,
   backspaceCommandQuickOpenQuery,
   closeCommandQuickOpen,
@@ -17,6 +18,7 @@ import {
   searchSessionEntries,
   sessionTemplate,
   switchCommandQuickOpenProvider,
+  requestCommandQuickOpenFiles,
 } from "../src/command-quick-open.js";
 import { renderCommandQuickOpenPage } from "../src/components/command-quick-open-page.js";
 import { renderScreen } from "../src/render.js";
@@ -262,6 +264,65 @@ test("session QuickOpen consumes correlated workspace snapshot and only fills lo
   assert.equal(acceptCommandQuickOpen(state), true);
   assert.equal(state.input, "/load current");
   assert.equal(state.messages.length, 0);
+});
+
+test("file QuickOpen consumes correlated bounded results and only fills read", () => {
+  const state = createInitialState();
+  openCommandQuickOpen(state);
+  const requests = {
+    tasks: () => "task-request",
+    sessions: () => "session-request",
+    files: (query, refresh) => `${query || "root"}-${refresh}`,
+  };
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  assert.equal(switchCommandQuickOpenProvider(state, requests), "files");
+  assert.equal(state.commandQuickOpen.fileRequestId, "root-true");
+
+  const payload = {
+    schema_version: 1,
+    status: "ready",
+    revision: 2,
+    index_sha256: "a".repeat(64),
+    query: "",
+    items: [{
+      path: "src/中文 file.py",
+      name: "中文 file.py",
+      directory: "src",
+      extension: ".py",
+      template: "/read 'src/中文 file.py'",
+    }],
+    total_indexed: 320,
+    truncated: false,
+    source: "git",
+    built_at: "2026-07-23T00:00:00+00:00",
+    message: "",
+  };
+  assert.equal(applyCommandQuickOpenFileSnapshot(
+    state,
+    "stale-request",
+    payload,
+  ), false);
+  reduceServerEvent(state, normalizeServerRecord({
+    id: "server-files",
+    request_id: "root-true",
+    type: "workspace/files",
+    payload,
+  }));
+
+  assert.equal(getCommandQuickOpenItems(state)[0].path, "src/中文 file.py");
+  assert.match(stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n")), /Git ignore-aware/);
+  assert.equal(acceptCommandQuickOpen(state), true);
+  assert.equal(state.input, "/read 'src/中文 file.py'");
+  assert.equal(state.messages.length, 0);
+
+  openCommandQuickOpen(state);
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  state.commandQuickOpen.query = "router";
+  assert.equal(requestCommandQuickOpenFiles(state, requests.files), true);
+  assert.equal(state.commandQuickOpen.fileRequestId, "router-false");
 });
 
 function command(commandName, { aliases = [], risk, description, syntax = "" }) {

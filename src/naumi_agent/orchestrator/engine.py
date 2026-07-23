@@ -351,6 +351,7 @@ from naumi_agent.tools.memory import create_memory_tools
 from naumi_agent.tools.sandbox import create_sandbox_tools
 from naumi_agent.tools.web import create_web_tools
 from naumi_agent.ui.tool_output_archive import ToolOutputArchive
+from naumi_agent.ui.workspace_file_index import WorkspaceFileIndex
 from naumi_agent.workbench.review_evidence import ReviewEvidenceCollector
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.tools import create_workbench_tools
@@ -799,6 +800,7 @@ class AgentEngine:
             services.browser_execution_heartbeat_factory
         )
         self.workspace_root = paths.workspace_root
+        self.workspace_file_index = WorkspaceFileIndex(paths.workspace_root)
         self._runtime_data_dir = paths.runtime_data_dir
         self.tool_output_archive = ToolOutputArchive(
             paths.runtime_data_dir / "tool-outputs"
@@ -2089,6 +2091,11 @@ class AgentEngine:
             "session_retention_worker",
             self._retention_periodic_service.stop,
         )
+        if self.workspace_file_index.building:
+            await self._shutdown_component(
+                "workspace_file_index",
+                self.workspace_file_index.cancel,
+            )
         if hasattr(self, "subagent_manager"):
             await self._shutdown_component(
                 "subagent_reaper",

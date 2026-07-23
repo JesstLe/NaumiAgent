@@ -5,6 +5,7 @@ const QUERY_LIMIT = 200;
 const RESULT_LIMIT = 200;
 const TASK_RESULT_LIMIT = 50;
 const SESSION_RESULT_LIMIT = 100;
+const FILE_RESULT_LIMIT = 200;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 const TASK_STATUS_ORDER = Object.freeze({
   running: 0,
@@ -36,6 +37,13 @@ export function openCommandQuickOpen(state) {
     quickOpen.sessionError = "";
     quickOpen.sessionRequestId = "";
   }
+  if (!quickOpen.fileLoading) {
+    quickOpen.fileItems = [];
+    quickOpen.fileLoaded = false;
+    quickOpen.fileError = "";
+    quickOpen.fileRequestId = "";
+    quickOpen.fileMeta = null;
+  }
   quickOpen.draftText = String(state.input ?? "");
   quickOpen.draftCursor = state.inputCursor;
   return true;
@@ -47,6 +55,8 @@ export function closeCommandQuickOpen(state) {
   quickOpen.open = false;
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
+  quickOpen.fileLoading = false;
+  quickOpen.fileRequestId = "";
   return true;
 }
 
@@ -74,6 +84,8 @@ export function getCommandQuickOpenItems(state) {
     ? searchTaskEntries(quickOpen.taskItems, quickOpen.query, TASK_RESULT_LIMIT)
     : quickOpen.provider === "sessions"
       ? searchSessionEntries(quickOpen.sessionItems, quickOpen.query, SESSION_RESULT_LIMIT)
+      : quickOpen.provider === "files"
+        ? quickOpen.fileItems.slice(0, FILE_RESULT_LIMIT)
     : searchCommandEntries(
       state.slashCommands,
       quickOpen.query,
@@ -93,7 +105,12 @@ export function getCommandQuickOpenItems(state) {
 
 export function switchCommandQuickOpenProvider(state, requests = null) {
   const quickOpen = ensureCommandQuickOpenState(state);
-  quickOpen.provider = ({ commands: "tasks", tasks: "sessions", sessions: "commands" })[quickOpen.provider];
+  quickOpen.provider = ({
+    commands: "tasks",
+    tasks: "sessions",
+    sessions: "files",
+    files: "commands",
+  })[quickOpen.provider];
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
   if (
@@ -121,7 +138,55 @@ export function switchCommandQuickOpenProvider(state, requests = null) {
       quickOpen.sessionError = "会话快照请求未发送。";
     }
   }
+  if (quickOpen.provider === "files" && typeof requests?.files === "function") {
+    requestCommandQuickOpenFiles(state, requests.files, { refresh: !quickOpen.fileLoaded });
+  }
   return quickOpen.provider;
+}
+
+export function requestCommandQuickOpenFiles(state, requestFiles, { refresh = false } = {}) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (quickOpen.provider !== "files" || typeof requestFiles !== "function") return false;
+  quickOpen.fileLoading = true;
+  quickOpen.fileError = "";
+  quickOpen.fileRequestId = String(requestFiles(quickOpen.query, Boolean(refresh)) || "");
+  if (!quickOpen.fileRequestId) {
+    quickOpen.fileLoading = false;
+    quickOpen.fileError = "Workspace 文件索引请求未发送。";
+    return false;
+  }
+  return true;
+}
+
+export function applyCommandQuickOpenFileSnapshot(state, requestId, payload) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.fileRequestId || quickOpen.fileRequestId !== String(requestId || "")) return false;
+  quickOpen.fileItems = payload?.status === "ready" && Array.isArray(payload.items)
+    ? payload.items.slice(0, FILE_RESULT_LIMIT) : [];
+  quickOpen.fileLoaded = payload?.status === "ready";
+  quickOpen.fileLoading = false;
+  quickOpen.fileError = payload?.status === "cancelled"
+    ? String(payload.message || "Workspace 文件索引构建已取消。").slice(0, 500) : "";
+  quickOpen.fileRequestId = "";
+  quickOpen.fileMeta = payload?.status === "ready" ? {
+    revision: payload.revision,
+    totalIndexed: payload.total_indexed,
+    truncated: payload.truncated,
+    source: payload.source,
+  } : null;
+  quickOpen.selectedIndex = 0;
+  return true;
+}
+
+export function failCommandQuickOpenFileSnapshot(state, requestId, message = "") {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  if (!quickOpen.fileRequestId || quickOpen.fileRequestId !== String(requestId || "")) return false;
+  quickOpen.fileLoading = false;
+  quickOpen.fileError = String(
+    message || "Workspace 文件索引读取失败，请检查目录权限后重试。",
+  ).slice(0, 500);
+  quickOpen.fileRequestId = "";
+  return true;
 }
 
 export function applyCommandQuickOpenSessionSnapshot(state, requestId, payload) {
@@ -182,6 +247,12 @@ export function resetCommandQuickOpenTaskCache(state) {
   quickOpen.sessionLoading = false;
   quickOpen.sessionError = "";
   quickOpen.sessionRequestId = "";
+  quickOpen.fileItems = [];
+  quickOpen.fileLoaded = false;
+  quickOpen.fileLoading = false;
+  quickOpen.fileError = "";
+  quickOpen.fileRequestId = "";
+  quickOpen.fileMeta = null;
   quickOpen.provider = "commands";
   quickOpen.selectedIndex = 0;
 }
@@ -203,6 +274,7 @@ export function acceptCommandQuickOpen(state) {
     state,
     selected.provider === "tasks" ? taskTemplate(selected)
       : selected.provider === "sessions" ? sessionTemplate(selected)
+        : selected.provider === "files" ? fileTemplate(selected)
         : commandTemplate(selected),
   );
   closeCommandQuickOpen(state);
@@ -222,6 +294,20 @@ export function searchSessionEntries(entries, query, limit = SESSION_RESULT_LIMI
 export function sessionTemplate(entry) {
   if (!entry?.resumable || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(String(entry.session_id || ""))) throw new Error("会话 ID 无法安全填入 QuickOpen。");
   return `/load ${entry.session_id}`;
+}
+
+export function fileTemplate(entry) {
+  const template = String(entry?.template || "");
+  if (
+    !entry
+    || typeof entry !== "object"
+    || typeof entry.path !== "string"
+    || !template.startsWith("/read ")
+    || template.length > 4_200
+  ) {
+    throw new Error("Workspace 文件无法安全填入 QuickOpen。");
+  }
+  return template;
 }
 
 export function searchTaskEntries(entries, query, limit = TASK_RESULT_LIMIT) {
@@ -403,6 +489,8 @@ function ensureCommandQuickOpenState(state) {
       taskRequestId: "",
       sessionItems: [], sessionWarnings: [], sessionLoaded: false, sessionLoading: false,
       sessionError: "", sessionRequestId: "",
+      fileItems: [], fileLoaded: false, fileLoading: false, fileError: "",
+      fileRequestId: "", fileMeta: null,
     };
   }
   if (!Array.isArray(state.commandQuickOpen.recentCommands)) {
@@ -412,7 +500,8 @@ function ensureCommandQuickOpenState(state) {
   if (!Array.isArray(state.commandQuickOpen.taskWarnings)) state.commandQuickOpen.taskWarnings = [];
   if (!Array.isArray(state.commandQuickOpen.sessionItems)) state.commandQuickOpen.sessionItems = [];
   if (!Array.isArray(state.commandQuickOpen.sessionWarnings)) state.commandQuickOpen.sessionWarnings = [];
-  if (!["commands", "tasks", "sessions"].includes(state.commandQuickOpen.provider)) {
+  if (!Array.isArray(state.commandQuickOpen.fileItems)) state.commandQuickOpen.fileItems = [];
+  if (!["commands", "tasks", "sessions", "files"].includes(state.commandQuickOpen.provider)) {
     state.commandQuickOpen.provider = "commands";
   }
   return state.commandQuickOpen;

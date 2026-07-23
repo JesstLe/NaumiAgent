@@ -23,8 +23,10 @@ import {
 import {
   applyCommandQuickOpenTaskSnapshot,
   applyCommandQuickOpenSessionSnapshot,
+  applyCommandQuickOpenFileSnapshot,
   failCommandQuickOpenTaskSnapshot,
   failCommandQuickOpenSessionSnapshot,
+  failCommandQuickOpenFileSnapshot,
   recordRecentCommand,
   resetCommandQuickOpenTaskCache,
 } from "./command-quick-open.js";
@@ -355,6 +357,12 @@ export function createInitialState() {
       sessionLoading: false,
       sessionError: "",
       sessionRequestId: "",
+      fileItems: [],
+      fileLoaded: false,
+      fileLoading: false,
+      fileError: "",
+      fileRequestId: "",
+      fileMeta: null,
     },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
@@ -799,6 +807,9 @@ export function reduceServerEvent(state, record) {
     case "sessions/list":
       applyCommandQuickOpenSessionSnapshot(state, record.request_id, payload);
       break;
+    case "workspace/files":
+      applyCommandQuickOpenFileSnapshot(state, record.request_id, payload);
+      break;
     case "completion/receipt":
       addCompletionReceipt(state, payload, record.request_id);
       break;
@@ -1201,6 +1212,11 @@ export function reduceServerEvent(state, record) {
         payload.message,
       )) break;
       if (failCommandQuickOpenSessionSnapshot(
+        state,
+        record.request_id,
+        payload.message,
+      )) break;
+      if (failCommandQuickOpenFileSnapshot(
         state,
         record.request_id,
         payload.message,

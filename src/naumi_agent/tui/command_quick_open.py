@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Any
 
@@ -27,6 +28,11 @@ from naumi_agent.ui.task_panel import TaskViewItem, build_task_panel_snapshot
 from naumi_agent.ui.task_quick_open import (
     search_terminal_tasks,
     terminal_task_template,
+)
+from naumi_agent.ui.workspace_file_index import (
+    WorkspaceFileItem,
+    WorkspaceFileSearchResult,
+    workspace_file_template,
 )
 
 _RISK_LABELS = {
@@ -129,12 +135,20 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         self._session_loaded = False
         self._session_loading = False
         self._session_error = ""
-        self._results: tuple[TerminalCommandIndexEntry | TaskViewItem | SessionListItem, ...] = ()
+        self._file_items: tuple[WorkspaceFileItem, ...] = ()
+        self._file_result: WorkspaceFileSearchResult | None = None
+        self._file_loading = False
+        self._file_error = ""
+        self._file_query_task: asyncio.Task[None] | None = None
+        self._results: tuple[
+            TerminalCommandIndexEntry | TaskViewItem | SessionListItem | WorkspaceFileItem,
+            ...,
+        ] = ()
 
     def compose(self) -> ComposeResult:
         with Container():
             yield Label(
-                "[bold]命令 QuickOpen[/bold] · Tab 切换任务/会话 · 选择后仅填入输入框",
+                "[bold]命令 QuickOpen[/bold] · Tab 切换任务/会话/文件 · 选择后仅填入输入框",
                 id="command-quick-open-title",
             )
             yield Input(
@@ -145,7 +159,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             yield ListView(id="command-quick-open-results")
             yield Static("", id="command-quick-open-detail")
             yield Static(
-                "Tab 切换命令/任务/会话 · ↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
+                "Tab 切换命令/任务/会话/文件 · ↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
                 id="command-quick-open-help",
             )
 
@@ -155,6 +169,9 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
 
     @on(Input.Changed, "#command-quick-open-query")
     async def on_query_changed(self, event: Input.Changed) -> None:
+        if self._provider == "files":
+            self._schedule_file_search(event.value)
+            return
         await self._refresh_results(event.value)
 
     @on(Input.Submitted, "#command-quick-open-query")
@@ -171,6 +188,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
 
     async def on_key(self, event: Key) -> None:
         if event.key == "escape":
+            await self._cancel_file_search(cancel_index=True)
             self.dismiss(None)
             event.prevent_default()
             event.stop()
@@ -199,6 +217,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             self._results = search_terminal_tasks(self._task_items, query, limit=50)
         elif self._provider == "sessions":
             self._results = search_terminal_sessions(self._session_items, query, limit=100)
+        elif self._provider == "files":
+            self._results = self._file_items
         else:
             self._results = search_terminal_commands(
                 self._entries,
@@ -216,7 +236,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         self._render_detail()
 
     def _render_entry(
-        self, entry: TerminalCommandIndexEntry | TaskViewItem | SessionListItem
+        self,
+        entry: TerminalCommandIndexEntry | TaskViewItem | SessionListItem | WorkspaceFileItem,
     ) -> str:
         if isinstance(entry, TaskViewItem):
             source = _TASK_SOURCE_LABELS.get(entry.source, entry.source)
@@ -234,6 +255,10 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"[bold]{escape(entry.title)}[/bold] · {escape(entry.session_id)} · "
                 f"{escape(entry.model)}{current}"
             )
+        if isinstance(entry, WorkspaceFileItem):
+            directory = f" · {escape(entry.directory)}" if entry.directory else ""
+            extension = f" · {escape(entry.extension)}" if entry.extension else ""
+            return f"[bold]{escape(entry.name)}[/bold]{directory}{extension}"
         syntax = f" {entry.arguments.syntax}" if entry.arguments.syntax else ""
         risk = _RISK_LABELS[entry.permission_risk]
         style = _RISK_STYLES[entry.permission_risk]
@@ -259,8 +284,14 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 detail.update("[cyan]正在读取当前工作区会话…[/cyan]")
             elif self._provider == "sessions" and self._session_error:
                 detail.update(f"[yellow]{escape(self._session_error)}[/yellow]")
+            elif self._provider == "files" and self._file_loading:
+                detail.update("[cyan]正在后台建立 Workspace 文件索引，可按 Esc 取消…[/cyan]")
+            elif self._provider == "files" and self._file_error:
+                detail.update(f"[yellow]{escape(self._file_error)}[/yellow]")
             else:
-                label = {"tasks": "任务", "sessions": "会话"}.get(self._provider, "命令")
+                label = {"tasks": "任务", "sessions": "会话", "files": "文件"}.get(
+                    self._provider, "命令"
+                )
                 detail.update(f"[yellow]没有匹配{label}。[/yellow]")
             return
         if isinstance(selected, TaskViewItem):
@@ -278,6 +309,18 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"将填入：[bold]{escape(terminal_session_template(selected))}[/bold]"
             )
             return
+        if isinstance(selected, WorkspaceFileItem):
+            result = self._file_result
+            source = (
+                "Git ignore-aware"
+                if result is not None and result.source == "git"
+                else "文件系统"
+            )
+            detail.update(
+                f"相对路径：{escape(selected.path)} · 索引来源：{source}\n"
+                f"将填入：[bold]{escape(workspace_file_template(selected))}[/bold]"
+            )
+            return
         aliases = "、".join(selected.aliases) if selected.aliases else "无"
         detail.update(
             f"类别：{escape(selected.category)} · 来源：{escape(selected.source)} · "
@@ -285,7 +328,9 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             f"将填入：[bold]{escape(terminal_command_template(selected))}[/bold]"
         )
 
-    def _selected_entry(self) -> TerminalCommandIndexEntry | TaskViewItem | SessionListItem | None:
+    def _selected_entry(
+        self,
+    ) -> TerminalCommandIndexEntry | TaskViewItem | SessionListItem | WorkspaceFileItem | None:
         if not self._results:
             return None
         index = self.query_one("#command-quick-open-results", ListView).index
@@ -299,15 +344,20 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 if isinstance(selected, TaskViewItem)
                 else terminal_session_template(selected)
                 if isinstance(selected, SessionListItem)
+                else workspace_file_template(selected)
+                if isinstance(selected, WorkspaceFileItem)
                 else terminal_command_template(selected)
             )
             self.dismiss(template)
 
     async def _switch_provider(self) -> None:
+        if self._provider == "files":
+            await self._cancel_file_search(cancel_index=False)
         self._provider = {
             "commands": "tasks",
             "tasks": "sessions",
-            "sessions": "commands",
+            "sessions": "files",
+            "files": "commands",
         }[self._provider]
         query = self.query_one("#command-quick-open-query", Input)
         query.value = ""
@@ -320,8 +370,15 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             title.update("[bold]会话 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框")
             query.placeholder = "搜索会话标题、ID、模型或分支…"
             await self._load_sessions()
+        elif self._provider == "files":
+            title.update("[bold]文件 QuickOpen[/bold] · Tab 切换命令 · 选择后仅填入输入框")
+            query.placeholder = "搜索相对路径、文件名或扩展名…"
+            self._schedule_file_search("", refresh=self._file_result is None)
         else:
-            title.update("[bold]命令 QuickOpen[/bold] · Tab 切换任务/会话 · 选择后仅填入输入框")
+            title.update(
+                "[bold]命令 QuickOpen[/bold] · "
+                "Tab 切换任务/会话/文件 · 选择后仅填入输入框"
+            )
             query.placeholder = "搜索命令、别名、说明、类别或风险…"
         await self._refresh_results("")
         query.focus()
@@ -359,6 +416,57 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             self._session_error = "会话快照读取失败，请稍后重试。"
         finally:
             self._session_loading = False
+
+    def _schedule_file_search(self, query: str, *, refresh: bool = False) -> None:
+        task = self._file_query_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._file_query_task = asyncio.create_task(
+            self._load_files(query, refresh=refresh),
+            name="tui-workspace-file-search",
+        )
+
+    async def _load_files(self, query: str, *, refresh: bool) -> None:
+        index = getattr(self._engine, "workspace_file_index", None)
+        if index is None:
+            self._file_error = "Workspace 文件索引尚未初始化。"
+            self._file_loading = False
+            await self._refresh_results(query)
+            return
+        self._file_loading = True
+        self._file_error = ""
+        self._file_items = ()
+        await self._refresh_results(query)
+        try:
+            result = await index.search(query, limit=200, refresh=refresh)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._file_error = "Workspace 文件索引读取失败，请检查目录权限后重试。"
+        else:
+            current_query = self.query_one("#command-quick-open-query", Input).value
+            if self._provider == "files" and current_query == query:
+                self._file_result = result
+                self._file_items = result.items
+        finally:
+            if self._file_query_task is asyncio.current_task():
+                self._file_query_task = None
+                self._file_loading = False
+                current_query = self.query_one("#command-quick-open-query", Input).value
+                await self._refresh_results(current_query)
+
+    async def _cancel_file_search(self, *, cancel_index: bool) -> None:
+        task = self._file_query_task
+        self._file_query_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        index = getattr(self._engine, "workspace_file_index", None)
+        if cancel_index and index is not None and index.building:
+            await index.cancel()
+
+    async def on_unmount(self) -> None:
+        await self._cancel_file_search(cancel_index=True)
 
 
 __all__ = ["CommandQuickOpenScreen"]

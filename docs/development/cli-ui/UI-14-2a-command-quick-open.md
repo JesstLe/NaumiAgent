@@ -48,7 +48,7 @@ category、权限风险或 fuzzy 子序列搜索，使用 `↑/↓/Tab` 导航�
 
 ## 当前不足与下一依赖
 
-UI-14.2 仍为 partial。下一 provider 不应直接扫描 100k workspace 文件；应先实现可取消、workspace 隔离、后台构建和
-有界内存的文件索引核心，再接入 QuickOpen。会话、任务、Agent provider 应分别读取其现有权威 snapshot/store，禁止复制
-第二套状态。UI-14.2b 已在 `UI-14-2b-recent-command-ranking.md` 交付本次启动内的无敏感内容 MRU 合同；跨启动持久历史
+UI-14.2 仍为 partial。UI-14.2e 已按此前前置要求实现可取消、workspace 隔离、后台构建和有界内存的文件索引，
+并接入两端文件 provider；Agent/页面 provider 应继续读取现有权威 snapshot/store，禁止复制第二套状态。
+UI-14.2b 已在 `UI-14-2b-recent-command-ranking.md` 交付本次启动内的无敏感内容 MRU 合同；跨启动持久历史
 仍不属于瞬态 QuickOpen 状态。typed argument form、Vim mode 和键冲突诊断仍属于后续切片。

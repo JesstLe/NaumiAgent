@@ -79,6 +79,44 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_workspace_file_requests() -> None:
+    request = normalize_client_record({
+        "type": ClientEventType.WORKSPACE_FILES_REQUEST,
+        "payload": {"query": " src/ui ", "limit": 50, "refresh": True, "private": "drop"},
+    })
+    cancel = normalize_client_record({
+        "type": ClientEventType.WORKSPACE_FILES_CANCEL,
+        "payload": {"private": "drop"},
+    })
+
+    assert request["payload"] == {
+        "query": " src/ui ",
+        "limit": 50,
+        "refresh": True,
+    }
+    assert cancel["payload"] == {}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"query": "x" * 201},
+        {"limit": 0},
+        {"limit": 201},
+        {"limit": True},
+        {"refresh": "yes"},
+    ],
+)
+def test_protocol_rejects_invalid_workspace_file_requests(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="Workspace File"):
+        normalize_client_record({
+            "type": ClientEventType.WORKSPACE_FILES_REQUEST,
+            "payload": payload,
+        })
+
+
 def test_protocol_normalizes_queue_promotion_target() -> None:
     record = normalize_client_record(
         {

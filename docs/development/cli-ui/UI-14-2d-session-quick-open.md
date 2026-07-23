@@ -26,5 +26,5 @@ New UI 与 Textual TUI 的 `Ctrl+P` QuickOpen 现按 `命令 → 任务 → 会�
 
 ## 未完成项
 
-文件、Agent 和页面 provider、跨启动最近历史、可取消后台索引、Vim mode 与键位冲突诊断仍未实现；
-UI-14 保持 partial。
+UI-14.2e 已实现文件 provider 与可取消后台索引。Agent 和页面 provider、跨启动最近历史、Vim mode 与键位冲突诊断
+仍未实现；UI-14 保持 partial。
