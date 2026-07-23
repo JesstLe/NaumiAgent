@@ -276,6 +276,8 @@ from naumi_agent.harness.retention_planner import (
 )
 from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
 from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
+from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionKernel
+from naumi_agent.harness.sandbox_service import HarnessSandboxEvalExecutor
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
@@ -851,6 +853,26 @@ class AgentEngine:
             sandbox_root=paths.shell_worker_sandbox_dir,
             artifact_root=paths.shell_worker_artifact_dir,
         )
+        self.harness_sandbox_batch_admission = HarnessSandboxBatchAdmission(
+            max_active=config.safety.max_parallel_sandbox_batches,
+            max_queued=config.safety.max_queued_sandbox_batches,
+        )
+        self.harness_sandbox_eval_kernel = HarnessSandboxEvalExecutionKernel(
+            workspace_root=paths.workspace_root,
+            permission_store=resources.permission_decision_store,
+            run_grant_authority=self.run_delegation_grant_authority,
+            sandbox_runner=self.harness_sandbox_check_runner,
+            shell_admission_composer=self.shell_worker_admission_composer,
+            now=lambda: datetime.now(UTC).isoformat(),
+        )
+        self.harness_sandbox_eval_executor = HarnessSandboxEvalExecutor(
+            workspace_root=paths.workspace_root,
+            store=self._harness_store,
+            permission_store=resources.permission_decision_store,
+            run_grant_authority=self.run_delegation_grant_authority,
+            execution_kernel=self.harness_sandbox_eval_kernel,
+            admission=self.harness_sandbox_batch_admission,
+        )
         self.harness_service = HarnessService(
             workspace_root=self.workspace_root,
             trust_store=resources.harness_trust_store,
@@ -858,10 +880,7 @@ class AgentEngine:
             sandbox_check_runner=self.harness_sandbox_check_runner,
             shell_admission_composer=self.shell_worker_admission_composer,
             authorization_receipt_provider=current_permission_receipt,
-        )
-        self.harness_sandbox_batch_admission = HarnessSandboxBatchAdmission(
-            max_active=config.safety.max_parallel_sandbox_batches,
-            max_queued=config.safety.max_queued_sandbox_batches,
+            sandbox_eval_executor=self.harness_sandbox_eval_executor,
         )
         self.evolution_candidate_store = resources.evolution_candidate_store
         self.feedback_intake_service = FeedbackIntakeService(
