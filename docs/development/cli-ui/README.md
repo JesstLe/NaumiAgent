@@ -17,6 +17,8 @@ durable queue、连续 claim 和 `/send-now` parity；HAR-10.3b5 已增加双端
 状态。UI-16.6a 已让 working indicator 重新显示受限、脱敏的运行性能阶段，同时避免等待态展示过时指标。
 UI-16.3a 已让 `/q`、空闲 Ctrl+C 与 macOS/Linux/Windows 可捕获信号进入同一安全退出状态机，等待
 Python Bridge 完成 draining、持久化与资源清理后返回同请求 ID；超时、重复信号和 fatal path 均有有界兜底。
+UI-15.5a 已将 New UI 触摸板/滚轮方向 burst 从直接丢弃改为首步立即、48ms 匀速、最多一行待输出且
+反向可立即打断的控制器，慢滑可逐行定位，快速滑动不会形成长惯性队列。
 UI-13.1c 与 ARC-01.4c1-4c3 已让 New UI/TUI Doctor 都展示各自 terminal lifecycle 的实时 retention 状态；缺少
 Composition 注入时明确标记不可观测，而不是伪造调度健康。UI-17.1 已为两端发布 14 项严格 capability manifest；
 UI-13.2a 已让 Provider 本地配置与显式 live probe 失败产生低基数稳定诊断码，并由 New UI/TUI/CLI 共用；
