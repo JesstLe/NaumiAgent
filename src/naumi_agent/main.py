@@ -2190,6 +2190,21 @@ async def _show_available_models(engine: Any, arg: str) -> None:
             )
 
 
+def _parse_copy_receipt_args(arg: str) -> str | None:
+    """Return a receipt selector, or ``None`` for transcript copy scopes."""
+    try:
+        parts = shlex.split(arg)
+    except ValueError as exc:
+        raise ValueError(
+            "用法：/copy receipt [receipt-id|latest]"
+        ) from exc
+    if not parts or parts[0].lower() != "receipt":
+        return None
+    if len(parts) > 2:
+        raise ValueError("用法：/copy receipt [receipt-id|latest]")
+    return parts[1] if len(parts) == 2 else "latest"
+
+
 async def _handle_command(engine: Any, cmd: str) -> None:
     """处理斜杠命令."""
     parts = cmd.strip().split(maxsplit=1)
@@ -2299,7 +2314,26 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/hooks":
             _show_hooks(engine)
         case "/copy":
-            if _active_cli:
+            try:
+                copy_args = _parse_copy_receipt_args(arg)
+            except ValueError as exc:
+                console.print(str(exc), style="yellow", markup=False)
+                return
+            if copy_args is not None:
+                from naumi_agent.ui.completion_receipt_export import (
+                    CompletionReceiptExportError,
+                    copy_completion_receipt,
+                )
+
+                try:
+                    result = await copy_completion_receipt(engine, copy_args)
+                except CompletionReceiptExportError as exc:
+                    console.print(str(exc), style="yellow", markup=False)
+                else:
+                    console.print(result.copy_result.message, style="green", markup=False)
+                    if result.harness_warning:
+                        console.print(result.harness_warning, style="yellow", markup=False)
+            elif _active_cli:
                 _active_cli.copy_transcript(arg or "all")
             else:
                 console.print("[yellow]当前界面不支持复制完整记录[/yellow]")
@@ -2802,7 +2836,10 @@ def _print_help() -> None:
             "/evolution [list|detail|experiment-contract|evaluation|enqueue]",
             "审查 Candidate、实验约束 authority、评测回执或 Workbench 队列",
         ),
-        ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
+        (
+            "/copy [all|last|error|receipt [receipt-id|latest]]",
+            "复制/导出记录或权威完成回执 (Ctrl+Y)",
+        ),
         ("/debug", "显示本次 CLI/TUI 结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
         ("/diff [all|worktree|staged]", "查看本轮结构化 git diff"),

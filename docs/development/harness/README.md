@@ -57,8 +57,9 @@ Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCo
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
-ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor。完成卡直达、复制回执、客户端
-ACK、活动运行恢复与 cursor/revision/gap recovery 仍未完成。
+ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor。HAR-07.5c1 已让三端共享
+`/copy receipt [receipt-id|latest]`，从当前 session 的持久 Store 生成脱敏回执并保存到
+`.naumi/exports`。完成卡直达、客户端 ACK、活动运行恢复与 cursor/revision/gap recovery 仍未完成。
 
 ## 后续顺序
 

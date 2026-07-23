@@ -145,6 +145,26 @@ test("generic completion receipt remains compatible without a Harness peer", () 
   const plain = renderReceipt().map(stripAnsi).join("\n");
   assert.doesNotMatch(plain, /Harness/);
   assert.match(plain, /完成回执/);
+  assert.match(plain, /操作 · \/copy receipt receipt-test/);
+});
+
+test("completion receipt copy action strips terminal controls from receipt id", () => {
+  const output = renderReceipt({
+    receipt_id: "receipt-\u001b]8;;https://evil.invalid\u0007link\u001b]8;;\u0007-\u001b[31mred",
+  }).join("\n");
+  const plain = stripAnsi(output);
+
+  assert.doesNotMatch(output, /\u001b\]8/);
+  assert.doesNotMatch(plain, /evil\.invalid/);
+  assert.match(plain, /\/copy receipt receipt-link-red/);
+});
+
+test("completion receipt copy action quotes receipt ids with spaces", () => {
+  const plain = renderReceipt({
+    receipt_id: "receipt with spaces",
+  }).map(stripAnsi).join("\n");
+
+  assert.match(plain, /\/copy receipt 'receipt with spaces'/);
 });
 
 test("Harness meaning remains explicit when terminal colors are disabled", () => {
@@ -167,6 +187,7 @@ test("Harness meaning remains explicit when terminal colors are disabled", () =>
 function renderReceipt(overrides = {}, harnessReceipt = null, width = 100) {
   return renderComponent(CompletionReceiptCard({
     receipt: {
+      receipt_id: "receipt-test",
       outcome: "partial",
       summary: "语义着色验证。",
       changes: [],

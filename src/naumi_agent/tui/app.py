@@ -58,10 +58,6 @@ from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.command_quick_open import CommandQuickOpenScreen
-from naumi_agent.tui.completion_receipt import (
-    completion_outcome_label,
-    format_completion_receipt_text,
-)
 from naumi_agent.tui.runtime_inspector import RuntimeInspectorScreen
 from naumi_agent.tui.semantic_markdown import SemanticMarkdown as Markdown
 from naumi_agent.tui.workbench_overview import WorkbenchOverviewScreen
@@ -75,6 +71,10 @@ from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.command_index import (
     build_terminal_command_index,
     record_recent_terminal_command,
+)
+from naumi_agent.ui.completion_receipt import (
+    completion_outcome_label,
+    format_completion_receipt_text,
 )
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.doctor_export import (

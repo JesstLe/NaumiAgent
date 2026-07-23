@@ -7764,3 +7764,56 @@ async def test_bridge_shutdown_releases_pending_interaction() -> None:
 
     with pytest.raises(UserInteractionUnavailableError, match="界面已关闭"):
         await pending
+
+
+@pytest.mark.asyncio
+async def test_bridge_copy_receipt_command_uses_shared_backend_without_frontend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from naumi_agent import clipboard
+
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine._runtime_data_dir = tmp_path / ".naumi"
+    engine._harness_store = None
+    engine._session = SimpleNamespace(id="session-copy")
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    await engine.chat_run_store.start_run(
+        session_id="session-copy",
+        user_message_id="message-copy",
+        run_id="run-copy",
+    )
+    receipt = CompletionReceipt.from_dict(
+        {
+            "schema_version": 1,
+            "receipt_id": "receipt-copy",
+            "run_id": "run-copy",
+            "outcome": "completed",
+            "summary": "Bridge 回执复制完成。",
+            "git_state": {"available": False, "dirty": False},
+            "duration_ms": 50,
+        }
+    )
+    await engine.chat_run_store.finish_run(
+        "run-copy",
+        status="completed",
+        receipt=receipt,
+    )
+    monkeypatch.setattr(clipboard, "copy_text", lambda _text: True)
+
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge._emit_system_notice = AsyncMock()
+    bridge.emit = AsyncMock()
+
+    await bridge._run_cli_slash_command(
+        "/copy receipt receipt-copy",
+        request_id="request-copy",
+    )
+
+    bridge._emit_system_notice.assert_awaited_once()
+    notice = bridge._emit_system_notice.await_args.args
+    assert notice[0] == "command"
+    assert "已复制完成回执" in notice[1]
+    assert "当前界面不支持" not in notice[1]
+    assert list((tmp_path / ".naumi" / "exports").glob("completion-receipt-*.txt"))

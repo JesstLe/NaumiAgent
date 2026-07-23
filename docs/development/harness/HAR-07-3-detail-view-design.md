@@ -59,5 +59,6 @@ Python serializer 与 Node normalizer 均限制为 100 项，描述限制 500 �
 ## 明确不在本切片
 
 - HAR-07.4b 的断线 revision/gap 自动补发。
-- HAR-07.5a 已补齐详情页 `e/r` 权威刷新；完成卡入口、`v` Evidence 单项焦点和复制操作仍待实现。
+- HAR-07.5a、5b、5c1 已分别补齐详情页 `e/r` 权威刷新、`v` Evidence 单项焦点和复制回执；
+  完成卡直接进入详情仍待实现。
 - HAR-07.6 的跨表面结构化 snapshot parity；本切片先建立字段集合与共享投影边界。
