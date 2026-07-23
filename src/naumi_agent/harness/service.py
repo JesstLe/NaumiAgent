@@ -106,6 +106,11 @@ from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckStatus,
 )
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestBuilder
+from naumi_agent.harness.sandbox_retry_detail import (
+    HarnessSandboxRetryDetailSnapshot,
+    build_sandbox_retry_detail_snapshot,
+    missing_sandbox_retry_detail_snapshot,
+)
 from naumi_agent.harness.sandbox_retry_recovery import (
     SANDBOX_RETRY_RECOVERY_LIMIT,
     HarnessSandboxRetryRecoverySnapshot,
@@ -565,6 +570,34 @@ class HarnessService:
             assessed_at=assessed_at,
         )
         return build_sandbox_retry_recovery_snapshot(page)
+
+    async def sandbox_retry_detail(
+        self,
+        *,
+        retry_action_id: str,
+        dispatch_id: str,
+        assessed_at: str | None = None,
+    ) -> HarnessSandboxRetryDetailSnapshot:
+        """Read one exact retry authority chain without changing ticket state."""
+        if self._store is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_detail_store_unavailable",
+                "Harness 状态库尚未初始化，无法读取 Sandbox retry detail。",
+            )
+        assessment = assessed_at or datetime.now(UTC).isoformat()
+        record = await self._store.get_sandbox_retry_detail(
+            workspace_root=self.workspace_root,
+            retry_action_id=retry_action_id,
+            dispatch_id=dispatch_id,
+            assessed_at=assessment,
+        )
+        if record is None:
+            return missing_sandbox_retry_detail_snapshot(
+                retry_action_id=retry_action_id,
+                dispatch_id=dispatch_id,
+                assessed_at=assessment,
+            )
+        return build_sandbox_retry_detail_snapshot(record)
 
     async def eval_baseline_status(
         self,
@@ -2279,6 +2312,14 @@ def render_sandbox_retry_catalog(page: HarnessSandboxRetryCatalogPage) -> str:
                 ),
                 f"- Ticket lease：`{item.ticket_lease_expires_at or '-'}`",
                 f"- 更新时间：`{dispatch.updated_at}`",
+                "- 只读详情：",
+                "",
+                "```text",
+                "/harness eval sandbox retry-detail "
+                f"{dispatch.retry_action_id} "
+                f"--dispatch {dispatch.dispatch_id} "
+                f"--assessed-at {page.assessed_at}",
+                "```",
             )
         )
         if item.recovery_status in {"pending", "recovery_required"}:

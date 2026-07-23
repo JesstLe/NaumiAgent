@@ -182,6 +182,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         sandbox_retries_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retries"
         )
+        sandbox_retry_detail_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_retry_detail"
+        )
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -214,6 +217,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert sandbox_retries_tool is not None
         assert sandbox_retries_tool.metadata.read_only
         assert sandbox_retries_tool.metadata.concurrency_safe
+        assert sandbox_retry_detail_tool is not None
+        assert sandbox_retry_detail_tool.metadata.read_only
+        assert sandbox_retry_detail_tool.metadata.concurrency_safe
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -571,7 +577,7 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
             authority_token="4" * 32,
             now=stamp(3),
         )
-        await store.claim_sandbox_retry_dispatch(
+        dispatch, _ticket = await store.claim_sandbox_retry_dispatch(
             workspace_root=engine.workspace_root,
             retry_action_id=retry.action_id,
             retry_receipt_id=retry.receipt_id,
@@ -593,6 +599,16 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
                 ),
             )
         )
+        detailed = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    f"/harness eval sandbox retry-detail {retry.action_id} "
+                    f"--dispatch {dispatch.dispatch_id} "
+                    f"--assessed-at {stamp(7)}"
+                ),
+            )
+        )
 
         assert "租约已过期，需要恢复" in rendered
         assert retry.action_id in rendered
@@ -600,7 +616,16 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
         assert retry.receipt_sha256 in rendered
         assert cancel.receipt_id in rendered
         assert "当前目录只读" in rendered
+        assert "/harness eval sandbox retry-detail" in rendered
         assert "/harness eval sandbox resume" in rendered
+        assert "Sandbox retry dispatch 详情" in detailed
+        assert dispatch.dispatch_id in detailed
+        assert "Retention 保护集合（只读）" in detailed
+        assert "/harness eval sandbox resume" in detailed
+        assert (
+            engine.tool_registry.get("harness_eval_sandbox_retry_detail")
+            is not None
+        )
     finally:
         await engine.shutdown()
 

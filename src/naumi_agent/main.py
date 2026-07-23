@@ -4011,6 +4011,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "--receipt <retry-receipt> --sha256 <digest>\n"
         "      /harness eval sandbox retries [--state all|open|terminal] "
         "[--limit 1..100] [--cursor <opaque>] [--assessed-at <ISO8601>]\n"
+        "      /harness eval sandbox retry-detail <retry-action> "
+        "--dispatch <dispatch> [--assessed-at <ISO8601>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4208,6 +4210,52 @@ async def _run_harness(engine: Any, arg: str) -> None:
             ToolCall(
                 id=f"manual-harness-sandbox-retries-{uuid.uuid4().hex}",
                 name="harness_eval_sandbox_retries",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 4
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "retry-detail"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        retry_action_id = parts[3]
+        parsed: dict[str, str] = {}
+        index = 4
+        valid = True
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in {"--dispatch", "--assessed-at"}
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        dispatch_id = parsed.get("--dispatch", "")
+        if (
+            not valid
+            or re.fullmatch(r"hsar_[0-9a-f]{24}", retry_action_id) is None
+            or re.fullmatch(r"hsard_[0-9a-f]{24}", dispatch_id) is None
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        arguments: dict[str, object] = {
+            "retry_action_id": retry_action_id,
+            "dispatch_id": dispatch_id,
+        }
+        if "--assessed-at" in parsed:
+            arguments["assessed_at"] = parsed["--assessed-at"]
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-retry-detail-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox_retry_detail",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
         )
