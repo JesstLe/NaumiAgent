@@ -43,6 +43,7 @@ TTL 已到但尚未被写路径收割的 active 行在只读快照中不占槽�
 ## 5. 明确未完成
 
 - reservation 表示 Runtime 已承诺的 slot，不证明 worker 内真实 CPU、内存、进程或队列深度；
-- 尚无 queue wait、reservation age、TTL orphan、利用率历史或容量趋势，它们属于 ARC-06.8/ARC-08；
+- UI-13.1e 已补充 queue policy、live waiting、active claim、oldest wait 与到期待收口聚合；job 级 queue
+  catalog、reservation age、利用率历史和容量趋势仍属于 ARC-06.8/ARC-08；
 - 尚无 Agent/Browser 持久 Worker capacity producer；Doctor 只展示真实存在的 authority，不生成模拟数据；
 - 多 Worker 聚合、筛选和详情页需要独立 bounded typed contract，不能继续扩张一条 Doctor detail 字符串。

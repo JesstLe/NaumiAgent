@@ -21,7 +21,7 @@
 | UI-10 | `/workbench` 命令页 | partial (10.1-10.4, 10.6a, 10.6c, 10.7) | UI 协议、Runtime Inspector | `cli-ui/UI-10-workbench-page.md` |
 | UI-11 | 全屏任务与 Timeline 导航 | partial (11.1a, 11.2a) | Agent Control Center | `cli-ui/UI-11-task-navigation.md` |
 | UI-12 | 权限策略中心 | partial (12.1a, 12.3a, 12.3b1, 12.3b2) | permission bubbles | `cli-ui/UI-12-permission-center.md` |
-| UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1d, 13.2a, 13.5a) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |
+| UI-13 | Doctor/Debug 全屏诊断 | partial (13.1a-13.1e, 13.2a, 13.5a) | DebugTrace, heartbeat | `cli-ui/UI-13-diagnostics.md` |
 | UI-14 | QuickOpen、Vim 与完整键位层 | partial (14.1a, 14.2a-14.2g) | shared keybindings | `cli-ui/UI-14-navigation-input.md` |
 | UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a, 15.2a, 15.3a, 15.4a, 15.5a, 15.5b, 15.6a) | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | partial (16.1a, 16.2a, 16.3a, 16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |

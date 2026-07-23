@@ -36,6 +36,9 @@
 - UI-13.1d Worker Capacity Health：已实现。共享只读 authority 从 Worker Registry v3 投影真实 reservation
   占用/可用槽位，按 assessed time 逻辑忽略过期项但不写回；New UI/TUI 显示同一中文容量事实，详见
   `UI-13-1d-worker-capacity-health.md`。
+- UI-13.1e Worker Queue Backlog Health：已实现。相同只读 authority 投影 durable policy、live waiting、
+  active claim、oldest wait 与待收口过期事实；队列满只降级，identity/schema/link 损坏仍 fail closed，
+  New UI/TUI 不维护第二份队列状态，详见 `UI-13-1e-worker-queue-backlog-health.md`。
 - UI-13.2a Provider Diagnostic Codes：已实现。Doctor 以低基数稳定码区分凭据、配置、404、429、5xx、
   timeout 与连接错误；结构化 HTTP 状态优先，New UI/TUI/CLI 复用同一 typed authority，详见
   `UI-13-2a-provider-diagnostic-codes.md`。
