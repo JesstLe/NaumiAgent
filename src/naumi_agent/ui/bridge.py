@@ -98,6 +98,7 @@ from naumi_agent.ui.protocol_registry import load_protocol_event_registry
 from naumi_agent.ui.runtime_health import (
     runtime_heartbeat_retention_status_payload,
 )
+from naumi_agent.ui.workspace_file_index import workspace_file_search_payload
 from naumi_agent.user_interaction import (
     UserInteractionRequest,
     UserInteractionUnavailableError,
@@ -538,6 +539,7 @@ class JsonlEngineBridge:
         self._run_task: asyncio.Task[Any] | None = None
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
+        self._workspace_file_search_task: asyncio.Task[None] | None = None
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._queue_owner_id = f"queue-bridge-{uuid4().hex}"
         self._queue_authorities: dict[str, DurableConversationQueueAuthority] = {}
@@ -1381,6 +1383,12 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.RECEIPT_REQUEST:
             await self.resend_completion_receipt(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.WORKSPACE_FILES_REQUEST:
+            await self.search_workspace_files(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.WORKSPACE_FILES_CANCEL:
+            await self.cancel_workspace_file_index(request_id=request_id)
             return
         if event_type == ClientEventType.HARNESS_EXPLAIN_REQUEST:
             await self.query_harness_explain(payload, request_id=request_id)
@@ -2388,6 +2396,81 @@ class JsonlEngineBridge:
 
         task = asyncio.create_task(run())
         self._harness_eval_batch_tasks[request_id] = task
+
+    async def search_workspace_files(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Search the Engine-owned file index without blocking the control plane."""
+        previous = self._workspace_file_search_task
+        if previous is not None and not previous.done():
+            previous.cancel()
+            await asyncio.gather(previous, return_exceptions=True)
+        index = getattr(self.engine, "workspace_file_index", None)
+        if index is None:
+            await self.emit_error(
+                "Workspace 文件索引尚未初始化。",
+                code="workspace_file_index_unavailable",
+                request_id=request_id,
+            )
+            return
+
+        async def run() -> None:
+            try:
+                result = await index.search(
+                    str(payload.get("query") or ""),
+                    limit=int(payload.get("limit", 200)),
+                    refresh=bool(payload.get("refresh", False)),
+                )
+                await self.emit(
+                    ServerEventType.WORKSPACE_FILES,
+                    workspace_file_search_payload(result),
+                    request_id=request_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Workspace file index search failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "Workspace 文件索引读取失败，请检查目录权限后重试。",
+                    code="workspace_file_index_failed",
+                    request_id=request_id,
+                )
+            finally:
+                if self._workspace_file_search_task is asyncio.current_task():
+                    self._workspace_file_search_task = None
+
+        self._workspace_file_search_task = asyncio.create_task(
+            run(),
+            name=f"workspace-file-search-{request_id}",
+        )
+
+    async def cancel_workspace_file_index(self, *, request_id: str) -> None:
+        """Cancel the current query and any in-flight background index build."""
+        task = self._workspace_file_search_task
+        self._workspace_file_search_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        index = getattr(self.engine, "workspace_file_index", None)
+        if index is None:
+            await self.emit_error(
+                "Workspace 文件索引尚未初始化。",
+                code="workspace_file_index_unavailable",
+                request_id=request_id,
+            )
+            return
+        result = await index.cancel()
+        await self.emit(
+            ServerEventType.WORKSPACE_FILES,
+            workspace_file_search_payload(result),
+            request_id=request_id,
+        )
 
     async def cancel_harness_eval_sandbox(
         self,
@@ -4720,6 +4803,11 @@ class JsonlEngineBridge:
         if promotion_tasks:
             await asyncio.gather(*promotion_tasks, return_exceptions=True)
         self._harness_eval_promotion_tasks.clear()
+        workspace_file_task = self._workspace_file_search_task
+        self._workspace_file_search_task = None
+        if workspace_file_task is not None and not workspace_file_task.done():
+            workspace_file_task.cancel()
+            await asyncio.gather(workspace_file_task, return_exceptions=True)
         try:
             await self.engine.shutdown()
         except Exception:

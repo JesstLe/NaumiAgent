@@ -1215,6 +1215,52 @@ test("session list is workspace scoped, bounded, strict, and drops private field
   );
 });
 
+test("workspace file list is bounded, relative, and template-correlated", () => {
+  const item = {
+    path: "src/中文 file.py",
+    name: "中文 file.py",
+    directory: "src",
+    extension: ".py",
+    template: "/read 'src/中文 file.py'",
+    absolute_path: "/private/workspace/src/中文 file.py",
+  };
+  const normalized = normalizeServerRecord({
+    type: "workspace/files",
+    payload: {
+      schema_version: 1,
+      status: "ready",
+      revision: 3,
+      index_sha256: "b".repeat(64),
+      query: "中文",
+      items: [item],
+      total_indexed: 12,
+      truncated: false,
+      source: "git",
+      built_at: "2026-07-23T00:00:00+00:00",
+      message: "",
+      workspace_root: "/private/workspace",
+    },
+  }).payload;
+
+  assert.equal(normalized.items[0].path, "src/中文 file.py");
+  assert.equal(Object.hasOwn(normalized.items[0], "absolute_path"), false);
+  assert.equal(Object.hasOwn(normalized, "workspace_root"), false);
+  for (const invalid of [
+    { ...item, path: "/etc/passwd", template: "/read /etc/passwd" },
+    { ...item, path: "../secret", template: "/read ../secret" },
+    { ...item, template: "/write 'src/中文 file.py'" },
+    { ...item, name: "安全文件.py" },
+  ]) {
+    assert.throws(
+      () => normalizeServerRecord({
+        type: "workspace/files",
+        payload: { ...normalized, items: [invalid] },
+      }),
+      /workspace\/files/,
+    );
+  }
+});
+
 test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () => {
   const pursuit = {
     run_id: "pursuit_1",

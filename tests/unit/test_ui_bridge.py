@@ -97,6 +97,10 @@ from naumi_agent.ui.protocol import (
     negotiate_hello,
     normalize_client_record,
 )
+from naumi_agent.ui.workspace_file_index import (
+    WorkspaceFileItem,
+    WorkspaceFileSearchResult,
+)
 from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
@@ -6258,6 +6262,55 @@ async def test_bridge_emits_correlated_workspace_session_list() -> None:
     assert record["payload"]["query"] == "历史"
     assert record["payload"]["items"][0]["session_id"] == "session-1"
     assert "messages" not in record["payload"]["items"][0]
+
+
+@pytest.mark.asyncio
+async def test_bridge_emits_correlated_workspace_file_results_without_root() -> None:
+    engine = _FakeEngine()
+    engine.workspace_file_index = SimpleNamespace(
+        search=AsyncMock(return_value=WorkspaceFileSearchResult(
+            status="ready",
+            revision=1,
+            index_sha256="a" * 64,
+            query="router",
+            items=(WorkspaceFileItem(
+                path="src/router.py",
+                name="router.py",
+                directory="src",
+                extension=".py",
+            ),),
+            total_indexed=20,
+            truncated=False,
+            source="git",
+            built_at="2026-07-23T00:00:00+00:00",
+        )),
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "workspace-files-1",
+        "type": ClientEventType.WORKSPACE_FILES_REQUEST,
+        "payload": {"query": "router", "limit": 20, "refresh": False},
+    })
+    task = bridge._workspace_file_search_task
+    assert task is not None
+    await task
+
+    record = next(
+        record for record in _records(writer) if record["type"] == "workspace/files"
+    )
+    assert record["request_id"] == "workspace-files-1"
+    assert record["payload"]["items"][0] == {
+        "path": "src/router.py",
+        "name": "router.py",
+        "directory": "src",
+        "extension": ".py",
+        "template": "/read src/router.py",
+    }
+    assert "workspace_root" not in record["payload"]
+    assert "/Users/" not in json.dumps(record, ensure_ascii=False)
 
 
 @pytest.mark.asyncio

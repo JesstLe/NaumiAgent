@@ -45,6 +45,7 @@ import {
   closeCommandQuickOpen,
   moveCommandQuickOpenSelection,
   openCommandQuickOpen,
+  requestCommandQuickOpenFiles,
   switchCommandQuickOpenProvider,
 } from "./command-quick-open.js";
 import {
@@ -580,6 +581,7 @@ function handleKeyInput(chunk) {
     if (token.type === "paste") {
       if (state.commandQuickOpen?.open) {
         appendCommandQuickOpenQuery(state, token.value);
+        refreshCommandQuickOpenFiles();
       } else if (state.interaction) {
         handleInteractionKey(state, token.value, send);
       } else if (state.historySearch?.open) {
@@ -936,6 +938,9 @@ function handleHistorySearchKey(chunk) {
 
 function handleCommandQuickOpenKey(chunk) {
   if (chunk === INPUT_KEYS.escape || isCommandQuickOpenKey(chunk)) {
+    if (state.commandQuickOpen?.provider === "files" && state.commandQuickOpen?.fileLoading) {
+      send("workspace/files/cancel", {});
+    }
     return closeCommandQuickOpen(state);
   }
   if (chunk === INPUT_KEYS.up) return moveCommandQuickOpenSelection(state, "previous") || true;
@@ -954,6 +959,11 @@ function handleCommandQuickOpenKey(chunk) {
           page_size: 100,
           query: "",
         }),
+        files: (query, refresh) => send("workspace/files/request", {
+          query,
+          limit: 200,
+          refresh,
+        }),
       },
     );
     return true;
@@ -970,13 +980,27 @@ function handleCommandQuickOpenKey(chunk) {
     return true;
   }
   if (chunk === "\u007f" || chunk === "\b") {
-    return backspaceCommandQuickOpenQuery(state) || true;
+    const changed = backspaceCommandQuickOpenQuery(state);
+    if (changed) refreshCommandQuickOpenFiles();
+    return changed || true;
   }
   if (chunk >= " " && chunk !== "\x7f") {
     appendCommandQuickOpenQuery(state, chunk);
+    refreshCommandQuickOpenFiles();
     return true;
   }
   return true;
+}
+
+function refreshCommandQuickOpenFiles() {
+  requestCommandQuickOpenFiles(
+    state,
+    (query, refresh) => send("workspace/files/request", {
+      query,
+      limit: 200,
+      refresh,
+    }),
+  );
 }
 
 function isCommandQuickOpenKey(chunk) {

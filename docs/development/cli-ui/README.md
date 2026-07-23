@@ -28,6 +28,8 @@ UI-14.2a 已进一步交付两端 `Ctrl+P` 命令 QuickOpen，支持别名、说
 UI-14.2b 已增加本次启动内的隐私安全最近命令排序，只记录规范命令名且新启动重置；
 UI-14.2c 已复用 UI-11 类型化任务快照增加两端任务 provider，`Tab` 切换并只填入只读详情命令；
 UI-14.2d 已复用 ARC-03.2b2 工作区会话快照增加两端会话 provider，选择只填入 `/load <id>`；
+UI-14.2e 已增加 Engine-owned、可取消、workspace 隔离、最多 100k 文件的后台索引，两端文件 provider
+选择只填入安全 `/read` 模板；
 文件/会话/Agent provider、跨启动历史与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。
 后续模块不得绕开这些路径重建新状态层。

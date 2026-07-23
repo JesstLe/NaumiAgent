@@ -730,6 +730,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "sessions/list") {
     return normalizeSessionList(payload);
   }
+  if (type === "workspace/files") {
+    return normalizeWorkspaceFileList(payload);
+  }
   if (type === "inspector/snapshot") {
     return normalizeInspectorSnapshot(payload);
   }
@@ -3124,6 +3127,101 @@ function normalizeSessionList(payload) {
     warnings: harnessTextArray(payload.warnings, "sessions/list warnings", 10)
       .map((value) => sessionText(value, "sessions/list warning", 300)),
   };
+}
+
+function normalizeWorkspaceFileList(payload) {
+  const source = harnessObject(payload, "workspace/files");
+  if (Number(source.schema_version) !== 1) {
+    throw new Error(`workspace/files schema_version 不兼容: ${source.schema_version}`);
+  }
+  const status = sessionText(source.status, "workspace/files status", 20);
+  if (!["ready", "cancelled"].includes(status)) {
+    throw new Error("workspace/files status 无效");
+  }
+  const revision = harnessNonnegativeInteger(source.revision, "workspace/files revision");
+  const indexSha256 = sessionText(source.index_sha256, "workspace/files index_sha256", 64);
+  if (indexSha256 && !/^[a-f0-9]{64}$/.test(indexSha256)) {
+    throw new Error("workspace/files index_sha256 格式无效");
+  }
+  if (status === "ready" && !indexSha256) {
+    throw new Error("workspace/files ready 缺少 index_sha256");
+  }
+  const query = sessionText(source.query, "workspace/files query", 200);
+  const items = harnessObjectArray(source.items, "workspace/files items", 200)
+    .map(normalizeWorkspaceFileItem);
+  const totalIndexed = harnessNonnegativeInteger(
+    source.total_indexed,
+    "workspace/files total_indexed",
+  );
+  if (totalIndexed > 100_000) {
+    throw new Error("workspace/files total_indexed 超出上限");
+  }
+  if (items.length > totalIndexed || (status === "cancelled" && items.length)) {
+    throw new Error("workspace/files items 与索引状态不一致");
+  }
+  if (new Set(items.map((item) => item.path)).size !== items.length) {
+    throw new Error("workspace/files item.path 不得重复");
+  }
+  const fileSource = sessionText(source.source, "workspace/files source", 20);
+  if (fileSource && !["git", "filesystem"].includes(fileSource)) {
+    throw new Error("workspace/files source 无效");
+  }
+  return {
+    schema_version: 1,
+    status,
+    revision,
+    index_sha256: indexSha256,
+    query,
+    items,
+    total_indexed: totalIndexed,
+    truncated: harnessBoolean(source.truncated, "workspace/files truncated"),
+    source: fileSource,
+    built_at: sessionText(source.built_at, "workspace/files built_at", 64),
+    message: sessionText(source.message, "workspace/files message", 300),
+  };
+}
+
+function normalizeWorkspaceFileItem(value) {
+  const item = harnessObject(value, "workspace/files item");
+  const path = sessionText(item.path, "workspace/files item.path", 4096);
+  if (!isSafeWorkspaceRelativePath(path)) {
+    throw new Error("workspace/files item.path 必须是安全的相对路径");
+  }
+  const name = sessionText(item.name, "workspace/files item.name", 512);
+  const directory = sessionText(item.directory, "workspace/files item.directory", 4096);
+  const extension = sessionText(item.extension, "workspace/files item.extension", 100);
+  const segments = path.split("/");
+  const expectedName = segments.at(-1);
+  const expectedDirectory = segments.slice(0, -1).join("/");
+  const dot = expectedName.lastIndexOf(".");
+  const expectedExtension = dot > 0 && dot < expectedName.length - 1
+    ? expectedName.slice(dot).toLocaleLowerCase("und") : "";
+  if (
+    name !== expectedName
+    || directory !== expectedDirectory
+    || extension !== expectedExtension
+  ) {
+    throw new Error("workspace/files item 显示字段与路径不一致");
+  }
+  const template = sessionText(item.template, "workspace/files item.template", 4200);
+  if (template !== `/read ${shellQuoteWorkspacePath(path)}`) {
+    throw new Error("workspace/files item.template 与路径不匹配");
+  }
+  return { path, name, directory, extension, template };
+}
+
+function isSafeWorkspaceRelativePath(path) {
+  if (!path || path.startsWith("/") || path.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(path)) {
+    return false;
+  }
+  if (/[\u0000-\u001f\u007f]/.test(path) || path.includes("\\")) return false;
+  const segments = path.split("/");
+  return segments.every((segment) => segment && segment !== "." && segment !== "..");
+}
+
+function shellQuoteWorkspacePath(path) {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(path)) return path;
+  return `'${path.replaceAll("'", `'\"'\"'`)}'`;
 }
 
 function normalizeSessionListItem(value) {

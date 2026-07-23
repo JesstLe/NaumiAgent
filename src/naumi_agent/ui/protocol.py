@@ -79,6 +79,8 @@ class ClientEventType(StrEnum):
     PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
     SESSIONS_LIST_REQUEST = "sessions/list/request"
+    WORKSPACE_FILES_REQUEST = "workspace/files/request"
+    WORKSPACE_FILES_CANCEL = "workspace/files/cancel"
     GOAL_PANEL = "goal_panel"
     TASK_PANEL = "task_panel"
     TASK_CANCEL = "task_cancel"
@@ -129,6 +131,7 @@ class ServerEventType(StrEnum):
     RUN_CANCELLED = "run/cancelled"
     SESSION_REPLAYED = "session/replayed"
     SESSIONS_LIST = "sessions/list"
+    WORKSPACE_FILES = "workspace/files"
     STATUS = "runtime/status"
     MODE_CHANGED = "mode/changed"
     PERMISSION_REQUEST = "permission/request"
@@ -318,6 +321,21 @@ def _normalize_client_payload(
             "receipt_id": receipt_id,
             "run_id": run_id,
         }
+
+    if event_type == ClientEventType.WORKSPACE_FILES_REQUEST:
+        query = str(payload.get("query") or "")
+        if len(query) > 200:
+            raise ValueError("Workspace File query 不能超过 200 个字符。")
+        limit = payload.get("limit", 200)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
+            raise ValueError("Workspace File limit 必须在 1..200。")
+        refresh = payload.get("refresh", False)
+        if not isinstance(refresh, bool):
+            raise ValueError("Workspace File refresh 必须是布尔值。")
+        return {"query": query, "limit": limit, "refresh": refresh}
+
+    if event_type == ClientEventType.WORKSPACE_FILES_CANCEL:
+        return {}
 
     if event_type in {
         ClientEventType.HARNESS_EXPLAIN_REQUEST,

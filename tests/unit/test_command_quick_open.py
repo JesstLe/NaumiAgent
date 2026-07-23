@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from textual.widgets import Input
 
@@ -11,6 +13,7 @@ from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tasks.models import Task, TaskStatus
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.command_quick_open import CommandQuickOpenScreen
+from naumi_agent.ui.workspace_file_index import WorkspaceFileIndex
 
 
 class _QuickOpenTaskStore:
@@ -146,4 +149,40 @@ async def test_tui_quick_open_switches_to_workspace_sessions_and_only_fills() ->
         await pilot.pause()
 
         assert composer.value == "/load quick-session"
+        assert app._agent_busy is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_tui_quick_open_searches_workspace_files_and_only_fills_read(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "中文 file.py").write_text("print('ok')", encoding="utf-8")
+    engine = AgentEngine(AppConfig())
+    engine.workspace_file_index = WorkspaceFileIndex(tmp_path)
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        composer = app.query_one("#msg-input", Input)
+        composer.value = "保留草稿"
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandQuickOpenScreen)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("tab")
+        for _ in range(40):
+            if screen._results:  # noqa: SLF001
+                break
+            await pilot.pause(0.05)
+
+        assert screen._provider == "files"  # noqa: SLF001
+        assert screen._results[0].path == "src/中文 file.py"  # noqa: SLF001
+        assert "/private/" not in screen._render_entry(screen._results[0])  # noqa: SLF001
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert composer.value == "/read 'src/中文 file.py'"
         assert app._agent_busy is False  # noqa: SLF001
