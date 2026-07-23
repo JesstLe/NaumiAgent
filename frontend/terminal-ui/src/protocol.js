@@ -2892,6 +2892,13 @@ function normalizeGoalInteraction(item) {
   if (canCancel !== (state === "pending")) {
     throw new Error("goals/snapshot interaction.can_cancel 与状态不一致");
   }
+  const canTakeover = harnessBoolean(
+    item.can_takeover ?? false,
+    "goals/snapshot interaction.can_takeover",
+  );
+  if (canTakeover && state !== "pending") {
+    throw new Error("goals/snapshot interaction.can_takeover 与状态不一致");
+  }
   return {
     interaction_id: interactionId,
     pursuit_run_id: pursuitRunId,
@@ -2903,6 +2910,7 @@ function normalizeGoalInteraction(item) {
     expires_at: harnessText(item.expires_at, "goals/snapshot interaction.expires_at"),
     updated_at: harnessText(item.updated_at, "goals/snapshot interaction.updated_at"),
     can_cancel: canCancel,
+    can_takeover: canTakeover,
   };
 }
 

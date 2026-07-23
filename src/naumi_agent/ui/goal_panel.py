@@ -246,6 +246,10 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
                 lines.append(
                     f"  - 取消：`/goal interaction cancel {item['interaction_id']}`"
                 )
+            if item["can_takeover"]:
+                lines.append(
+                    f"  - 接管：`/goal interaction takeover {item['interaction_id']}`"
+                )
     return "\n".join(lines).rstrip()
 
 
@@ -321,7 +325,7 @@ def render_goal_interaction_detail(
         )
     if record.state == "pending" and lease_expired and not question_expired:
         lines.append(
-            "> 当前只提供接管资格事实；宿主绑定的手动接管动作尚未开放。"
+            f"- 接管：`/goal interaction takeover {record.interaction_id}`"
         )
     return "\n".join(lines)
 
@@ -334,6 +338,15 @@ def _parse_aware(value: str) -> datetime:
 
 
 def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    question_live = (
+        not record.expires_at or _parse_aware(record.expires_at) > now
+    )
+    can_takeover = (
+        record.state == "pending"
+        and question_live
+        and _parse_aware(record.owner_lease_expires_at) <= now
+    )
     return {
         "interaction_id": _bounded_text(record.interaction_id, 132),
         "pursuit_run_id": _bounded_text(record.subject_id, 128),
@@ -345,6 +358,7 @@ def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
         "expires_at": _bounded_text(record.expires_at, 64),
         "updated_at": _bounded_text(record.updated_at, 64),
         "can_cancel": record.state == "pending",
+        "can_takeover": can_takeover,
     }
 
 

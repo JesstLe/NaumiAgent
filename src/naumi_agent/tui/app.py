@@ -45,6 +45,7 @@ from naumi_agent.harness.coordinator import ReconciliationCoordinatorOutcome
 from naumi_agent.harness.interaction import HarnessInteractionRecord
 from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
+    InteractionClaimError,
 )
 from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 from naumi_agent.orchestrator.engine import AgentEngine
@@ -284,6 +285,10 @@ class _TuiSlashCommandFrontend:
     ) -> dict[str, str]:
         """Delegate guided Slash interactions to the same Textual modal host."""
         return await self._app.request_user_interaction(payload)
+
+    async def takeover_goal_interaction(self, interaction_id: str) -> str:
+        """Bind one manual Goal takeover to this Textual host and modal."""
+        return await self._app.takeover_goal_interaction(interaction_id)
 
     def clear_output(self) -> None:
         self._app.query_one(ChatPanel).clear()
@@ -1670,6 +1675,7 @@ class NaumiApp(App):
         self._unmounting = False
         self._slash_frontend = _TuiSlashCommandFrontend(self)
         self._interaction_lock = asyncio.Lock()
+        self._interaction_claim_lock = asyncio.Lock()
         self._active_interaction_ids: set[str] = set()
         self._interaction_records: dict[str, HarnessInteractionRecord] = {}
         self._interaction_owner_tasks: dict[str, asyncio.Task[None]] = {}
@@ -2168,7 +2174,15 @@ class NaumiApp(App):
         recovery_failures = 0
         while self.is_running:
             try:
-                recovery = await authority.recover_pending(limit=50)
+                async with self._interaction_claim_lock:
+                    recovery = await authority.recover_pending(limit=50)
+                    claimed = tuple(
+                        record for record in recovery.claimed
+                        if record.interaction_id not in self._active_interaction_ids
+                    )
+                    for record in claimed:
+                        self._active_interaction_ids.add(record.interaction_id)
+                        self._start_interaction_owner_renewal(record)
             except Exception:
                 logger.warning("TUI durable interaction recovery failed")
                 self._set_interaction_status(
@@ -2180,64 +2194,115 @@ class NaumiApp(App):
                 await asyncio.sleep(float(2 ** (recovery_failures - 1)))
                 continue
             recovery_failures = 0
-            claimed = tuple(
-                record for record in recovery.claimed
-                if record.interaction_id not in self._active_interaction_ids
-            )
             for record in claimed:
-                self._active_interaction_ids.add(record.interaction_id)
-                self._start_interaction_owner_renewal(record)
-            for record in claimed:
-                try:
-                    async with self._interaction_lock:
-                        record = self._interaction_records.get(
-                            record.interaction_id,
-                            record,
-                        )
-                        raw_response = await self._present_user_interaction(
-                            {
-                                "request_id": record.interaction_id,
-                                **record.request().to_public_dict(),
-                                "expires_at": record.expires_at,
-                            },
-                            record=record,
-                        )
-                    record = await self._stop_interaction_owner_renewal(
-                        record.interaction_id,
-                        fallback=record,
-                    )
-                    await authority.answer(record=record, response=raw_response)
-                    self._set_interaction_status(
-                        f"已恢复并保存交互 {record.interaction_id}；"
-                        "若属于目标追踪，请执行 /pursue resume。"
-                    )
-                except TimeoutError:
-                    record = await self._stop_interaction_owner_renewal(
-                        record.interaction_id,
-                        fallback=record,
-                    )
-                    try:
-                        await authority.expire(
-                            record=record,
-                            now=record.expires_at,
-                        )
-                    except Exception:
-                        logger.warning("TUI replay interaction timeout commit failed")
-                except Exception:
-                    logger.warning("TUI replay interaction answer failed")
-                    self._set_interaction_status(
-                        "恢复问题的答案未能持久化；重开 TUI 后可重试。"
-                    )
-                finally:
-                    if record.interaction_id in self._interaction_owner_tasks:
-                        await self._stop_interaction_owner_renewal(
-                            record.interaction_id,
-                            fallback=record,
-                        )
-                    self._active_interaction_ids.discard(record.interaction_id)
+                await self._complete_claimed_interaction(record)
             if recovery.retry_after_seconds is None:
                 return
             await asyncio.sleep(max(0.05, recovery.retry_after_seconds + 0.05))
+
+    async def takeover_goal_interaction(self, interaction_id: str) -> str:
+        """Claim one Goal-linked interaction and immediately open this host modal."""
+        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
+            return "⚠️ interaction_id 格式无效。"
+        authority = self._interaction_authority()
+        if authority is None:
+            return "⚠️ 持久交互 authority 不可用，接管未提交。"
+        try:
+            record = await authority.store.get_interaction(
+                workspace_root=self.engine.workspace_root,
+                interaction_id=interaction_id,
+            )
+        except Exception:
+            return "⚠️ 持久交互读取失败，请运行 `/doctor`。"
+        if record is None:
+            return f"⚠️ 用户交互不存在：`{interaction_id}`。"
+        try:
+            linked_runs = {
+                goal.pursuit_run_id
+                for goal in self.engine.goal_store.list(
+                    include_finished=True,
+                    limit=50,
+                )
+                if goal.pursuit_run_id
+            }
+        except Exception:
+            return "⚠️ Goal 状态读取失败，请运行 `/doctor`。"
+        if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
+            return "⚠️ 该交互不属于当前 Goal 页面中的 Pursuit。"
+        async with self._interaction_claim_lock:
+            if interaction_id in self._active_interaction_ids:
+                return "ℹ️ 该用户交互已在当前 TUI 中展示。"
+            try:
+                record = await authority.claim(interaction_id=interaction_id)
+            except InteractionClaimError as exc:
+                return f"⚠️ {exc}"
+            except Exception:
+                return "⚠️ 用户交互在接管前已发生变化，请刷新后重试。"
+            self._active_interaction_ids.add(interaction_id)
+            self._start_interaction_owner_renewal(record)
+        result = await self._complete_claimed_interaction(record)
+        return result or f"✅ 已接管并保存交互 `{interaction_id}`。"
+
+    async def _complete_claimed_interaction(
+        self,
+        record: HarnessInteractionRecord,
+    ) -> str:
+        """Display, answer, and release one record already claimed by this TUI."""
+        authority = self._interaction_authority()
+        if authority is None:
+            if record.interaction_id in self._interaction_owner_tasks:
+                await self._stop_interaction_owner_renewal(
+                    record.interaction_id,
+                    fallback=record,
+                )
+            self._active_interaction_ids.discard(record.interaction_id)
+            return "⚠️ 持久交互 authority 在展示前不可用。"
+        interaction_id = record.interaction_id
+        try:
+            async with self._interaction_lock:
+                record = self._interaction_records.get(interaction_id, record)
+                raw_response = await self._present_user_interaction(
+                    {
+                        "request_id": interaction_id,
+                        **record.request().to_public_dict(),
+                        "expires_at": record.expires_at,
+                    },
+                    record=record,
+                )
+            record = await self._stop_interaction_owner_renewal(
+                interaction_id,
+                fallback=record,
+            )
+            await authority.answer(record=record, response=raw_response)
+            message = (
+                f"已恢复并保存交互 {interaction_id}；"
+                "若属于目标追踪，请执行 /pursue resume。"
+            )
+            self._set_interaction_status(message)
+            return f"✅ {message}"
+        except TimeoutError:
+            record = await self._stop_interaction_owner_renewal(
+                interaction_id,
+                fallback=record,
+            )
+            try:
+                await authority.expire(record=record, now=record.expires_at)
+            except Exception:
+                logger.warning("TUI replay interaction timeout commit failed")
+            return f"⚠️ 用户交互 `{interaction_id}` 已超时。"
+        except Exception:
+            logger.warning("TUI replay interaction answer failed")
+            self._set_interaction_status(
+                "恢复问题的答案未能持久化；重开 TUI 后可重试。"
+            )
+            return "⚠️ 恢复问题的答案未能持久化。"
+        finally:
+            if interaction_id in self._interaction_owner_tasks:
+                await self._stop_interaction_owner_renewal(
+                    interaction_id,
+                    fallback=record,
+                )
+            self._active_interaction_ids.discard(interaction_id)
 
     def _show_startup_status(self) -> None:
         """Show model, budget, and context info in status bar on startup."""

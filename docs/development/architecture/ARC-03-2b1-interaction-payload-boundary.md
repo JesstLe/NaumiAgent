@@ -46,4 +46,5 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 
 HAR-10.6a 已建立单一 durable interaction authority；HAR-10.6b 已让 Pursuit checkpoint 只引用稳定
 interaction ID，并由 New UI Bridge 消费 pending/timeout/takeover 事实。UI-18.4b 已让 TUI 复用相同
-authority adapter；UI-18.4c 已收口 Goal ledger/cancel，手动 takeover、cursor 与详情页继续由 UI-18.4 收口。
+authority adapter；UI-18.4c 已收口 Goal ledger/cancel，UI-18.4d1/18.4d2 已收口共享详情与
+宿主绑定手动 takeover；cursor 与页内详情继续由 UI-18.4 收口。

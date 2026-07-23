@@ -1959,6 +1959,7 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
         expires_at: "later",
         updated_at: "now",
         can_cancel: true,
+        can_takeover: true,
       }],
     },
   });
@@ -1968,8 +1969,14 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   assert.match(stripAnsi(renderScreen(state, 100, 22).join("\n")), /stale_preparing/);
   assert.match(stripAnsi(renderScreen(state, 100, 30).join("\n")), /ask-goal-1 · 等待回答/);
 
-  handleSubmitText(state, "/goal interaction cancel ask-goal-1", send);
+  handleSubmitText(state, "/goal interaction takeover ask-goal-1", send);
   assert.deepEqual(sent[1], {
+    type: "interaction_takeover",
+    payload: { interaction_id: "ask-goal-1" },
+  });
+
+  handleSubmitText(state, "/goal interaction cancel ask-goal-1", send);
+  assert.deepEqual(sent[2], {
     type: "interaction_cancel",
     payload: { interaction_id: "ask-goal-1" },
   });
@@ -1984,9 +1991,10 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   });
   assert.equal(state.goalPanel.snapshot.interactions[0].state, "cancelled");
   assert.equal(state.goalPanel.snapshot.interactions[0].can_cancel, false);
+  assert.equal(state.goalPanel.snapshot.interactions[0].can_takeover, false);
 
   assert.equal(handleGoalPanelKey(state, "r", send), true);
-  assert.deepEqual(sent[2], {
+  assert.deepEqual(sent[3], {
     type: "goal_panel",
     payload: { limit: 20, include_finished: true },
   });
@@ -1996,7 +2004,7 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   assert.equal(state.followTail, false);
 
   handleSubmitText(state, "/goal create 新目标", send);
-  assert.deepEqual(sent[3], { type: "submit", payload: { text: "/goal create 新目标" } });
+  assert.deepEqual(sent[4], { type: "submit", payload: { text: "/goal create 新目标" } });
 });
 
 test("evolution command opens typed review route and navigates to detail", () => {

@@ -100,6 +100,9 @@ function renderInteractions(interactions) {
     if (item.can_cancel) {
       lines.push(color(ANSI.dim, `    取消 · /goal interaction cancel ${item.interaction_id}`));
     }
+    if (item.can_takeover) {
+      lines.push(color(ANSI.cyan, `    接管 · /goal interaction takeover ${item.interaction_id}`));
+    }
   }
   return lines;
 }

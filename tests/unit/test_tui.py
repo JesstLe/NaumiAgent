@@ -33,6 +33,7 @@ from naumi_agent.orchestrator.engine import (
     AgentRuntimeMode,
     AgentUsage,
 )
+from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycleFactory,
@@ -1256,6 +1257,71 @@ class TestNaumiApp:
 
         assert answered.owner_id.startswith("tui-")
         assert answered.owner_epoch == 2
+        assert answered.answer_value == "continue"
+
+    @pytest.mark.asyncio
+    async def test_tui_manual_takeover_binds_exact_goal_interaction_to_modal(
+        self,
+        tmp_path,
+    ) -> None:
+        store = HarnessStore(tmp_path / "harness.db")
+        engine = create_agent_engine(AppConfig())
+        engine.workspace_root = tmp_path
+        engine.harness_service = SimpleNamespace(store=store)
+        engine.goal_store = GoalStore(tmp_path / "goals")
+        goal = engine.goal_store.create("手动接管 TUI 交互")
+        engine.goal_store.attach_pursuit(goal.id, "pursuit-manual-tui")
+        app = NaumiApp(engine)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            record = new_interaction_record(
+                request=normalize_interaction_request({
+                    "header": "手动恢复",
+                    "question": "是否继续目标？",
+                    "options": [
+                        {"value": "continue", "label": "继续"},
+                        {"value": "stop", "label": "停止"},
+                    ],
+                }),
+                subject_kind="pursuit",
+                subject_id="pursuit-manual-tui",
+                session_id="session-manual-tui",
+                agent_name="main",
+                owner_id="bridge-dead",
+                created_at=(datetime.now(UTC) - timedelta(seconds=10)).isoformat(),
+                owner_lease_seconds=3,
+                interaction_id="ask-manual-tui",
+            )
+            await store.create_interaction(workspace_root=tmp_path, record=record)
+
+            takeover = asyncio.create_task(
+                app.takeover_goal_interaction(record.interaction_id)
+            )
+            await _wait_for_ui_condition(
+                pilot,
+                lambda: isinstance(app.screen, UserInteractionScreen),
+                description="手动接管交互弹窗",
+            )
+            claimed = await store.get_interaction(
+                workspace_root=tmp_path,
+                interaction_id=record.interaction_id,
+            )
+            assert claimed is not None
+            assert claimed.owner_id == app._interaction_owner_id
+            assert claimed.owner_epoch == 2
+            await pilot.press("enter")
+            result = await asyncio.wait_for(
+                takeover,
+                timeout=_ASYNC_UI_TIMEOUT_SECONDS,
+            )
+
+        assert "已恢复并保存交互" in result
+        answered = await store.get_interaction(
+            workspace_root=tmp_path,
+            interaction_id=record.interaction_id,
+        )
+        assert answered is not None
+        assert answered.state == "answered"
         assert answered.answer_value == "continue"
 
     @pytest.mark.asyncio

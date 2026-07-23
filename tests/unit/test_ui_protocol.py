@@ -110,11 +110,31 @@ def test_protocol_normalizes_interaction_cancel_target() -> None:
     assert record["payload"] == {"interaction_id": "ask-goal-cancel"}
 
 
+def test_protocol_normalizes_interaction_takeover_target() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.INTERACTION_TAKEOVER,
+        "payload": {"interaction_id": " ask-goal-takeover ", "private": "drop"},
+    })
+
+    assert record["payload"] == {"interaction_id": "ask-goal-takeover"}
+
+
 @pytest.mark.parametrize("interaction_id", ["", "ask-", "invalid", "ask-空白"])
 def test_protocol_rejects_invalid_interaction_cancel_target(interaction_id: str) -> None:
     with pytest.raises(ValueError, match="interaction_id"):
         normalize_client_record({
             "type": ClientEventType.INTERACTION_CANCEL,
+            "payload": {"interaction_id": interaction_id},
+        })
+
+
+@pytest.mark.parametrize("interaction_id", ["", "ask-", "invalid", "ask-空白"])
+def test_protocol_rejects_invalid_interaction_takeover_target(
+    interaction_id: str,
+) -> None:
+    with pytest.raises(ValueError, match="interaction_id"):
+        normalize_client_record({
+            "type": ClientEventType.INTERACTION_TAKEOVER,
             "payload": {"interaction_id": interaction_id},
         })
 

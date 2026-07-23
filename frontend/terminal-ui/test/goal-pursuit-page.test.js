@@ -36,6 +36,7 @@ test("Goal page exposes shared interaction detail command for every state", () =
           header: "继续方式",
           question: "是否继续？",
           can_cancel: true,
+          can_takeover: true,
         },
         {
           interaction_id: "ask-answered",
@@ -44,6 +45,7 @@ test("Goal page exposes shared interaction detail command for every state", () =
           header: "继续方式",
           question: "是否继续？",
           can_cancel: false,
+          can_takeover: false,
         },
       ],
     },
@@ -52,5 +54,7 @@ test("Goal page exposes shared interaction detail command for every state", () =
   assert.match(lines, /\/goal interaction detail ask-pending/);
   assert.match(lines, /\/goal interaction detail ask-answered/);
   assert.match(lines, /\/goal interaction cancel ask-pending/);
+  assert.match(lines, /\/goal interaction takeover ask-pending/);
   assert.doesNotMatch(lines, /\/goal interaction cancel ask-answered/);
+  assert.doesNotMatch(lines, /\/goal interaction takeover ask-answered/);
 });

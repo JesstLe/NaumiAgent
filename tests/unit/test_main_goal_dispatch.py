@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import naumi_agent.main as main_module
 from naumi_agent.main import _run_goal
 from naumi_agent.tools.base import ToolCall, ToolResult
 
@@ -100,6 +101,7 @@ async def test_run_goal_routes_all_operations_through_engine_executor(
         "interaction",
         "interaction detail bad",
         "interaction cancel bad",
+        "interaction takeover bad",
         "unknown later",
     ],
 )
@@ -113,3 +115,33 @@ async def test_run_goal_rejects_invalid_or_ambiguous_operations(argument: str) -
         assert engine.executed[0][0].name == "goal_create"
     else:
         assert engine.executed == []
+
+
+@pytest.mark.asyncio
+async def test_run_goal_binds_takeover_to_active_frontend(monkeypatch) -> None:
+    class _Frontend:
+        def __init__(self) -> None:
+            self.ids: list[str] = []
+
+        async def takeover_goal_interaction(self, interaction_id: str) -> str:
+            self.ids.append(interaction_id)
+            return "✅ 已接管并展示。"
+
+    frontend = _Frontend()
+    monkeypatch.setattr(main_module, "_active_cli", frontend)
+    engine = _EngineFake()
+
+    await _run_goal(engine, "interaction takeover ask-goal-1")
+
+    assert frontend.ids == ["ask-goal-1"]
+    assert engine.executed == []
+
+
+@pytest.mark.asyncio
+async def test_run_goal_refuses_takeover_without_ui_host(monkeypatch) -> None:
+    monkeypatch.setattr(main_module, "_active_cli", None)
+    engine = _EngineFake()
+
+    await _run_goal(engine, "interaction takeover ask-goal-1")
+
+    assert engine.executed == []
