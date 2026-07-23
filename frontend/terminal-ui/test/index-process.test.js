@@ -671,6 +671,52 @@ test("terminal UI process handles submit, mode switch, permission, and tool rend
   }
 });
 
+test("terminal UI Ctrl+O opens the latest paired Harness completion detail", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: { NAUMI_TEST_HARNESS_RECEIPT: "1" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "chat > ▌", 7000);
+    app.stdin.write("验证完成回执详情入口\n");
+    await waitForLatestScreen(output, "需要确认", 7000);
+    app.stdin.write("\x0f");
+    await delay(60);
+    assert.equal(
+      readDebugEvents(app.debugLogPath).filter(
+        (record) => record.event === "protocol.send"
+          && ["harness/explain/request", "harness/replay/request"].includes(
+            record.payload.record.type,
+          ),
+      ).length,
+      0,
+    );
+    await waitForLatestScreen(output, "需要确认", 7000);
+    app.stdin.write("y");
+    await waitForLatestScreen(output, "Ctrl+O 查看详情", 7000);
+
+    app.stdin.write("\x0f");
+    await waitForLatestScreen(output, "Harness 运行详情", 7000);
+    const detailRequests = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send"
+        && ["harness/explain/request", "harness/replay/request"].includes(
+          record.payload.record.type,
+        ),
+    );
+    assert.deepEqual(
+      detailRequests.map((record) => record.payload.record.type),
+      ["harness/explain/request", "harness/replay/request"],
+    );
+    assert(detailRequests.every(
+      (record) => record.payload.record.payload.run_id === "run-fake-1",
+    ));
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process can launch bridge from JSON argv", async () => {
   const app = launchTerminalUi("fake-bridge.js", { bridgeMode: "json" });
   const output = collectOutput(app);

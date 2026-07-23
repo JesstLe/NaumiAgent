@@ -36,6 +36,7 @@ class KeybindingAction(StrEnum):
     SHOW_TOOLS = "show_tools"
     TOGGLE_BROWSER = "toggle_browser"
     OPEN_COMMAND_QUICK_OPEN = "open_command_quick_open"
+    OPEN_LATEST_HARNESS_DETAIL = "open_latest_harness_detail"
     RUN_CANCEL = "run_cancel"
 
 
@@ -257,6 +258,13 @@ KEYBINDING_DEFINITIONS: tuple[KeybindingDefinition, ...] = (
         interfaces=("tui",),
         textual_action="open_command_quick_open",
         textual_priority=True,
+    ),
+    KeybindingDefinition(
+        KeybindingAction.OPEN_LATEST_HARNESS_DETAIL,
+        "打开最近完成回执的 Harness 详情",
+        ("c-o",),
+        interfaces=("tui",),
+        textual_action="open_latest_harness_detail",
     ),
     KeybindingDefinition(
         KeybindingAction.RUN_CANCEL,

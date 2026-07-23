@@ -24,6 +24,7 @@ export const INPUT_KEYS = {
   ctrlA: "\x01",
   ctrlE: "\x05",
   ctrlI: "\x1b[105;5u",
+  ctrlO: "\x0f",
   ctrlP: "\x10",
   ctrlPEnhanced: "\x1b[112;5u",
   ctrlL: "\x0c",

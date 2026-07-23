@@ -31,6 +31,11 @@ def test_default_keybindings_include_cli_permission_and_mode_scopes() -> None:
         "c-i",
     )
     assert bindings.keys_for(KeybindingAction.OPEN_AGENTS, interface="tui") == ("c-g",)
+    assert bindings.keys_for(
+        KeybindingAction.OPEN_LATEST_HARNESS_DETAIL,
+        interface="tui",
+    ) == ("c-o",)
+    assert "Ctrl+O" in render_keybinding_help(bindings, interface="tui")
 
 
 def test_key_name_normalization_accepts_user_friendly_aliases() -> None:
@@ -47,6 +52,7 @@ def test_config_overrides_replace_defaults() -> None:
     bindings = build_keybindings(
         {
             "copy_transcript": "Ctrl+X",
+            "open_latest_harness_detail": "Ctrl+U",
             "mode_cycle": ["f2"],
         }
     )
@@ -55,6 +61,10 @@ def test_config_overrides_replace_defaults() -> None:
         "c-x",
     )
     assert bindings.keys_for(KeybindingAction.MODE_CYCLE, interface="tui") == ("f2",)
+    assert bindings.display_keys_for(
+        KeybindingAction.OPEN_LATEST_HARNESS_DETAIL,
+        interface="tui",
+    ) == "Ctrl+U"
     assert "Ctrl+Y" not in render_keybinding_help(bindings, interface="cli")
     assert "Ctrl+P" in render_keybinding_help(bindings, interface="tui")
     assert "Ctrl+C" in render_keybinding_help(bindings, interface="tui")
@@ -68,6 +78,9 @@ def test_conflict_detection_is_scoped_by_interface_and_permission_mode() -> None
 
     with pytest.raises(KeybindingConfigError, match="快捷键冲突"):
         build_keybindings({"open_agents": "Ctrl+I"})
+
+    with pytest.raises(KeybindingConfigError, match="快捷键冲突"):
+        build_keybindings({"open_latest_harness_detail": "Ctrl+P"})
 
 
 def test_unknown_action_reports_available_actions() -> None:

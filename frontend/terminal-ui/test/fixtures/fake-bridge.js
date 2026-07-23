@@ -339,10 +339,29 @@ attachJsonlLineReader(process.stdin, (line) => {
 
   if (record.type === "receipt/request") {
     setTimeout(() => {
+      const runId = payload.run_id || "run-fake-1";
+      if (process.env.NAUMI_TEST_HARNESS_RECEIPT === "1") {
+        emit("harness/receipt", {
+          schema_version: 1,
+          revision: 1,
+          run_id: runId,
+          status: "completed_verified",
+          task_kind: "change",
+          changed_files: ["showcase/index.html"],
+          checks: [{ id: "node-test", status: "passed" }],
+          criteria: [{
+            id: "verified",
+            status: "satisfied",
+            evidence_ids: ["check:node-test"],
+          }],
+          warnings: [],
+          tree_fingerprint: "a".repeat(64),
+        }, record.id);
+      }
       emit("completion/receipt", {
         schema_version: 1,
         receipt_id: payload.receipt_id || "receipt-fake-1",
-        run_id: payload.run_id || "run-fake-1",
+        run_id: runId,
         outcome: "completed",
         summary: "页面已写入并完成验证。",
         changes: [{ path: "showcase/index.html", status: "modified", source_tool: "file_write", additions: 65, deletions: 1 }],

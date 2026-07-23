@@ -84,6 +84,7 @@ import {
   cancelTaskPanelItem,
   jumpToTaskPanelRecord,
   markBridgeReconnecting,
+  openLatestHarnessDetail,
   openSelectedTaskPanelItem,
   pushSystemMessage,
   reduceServerEvent,
@@ -946,7 +947,11 @@ function handleSingleKeyInput(chunk) {
   if (state.permission) {
     const key = chunk.toLowerCase();
     if (chunk === INPUT_KEYS.ctrlR) return;
-    if (chunk === INPUT_KEYS.ctrlI || chunk === INPUT_KEYS.tab) return;
+    if (
+      chunk === INPUT_KEYS.ctrlI
+      || chunk === INPUT_KEYS.ctrlO
+      || chunk === INPUT_KEYS.tab
+    ) return;
     if (chunk === INPUT_KEYS.shiftTab) {
       send("permission_response", { request_id: state.permission.requestId, choice: "bypass" });
       return;
@@ -1068,6 +1073,12 @@ function handleSingleKeyInput(chunk) {
   }
   if (chunk === INPUT_KEYS.ctrlT) {
     toggleComposerIntent(state);
+    persistUiSnapshot();
+    scheduleRedraw();
+    return;
+  }
+  if (chunk === INPUT_KEYS.ctrlO) {
+    openLatestHarnessDetail(state, send);
     persistUiSnapshot();
     scheduleRedraw();
     return;

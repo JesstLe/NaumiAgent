@@ -49,5 +49,5 @@ Evidence 焦点保留：run id、运行状态、目标、摘要；每条 Evidenc
 ## 未完成边界
 
 本切片本身不实现完成卡直接进入详情、系统剪贴板复制、artifact body 预览或 HAR-07.4b reconnect gap
-recovery。系统剪贴板复制后来由 HAR-07.5c1 独立完成；其余边界继续由 HAR-07.5c2+ 与
-ARC-02.5/HAR-07.4b 跟进，不能因 Evidence 焦点完成而把 HAR-07 标记为 implemented。
+recovery。系统剪贴板复制与完成卡详情入口后来由 HAR-07.5c1、5c2 独立完成；artifact body 与恢复边界
+继续由 UI-15.4、ARC-02.5/HAR-07.4b 跟进，不能因 Evidence 焦点完成而把整个 HAR-07 标记完成。

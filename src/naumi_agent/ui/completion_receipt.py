@@ -19,6 +19,8 @@ _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 def format_completion_receipt_text(
     value: CompletionReceipt | dict[str, Any],
     harness_receipt: dict[str, Any] | None = None,
+    *,
+    detail_shortcut: str = "Ctrl+O",
 ) -> Text:
     """Render a semantic Rich completion receipt for Textual."""
     receipt = (
@@ -96,6 +98,15 @@ def format_completion_receipt_text(
         rows.append(_rich_row((f"风险 · {_plain(item.message)}", style)))
     for item in receipt.next_actions[:3]:
         rows.append(_rich_row((f"下一步 · {_plain(item.label)}", "cyan")))
+    if has_correlated_harness_receipt(receipt, harness_receipt):
+        rows.append(
+            _rich_row(
+                ("操作 · ", "dim"),
+                (f"{_plain(detail_shortcut)} 查看详情", "cyan"),
+                (" · ", "dim"),
+                (_harness_detail_command(receipt.run_id), "cyan"),
+            )
+        )
     rows.append(
         _rich_row(
             ("操作 · ", "dim"),
@@ -381,6 +392,24 @@ def _copy_receipt_command(receipt_id: Any) -> str:
     return f"/copy receipt {shlex.quote(safe_receipt_id)}"
 
 
+def _harness_detail_command(run_id: Any) -> str:
+    safe_run_id = sanitize_completion_receipt_inline(run_id)
+    return f"/harness detail {shlex.quote(safe_run_id)}"
+
+
+def has_correlated_harness_receipt(
+    receipt: CompletionReceipt,
+    harness_receipt: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(harness_receipt, dict):
+        return False
+    return (
+        str(harness_receipt.get("run_id") or "").strip() == receipt.run_id
+        and harness_receipt.get("status")
+        in {"completed_verified", "completed_unverified", "blocked"}
+    )
+
+
 def _rich_row(*segments: tuple[str, str | None]) -> Text:
     row = Text()
     for value, style in segments:
@@ -410,5 +439,6 @@ __all__ = [
     "completion_outcome_label",
     "format_completion_receipt_markdown",
     "format_completion_receipt_text",
+    "has_correlated_harness_receipt",
     "sanitize_completion_receipt_inline",
 ]

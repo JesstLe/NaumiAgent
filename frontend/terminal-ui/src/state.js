@@ -4287,6 +4287,32 @@ function openHarnessDetailRoute(
   return true;
 }
 
+export function openLatestHarnessDetail(state, send) {
+  return openHarnessDetailRoute(
+    state,
+    latestPairedHarnessRunId(state),
+    send,
+    { focus: "all", requestReplay: true },
+  );
+}
+
+function latestPairedHarnessRunId(state) {
+  for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+    const message = state.messages[index];
+    if (message?.kind !== "completion_receipt") continue;
+    const runId = String(message.runId || message.receipt?.run_id || "").trim();
+    const harnessReceipt = message.harnessReceipt ?? state.harnessReceipts[runId];
+    if (
+      runId
+      && String(harnessReceipt?.run_id || "").trim() === runId
+      && Number(harnessReceipt?.revision) >= 1
+    ) {
+      return runId;
+    }
+  }
+  return "";
+}
+
 function latestHarnessRunId(state) {
   for (let index = state.messages.length - 1; index >= 0; index -= 1) {
     const message = state.messages[index];

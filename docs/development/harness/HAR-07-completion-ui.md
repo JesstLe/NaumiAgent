@@ -15,7 +15,7 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 | HAR-07.4a | Resume Recovery | 显式 resume 从持久化 Store 恢复单一权威卡片 |
 | HAR-07.4b1 | Idle Bridge Reconnect | 空闲断线有界重启、重新协商并精确恢复 session |
 | HAR-07.4b | Reconnect Recovery | 断线重连按 revision/gap 补发且幂等 |
-| HAR-07.5 | Interaction | `e` explain、`r` replay、`v` evidence、复制回执 |
+| HAR-07.5 | Interaction | `e` explain、`r` replay、`v` evidence、复制回执、完成卡直达详情 |
 | HAR-07.6 | TUI parity | Textual 表面语义一致，布局可降级 |
 
 ## 视觉语义
@@ -163,9 +163,20 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 - macOS/Windows/Linux 分别使用 `pbcopy`、`clip`、`wl-copy|xclip`，后端有 3 秒超时；文件名前缀白名单、
   独占创建和并发不覆盖已验证。详细边界见 `HAR-07-5c1-completion-receipt-copy.md`。
 
+### HAR-07.5c2 已实现：完成回执直接进入 Harness Detail
+
+- 具备同 run 的类型化 Harness Receipt 时，New UI 与 Textual TUI 完成卡显示
+  `Ctrl+O 查看详情` 和精确 `/harness detail <run-id>`；普通回执不显示虚假入口。
+- New UI 从时间线反向选择最近一张有效配对卡，复用既有 `openHarnessDetailRoute()` 发出同 run 的
+  Explain/Replay 请求；Textual TUI 复用共享 Slash/Service，不复制详情查询逻辑。
+- 权限、Interaction、QuickOpen 和 Modal 保持更高输入优先级；无目标、错配或无效版本时不发后端请求。
+- Textual 快捷键可通过 `open_latest_harness_detail` 覆盖且卡片显示实际按键；会话替换/清空会移除
+  瞬态目标，新运行不会让仍可见的上一张有效卡失效。
+- 真实 New UI 进程键盘闭环、Textual app/Engine sink 和 SQLite Store→Bridge→Node action 已验证。
+  详细边界见 `HAR-07-5c2-completion-detail-entry.md`。
+
 ### 尚未完成
 
 - HAR-07.4b：ARC-03.3a、HAR-07.4b1 与 ARC-02.5a 已补齐 additive informational 序号安全、
   空闲 Bridge 重启、精确 session resume，以及两类安全回执的稳定持久 cursor；客户端 ACK、
   cursor resend、活动运行恢复和 revision/gap 自动补发仍未完成，不能把当前状态描述为完整断线恢复。
-- HAR-07.5c2+：完成卡直接进入 Harness Detail；`e/r` 刷新、`v` Evidence 焦点和跨平台复制回执已完成。
