@@ -25,6 +25,7 @@ class _EngineFake:
                 "goal_status",
                 "goal_list",
                 "goal_update",
+                "goal_interaction_detail",
                 "goal_interaction_cancel",
                 "goal_pursue",
             )
@@ -62,6 +63,11 @@ class _EngineFake:
         ("cancel 改变方向", "goal_update", {"status": "cancelled", "note": "改变方向"}),
         ("pursue", "goal_pursue", {}),
         (
+            "interaction detail ask-goal-1",
+            "goal_interaction_detail",
+            {"interaction_id": "ask-goal-1"},
+        ),
+        (
             "interaction cancel ask-goal-1",
             "goal_interaction_cancel",
             {"interaction_id": "ask-goal-1"},
@@ -92,6 +98,7 @@ async def test_run_goal_routes_all_operations_through_engine_executor(
         "block",
         "pursue later",
         "interaction",
+        "interaction detail bad",
         "interaction cancel bad",
         "unknown later",
     ],

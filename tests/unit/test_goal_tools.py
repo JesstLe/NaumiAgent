@@ -198,3 +198,106 @@ async def test_goal_interaction_cancel_uses_linked_harness_authority(tmp_path) -
     )
     assert cancelled is not None
     assert cancelled.state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_goal_interaction_detail_reads_linked_authority_without_owner_leak(
+    tmp_path,
+) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    goal = goal_store.create("查看交互详情")
+    run = PursuitRun(
+        id="pursuit_detail_tool",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=time.time(),
+        updated_at=time.time(),
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    created_at = datetime.now(UTC).isoformat()
+    record = new_interaction_record(
+        request=normalize_interaction_request({
+            "header": "合并方式",
+            "question": "请选择后续操作。",
+            "options": [
+                {"value": "merge", "label": "合并", "description": "保留完整历史"},
+                {"value": "rebase", "label": "变基", "description": "保持线性历史"},
+            ],
+            "allow_custom": True,
+            "custom_label": "输入其他方案",
+        }),
+        subject_kind="pursuit",
+        subject_id=run.id,
+        session_id="session-1",
+        agent_name="main",
+        owner_id="private-bridge-owner",
+        created_at=created_at,
+        owner_lease_seconds=30,
+        interaction_id="ask-goal-tool-detail",
+    )
+    await harness_store.create_interaction(workspace_root=tmp_path, record=record)
+    tool = _tool_map(
+        goal_store,
+        pursuit_store=pursuit_store,
+        interaction_authority=harness_store,
+        workspace_root=tmp_path,
+    )["goal_interaction_detail"]
+
+    result = await tool.execute(interaction_id=record.interaction_id)
+
+    assert "Goal 用户交互详情" in result
+    assert "合并 (`merge`) — 保留完整历史" in result
+    assert "自定义：输入其他方案" in result
+    assert "Owner 租约生效" in result
+    assert "sequence 1 · owner epoch 1" in result
+    assert "private-bridge-owner" not in result
+    unchanged = await harness_store.get_interaction(
+        workspace_root=tmp_path,
+        interaction_id=record.interaction_id,
+    )
+    assert unchanged is not None
+    assert unchanged.sequence == 1
+    assert unchanged.state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_goal_interaction_detail_rejects_unlinked_and_invalid_records(
+    tmp_path,
+) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    goal_store.create("不允许跨 Goal 读取")
+    record = new_interaction_record(
+        request=normalize_interaction_request({
+            "header": "其他任务",
+            "question": "是否继续？",
+            "options": [
+                {"value": "yes", "label": "是"},
+                {"value": "no", "label": "否"},
+            ],
+        }),
+        subject_kind="pursuit",
+        subject_id="pursuit_not_linked",
+        session_id="session-2",
+        agent_name="main",
+        owner_id="bridge-b",
+        created_at=datetime.now(UTC).isoformat(),
+        owner_lease_seconds=30,
+        interaction_id="ask-goal-unlinked-detail",
+    )
+    await harness_store.create_interaction(workspace_root=tmp_path, record=record)
+    tool = _tool_map(
+        goal_store,
+        interaction_authority=harness_store,
+        workspace_root=tmp_path,
+    )["goal_interaction_detail"]
+
+    assert "格式无效" in await tool.execute(interaction_id="bad")
+    assert "不属于当前 Goal" in await tool.execute(
+        interaction_id=record.interaction_id
+    )
+    assert "不存在" in await tool.execute(interaction_id="ask-goal-missing")

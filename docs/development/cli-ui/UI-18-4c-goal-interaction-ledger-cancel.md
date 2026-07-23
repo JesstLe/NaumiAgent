@@ -35,5 +35,6 @@
 ## 保留边界
 
 - 本切片不开放手动 takeover；有效 owner lease 仍由 Bridge/TUI 自动续租，死 owner 由现有 recovery 接管。
-- 历史是最近 50 项的有界投影，尚无 cursor、筛选和独立详情页。
+- 历史是最近 50 项的有界投影，尚无 cursor 和筛选；UI-18.4d1 已提供共享只读详情
+  命令，但还不是页内可展开详情。
 - 取消后的 Pursuit checkpoint 由既有 resume reconcile 判为 cancelled；本切片不自动 resume，也不隐式消耗模型轮次。

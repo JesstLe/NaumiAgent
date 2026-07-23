@@ -16,7 +16,7 @@ export function renderGoalPursuitPage(view, width, height) {
     : null;
   const logical = [
     color(ANSI.cyan, "Goal / Pursuit"),
-    color(ANSI.dim, "r 刷新 · ↑/↓ 滚动 · Esc 返回 · /goal interaction cancel <id> 取消等待"),
+    color(ANSI.dim, "r 刷新 · ↑/↓ 滚动 · Esc 返回 · /goal interaction detail <id> 查看详情"),
   ];
   if (value.loading && !snapshot) {
     logical.push(color(ANSI.cyan, "正在读取 Goal / Pursuit 权威状态…"));
@@ -96,6 +96,7 @@ function renderInteractions(interactions) {
       style,
       `  ${item.interaction_id} · ${label} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`,
     ));
+    lines.push(color(ANSI.dim, `    详情 · /goal interaction detail ${item.interaction_id}`));
     if (item.can_cancel) {
       lines.push(color(ANSI.dim, `    取消 · /goal interaction cancel ${item.interaction_id}`));
     }

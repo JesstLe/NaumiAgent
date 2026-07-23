@@ -239,11 +239,98 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
                 f"- `{item['interaction_id']}` · {_interaction_status_label(item['state'])} · "
                 f"{item['header']}：{item['question']}"
             )
+            lines.append(
+                f"  - 详情：`/goal interaction detail {item['interaction_id']}`"
+            )
             if item["can_cancel"]:
                 lines.append(
-                    f"  - 可执行：`/goal interaction cancel {item['interaction_id']}`"
+                    f"  - 取消：`/goal interaction cancel {item['interaction_id']}`"
                 )
     return "\n".join(lines).rstrip()
+
+
+def render_goal_interaction_detail(
+    record: HarnessInteractionRecord,
+    *,
+    assessed_at: str | None = None,
+) -> str:
+    """Render one durable interaction without exposing its private owner identity."""
+    now = _parse_aware(assessed_at or datetime.now(UTC).isoformat())
+    deadline = _parse_aware(record.expires_at) if record.expires_at else None
+    owner_lease = _parse_aware(record.owner_lease_expires_at)
+    question_expired = deadline is not None and now >= deadline
+    lease_expired = now >= owner_lease
+
+    if record.state != "pending":
+        authority = "终态记录 · 不适用接管"
+    elif question_expired:
+        authority = "问题期限已到 · 等待 authority 收口为超时"
+    elif lease_expired:
+        authority = "Owner 租约已过期 · 可由活动界面接管"
+    else:
+        authority = "Owner 租约生效 · 暂不可接管"
+
+    lines = [
+        "### Goal 用户交互详情",
+        "",
+        f"- 交互 ID：`{_bounded_text(record.interaction_id, 132)}`",
+        f"- Pursuit：`{_bounded_text(record.subject_id, 128)}`",
+        f"- 状态：{_interaction_status_label(record.state)}",
+        f"- 问题：{_bounded_text(record.header, 40)} · "
+        f"{_bounded_text(record.question, 2_000)}",
+        "- 选项：",
+    ]
+    for index, option in enumerate(record.options, start=1):
+        description = _bounded_text(option.description, 300)
+        suffix = f" — {description}" if description else ""
+        lines.append(
+            f"  {index}. {_bounded_text(option.label, 80)} "
+            f"(`{_bounded_text(option.value, 80)}`){suffix}"
+        )
+    if record.allow_custom:
+        lines.append(f"  - 自定义：{_bounded_text(record.custom_label, 80)}")
+
+    if record.state == "answered":
+        if record.answer_kind == "custom":
+            answer = _bounded_text(record.custom_text, 4_000)
+            lines.append(f"- 回答：自定义 · {answer}")
+        else:
+            lines.append(
+                f"- 回答：{_bounded_text(record.answer_label, 80)} "
+                f"(`{_bounded_text(record.answer_value, 80)}`)"
+            )
+    elif record.state == "pending":
+        lines.append("- 回答：尚未提交")
+    elif record.state == "expired":
+        lines.append("- 回答：未回答，已超时")
+    else:
+        lines.append("- 回答：未回答，已取消")
+
+    lines.extend([
+        f"- Authority：{authority}",
+        f"- Fencing：sequence {record.sequence} · owner epoch {record.owner_epoch}",
+        f"- 时间：创建 {record.created_at} · 更新 {record.updated_at}",
+        f"- 问题截止：{record.expires_at or '无'}",
+        f"- Owner 租约截止：{record.owner_lease_expires_at}",
+    ])
+    if record.answered_at:
+        lines.append(f"- 回答时间：{record.answered_at}")
+    if record.state == "pending":
+        lines.append(
+            f"- 取消：`/goal interaction cancel {record.interaction_id}`"
+        )
+    if record.state == "pending" and lease_expired and not question_expired:
+        lines.append(
+            "> 当前只提供接管资格事实；宿主绑定的手动接管动作尚未开放。"
+        )
+    return "\n".join(lines)
+
+
+def _parse_aware(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("交互时间必须包含时区。")
+    return parsed.astimezone(UTC)
 
 
 def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
@@ -429,5 +516,6 @@ __all__ = [
     "GoalPursuitSnapshot",
     "build_goal_pursuit_snapshot",
     "build_goal_pursuit_snapshot_with_recovery",
+    "render_goal_interaction_detail",
     "render_goal_pursuit_snapshot",
 ]
