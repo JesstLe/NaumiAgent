@@ -1602,6 +1602,76 @@ async def test_bridge_streams_non_blocking_harness_eval_batch_progress() -> None
 
 
 @pytest.mark.asyncio
+async def test_bridge_emits_durable_harness_sandbox_cancel_receipt() -> None:
+    class CancelAuthority:
+        async def cancel(self, **kwargs):
+            assert kwargs["ticket_id"] == f"hsadm_{'a' * 24}"
+            assert kwargs["epoch"] == 2
+            assert kwargs["expected_state"] == "active"
+            return (
+                SimpleNamespace(
+                    receipt_id=f"hsacr_{'d' * 24}",
+                    receipt_sha256="d" * 64,
+                    action_id=f"hsac_{'c' * 24}",
+                    ticket_id=f"hsadm_{'a' * 24}",
+                    authority_key="b" * 64,
+                    presented_epoch=2,
+                    presented_state="active",
+                    decision="accepted",
+                    observed_state="cancelled",
+                    code="sandbox_batch_cancelled_by_user",
+                    actor_id="new-ui",
+                    reason="用户取消",
+                    created_at="2026-07-23T12:00:00+00:00",
+                ),
+                SimpleNamespace(
+                    ticket_id=f"hsadm_{'a' * 24}",
+                    authority_key="b" * 64,
+                    epoch=2,
+                    state="cancelled",
+                    queue_position=0,
+                    max_active=1,
+                    max_queued=8,
+                    active_count=0,
+                    queued_count=0,
+                    updated_at="2026-07-23T12:00:00+00:00",
+                    terminal_code="sandbox_batch_cancelled_by_user",
+                ),
+            )
+
+    engine = _FakeEngine()
+    engine.harness_sandbox_batch_admission = CancelAuthority()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "cancel-request",
+            "type": ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL,
+            "payload": {
+                "action_id": f"hsac_{'c' * 24}",
+                "ticket_id": f"hsadm_{'a' * 24}",
+                "authority_key": "b" * 64,
+                "epoch": 2,
+                "expected_state": "active",
+                "reason": "用户取消",
+            },
+        }
+    )
+
+    response = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "harness/eval-sandbox/cancel-result"
+    )
+    assert response["request_id"] == "cancel-request"
+    assert response["payload"]["decision"] == "accepted"
+    assert response["payload"]["current"]["state"] == "cancelled"
+    assert "owner_id" not in response["payload"]["current"]
+
+
+@pytest.mark.asyncio
 async def test_bridge_runs_guided_harness_eval_promotion_through_interaction_protocol() -> None:
     class PromotionService:
         def __init__(self) -> None:

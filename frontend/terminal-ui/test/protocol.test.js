@@ -904,6 +904,51 @@ test("harness sandbox admission response requires a coherent durable snapshot", 
   );
 });
 
+test("harness sandbox cancel result preserves exact fence and durable receipt", () => {
+  const payload = normalizeServerRecord({
+    type: "harness/eval-sandbox/cancel-result",
+    payload: {
+      schema_version: 1,
+      receipt_id: `hsacr_${"a".repeat(24)}`,
+      receipt_sha256: "a".repeat(64),
+      action_id: `hsac_${"b".repeat(24)}`,
+      ticket_id: `hsadm_${"c".repeat(24)}`,
+      authority_key: "d".repeat(64),
+      presented_epoch: 2,
+      presented_state: "active",
+      decision: "accepted",
+      observed_state: "cancelled",
+      code: "sandbox_batch_cancelled_by_user",
+      actor_id: "new-ui",
+      reason: "用户取消",
+      created_at: "2026-07-23T12:00:00+00:00",
+      current: {
+        ticket_id: `hsadm_${"c".repeat(24)}`,
+        authority_key: "d".repeat(64),
+        epoch: 2,
+        state: "cancelled",
+        queue_position: 0,
+        max_active: 1,
+        max_queued: 8,
+        active_count: 0,
+        queued_count: 0,
+        updated_at: "2026-07-23T12:00:00+00:00",
+        terminal_code: "sandbox_batch_cancelled_by_user",
+      },
+    },
+  }).payload;
+
+  assert.equal(payload.decision, "accepted");
+  assert.equal(payload.current.state, "cancelled");
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/eval-sandbox/cancel-result",
+      payload: { ...payload, observed_state: "missing" },
+    }),
+    /current 与 observed_state/,
+  );
+});
+
 test("harness eval promotion response validates guided and authoritative state", () => {
   const waiting = normalizeServerRecord({
     type: "harness/eval-promotion",

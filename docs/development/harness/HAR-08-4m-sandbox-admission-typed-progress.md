@@ -154,9 +154,9 @@ TUI 不解析展示文本来恢复状态，仍消费同一 typed payload。
 - 多机外部数据库调度；
 - Linux/Windows 真实终端视觉 CI。
 
-## 下一依赖切片
+## 后续依赖切片
 
-HAR-08.4n 应实现 owner-fenced cancel action：
+HAR-08.4n 已实现 owner-fenced cancel action：
 
 1. 取消必须精确绑定 workspace、ticket、调用者可见 revision/epoch；
 2. queued cancel 与 active execution cancel 分开定义；
@@ -164,4 +164,5 @@ HAR-08.4n 应实现 owner-fenced cancel action：
 4. Bridge action 需要 typed request/receipt；
 5. New UI 与 TUI 使用同一 cancel authority；
 6. bypass 省略二次确认，但不能绕过 ticket/epoch fencing；
-7. retry 必须在 cancel receipt 已 durable 后另起 immutable authority，不复用旧 ticket。
+以上 1-6 已落地；第 7 项 retry 留给 HAR-08.4o：必须在 accepted cancel receipt 已
+durable 后另起 immutable authority，不复用旧 ticket。

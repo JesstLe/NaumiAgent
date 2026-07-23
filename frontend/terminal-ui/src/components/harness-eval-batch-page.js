@@ -76,6 +76,8 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
   const persisted = Number(snapshot.persisted) || 0;
   const progress = requested > 0 ? Math.round((persisted / requested) * 100) : 0;
   const checks = Array.isArray(snapshot.check_ids) ? snapshot.check_ids : [];
+  const canCancel = ["queued", "active"].includes(snapshot.admission_state);
+  const cancelReceipt = object(value.cancelReceipt);
   const logical = [
     color(ANSI.cyan, "Harness Sandbox Eval"),
     color(ANSI.dim, "精确 Git revision · 隔离 Worker · ↑/↓ 滚动 · Esc 返回"),
@@ -99,6 +101,28 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
               + ` · active ${Number(snapshot.active_count) || 0}/${Number(snapshot.max_active) || 0}`
               + ` · queued ${Number(snapshot.queued_count) || 0}/${Number(snapshot.max_queued) || 0}`,
           `Epoch · ${Number(snapshot.admission_epoch) || "-"}`,
+          ...(canCancel
+            ? [
+                value.cancelPending
+                  ? color(ANSI.yellow, "取消请求正在由容量权威裁决…")
+                  : color(ANSI.dim, "操作 · C 取消当前精确 ticket（无需二次确认）"),
+              ]
+            : []),
+        ]
+      : []),
+    ...(cancelReceipt.receipt_id || cancelReceipt.code
+      ? [
+          section("取消回执"),
+          color(
+            cancelReceipt.decision === "accepted" ? ANSI.green : ANSI.yellow,
+            cancelReceipt.decision === "accepted"
+              ? "已接受 · 执行将在安全边界停止"
+              : "未接受 · 页面状态已刷新，请核对后再操作",
+          ),
+          `Code · ${text(cancelReceipt.code)}`,
+          ...(cancelReceipt.receipt_id
+            ? [`Receipt · ${text(cancelReceipt.receipt_id)}`]
+            : []),
         ]
       : []),
     section("执行权威"),

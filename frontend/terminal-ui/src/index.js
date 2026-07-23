@@ -685,7 +685,7 @@ function handleSingleKeyInput(chunk) {
     scheduleRedraw();
     return;
   }
-  if (state.route?.name === "harness_eval_batch" && handleHarnessEvalBatchKey(state, chunk)) {
+  if (state.route?.name === "harness_eval_batch" && handleHarnessEvalBatchKey(state, chunk, send)) {
     scheduleRedraw();
     return;
   }

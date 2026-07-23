@@ -4459,6 +4459,79 @@ test("Harness Sandbox Eval command keeps shared Slash execution and opens typed 
   assert.equal(state.followTail, false);
 });
 
+test("Harness Sandbox page submits an exact cancel action and applies durable receipt", () => {
+  const state = createInitialState();
+  state.route = { name: "harness_eval_batch", originAnchor: null };
+  state.harnessEvalBatch.batchId = "sandbox-cancel";
+  state.harnessEvalBatches["sandbox-cancel"] = {
+    kind: "sandbox",
+    batch_id: "sandbox-cancel",
+    admission_ticket_id: `hsadm_${"a".repeat(24)}`,
+    authority_key: "b".repeat(64),
+    admission_epoch: 2,
+    admission_state: "queued",
+  };
+  const sent = [];
+
+  assert.equal(handleHarnessEvalBatchKey(state, "c", (type, payload) => {
+    sent.push({ type, payload });
+    return "cancel-request";
+  }), true);
+  assert.equal(state.harnessEvalBatch.cancelPending, true);
+  assert.equal(state.harnessEvalBatch.cancelRequestId, "cancel-request");
+  assert.equal(sent[0].type, "harness/eval-sandbox/cancel");
+  assert.match(sent[0].payload.action_id, /^hsac_[0-9a-f]{24}$/u);
+  assert.equal(sent[0].payload.ticket_id, `hsadm_${"a".repeat(24)}`);
+  assert.equal(sent[0].payload.epoch, 2);
+  assert.equal(sent[0].payload.expected_state, "queued");
+
+  reduceServerEvent(state, {
+    type: "harness/eval-sandbox/cancel-result",
+    payload: {
+      receipt_id: `hsacr_${"c".repeat(24)}`,
+      ticket_id: `hsadm_${"a".repeat(24)}`,
+      decision: "accepted",
+      code: "sandbox_batch_cancelled_by_user",
+      current: {
+        epoch: 2,
+        state: "cancelled",
+        queue_position: 0,
+        max_active: 1,
+        max_queued: 8,
+        active_count: 0,
+        queued_count: 0,
+        updated_at: "2026-07-23T12:00:00+08:00",
+      },
+    },
+  });
+  assert.equal(state.harnessEvalBatch.cancelPending, false);
+  assert.equal(state.harnessEvalBatch.cancelRequestId, "");
+  assert.equal(state.harnessEvalBatch.cancelReceipt.decision, "accepted");
+  assert.equal(
+    state.harnessEvalBatches["sandbox-cancel"].admission_state,
+    "cancelled",
+  );
+});
+
+test("Harness Sandbox cancel transport rejection clears single-flight state", () => {
+  const state = createInitialState();
+  state.harnessEvalBatch.cancelPending = true;
+  state.harnessEvalBatch.cancelRequestId = "cancel-failed";
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "cancel-failed",
+    payload: {
+      code: "sandbox_batch_cancel_unavailable",
+      message: "取消权威暂不可用。",
+    },
+  });
+
+  assert.equal(state.harnessEvalBatch.cancelPending, false);
+  assert.equal(state.harnessEvalBatch.cancelRequestId, "");
+  assert.equal(state.harnessEvalBatch.cancelReceipt.decision, "rejected");
+});
+
 test("Harness Baseline promotion command opens guided typed route and restores origin", () => {
   const state = createInitialState();
   state.scrollOffset = 8;

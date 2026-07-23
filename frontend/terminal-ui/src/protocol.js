@@ -176,6 +176,15 @@ export function splitShellLike(command) {
   return command.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((part) => part.replace(/^"|"$/g, "")) ?? [];
 }
 
+let nextSandboxCancelNonce = 1;
+
+export function createHarnessSandboxCancelActionId(ticketId) {
+  const digest = createHash("sha256")
+    .update(`${process.pid}:${Date.now()}:${nextSandboxCancelNonce++}:${String(ticketId ?? "")}`)
+    .digest("hex");
+  return `hsac_${digest.slice(0, 24)}`;
+}
+
 export function createEventSender(writable, { debugLog = null } = {}) {
   let nextClientId = 1;
   return function send(type, payload, options = {}) {
@@ -687,6 +696,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/eval-batch") {
     return normalizeHarnessEvalBatch(payload);
+  }
+  if (type === "harness/eval-sandbox/cancel-result") {
+    return normalizeHarnessSandboxCancelResult(payload);
   }
   if (type === "harness/eval-promotion") {
     return normalizeHarnessEvalPromotion(payload);
@@ -2075,6 +2087,97 @@ function normalizeHarnessEvalBatch(payload) {
     identity_sha256: identity,
     code: harnessText(payload.code, "harness/eval-batch code"),
     message: harnessText(payload.message, "harness/eval-batch message"),
+  };
+}
+
+function normalizeHarnessSandboxCancelResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error("harness/eval-sandbox/cancel-result schema_version 不兼容");
+  }
+  const receiptId = harnessText(payload.receipt_id, "Sandbox cancel receipt_id");
+  const actionId = harnessText(payload.action_id, "Sandbox cancel action_id");
+  const ticketId = harnessText(payload.ticket_id, "Sandbox cancel ticket_id");
+  const authorityKey = harnessText(payload.authority_key, "Sandbox cancel authority_key");
+  const receiptSha256 = harnessText(payload.receipt_sha256, "Sandbox cancel receipt_sha256");
+  if (!/^hsacr_[0-9a-f]{24}$/u.test(receiptId)
+    || !/^hsac_[0-9a-f]{24}$/u.test(actionId)
+    || !/^hsadm_[0-9a-f]{24}$/u.test(ticketId)
+    || !/^[0-9a-f]{64}$/u.test(authorityKey)
+    || !/^[0-9a-f]{64}$/u.test(receiptSha256)) {
+    throw new Error("harness/eval-sandbox/cancel-result identity 无效");
+  }
+  const decision = harnessChoice(
+    payload.decision,
+    "Sandbox cancel decision",
+    new Set(["accepted", "rejected"]),
+  );
+  const observedState = harnessChoice(
+    payload.observed_state,
+    "Sandbox cancel observed_state",
+    new Set(["missing", "queued", "active", "completed", "cancelled", "failed", "expired"]),
+  );
+  const current = payload.current === null || payload.current === undefined
+    ? null
+    : normalizeHarnessSandboxCancelCurrent(payload.current);
+  if ((observedState === "missing") !== (current === null)) {
+    throw new Error("Sandbox cancel current 与 observed_state 不一致");
+  }
+  if (
+    current
+    && (
+      current.ticket_id !== ticketId
+      || current.authority_key !== authorityKey
+      || current.state !== observedState
+    )
+  ) {
+    throw new Error("Sandbox cancel current 未绑定同一 ticket/authority/state");
+  }
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    receipt_sha256: receiptSha256,
+    action_id: actionId,
+    ticket_id: ticketId,
+    authority_key: authorityKey,
+    presented_epoch: harnessPositiveInteger(payload.presented_epoch, "Sandbox cancel presented_epoch"),
+    presented_state: harnessChoice(
+      payload.presented_state,
+      "Sandbox cancel presented_state",
+      new Set(["queued", "active"]),
+    ),
+    decision,
+    observed_state: observedState,
+    code: harnessText(payload.code, "Sandbox cancel code"),
+    actor_id: harnessText(payload.actor_id, "Sandbox cancel actor_id"),
+    reason: harnessText(payload.reason, "Sandbox cancel reason"),
+    created_at: harnessText(payload.created_at, "Sandbox cancel created_at"),
+    current,
+  };
+}
+
+function normalizeHarnessSandboxCancelCurrent(value) {
+  const current = value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  if (!current) throw new Error("Sandbox cancel current 必须是对象");
+  const authorityKey = harnessText(current.authority_key, "Sandbox cancel current authority_key");
+  if (!/^[0-9a-f]{64}$/u.test(authorityKey)) {
+    throw new Error("Sandbox cancel current authority_key 无效");
+  }
+  return {
+    ticket_id: harnessText(current.ticket_id, "Sandbox cancel current ticket_id"),
+    authority_key: authorityKey,
+    epoch: harnessPositiveInteger(current.epoch, "Sandbox cancel current epoch"),
+    state: harnessChoice(
+      current.state,
+      "Sandbox cancel current state",
+      new Set(["queued", "active", "completed", "cancelled", "failed", "expired"]),
+    ),
+    queue_position: harnessNonnegativeInteger(current.queue_position, "Sandbox cancel current queue_position"),
+    max_active: harnessPositiveInteger(current.max_active, "Sandbox cancel current max_active"),
+    max_queued: harnessNonnegativeInteger(current.max_queued, "Sandbox cancel current max_queued"),
+    active_count: harnessNonnegativeInteger(current.active_count, "Sandbox cancel current active_count"),
+    queued_count: harnessNonnegativeInteger(current.queued_count, "Sandbox cancel current queued_count"),
+    updated_at: harnessText(current.updated_at, "Sandbox cancel current updated_at"),
+    terminal_code: String(current.terminal_code ?? ""),
   };
 }
 

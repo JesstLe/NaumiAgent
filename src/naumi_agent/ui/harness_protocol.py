@@ -17,6 +17,10 @@ from naumi_agent.harness.eval_surface import (
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchCheckpoint
+from naumi_agent.harness.store import (
+    HarnessSandboxAdmissionCancelReceipt,
+    HarnessSandboxAdmissionTicket,
+)
 
 HARNESS_DETAIL_SCHEMA_VERSION = 1
 HARNESS_DETAIL_REVISION = 1
@@ -106,6 +110,46 @@ def harness_eval_batch_payload(progress: HarnessEvalBatchProgress) -> dict[str, 
         "identity_sha256": progress.identity_sha256,
         "code": _text(progress.code),
         "message": _text(progress.message),
+    }
+
+
+def harness_sandbox_cancel_receipt_payload(
+    receipt: HarnessSandboxAdmissionCancelReceipt,
+    ticket: HarnessSandboxAdmissionTicket | None,
+) -> dict[str, Any]:
+    """Project one durable cancel decision without exposing owner/workspace data."""
+    return {
+        "schema_version": 1,
+        "receipt_id": receipt.receipt_id,
+        "receipt_sha256": receipt.receipt_sha256,
+        "action_id": receipt.action_id,
+        "ticket_id": receipt.ticket_id,
+        "authority_key": receipt.authority_key,
+        "presented_epoch": receipt.presented_epoch,
+        "presented_state": receipt.presented_state,
+        "decision": receipt.decision,
+        "observed_state": receipt.observed_state,
+        "code": receipt.code,
+        "actor_id": _text(receipt.actor_id),
+        "reason": _text(receipt.reason),
+        "created_at": receipt.created_at,
+        "current": (
+            {
+                "ticket_id": ticket.ticket_id,
+                "authority_key": ticket.authority_key,
+                "epoch": ticket.epoch,
+                "state": ticket.state,
+                "queue_position": ticket.queue_position,
+                "max_active": ticket.max_active,
+                "max_queued": ticket.max_queued,
+                "active_count": ticket.active_count,
+                "queued_count": ticket.queued_count,
+                "updated_at": ticket.updated_at,
+                "terminal_code": ticket.terminal_code,
+            }
+            if ticket is not None
+            else None
+        ),
     }
 
 

@@ -59,6 +59,7 @@ class ClientEventType(StrEnum):
     HARNESS_REPLAY_REQUEST = "harness/replay/request"
     HARNESS_EVAL_BASELINE_REQUEST = "harness/eval-baseline/request"
     HARNESS_EVAL_BATCH_REQUEST = "harness/eval-batch/request"
+    HARNESS_EVAL_SANDBOX_CANCEL = "harness/eval-sandbox/cancel"
     HARNESS_EVAL_PROMOTION_REQUEST = "harness/eval-promotion/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
@@ -112,6 +113,7 @@ class ServerEventType(StrEnum):
     HARNESS_REPLAY = "harness/replay"
     HARNESS_EVAL_BASELINE = "harness/eval-baseline"
     HARNESS_EVAL_BATCH = "harness/eval-batch"
+    HARNESS_EVAL_SANDBOX_CANCEL_RESULT = "harness/eval-sandbox/cancel-result"
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     DOCTOR_HEALTH = "doctor/health"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
@@ -347,6 +349,34 @@ def _normalize_client_payload(
             "suite_id": suite_id,
             "repetitions": repetitions,
             "batch_id": batch_id,
+        }
+
+    if event_type == ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL:
+        action_id = str(payload.get("action_id") or "").strip().lower()
+        if re.fullmatch(r"hsac_[0-9a-f]{24}", action_id) is None:
+            raise ValueError("Sandbox cancel action_id 格式无效。")
+        ticket_id = str(payload.get("ticket_id") or "").strip().lower()
+        if re.fullmatch(r"hsadm_[0-9a-f]{24}", ticket_id) is None:
+            raise ValueError("Sandbox cancel ticket_id 格式无效。")
+        authority_key = str(payload.get("authority_key") or "").strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", authority_key) is None:
+            raise ValueError("Sandbox cancel authority_key 必须是 SHA-256。")
+        epoch = payload.get("epoch")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("Sandbox cancel epoch 必须是正整数。")
+        expected_state = str(payload.get("expected_state") or "").strip().lower()
+        if expected_state not in {"queued", "active"}:
+            raise ValueError("Sandbox cancel expected_state 必须是 queued 或 active。")
+        reason = str(payload.get("reason") or "").strip()
+        if len(reason) > 500:
+            raise ValueError("Sandbox cancel reason 不能超过 500 个字符。")
+        return {
+            "action_id": action_id,
+            "ticket_id": ticket_id,
+            "authority_key": authority_key,
+            "epoch": epoch,
+            "expected_state": expected_state,
+            "reason": reason,
         }
 
     if event_type == ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST:
