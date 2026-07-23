@@ -274,6 +274,7 @@ from naumi_agent.harness.retention_planner import (
     SessionRetentionPreview,
     plan_session_retention,
 )
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
 from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.tools import create_harness_tools
@@ -858,6 +859,10 @@ class AgentEngine:
             shell_admission_composer=self.shell_worker_admission_composer,
             authorization_receipt_provider=current_permission_receipt,
         )
+        self.harness_sandbox_batch_admission = HarnessSandboxBatchAdmission(
+            max_active=config.safety.max_parallel_sandbox_batches,
+            max_queued=config.safety.max_queued_sandbox_batches,
+        )
         self.evolution_candidate_store = resources.evolution_candidate_store
         self.feedback_intake_service = FeedbackIntakeService(
             self.evolution_candidate_store
@@ -1088,6 +1093,7 @@ class AgentEngine:
                 run_grant_authority=self.run_delegation_grant_authority,
                 sample_executor=self.evolution_adversarial_sample_executor,
                 receipt_store=self.evolution_adversarial_cohort_receipt_store,
+                batch_admission=self.harness_sandbox_batch_admission,
             )
         )
         self.evolution_adversarial_comparison_executor = (
@@ -1100,6 +1106,7 @@ class AgentEngine:
                 permission_store=resources.permission_decision_store,
                 run_grant_authority=self.run_delegation_grant_authority,
                 sample_executor=self.evolution_interventional_red_sample_executor,
+                batch_admission=self.harness_sandbox_batch_admission,
             )
         )
         self.evolution_interventional_green_cohort_request_builder = (
@@ -1121,6 +1128,7 @@ class AgentEngine:
                 permission_store=resources.permission_decision_store,
                 run_grant_authority=self.run_delegation_grant_authority,
                 sample_executor=self.evolution_interventional_green_sample_executor,
+                batch_admission=self.harness_sandbox_batch_admission,
             )
         )
         self.evolution_interventional_comparison_executor = (

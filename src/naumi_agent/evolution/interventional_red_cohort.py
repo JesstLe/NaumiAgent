@@ -37,6 +37,7 @@ from naumi_agent.evolution.validation_plans import (
     EvolutionValidationPlan,
     EvolutionValidationProfileBinding,
 )
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 INTERVENTIONAL_RED_COHORT_POLICY = "evolution-interventional-red-cohort-v1"
@@ -177,6 +178,7 @@ class EvolutionInterventionalRedCohortExecutor:
         sample_executor: EvolutionInterventionalRedSampleExecutor,
         now: Callable[[], str] | None = None,
         token: Callable[[], str] | None = None,
+        batch_admission: HarnessSandboxBatchAdmission | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         self._store = store
@@ -189,6 +191,7 @@ class EvolutionInterventionalRedCohortExecutor:
             run_grant_authority=run_grant_authority,
             now=self._now,
             token=token,
+            admission=batch_admission,
         )
 
     async def execute(

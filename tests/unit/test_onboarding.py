@@ -105,6 +105,8 @@ def test_build_config_keeps_runtime_budgets_unlimited_by_default(
     assert safety["max_parallel_tools"] == 4
     assert safety["max_parallel_agents"] == 4
     assert safety["max_queued_agents"] == 64
+    assert safety["max_parallel_sandbox_batches"] == 2
+    assert safety["max_queued_sandbox_batches"] == 8
     assert config["browser"] == {
         "max_concurrent_runs": 2,
         "run_history_limit": 200,

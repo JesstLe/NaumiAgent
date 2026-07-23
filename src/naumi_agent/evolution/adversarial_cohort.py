@@ -35,7 +35,10 @@ from naumi_agent.evolution.interventional_cohort_kernel import (
 )
 from naumi_agent.evolution.validation_plans import EvolutionValidationPlan
 from naumi_agent.harness.eval_models import EvalCaseStatus
-from naumi_agent.harness.sandbox_batch import BatchProgressCallback
+from naumi_agent.harness.sandbox_batch import (
+    BatchProgressCallback,
+    HarnessSandboxBatchAdmission,
+)
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 if TYPE_CHECKING:
@@ -190,6 +193,7 @@ class EvolutionAdversarialCohortExecutor:
         receipt_store: EvolutionAdversarialCohortReceiptStore,
         now: Callable[[], str] | None = None,
         token: Callable[[], str] | None = None,
+        batch_admission: HarnessSandboxBatchAdmission | None = None,
     ) -> None:
         self._workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         if not isinstance(sample_executor, EvolutionAdversarialSampleExecutor):
@@ -215,6 +219,7 @@ class EvolutionAdversarialCohortExecutor:
             run_grant_authority=run_grant_authority,
             now=now or (lambda: datetime.now(UTC).isoformat()),
             token=token,
+            admission=batch_admission,
         )
 
     async def execute(

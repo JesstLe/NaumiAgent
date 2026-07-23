@@ -8,6 +8,7 @@ from pathlib import Path
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantAuthority
 from naumi_agent.harness.sandbox_batch import (
+    HarnessSandboxBatchAdmission,
     HarnessSandboxBatchCoordinator,
     HarnessSandboxBatchError,
 )
@@ -28,6 +29,7 @@ class EvolutionInterventionalCohortKernel(HarnessSandboxBatchCoordinator):
         run_grant_authority: RunDelegationGrantAuthority,
         now: Callable[[], str] | None = None,
         token: Callable[[], str] | None = None,
+        admission: HarnessSandboxBatchAdmission | None = None,
     ) -> None:
         super().__init__(
             workspace_root=workspace_root,
@@ -37,6 +39,7 @@ class EvolutionInterventionalCohortKernel(HarnessSandboxBatchCoordinator):
             now=now,
             token=token,
             compatibility_scope="evolution",
+            admission=admission,
         )
 
 

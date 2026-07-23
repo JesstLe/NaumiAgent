@@ -116,6 +116,9 @@
 - HAR-08.4f Resumable Sandbox Batch Coordinator：已实现。连续 H5a 前缀、单一 lease/grant、逐 sample
   Store-confirmed checkpoint、中断清理与跨 epoch 恢复已下沉到 Harness；Evolution cohort 仅保留兼容 adapter。
   详见 `HAR-08-4f-resumable-sandbox-batch-coordinator.md`。
+- HAR-08.4g 有界 Sandbox Batch Admission：已实现。一个 Engine 内的 RED/GREEN/adversarial consumer 共用
+  active/queued 硬上限；饱和、取消、嵌套自等待和完整 H5a 快速返回均有稳定语义。详见
+  `HAR-08-4g-bounded-sandbox-batch-admission.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -125,5 +128,5 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨 Batch admission/backpressure 与
+- HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨进程/多主机 Batch admission 与
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。

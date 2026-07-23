@@ -660,6 +660,23 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         engine.harness_sandbox_check_runner.artifact_root
         == engine._paths.shell_worker_artifact_dir
     )
+    batch_admission = engine.harness_sandbox_batch_admission
+    assert batch_admission.max_active == config.safety.max_parallel_sandbox_batches
+    assert batch_admission.max_queued == config.safety.max_queued_sandbox_batches
+    assert (
+        engine.evolution_interventional_red_cohort_executor
+        ._cohort_kernel.admission
+        is batch_admission
+    )
+    assert (
+        engine.evolution_interventional_green_cohort_executor
+        ._cohort_kernel.admission
+        is batch_admission
+    )
+    assert (
+        engine.evolution_adversarial_cohort_executor._coordinator.admission
+        is batch_admission
+    )
     assert not engine._paths.execution_grant_db_path.exists()
     assert not engine._paths.run_delegation_grant_db_path.exists()
     assert not engine._paths.permission_decision_db_path.exists()

@@ -401,6 +401,8 @@ safety:
   max_parallel_tools: 4         # 工具安全批次，范围 1-16
   max_parallel_agents: 4        # 进程内 Agent 活跃数，范围 1-32；1 为串行排障
   max_queued_agents: 64         # 进程内 Agent 等待数，范围 0-10000；0 为不等待
+  max_parallel_sandbox_batches: 2  # 进程内 Sandbox Eval 活跃批次数，范围 1-32
+  max_queued_sandbox_batches: 8    # Sandbox Eval 等待批次数，范围 0-10000；0 为不等待
 
   guardrails:
     input_validation: true

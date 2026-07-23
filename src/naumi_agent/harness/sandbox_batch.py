@@ -8,7 +8,10 @@ import hmac
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self, TypeVar
@@ -49,6 +52,19 @@ type BatchReceiptBuilder[SampleReceiptT: BaseModel, BatchReceiptT: BaseModel] = 
     BatchReceiptT,
 ]
 type BatchProgressCallback = Callable[["HarnessSandboxBatchCheckpoint"], Awaitable[None]]
+
+@dataclass(slots=True)
+class _SandboxBatchAdmissionOwnership:
+    gate_id: int
+    active: bool = True
+
+
+_SANDBOX_BATCH_ADMISSION_STACK: ContextVar[
+    tuple[_SandboxBatchAdmissionOwnership, ...]
+] = ContextVar(
+    "naumi_sandbox_batch_admission_stack",
+    default=(),
+)
 
 
 class _StrictModel(BaseModel):
@@ -126,6 +142,87 @@ class HarnessSandboxBatchError(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxBatchAdmissionSnapshot:
+    """One process-local, immediately consistent capacity snapshot."""
+
+    max_active: int
+    max_queued: int
+    active: int
+    queued: int
+
+
+class HarnessSandboxBatchAdmission:
+    """Bound active and waiting Sandbox batches within one Runtime process."""
+
+    def __init__(self, *, max_active: int = 2, max_queued: int = 8) -> None:
+        if (
+            isinstance(max_active, bool)
+            or not 1 <= max_active <= 32
+            or isinstance(max_queued, bool)
+            or not 0 <= max_queued <= 10_000
+        ):
+            raise ValueError(
+                "Sandbox Batch admission 容量必须满足 active=1..32、queued=0..10000。"
+            )
+        self.max_active = max_active
+        self.max_queued = max_queued
+        self._slots = asyncio.BoundedSemaphore(max_active)
+        self._active = 0
+        self._queued = 0
+
+    def snapshot(self) -> HarnessSandboxBatchAdmissionSnapshot:
+        return HarnessSandboxBatchAdmissionSnapshot(
+            max_active=self.max_active,
+            max_queued=self.max_queued,
+            active=self._active,
+            queued=self._queued,
+        )
+
+    @asynccontextmanager
+    async def admit(self) -> AsyncIterator[None]:
+        """Own one slot, preserving queue counts across cancellation and failure."""
+        stack = _SANDBOX_BATCH_ADMISSION_STACK.get()
+        if any(owner.active and owner.gate_id == id(self) for owner in stack):
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_nested_admission",
+                "Sandbox Batch 不允许在持有同一容量槽时同步嵌套启动。",
+            )
+        if self._active + self._queued >= self.max_active + self.max_queued:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_capacity_exhausted",
+                (
+                    "Sandbox Batch 等待队列已满"
+                    f"（活跃 {self._active}/{self.max_active}，"
+                    f"排队 {self._queued}/{self.max_queued}）；"
+                    "请等待现有批次完成后重试。"
+                ),
+            )
+
+        self._queued += 1
+        acquired = False
+        token = None
+        ownership = None
+        try:
+            await self._slots.acquire()
+            acquired = True
+            self._queued -= 1
+            self._active += 1
+            ownership = _SandboxBatchAdmissionOwnership(gate_id=id(self))
+            token = _SANDBOX_BATCH_ADMISSION_STACK.set((*stack, ownership))
+            yield
+        finally:
+            if acquired:
+                if ownership is not None:
+                    ownership.active = False
+                if token is not None:
+                    _SANDBOX_BATCH_ADMISSION_STACK.reset(token)
+                self._active -= 1
+                self._slots.release()
+            else:
+                self._queued -= 1
+
+
 class HarnessSandboxBatchCoordinator:
     """Own one batch Runtime lease/Run Grant and recover continuous H5a prefixes."""
 
@@ -139,6 +236,7 @@ class HarnessSandboxBatchCoordinator:
         now: Callable[[], str] | None = None,
         token: Callable[[], str] | None = None,
         compatibility_scope: Literal["harness", "evolution"] = "harness",
+        admission: HarnessSandboxBatchAdmission | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve(strict=True)
         if compatibility_scope not in {"harness", "evolution"}:
@@ -147,6 +245,11 @@ class HarnessSandboxBatchCoordinator:
             raise TypeError("Sandbox Batch now 必须可调用。")
         if token is not None and not callable(token):
             raise TypeError("Sandbox Batch token 必须可调用。")
+        if admission is not None and not isinstance(
+            admission,
+            HarnessSandboxBatchAdmission,
+        ):
+            raise TypeError("Sandbox Batch admission 类型无效。")
         if Path(run_grant_authority._workspace_root) != self.workspace_root:
             raise ValueError("Sandbox Batch Run Grant 与 workspace 不一致。")
         if run_grant_authority._permission_store is not permission_store:
@@ -157,8 +260,72 @@ class HarnessSandboxBatchCoordinator:
         self.now = now or (lambda: datetime.now(UTC).isoformat())
         self.token = token or (lambda: uuid4().hex)
         self.compatibility_scope = compatibility_scope
+        self.admission = admission or HarnessSandboxBatchAdmission()
 
     async def execute(
+        self,
+        *,
+        phase: Literal["red", "green", "adversarial"],
+        authority_key: str,
+        parent_receipt_id: str,
+        requested_samples: int,
+        max_total_duration_seconds: int,
+        load_records: BatchRecordsLoader,
+        validate_existing_prefix: BatchPrefixValidator[_SampleReceiptT],
+        validate_run_evidence: BatchRunEvidenceValidator,
+        execute_sample: BatchSampleExecutor[_SampleReceiptT],
+        build_receipt: BatchReceiptBuilder[_SampleReceiptT, _BatchReceiptT],
+        on_progress: BatchProgressCallback | None = None,
+    ) -> _BatchReceiptT:
+        lane = self._lane(phase)
+        lane_name = lane.upper()
+        if _SHA256_RE.fullmatch(authority_key) is None:
+            raise self._error(
+                "authority_key_invalid",
+                f"{self._label(lane_name)} authority key 必须是 SHA-256。",
+            )
+        if (
+            isinstance(requested_samples, bool)
+            or not 5 <= requested_samples <= 100
+            or isinstance(max_total_duration_seconds, bool)
+            or not 60 <= max_total_duration_seconds <= 3_600
+        ):
+            raise self._error(
+                "budget_invalid",
+                f"{self._label(lane_name)} 样本数或总时限无效。",
+            )
+        records = await load_records()
+        self._require_continuous_prefix(records, requested_samples, lane_name)
+        receipts = await validate_existing_prefix(records)
+        self._require_receipt_prefix(receipts, records, lane_name)
+        validate_run_evidence(records)
+        if len(records) == requested_samples:
+            await self._emit(
+                on_progress,
+                authority_key=authority_key,
+                lane=lane,
+                stage="completed",
+                requested_samples=requested_samples,
+                records=records,
+            )
+            return build_receipt(records, receipts)
+
+        async with self.admission.admit():
+            return await self._execute_admitted(
+                phase=phase,
+                authority_key=authority_key,
+                parent_receipt_id=parent_receipt_id,
+                requested_samples=requested_samples,
+                max_total_duration_seconds=max_total_duration_seconds,
+                load_records=load_records,
+                validate_existing_prefix=validate_existing_prefix,
+                validate_run_evidence=validate_run_evidence,
+                execute_sample=execute_sample,
+                build_receipt=build_receipt,
+                on_progress=on_progress,
+            )
+
+    async def _execute_admitted(
         self,
         *,
         phase: Literal["red", "green", "adversarial"],
@@ -512,6 +679,8 @@ def _sha256_payload(payload: object) -> str:
 
 
 __all__ = [
+    "HarnessSandboxBatchAdmission",
+    "HarnessSandboxBatchAdmissionSnapshot",
     "HarnessSandboxBatchCheckpoint",
     "HarnessSandboxBatchCoordinator",
     "HarnessSandboxBatchError",

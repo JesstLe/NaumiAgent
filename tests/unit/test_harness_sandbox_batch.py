@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,8 +8,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from naumi_agent.harness.sandbox_batch import (
+    HarnessSandboxBatchAdmission,
     HarnessSandboxBatchCheckpoint,
     HarnessSandboxBatchCoordinator,
+    HarnessSandboxBatchError,
 )
 
 
@@ -80,6 +83,7 @@ def _coordinator(
     grants: _RunGrantAuthority,
     *,
     token: str,
+    admission: HarnessSandboxBatchAdmission | None = None,
 ) -> HarnessSandboxBatchCoordinator:
     return HarnessSandboxBatchCoordinator(
         workspace_root=tmp_path,
@@ -88,6 +92,7 @@ def _coordinator(
         run_grant_authority=grants,  # type: ignore[arg-type]
         now=lambda: "2026-07-20T00:00:00+00:00",
         token=lambda: token,
+        admission=admission,
     )
 
 
@@ -103,6 +108,145 @@ def test_sandbox_batch_rejects_cross_workspace_authority(tmp_path: Path) -> None
             permission_store=permissions,  # type: ignore[arg-type]
             run_grant_authority=grants,  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.parametrize(
+    ("max_active", "max_queued"),
+    [(0, 0), (33, 0), (1, -1), (1, 10_001), (True, 1), (1, False)],
+)
+def test_sandbox_batch_admission_rejects_invalid_capacity(
+    max_active: int,
+    max_queued: int,
+) -> None:
+    with pytest.raises(ValueError, match="容量"):
+        HarnessSandboxBatchAdmission(
+            max_active=max_active,
+            max_queued=max_queued,
+        )
+
+
+@pytest.mark.asyncio
+async def test_sandbox_batch_admission_bounds_queue_and_reclaims_cancelled_waiter(
+) -> None:
+    admission = HarnessSandboxBatchAdmission(max_active=1, max_queued=1)
+    active_started = asyncio.Event()
+    release_active = asyncio.Event()
+
+    async def hold_active() -> None:
+        async with admission.admit():
+            active_started.set()
+            await release_active.wait()
+
+    active = asyncio.create_task(hold_active())
+    await active_started.wait()
+    queued = asyncio.create_task(hold_active())
+    for _ in range(20):
+        if admission.snapshot().queued == 1:
+            break
+        await asyncio.sleep(0)
+    assert admission.snapshot().active == 1
+    assert admission.snapshot().queued == 1
+
+    with pytest.raises(
+        HarnessSandboxBatchError,
+        match="等待队列已满",
+    ) as saturated:
+        async with admission.admit():
+            raise AssertionError("capacity exhaustion must not enter the batch")
+    assert saturated.value.code == "sandbox_batch_capacity_exhausted"
+
+    queued.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await queued
+    assert admission.snapshot().queued == 0
+
+    replacement = asyncio.create_task(hold_active())
+    for _ in range(20):
+        if admission.snapshot().queued == 1:
+            break
+        await asyncio.sleep(0)
+    release_active.set()
+    await asyncio.gather(active, replacement)
+    assert admission.snapshot().active == 0
+    assert admission.snapshot().queued == 0
+
+
+@pytest.mark.asyncio
+async def test_sandbox_batch_admission_rejects_self_waiting_nested_batch() -> None:
+    admission = HarnessSandboxBatchAdmission(max_active=2, max_queued=2)
+    async with admission.admit():
+        with pytest.raises(HarnessSandboxBatchError) as nested:
+            async with admission.admit():
+                raise AssertionError("nested admission must fail closed")
+    assert nested.value.code == "sandbox_batch_nested_admission"
+    assert admission.snapshot().active == 0
+
+
+@pytest.mark.asyncio
+async def test_inherited_admission_context_expires_when_parent_batch_releases(
+) -> None:
+    admission = HarnessSandboxBatchAdmission(max_active=1, max_queued=1)
+    parent_released = asyncio.Event()
+    child_entered = asyncio.Event()
+
+    async def delayed_child() -> None:
+        await parent_released.wait()
+        async with admission.admit():
+            child_entered.set()
+
+    async with admission.admit():
+        child = asyncio.create_task(delayed_child())
+    parent_released.set()
+    await child
+
+    assert child_entered.is_set()
+    assert admission.snapshot().active == 0
+    assert admission.snapshot().queued == 0
+
+
+@pytest.mark.asyncio
+async def test_completed_sandbox_batch_bypasses_saturated_admission(
+    tmp_path: Path,
+) -> None:
+    store = _Store()
+    store.records.extend(_record(index) for index in range(5))
+    permissions = _PermissionStore()
+    grants = _RunGrantAuthority(tmp_path, permissions)
+    admission = HarnessSandboxBatchAdmission(max_active=1, max_queued=0)
+
+    async def load_records():
+        return tuple(store.records)
+
+    async def validate_prefix(records):
+        return [_SampleReceipt(sample_index=item.sample_index) for item in records]
+
+    async with admission.admit():
+        receipt = await _coordinator(
+            tmp_path,
+            store,
+            permissions,
+            grants,
+            token="c" * 32,
+            admission=admission,
+        ).execute(
+            phase="red",
+            authority_key="c" * 64,
+            parent_receipt_id="parent",
+            requested_samples=5,
+            max_total_duration_seconds=60,
+            load_records=load_records,
+            validate_existing_prefix=validate_prefix,
+            validate_run_evidence=lambda _records: None,
+            execute_sample=lambda _index, _authority: pytest.fail(
+                "completed batch must not execute a sample"
+            ),
+            build_receipt=lambda records, _receipts: _BatchReceipt(
+                persisted_samples=len(records)
+            ),
+        )
+
+    assert receipt.persisted_samples == 5
+    assert not grants.issued
 
 
 @pytest.mark.asyncio
@@ -139,14 +283,15 @@ async def test_sandbox_batch_emits_partial_checkpoint_and_resumes(
             assert store.released
         interrupted_progress.append(checkpoint)
 
+    interrupted_coordinator = _coordinator(
+        tmp_path,
+        store,
+        permissions,
+        grants,
+        token="a" * 32,
+    )
     with pytest.raises(RuntimeError, match="simulated interruption"):
-        await _coordinator(
-            tmp_path,
-            store,
-            permissions,
-            grants,
-            token="a" * 32,
-        ).execute(
+        await interrupted_coordinator.execute(
             phase="adversarial",
             authority_key="a" * 64,
             parent_receipt_id="parent",
@@ -176,6 +321,8 @@ async def test_sandbox_batch_emits_partial_checkpoint_and_resumes(
         )
     assert grants.revoked[-1]["reason"] == "sandbox_batch_finished"
     assert len(store.released) == 1
+    assert interrupted_coordinator.admission.snapshot().active == 0
+    assert interrupted_coordinator.admission.snapshot().queued == 0
 
     resumed_progress: list[HarnessSandboxBatchCheckpoint] = []
 
