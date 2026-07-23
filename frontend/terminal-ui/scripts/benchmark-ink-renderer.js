@@ -10,9 +10,17 @@ import {
 } from "../src/experiments/ink-renderer.js";
 
 export function runInkRendererBenchmark(options = {}) {
+  const legacyProjection = options.disablePresentationIndex === true;
   return runRendererBenchmarkWithAdapter(options, {
-    renderer: INK_EXPERIMENT_RENDERER,
-    render: renderInkExperimentScreen,
+    renderer: legacyProjection
+      ? `${INK_EXPERIMENT_RENDERER}-legacy-projection`
+      : INK_EXPERIMENT_RENDERER,
+    render: (state, width, height) => renderInkExperimentScreen(
+      state,
+      width,
+      height,
+      { disablePresentationIndex: legacyProjection },
+    ),
   });
 }
 
@@ -31,6 +39,9 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.projection && !["indexed", "legacy"].includes(args.projection)) {
+    throw new Error("--projection 只允许 indexed 或 legacy");
+  }
   const result = runInkRendererBenchmark({
     profile: args.profile,
     messages: args.messages,
@@ -40,6 +51,7 @@ function main() {
     warmup: args.warmup,
     width: args.width,
     height: args.height,
+    disablePresentationIndex: args.projection === "legacy",
   });
   const output = `${JSON.stringify(result, null, 2)}\n`;
   if (args.output) writeFileSync(args.output, output, "utf8");

@@ -1,0 +1,67 @@
+{
+  "schema": "naumi.renderer-benchmark.v1",
+  "renderer": "react-ink-6",
+  "profile": "smoke",
+  "fixture": {
+    "generator": "terminal-ui-mixed-cjk-v2-paged-output",
+    "messages": 1000,
+    "tools": 100,
+    "log_chars": 100000,
+    "width": 120,
+    "height": 40
+  },
+  "fixture_sha256": "873128ca669ccb61de38fa50909c67d9dbc9610bb1af88bbcbcf630edc9d6105",
+  "protocol_contract": {
+    "version": 1,
+    "registry_sha256": "c696a74ece9d8db6b40fed37d4a6c0ad7960d60052fa0b026ad2a5558d59226f"
+  },
+  "runtime": {
+    "node": "v24.12.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "scenarios": [
+    {
+      "name": "tail",
+      "iterations": 12,
+      "cold_render_ms": 35.876,
+      "render_ms": {
+        "min": 4.898,
+        "p50": 6.046,
+        "p95": 8.48,
+        "max": 8.48
+      },
+      "rss_delta_bytes": 36323328,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    },
+    {
+      "name": "deep_scroll",
+      "iterations": 12,
+      "cold_render_ms": 4.716,
+      "render_ms": {
+        "min": 2.44,
+        "p50": 2.988,
+        "p95": 4.265,
+        "max": 4.265
+      },
+      "rss_delta_bytes": 21151744,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    },
+    {
+      "name": "paged_output",
+      "iterations": 12,
+      "cold_render_ms": 8.391,
+      "render_ms": {
+        "min": 4.767,
+        "p50": 5.84,
+        "p95": 6.779,
+        "max": 6.779
+      },
+      "rss_delta_bytes": 20692992,
+      "rendered_lines": 40,
+      "viewport_bounded": true
+    }
+  ]
+}

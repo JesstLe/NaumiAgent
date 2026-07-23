@@ -7,14 +7,22 @@ import {
   sanitizeTerminalText,
   truncateAnsi,
 } from "../ansi.js";
+import {
+  ensureTimelineRowIndex,
+  findTimelineSegmentAtRow,
+  timelineRowIndexDebug,
+} from "../timeline-row-index.js";
 
 export const INK_EXPERIMENT_RENDERER = "react-ink-6";
+export const INK_PRESENTATION_INDEX_NAMESPACE = "ink-presentation-v1";
 
-export function renderInkExperimentScreen(state, width, height) {
+export function renderInkExperimentScreen(state, width, height, options = {}) {
   const columns = boundedDimension(width, "width", 40, 400);
   const rows = boundedDimension(height, "height", 8, 200);
   const timelineRows = Math.max(1, rows - 3);
-  const visibleRows = selectVisibleRows(state, timelineRows);
+  const visibleRows = options.disablePresentationIndex
+    ? selectVisibleRowsLegacy(state, timelineRows)
+    : selectVisibleRows(state, timelineRows, columns);
   const children = [
     React.createElement(
       Text,
@@ -50,6 +58,10 @@ export function renderInkExperimentScreen(state, width, height) {
     { columns },
   );
   return normalizeViewport(output, columns, rows);
+}
+
+export function inkPresentationIndexDebug(state) {
+  return timelineRowIndexDebug(state, INK_PRESENTATION_INDEX_NAMESPACE);
 }
 
 function MessageRow({ presentation }) {
@@ -113,7 +125,51 @@ function presentMessageRows(message, state) {
   }];
 }
 
-function selectVisibleRows(state, limit) {
+function selectVisibleRows(state, limit, width) {
+  const messages = Array.isArray(state?.messages) ? state.messages : [];
+  const index = ensureTimelineRowIndex(
+    state,
+    {
+      width,
+      timelineIndexNamespace: INK_PRESENTATION_INDEX_NAMESPACE,
+    },
+    (message) => presentMessageRows(message, state),
+  );
+  const offset = boundedScrollOffset(state?.scrollOffset, index.totalLines);
+  const end = Math.max(0, index.totalLines - offset);
+  const start = Math.max(0, end - limit);
+  if (start >= end) {
+    index.lastRenderedRange = null;
+    return [];
+  }
+  const first = findTimelineSegmentAtRow(index, start);
+  const last = findTimelineSegmentAtRow(index, end - 1);
+  if (first < 0 || last < first) {
+    index.lastRenderedRange = null;
+    return [];
+  }
+
+  const visible = [];
+  const overscanStart = Math.max(0, first - 1);
+  const overscanEnd = Math.min(index.segments.length - 1, last + 1);
+  index.lastRenderedRange = { first, last, overscanStart, overscanEnd };
+  for (let position = overscanStart; position <= overscanEnd; position += 1) {
+    const segment = index.segments[position];
+    const rows = presentMessageRows(messages[segment.messageIndex], state);
+    if (position < first || position > last || segment.height <= 0) continue;
+    const localStart = Math.max(0, start - segment.start);
+    const localEnd = Math.min(segment.height, end - segment.start);
+    visible.push(...rows.slice(localStart, localEnd).map(
+      (row, rowIndex) => ({
+        ...row,
+        key: `${String(messages[segment.messageIndex]?.id || `message-${segment.messageIndex}`)}:${localStart + rowIndex}`,
+      }),
+    ));
+  }
+  return visible;
+}
+
+function selectVisibleRowsLegacy(state, limit) {
   const messages = Array.isArray(state?.messages) ? state.messages : [];
   const rows = messages.flatMap((message, messageIndex) => presentMessageRows(message, state).map(
     (row, rowIndex) => ({
@@ -121,10 +177,14 @@ function selectVisibleRows(state, limit) {
       key: `${String(message?.id || `message-${messageIndex}`)}:${rowIndex}`,
     }),
   ));
-  const offset = Math.max(0, Math.trunc(Number(state?.scrollOffset) || 0));
-  const boundedOffset = Math.min(offset, Math.max(0, rows.length - 1));
+  const boundedOffset = boundedScrollOffset(state?.scrollOffset, rows.length);
   const end = Math.max(0, rows.length - boundedOffset);
   return rows.slice(Math.max(0, end - limit), end);
+}
+
+function boundedScrollOffset(value, totalRows) {
+  const offset = Math.max(0, Math.trunc(Number(value) || 0));
+  return Math.min(offset, Math.max(0, totalRows - 1));
 }
 
 function permissionRows(payload) {
