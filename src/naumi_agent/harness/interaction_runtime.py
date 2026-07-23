@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import ceil
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -46,6 +47,14 @@ class InteractionRecoveryBatch:
     claimed: tuple[HarnessInteractionRecord, ...]
     expired_ids: tuple[str, ...]
     retry_after_seconds: float | None
+
+
+class InteractionClaimError(RuntimeError):
+    """One exact manual claim that cannot safely bind to the requesting host."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class DurableInteractionAuthorityClient:
@@ -170,6 +179,57 @@ class DurableInteractionAuthorityClient:
             owner_lease_seconds=self.owner_lease_seconds,
         )
 
+    async def claim(
+        self,
+        *,
+        interaction_id: str,
+        now: str | None = None,
+    ) -> HarnessInteractionRecord:
+        """Claim exactly one pending interaction for immediate host display."""
+        timestamp = datetime.fromisoformat(now) if now else datetime.now(UTC)
+        if timestamp.utcoffset() is None:
+            raise ValueError("interaction claim now 必须包含时区。")
+        record = await self.store.get_interaction(
+            workspace_root=self.workspace_root,
+            interaction_id=interaction_id,
+        )
+        if record is None:
+            raise InteractionClaimError(
+                "not_found",
+                f"未找到持久用户交互：{interaction_id}。",
+            )
+        if record.state != "pending":
+            raise InteractionClaimError(
+                "terminal",
+                f"用户交互已是终态：{record.state}。",
+            )
+        if (
+            record.expires_at
+            and datetime.fromisoformat(record.expires_at) <= timestamp
+        ):
+            await self.expire(record=record, now=timestamp.isoformat())
+            raise InteractionClaimError(
+                "expired",
+                "用户交互已到期，已收口为超时状态。",
+            )
+        owner_expiry = datetime.fromisoformat(record.owner_lease_expires_at)
+        if record.owner_id != self.owner_id and owner_expiry > timestamp:
+            remaining = max(1, ceil((owner_expiry - timestamp).total_seconds()))
+            raise InteractionClaimError(
+                "live_owner",
+                f"其他界面仍在处理该交互，租约约 {remaining} 秒后到期。",
+            )
+        if owner_expiry <= timestamp:
+            record = await self.store.takeover_interaction(
+                workspace_root=self.workspace_root,
+                interaction_id=record.interaction_id,
+                expected_sequence=record.sequence,
+                owner_id=self.owner_id,
+                now=timestamp.isoformat(),
+                owner_lease_seconds=self.owner_lease_seconds,
+            )
+        return record
+
     async def recover_pending(
         self,
         *,
@@ -237,6 +297,7 @@ class DurableInteractionAuthorityClient:
 
 __all__ = [
     "DurableInteractionAuthorityClient",
+    "InteractionClaimError",
     "InteractionAuthorityStore",
     "InteractionRecoveryBatch",
 ]

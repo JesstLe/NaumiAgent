@@ -14,6 +14,7 @@ from naumi_agent.harness.interaction import (
 )
 from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
+    InteractionClaimError,
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import (
@@ -250,6 +251,66 @@ async def test_runtime_client_renews_expired_same_owner_before_answer(
     )
     assert answered.state == "answered"
     assert response["label"] == "安全恢复"
+
+
+@pytest.mark.asyncio
+async def test_runtime_client_claims_exact_expired_owner_and_rejects_live_owner(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(interaction_id="ask-exact-claim"),
+    )
+    client = DurableInteractionAuthorityClient(
+        store=store,
+        workspace_root=workspace,
+        owner_id="bridge-b",
+        owner_lease_seconds=10,
+    )
+
+    with pytest.raises(InteractionClaimError, match="其他界面") as live:
+        await client.claim(interaction_id="ask-exact-claim", now=T4)
+    assert live.value.code == "live_owner"
+
+    claimed = await client.claim(interaction_id="ask-exact-claim", now=T11)
+
+    assert claimed.interaction_id == "ask-exact-claim"
+    assert claimed.owner_id == "bridge-b"
+    assert claimed.owner_epoch == 2
+    assert claimed.sequence == 2
+
+
+@pytest.mark.asyncio
+async def test_runtime_client_exact_claim_expires_deadline_before_takeover(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(interaction_id="ask-expired-claim", timeout=20),
+    )
+    client = DurableInteractionAuthorityClient(
+        store=store,
+        workspace_root=workspace,
+        owner_id="bridge-b",
+        owner_lease_seconds=10,
+    )
+
+    with pytest.raises(InteractionClaimError, match="已到期") as expired:
+        await client.claim(interaction_id="ask-expired-claim", now=T20)
+
+    assert expired.value.code == "expired"
+    record = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id="ask-expired-claim",
+    )
+    assert record is not None
+    assert record.state == "expired"
 
 
 @pytest.mark.asyncio

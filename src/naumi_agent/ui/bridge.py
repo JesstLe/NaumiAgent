@@ -49,6 +49,7 @@ from naumi_agent.harness.interaction import (
 )
 from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
+    InteractionClaimError,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
 from naumi_agent.harness.store import (
@@ -542,6 +543,7 @@ class JsonlEngineBridge:
         ) = None
         self._interaction_authority_store: object | None = None
         self._interaction_replay_task: asyncio.Task[None] | None = None
+        self._interaction_claim_lock = asyncio.Lock()
         runtime_identity = f"terminal-ui-{uuid4().hex}"
         self._runtime_heartbeat_subject_id = runtime_identity
         self._runtime_heartbeat_instance_id = runtime_identity
@@ -731,43 +733,14 @@ class JsonlEngineBridge:
         now = datetime.now(UTC)
         retry_after_seconds: float | None = None
         try:
-            recovery = await authority.recover_pending(
-                now=now.isoformat(),
-                limit=50,
-            )
-            retry_after_seconds = recovery.retry_after_seconds
-            for record in recovery.claimed:
-                if record.interaction_id in self._pending_interactions:
-                    continue
-                request = record.request()
-                future: asyncio.Future[dict[str, str]] = (
-                    asyncio.get_running_loop().create_future()
+            async with self._interaction_claim_lock:
+                recovery = await authority.recover_pending(
+                    now=now.isoformat(),
+                    limit=50,
                 )
-                public_payload = {
-                    "request_id": record.interaction_id,
-                    "session_id": record.session_id,
-                    "run_id": record.subject_id if record.subject_kind == "pursuit" else "",
-                    "agent_name": record.agent_name,
-                    **request.to_public_dict(),
-                    "expires_at": record.expires_at,
-                    "status": "needs_input",
-                }
-                self._pending_interactions[record.interaction_id] = PendingInteraction(
-                    future=future,
-                    request=request,
-                    public_payload=public_payload,
-                    durable_record=record,
-                    replay_only=True,
-                )
-                await self.emit(
-                    ServerEventType.INTERACTION_REQUEST,
-                    public_payload,
-                    request_id=record.interaction_id,
-                )
-                self._schedule_pending_interaction_owner_renewal(
-                    record.interaction_id
-                )
-                self._schedule_pending_interaction_timeout(record.interaction_id)
+                retry_after_seconds = recovery.retry_after_seconds
+                for record in recovery.claimed:
+                    await self._bind_replayed_interaction(record)
         except Exception as exc:
             logger.warning(
                 "Durable interaction replay failed (%s)", type(exc).__name__,
@@ -776,6 +749,59 @@ class JsonlEngineBridge:
         finally:
             if retry_after_seconds is not None and not self._closed:
                 self._schedule_interaction_replay(retry_after_seconds)
+
+    async def _bind_replayed_interaction(
+        self,
+        record: HarnessInteractionRecord,
+    ) -> bool:
+        """Bind one authority-owned record to this Bridge Future and UI card."""
+        if record.interaction_id in self._pending_interactions:
+            return False
+        request = record.request()
+        future: asyncio.Future[dict[str, str]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        public_payload = {
+            "request_id": record.interaction_id,
+            "session_id": record.session_id,
+            "run_id": record.subject_id if record.subject_kind == "pursuit" else "",
+            "agent_name": record.agent_name,
+            **request.to_public_dict(),
+            "expires_at": record.expires_at,
+            "status": "needs_input",
+        }
+        self._pending_interactions[record.interaction_id] = PendingInteraction(
+            future=future,
+            request=request,
+            public_payload=public_payload,
+            durable_record=record,
+            replay_only=True,
+        )
+        pending = self._pending_interactions[record.interaction_id]
+        try:
+            await self.emit(
+                ServerEventType.INTERACTION_REQUEST,
+                public_payload,
+                request_id=record.interaction_id,
+            )
+            self._schedule_pending_interaction_owner_renewal(record.interaction_id)
+            self._schedule_pending_interaction_timeout(record.interaction_id)
+        except Exception:
+            if self._pending_interactions.get(record.interaction_id) is pending:
+                self._pending_interactions.pop(record.interaction_id, None)
+            tasks = tuple(
+                task
+                for task in (pending.owner_renew_task, pending.timeout_task)
+                if task is not None and task is not asyncio.current_task()
+            )
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if not future.done():
+                future.cancel()
+            raise
+        return True
 
     def _schedule_interaction_replay(self, delay_seconds: float) -> None:
         """Recheck a live foreign owner without stealing its valid lease."""
@@ -1307,6 +1333,10 @@ class JsonlEngineBridge:
 
         if event_type == ClientEventType.INTERACTION_CANCEL:
             await self.cancel_user_interaction(payload, request_id=request_id)
+            return
+
+        if event_type == ClientEventType.INTERACTION_TAKEOVER:
+            await self.takeover_user_interaction(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.PERMISSION_REVOKE:
@@ -4206,22 +4236,24 @@ class JsonlEngineBridge:
         if pending.replay_only:
             self._pending_interactions.pop(interaction_id, None)
 
-    async def cancel_user_interaction(
+    async def _read_goal_linked_interaction(
         self,
-        payload: dict[str, Any],
+        interaction_id: str,
         *,
         request_id: str,
-    ) -> None:
-        """Cancel one durable interaction through sequence-fenced authority."""
-        interaction_id = str(payload.get("interaction_id") or "")
+    ) -> tuple[
+        DurableInteractionAuthorityClient | None,
+        HarnessInteractionRecord | None,
+    ]:
+        """Read one Goal-linked interaction or emit a bounded public error."""
         authority = self._interaction_authority()
         if authority is None:
             await self.emit_error(
-                "持久交互 authority 不可用，取消未提交。",
+                "持久交互 authority 不可用。",
                 code="interaction_authority_unavailable",
                 request_id=request_id,
             )
-            return
+            return None, None
         try:
             record = await authority.store.get_interaction(
                 workspace_root=self.engine.workspace_root,
@@ -4233,21 +4265,14 @@ class JsonlEngineBridge:
                 code="interaction_authority_read_failed",
                 request_id=request_id,
             )
-            return
+            return None, None
         if record is None:
             await self.emit_error(
                 f"未找到持久用户交互: {interaction_id}",
                 code="unknown_interaction_request",
                 request_id=request_id,
             )
-            return
-        if record.state != "pending":
-            await self.emit_error(
-                f"用户交互已是终态：{record.state}，不能取消。",
-                code="interaction_not_pending",
-                request_id=request_id,
-            )
-            return
+            return None, None
         try:
             linked_runs = {
                 goal.pursuit_run_id
@@ -4263,11 +4288,111 @@ class JsonlEngineBridge:
                 code="goal_state_unavailable",
                 request_id=request_id,
             )
-            return
+            return None, None
         if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
             await self.emit_error(
-                "该交互不属于当前 Goal 页面中的 Pursuit，拒绝取消。",
+                "该交互不属于当前 Goal 页面中的 Pursuit。",
                 code="interaction_scope_mismatch",
+                request_id=request_id,
+            )
+            return None, None
+        return authority, record
+
+    async def takeover_user_interaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Claim exactly one interaction and bind it to this Bridge UI host."""
+        interaction_id = str(payload.get("interaction_id") or "")
+        async with self._interaction_claim_lock:
+            authority, record = await self._read_goal_linked_interaction(
+                interaction_id,
+                request_id=request_id,
+            )
+            if authority is None or record is None:
+                return
+            if interaction_id in self._pending_interactions:
+                await self.emit_error(
+                    "该用户交互已在当前界面中展示。",
+                    code="interaction_already_active",
+                    request_id=request_id,
+                )
+                return
+            try:
+                claimed = await authority.claim(interaction_id=interaction_id)
+            except InteractionClaimError as exc:
+                if exc.code == "expired":
+                    await self.emit(
+                        ServerEventType.INTERACTION_RESOLVED,
+                        {
+                            "request_id": interaction_id,
+                            "status": "expired",
+                            "reason": str(exc),
+                        },
+                        request_id=request_id,
+                    )
+                    await self.emit(ServerEventType.STATUS, self.status_payload())
+                    return
+                await self.emit_error(
+                    str(exc),
+                    code=f"interaction_takeover_{exc.code}",
+                    request_id=request_id,
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    "Durable interaction takeover failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "用户交互在接管前已发生变化，请刷新 Goal 页面重试。",
+                    code="interaction_takeover_conflict",
+                    request_id=request_id,
+                )
+                return
+            try:
+                bound = await self._bind_replayed_interaction(claimed)
+            except Exception as exc:
+                logger.warning(
+                    "Durable interaction host binding failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "交互已取得临时租约，但当前界面未能展示；"
+                    "租约到期后可刷新 Goal 页面重试。",
+                    code="interaction_takeover_bind_failed",
+                    request_id=request_id,
+                )
+                return
+            if not bound:
+                await self.emit_error(
+                    "该用户交互已在当前界面中展示。",
+                    code="interaction_already_active",
+                    request_id=request_id,
+                )
+                return
+        await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def cancel_user_interaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel one durable interaction through sequence-fenced authority."""
+        interaction_id = str(payload.get("interaction_id") or "")
+        authority, record = await self._read_goal_linked_interaction(
+            interaction_id,
+            request_id=request_id,
+        )
+        if authority is None or record is None:
+            return
+        if record.state != "pending":
+            await self.emit_error(
+                f"用户交互已是终态：{record.state}，不能取消。",
+                code="interaction_not_pending",
                 request_id=request_id,
             )
             return

@@ -197,6 +197,7 @@ async def test_goal_snapshot_projects_only_linked_interaction_public_state(tmp_p
         "expires_at": "",
         "updated_at": "2026-07-18T00:00:00+00:00",
         "can_cancel": True,
+        "can_takeover": True,
     }]
     assert "owner_id" not in str(payload["interactions"])
     rendered = render_goal_pursuit_snapshot(snapshot)
@@ -248,7 +249,7 @@ def test_interaction_detail_distinguishes_takeover_eligibility_and_deadline() ->
     )
 
     assert "Owner 租约已过期 · 可由活动界面接管" in takeover_output
-    assert "宿主绑定的手动接管动作尚未开放" in takeover_output
+    assert "/goal interaction takeover ask-goal-takeover-detail" in takeover_output
     assert "问题期限已到 · 等待 authority 收口为超时" in deadline_output
     assert "可由活动界面接管" not in deadline_output
 

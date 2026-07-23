@@ -25,7 +25,8 @@ authority 状态。
 - 选项同时显示 label、value 和 description；自定义回答使用既有有界、控制字符清理与脱敏后文本。
 - 终态显示已选选项或自定义答案、回答时间；未回答终态不伪造答案。
 - 页面显示 sequence 和 owner epoch 供并发诊断，但不显示 owner ID、session 内部身份或原始字典。
-- 当租约过期且问题仍有效时，页面只声明“可接管”事实，明确告知手动动作尚未开放。
+- 当租约过期且问题仍有效时，详情显示“可接管”事实；UI-18.4d2 已在此事实上开放
+  宿主绑定的 takeover 命令。
 
 ## 验收标准
 
@@ -38,8 +39,9 @@ authority 状态。
 
 ## 保留边界与下一步
 
-- 本切片不开放 takeover 写动作。手动 takeover 必须和当前 Bridge/TUI 宿主的 Future/Modal、
-  keepalive 以及 replay 绑定后一次性提交，否则新 owner 没有任何界面承接问题。
+- 本切片交付时不开放 takeover 写动作；后续 UI-18.4d2 已按本文边界将 Future/Modal、keepalive
+  以及 replay 一次性绑定到新 owner。
 - 本切片提供的是命令驱动详情 surface，还不是 Goal 页内的独立可展开详情页。
 - interaction 列表仍是最近 50 项；cursor/筛选与优先级应与 HAR-10.3 durable queue 协调设计。
-- 下一最小切片应先实现“宿主绑定 takeover-and-display”，而不是单独暴露 Store takeover 按钮。
+- “宿主绑定 takeover-and-display”已由 UI-18.4d2 实现；下一边界是页内展开详情与 cursor，
+  不得回退为单独的 Store owner 写入。

@@ -6897,6 +6897,239 @@ async def test_bridge_replays_expired_foreign_interaction_owner(
 
 
 @pytest.mark.asyncio
+async def test_bridge_manual_takeover_claims_exact_goal_interaction_and_displays(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    created_at = datetime.fromtimestamp(
+        datetime.now(UTC).timestamp() - 10,
+        tz=UTC,
+    ).isoformat()
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-manual-takeover",
+        session_id="session-takeover",
+        agent_name="main",
+        owner_id="bridge-dead",
+        created_at=created_at,
+        owner_lease_seconds=3,
+        interaction_id="ask-manual-takeover",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("手动接管用户交互")
+    engine.goal_store.attach_pursuit(goal.id, record.subject_id)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "takeover-goal-interaction",
+        "type": ClientEventType.INTERACTION_TAKEOVER,
+        "payload": {"interaction_id": record.interaction_id},
+    })
+
+    requests = [
+        item for item in _records(writer)
+        if item["type"] == "interaction/request"
+    ]
+    assert len(requests) == 1
+    assert requests[0]["payload"]["request_id"] == record.interaction_id
+    claimed = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+    )
+    assert claimed is not None
+    assert claimed.owner_id == bridge._interaction_owner_id
+    assert claimed.owner_epoch == 2
+    assert record.interaction_id in bridge._pending_interactions
+
+    await bridge.resolve_user_interaction(
+        {
+            "request_id": record.interaction_id,
+            "kind": "option",
+            "value": "workspace",
+        },
+        request_id="answer-manual-takeover",
+    )
+    answered = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+    )
+    assert answered is not None
+    assert answered.state == "answered"
+
+
+@pytest.mark.asyncio
+async def test_bridge_manual_takeover_rejects_live_owner_without_display(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-live-takeover",
+        session_id="session-live",
+        agent_name="main",
+        owner_id="bridge-live",
+        created_at=datetime.now(UTC).isoformat(),
+        owner_lease_seconds=30,
+        interaction_id="ask-live-takeover",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("不抢占活跃界面")
+    engine.goal_store.attach_pursuit(goal.id, record.subject_id)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.takeover_user_interaction(
+        {"interaction_id": record.interaction_id},
+        request_id="takeover-live-owner",
+    )
+
+    assert not any(
+        item["type"] == "interaction/request" for item in _records(writer)
+    )
+    error = next(item for item in _records(writer) if item["type"] == "error")
+    assert error["payload"]["code"] == "interaction_takeover_live_owner"
+    unchanged = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+    )
+    assert unchanged == record
+
+
+@pytest.mark.asyncio
+async def test_bridge_serializes_parallel_manual_takeover_without_duplicate_card(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    created_at = datetime.fromtimestamp(
+        datetime.now(UTC).timestamp() - 10,
+        tz=UTC,
+    ).isoformat()
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-parallel-takeover",
+        session_id="session-parallel",
+        agent_name="main",
+        owner_id="bridge-dead",
+        created_at=created_at,
+        owner_lease_seconds=3,
+        interaction_id="ask-parallel-takeover",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("并发接管只展示一次")
+    engine.goal_store.attach_pursuit(goal.id, record.subject_id)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await asyncio.gather(
+        bridge.takeover_user_interaction(
+            {"interaction_id": record.interaction_id},
+            request_id="takeover-parallel-1",
+        ),
+        bridge.takeover_user_interaction(
+            {"interaction_id": record.interaction_id},
+            request_id="takeover-parallel-2",
+        ),
+    )
+
+    requests = [
+        item for item in _records(writer)
+        if item["type"] == "interaction/request"
+    ]
+    assert len(requests) == 1
+    errors = [item for item in _records(writer) if item["type"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["code"] == "interaction_already_active"
+
+    await bridge.cancel_user_interaction(
+        {"interaction_id": record.interaction_id},
+        request_id="cleanup-parallel-takeover",
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_manual_takeover_cleans_pending_when_host_binding_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    record = new_interaction_record(
+        request=normalize_interaction_request(_interaction_payload()),
+        subject_kind="pursuit",
+        subject_id="pursuit-bind-failure",
+        session_id="session-bind-failure",
+        agent_name="main",
+        owner_id="bridge-dead",
+        created_at=datetime.fromtimestamp(
+            datetime.now(UTC).timestamp() - 10,
+            tz=UTC,
+        ).isoformat(),
+        owner_lease_seconds=3,
+        interaction_id="ask-bind-failure",
+    )
+    await store.create_interaction(workspace_root=workspace, record=record)
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    engine.harness_service = SimpleNamespace(store=store)
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    goal = engine.goal_store.create("接管后界面绑定失败")
+    engine.goal_store.attach_pursuit(goal.id, record.subject_id)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    original_emit = bridge.emit
+
+    async def fail_request_emit(event_type, payload, *, request_id=None):
+        if event_type == ServerEventType.INTERACTION_REQUEST:
+            raise OSError("closed output")
+        await original_emit(event_type, payload, request_id=request_id)
+
+    monkeypatch.setattr(bridge, "emit", fail_request_emit)
+
+    await bridge.takeover_user_interaction(
+        {"interaction_id": record.interaction_id},
+        request_id="takeover-bind-failure",
+    )
+
+    assert record.interaction_id not in bridge._pending_interactions
+    error = next(item for item in _records(writer) if item["type"] == "error")
+    assert error["payload"]["code"] == "interaction_takeover_bind_failed"
+    claimed = await store.get_interaction(
+        workspace_root=workspace,
+        interaction_id=record.interaction_id,
+    )
+    assert claimed is not None
+    assert claimed.state == "pending"
+    assert claimed.owner_id == bridge._interaction_owner_id
+
+
+@pytest.mark.asyncio
 async def test_bridge_expires_timed_out_interaction_without_replay(
     tmp_path: Path,
 ) -> None:

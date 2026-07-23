@@ -4884,12 +4884,34 @@ async def _run_goal(engine: Any, arg: str) -> None:
     elif subcommand == "interaction":
         action, _, interaction_id = remainder.partition(" ")
         action = action.lower()
-        if action not in {"detail", "cancel"} or not re.fullmatch(
+        if action not in {"detail", "cancel", "takeover"} or not re.fullmatch(
             r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id.strip()
         ):
             console.print(
-                "[yellow]用法: /goal interaction [detail|cancel] "
+                "[yellow]用法: /goal interaction [detail|cancel|takeover] "
                 "<interaction-id>[/yellow]"
+            )
+            return
+        if action == "takeover":
+            if _active_cli is None or not hasattr(
+                _active_cli,
+                "takeover_goal_interaction",
+            ):
+                console.print(
+                    "[yellow]当前界面无法承接交互；请在 New UI 或 "
+                    "Textual TUI 中执行接管。[/yellow]"
+                )
+                return
+            result = await _active_cli.takeover_goal_interaction(
+                interaction_id.strip()
+            )
+            console.print(
+                Panel(
+                    Markdown(result),
+                    title="[bold cyan]持久交互[/bold cyan]",
+                    border_style="cyan",
+                    padding=(1, 2),
+                )
             )
             return
         tool_name = f"goal_interaction_{action}"

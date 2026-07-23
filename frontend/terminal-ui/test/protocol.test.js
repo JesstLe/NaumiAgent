@@ -383,6 +383,17 @@ test("interaction cancellation uses a strict target and terminal receipt", () =>
   );
 });
 
+test("interaction takeover sends one strict host-binding target", () => {
+  const chunks = [];
+  const send = createEventSender({ write: (chunk) => chunks.push(chunk) });
+
+  send("interaction_takeover", { interaction_id: "ask-goal-takeover" });
+
+  assert.deepEqual(JSON.parse(chunks[0]).payload, {
+    interaction_id: "ask-goal-takeover",
+  });
+});
+
 test("queue promotion receipt normalizes boundary metadata", () => {
   const normalized = normalizeServerRecord({
     type: "run/queue_promoted",
@@ -1156,6 +1167,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         expires_at: "2026-07-18T01:00:00+00:00",
         updated_at: "2026-07-18T00:00:01+00:00",
         can_cancel: true,
+        can_takeover: true,
         owner_id: "private-owner",
       }],
     },
@@ -1174,6 +1186,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.waits[0], "private_payload"), false);
   assert.equal(normalized.interactions[0].interaction_id, "ask-goal-1");
   assert.equal(normalized.interactions[0].can_cancel, true);
+  assert.equal(normalized.interactions[0].can_takeover, true);
   assert.equal(Object.hasOwn(normalized.interactions[0], "owner_id"), false);
   assert.throws(
     () => normalizeServerRecord({
@@ -1214,6 +1227,21 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /can_cancel/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        interactions: [{
+          ...normalized.interactions[0],
+          state: "answered",
+          can_cancel: false,
+          can_takeover: true,
+        }],
+      },
+    }),
+    /can_takeover/,
   );
   assert.throws(
     () => normalizeServerRecord({

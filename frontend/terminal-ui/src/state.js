@@ -729,6 +729,12 @@ export function reduceServerEvent(state, record) {
       break;
     case "interaction/request":
       handleInteractionRequest(state, record);
+      if (state.goalPanel.snapshot?.interactions) {
+        const historical = state.goalPanel.snapshot.interactions.find(
+          (item) => item.interaction_id === String(payload.request_id ?? ""),
+        );
+        if (historical) historical.can_takeover = false;
+      }
       break;
     case "interaction/resolved":
       handleInteractionResolved(state, payload);
@@ -739,6 +745,7 @@ export function reduceServerEvent(state, record) {
         if (historical) {
           historical.state = String(payload.status ?? historical.state);
           historical.can_cancel = false;
+          historical.can_takeover = false;
         }
       }
       if (payload.status === "cancelled") {
@@ -2706,6 +2713,12 @@ export function handleSubmitText(state, text, send) {
   );
   if (interactionCancel) {
     return send("interaction_cancel", { interaction_id: interactionCancel[1] });
+  }
+  const interactionTakeover = commandText.match(
+    /^\/goal\s+interaction\s+takeover\s+(ask-[A-Za-z0-9._:-]{1,128})$/i,
+  );
+  if (interactionTakeover) {
+    return send("interaction_takeover", { interaction_id: interactionTakeover[1] });
   }
   const harnessBatch = parseHarnessEvalBatchCommand(commandText);
   if (harnessBatch) {

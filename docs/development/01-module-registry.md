@@ -26,7 +26,7 @@
 | UI-15 | 渲染性能、虚拟化与大输出 | partial (15.1a, 15.4a, 15.6a) | render cache | `cli-ui/UI-15-performance.md` |
 | UI-16 | 跨终端、无障碍与国际化 | partial (16.1a, 16.6a) | terminal capabilities | `cli-ui/UI-16-platform-accessibility.md` |
 | UI-17 | New UI/TUI parity 与发布门 | partial (17.1, 17.2a-17.2e, 17.3a-17.3b) | UI-10..16 | `cli-ui/UI-17-parity-release.md` |
-| UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.4b, 18.4c, 18.4d1, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
+| UI-18 | Goal/Pursuit 与恢复可视化 | partial (18.1, 18.4a, 18.4b, 18.4c, 18.4d1, 18.4d2, 18.5a) | ARC-01, HAR-10 | `cli-ui/UI-18-goal-pursuit.md` |
 
 ## Claude Code Source Alignment
 
