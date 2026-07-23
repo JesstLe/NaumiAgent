@@ -175,8 +175,20 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 - 真实 New UI 进程键盘闭环、Textual app/Engine sink 和 SQLite Store→Bridge→Node action 已验证。
   详细边界见 `HAR-07-5c2-completion-detail-entry.md`。
 
+### HAR-07.4b2 已实现：安全回执 ACK 与 Cursor Recovery
+
+- ARC-02.5b 已让 New UI 按 session 持久保存稳定 client/stream/cursor，并由 Bridge SQLite
+  权威持久接受单调 ACK；
+- 空闲 Bridge 重连时，现有精确 session resume 会带 `resume_after_cursor`，窗口内只补发缺失的
+  completion/harness receipt，同 cursor 不重复渲染；
+- ACK 缺失/不一致、窗口外、错误 stream 和超前 cursor 明确进入无 cursor 的业务 Store 快照；
+  只有 Harness/ChatRun 权威均成功读取后才建立并 ACK 新基线，不把缺口伪装成“没有更新”；
+- 真实双进程链路验证 cursor 1 ACK 后断线，第二进程只补 cursor 2，并将最终 cursor 2 原子保存；
+- 详细合同与边界见
+  [ARC-02.5b](../architecture/ARC-02-5b-terminal-event-cursor-recovery.md)。
+
 ### 尚未完成
 
-- HAR-07.4b：ARC-03.3a、HAR-07.4b1 与 ARC-02.5a 已补齐 additive informational 序号安全、
-  空闲 Bridge 重启、精确 session resume，以及两类安全回执的稳定持久 cursor；客户端 ACK、
-  cursor resend、活动运行恢复和 revision/gap 自动补发仍未完成，不能把当前状态描述为完整断线恢复。
+- HAR-07.4b：空闲状态下两类安全回执的 ACK、cursor resend 和窗口外 snapshot 已完成，但活动模型流、
+  工具副作用、permission/interaction 与运行中 progress 的恢复仍未建立安全事件合同；活动运行断线继续
+  fail closed 到 TUI，不能把 HAR-07.4b 或整个 HAR-07 标记完成。

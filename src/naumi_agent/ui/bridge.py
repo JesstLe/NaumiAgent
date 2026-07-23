@@ -64,6 +64,7 @@ from naumi_agent.runtime.terminal_events import (
     REPLAY_SAFE_TERMINAL_EVENTS,
     TerminalEventJournalError,
     TerminalEventJournalStore,
+    TerminalEventRecord,
 )
 from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycle,
@@ -654,6 +655,7 @@ class JsonlEngineBridge:
         payload: dict[str, Any] | None = None,
         *,
         request_id: str | None = None,
+        journal: bool = True,
     ) -> None:
         """Emit one JSONL record to the frontend."""
         if self._writer is None:
@@ -663,7 +665,8 @@ class JsonlEngineBridge:
             policy = self._protocol_event_registry.policy("server", event_type)
             durable_fields: dict[str, str | int] = {}
             if (
-                self._terminal_event_store is not None
+                journal
+                and self._terminal_event_store is not None
                 and event_type in REPLAY_SAFE_TERMINAL_EVENTS
             ):
                 session_id = str(
@@ -694,6 +697,37 @@ class JsonlEngineBridge:
                 **durable_fields,
             )
             text = encode_jsonl(record)
+            self._writer.write(text)
+            self._writer.flush()
+            self._sequence = next_sequence
+        if self.debug_trace is not None:
+            self.debug_trace.output("ui_bridge.stdout", text)
+
+    async def _emit_replayed_terminal_event(
+        self,
+        record: TerminalEventRecord,
+        *,
+        request_id: str,
+    ) -> None:
+        """Publish one already-verified durable record without reallocating identity."""
+        if self._writer is None:
+            raise RuntimeError("bridge writer is not bound")
+        async with self._writer_lock:
+            policy = self._protocol_event_registry.policy("server", record.event_type)
+            if policy.criticality != record.criticality:
+                raise TerminalEventJournalError(
+                    "终端事件恢复记录与当前协议策略不一致。"
+                )
+            next_sequence = self._sequence + 1
+            envelope = make_envelope(
+                record.event_type,
+                record.payload,
+                request_id=request_id,
+                sequence=next_sequence,
+                criticality=policy.criticality,
+                **record.envelope_fields(),
+            )
+            text = encode_jsonl(envelope)
             self._writer.write(text)
             self._writer.flush()
             self._sequence = next_sequence
@@ -1547,6 +1581,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.RESUME:
             await self.resume_session(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.TERMINAL_EVENTS_ACK:
+            await self.acknowledge_terminal_events(payload, request_id=request_id)
+            return
 
         if event_type == ClientEventType.SESSIONS_LIST_REQUEST:
             await self.list_sessions(payload, request_id=request_id)
@@ -1580,6 +1617,57 @@ class JsonlEngineBridge:
             return
 
         await self.emit_error(f"未知客户端事件: {event_type}", request_id=request_id)
+
+    async def acknowledge_terminal_events(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Persist one client cursor only inside the current session authority."""
+        store = self._terminal_event_store
+        if store is None:
+            await self.emit_error(
+                "终端事件 ACK 权威暂不可用。",
+                code="terminal_event_ack_unavailable",
+                request_id=request_id,
+            )
+            return
+        current_session_id = str(
+            getattr(getattr(self.engine, "_session", None), "id", "") or ""
+        ).strip()
+        if not current_session_id or payload["session_id"] != current_session_id:
+            await self.emit_error(
+                "终端事件 ACK 只能确认当前会话。",
+                code="terminal_event_ack_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        try:
+            ack = await store.acknowledge(
+                client_id=payload["client_id"],
+                session_id=current_session_id,
+                stream_id=payload["stream_id"],
+                cursor=payload["cursor"],
+            )
+        except Exception as exc:
+            logger.warning("Terminal event ACK failed (%s)", type(exc).__name__)
+            await self.emit_error(
+                "终端事件 ACK 未被权威日志接受；下次重连将重新核对回执。",
+                code="terminal_event_ack_rejected",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.ACK,
+            {
+                "event": str(ClientEventType.TERMINAL_EVENTS_ACK),
+                "session_id": ack.session_id,
+                "stream_id": ack.stream_id,
+                "cursor": ack.cursor,
+            },
+            request_id=request_id,
+        )
 
     async def set_reasoning(self, enabled: bool, *, request_id: str) -> None:
         self._show_reasoning = enabled
@@ -3448,6 +3536,38 @@ class JsonlEngineBridge:
             )
             return
 
+        recovery_window = None
+        recovery_mode = "legacy_snapshot"
+        if "resume_after_cursor" in payload:
+            if self._terminal_event_store is None:
+                await self.emit_error(
+                    "终端事件恢复权威暂不可用，已拒绝猜测缺失回执。",
+                    code="terminal_event_recovery_unavailable",
+                    request_id=request_id,
+                )
+                return
+            try:
+                recovery_window = await self._terminal_event_store.replay_window(
+                    client_id=payload["terminal_event_client_id"],
+                    session_id=session_id,
+                    cursor=payload["resume_after_cursor"],
+                    expected_stream_id=payload["terminal_event_stream_id"],
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Terminal event recovery planning failed (%s)",
+                    type(exc).__name__,
+                )
+                await self.emit_error(
+                    "终端事件恢复窗口无法核验，已拒绝静默跳过回执。",
+                    code="terminal_event_recovery_failed",
+                    request_id=request_id,
+                )
+                return
+            recovery_mode = (
+                "gap_snapshot" if recovery_window.gap else "cursor_replay"
+            )
+
         loaded = await self.engine.load_session(session_id)
         if not loaded:
             await self.emit_error(
@@ -3469,22 +3589,89 @@ class JsonlEngineBridge:
                 "title": getattr(session, "title", "") or session_id,
                 "message_count": len(raw_messages),
                 "clear": bool(payload.get("clear", True)),
+                "terminal_event_recovery": (
+                    {
+                        "mode": recovery_mode,
+                        "stream_id": recovery_window.stream_id,
+                        "requested_cursor": recovery_window.requested_cursor,
+                        "earliest_cursor": recovery_window.earliest_cursor,
+                        "latest_cursor": recovery_window.latest_cursor,
+                        "gap_reason": recovery_window.gap_reason,
+                    }
+                    if recovery_window is not None
+                    else {"mode": recovery_mode}
+                ),
             },
             request_id=request_id,
         )
         for message in replay_messages(raw_messages):
             await self.emit(ServerEventType.UI_MESSAGE, ui_message_payload(message))
-        await self._resume_harness_receipts(session_id, request_id=request_id)
-        run_store = getattr(self.engine, "chat_run_store", None)
-        if run_store is not None:
-            runs = await run_store.list_runs(session_id, limit=200)
-            for run in reversed(runs):
-                if run.receipt is not None:
-                    await self.emit(
-                        ServerEventType.COMPLETION_RECEIPT,
-                        run.receipt.to_dict(),
+        if recovery_mode == "cursor_replay":
+            for record in recovery_window.records:
+                await self._emit_replayed_terminal_event(
+                    record,
+                    request_id=request_id,
+                )
+        else:
+            snapshot_without_journal = recovery_mode == "gap_snapshot"
+            harness_snapshot_complete = await self._resume_harness_receipts(
+                session_id,
+                request_id=request_id,
+                journal=not snapshot_without_journal,
+                required=snapshot_without_journal,
+            )
+            if snapshot_without_journal and not harness_snapshot_complete:
+                return
+            run_store = getattr(self.engine, "chat_run_store", None)
+            if run_store is None and snapshot_without_journal:
+                await self.emit_error(
+                    "通用完成回执权威暂不可用，未建立新的恢复游标基线。",
+                    code="terminal_event_snapshot_authority_unavailable",
+                    request_id=request_id,
+                )
+                return
+            if run_store is not None:
+                try:
+                    runs = await run_store.list_runs(session_id, limit=200)
+                except Exception as exc:
+                    logger.warning(
+                        "Completion receipt snapshot failed (%s)",
+                        type(exc).__name__,
+                    )
+                    await self.emit_error(
+                        "通用完成回执快照读取失败，未建立新的恢复游标基线。",
+                        code="terminal_event_snapshot_failed",
                         request_id=request_id,
                     )
+                    return
+                for run in reversed(runs):
+                    if run.receipt is not None:
+                        await self.emit(
+                            ServerEventType.COMPLETION_RECEIPT,
+                            run.receipt.to_dict(),
+                            request_id=request_id,
+                            journal=not snapshot_without_journal,
+                        )
+        if recovery_window is not None:
+            await self.emit(
+                ServerEventType.TERMINAL_EVENTS_RECOVERY,
+                {
+                    "schema_version": 1,
+                    "session_id": session_id,
+                    "mode": (
+                        "snapshot_complete"
+                        if recovery_mode == "gap_snapshot"
+                        else "replay_complete"
+                    ),
+                    "stream_id": recovery_window.stream_id,
+                    "requested_cursor": recovery_window.requested_cursor,
+                    "earliest_cursor": recovery_window.earliest_cursor,
+                    "latest_cursor": recovery_window.latest_cursor,
+                    "gap_reason": recovery_window.gap_reason,
+                    "replayed_count": len(recovery_window.records),
+                },
+                request_id=request_id,
+            )
         await self._recover_durable_conversation_queue(session_id)
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
@@ -3557,12 +3744,21 @@ class JsonlEngineBridge:
         session_id: str,
         *,
         request_id: str,
-    ) -> None:
+        journal: bool = True,
+        required: bool = False,
+    ) -> bool:
         """Replay durable Harness receipts before their generic completion cards."""
         service = getattr(self.engine, "harness_service", None)
         store = getattr(service, "store", None)
         if store is None:
-            return
+            if required:
+                await self.emit_error(
+                    "Harness 回执权威暂不可用，未建立新的恢复游标基线。",
+                    code="terminal_event_snapshot_authority_unavailable",
+                    request_id=request_id,
+                )
+                return False
+            return True
         try:
             runs = await store.list_session_runs(
                 self.engine.workspace_root,
@@ -3577,7 +3773,7 @@ class JsonlEngineBridge:
                 code="harness_receipt_recovery_failed",
                 request_id=request_id,
             )
-            return
+            return False
 
         for run in reversed(runs):
             receipt = getattr(run, "receipt", None)
@@ -3591,7 +3787,9 @@ class JsonlEngineBridge:
                     "revision": 1,
                 },
                 request_id=request_id,
+                journal=journal,
             )
+        return True
 
     async def _run_cli_slash_command(self, cmd: str, *, request_id: str) -> None:
         """Execute a slash command through the legacy CLI command handlers."""

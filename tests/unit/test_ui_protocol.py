@@ -79,6 +79,64 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_terminal_event_resume_and_ack() -> None:
+    resume = normalize_client_record({
+        "type": ClientEventType.RESUME,
+        "payload": {
+            "session_id": " session-1 ",
+            "terminal_event_client_id": "tecli_0123456789abcdef01234567",
+            "terminal_event_stream_id": "tes_0123456789abcdef01234567",
+            "resume_after_cursor": 7,
+            "private": "drop",
+        },
+    })
+    ack = normalize_client_record({
+        "type": ClientEventType.TERMINAL_EVENTS_ACK,
+        "payload": {
+            "client_id": "tecli_0123456789abcdef01234567",
+            "session_id": "session-1",
+            "stream_id": "tes_0123456789abcdef01234567",
+            "cursor": 9,
+            "private": "drop",
+        },
+    })
+
+    assert resume["payload"] == {
+        "session_id": "session-1",
+        "terminal_event_client_id": "tecli_0123456789abcdef01234567",
+        "terminal_event_stream_id": "tes_0123456789abcdef01234567",
+        "resume_after_cursor": 7,
+    }
+    assert ack["payload"] == {
+        "client_id": "tecli_0123456789abcdef01234567",
+        "session_id": "session-1",
+        "stream_id": "tes_0123456789abcdef01234567",
+        "cursor": 9,
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"session_id": "session-1", "resume_after_cursor": 7},
+        {
+            "session_id": "session-1",
+            "terminal_event_client_id": "tecli_0123456789abcdef01234567",
+            "terminal_event_stream_id": "tes_0123456789abcdef01234567",
+            "resume_after_cursor": 0,
+        },
+    ],
+)
+def test_protocol_rejects_partial_or_invalid_terminal_event_resume(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="terminal_event|resume_after_cursor"):
+        normalize_client_record({
+            "type": ClientEventType.RESUME,
+            "payload": payload,
+        })
+
+
 def test_protocol_normalizes_one_shot_agent_snapshot_request() -> None:
     record = normalize_client_record({
         "type": ClientEventType.AGENTS_REQUEST,

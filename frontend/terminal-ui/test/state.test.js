@@ -1220,6 +1220,29 @@ test("session replay clears Harness caches only for a replacement timeline", () 
   assert.deepEqual(Object.keys(state.harnessReplays), ["run-current"]);
 });
 
+test("terminal event recovery explains replay and gap snapshot outcomes", () => {
+  const replayed = createInitialState();
+  const snapped = createInitialState();
+
+  reduceServerEvent(replayed, {
+    type: "terminal_events/recovery",
+    payload: { mode: "replay_complete", replayed_count: 2 },
+  });
+  reduceServerEvent(snapped, {
+    type: "terminal_events/recovery",
+    payload: {
+      mode: "snapshot_complete",
+      gap_reason: "retention_gap",
+      replayed_count: 0,
+    },
+  });
+
+  assert.match(replayed.messages.at(-1).content, /补发 2 条缺失回执/);
+  assert.equal(replayed.messages.at(-1).level, "success");
+  assert.match(snapped.messages.at(-1).content, /超出保留窗口/);
+  assert.equal(snapped.messages.at(-1).level, "warning");
+});
+
 test("generic errors do not override the active run lifecycle", () => {
   const state = createInitialState();
 
@@ -3023,6 +3046,24 @@ test("applying a missing snapshot clears presentation state for a new session", 
   assert.equal(state.inputCursor, 0);
   assert.equal(state.scrollOffset, 0);
   assert.deepEqual(state.folds, {});
+  assert.deepEqual(state.terminalEventCursor, { streamId: "", cursor: 0 });
+});
+
+test("UI snapshot preserves only a valid terminal event cursor", () => {
+  const state = createInitialState();
+  state.terminalEventCursor = {
+    streamId: "tes_0123456789abcdef01234567",
+    cursor: 7,
+  };
+  const restored = createInitialState();
+
+  applyUiSnapshot(restored, createUiSnapshot(state));
+  assert.deepEqual(restored.terminalEventCursor, state.terminalEventCursor);
+
+  applyUiSnapshot(restored, {
+    terminalEventCursor: { streamId: "bad", cursor: Number.MAX_SAFE_INTEGER + 1 },
+  });
+  assert.deepEqual(restored.terminalEventCursor, { streamId: "", cursor: 0 });
 });
 
 test("composer snapshot preserves an absent preferred column as null", () => {

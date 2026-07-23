@@ -714,6 +714,21 @@ function processBridgeRecord(record) {
     heartbeat?.receivePong(record.request_id);
     return;
   }
+  const durableDecision = assessDurableTerminalEvent(record);
+  if (durableDecision.action === "duplicate") {
+    acknowledgeTerminalEvent({
+      stream_id: state.terminalEventCursor.streamId,
+      cursor: state.terminalEventCursor.cursor,
+    });
+    return;
+  }
+  if (durableDecision.action === "gap") {
+    handleFatalError(new Error(
+      `持久回执游标不连续（期望 ${durableDecision.expectedCursor}，收到 ${record.cursor}）。`
+      + "已停止消费，避免把缺失回执误报为完成。",
+    ));
+    return;
+  }
   const previousSessionId = state.currentSessionId;
   const previousSnapshot = createUiSnapshot(state);
   const actions = reduceServerEvent(state, record);
@@ -726,6 +741,7 @@ function processBridgeRecord(record) {
       rawSend("resume", {
         session_id: recovery.sessionId,
         clear: true,
+        ...terminalEventResumeFields(recovery.sessionId),
       }, { id: requestId });
       logDebug("bridge.recovery.resume_sent", {
         incident: recovery.incident,
@@ -791,11 +807,36 @@ function processBridgeRecord(record) {
     setUiSnapshot(uiStateStore, previousSessionId, previousSnapshot);
   }
   if (record.type === "session/replayed") {
-    restoreUiSnapshot(state.currentSessionId, { preferLaunchSnapshot: true });
+    restoreUiSnapshot(state.currentSessionId, {
+      preferLaunchSnapshot: !bridgeRecovery.snapshot().active,
+    });
+    applyTerminalEventRecoveryStart(record.payload?.terminal_event_recovery);
     resetHistorySearch(state);
     jumpTimelineToLatest(state);
     if (state.inspector.open) requestRuntimeInspectorSnapshot();
     if (state.agents.open) requestAgentControlSnapshot();
+  }
+  if (record.type === "terminal_events/recovery") {
+    completeTerminalEventRecovery(record.payload);
+  } else if (durableDecision.action === "accept") {
+    const sameStream = state.terminalEventCursor.streamId === String(record.stream_id);
+    state.terminalEventCursor = {
+      streamId: String(record.stream_id),
+      cursor: sameStream
+        ? Math.max(state.terminalEventCursor.cursor, Number(record.cursor))
+        : Number(record.cursor),
+    };
+    persistTerminalEventCursor();
+    acknowledgeTerminalEvent({
+      stream_id: state.terminalEventCursor.streamId,
+      cursor: state.terminalEventCursor.cursor,
+    });
+  }
+  if (
+    record.type === "runtime/status"
+    && state.terminalEventRecovery?.mode === "legacy_snapshot"
+  ) {
+    state.terminalEventRecovery = { mode: "" };
   }
   if (!(record.type === "ui/message" && record.payload?.type === "thinking" && !state.showReasoning)) {
     markTimelineOutput(state, record, timelineEntryId(record));
@@ -871,17 +912,154 @@ function isUrgentProtocolRecord(record) {
 }
 
 function sendWithProtocolGate(type, payload, options = {}) {
-  if (state.protocolNegotiated) return rawSend(type, payload, options);
+  if (state.protocolNegotiated) {
+    const normalizedPayload = type === "resume"
+      ? { ...payload, ...terminalEventResumeFields(payload?.session_id) }
+      : payload;
+    return rawSend(type, normalizedPayload, options);
+  }
   const id = options.id ? String(options.id) : `ui-deferred-${nextDeferredProtocolId++}`;
-  deferredProtocolSends.push({ type, payload, options: { ...options, id } });
+  deferredProtocolSends.push({
+    type,
+    payload,
+    options: { ...options, id },
+  });
   debugLog?.log("protocol.send.deferred", { type, id });
   return id;
+}
+
+function terminalEventResumeFields(sessionId) {
+  if (!terminalEventRecoveryNegotiated()) return {};
+  const normalizedSessionId = String(sessionId ?? "").trim();
+  if (!normalizedSessionId) return {};
+  const snapshot = normalizedSessionId === String(state.currentSessionId || "")
+    ? { terminalEventCursor: state.terminalEventCursor }
+    : getUiSnapshot(uiStateStore, normalizedSessionId);
+  const cursor = snapshot?.terminalEventCursor;
+  if (
+    !/^tes_[0-9a-f]{24}$/.test(String(cursor?.streamId ?? ""))
+    || !Number.isSafeInteger(cursor?.cursor)
+    || cursor.cursor < 1
+  ) return {};
+  return {
+    terminal_event_client_id: uiStateStore.terminalEventClientId,
+    terminal_event_stream_id: cursor.streamId,
+    resume_after_cursor: cursor.cursor,
+  };
+}
+
+function assessDurableTerminalEvent(record) {
+  if (!record?.event_id) return { action: "none" };
+  const streamId = String(record.stream_id ?? "");
+  const cursor = Number(record.cursor);
+  const current = state.terminalEventCursor || { streamId: "", cursor: 0 };
+  const recoveryMode = String(state.terminalEventRecovery?.mode || "");
+  if (recoveryMode === "legacy_snapshot") return { action: "accept" };
+  if (!current.streamId || current.streamId !== streamId) {
+    return current.streamId
+      ? { action: "gap", expectedCursor: current.cursor + 1 }
+      : { action: "accept" };
+  }
+  if (cursor <= current.cursor) return { action: "duplicate" };
+  if (cursor !== current.cursor + 1) {
+    return { action: "gap", expectedCursor: current.cursor + 1 };
+  }
+  return { action: "accept" };
+}
+
+function applyTerminalEventRecoveryStart(recovery) {
+  const mode = String(recovery?.mode || "legacy_snapshot");
+  state.terminalEventRecovery = { ...recovery, mode };
+  if (mode === "gap_snapshot") {
+    state.terminalEventCursor = { streamId: "", cursor: 0 };
+    persistTerminalEventCursor();
+    return;
+  }
+  if (mode !== "cursor_replay") return;
+  const current = state.terminalEventCursor || {};
+  if (
+    current.streamId !== recovery.stream_id
+    || current.cursor !== recovery.requested_cursor
+  ) {
+    handleFatalError(new Error(
+      "本地回执游标与 Bridge 恢复计划不一致；已停止恢复以避免跳过事件。",
+    ));
+  }
+}
+
+function completeTerminalEventRecovery(recovery) {
+  if (String(recovery?.session_id || "") !== String(state.currentSessionId || "")) {
+    handleFatalError(new Error("终端事件恢复结果不属于当前会话。"));
+    return;
+  }
+  const latestCursor = Number(recovery.latest_cursor);
+  const streamId = String(recovery.stream_id || "");
+  if (recovery.mode === "replay_complete") {
+    if (
+      latestCursor > 0
+      && (
+        state.terminalEventCursor.streamId !== streamId
+        || state.terminalEventCursor.cursor !== latestCursor
+      )
+    ) {
+      handleFatalError(new Error("终端事件重放未到达权威最新游标。"));
+      return;
+    }
+  } else if (recovery.mode === "snapshot_complete") {
+    state.terminalEventCursor = streamId && latestCursor > 0
+      ? { streamId, cursor: latestCursor }
+      : { streamId: "", cursor: 0 };
+    persistTerminalEventCursor();
+  }
+  state.terminalEventRecovery = { mode: "" };
+  if (streamId && latestCursor > 0) {
+    acknowledgeTerminalEvent({
+      stream_id: streamId,
+      cursor: latestCursor,
+    });
+  }
+}
+
+function persistTerminalEventCursor() {
+  setUiSnapshot(uiStateStore, state.currentSessionId, createUiSnapshot(state));
+  if (!saveUiStateStore(uiStateStore)) {
+    handleFatalError(new Error(
+      "无法持久保存回执游标；已停止确认，避免下次重连跳过事件。",
+    ));
+  }
+}
+
+function acknowledgeTerminalEvent(record) {
+  if (
+    !terminalEventRecoveryNegotiated()
+    || !state.currentSessionId
+    || !record?.stream_id
+    || !record?.cursor
+  ) return;
+  send("terminal_events/ack", {
+    client_id: uiStateStore.terminalEventClientId,
+    session_id: state.currentSessionId,
+    stream_id: String(record.stream_id),
+    cursor: Number(record.cursor),
+  });
+}
+
+function terminalEventRecoveryNegotiated() {
+  return state.protocolNegotiated
+    && Array.isArray(state.protocolNegotiation?.capabilities)
+    && state.protocolNegotiation.capabilities.includes("terminal_event_recovery");
 }
 
 function flushDeferredProtocolSends() {
   while (deferredProtocolSends.length > 0) {
     const pending = deferredProtocolSends.shift();
-    rawSend(pending.type, pending.payload, pending.options);
+    const payload = pending.type === "resume"
+      ? {
+        ...pending.payload,
+        ...terminalEventResumeFields(pending.payload?.session_id),
+      }
+      : pending.payload;
+    rawSend(pending.type, payload, pending.options);
   }
 }
 

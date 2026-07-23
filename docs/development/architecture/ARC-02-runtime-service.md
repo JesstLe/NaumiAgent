@@ -44,3 +44,8 @@
   双摘要完整性校验和每 session 4096 条有界保留。该切片仍没有客户端 ACK、cursor replay、
   窗口外 gap/snapshot 或活动运行恢复，详见
   [ARC-02.5a](./ARC-02-5a-terminal-event-journal.md)。
+- ARC-02.5b 已让 New UI 持久保存 session cursor 与稳定 client identity，Bridge 持久接受单调 ACK；
+  空闲重连仅在请求位置与服务端 ACK 一致时按 `resume_after_cursor` 补发窗口内缺失回执；ACK
+  不一致、stream 变化或窗口外会执行无 cursor 业务快照，且仅在所有业务权威读取成功后建立新基线。
+  活动模型流、工具结果、多客户端 slow-client policy 和本地 socket 仍未完成，详见
+  [ARC-02.5b](./ARC-02-5b-terminal-event-cursor-recovery.md)。

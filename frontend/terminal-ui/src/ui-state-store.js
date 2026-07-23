@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomBytes } from "node:crypto";
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 6;
 const LEGACY_STORE_VERSION = 1;
 const COMPOSER_STORE_VERSION = 2;
 const HISTORY_STORE_VERSION = 3;
 const INSPECTOR_STORE_VERSION = 4;
+const AGENT_STORE_VERSION = 5;
 const STORE_PATH = path.join(".naumi", "terminal-ui-state.json");
 const DEFAULT_SESSION_KEY = "__default__";
 const MAX_HISTORY_ENTRIES = 100;
@@ -26,6 +28,9 @@ export function loadUiStateStore(cwd) {
         filePath,
         sessions: parsed.sessions,
         inputHistory: sanitizeInputHistory(parsed.input_history),
+        terminalEventClientId: sanitizeTerminalEventClientId(
+          parsed.terminal_event_client_id,
+        ),
         writable: true,
       };
     }
@@ -39,6 +44,7 @@ export function loadUiStateStore(cwd) {
           ]),
         ),
         inputHistory: [],
+        terminalEventClientId: newTerminalEventClientId(),
         writable: true,
       };
     }
@@ -47,6 +53,7 @@ export function loadUiStateStore(cwd) {
         filePath,
         sessions: migrateAgentSessions(migrateInspectorSessions(parsed.sessions)),
         inputHistory: [],
+        terminalEventClientId: newTerminalEventClientId(),
         writable: true,
       };
     }
@@ -55,6 +62,7 @@ export function loadUiStateStore(cwd) {
         filePath,
         sessions: migrateAgentSessions(migrateInspectorSessions(parsed.sessions)),
         inputHistory: sanitizeInputHistory(parsed.input_history),
+        terminalEventClientId: newTerminalEventClientId(),
         writable: true,
       };
     }
@@ -63,6 +71,16 @@ export function loadUiStateStore(cwd) {
         filePath,
         sessions: migrateAgentSessions(parsed.sessions),
         inputHistory: sanitizeInputHistory(parsed.input_history),
+        terminalEventClientId: newTerminalEventClientId(),
+        writable: true,
+      };
+    }
+    if (parsed.version === AGENT_STORE_VERSION) {
+      return {
+        filePath,
+        sessions: parsed.sessions,
+        inputHistory: sanitizeInputHistory(parsed.input_history),
+        terminalEventClientId: newTerminalEventClientId(),
         writable: true,
       };
     }
@@ -87,6 +105,9 @@ export function saveUiStateStore(store) {
       version: STORE_VERSION,
       sessions: store.sessions,
       input_history: sanitizeInputHistory(store.inputHistory),
+      terminal_event_client_id: sanitizeTerminalEventClientId(
+        store.terminalEventClientId,
+      ),
     }, null, 2), "utf8");
     replaceUiStateFile(tmpPath, store.filePath);
     return true;
@@ -155,7 +176,13 @@ export function sessionKey(sessionId) {
 }
 
 function createEmptyStore(filePath, { writable = true } = {}) {
-  return { filePath, sessions: {}, inputHistory: [], writable };
+  return {
+    filePath,
+    sessions: {},
+    inputHistory: [],
+    terminalEventClientId: newTerminalEventClientId(),
+    writable,
+  };
 }
 
 function temporaryStatePath(filePath) {
@@ -245,4 +272,15 @@ function sanitizeInputHistory(history) {
     totalChars += value.length;
   }
   return keptNewestFirst.reverse();
+}
+
+function sanitizeTerminalEventClientId(value) {
+  const normalized = String(value ?? "");
+  return /^tecli_[0-9a-f]{24}$/.test(normalized)
+    ? normalized
+    : newTerminalEventClientId();
+}
+
+function newTerminalEventClientId() {
+  return `tecli_${randomBytes(12).toString("hex")}`;
 }

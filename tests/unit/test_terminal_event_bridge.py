@@ -179,3 +179,44 @@ async def test_bridge_fails_closed_when_receipt_has_no_session_boundary(
             },
         )
     assert writer.getvalue() == ""
+
+
+async def test_bridge_persists_and_confirms_terminal_event_ack(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    record = await store.append(
+        session_id="session-bridge",
+        event_type="completion/receipt",
+        criticality="terminal",
+        idempotency_key="completion:receipt-ack",
+        payload={
+            "schema_version": 1,
+            "receipt_id": "receipt-ack",
+            "run_id": "run-ack",
+            "outcome": "completed",
+        },
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_Engine(store), config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.acknowledge_terminal_events(
+        {
+            "client_id": "tecli_0123456789abcdef01234567",
+            "session_id": "session-bridge",
+            "stream_id": record.stream_id,
+            "cursor": record.cursor,
+        },
+        request_id="ack-1",
+    )
+
+    response = json.loads(writer.getvalue())
+    assert response["type"] == "ack"
+    assert response["request_id"] == "ack-1"
+    assert response["payload"] == {
+        "event": "terminal_events/ack",
+        "session_id": "session-bridge",
+        "stream_id": record.stream_id,
+        "cursor": 1,
+    }

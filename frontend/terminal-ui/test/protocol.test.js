@@ -534,6 +534,7 @@ test("protocol contract drives client and server event validation", () => {
       "session_list",
       "task_snapshot",
       "terminal_event_cursor",
+      "terminal_event_recovery",
       "typed_ui_messages",
       "workbench_proposal_actions",
       "workbench_snapshot",
@@ -613,6 +614,7 @@ test("compatibility ledger accepts only explicit prior registry digests", () => 
   assert.equal(validateCompatibility(structuredClone(PROTOCOL_CONTRACT)), true);
   assert.deepEqual(PROTOCOL_COMPATIBLE_REGISTRY_SHA256, [
     PROTOCOL_REGISTRY_SHA256,
+    ...PROTOCOL_CONTRACT.compatibility.previous_registry_sha256,
   ]);
 
   const prior = structuredClone(PROTOCOL_CONTRACT);
@@ -712,6 +714,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "session_list",
       "task_snapshot",
       "terminal_event_cursor",
+      "terminal_event_recovery",
       "typed_ui_messages",
       "workbench_proposal_actions",
       "workbench_snapshot",
@@ -2014,7 +2017,88 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     title: "",
     message_count: 4,
     clear: false,
+    terminal_event_recovery: { mode: "legacy_snapshot" },
   });
+
+  assert.deepEqual(normalizeServerRecord({
+    type: "terminal_events/recovery",
+    payload: {
+      schema_version: 1,
+      session_id: "session-cursor",
+      mode: "replay_complete",
+      stream_id: "tes_0123456789abcdef01234567",
+      requested_cursor: 3,
+      earliest_cursor: 1,
+      latest_cursor: 5,
+      replayed_count: 2,
+    },
+  }).payload, {
+    schema_version: 1,
+    session_id: "session-cursor",
+    mode: "replay_complete",
+    stream_id: "tes_0123456789abcdef01234567",
+    requested_cursor: 3,
+    earliest_cursor: 1,
+    latest_cursor: 5,
+    gap_reason: "",
+    replayed_count: 2,
+  });
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "terminal_events/recovery",
+      payload: {
+        schema_version: 1,
+        session_id: "session-cursor",
+        mode: "replay_complete",
+        stream_id: "tes_0123456789abcdef01234567",
+        requested_cursor: 3,
+        earliest_cursor: 5,
+        latest_cursor: 4,
+        replayed_count: 1,
+      },
+    }),
+    /cursor 边界无效/,
+  );
+  for (const payload of [
+    {
+      schema_version: 1,
+      session_id: "session-cursor",
+      mode: "replay_complete",
+      stream_id: "",
+      requested_cursor: 3,
+      earliest_cursor: 1,
+      latest_cursor: 5,
+      replayed_count: 2,
+    },
+    {
+      schema_version: 1,
+      session_id: "session-cursor",
+      mode: "replay_complete",
+      stream_id: "tes_0123456789abcdef01234567",
+      requested_cursor: 3,
+      earliest_cursor: 1,
+      latest_cursor: 5,
+      replayed_count: 1,
+    },
+    {
+      schema_version: 1,
+      session_id: "session-cursor",
+      mode: "snapshot_complete",
+      stream_id: "tes_0123456789abcdef01234567",
+      requested_cursor: 3,
+      earliest_cursor: 4,
+      latest_cursor: 5,
+      replayed_count: 1,
+    },
+  ]) {
+    assert.throws(
+      () => normalizeServerRecord({
+        type: "terminal_events/recovery",
+        payload,
+      }),
+      /terminal event recovery/,
+    );
+  }
 
   assert.deepEqual(normalizeServerRecord({
     type: "permission/resolved",

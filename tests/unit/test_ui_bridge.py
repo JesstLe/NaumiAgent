@@ -66,6 +66,7 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.composition import create_agent_engine
 from naumi_agent.runtime.ports.events import EventSink, RuntimeEventType
+from naumi_agent.runtime.terminal_events import TerminalEventJournalStore
 from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycleFactory,
     TerminalRuntimeState,
@@ -1058,6 +1059,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "sequence_integrity",
             "task_snapshot",
             "terminal_event_cursor",
+            "terminal_event_recovery",
             "typed_ui_messages",
             "workbench_snapshot",
             "workbench_proposal_actions",
@@ -5267,6 +5269,267 @@ async def test_bridge_resume_replays_durable_completion_receipts(tmp_path: Path)
         json.loads(json.dumps(receipt.to_dict()))
     ]
     assert replayed[0]["request_id"] == "resume-receipt"
+
+
+@pytest.mark.asyncio
+async def test_bridge_cursor_recovery_fails_before_switching_session_authority() -> None:
+    class CountingEngine(_FakeEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.load_calls: list[str] = []
+
+        async def load_session(self, session_id: str) -> bool:
+            self.load_calls.append(session_id)
+            return await super().load_session(session_id)
+
+    engine = CountingEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session(
+        {
+            "session_id": "session-1",
+            "terminal_event_client_id": "tecli_0123456789abcdef01234567",
+            "terminal_event_stream_id": "tes_0123456789abcdef01234567",
+            "resume_after_cursor": 1,
+        },
+        request_id="resume-no-authority",
+    )
+
+    assert engine.load_calls == []
+    assert engine._session is None
+    assert next(record for record in _records(writer) if record["type"] == "error")[
+        "payload"
+    ]["code"] == "terminal_event_recovery_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_replays_only_missing_terminal_event_cursors(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    store = TerminalEventJournalStore(
+        tmp_path / "terminal-events.db",
+        workspace_root=engine.workspace_root,
+    )
+    engine.terminal_event_store = store
+    first = await store.append(
+        session_id="session-1",
+        event_type="completion/receipt",
+        criticality="terminal",
+        idempotency_key="completion:cursor-first",
+        payload={
+            "schema_version": 1,
+            "receipt_id": "cursor-first",
+            "run_id": "run-first",
+            "outcome": "completed",
+        },
+    )
+    second = await store.append(
+        session_id="session-1",
+        event_type="harness/receipt",
+        criticality="terminal",
+        idempotency_key="harness:run-second:1",
+        payload={
+            "schema_version": 1,
+            "run_id": "run-second",
+            "revision": 1,
+            "status": "completed_verified",
+            "task_kind": "change",
+            "changed_files": [],
+            "checks": [],
+            "criteria": [],
+            "warnings": [],
+            "tree_fingerprint": "a" * 64,
+        },
+    )
+    client_id = "tecli_0123456789abcdef01234567"
+    await store.acknowledge(
+        client_id=client_id,
+        session_id="session-1",
+        stream_id=first.stream_id,
+        cursor=first.cursor,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session(
+        {
+            "session_id": "session-1",
+            "terminal_event_client_id": client_id,
+            "terminal_event_stream_id": first.stream_id,
+            "resume_after_cursor": first.cursor,
+        },
+        request_id="resume-cursor",
+    )
+
+    records = _records(writer)
+    durable = [
+        record for record in records if record["type"] in {
+            "completion/receipt",
+            "harness/receipt",
+        }
+    ]
+    assert [(record["type"], record["cursor"]) for record in durable] == [
+        ("harness/receipt", second.cursor)
+    ]
+    recovery = next(
+        record for record in records
+        if record["type"] == "terminal_events/recovery"
+    )
+    assert recovery["payload"] == {
+        "schema_version": 1,
+        "session_id": "session-1",
+        "mode": "replay_complete",
+        "stream_id": first.stream_id,
+        "requested_cursor": 1,
+        "earliest_cursor": 1,
+        "latest_cursor": 2,
+        "gap_reason": "",
+        "replayed_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_bridge_resume_uses_nonjournaled_snapshot_outside_retention(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    store = TerminalEventJournalStore(
+        tmp_path / "terminal-events.db",
+        workspace_root=engine.workspace_root,
+        max_events_per_stream=2,
+    )
+    engine.terminal_event_store = store
+    records = []
+    for index in range(4):
+        records.append(
+            await store.append(
+                session_id="session-1",
+                event_type="completion/receipt",
+                criticality="terminal",
+                idempotency_key=f"completion:pruned-{index}",
+                payload={
+                    "schema_version": 1,
+                    "receipt_id": f"pruned-{index}",
+                    "run_id": f"run-pruned-{index}",
+                    "outcome": "completed",
+                },
+            )
+        )
+    client_id = "tecli_0123456789abcdef01234567"
+    await store.acknowledge(
+        client_id=client_id,
+        session_id="session-1",
+        stream_id=records[-1].stream_id,
+        cursor=1,
+    )
+    engine.harness_service = SimpleNamespace(
+        store=SimpleNamespace(list_session_runs=AsyncMock(return_value=[])),
+    )
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    run = await engine.chat_run_store.start_run(
+        session_id="session-1",
+        user_message_id="msg-snapshot",
+        run_id="run-snapshot",
+    )
+    receipt = CompletionReceipt.from_dict({
+        "schema_version": 1,
+        "receipt_id": "receipt-snapshot",
+        "run_id": run.id,
+        "outcome": "completed",
+        "summary": "窗口外快照。",
+        "git_state": {"available": False, "dirty": False},
+    })
+    await engine.chat_run_store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session(
+        {
+            "session_id": "session-1",
+            "terminal_event_client_id": client_id,
+            "terminal_event_stream_id": records[-1].stream_id,
+            "resume_after_cursor": 1,
+        },
+        request_id="resume-gap",
+    )
+
+    emitted = _records(writer)
+    replayed_receipt = next(
+        record for record in emitted if record["type"] == "completion/receipt"
+    )
+    assert "cursor" not in replayed_receipt
+    recovery = next(
+        record for record in emitted
+        if record["type"] == "terminal_events/recovery"
+    )
+    assert recovery["payload"]["mode"] == "snapshot_complete"
+    assert recovery["payload"]["gap_reason"] == "retention_gap"
+
+
+@pytest.mark.asyncio
+async def test_bridge_gap_snapshot_refuses_incomplete_business_authority(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    store = TerminalEventJournalStore(
+        tmp_path / "terminal-events.db",
+        workspace_root=engine.workspace_root,
+        max_events_per_stream=1,
+    )
+    engine.terminal_event_store = store
+    records = []
+    for index in range(3):
+        records.append(
+            await store.append(
+                session_id="session-1",
+                event_type="completion/receipt",
+                criticality="terminal",
+                idempotency_key=f"completion:authority-{index}",
+                payload={
+                    "schema_version": 1,
+                    "receipt_id": f"authority-{index}",
+                    "run_id": f"run-authority-{index}",
+                    "outcome": "completed",
+                },
+            )
+        )
+    client_id = "tecli_0123456789abcdef01234567"
+    await store.acknowledge(
+        client_id=client_id,
+        session_id="session-1",
+        stream_id=records[-1].stream_id,
+        cursor=1,
+    )
+    engine.chat_run_store = ChatRunStore(tmp_path / "chat-runs.db")
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.resume_session(
+        {
+            "session_id": "session-1",
+            "terminal_event_client_id": client_id,
+            "terminal_event_stream_id": records[-1].stream_id,
+            "resume_after_cursor": 1,
+        },
+        request_id="resume-incomplete-authority",
+    )
+
+    emitted = _records(writer)
+    error = next(record for record in emitted if record["type"] == "error")
+    assert error["payload"]["code"] == "terminal_event_snapshot_authority_unavailable"
+    assert not any(
+        record["type"] == "terminal_events/recovery" for record in emitted
+    )
 
 
 @pytest.mark.asyncio
