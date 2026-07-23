@@ -4059,6 +4059,22 @@ async def _run_harness(engine: Any, arg: str) -> None:
         batch_id = parsed.get("--batch") or f"sandbox-{uuid.uuid4().hex[:16]}"
         session = await engine.get_or_create_session()
         run_id = f"manual:{session.id}"
+
+        async def publish_sandbox_progress(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            if event != "harness_sandbox_eval_progress":
+                return
+            updater = (
+                _active_cli.update_harness_sandbox_eval
+                if _active_cli is not None
+                and hasattr(_active_cli, "update_harness_sandbox_eval")
+                else None
+            )
+            if updater is not None:
+                await updater(data)
+
         result = await engine.execute_tool(
             ToolCall(
                 id=f"manual-harness-sandbox-{uuid.uuid4().hex}",
@@ -4072,7 +4088,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
                     },
                     ensure_ascii=False,
                 ),
-            )
+            ),
+            on_event=publish_sandbox_progress,
         )
         console.print(Markdown(result.content))
         return

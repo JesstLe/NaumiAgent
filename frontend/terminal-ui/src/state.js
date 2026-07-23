@@ -383,6 +383,7 @@ export function createInitialState() {
       batchId: "",
       suiteId: "",
       scrollOffset: 0,
+      originAnchor: null,
     },
     harnessEvalPromotion: {
       requestId: "",
@@ -815,11 +816,25 @@ export function reduceServerEvent(state, record) {
     case "harness/eval-batch":
       addHarnessEvalBatch(state.harnessEvalBatches, payload);
       if (
+        payload.kind === "sandbox"
+        && state.route?.name === "conversation"
+      ) {
+        const originAnchor = state.harnessEvalBatch.originAnchor || {
+          scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+          followTail: Boolean(state.followTail),
+        };
+        state.route = { name: "harness_eval_batch", originAnchor };
+      }
+      if (
+        payload.kind === "sandbox"
+        ||
         state.harnessEvalBatch.requestId === String(record.request_id || "")
         || state.harnessEvalBatch.batchId === payload.batch_id
       ) {
         state.harnessEvalBatch.batchId = payload.batch_id;
-        state.harnessEvalBatch.suiteId = payload.suite_id;
+        state.harnessEvalBatch.suiteId = payload.kind === "sandbox"
+          ? "sandbox"
+          : payload.suite_id;
       }
       break;
     case "harness/eval-promotion": {
@@ -1050,6 +1065,7 @@ export function reduceServerEvent(state, record) {
         batchId: "",
         suiteId: "",
         scrollOffset: 0,
+        originAnchor: null,
       };
       state.harnessEvalPromotion = {
         requestId: "",
@@ -2720,6 +2736,23 @@ export function handleSubmitText(state, text, send) {
   if (interactionTakeover) {
     return send("interaction_takeover", { interaction_id: interactionTakeover[1] });
   }
+  const sandboxBatch = parseHarnessSandboxEvalCommand(commandText);
+  if (sandboxBatch) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    state.harnessEvalBatch = {
+      requestId: "",
+      batchId: sandboxBatch.batch_id,
+      suiteId: "sandbox",
+      scrollOffset: 0,
+      originAnchor,
+    };
+    const message = submitUserMessage(state, commandText, send);
+    state.harnessEvalBatch.requestId = String(message?.requestId || "");
+    return message;
+  }
   const harnessBatch = parseHarnessEvalBatchCommand(commandText);
   if (harnessBatch) {
     const originAnchor = {
@@ -3579,6 +3612,7 @@ export function handleHarnessEvalBatchKey(state, key) {
     const anchor = state.route.originAnchor || {};
     state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
     state.followTail = anchor.followTail !== false;
+    state.harnessEvalBatch.originAnchor = null;
     state.route = { name: "conversation", originAnchor: null };
     return true;
   }
@@ -3662,6 +3696,58 @@ function parseHarnessEvalBatchCommand(commandText) {
     }
   }
   return seen.size ? request : null;
+}
+
+function parseHarnessSandboxEvalCommand(commandText) {
+  const match = String(commandText || "").match(
+    /^\/harness\s+eval\s+sandbox\s+(.+)$/i,
+  );
+  if (!match) return null;
+  const tokens = match[1].trim().split(/\s+/);
+  const checkIds = [];
+  const options = new Map();
+  let index = 0;
+  while (index < tokens.length && !tokens[index].startsWith("--")) {
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(tokens[index])) return null;
+    checkIds.push(tokens[index]);
+    index += 1;
+  }
+  while (index < tokens.length) {
+    const option = tokens[index];
+    const value = tokens[index + 1];
+    if (
+      !["--samples", "--batch"].includes(option)
+      || options.has(option)
+      || !value
+      || value.startsWith("--")
+    ) return null;
+    options.set(option, value);
+    index += 2;
+  }
+  if (
+    !checkIds.length
+    || checkIds.length > 80
+    || new Set(checkIds).size !== checkIds.length
+  ) return null;
+  const samples = options.has("--samples")
+    ? Number(options.get("--samples"))
+    : 5;
+  if (
+    !Number.isSafeInteger(samples)
+    || samples < 5
+    || samples > 100
+    || (options.has("--samples") && !/^\d+$/.test(options.get("--samples")))
+  ) return null;
+  const batchId = String(options.get("--batch") || "");
+  if (batchId && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(batchId)) {
+    return null;
+  }
+  return {
+    kind: "sandbox",
+    check_ids: checkIds,
+    requested: samples,
+    batch_id: batchId,
+  };
 }
 
 function parseHarnessEvalPromotionCommand(commandText) {

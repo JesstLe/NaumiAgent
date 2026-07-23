@@ -63,5 +63,6 @@ HAR-08.4j 已注册 `harness_eval_sandbox` Tool 和 `/harness eval sandbox` 共�
 均可进入本 Service。测试中的 execution kernel 使用受控替身验证 Service 编排；真实 ARC-04
 materialization/Worker 命令执行由既有 HAR-08.4e 与单检查真实后端测试覆盖，本切片没有重复实现 Worker。
 
-下一切片应把 coordinator checkpoint 接入共享 Runtime typed event，再由 New UI/TUI 渲染真实进度。
-跨进程 admission、跨主机 dispatcher 和 Linux/Windows 真实隔离 CI 仍不属于本切片。
+HAR-08.4k 已把 coordinator checkpoint 接入共享 Runtime typed event，并由 New UI/TUI 渲染
+Store-confirmed 进度。跨进程 admission、跨主机 dispatcher、真实 queued/cancel/retry 和 Linux/Windows
+真实隔离 CI 仍未完成。

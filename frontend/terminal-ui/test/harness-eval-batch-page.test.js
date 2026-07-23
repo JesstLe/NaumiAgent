@@ -52,3 +52,34 @@ test("Harness Eval Batch page never invents identity before source review", () =
   assert(plain.includes("正在保存 · 0%"));
   assert(!plain.includes("可晋升"));
 });
+
+test("Harness Sandbox Eval page renders only coordinator facts", () => {
+  const lines = renderHarnessEvalBatchPage({
+    batchId: "sandbox-1",
+    snapshot: {
+      kind: "sandbox",
+      stage: "executing",
+      batch_id: "sandbox-1",
+      check_ids: ["unit", "lint"],
+      requested: 5,
+      persisted: 2,
+      checkpoint_id: `hsbatch_${"a".repeat(24)}`,
+      authority_key: "b".repeat(64),
+      lane: "sandbox",
+      run_id: "manual:session-1",
+      run_grant_sha256: "c".repeat(64),
+      sample_result_sha256: ["d".repeat(64), "e".repeat(64)],
+      code: "",
+      updated_at: "2026-07-23T10:00:00+08:00",
+    },
+  }, 100, 18);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert(plain.includes("Harness Sandbox Eval"));
+  assert(plain.includes("隔离执行 · 40%"));
+  assert(plain.includes("unit · lint"));
+  assert(plain.includes("结果摘要 · 2 个"));
+  assert(!plain.includes("Baseline"));
+  assert(!plain.includes("实现回归"));
+  assert(lines.every((line) => visibleWidth(line) <= 100));
+});

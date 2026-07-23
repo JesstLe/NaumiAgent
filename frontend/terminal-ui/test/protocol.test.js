@@ -172,6 +172,32 @@ function harnessEvalBatchPayload(stage = "evaluating") {
   };
 }
 
+function harnessSandboxEvalPayload(stage = "executing") {
+  const persisted = stage === "completed" ? 5 : 2;
+  return {
+    schema_version: 1,
+    kind: "sandbox",
+    stage,
+    terminal: ["completed", "failed"].includes(stage),
+    batch_id: "sandbox-1",
+    check_ids: ["unit", "lint"],
+    requested: 5,
+    persisted,
+    checkpoint_id: `hsbatch_${"a".repeat(24)}`,
+    checkpoint_sha256: "b".repeat(64),
+    authority_key: "c".repeat(64),
+    lane: "sandbox",
+    run_id: "manual:session-1",
+    run_grant_sha256: "d".repeat(64),
+    sample_result_sha256: Array.from(
+      { length: persisted },
+      (_, index) => String(index + 1).repeat(64),
+    ),
+    code: stage === "failed" ? "sample_execution_interrupted" : "",
+    updated_at: "2026-07-23T10:00:00+08:00",
+  };
+}
+
 function harnessEvalPromotionPayload(stage = "promoted") {
   const terminal = !["awaiting_reason", "awaiting_confirmation"].includes(stage);
   const successful = ["promoted", "already_active"].includes(stage);
@@ -806,6 +832,31 @@ test("harness eval batch response validates factual progress and terminal state"
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
     /完整样本/,
+  );
+});
+
+test("harness sandbox eval response preserves coordinator checkpoint semantics", () => {
+  const progress = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessSandboxEvalPayload(),
+  }).payload;
+  const completed = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessSandboxEvalPayload("completed"),
+  }).payload;
+
+  assert.equal(progress.kind, "sandbox");
+  assert.equal(progress.stage, "executing");
+  assert.deepEqual(progress.check_ids, ["unit", "lint"]);
+  assert.equal(progress.sample_result_sha256.length, 2);
+  assert.equal(completed.terminal, true);
+  assert.equal(completed.persisted, 5);
+
+  const invalid = harnessSandboxEvalPayload();
+  invalid.sample_result_sha256.pop();
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
+    /摘要数量/,
   );
 });
 

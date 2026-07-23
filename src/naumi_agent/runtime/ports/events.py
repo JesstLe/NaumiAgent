@@ -34,6 +34,7 @@ class RuntimeEventType(StrEnum):
     HARNESS_COMPLETION_RECEIPT = "harness_completion_receipt"
     HARNESS_KNOWLEDGE = "harness_knowledge"
     HARNESS_KNOWLEDGE_INVALIDATED = "harness_knowledge_invalidated"
+    HARNESS_SANDBOX_EVAL_PROGRESS = "harness_sandbox_eval_progress"
     HOOK_TRACE = "hook_trace"
     LATENCY_METRIC = "latency_metric"
     PERF_PHASE = "perf_phase"

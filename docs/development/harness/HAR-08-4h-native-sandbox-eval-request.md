@@ -58,4 +58,5 @@ HAR-08.4h 只建立可执行请求权威，不签发父权限、Run Grant，不�
 不能隐式读取易漂移 working tree。下一切片应让 `HarnessService`、`harness_eval_sandbox` Tool 和
 HAR-08.4i 已让 `HarnessService` 共用本 request builder、HAR-08.4g admission、4f coordinator、4e kernel
 与 H5a Store；HAR-08.4j 已接入 `harness_eval_sandbox` Tool 和 `/harness eval sandbox`。New UI/TUI typed
-checkpoint 尚未接线，Eval YAML 的 protocol-only schema 保持不变。
+checkpoint 已由 HAR-08.4k 接线，Eval YAML 的 protocol-only schema 保持不变。跨进程 admission 与真实
+queued/cancel/retry 仍待后续权威实现。

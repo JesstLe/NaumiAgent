@@ -128,6 +128,9 @@
 - HAR-08.4j Sandbox Eval Tool and Slash：已实现。Agent Tool 与共享 Slash 路由均通过唯一 Service，权限
   精确绑定 checks/samples/batch/run；真实 5-sample Worker batch 形成完整 H5a、artifact 与权限清理证据。
   详见 `HAR-08-4j-sandbox-eval-tool-slash.md`。
+- HAR-08.4k Sandbox Eval Typed Progress：已实现。Coordinator checkpoint 经闭集 Runtime event 同步到
+  New UI/TUI；两端展示真实 stage、Store-confirmed persisted、authority 与 run/grant 摘要，且 Sandbox 页面
+  不伪造普通 Eval Case/Baseline 指标。详见 `HAR-08-4k-sandbox-eval-typed-progress.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -137,5 +140,5 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：Sandbox Eval typed progress UI、跨进程/多主机 Batch admission 与
-  Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
+- HAR-08.4 仍为 partial：跨进程/多主机 Batch admission、真实 queued/cancel/retry 与 Linux/Windows CI
+  证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。

@@ -191,6 +191,24 @@ class PendingInteraction:
     owner_renew_task: asyncio.Task[None] | None = None
 
 
+@dataclass(slots=True)
+class _BridgeHarnessSandboxFrontend:
+    """Bind one shared Slash progress stream to its originating UI request."""
+
+    bridge: Any
+    request_id: str
+
+    async def update_harness_sandbox_eval(
+        self,
+        progress: dict[str, object],
+    ) -> None:
+        await self.bridge.emit(
+            ServerEventType.HARNESS_EVAL_BATCH,
+            dict(progress),
+            request_id=self.request_id,
+        )
+
+
 def _backend_choices_error_message(kind: str) -> str:
     if kind == "missing":
         return "后端权限选择缺失，系统已拒绝本次操作。"
@@ -3340,7 +3358,20 @@ class JsonlEngineBridge:
             parse_reasoning_toggle = None
 
         try:
-            output = await execute_slash_command(self.engine, cmd)
+            frontend = (
+                _BridgeHarnessSandboxFrontend(self, request_id)
+                if re.match(
+                    r"^/harness\s+eval\s+sandbox(?:\s|$)",
+                    cmd,
+                    re.IGNORECASE,
+                )
+                else None
+            )
+            output = await execute_slash_command(
+                self.engine,
+                cmd,
+                frontend=frontend,
+            )
         except Exception as exc:
             logger.exception("UI bridge slash command execution failed")
             if self.debug_trace is not None:
@@ -3948,6 +3979,12 @@ class JsonlEngineBridge:
         """Publish one engine event after any durable completion boundary."""
 
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
+        if event == "harness_sandbox_eval_progress":
+            await self.emit(
+                ServerEventType.HARNESS_EVAL_BATCH,
+                data,
+                request_id=self._active_run_context.get("request_id") or None,
+            )
         if event == "harness_completion_receipt":
             await self.emit(
                 ServerEventType.HARNESS_RECEIPT,

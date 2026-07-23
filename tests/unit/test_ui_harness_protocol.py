@@ -27,12 +27,14 @@ from naumi_agent.harness.replay_models import (
     HarnessReplayResult,
     HarnessReplayTimelineEvent,
 )
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchCheckpoint
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
     harness_eval_batch_payload,
     harness_eval_promotion_payload,
     harness_explain_payload,
     harness_replay_payload,
+    harness_sandbox_eval_progress_payload,
 )
 
 
@@ -159,6 +161,47 @@ def test_harness_eval_batch_payload_distinguishes_progress_and_terminal() -> Non
                     ),
                 ),
             )
+        )
+
+
+def test_harness_sandbox_eval_progress_payload_preserves_checkpoint_facts() -> None:
+    checkpoint = HarnessSandboxBatchCheckpoint.model_construct(
+        schema_version=1,
+        policy_version="harness-sandbox-batch-v1",
+        checkpoint_id=f"hsbatch_{'a' * 24}",
+        checkpoint_sha256="a" * 64,
+        authority_key="b" * 64,
+        lane="sandbox",
+        stage="executing",
+        requested_samples=5,
+        persisted_samples=2,
+        sample_result_sha256=("c" * 64, "d" * 64),
+        run_id="hsrun:test",
+        run_grant_sha256="e" * 64,
+        code="",
+        updated_at="2026-07-23T10:00:00+08:00",
+    )
+
+    payload = harness_sandbox_eval_progress_payload(
+        checkpoint,
+        batch_id="sandbox-batch-1",
+        check_ids=("unit", "lint"),
+    )
+
+    assert payload["kind"] == "sandbox"
+    assert payload["stage"] == "executing"
+    assert payload["terminal"] is False
+    assert payload["requested"] == 5
+    assert payload["persisted"] == 2
+    assert payload["check_ids"] == ["unit", "lint"]
+    assert payload["sample_result_sha256"] == ["c" * 64, "d" * 64]
+    assert "workspace_root" not in payload
+
+    with pytest.raises(ValueError, match="check_ids"):
+        harness_sandbox_eval_progress_payload(
+            checkpoint,
+            batch_id="sandbox-batch-1",
+            check_ids=("unit", "unit"),
         )
 
 

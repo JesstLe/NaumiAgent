@@ -28,6 +28,7 @@ EXPECTED_RUNTIME_EVENT_TYPES = frozenset({
     "harness_completion_receipt",
     "harness_knowledge",
     "harness_knowledge_invalidated",
+    "harness_sandbox_eval_progress",
     "hook_trace",
     "latency_metric",
     "perf_phase",
