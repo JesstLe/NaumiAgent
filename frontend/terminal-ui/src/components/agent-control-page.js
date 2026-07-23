@@ -148,6 +148,10 @@ function renderDetail(view, snapshot, width) {
       `状态 · ${item.status} / ${item.phase}`,
       `当前工具 · ${item.current_tool || "-"}`,
       `最近工具 · ${array(item.recent_tools).join(", ") || "-"}`,
+      `Worker 工具范围 · ${workerToolScope(item.worker_tool_scope)}`,
+      item.worker_contract_failure_code
+        ? color(ANSI.yellow, `Worker 合同降级 · ${item.worker_contract_failure_code}`)
+        : `Worker 合同 · 请求 ${shortDigest(item.worker_request_sha256)} · 结果 ${shortDigest(item.worker_result_sha256)}`,
       item.heartbeat_failure_code
         ? color(
           ANSI.yellow,
@@ -187,6 +191,18 @@ function renderDetail(view, snapshot, width) {
     `工具 · ${array(item.tools).join(", ") || "-"}`,
     `年龄 · ${number(item.age_ms)}ms · 心跳 ${number(item.heartbeat_age_ms)}ms`,
   ].flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+}
+
+function shortDigest(value) {
+  const digest = String(value || "");
+  return digest ? digest.slice(0, 12) : "待生成";
+}
+
+function workerToolScope(value) {
+  const tools = array(value);
+  if (!tools.length) return "-";
+  const visible = tools.slice(0, 8).join(", ");
+  return tools.length > 8 ? `${visible}，另 ${tools.length - 8} 项` : visible;
 }
 
 function executionStatus(status) {

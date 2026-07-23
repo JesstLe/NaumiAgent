@@ -1921,6 +1921,9 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.executions[0].stop_supported, true);
   assert.equal(normalized.executions[0].heartbeat_phase, "running");
   assert.equal(normalized.executions[0].heartbeat_subject_id, "agent-execution-test");
+  assert.equal(normalized.executions[0].worker_request_sha256, "a".repeat(64));
+  assert.equal(normalized.executions[0].worker_result_sha256, "");
+  assert.deepEqual(normalized.executions[0].worker_tool_scope, ["file_read"]);
 
   const update = normalizeServerRecord({
     type: "agents/update",
@@ -1990,6 +1993,26 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     /execution.heartbeat_phase 无效/,
   );
 
+  const invalidWorkerDigest = agentControlSnapshotFixture(1);
+  invalidWorkerDigest.executions[0].worker_request_sha256 = "not-a-digest";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: invalidWorkerDigest,
+    }),
+    /worker_request_sha256.*SHA-256/,
+  );
+
+  const oversizedWorkerScope = agentControlSnapshotFixture(1);
+  oversizedWorkerScope.executions[0].worker_tool_scope = Array(257).fill("file_read");
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: oversizedWorkerScope,
+    }),
+    /worker_tool_scope.*最多 256 项/,
+  );
+
   const missingSection = agentControlSnapshotFixture(1);
   delete missingSection.blackboard;
   assert.throws(
@@ -2053,6 +2076,10 @@ function agentControlSnapshotFixture(revision) {
       heartbeat_subject_id: "agent-execution-test",
       heartbeat_phase: "running",
       heartbeat_failure_code: "",
+      worker_request_sha256: "a".repeat(64),
+      worker_result_sha256: "",
+      worker_tool_scope: ["file_read"],
+      worker_contract_failure_code: "",
       current_tool: "file_read",
       recent_tools: ["file_read"],
       total_tokens: 0,

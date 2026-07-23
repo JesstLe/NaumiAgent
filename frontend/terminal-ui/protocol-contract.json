@@ -257,6 +257,12 @@
       "heartbeat_phase",
       "heartbeat_failure_code"
     ],
+    "execution_worker_contract_fields": [
+      "worker_request_sha256",
+      "worker_result_sha256",
+      "worker_tool_scope",
+      "worker_contract_failure_code"
+    ],
     "heartbeat_phases": [
       "starting",
       "running",

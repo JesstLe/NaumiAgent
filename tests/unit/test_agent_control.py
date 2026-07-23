@@ -157,6 +157,10 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert execution.heartbeat_subject_id.startswith("agent-execution-")
         assert execution.heartbeat_phase == "running"
         assert execution.heartbeat_failure_code == ""
+        assert len(execution.worker_request_sha256) == 64
+        assert execution.worker_result_sha256 == ""
+        assert "file_read" in execution.worker_tool_scope
+        assert execution.worker_contract_failure_code == ""
         assert first.team_messages[0].topic == "team.review"
         assert first.team_messages[0].priority == "high"
         assert first.blackboard[0].key == "team/decision"

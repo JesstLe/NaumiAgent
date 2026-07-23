@@ -5116,6 +5116,10 @@ function normalizeExecutionDescriptor(item) {
       ? strictChoice(item.heartbeat_phase, "execution.heartbeat_phase", HEARTBEAT_PHASES)
       : "",
     heartbeat_failure_code: agentText(item.heartbeat_failure_code),
+    worker_request_sha256: optionalSha256(item.worker_request_sha256, "execution.worker_request_sha256"),
+    worker_result_sha256: optionalSha256(item.worker_result_sha256, "execution.worker_result_sha256"),
+    worker_tool_scope: agentTextArray(item.worker_tool_scope ?? [], "execution.worker_tool_scope", 256),
+    worker_contract_failure_code: agentText(item.worker_contract_failure_code),
     current_tool: agentText(item.current_tool),
     recent_tools: agentTextArray(item.recent_tools, "execution.recent_tools", 20),
     total_tokens: strictAgentNonnegativeInteger(item.total_tokens ?? 0, "execution.total_tokens"),
@@ -5125,6 +5129,15 @@ function normalizeExecutionDescriptor(item) {
     stop_supported: strictBoolean(item.stop_supported, "execution.stop_supported"),
     stop_requested: strictBoolean(item.stop_requested, "execution.stop_requested"),
   };
+}
+
+function optionalSha256(value, field) {
+  const result = agentText(value);
+  if (!result) return "";
+  if (!/^[0-9a-f]{64}$/.test(result)) {
+    throw new Error(`${field} 必须是小写 SHA-256`);
+  }
+  return result;
 }
 
 function normalizeTeamMessage(item) {

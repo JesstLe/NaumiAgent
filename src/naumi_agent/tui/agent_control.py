@@ -380,6 +380,19 @@ def _format_execution(snapshot: AgentControlSnapshot, selected_id: str) -> list[
         f"- 状态：{item.status} · 阶段：{item.phase}",
         f"- 当前工具：`{_code(item.current_tool or '-')}`",
         f"- 最近工具：{', '.join(f'`{_code(value)}`' for value in item.recent_tools) or '-'}",
+        (
+            "- Worker 工具范围："
+            + _tool_scope_summary(item.worker_tool_scope)
+        ),
+        (
+            f"- Worker 合同：请求 `{_code(_short_digest(item.worker_request_sha256))}`"
+            f" · 结果 `{_code(_short_digest(item.worker_result_sha256))}`"
+            + (
+                f" · 降级 `{_code(item.worker_contract_failure_code)}`"
+                if item.worker_contract_failure_code
+                else ""
+            )
+        ),
         f"- 耗时：{item.elapsed_ms}ms · heartbeat：{item.heartbeat_age_ms}ms",
         (
             f"- 持久心跳：{item.heartbeat_phase or '未启用'}"
@@ -394,6 +407,21 @@ def _format_execution(snapshot: AgentControlSnapshot, selected_id: str) -> list[
         f"- 操作：{'可停止' if item.stop_supported else '不可停止'}",
         *( [f"- 错误：{_plain(item.error)}"] if item.error else [] ),
     ]
+
+
+def _short_digest(value: str) -> str:
+    return value[:12] if value else "待生成"
+
+
+def _tool_scope_summary(values: tuple[str, ...]) -> str:
+    if not values:
+        return "-"
+    visible = ", ".join(f"`{_code(value)}`" for value in values[:8])
+    return (
+        f"{visible}，另 {len(values) - 8} 项"
+        if len(values) > 8
+        else visible
+    )
 
 
 def _format_team(snapshot: AgentControlSnapshot, selected_id: str) -> list[str]:

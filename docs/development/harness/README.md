@@ -38,7 +38,8 @@ HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/term
 HAR-10.7a 已封住直接 Agent 委派绕过 `max_parallel_agents` 的入口，让 direct/batch/DAG 共用进程内
 admission、排队计数与取消清理，并拒绝容量饱和时会自锁的嵌套委派；HAR-10.7b 又以
 `max_queued_agents` 封住本地等待协程的无界增长，并提供稳定过载回执。持久 Agent Worker、跨进程队列与
-公平调度仍属于 ARC-04/06 后续。
+公平调度仍属于 ARC-04/06 后续。ARC-04.5a 已先让现有委派在模型调用前签发请求合同、终态签发低敏结果
+回执，并由 New UI/TUI 显示精确工具范围与摘要；合同尚未进入 durable Agent Job Store。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request

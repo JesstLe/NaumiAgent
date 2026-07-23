@@ -8,6 +8,7 @@ import math
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from inspect import signature
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,12 @@ from naumi_agent.agents.base import (
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
+from naumi_agent.daemons.agent_worker_contract import (
+    AgentWorkerRequest,
+    AgentWorkerResult,
+    issue_agent_worker_request,
+    issue_agent_worker_result,
+)
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.runtime.agent_heartbeat import (
     AgentExecutionHeartbeatFactory,
@@ -117,6 +124,10 @@ class AgentExecutionRecord:
     heartbeat_subject_id: str = ""
     heartbeat_phase: str = ""
     heartbeat_failure_code: str = ""
+    worker_request_sha256: str = ""
+    worker_result_sha256: str = ""
+    worker_tool_scope: tuple[str, ...] = ()
+    worker_contract_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -143,6 +154,7 @@ class _ActiveExecution:
     session_id: str
     agent_name: str
     description: str
+    worker_request: AgentWorkerRequest
     started_at: float = field(default_factory=time.time)
     started_mono: float = field(default_factory=time.monotonic)
     last_updated_mono: float = field(default_factory=time.monotonic)
@@ -155,6 +167,8 @@ class _ActiveExecution:
     execute_task: asyncio.Task[AgentResult] | None = None
     heartbeat_lifecycle: AgentExecutionHeartbeatLifecycle | None = None
     heartbeat_failure_code: str = ""
+    worker_result: AgentWorkerResult | None = None
+    worker_contract_failure_code: str = ""
 
 
 class SubAgentManager:
@@ -508,6 +522,7 @@ class SubAgentManager:
         self,
         task: SubTask,
         agent_name: str,
+        worker_request: AgentWorkerRequest,
     ) -> bool:
         async with self._execution_lock:
             if task.id in self._active_executions:
@@ -519,6 +534,7 @@ class SubAgentManager:
                 ),
                 agent_name=agent_name,
                 description=task.description,
+                worker_request=worker_request,
             )
             return True
 
@@ -622,6 +638,26 @@ class SubAgentManager:
             execution = self._active_executions.pop(task_id, None)
             if execution is None:
                 return
+            try:
+                execution.worker_result = issue_agent_worker_result(
+                    request=execution.worker_request,
+                    status=result.status,
+                    response=result.response,
+                    error=result.error,
+                    total_tokens=result.total_tokens,
+                    total_cost_usd=result.total_cost_usd,
+                    turns=result.turns,
+                    completed_at=datetime.now(UTC).isoformat(),
+                )
+            except (TypeError, ValueError) as exc:
+                execution.worker_contract_failure_code = (
+                    "agent_worker_result_invalid"
+                )
+                logger.warning(
+                    "Agent Worker terminal contract rejected [%s]: %s",
+                    task_id,
+                    type(exc).__name__,
+                )
             lifecycle = execution.heartbeat_lifecycle
             now_mono = time.monotonic()
             record = _execution_record(
@@ -825,7 +861,45 @@ class SubAgentManager:
 
         context = "\n\n".join(context_parts) if context_parts else ""
 
-        if not await self._register_execution(task, agent_name):
+        try:
+            worker_request = issue_agent_worker_request(
+                task_id=task.id,
+                session_id=str(
+                    getattr(getattr(self._engine, "_session", None), "id", "") or ""
+                ),
+                agent_name=agent_name,
+                task=task.description,
+                context=context,
+                tool_scope=agent.tool_names,
+                permission_mode=agent.config.permission_level,
+                model_tier=agent.config.model_tier,
+                max_turns=agent.config.max_turns,
+                max_budget_usd=agent.config.max_budget_usd,
+                timeout_seconds=_agent_timeout_seconds(agent),
+                message_topic=f"task.{task.id}.completed",
+                issued_at=datetime.now(UTC).isoformat(),
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Agent Worker request contract rejected [%s]: %s",
+                task.id,
+                type(exc).__name__,
+            )
+            result = AgentResult(
+                status="error",
+                error="Agent Worker 请求合同无效，已在模型调用前安全拒绝。",
+            )
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
+
+        if not await self._register_execution(task, agent_name, worker_request):
             await self._emit_subagent_event(
                 event_callback,
                 status="failed",
@@ -870,6 +944,7 @@ class SubAgentManager:
                     "task_id": task.id,
                     "agent_name": agent_name,
                     "description": task.description,
+                    "worker_request_sha256": worker_request.request_sha256,
                 },
                 agent_name=agent_name,
             ))
@@ -1320,6 +1395,11 @@ def _execution_record(
         heartbeat_subject_id = heartbeat.subject_id
         heartbeat_phase = heartbeat.phase
         heartbeat_failure_code = heartbeat_failure_code or heartbeat.failure_code
+    worker_result_sha256 = (
+        execution.worker_result.result_sha256
+        if execution.worker_result is not None
+        else ""
+    )
     return AgentExecutionRecord(
         task_id=execution.task_id,
         session_id=execution.session_id,
@@ -1334,6 +1414,10 @@ def _execution_record(
         heartbeat_subject_id=heartbeat_subject_id,
         heartbeat_phase=heartbeat_phase,
         heartbeat_failure_code=heartbeat_failure_code,
+        worker_request_sha256=execution.worker_request.request_sha256,
+        worker_result_sha256=worker_result_sha256,
+        worker_tool_scope=execution.worker_request.tool_scope,
+        worker_contract_failure_code=execution.worker_contract_failure_code,
         current_tool=execution.current_tool,
         recent_tools=tuple(execution.recent_tools),
         total_tokens=result.total_tokens if result is not None else 0,
