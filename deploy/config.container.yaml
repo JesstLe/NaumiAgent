@@ -29,7 +29,9 @@ safety:
   allowed_dirs:
     - "/workspace"
     - "/app/data"
-  max_turns: 30
+  max_turns: 50
+  max_parallel_sandbox_batches: 2
+  max_queued_sandbox_batches: 8
   max_input_tokens: 500000
 
 mcp:

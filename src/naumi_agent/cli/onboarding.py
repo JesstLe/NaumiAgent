@@ -224,6 +224,8 @@ def _build_config(
             "max_parallel_tools": 4,
             "max_parallel_agents": 4,
             "max_queued_agents": 64,
+            "max_parallel_sandbox_batches": 2,
+            "max_queued_sandbox_batches": 8,
         },
         "mcp": {"servers": {}},
         "api": {

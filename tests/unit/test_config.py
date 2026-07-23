@@ -18,6 +18,8 @@ class TestAppConfig:
         assert config.safety.max_parallel_tools == 4
         assert config.safety.max_parallel_agents == 4
         assert config.safety.max_queued_agents == 64
+        assert config.safety.max_parallel_sandbox_batches == 2
+        assert config.safety.max_queued_sandbox_batches == 8
         assert config.memory.session_db_path == "data/sessions.db"
         assert config.ui.theme == "dark"
         assert config.ui.output_style == "detailed"
@@ -501,6 +503,48 @@ search:
         config = AppConfig(safety={"max_queued_agents": value})  # type: ignore[arg-type]
 
         assert config.safety.max_queued_agents == value
+
+    @pytest.mark.parametrize("value", [0, 33])
+    def test_parallel_sandbox_batch_limit_rejects_out_of_range_values(
+        self,
+        value: int,
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(
+                safety={"max_parallel_sandbox_batches": value}
+            )  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [1, 2, 32])
+    def test_parallel_sandbox_batch_limit_accepts_supported_values(
+        self,
+        value: int,
+    ) -> None:
+        config = AppConfig(
+            safety={"max_parallel_sandbox_batches": value}
+        )  # type: ignore[arg-type]
+
+        assert config.safety.max_parallel_sandbox_batches == value
+
+    @pytest.mark.parametrize("value", [-1, 10_001])
+    def test_queued_sandbox_batch_limit_rejects_out_of_range_values(
+        self,
+        value: int,
+    ) -> None:
+        with pytest.raises(ValueError):
+            AppConfig(
+                safety={"max_queued_sandbox_batches": value}
+            )  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [0, 8, 10_000])
+    def test_queued_sandbox_batch_limit_accepts_supported_values(
+        self,
+        value: int,
+    ) -> None:
+        config = AppConfig(
+            safety={"max_queued_sandbox_batches": value}
+        )  # type: ignore[arg-type]
+
+        assert config.safety.max_queued_sandbox_batches == value
 
     @pytest.mark.parametrize("value", [0, 9])
     def test_browser_concurrency_rejects_out_of_range_values(self, value: int) -> None:
