@@ -82,7 +82,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 19
+HARNESS_STORE_SCHEMA_VERSION = 20
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -94,8 +94,21 @@ _SANDBOX_ADMISSION_TERMINAL_STATES = frozenset(
     {"completed", "cancelled", "failed", "expired"}
 )
 _SANDBOX_ADMISSION_LANES = frozenset({"sandbox", "red", "green", "adversarial"})
+_SANDBOX_ADMISSION_RETRY_CODES = frozenset({
+    "sandbox_batch_retry_authorized",
+    "sandbox_batch_retry_cancel_not_accepted",
+    "sandbox_batch_retry_cancel_receipt_consumed",
+    "sandbox_batch_retry_cancel_receipt_mismatch",
+    "sandbox_batch_retry_cancel_receipt_not_found",
+    "sandbox_batch_retry_clock_rollback",
+    "sandbox_batch_retry_request_manifest_missing",
+    "sandbox_batch_retry_source_ticket_invalid",
+})
 _SANDBOX_ADMISSION_TICKET_RE = re.compile(r"^hsadm_[0-9a-f]{24}$")
 _SANDBOX_ADMISSION_CANCEL_ACTION_RE = re.compile(r"^hsac_[0-9a-f]{24}$")
+_SANDBOX_ADMISSION_CANCEL_RECEIPT_RE = re.compile(r"^hsacr_[0-9a-f]{24}$")
+_SANDBOX_ADMISSION_RETRY_ACTION_RE = re.compile(r"^hsar_[0-9a-f]{24}$")
+_SANDBOX_ADMISSION_RETRY_RECEIPT_RE = re.compile(r"^hsarr_[0-9a-f]{24}$")
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -368,6 +381,26 @@ class HarnessSandboxAdmissionCancelReceipt:
     presented_state: str
     decision: str
     observed_state: str
+    code: str
+    actor_id: str
+    reason: str
+    created_at: str
+    receipt_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxAdmissionRetryReceipt:
+    """Tamper-evident decision for one explicit post-cancel retry intent."""
+
+    receipt_id: str
+    action_id: str
+    cancel_receipt_id: str
+    cancel_receipt_sha256: str
+    source_ticket_id: str
+    source_authority_key: str
+    eval_request_sha256: str
+    execution_authority_key: str
+    decision: str
     code: str
     actor_id: str
     reason: str
@@ -5626,6 +5659,251 @@ class HarnessStore:
         except (aiosqlite.Error, OSError) as exc:
             raise HarnessStoreError("无法裁决 Sandbox Batch 取消请求。") from exc
 
+    async def authorize_sandbox_admission_retry(
+        self,
+        *,
+        workspace_root: str | Path,
+        action_id: str,
+        cancel_receipt_id: str,
+        cancel_receipt_sha256: str,
+        actor_id: str,
+        reason: str,
+        authority_token: str,
+        now: str,
+    ) -> HarnessSandboxAdmissionRetryReceipt:
+        """Consume one accepted cancel receipt into one durable retry authority."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(action_id)
+        cancel_id = _normalize_sandbox_cancel_receipt_id(cancel_receipt_id)
+        cancel_sha256 = _validate_sha256(
+            cancel_receipt_sha256,
+            field="cancel_receipt_sha256",
+        )
+        actor = _normalize_text(actor_id, field="actor_id", max_length=128)
+        normalized_reason = _normalize_text(reason, field="reason", max_length=500)
+        token = (
+            authority_token.strip().lower()
+            if isinstance(authority_token, str)
+            else ""
+        )
+        if re.fullmatch(r"[0-9a-f]{32,128}", token) is None:
+            raise ValueError("Sandbox retry authority token 格式无效。")
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        action_sha256 = _sandbox_retry_action_digest(
+            workspace_root=workspace,
+            action_id=action,
+            cancel_receipt_id=cancel_id,
+            cancel_receipt_sha256=cancel_sha256,
+            actor_id=actor,
+            reason=normalized_reason,
+        )
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await _select_sandbox_retry_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                if existing is not None:
+                    if not hmac.compare_digest(
+                        str(existing["action_sha256"]),
+                        action_sha256,
+                    ):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            f"Sandbox retry action {action} 已被不同请求占用。"
+                        )
+                    receipt = _sandbox_retry_receipt_from_row(existing)
+                    await db.rollback()
+                    return receipt
+
+                cancel_row = await _select_sandbox_cancel_receipt(
+                    db,
+                    workspace_root=workspace,
+                    receipt_id=cancel_id,
+                )
+                cancel_receipt = (
+                    _sandbox_cancel_receipt_from_row(cancel_row)
+                    if cancel_row is not None
+                    else None
+                )
+                source_ticket_id = (
+                    cancel_receipt.ticket_id if cancel_receipt is not None else ""
+                )
+                source_authority_key = (
+                    cancel_receipt.authority_key
+                    if cancel_receipt is not None
+                    else ""
+                )
+                eval_request_sha256 = ""
+                execution_authority_key = ""
+                decision = "rejected"
+
+                if cancel_receipt is None:
+                    code = "sandbox_batch_retry_cancel_receipt_not_found"
+                elif not hmac.compare_digest(
+                    cancel_receipt.receipt_sha256,
+                    cancel_sha256,
+                ):
+                    code = "sandbox_batch_retry_cancel_receipt_mismatch"
+                elif cancel_receipt.decision != "accepted":
+                    code = "sandbox_batch_retry_cancel_not_accepted"
+                elif datetime.fromisoformat(timestamp) < datetime.fromisoformat(
+                    cancel_receipt.created_at
+                ):
+                    code = "sandbox_batch_retry_clock_rollback"
+                else:
+                    ticket_row = await _select_sandbox_admission_row(
+                        db,
+                        workspace_root=workspace,
+                        ticket_id=cancel_receipt.ticket_id,
+                    )
+                    if (
+                        ticket_row is None
+                        or str(ticket_row["state"]) != "cancelled"
+                        or int(ticket_row["epoch"]) != cancel_receipt.presented_epoch
+                        or not hmac.compare_digest(
+                            str(ticket_row["authority_key"]),
+                            cancel_receipt.authority_key,
+                        )
+                    ):
+                        code = "sandbox_batch_retry_source_ticket_invalid"
+                    else:
+                        eval_request_sha256 = (
+                            await _resolve_sandbox_eval_request_sha256(
+                                db,
+                                workspace_root=workspace,
+                                source_authority_key=cancel_receipt.authority_key,
+                            )
+                            or ""
+                        )
+                        consumed = await _select_accepted_sandbox_retry_by_cancel(
+                            db,
+                            workspace_root=workspace,
+                            cancel_receipt_id=cancel_id,
+                        )
+                        if not eval_request_sha256:
+                            code = "sandbox_batch_retry_request_manifest_missing"
+                        elif consumed is not None:
+                            _sandbox_retry_receipt_from_row(consumed)
+                            code = "sandbox_batch_retry_cancel_receipt_consumed"
+                        else:
+                            decision = "accepted"
+                            code = "sandbox_batch_retry_authorized"
+                            execution_authority_key = (
+                                _sandbox_retry_execution_authority(
+                                    workspace_root=workspace,
+                                    action_id=action,
+                                    cancel_receipt_id=cancel_id,
+                                    cancel_receipt_sha256=cancel_sha256,
+                                    eval_request_sha256=eval_request_sha256,
+                                    authority_token=token,
+                                    created_at=timestamp,
+                                )
+                            )
+                            if hmac.compare_digest(
+                                execution_authority_key,
+                                cancel_receipt.authority_key,
+                            ):
+                                await db.rollback()
+                                raise HarnessStoreConflictError(
+                                    "Sandbox retry execution authority 未发生轮换。"
+                                )
+
+                receipt_sha256 = _sandbox_retry_receipt_digest(
+                    action_id=action,
+                    cancel_receipt_id=cancel_id,
+                    cancel_receipt_sha256=cancel_sha256,
+                    source_ticket_id=source_ticket_id,
+                    source_authority_key=source_authority_key,
+                    eval_request_sha256=eval_request_sha256,
+                    execution_authority_key=execution_authority_key,
+                    decision=decision,
+                    code=code,
+                    actor_id=actor,
+                    reason=normalized_reason,
+                    created_at=timestamp,
+                )
+                receipt_id = f"hsarr_{receipt_sha256[:24]}"
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_admission_retry_attempts (
+                        workspace_root, action_id, receipt_id,
+                        cancel_receipt_id, cancel_receipt_sha256,
+                        source_ticket_id, source_authority_key,
+                        eval_request_sha256, execution_authority_key,
+                        decision, code, actor_id, reason, created_at,
+                        action_sha256, receipt_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        action,
+                        receipt_id,
+                        cancel_id,
+                        cancel_sha256,
+                        source_ticket_id,
+                        source_authority_key,
+                        eval_request_sha256,
+                        execution_authority_key,
+                        decision,
+                        code,
+                        actor,
+                        normalized_reason,
+                        timestamp,
+                        action_sha256,
+                        receipt_sha256,
+                    ),
+                )
+                stored = await _select_sandbox_retry_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                assert stored is not None
+                receipt = _sandbox_retry_receipt_from_row(stored)
+                await db.commit()
+                return receipt
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError(
+                "无法裁决 Sandbox Batch retry authority。"
+            ) from exc
+
+    async def get_sandbox_admission_retry(
+        self,
+        *,
+        workspace_root: str | Path,
+        action_id: str,
+    ) -> HarnessSandboxAdmissionRetryReceipt | None:
+        """Recover one retry decision without recreating execution authority."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(action_id)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                row = await _select_sandbox_retry_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                return _sandbox_retry_receipt_from_row(row) if row is not None else None
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError(
+                "无法读取 Sandbox Batch retry authority。"
+            ) from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox Batch retry authority 损坏或无法读取。"
+            ) from exc
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -5666,6 +5944,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V17)
                             await db.executescript(_SCHEMA_V18)
                             await db.executescript(_SCHEMA_V19)
+                            await db.executescript(_SCHEMA_V20)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -6430,6 +6709,20 @@ def _normalize_sandbox_cancel_action_id(value: str) -> str:
     return normalized
 
 
+def _normalize_sandbox_cancel_receipt_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_CANCEL_RECEIPT_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox cancel receipt_id 格式无效。")
+    return normalized
+
+
+def _normalize_sandbox_retry_action_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_RETRY_ACTION_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry action_id 格式无效。")
+    return normalized
+
+
 def _normalize_sandbox_admission_lane(value: str) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     if normalized not in _SANDBOX_ADMISSION_LANES:
@@ -6545,6 +6838,82 @@ def _sandbox_cancel_receipt_digest(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _sandbox_retry_action_digest(
+    *,
+    workspace_root: str,
+    action_id: str,
+    cancel_receipt_id: str,
+    cancel_receipt_sha256: str,
+    actor_id: str,
+    reason: str,
+) -> str:
+    payload = _json_dumps({
+        "workspace_root": workspace_root,
+        "action_id": action_id,
+        "cancel_receipt_id": cancel_receipt_id,
+        "cancel_receipt_sha256": cancel_receipt_sha256,
+        "actor_id": actor_id,
+        "reason": reason,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sandbox_retry_execution_authority(
+    *,
+    workspace_root: str,
+    action_id: str,
+    cancel_receipt_id: str,
+    cancel_receipt_sha256: str,
+    eval_request_sha256: str,
+    authority_token: str,
+    created_at: str,
+) -> str:
+    payload = _json_dumps({
+        "policy_version": "harness-sandbox-retry-authority-v1",
+        "workspace_root": workspace_root,
+        "action_id": action_id,
+        "cancel_receipt_id": cancel_receipt_id,
+        "cancel_receipt_sha256": cancel_receipt_sha256,
+        "eval_request_sha256": eval_request_sha256,
+        "authority_token": authority_token,
+        "created_at": created_at,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sandbox_retry_receipt_digest(
+    *,
+    action_id: str,
+    cancel_receipt_id: str,
+    cancel_receipt_sha256: str,
+    source_ticket_id: str,
+    source_authority_key: str,
+    eval_request_sha256: str,
+    execution_authority_key: str,
+    decision: str,
+    code: str,
+    actor_id: str,
+    reason: str,
+    created_at: str,
+) -> str:
+    payload = _json_dumps({
+        "schema_version": 1,
+        "action_id": action_id,
+        "cancel_receipt_id": cancel_receipt_id,
+        "cancel_receipt_sha256": cancel_receipt_sha256,
+        "source_ticket_id": source_ticket_id,
+        "source_authority_key": source_authority_key,
+        "eval_request_sha256": eval_request_sha256,
+        "execution_authority_key": execution_authority_key,
+        "decision": decision,
+        "code": code,
+        "actor_id": actor_id,
+        "reason": reason,
+        "created_at": created_at,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 async def _select_sandbox_cancel_attempt(
     db: aiosqlite.Connection,
     *,
@@ -6558,6 +6927,23 @@ async def _select_sandbox_cancel_attempt(
             WHERE workspace_root = ? AND action_id = ?
             """,
             (workspace_root, action_id),
+        )
+    ).fetchone()
+
+
+async def _select_sandbox_cancel_receipt(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    receipt_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_cancel_attempts
+            WHERE workspace_root = ? AND receipt_id = ?
+            """,
+            (workspace_root, receipt_id),
         )
     ).fetchone()
 
@@ -6596,6 +6982,187 @@ def _sandbox_cancel_receipt_from_row(
         actor_id=str(row["actor_id"]),
         reason=str(row["reason"]),
         created_at=str(row["created_at"]),
+        receipt_sha256=expected,
+    )
+
+
+async def _select_sandbox_retry_attempt(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    action_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_retry_attempts
+            WHERE workspace_root = ? AND action_id = ?
+            """,
+            (workspace_root, action_id),
+        )
+    ).fetchone()
+
+
+async def _select_accepted_sandbox_retry_by_cancel(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    cancel_receipt_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_retry_attempts
+            WHERE workspace_root = ? AND cancel_receipt_id = ?
+              AND decision = 'accepted'
+            """,
+            (workspace_root, cancel_receipt_id),
+        )
+    ).fetchone()
+
+
+async def _resolve_sandbox_eval_request_sha256(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    source_authority_key: str,
+) -> str | None:
+    direct = await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_eval_requests
+            WHERE workspace_root = ? AND request_sha256 = ?
+            """,
+            (workspace_root, source_authority_key),
+        )
+    ).fetchone()
+    if direct is not None:
+        return _sandbox_eval_request_from_row(direct).request_sha256
+    retry_row = await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_retry_attempts
+            WHERE workspace_root = ? AND execution_authority_key = ?
+              AND decision = 'accepted'
+            """,
+            (workspace_root, source_authority_key),
+        )
+    ).fetchone()
+    if retry_row is None:
+        return None
+    retry = _sandbox_retry_receipt_from_row(retry_row)
+    manifest = await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_eval_requests
+            WHERE workspace_root = ? AND request_sha256 = ?
+            """,
+            (workspace_root, retry.eval_request_sha256),
+        )
+    ).fetchone()
+    if manifest is None:
+        return None
+    return _sandbox_eval_request_from_row(manifest).request_sha256
+
+
+def _sandbox_retry_receipt_from_row(
+    row: aiosqlite.Row,
+) -> HarnessSandboxAdmissionRetryReceipt:
+    workspace_root = _canonical_workspace(str(row["workspace_root"]))
+    action_id = _normalize_sandbox_retry_action_id(str(row["action_id"]))
+    cancel_receipt_id = _normalize_sandbox_cancel_receipt_id(
+        str(row["cancel_receipt_id"])
+    )
+    cancel_receipt_sha256 = _validate_sha256(
+        str(row["cancel_receipt_sha256"]),
+        field="cancel_receipt_sha256",
+    )
+    decision = str(row["decision"])
+    if decision not in {"accepted", "rejected"}:
+        raise HarnessStoreError("Sandbox retry decision 无效。")
+    code = str(row["code"])
+    if code not in _SANDBOX_ADMISSION_RETRY_CODES:
+        raise HarnessStoreError("Sandbox retry code 无效。")
+    actor_id = _normalize_text(str(row["actor_id"]), field="actor_id", max_length=128)
+    reason = _normalize_text(str(row["reason"]), field="reason", max_length=500)
+    source_ticket_id = str(row["source_ticket_id"])
+    source_authority_key = str(row["source_authority_key"])
+    eval_request_sha256 = str(row["eval_request_sha256"])
+    execution_authority_key = str(row["execution_authority_key"])
+    if source_ticket_id:
+        _normalize_sandbox_admission_ticket_id(source_ticket_id)
+    if source_authority_key:
+        _validate_sha256(source_authority_key, field="source_authority_key")
+    if eval_request_sha256:
+        _validate_sha256(eval_request_sha256, field="eval_request_sha256")
+    if execution_authority_key:
+        _validate_sha256(
+            execution_authority_key,
+            field="execution_authority_key",
+        )
+    if decision == "accepted" and (
+        not source_ticket_id
+        or not source_authority_key
+        or not eval_request_sha256
+        or not execution_authority_key
+        or code != "sandbox_batch_retry_authorized"
+        or hmac.compare_digest(source_authority_key, execution_authority_key)
+    ):
+        raise HarnessStoreError("Sandbox retry accepted receipt 字段不完整。")
+    if decision == "rejected" and (
+        execution_authority_key or code == "sandbox_batch_retry_authorized"
+    ):
+        raise HarnessStoreError("Sandbox retry rejected receipt 不得包含执行权威。")
+    created_at = _normalize_utc_timestamp(
+        str(row["created_at"]),
+        field="created_at",
+    )
+    expected = _sandbox_retry_receipt_digest(
+        action_id=action_id,
+        cancel_receipt_id=cancel_receipt_id,
+        cancel_receipt_sha256=cancel_receipt_sha256,
+        source_ticket_id=source_ticket_id,
+        source_authority_key=source_authority_key,
+        eval_request_sha256=eval_request_sha256,
+        execution_authority_key=execution_authority_key,
+        decision=decision,
+        code=code,
+        actor_id=actor_id,
+        reason=reason,
+        created_at=created_at,
+    )
+    if not hmac.compare_digest(expected, str(row["receipt_sha256"])):
+        raise HarnessStoreError("Sandbox retry receipt 摘要不一致。")
+    receipt_id = f"hsarr_{expected[:24]}"
+    if (
+        _SANDBOX_ADMISSION_RETRY_RECEIPT_RE.fullmatch(receipt_id) is None
+        or not hmac.compare_digest(receipt_id, str(row["receipt_id"]))
+    ):
+        raise HarnessStoreError("Sandbox retry receipt identity 不一致。")
+    expected_action = _sandbox_retry_action_digest(
+        workspace_root=workspace_root,
+        action_id=action_id,
+        cancel_receipt_id=cancel_receipt_id,
+        cancel_receipt_sha256=cancel_receipt_sha256,
+        actor_id=actor_id,
+        reason=reason,
+    )
+    if not hmac.compare_digest(expected_action, str(row["action_sha256"])):
+        raise HarnessStoreError("Sandbox retry action 摘要不一致。")
+    return HarnessSandboxAdmissionRetryReceipt(
+        receipt_id=receipt_id,
+        action_id=action_id,
+        cancel_receipt_id=cancel_receipt_id,
+        cancel_receipt_sha256=cancel_receipt_sha256,
+        source_ticket_id=source_ticket_id,
+        source_authority_key=source_authority_key,
+        eval_request_sha256=eval_request_sha256,
+        execution_authority_key=execution_authority_key,
+        decision=decision,
+        code=code,
+        actor_id=actor_id,
+        reason=reason,
+        created_at=created_at,
         receipt_sha256=expected,
     )
 
@@ -8121,4 +8688,39 @@ CREATE INDEX IF NOT EXISTS idx_harness_sandbox_eval_request_suite
 ON harness_sandbox_eval_requests (
     workspace_root, suite_id, created_at, request_id
 );
+"""
+
+_SCHEMA_V20 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_admission_retry_attempts (
+    workspace_root TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    cancel_receipt_id TEXT NOT NULL,
+    cancel_receipt_sha256 TEXT NOT NULL,
+    source_ticket_id TEXT NOT NULL,
+    source_authority_key TEXT NOT NULL,
+    eval_request_sha256 TEXT NOT NULL,
+    execution_authority_key TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+    code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    action_sha256 TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, action_id),
+    UNIQUE (workspace_root, receipt_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_harness_sandbox_retry_consumed_cancel
+ON harness_sandbox_admission_retry_attempts (
+    workspace_root, cancel_receipt_id
+)
+WHERE decision = 'accepted';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_harness_sandbox_retry_execution_authority
+ON harness_sandbox_admission_retry_attempts (
+    workspace_root, execution_authority_key
+)
+WHERE decision = 'accepted';
 """

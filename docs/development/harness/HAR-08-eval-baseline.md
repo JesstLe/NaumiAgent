@@ -144,6 +144,9 @@
   之前持久化完整不可变 request；新进程可按 workspace/request SHA 恢复，同 batch 漂移、并发覆盖和
   持久内容篡改均失败关闭，为取消后的真实 retry 提供服务端 request authority。详见
   `HAR-08-4o1-sandbox-eval-request-manifest.md`。
+- HAR-08.4o2 Sandbox Retry Intent Authority：已实现。Store v20 一次性消费 accepted cancel receipt，
+  复验 source ticket 和 Request Manifest，生成新的 durable execution authority；并发、幂等、rejected
+  audit 与 retry chain 均失败关闭。详见 `HAR-08-4o2-sandbox-retry-intent-authority.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -153,6 +156,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨主机 Batch admission、cancel 后新 execution authority/ticket 的真实 retry
-  与 Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
-  implemented。
+- HAR-08.4 仍为 partial：跨主机 Batch admission、retry intent 的 durable dispatch、新 ticket 和真实
+  恢复执行，以及 Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把
+  HAR-08 整体标记为 implemented。

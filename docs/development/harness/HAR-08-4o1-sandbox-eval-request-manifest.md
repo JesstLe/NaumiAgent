@@ -8,8 +8,9 @@
 在进程退出、取消完成或 UI 重连后，服务端如何从 durable authority 恢复最初获准执行的
 Sandbox Eval Request，而不是信任客户端重新提交 checks、samples、batch 或工作区。
 
-本切片不开放 retry 命令，也不创建新 admission ticket。只有 HAR-08.4o2 完成 accepted cancel
-receipt、新 action、新 execution authority 与真实重新执行的原子绑定后，UI 才能显示 retry。
+本切片不开放 retry 命令，也不创建新 admission ticket。HAR-08.4o2 已完成 accepted cancel
+receipt、新 action 与新 execution authority 的 durable intent；仍须 HAR-08.4o3 完成可恢复 dispatch、
+新 ticket 与真实重新执行后，UI 才能显示 retry 已启动。
 
 ## 已发现的缺口
 
@@ -109,9 +110,12 @@ claim，cancel receipt 保存的是取消裁决；三者都不能无歧义重建
 - 新 ticket、Run Grant、真实恢复执行；
 - Slash、Bridge、New UI 与 TUI retry surface。
 
-## 下一切片
+## 后续切片
 
-HAR-08.4o2 应在一个 durable transaction 中验证 accepted cancel receipt 与其原 ticket/request
-authority，消费该 receipt 创建新的 retry action/receipt 和 execution authority。上层随后以该 authority
-恢复本 manifest，并使用新 permission receipt、admission ticket、Runtime lease 与 Run Grant 继续原 batch
-的连续 H5a 前缀；不得复活旧 ticket，也不得接受客户端重述原请求。
+HAR-08.4o2 已在 durable transaction 中验证并消费 accepted cancel receipt，创建新的 retry
+action/receipt 和 execution authority。详见
+`HAR-08-4o2-sandbox-retry-intent-authority.md`。
+
+HAR-08.4o3 应以该 authority 恢复本 manifest，并使用新 permission receipt、admission ticket、
+Runtime lease 与 Run Grant 继续原 batch 的连续 H5a 前缀；不得复活旧 ticket，也不得接受客户端重述
+原请求。
