@@ -13,6 +13,7 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 | HAR-07.2 | Compact card | 状态、耗时、检查、证据、风险、警告 |
 | HAR-07.3 | Detail view | criteria/check/evidence/failure classification 分区 |
 | HAR-07.4a | Resume Recovery | 显式 resume 从持久化 Store 恢复单一权威卡片 |
+| HAR-07.4b1 | Idle Bridge Reconnect | 空闲断线有界重启、重新协商并精确恢复 session |
 | HAR-07.4b | Reconnect Recovery | 断线重连按 revision/gap 补发且幂等 |
 | HAR-07.5 | Interaction | `e` explain、`r` replay、`v` evidence、复制回执 |
 | HAR-07.6 | TUI parity | Textual 表面语义一致，布局可降级 |
@@ -36,7 +37,7 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 
 不在前端重新分类失败，不允许 UI 改写 Receipt。
 
-## 实现进展（2026-07-18）
+## 实现进展（2026-07-23）
 
 ### HAR-07.1a 已实现：类型化 Harness Receipt
 
@@ -138,8 +139,22 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 - Python/Node 共用 HAR-07 golden fixture，并以真实 SQLite Store → 重建 Service → slash router 验证；详细边界见
   `HAR-07-5b-evidence-focus.md`。
 
+### HAR-07.4b1 已实现：空闲 Bridge 进程重连
+
+- New UI 在无活动运行、permission、interaction 和未确认发送时，可在同一前端进程中有界重启
+  Python Bridge；三次尝试都重新 hello 协商、重置 sequence guard，且不会继承旧 Bridge 的
+  protocol registry 证明。
+- 断线前存在精确 session id 时，新进程 hello 成功后先发送替换式 resume，再释放断线期间的
+  deferred sends。HAR-07.4a 随后从持久 Store 恢复 Harness 与通用回执，前端仍只生成一张卡。
+- 活动运行或未裁决输入断线继续 fail-closed，并以非零码交给 TUI fallback；不会自动重放
+  submit、tool、permission 或 interaction。
+- 真实 Node UI + 两个先后启动的 JSONL Bridge 进程已验证重连、seq 重新起点、精确 session、
+  单回执和活动运行拒绝。详细状态机与剩余边界见
+  `HAR-07-4b1-idle-bridge-reconnect.md`。
+
 ### 尚未完成
 
-- HAR-07.4b：ARC-03.3a 已补齐 attested additive informational 事件不会制造伪 gap 的最小前置；
-  Bridge 断线重连、ARC-02.5 cursor/Event Store 和 revision/gap 自动补发仍未实现。显式 `/resume` 恢复已完成。
+- HAR-07.4b：ARC-03.3a 与 HAR-07.4b1 已补齐 additive informational 序号安全、空闲 Bridge
+  重启和精确 session resume；ARC-02.5 cursor/Event Store、活动运行恢复和 revision/gap 自动补发
+  仍未实现，不能把空闲进程重连描述为完整断线恢复。
 - HAR-07.5c+：完成卡入口与跨平台复制回执；`e/r` 刷新和 `v` Evidence 焦点已完成。

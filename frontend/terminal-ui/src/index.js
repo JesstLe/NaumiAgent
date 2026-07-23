@@ -3,6 +3,11 @@ import { spawn } from "node:child_process";
 import process from "node:process";
 import { configureAnsiColors, sanitizeTerminalText } from "./ansi.js";
 import { bridgeEnvironment, isIgnorableBridgeStderr } from "./bridge-stderr.js";
+import {
+  assessIdleBridgeRecovery,
+  bridgeRecoveryHandshakeTimeoutFromEnv,
+  createBridgeRecoveryTracker,
+} from "./bridge-recovery.js";
 import { createDebugLog } from "./debug-log.js";
 import { createHeartbeatController, heartbeatTimingFromEnv } from "./heartbeat.js";
 import {
@@ -78,6 +83,7 @@ import {
   hasTaskPanelFocus,
   cancelTaskPanelItem,
   jumpToTaskPanelRecord,
+  markBridgeReconnecting,
   openSelectedTaskPanelItem,
   pushSystemMessage,
   reduceServerEvent,
@@ -129,6 +135,9 @@ const launchUiStateStore = {
 };
 const explicitlyRestoredSessionIds = new Set();
 const heartbeatTiming = heartbeatTimingFromEnv(process.env);
+const bridgeRecoveryTimeoutMs = bridgeRecoveryHandshakeTimeoutFromEnv(process.env);
+const bridgeRecovery = createBridgeRecoveryTracker();
+const BRIDGE_RECOVERY_STABILITY_MS = 5_000;
 state.inputHistory = getProjectInputHistory(uiStateStore);
 let debugLog = null;
 
@@ -141,6 +150,10 @@ let nextDeferredProtocolId = 1;
 const deferredProtocolSends = [];
 let uiSnapshotTimer = null;
 let inputEscapeTimer = null;
+let bridgeRecoveryTimer = null;
+let bridgeRecoveryDeadlineTimer = null;
+let bridgeRecoveryStabilityTimer = null;
+let bridgeRecoveryReplayConfirmed = false;
 let quitting = false;
 let viewportWidth = null;
 let viewportHeight = null;
@@ -157,7 +170,7 @@ const screenPainter = createScreenPainter({
 });
 const redrawScheduler = createRedrawScheduler({ onRedraw: redraw });
 const protocolEventBatcher = createProtocolEventBatcher({ onRecord: processBridgeRecord });
-const serverSequenceGuard = createServerSequenceGuard();
+let serverSequenceGuard = createServerSequenceGuard();
 const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
@@ -195,10 +208,18 @@ function main() {
   debugLog = createDebugLog({ cwd: process.cwd(), env: process.env });
   state.frontendDebugLogPath = debugLog?.path ?? "";
   debugLog?.log("terminal_ui.state", { frontend_debug_log_path: state.frontendDebugLogPath });
-  bridge = startBridge();
-  bridge.on("error", handleFatalError);
-  rawSend = createEventSender(bridge.stdin, { debugLog });
   send = sendWithProtocolGate;
+  connectBridge();
+  setupTerminal();
+  redrawScheduler.settleInitial();
+}
+
+function connectBridge() {
+  const connectedBridge = startBridge();
+  bridge = connectedBridge;
+  bridgeRecoveryReplayConfirmed = false;
+  serverSequenceGuard = createServerSequenceGuard();
+  rawSend = createEventSender(connectedBridge.stdin, { debugLog });
   heartbeat = createHeartbeatController({
     sendPing: (id) => send("ping", {}, { id }),
     onHealth(value) {
@@ -217,8 +238,19 @@ function main() {
     onDebug: logDebug,
     ...heartbeatTiming,
   });
-  attachJsonlLineReader(bridge.stdout, handleBridgeLine);
-  bridge.stderr.on("data", (chunk) => {
+  connectedBridge.on("error", (error) => {
+    handleBridgeFailure(connectedBridge, {
+      kind: "spawn_error",
+      code: null,
+      signal: null,
+      error: safeFatalMessage(error),
+    });
+  });
+  attachJsonlLineReader(connectedBridge.stdout, (line) => {
+    if (connectedBridge === bridge) handleBridgeLine(line);
+  });
+  connectedBridge.stderr.on("data", (chunk) => {
+    if (connectedBridge !== bridge) return;
     const lines = chunk.toString("utf8").split(/\r?\n/);
     for (const rawLine of lines) {
       const text = rawLine.trim();
@@ -230,8 +262,8 @@ function main() {
       }
     }
   });
-  bridge.stdin.on("error", (error) => {
-    if (quitting) return;
+  connectedBridge.stdin.on("error", (error) => {
+    if (quitting || connectedBridge !== bridge) return;
     failQueuedUserMessages(state, {
       code: "bridge_write_failed",
       message: "无法写入本地 Bridge，请检查后端进程后重试。",
@@ -246,31 +278,17 @@ function main() {
     persistUiSnapshot();
     scheduleRedraw();
   });
-  bridge.on("exit", (code, signal) => {
-    debugLog?.log("bridge.exit", { code, signal, quitting });
-    if (!quitting) {
-      protocolEventBatcher.flush();
-      failQueuedUserMessages(state, {
-        code: "bridge_disconnected",
-        message: "本地 Bridge 已断开，请重启后重试。",
-      });
-      pushSystemMessage(
-        state,
-        "bridge exit",
-        `后端桥接已退出 code=${code} signal=${signal}`,
-        "error",
-        { dismissWelcome: true },
-      );
-      redraw();
-    }
-    restoreTerminal();
-    debugLog?.close();
-    process.exit(code ?? 0);
+  connectedBridge.on("exit", (code, signal) => {
+    handleBridgeFailure(connectedBridge, {
+      kind: "exit",
+      code,
+      signal,
+      error: "",
+    });
   });
 
-  setupTerminal();
   helloRequestId = rawSend("hello", createHelloPayload());
-  redrawScheduler.settleInitial();
+  if (bridgeRecovery.snapshot().active) armBridgeRecoveryDeadline(connectedBridge);
 }
 
 function startBridge() {
@@ -290,6 +308,203 @@ function startBridge() {
   );
 }
 
+function handleBridgeFailure(targetBridge, details) {
+  if (targetBridge !== bridge) return;
+  logDebug("bridge.failure", {
+    ...details,
+    quitting,
+    recovery: bridgeRecovery.snapshot(),
+  });
+  bridge = null;
+  rawSend = null;
+  heartbeat?.stop();
+  heartbeat = null;
+  clearBridgeRecoveryDeadline();
+  clearBridgeRecoveryStabilityTimer();
+  bridgeRecoveryReplayConfirmed = false;
+  protocolEventBatcher.cancel();
+  if (quitting) return;
+
+  const activeRecovery = bridgeRecovery.snapshot().active;
+  if (!activeRecovery) {
+    const decision = assessIdleBridgeRecovery(state);
+    if (!decision.recoverable) {
+      failBridgeRecoveryClosed(details, decision);
+      return;
+    }
+    bridgeRecovery.begin(decision.sessionId);
+    pushSystemMessage(
+      state,
+      "Bridge 恢复",
+      decision.sessionId
+        ? `本地 Bridge 已断开；正在恢复会话 ${decision.sessionId}，不会自动重放工具或消息。`
+        : "本地 Bridge 已断开；正在重新建立空闲控制面。",
+      "warning",
+      { dismissWelcome: true },
+    );
+  }
+  markBridgeReconnecting(state);
+  scheduleNextBridgeRecovery(details);
+}
+
+function scheduleNextBridgeRecovery(lastFailure = {}) {
+  clearBridgeRecoveryTimer();
+  const next = bridgeRecovery.nextAttempt();
+  if (!next.allowed) {
+    failBridgeRecoveryClosed(lastFailure, {
+      reason: "attempts_exhausted",
+      message: `连续 ${next.maxAttempts} 次重连失败。`,
+    });
+    return;
+  }
+  logDebug("bridge.recovery.scheduled", {
+    incident: next.incident,
+    attempt: next.attempt,
+    max_attempts: next.maxAttempts,
+    delay_ms: next.delayMs,
+    session_id: next.sessionId,
+  });
+  pushSystemMessage(
+    state,
+    "Bridge 恢复",
+    `正在进行第 ${next.attempt}/${next.maxAttempts} 次重连…`,
+    "info",
+    { dismissWelcome: true },
+  );
+  scheduleRedraw();
+  bridgeRecoveryTimer = setTimeout(() => {
+    bridgeRecoveryTimer = null;
+    if (quitting || !bridgeRecovery.snapshot().active) return;
+    try {
+      connectBridge();
+    } catch (error) {
+      logDebug("bridge.recovery.spawn_error", {
+        error: safeFatalMessage(error),
+        recovery: bridgeRecovery.snapshot(),
+      });
+      scheduleNextBridgeRecovery({
+        kind: "spawn_throw",
+        error: safeFatalMessage(error),
+      });
+    }
+  }, next.delayMs);
+}
+
+function armBridgeRecoveryDeadline(targetBridge) {
+  clearBridgeRecoveryDeadline();
+  bridgeRecoveryDeadlineTimer = setTimeout(() => {
+    bridgeRecoveryDeadlineTimer = null;
+    if (
+      quitting
+      || targetBridge !== bridge
+      || !bridgeRecovery.snapshot().active
+    ) return;
+    logDebug("bridge.recovery.timeout", {
+      timeout_ms: bridgeRecoveryTimeoutMs,
+      recovery: bridgeRecovery.snapshot(),
+    });
+    try {
+      targetBridge.kill();
+    } catch (error) {
+      handleBridgeFailure(targetBridge, {
+        kind: "recovery_timeout",
+        code: null,
+        signal: null,
+        error: safeFatalMessage(error),
+      });
+    }
+  }, bridgeRecoveryTimeoutMs);
+  bridgeRecoveryDeadlineTimer?.unref?.();
+}
+
+function completeBridgeRecovery(source) {
+  const current = bridgeRecovery.snapshot();
+  if (!current.active) return false;
+  clearBridgeRecoveryDeadline();
+  const completed = bridgeRecovery.complete();
+  logDebug("bridge.recovery.completed", {
+    incident: completed.incident,
+    attempt: completed.attempt,
+    session_id: completed.sessionId,
+    source,
+  });
+  pushSystemMessage(
+    state,
+    "Bridge 恢复",
+    completed.sessionId
+      ? `已重新连接并从权威存储恢复会话 ${completed.sessionId}。`
+      : "已重新连接本地 Bridge。",
+    "success",
+    { dismissWelcome: true },
+  );
+  flushDeferredProtocolSends();
+  scheduleRedraw();
+  bridgeRecoveryStabilityTimer = setTimeout(() => {
+    bridgeRecoveryStabilityTimer = null;
+    const settled = bridgeRecovery.settle();
+    logDebug("bridge.recovery.stable", {
+      incident: settled.incident,
+      attempt: settled.attempt,
+      stable_ms: BRIDGE_RECOVERY_STABILITY_MS,
+    });
+  }, BRIDGE_RECOVERY_STABILITY_MS);
+  bridgeRecoveryStabilityTimer?.unref?.();
+  return true;
+}
+
+function failBridgeRecoveryClosed(details, decision) {
+  if (quitting) return;
+  quitting = true;
+  clearBridgeRecoveryTimer();
+  clearBridgeRecoveryDeadline();
+  clearBridgeRecoveryStabilityTimer();
+  bridgeRecoveryReplayConfirmed = false;
+  const recovery = bridgeRecovery.abort();
+  failQueuedUserMessages(state, {
+    code: "bridge_disconnected",
+    message: "本地 Bridge 已断开；消息未自动重放，请在 fallback TUI 中核对。",
+  });
+  const cause = decision?.message || "后端桥接意外退出。";
+  const processDetail = details?.kind === "exit"
+    ? ` code=${details.code} signal=${details.signal}`
+    : "";
+  pushSystemMessage(
+    state,
+    "Bridge 恢复失败",
+    `${cause}${processDetail} 已停止 New UI，避免重复执行或展示未经确认的状态。`,
+    "error",
+    { dismissWelcome: true },
+  );
+  logDebug("bridge.recovery.failed_closed", {
+    reason: decision?.reason ?? "unknown",
+    details,
+    recovery,
+  });
+  redraw();
+  restoreTerminal();
+  terminateBridge();
+  debugLog?.close();
+  process.exit(1);
+}
+
+function clearBridgeRecoveryTimer() {
+  if (bridgeRecoveryTimer === null) return;
+  clearTimeout(bridgeRecoveryTimer);
+  bridgeRecoveryTimer = null;
+}
+
+function clearBridgeRecoveryDeadline() {
+  if (bridgeRecoveryDeadlineTimer === null) return;
+  clearTimeout(bridgeRecoveryDeadlineTimer);
+  bridgeRecoveryDeadlineTimer = null;
+}
+
+function clearBridgeRecoveryStabilityTimer() {
+  if (bridgeRecoveryStabilityTimer === null) return;
+  clearTimeout(bridgeRecoveryStabilityTimer);
+  bridgeRecoveryStabilityTimer = null;
+}
+
 function setupTerminal() {
   terminalSession.setup({
     onInput: handleKeyInput,
@@ -298,6 +513,9 @@ function setupTerminal() {
 }
 
 function restoreTerminal() {
+  clearBridgeRecoveryTimer();
+  clearBridgeRecoveryDeadline();
+  clearBridgeRecoveryStabilityTimer();
   heartbeat?.stop();
   workingAnimation.stop();
   redrawScheduler.cancel();
@@ -500,13 +718,72 @@ function processBridgeRecord(record) {
   const actions = reduceServerEvent(state, record);
   if (record.type === "ack" && record.payload?.event === "hello") {
     heartbeat?.start();
-    flushDeferredProtocolSends();
+    const recovery = bridgeRecovery.snapshot();
+    if (recovery.active && recovery.sessionId) {
+      const requestId = `bridge-recovery-${recovery.incident}-${recovery.attempt}`;
+      bridgeRecovery.markResumeRequest(requestId);
+      rawSend("resume", {
+        session_id: recovery.sessionId,
+        clear: true,
+      }, { id: requestId });
+      logDebug("bridge.recovery.resume_sent", {
+        incident: recovery.incident,
+        attempt: recovery.attempt,
+        session_id: recovery.sessionId,
+        request_id: requestId,
+      });
+    } else if (!recovery.active) {
+      flushDeferredProtocolSends();
+    }
   } else if (record.type === "error" && record.request_id === helloRequestId) {
     deferredProtocolSends.length = 0;
     failQueuedUserMessages(state, {
       code: record.payload?.code ?? "protocol_negotiation_failed",
       message: record.payload?.message ?? "终端协议协商失败，请升级后重试。",
     });
+    if (bridgeRecovery.snapshot().active) {
+      failBridgeRecoveryClosed(
+        { kind: "hello_rejected", error: record.payload?.message ?? "" },
+        {
+          reason: "protocol_negotiation_failed",
+          message: "重连后的 Bridge 协议协商失败。",
+        },
+      );
+      return;
+    }
+  } else if (
+    record.type === "error"
+    && bridgeRecovery.matchesResume(record)
+  ) {
+    failBridgeRecoveryClosed(
+      { kind: "resume_rejected", error: record.payload?.message ?? "" },
+      {
+        reason: "session_resume_failed",
+        message: "重连成功，但指定会话无法从权威存储恢复。",
+      },
+    );
+    return;
+  } else if (
+    record.type === "session/replayed"
+    && bridgeRecovery.matchesResume(record)
+  ) {
+    bridgeRecoveryReplayConfirmed = true;
+    logDebug("bridge.recovery.session_replayed", {
+      session_id: record.payload?.session_id ?? "",
+      request_id: record.request_id ?? "",
+    });
+  } else if (
+    record.type === "runtime/status"
+    && bridgeRecovery.snapshot().active
+    && bridgeRecoveryReplayConfirmed
+  ) {
+    completeBridgeRecovery("resume_status");
+  } else if (
+    record.type === "ready"
+    && bridgeRecovery.snapshot().active
+    && !bridgeRecovery.snapshot().sessionId
+  ) {
+    completeBridgeRecovery("ready_without_session");
   }
   syncWorkingAnimation();
   if (state.currentSessionId !== previousSessionId) {
