@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "manifest_kind": "source_license_scope",
+  "source_name": "local-claude-code",
+  "source_commit": "b9c3fb6c2e15476d77f28557e70f2f6dd48bee65",
+  "source_identity_sha256": "75d73b2b352c13417759f3353b6a6775ac6ea3606f2d6190606ec9559cf356cc",
+  "license_path": "README.md",
+  "license_sha256": "440c9accfada69aff1024ca8ee50a2b90a75dd846ff2ec5b415abc0881fed450",
+  "license_claim_sha256": "78d9c43037ecaa5de0b9b50bf9fc22164d52e3764f7550f6b8cfacb4d690e034",
+  "license_expression": "LicenseRef-Claude-Code-README",
+  "review_status": "restricted_pending_legal_review",
+  "redistribution_status": "unreviewed",
+  "assessed_by": "codex-local-audit",
+  "assessed_at": "2026-07-23T12:00:00+08:00",
+  "assessment_reason": "README 包含自由复用、参考和学习声明，但 checkout 没有独立 LICENSE 文件或标准许可证标识；在人工法律复核前禁止推导复制、改编和再分发权限。",
+  "legal_review_required": true,
+  "notice_path": "",
+  "rules": [
+    {
+      "path_prefix": "src",
+      "allowed_modes": [
+        "reference",
+        "reimplement"
+      ],
+      "notice_requirement": "unknown",
+      "rationale": "允许研究交互语义、状态机和测试方法并独立重实现；不得复制或改编表达性源码。"
+    }
+  ],
+  "exclusions": [],
+  "unmatched_policy": "reject"
+}

@@ -91,6 +91,6 @@ CC-05.1 不会把当前 manifest 自动视为已批准。
 
 ## 未完成项
 
-CC-05.2 继续实现结构差异清单，必须以本 receipt 的 `baseline_entry_id` 和 `observation_id` 作为输入
-绑定；CC-05.3-05.6 仍未实现。CC-01.2/1.3 完成后还需扩展 license scope 和 versioned mapping
-字段，但不得破坏 legacy v1 receipt 的严格读取。
+CC-05.2a 已实现结构差异清单并绑定本 receipt 的 `baseline_entry_id` 与 `observation_id`；CC-05.2b-05.6
+仍未实现。CC-01.2a 已交付独立 license scope audit，后续 observation 必须用兼容 contract variant
+显式引用；CC-01.3 完成后再扩展 versioned mapping 字段，不得破坏 legacy v1 receipt 的严格读取。
