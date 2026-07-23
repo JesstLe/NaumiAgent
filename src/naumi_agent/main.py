@@ -4007,6 +4007,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "--epoch <n> --state <queued|active> [--reason <原因>]\n"
         "      /harness eval sandbox retry <cancel-receipt> --sha256 <digest> "
         "[--reason <原因>]\n"
+        "      /harness eval sandbox retries [--state all|open|terminal] "
+        "[--limit 1..100] [--cursor <opaque>] [--assessed-at <ISO8601>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4156,6 +4158,58 @@ async def _run_harness(engine: Any, arg: str) -> None:
             f"Receipt: {receipt.receipt_id}\n"
             f"SHA-256: {receipt.receipt_sha256}"
         )
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 3
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "retries"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        parsed: dict[str, str] = {}
+        index = 3
+        valid = True
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option
+                not in {"--state", "--limit", "--cursor", "--assessed-at"}
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        try:
+            limit = int(parsed.get("--limit", "20"))
+        except ValueError:
+            valid = False
+            limit = 0
+        state = parsed.get("--state", "all")
+        if (
+            not valid
+            or state not in {"all", "open", "terminal"}
+            or not 1 <= limit <= 100
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        arguments: dict[str, object] = {
+            "state": state,
+            "limit": limit,
+            "cursor": parsed.get("--cursor", ""),
+        }
+        if "--assessed-at" in parsed:
+            arguments["assessed_at"] = parsed["--assessed-at"]
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-retries-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox_retries",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
         return
     if (
         subcommand == "eval"

@@ -32,6 +32,7 @@ from naumi_agent.harness.service import (
     render_harness_knowledge,
     render_harness_replay,
     render_harness_status,
+    render_sandbox_retry_catalog,
 )
 from naumi_agent.harness.store import HarnessStoreError
 from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
@@ -51,6 +52,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalBatchTool(service),
         HarnessEvalSandboxTool(service),
         HarnessEvalSandboxRetryTool(service),
+        HarnessEvalSandboxRetryCatalogTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -700,6 +702,87 @@ class HarnessEvalSandboxRetryTool(Tool):
             code = getattr(exc, "code", "sandbox_eval_retry_infrastructure_error")
             return f"Harness Sandbox Eval retry 未完成（`{code}`）：{exc}"
         return render_sandbox_eval_batch_receipt(receipt)
+
+
+class HarnessEvalSandboxRetryCatalogTool(_HarnessReadOnlyTool):
+    """Inspect durable retry dispatches without claiming or resuming them."""
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_retries"
+
+    @property
+    def description(self) -> str:
+        return "查看当前工作区有界且可校验的 Sandbox retry dispatch 目录"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox retry dispatch catalog history recovery expired"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "enum": ["all", "open", "terminal"],
+                    "default": "all",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                },
+                "cursor": {
+                    "type": "string",
+                    "maxLength": 1024,
+                    "default": "",
+                },
+                "assessed_at": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "翻页时复用上一页返回的 ISO 8601 评估时间",
+                },
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        state = kwargs.get("state", "all")
+        limit = kwargs.get("limit", 20)
+        cursor = kwargs.get("cursor", "")
+        assessed_at = kwargs.get("assessed_at")
+        if (
+            not isinstance(state, str)
+            or isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not isinstance(cursor, str)
+            or (assessed_at is not None and not isinstance(assessed_at, str))
+        ):
+            return (
+                "Sandbox retry catalog 参数无效：state、cursor、assessed_at "
+                "必须是字符串，limit 必须是整数。"
+            )
+        try:
+            page = await self._service.list_sandbox_retry_dispatches(
+                state_filter=state,
+                limit=limit,
+                cursor=cursor,
+                assessed_at=assessed_at,
+            )
+        except (HarnessSandboxEvalServiceError, HarnessStoreError, ValueError) as exc:
+            code = getattr(exc, "code", "sandbox_retry_catalog_unavailable")
+            return f"Sandbox retry catalog 暂不可用（`{code}`）：{exc}"
+        return render_sandbox_retry_catalog(page)
 
 
 class HarnessEvalBaselinePromoteTool(Tool):

@@ -59,7 +59,8 @@ HAR-08.4o3a 又以 Store v21 原子 claim dispatch 与全新 admission ticket，
 崩溃恢复，用户取消/失败/完成均终态关闭；HAR-08.4o3b 已用新的 retry permission、execution authority、
 ticket、Runtime lease 与 Run Grant 恢复原 Request Manifest 和连续 H5a，并开放共享 Tool/Slash。
 HAR-08.4o3c 已让 New UI 从 accepted cancel receipt 一键 retry，Textual TUI 复用共享 Slash 与 typed
-progress；dispatch catalog/retention 和三平台隔离 CI 仍未完成。
+progress；HAR-08.4o3d 又提供有界 durable dispatch catalog、opaque cursor、完整 authority/H5a 校验和
+共享只读 Tool/Slash。Receipt-bound 启动恢复、dispatch retention 和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

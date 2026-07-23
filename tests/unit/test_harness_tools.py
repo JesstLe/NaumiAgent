@@ -33,20 +33,22 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_eval_batch",
         "harness_eval_sandbox",
         "harness_eval_sandbox_retry",
+        "harness_eval_sandbox_retries",
         "harness_eval_baseline_promote",
         "harness_eval_compare",
         "harness_read_knowledge",
         "harness_run_check",
     ]
     assert all(
-        tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 5, 6, 12)
+        tools[index].metadata.read_only
+        for index in (0, 1, 2, 3, 4, 5, 6, 10, 13)
     )
     assert not tools[7].metadata.read_only
     assert not tools[8].metadata.read_only
     assert not tools[9].metadata.read_only
-    assert not tools[10].metadata.read_only
     assert not tools[11].metadata.read_only
-    assert not tools[13].metadata.read_only
+    assert not tools[12].metadata.read_only
+    assert not tools[14].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
