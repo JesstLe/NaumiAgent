@@ -75,7 +75,12 @@ test("ui state store saves session-scoped snapshots atomically", () => {
       folds: { "tool:call-1": { expanded: true } },
       foldCursor: 1,
       scrollOffset: 7,
+      terminalEventCursor: {
+        streamId: "tes_0123456789abcdef01234567",
+        cursor: 9,
+      },
     });
+    const clientId = store.terminalEventClientId;
     setProjectInputHistory(store, ["第一条", "第二条"]);
     saveUiStateStore(store);
 
@@ -84,6 +89,11 @@ test("ui state store saves session-scoped snapshots atomically", () => {
       "tool:call-1": { expanded: true },
     });
     assert.equal(getUiSnapshot(reloaded, "session-a").scrollOffset, 7);
+    assert.deepEqual(getUiSnapshot(reloaded, "session-a").terminalEventCursor, {
+      streamId: "tes_0123456789abcdef01234567",
+      cursor: 9,
+    });
+    assert.equal(reloaded.terminalEventClientId, clientId);
     assert.equal(getUiSnapshot(reloaded, "missing"), null);
     assert.deepEqual(getProjectInputHistory(reloaded), ["第一条", "第二条"]);
   } finally {
@@ -122,7 +132,9 @@ test("ui state store migrates version one sessions with an empty composer", () =
     assert.equal(getUiSnapshot(store, "abc").inspector.selectedTab, "plan");
     assert.equal(getUiSnapshot(store, "abc").agents.open, false);
     assert.equal(getUiSnapshot(store, "abc").agents.selectedTab, "agents");
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    assert.equal(persisted.version, 6);
+    assert.match(persisted.terminal_event_client_id, /^tecli_[0-9a-f]{24}$/);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
@@ -149,7 +161,7 @@ test("ui state store migrates version two without losing session drafts", () => 
     saveUiStateStore(store);
     assert.equal(getUiSnapshot(store, "abc").inspector.open, false);
     assert.equal(getUiSnapshot(store, "abc").agents.open, false);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 6);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;
@@ -187,7 +199,7 @@ test("ui state store migrates version four with closed bounded agent presentatio
     });
     assert.deepEqual(getProjectInputHistory(store), ["历史"]);
     saveUiStateStore(store);
-    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 5);
+    assert.equal(JSON.parse(fs.readFileSync(filePath, "utf8")).version, 6);
   } finally {
     if (previous === undefined) delete process.env.NAUMI_TERMINAL_UI_STATE_PATH;
     else process.env.NAUMI_TERMINAL_UI_STATE_PATH = previous;

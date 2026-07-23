@@ -26,6 +26,7 @@ REPLAY_SAFE_TERMINAL_EVENTS = frozenset(
 
 _IDENTITY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _SESSION_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,255}$")
+_CLIENT_ID_RE = re.compile(r"^tecli_[0-9a-f]{24}$")
 
 
 class TerminalEventJournalError(RuntimeError):
@@ -59,6 +60,30 @@ class TerminalEventRecord:
             "stream_id": self.stream_id,
             "cursor": self.cursor,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalEventReplayWindow:
+    """One bounded, verified decision for cursor recovery."""
+
+    stream_id: str
+    requested_cursor: int
+    earliest_cursor: int
+    latest_cursor: int
+    gap: bool
+    gap_reason: str
+    records: tuple[TerminalEventRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalEventClientAck:
+    """Highest cursor durably acknowledged by one terminal client."""
+
+    client_id: str
+    session_id: str
+    stream_id: str
+    cursor: int
+    updated_at: str
 
 
 class TerminalEventJournalStore:
@@ -241,6 +266,200 @@ class TerminalEventJournalStore:
                 ) from exc
         return [_record_from_row(row) for row in rows]
 
+    async def replay_window(
+        self,
+        *,
+        client_id: str,
+        session_id: str,
+        cursor: int,
+        expected_stream_id: str = "",
+    ) -> TerminalEventReplayWindow:
+        """Classify one cursor as replayable or outside the retained window."""
+        normalized_client = _validate_client_id(client_id)
+        normalized_session = _validate_session_id(session_id)
+        normalized_cursor = _validate_nonnegative_cursor(cursor)
+        normalized_stream = str(expected_stream_id).strip()
+        if normalized_stream and not re.fullmatch(r"tes_[0-9a-f]{24}", normalized_stream):
+            raise ValueError("expected_stream_id 格式无效。")
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await self._prepare(db)
+            try:
+                stream_result = await db.execute(
+                    """
+                    SELECT stream_id, last_cursor
+                    FROM terminal_event_streams
+                    WHERE workspace_root = ? AND session_id = ?
+                    """,
+                    (self._workspace_root, normalized_session),
+                )
+                stream = await stream_result.fetchone()
+                if stream is None:
+                    return TerminalEventReplayWindow(
+                        stream_id="",
+                        requested_cursor=normalized_cursor,
+                        earliest_cursor=0,
+                        latest_cursor=0,
+                        gap=bool(normalized_cursor or normalized_stream),
+                        gap_reason=(
+                            "stream_missing"
+                            if normalized_cursor or normalized_stream
+                            else ""
+                        ),
+                        records=(),
+                    )
+                stream_id = str(stream["stream_id"])
+                latest_cursor = int(stream["last_cursor"])
+                earliest_result = await db.execute(
+                    """
+                    SELECT MIN(cursor) AS earliest_cursor
+                    FROM terminal_events
+                    WHERE workspace_root = ? AND session_id = ?
+                    """,
+                    (self._workspace_root, normalized_session),
+                )
+                earliest_row = await earliest_result.fetchone()
+                earliest_cursor = int(earliest_row["earliest_cursor"] or latest_cursor + 1)
+                ack_result = await db.execute(
+                    """
+                    SELECT stream_id, cursor FROM terminal_event_acks
+                    WHERE workspace_root = ? AND session_id = ? AND client_id = ?
+                    """,
+                    (
+                        self._workspace_root,
+                        normalized_session,
+                        normalized_client,
+                    ),
+                )
+                ack = await ack_result.fetchone()
+                gap_reason = ""
+                if normalized_stream and normalized_stream != stream_id:
+                    gap_reason = "stream_mismatch"
+                elif normalized_cursor > latest_cursor:
+                    gap_reason = "cursor_ahead"
+                elif ack is None:
+                    gap_reason = "ack_missing"
+                elif str(ack["stream_id"]) != stream_id:
+                    gap_reason = "ack_stream_mismatch"
+                elif int(ack["cursor"]) != normalized_cursor:
+                    gap_reason = "ack_cursor_mismatch"
+                elif normalized_cursor < earliest_cursor - 1:
+                    gap_reason = "retention_gap"
+                gap = bool(gap_reason)
+                records: tuple[TerminalEventRecord, ...] = ()
+                if not gap:
+                    result = await db.execute(
+                        """
+                        SELECT * FROM terminal_events
+                        WHERE workspace_root = ? AND session_id = ? AND cursor > ?
+                        ORDER BY cursor ASC
+                        """,
+                        (self._workspace_root, normalized_session, normalized_cursor),
+                    )
+                    records = tuple(
+                        _record_from_row(row) for row in await result.fetchall()
+                    )
+            except sqlite3.Error as exc:
+                raise TerminalEventJournalError(
+                    "终端事件恢复窗口读取失败。"
+                ) from exc
+        return TerminalEventReplayWindow(
+            stream_id=stream_id,
+            requested_cursor=normalized_cursor,
+            earliest_cursor=earliest_cursor,
+            latest_cursor=latest_cursor,
+            gap=gap,
+            gap_reason=gap_reason,
+            records=records,
+        )
+
+    async def acknowledge(
+        self,
+        *,
+        client_id: str,
+        session_id: str,
+        stream_id: str,
+        cursor: int,
+    ) -> TerminalEventClientAck:
+        """Persist a monotonic ACK without allowing a client to skip the stream."""
+        normalized_client = _validate_client_id(client_id)
+        normalized_session = _validate_session_id(session_id)
+        normalized_stream = str(stream_id).strip()
+        if not re.fullmatch(r"tes_[0-9a-f]{24}", normalized_stream):
+            raise ValueError("stream_id 格式无效。")
+        normalized_cursor = _validate_positive_cursor(cursor)
+        updated_at = datetime.now(UTC).isoformat()
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await self._prepare(db)
+            try:
+                await db.execute("BEGIN IMMEDIATE")
+                stream_result = await db.execute(
+                    """
+                    SELECT stream_id, last_cursor
+                    FROM terminal_event_streams
+                    WHERE workspace_root = ? AND session_id = ?
+                    """,
+                    (self._workspace_root, normalized_session),
+                )
+                stream = await stream_result.fetchone()
+                if (
+                    stream is None
+                    or str(stream["stream_id"]) != normalized_stream
+                    or normalized_cursor > int(stream["last_cursor"])
+                ):
+                    raise TerminalEventJournalConflictError(
+                        "终端事件 ACK 与权威 stream/cursor 不一致。"
+                    )
+                ack_result = await db.execute(
+                    """
+                    SELECT cursor FROM terminal_event_acks
+                    WHERE workspace_root = ? AND session_id = ? AND client_id = ?
+                    """,
+                    (self._workspace_root, normalized_session, normalized_client),
+                )
+                existing = await ack_result.fetchone()
+                if existing is not None and normalized_cursor < int(existing["cursor"]):
+                    raise TerminalEventJournalConflictError(
+                        "终端事件 ACK 不得回退。"
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO terminal_event_acks (
+                        workspace_root, session_id, client_id, stream_id,
+                        cursor, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(workspace_root, session_id, client_id) DO UPDATE SET
+                        stream_id = excluded.stream_id,
+                        cursor = excluded.cursor,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        self._workspace_root,
+                        normalized_session,
+                        normalized_client,
+                        normalized_stream,
+                        normalized_cursor,
+                        updated_at,
+                    ),
+                )
+                await db.commit()
+            except TerminalEventJournalError:
+                await _rollback_quietly(db)
+                raise
+            except sqlite3.Error as exc:
+                await _rollback_quietly(db)
+                raise TerminalEventJournalError(
+                    "终端事件 ACK 写入失败。"
+                ) from exc
+        return TerminalEventClientAck(
+            client_id=normalized_client,
+            session_id=normalized_session,
+            stream_id=normalized_stream,
+            cursor=normalized_cursor,
+            updated_at=updated_at,
+        )
+
     async def get_by_idempotency_key(
         self,
         *,
@@ -315,6 +534,15 @@ class TerminalEventJournalStore:
             );
             CREATE INDEX IF NOT EXISTS terminal_events_stream_cursor_idx
                 ON terminal_events (workspace_root, session_id, cursor);
+            CREATE TABLE IF NOT EXISTS terminal_event_acks (
+                workspace_root TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                client_id TEXT NOT NULL,
+                stream_id TEXT NOT NULL,
+                cursor INTEGER NOT NULL CHECK(cursor > 0),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (workspace_root, session_id, client_id)
+            );
             """
         )
         await db.execute(
@@ -479,6 +707,26 @@ def _validate_idempotency_key(value: str) -> str:
     return normalized
 
 
+def _validate_client_id(value: str) -> str:
+    normalized = str(value).strip()
+    if not _CLIENT_ID_RE.fullmatch(normalized):
+        raise ValueError("client_id 格式无效。")
+    return normalized
+
+
+def _validate_nonnegative_cursor(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError("cursor 必须是非负整数。")
+    return value
+
+
+def _validate_positive_cursor(value: int) -> int:
+    normalized = _validate_nonnegative_cursor(value)
+    if normalized < 1:
+        raise ValueError("cursor 必须是正整数。")
+    return normalized
+
+
 def _canonical_json_object(value: dict[str, Any]) -> str:
     if not isinstance(value, dict):
         raise TypeError("payload 必须是对象。")
@@ -540,5 +788,7 @@ __all__ = [
     "TerminalEventJournalConflictError",
     "TerminalEventJournalError",
     "TerminalEventJournalStore",
+    "TerminalEventClientAck",
     "TerminalEventRecord",
+    "TerminalEventReplayWindow",
 ]

@@ -899,7 +899,14 @@ function normalizeServerPayload(type, payload) {
       title: String(payload.title ?? ""),
       message_count: Number(payload.message_count ?? 0),
       clear: payload.clear == null ? true : toBool(payload.clear),
+      terminal_event_recovery: normalizeTerminalEventRecovery(
+        payload.terminal_event_recovery ?? { mode: "legacy_snapshot" },
+        { initial: true },
+      ),
     };
+  }
+  if (type === "terminal_events/recovery") {
+    return normalizeTerminalEventRecovery(payload);
   }
   if (type === "run/completed") {
     return {
@@ -997,6 +1004,120 @@ function normalizeServerPayload(type, payload) {
     };
   }
   return { ...payload };
+}
+
+function normalizeTerminalEventRecovery(payload, { initial = false } = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("terminal event recovery 必须是对象");
+  }
+  const modes = initial
+    ? new Set(["legacy_snapshot", "cursor_replay", "gap_snapshot"])
+    : new Set(["replay_complete", "snapshot_complete"]);
+  const mode = String(payload.mode ?? "");
+  if (!modes.has(mode)) throw new Error("terminal event recovery mode 无效");
+  if (mode === "legacy_snapshot") return { mode };
+  const sessionId = initial ? "" : String(payload.session_id ?? "").trim();
+  if (
+    !initial
+    && (
+      !sessionId
+      || sessionId.length > 255
+      || /[\u0000-\u001f\u007f]/u.test(sessionId)
+    )
+  ) {
+    throw new Error("terminal event recovery session_id 无效");
+  }
+  const streamId = String(payload.stream_id ?? "");
+  if (streamId && !/^tes_[0-9a-f]{24}$/.test(streamId)) {
+    throw new Error("terminal event recovery stream_id 无效");
+  }
+  const requestedCursor = nonnegativeSafeInteger(
+    payload.requested_cursor,
+    "terminal event recovery requested_cursor",
+  );
+  const earliestCursor = nonnegativeSafeInteger(
+    payload.earliest_cursor,
+    "terminal event recovery earliest_cursor",
+  );
+  const latestCursor = nonnegativeSafeInteger(
+    payload.latest_cursor,
+    "terminal event recovery latest_cursor",
+  );
+  const gapReason = String(payload.gap_reason ?? "");
+  const gapReasons = new Set([
+    "",
+    "stream_missing",
+    "stream_mismatch",
+    "cursor_ahead",
+    "ack_missing",
+    "ack_stream_mismatch",
+    "ack_cursor_mismatch",
+    "retention_gap",
+  ]);
+  if (!gapReasons.has(gapReason)) {
+    throw new Error("terminal event recovery gap_reason 无效");
+  }
+  if (earliestCursor > latestCursor && latestCursor !== 0) {
+    throw new Error("terminal event recovery cursor 边界无效");
+  }
+  if (latestCursor === 0 && earliestCursor !== 0) {
+    throw new Error("terminal event recovery 空流边界无效");
+  }
+  if (requestedCursor < 1) {
+    throw new Error("terminal event recovery requested_cursor 必须为正数");
+  }
+  if (
+    ["cursor_replay", "replay_complete"].includes(mode)
+    && (
+      !streamId
+      || latestCursor < requestedCursor
+      || earliestCursor > requestedCursor + 1
+    )
+  ) {
+    throw new Error("terminal event recovery 重放窗口不连贯");
+  }
+  if (
+    ["cursor_replay", "replay_complete"].includes(mode)
+      ? gapReason !== ""
+      : gapReason === ""
+  ) {
+    throw new Error("terminal event recovery mode 与 gap_reason 不一致");
+  }
+  const normalized = {
+    ...(initial ? {} : { schema_version: Number(payload.schema_version), session_id: sessionId }),
+    mode,
+    stream_id: streamId,
+    requested_cursor: requestedCursor,
+    earliest_cursor: earliestCursor,
+    latest_cursor: latestCursor,
+    gap_reason: gapReason,
+  };
+  if (!initial) {
+    if (normalized.schema_version !== 1) {
+      throw new Error("terminal event recovery schema_version 无效");
+    }
+    normalized.replayed_count = nonnegativeSafeInteger(
+      payload.replayed_count,
+      "terminal event recovery replayed_count",
+    );
+    if (
+      mode === "replay_complete"
+      && normalized.replayed_count !== latestCursor - requestedCursor
+    ) {
+      throw new Error("terminal event recovery replayed_count 与游标不一致");
+    }
+    if (mode === "snapshot_complete" && normalized.replayed_count !== 0) {
+      throw new Error("terminal event recovery snapshot 不得声明补发记录");
+    }
+  }
+  return normalized;
+}
+
+function nonnegativeSafeInteger(value, field) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${field} 必须是非负安全整数`);
+  }
+  return value;
 }
 
 function normalizeWorkbenchApproval(value) {

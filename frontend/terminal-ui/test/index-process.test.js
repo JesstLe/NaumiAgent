@@ -321,6 +321,69 @@ test("terminal UI reconnects an idle Bridge and restores one authoritative recei
   }
 });
 
+test("terminal UI persists ACK and resumes only after the confirmed receipt cursor", async () => {
+  const markerPath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-cursor-recovery-${Date.now()}-${Math.random()}.marker`,
+  );
+  const statePath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-cursor-state-${Date.now()}-${Math.random()}.json`,
+  );
+  const app = launchTerminalUi("cursor-recovery-bridge.js", {
+    statePath,
+    env: {
+      NAUMI_TEST_CURSOR_RECOVERY_MARKER: markerPath,
+      NAUMI_BRIDGE_RECOVERY_TIMEOUT_MS: "1000",
+    },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "第一条持久回执。", 7000);
+    await waitForOutput(output, "第二条游标补发回执。", 7000);
+    await waitForLatestScreen(
+      output,
+      "已重新连接并从权威存储恢复会话",
+      7000,
+    );
+    assert.equal(app.exitCode, null);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const resume = events.find(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "resume",
+    );
+    assert.equal(resume.payload.record.payload.session_id, "session-cursor-recovery");
+    assert.equal(resume.payload.record.payload.resume_after_cursor, 1);
+    assert.equal(
+      resume.payload.record.payload.terminal_event_stream_id,
+      "tes_0123456789abcdef01234567",
+    );
+    assert.match(
+      resume.payload.record.payload.terminal_event_client_id,
+      /^tecli_[0-9a-f]{24}$/,
+    );
+    const ackCursors = events
+      .filter(
+        (record) => record.event === "protocol.send"
+          && record.payload.record.type === "terminal_events/ack",
+      )
+      .map((record) => record.payload.record.payload.cursor);
+    assert.deepEqual(ackCursors, [1, 2, 2]);
+    const persisted = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    assert.deepEqual(
+      persisted.sessions["session-cursor-recovery"].terminalEventCursor,
+      { streamId: "tes_0123456789abcdef01234567", cursor: 2 },
+    );
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+    fs.rmSync(markerPath, { force: true });
+    fs.rmSync(statePath, { force: true });
+  }
+});
+
 test("terminal UI fails closed instead of reconnecting an active run", async () => {
   const markerPath = path.join(
     tmpdir(),
@@ -390,6 +453,7 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
         "session_list",
         "task_snapshot",
         "terminal_event_cursor",
+        "terminal_event_recovery",
         "typed_ui_messages",
         "workbench_proposal_actions",
         "workbench_snapshot",

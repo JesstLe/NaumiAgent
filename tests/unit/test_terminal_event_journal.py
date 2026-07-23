@@ -175,6 +175,128 @@ async def test_terminal_event_journal_bounds_retention_without_reusing_cursor(
     ] == [4, 5, 6]
 
 
+async def test_terminal_event_replay_window_distinguishes_replay_gap_and_stream_change(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path, max_events_per_stream=3)
+    records = []
+    for index in range(5):
+        records.append(
+            await store.append(
+                session_id="session-window",
+                event_type="completion/receipt",
+                criticality="terminal",
+                idempotency_key=f"completion:window-{index}",
+                payload={"receipt_id": f"window-{index}", "run_id": f"run-{index}"},
+            )
+        )
+    client_id = "tecli_0123456789abcdef01234567"
+    await store.acknowledge(
+        client_id=client_id,
+        session_id="session-window",
+        stream_id=records[-1].stream_id,
+        cursor=3,
+    )
+
+    replay = await store.replay_window(
+        client_id=client_id,
+        session_id="session-window",
+        cursor=3,
+        expected_stream_id=records[-1].stream_id,
+    )
+    assert replay.gap is False
+    assert replay.gap_reason == ""
+    assert replay.earliest_cursor == 3
+    assert replay.latest_cursor == 5
+    assert [record.cursor for record in replay.records] == [4, 5]
+
+    pruned_client_id = "tecli_111111111111111111111111"
+    await store.acknowledge(
+        client_id=pruned_client_id,
+        session_id="session-window",
+        stream_id=records[-1].stream_id,
+        cursor=1,
+    )
+
+    pruned = await store.replay_window(
+        client_id=pruned_client_id,
+        session_id="session-window",
+        cursor=1,
+        expected_stream_id=records[-1].stream_id,
+    )
+    assert pruned.gap is True
+    assert pruned.gap_reason == "retention_gap"
+    assert pruned.records == ()
+
+    wrong_stream = await store.replay_window(
+        client_id=client_id,
+        session_id="session-window",
+        cursor=5,
+        expected_stream_id="tes_000000000000000000000000",
+    )
+    assert wrong_stream.gap is True
+    assert wrong_stream.gap_reason == "stream_mismatch"
+
+    missing_ack = await store.replay_window(
+        client_id="tecli_222222222222222222222222",
+        session_id="session-window",
+        cursor=5,
+        expected_stream_id=records[-1].stream_id,
+    )
+    assert missing_ack.gap is True
+    assert missing_ack.gap_reason == "ack_missing"
+
+
+async def test_terminal_event_ack_is_durable_monotonic_and_stream_fenced(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path)
+    record = await store.append(
+        session_id="session-ack",
+        event_type="completion/receipt",
+        criticality="terminal",
+        idempotency_key="completion:ack-1",
+        payload={"receipt_id": "ack-1", "run_id": "run-ack"},
+    )
+    second = await store.append(
+        session_id="session-ack",
+        event_type="completion/receipt",
+        criticality="terminal",
+        idempotency_key="completion:ack-2",
+        payload={"receipt_id": "ack-2", "run_id": "run-ack"},
+    )
+    client_id = "tecli_0123456789abcdef01234567"
+
+    first = await store.acknowledge(
+        client_id=client_id,
+        session_id="session-ack",
+        stream_id=record.stream_id,
+        cursor=second.cursor,
+    )
+    repeated = await _store(tmp_path).acknowledge(
+        client_id=client_id,
+        session_id="session-ack",
+        stream_id=record.stream_id,
+        cursor=second.cursor,
+    )
+    assert repeated.cursor == first.cursor == 2
+
+    with pytest.raises(TerminalEventJournalConflictError, match="不得回退"):
+        await store.acknowledge(
+            client_id=client_id,
+            session_id="session-ack",
+            stream_id=record.stream_id,
+            cursor=record.cursor,
+        )
+    with pytest.raises(TerminalEventJournalConflictError, match="不一致"):
+        await store.acknowledge(
+            client_id=client_id,
+            session_id="session-ack",
+            stream_id="tes_000000000000000000000000",
+            cursor=1,
+        )
+
+
 async def test_terminal_event_journal_rejects_unsafe_or_invalid_input(
     tmp_path: Path,
 ) -> None:

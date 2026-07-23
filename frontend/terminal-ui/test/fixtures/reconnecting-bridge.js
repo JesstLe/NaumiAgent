@@ -47,6 +47,17 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "resume" && generation === 2) {
+    if (
+      Object.hasOwn(payload, "terminal_event_client_id")
+      || Object.hasOwn(payload, "terminal_event_stream_id")
+      || Object.hasOwn(payload, "resume_after_cursor")
+    ) {
+      emit("error", {
+        code: "unexpected_terminal_recovery",
+        message: "未协商 terminal_event_recovery 时不得发送游标恢复字段。",
+      }, record.id);
+      return;
+    }
     emit("session/replayed", {
       session_id: payload.session_id,
       title: "Bridge 重连恢复",

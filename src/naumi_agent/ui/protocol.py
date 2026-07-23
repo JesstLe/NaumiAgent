@@ -31,6 +31,7 @@ PROTOCOL_CAPABILITIES = (
     "sequence_integrity",
     "task_snapshot",
     "terminal_event_cursor",
+    "terminal_event_recovery",
     "typed_ui_messages",
     "workbench_snapshot",
     "workbench_proposal_actions",
@@ -80,6 +81,7 @@ class ClientEventType(StrEnum):
     INTERACTION_TAKEOVER = "interaction_takeover"
     PERMISSION_REVOKE = "permission_revoke"
     RESUME = "resume"
+    TERMINAL_EVENTS_ACK = "terminal_events/ack"
     SESSIONS_LIST_REQUEST = "sessions/list/request"
     WORKSPACE_FILES_REQUEST = "workspace/files/request"
     WORKSPACE_FILES_CANCEL = "workspace/files/cancel"
@@ -134,6 +136,7 @@ class ServerEventType(StrEnum):
     RUN_COMPLETED = "run/completed"
     RUN_CANCELLED = "run/cancelled"
     SESSION_REPLAYED = "session/replayed"
+    TERMINAL_EVENTS_RECOVERY = "terminal_events/recovery"
     SESSIONS_LIST = "sessions/list"
     WORKSPACE_FILES = "workspace/files"
     STATUS = "runtime/status"
@@ -655,7 +658,64 @@ def _normalize_client_payload(
         }
         if "clear" in payload:
             normalized["clear"] = _to_bool(payload.get("clear"))
+        recovery_fields = {
+            "terminal_event_client_id": str(
+                payload.get("terminal_event_client_id") or ""
+            ).strip(),
+            "terminal_event_stream_id": str(
+                payload.get("terminal_event_stream_id") or ""
+            ).strip(),
+            "resume_after_cursor": payload.get("resume_after_cursor"),
+        }
+        if any(value not in {"", None} for value in recovery_fields.values()):
+            if not re.fullmatch(
+                r"tecli_[0-9a-f]{24}",
+                recovery_fields["terminal_event_client_id"],
+            ):
+                raise ValueError("terminal_event_client_id 格式无效。")
+            if not re.fullmatch(
+                r"tes_[0-9a-f]{24}",
+                recovery_fields["terminal_event_stream_id"],
+            ):
+                raise ValueError("terminal_event_stream_id 格式无效。")
+            cursor = recovery_fields["resume_after_cursor"]
+            if (
+                not isinstance(cursor, int)
+                or isinstance(cursor, bool)
+                or cursor < 1
+                or cursor > 2**53 - 1
+            ):
+                raise ValueError("resume_after_cursor 必须是正安全整数。")
+            normalized.update(recovery_fields)
         return normalized
+
+    if event_type == ClientEventType.TERMINAL_EVENTS_ACK:
+        client_id = str(payload.get("client_id") or "").strip()
+        session_id = str(payload.get("session_id") or "").strip()
+        stream_id = str(payload.get("stream_id") or "").strip()
+        cursor = payload.get("cursor")
+        if not re.fullmatch(r"tecli_[0-9a-f]{24}", client_id):
+            raise ValueError("terminal event ACK client_id 格式无效。")
+        if not session_id or len(session_id) > 255 or re.search(
+            r"[\x00-\x1f\x7f]",
+            session_id,
+        ):
+            raise ValueError("terminal event ACK session_id 格式无效。")
+        if not re.fullmatch(r"tes_[0-9a-f]{24}", stream_id):
+            raise ValueError("terminal event ACK stream_id 格式无效。")
+        if (
+            not isinstance(cursor, int)
+            or isinstance(cursor, bool)
+            or cursor < 1
+            or cursor > 2**53 - 1
+        ):
+            raise ValueError("terminal event ACK cursor 必须是正安全整数。")
+        return {
+            "client_id": client_id,
+            "session_id": session_id,
+            "stream_id": stream_id,
+            "cursor": cursor,
+        }
 
     if event_type == ClientEventType.SESSIONS_LIST_REQUEST:
         query = str(payload.get("query") or "").strip()

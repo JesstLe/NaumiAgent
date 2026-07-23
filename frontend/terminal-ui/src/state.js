@@ -308,6 +308,8 @@ export function createInitialState() {
     nextSubmitId: 1,
     nextCancelId: 1,
     currentSessionId: "",
+    terminalEventCursor: { streamId: "", cursor: 0 },
+    terminalEventRecovery: { mode: "" },
     input: "",
     inputCursor: null,
     inputPreferredColumn: null,
@@ -1136,6 +1138,9 @@ export function reduceServerEvent(state, record) {
       dismissWelcome(state);
       jumpTimelineToLatest(state);
       state.currentSessionId = payload.session_id || state.currentSessionId;
+      state.terminalEventRecovery = {
+        ...(payload.terminal_event_recovery || { mode: "legacy_snapshot" }),
+      };
       state.running = false;
       state.workingAnimationFrame = 0;
       discardActiveRunActivity(state);
@@ -1460,6 +1465,24 @@ export function reduceServerEvent(state, record) {
           "Workbench",
           `已同步：任务 ${counts.tasks} · worktree ${counts.worktrees} · 审阅项 ${counts.reviews}`,
           "info",
+        );
+      }
+      break;
+    }
+    case "terminal_events/recovery": {
+      if (payload.mode === "snapshot_complete") {
+        pushSystemMessage(
+          state,
+          "回执恢复",
+          terminalEventGapRecoveryMessage(payload.gap_reason),
+          "warning",
+        );
+      } else if (payload.replayed_count > 0) {
+        pushSystemMessage(
+          state,
+          "回执恢复",
+          `已从持久事件日志补发 ${payload.replayed_count} 条缺失回执。`,
+          "success",
         );
       }
       break;
@@ -4720,6 +4743,7 @@ export function createUiSnapshot(state) {
     scrollOffset: state.scrollOffset,
     outbox: serializeUserOutbox(state.messages),
     activeTaskSubmission: sanitizeActiveTaskSubmission(state.activeTaskSubmission),
+    terminalEventCursor: sanitizeTerminalEventCursor(state.terminalEventCursor),
     inspector: sanitizeInspectorPresentation(state.inspector),
     agents: sanitizeAgentControlPresentation(state.agents),
     composer: {
@@ -4745,6 +4769,9 @@ export function applyUiSnapshot(state, snapshot) {
   state.unreadOutputKeys = {};
   restoreUserOutbox(state, safeSnapshot.outbox);
   state.activeTaskSubmission = sanitizeActiveTaskSubmission(safeSnapshot.activeTaskSubmission);
+  state.terminalEventCursor = sanitizeTerminalEventCursor(
+    safeSnapshot.terminalEventCursor,
+  );
   const inspector = sanitizeInspectorPresentation(safeSnapshot.inspector);
   state.inspector.open = inspector.open;
   state.inspector.focused = false;
@@ -4774,6 +4801,35 @@ export function applyUiSnapshot(state, snapshot) {
     && Number.isFinite(Number(composer.preferredColumn))
     ? Math.max(0, Number(composer.preferredColumn))
     : null;
+}
+
+function terminalEventGapRecoveryMessage(reason) {
+  if (reason === "retention_gap") {
+    return "本地回执游标已超出保留窗口，已从权威 Store 重建快照并建立新基线。";
+  }
+  if (["ack_missing", "ack_cursor_mismatch", "ack_stream_mismatch"].includes(reason)) {
+    return "本地回执游标与服务端确认位置不一致，已从权威 Store 重建快照，未跳过未确认事件。";
+  }
+  if (["stream_missing", "stream_mismatch"].includes(reason)) {
+    return "权威回执事件流已经变化，已从业务 Store 重建快照并建立新基线。";
+  }
+  if (reason === "cursor_ahead") {
+    return "本地回执游标领先于服务端权威日志，已拒绝该位置并从 Store 重建快照。";
+  }
+  return "回执增量恢复无法安全确认，已从权威 Store 重建快照并建立新基线。";
+}
+
+function sanitizeTerminalEventCursor(value) {
+  const safe = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+  const streamId = /^tes_[0-9a-f]{24}$/.test(String(safe.streamId ?? ""))
+    ? String(safe.streamId)
+    : "";
+  const cursor = Number.isSafeInteger(safe.cursor) && safe.cursor > 0
+    ? safe.cursor
+    : 0;
+  return streamId && cursor ? { streamId, cursor } : { streamId: "", cursor: 0 };
 }
 
 function sanitizeInspectorPresentation(value) {

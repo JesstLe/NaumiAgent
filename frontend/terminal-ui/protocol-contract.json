@@ -2,7 +2,9 @@
   "version": 1,
   "transport": "jsonl",
   "compatibility": {
-    "previous_registry_sha256": [],
+    "previous_registry_sha256": [
+      "69aaabb584c1f1c364e969ca7b66352684fc938765f63bd5829bae8d3a5516d2"
+    ],
     "unknown_informational_events": "ignore_and_audit"
   },
   "negotiation": {
@@ -17,6 +19,7 @@
       "sequence_integrity",
       "task_snapshot",
       "terminal_event_cursor",
+      "terminal_event_recovery",
       "typed_ui_messages",
       "workbench_snapshot",
       "workbench_proposal_actions"
@@ -33,6 +36,10 @@
     "evolution_evaluation_lane": {
       "client_events": ["evolution/evaluation-lane/request"],
       "server_events": ["evolution/evaluation-lane"]
+    },
+    "terminal_event_recovery": {
+      "client_events": ["terminal_events/ack"],
+      "server_events": ["terminal_events/recovery"]
     }
   },
   "client_events": [
@@ -66,6 +73,7 @@
     "interaction_takeover",
     "permission_revoke",
     "resume",
+    "terminal_events/ack",
     "sessions/list/request",
     "workspace/files/request",
     "workspace/files/cancel",
@@ -109,6 +117,7 @@
     "run/completed",
     "run/cancelled",
     "session/replayed",
+    "terminal_events/recovery",
     "sessions/list",
     "workspace/files",
     "runtime/status",
@@ -162,6 +171,7 @@
       "interaction_takeover": {"owner":"safety","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "permission_revoke": {"owner":"safety","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "resume": {"owner":"sessions","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
+      "terminal_events/ack": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "sessions/list/request": {"owner":"sessions","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":["payload.query"],"redaction":"required"},
       "workspace/files/request": {"owner":"ui","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":["payload.query"],"redaction":"required"},
       "workspace/files/cancel": {"owner":"ui","stability":"experimental","criticality":"control","persistence":"never","sensitive_fields":[],"redaction":"none"},
@@ -205,6 +215,7 @@
       "run/completed": {"owner":"runtime","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "run/cancelled": {"owner":"runtime","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
       "session/replayed": {"owner":"sessions","stability":"stable","criticality":"control","persistence":"timeline","sensitive_fields":["payload.messages"],"redaction":"required"},
+      "terminal_events/recovery": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "sessions/list": {"owner":"sessions","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.query","payload.items.title"],"redaction":"required"},
       "workspace/files": {"owner":"ui","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":["payload.query","payload.items.path","payload.items.template"],"redaction":"required"},
       "runtime/status": {"owner":"runtime","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
