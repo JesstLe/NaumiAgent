@@ -21,6 +21,8 @@ from naumi_agent.daemons.worker_contract import (
 )
 from naumi_agent.daemons.worker_registry import (
     WORKER_REGISTRY_SCHEMA_VERSION,
+    WorkerCapacityExhaustedError,
+    WorkerCapacityReservationState,
     WorkerRegistrationState,
     WorkerRegistryConflictError,
     WorkerRegistryStore,
@@ -154,6 +156,170 @@ async def test_concurrent_first_registration_initializes_schema_once(tmp_path: P
     assert first == second
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT COUNT(*) FROM worker_registrations").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_capacity_reservations_are_atomic_bounded_and_releasable(tmp_path: Path) -> None:
+    db_path = tmp_path / "workers.db"
+    store = WorkerRegistryStore(db_path)
+    contract = _contract()
+    await store.register(contract, registered_at=T1)
+
+    async def reserve(index: int):
+        return await WorkerRegistryStore(db_path).reserve_capacity(
+            reservation_id=f"reservation-{index}",
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id=f"job-{index}",
+            reserved_at=T2,
+            ttl_seconds=10,
+        )
+
+    results = await asyncio.gather(*(reserve(index) for index in range(3)), return_exceptions=True)
+    admitted = [item for item in results if not isinstance(item, BaseException)]
+    blocked = [item for item in results if isinstance(item, BaseException)]
+    assert len(admitted) == 2
+    assert len(blocked) == 1
+    assert isinstance(blocked[0], WorkerCapacityExhaustedError)
+    snapshot = await store.capacity_snapshot(worker_id=contract.worker_id, assessed_at=T3)
+    assert snapshot is not None
+    assert (snapshot.maximum, snapshot.reserved, snapshot.available) == (2, 2, 0)
+
+    released = await store.release_capacity(
+        reservation_id=admitted[0].reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="job_finished",
+        released_at=T3,
+    )
+    replay = await store.release_capacity(
+        reservation_id=admitted[0].reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="job_finished",
+        released_at=T4,
+    )
+    assert released == replay
+    assert released.state is WorkerCapacityReservationState.RELEASED
+    replacement = await reserve(3)
+    assert replacement.state is WorkerCapacityReservationState.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_capacity_expiry_and_worker_takeover_fail_closed(tmp_path: Path) -> None:
+    store = WorkerRegistryStore(tmp_path / "workers.db")
+    first = _contract()
+    await store.register(first, registered_at=T1)
+    with pytest.raises(WorkerRegistryConflictError, match="max_wall_seconds"):
+        await store.reserve_capacity(
+            reservation_id="reservation-too-long",
+            worker_id=first.worker_id,
+            instance_id=first.instance_id,
+            epoch=first.epoch,
+            job_id="job-too-long",
+            reserved_at=T1,
+            ttl_seconds=121,
+        )
+    reservation = await store.reserve_capacity(
+        reservation_id="reservation-expiring",
+        worker_id=first.worker_id,
+        instance_id=first.instance_id,
+        epoch=first.epoch,
+        job_id="job-expiring",
+        reserved_at=T1,
+        ttl_seconds=1,
+    )
+    snapshot = await store.capacity_snapshot(worker_id=first.worker_id, assessed_at=T3)
+    assert snapshot is not None and snapshot.reserved == 0
+    with pytest.raises(WorkerRegistryConflictError, match="终结"):
+        await store.release_capacity(
+            reservation_id=reservation.reservation_id,
+            worker_id=first.worker_id,
+            instance_id=first.instance_id,
+            epoch=first.epoch,
+            reason_code="late_release",
+            released_at=T4,
+        )
+
+    active = await store.reserve_capacity(
+        reservation_id="reservation-fenced",
+        worker_id=first.worker_id,
+        instance_id=first.instance_id,
+        epoch=first.epoch,
+        job_id="job-fenced",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await store.register(_contract(2, issued_at=T3), registered_at=T3)
+    with pytest.raises(WorkerRegistryConflictError, match="fencing"):
+        await store.release_capacity(
+            reservation_id=active.reservation_id,
+            worker_id=first.worker_id,
+            instance_id=first.instance_id,
+            epoch=first.epoch,
+            reason_code="stale_release",
+            released_at=T4,
+        )
+
+
+@pytest.mark.asyncio
+async def test_registry_migrates_v1_capacity_schema_without_losing_registration(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "workers.db"
+    store = WorkerRegistryStore(db_path)
+    contract = _contract()
+    await store.register(contract, registered_at=T1)
+    with sqlite3.connect(db_path) as db:
+        db.execute("DROP INDEX active_worker_capacity")
+        db.execute("DROP TABLE worker_capacity_reservations")
+        db.execute("PRAGMA user_version = 1")
+        db.commit()
+
+    reopened = WorkerRegistryStore(db_path)
+    assert await reopened.get_active(contract.worker_id) is not None
+    reservation = await reopened.reserve_capacity(
+        reservation_id="reservation-after-migration",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="job-after-migration",
+        reserved_at=T2,
+        ttl_seconds=10,
+    )
+    assert reservation.state is WorkerCapacityReservationState.ACTIVE
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+@pytest.mark.asyncio
+async def test_capacity_snapshot_rejects_tampered_incarnation_index(tmp_path: Path) -> None:
+    db_path = tmp_path / "workers.db"
+    store = WorkerRegistryStore(db_path)
+    contract = _contract()
+    await store.register(contract, registered_at=T1)
+    await store.reserve_capacity(
+        reservation_id="reservation-tampered",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="job-tampered",
+        reserved_at=T2,
+        ttl_seconds=10,
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "UPDATE worker_capacity_reservations SET instance_id = 'forged-instance'"
+        )
+        db.commit()
+    with pytest.raises(WorkerRegistryStoreError, match="无法读取 Worker capacity"):
+        await WorkerRegistryStore(db_path).capacity_snapshot(
+            worker_id=contract.worker_id,
+            assessed_at=T3,
+        )
 
 
 @pytest.mark.asyncio

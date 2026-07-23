@@ -1,5 +1,8 @@
 # ARC-04.1b Worker 注册 Authority 与 Incarnation Fencing
 
+> ARC-06.1a 已将本 Store 从 schema v1 迁移到 v2，并增加 incarnation-fenced 的原子 capacity
+> reservation。健康报告的 `active_jobs` 继续用于 admission 事实校验，但不再被当作并发占位权威。
+
 ## 交付目标
 
 ARC-04.1a 冻结了 Worker 能力、资源、隔离与健康合同，但纯判定函数仍可接收调用方提供的合同。

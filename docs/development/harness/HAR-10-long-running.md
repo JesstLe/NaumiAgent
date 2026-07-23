@@ -85,7 +85,11 @@
   - UI-18.4b 已让 Textual TUI 复用相同 durable adapter、实时 timeout 与启动 takeover/replay；
   - UI-18.4c 已交付 Goal interaction ledger、sequence-fenced 显式 cancel 和 New UI/CLI/TUI 动作闭环；
   - 未完成：手动 takeover、cursor/优先级与跨 Store 原子提交。
-- HAR-10.7 Cluster scheduling：能力、资源、workspace 锁、亲和/反亲和和隔离。
+- HAR-10.7 Cluster scheduling（partial）：
+  - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
+    基于同一健康快照超卖最后槽位的问题；见
+    [设计](../architecture/ARC-06-1a-worker-capacity-reservations.md)。
+  - 未完成：Agent/Browser dispatch 接入、workspace 锁、能力路由、亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
     pytest/ruff/tox/nox 及主流语言测试入口 fail closed；见

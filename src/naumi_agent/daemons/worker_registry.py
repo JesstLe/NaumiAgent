@@ -9,7 +9,7 @@ import stat
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -33,7 +33,7 @@ from naumi_agent.daemons.worker_contract import (
     verify_worker_contract,
 )
 
-WORKER_REGISTRY_SCHEMA_VERSION = 1
+WORKER_REGISTRY_SCHEMA_VERSION = 2
 _MAX_CONTRACT_JSON_BYTES = 64 * 1024
 
 
@@ -45,10 +45,21 @@ class WorkerRegistryConflictError(WorkerRegistryStoreError):
     """Raised when a registration violates incarnation fencing."""
 
 
+class WorkerCapacityExhaustedError(WorkerRegistryConflictError):
+    """Raised when an atomic reservation would exceed worker capacity."""
+
+
 class WorkerRegistrationState(StrEnum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     REVOKED = "revoked"
+
+
+class WorkerCapacityReservationState(StrEnum):
+    ACTIVE = "active"
+    RELEASED = "released"
+    EXPIRED = "expired"
+    FENCED = "fenced"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +69,31 @@ class WorkerRegistration:
     registered_at: str
     terminal_at: str | None
     reason_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCapacityReservation:
+    reservation_id: str
+    worker_id: str
+    instance_id: str
+    epoch: int
+    job_id: str
+    state: WorkerCapacityReservationState
+    reserved_at: str
+    expires_at: str
+    terminal_at: str | None
+    reason_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCapacitySnapshot:
+    worker_id: str
+    instance_id: str
+    epoch: int
+    maximum: int
+    reserved: int
+    available: int
+    assessed_at: str
 
 
 class WorkerRegistryStore:
@@ -129,6 +165,13 @@ class WorkerRegistryStore:
                                 latest.contract.epoch,
                                 WorkerRegistrationState.ACTIVE.value,
                             ),
+                        )
+                        await _fence_capacity_reservations(
+                            db,
+                            worker_id=latest.contract.worker_id,
+                            epoch=latest.contract.epoch,
+                            fenced_at=timestamp,
+                            reason_code="higher_epoch_registered",
                         )
                 await db.execute(
                     """
@@ -212,6 +255,13 @@ class WorkerRegistryStore:
                         WorkerRegistrationState.ACTIVE.value,
                     ),
                 )
+                await _fence_capacity_reservations(
+                    db,
+                    worker_id=worker_id,
+                    epoch=epoch,
+                    fenced_at=timestamp,
+                    reason_code=reason_code,
+                )
                 updated = await _select_registration(db, worker_id, epoch)
                 await db.commit()
                 assert updated is not None
@@ -251,6 +301,201 @@ class WorkerRegistryStore:
                 return tuple(_registration_from_row(row) for row in await cursor.fetchall())
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法读取 Worker 注册历史。") from exc
+
+    async def reserve_capacity(
+        self,
+        *,
+        reservation_id: str,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        job_id: str,
+        reserved_at: str,
+        ttl_seconds: int,
+    ) -> WorkerCapacityReservation:
+        """Atomically reserve one slot on the exact active worker incarnation."""
+        for field, value in (
+            ("reservation_id", reservation_id),
+            ("worker_id", worker_id),
+            ("instance_id", instance_id),
+            ("job_id", job_id),
+        ):
+            _validate_identifier(value, field=field)
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+            raise TypeError("ttl_seconds 必须是整数。")
+        if not 1 <= ttl_seconds <= 7 * 24 * 60 * 60:
+            raise ValueError("ttl_seconds 必须在 1 到 604800 之间。")
+        timestamp = normalize_worker_timestamp(reserved_at, field="reserved_at")
+        expires_at = (
+            datetime.fromisoformat(timestamp) + timedelta(seconds=ttl_seconds)
+        ).isoformat()
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                registration_row = await _select_active(db, worker_id)
+                if registration_row is None:
+                    raise WorkerRegistryConflictError("Worker 当前没有 active incarnation。")
+                registration = _registration_from_row(registration_row)
+                if (
+                    registration.contract.instance_id != instance_id
+                    or registration.contract.epoch != epoch
+                ):
+                    raise WorkerRegistryConflictError(
+                        "Worker capacity reservation incarnation 已被 fencing。"
+                    )
+                if ttl_seconds > registration.contract.resources.max_wall_seconds:
+                    raise WorkerRegistryConflictError(
+                        "Capacity reservation TTL 超过 Worker max_wall_seconds。"
+                    )
+                await _expire_capacity_reservations(db, worker_id=worker_id, now=timestamp)
+                existing = await _select_capacity_reservation(db, reservation_id)
+                if existing is not None:
+                    reservation = _capacity_reservation_from_row(existing)
+                    if (
+                        reservation.worker_id != worker_id
+                        or reservation.instance_id != instance_id
+                        or reservation.epoch != epoch
+                        or reservation.job_id != job_id
+                        or reservation.expires_at != expires_at
+                    ):
+                        raise WorkerRegistryConflictError(
+                            "Capacity reservation identity 被不同事实复用。"
+                        )
+                    if reservation.state is not WorkerCapacityReservationState.ACTIVE:
+                        raise WorkerRegistryConflictError(
+                            "已终结的 capacity reservation 不能重新激活。"
+                        )
+                    await db.commit()
+                    return reservation
+                duplicate = await _select_capacity_job(db, worker_id, epoch, job_id)
+                if duplicate is not None:
+                    raise WorkerRegistryConflictError(
+                        "同一 Worker job 已使用其他 reservation identity。"
+                    )
+                active_count = await _count_active_capacity(db, worker_id, instance_id, epoch)
+                if active_count >= registration.contract.resources.max_concurrent_jobs:
+                    raise WorkerCapacityExhaustedError("Worker capacity 已耗尽。")
+                await db.execute(
+                    """
+                    INSERT INTO worker_capacity_reservations (
+                        reservation_id, worker_id, instance_id, epoch, job_id, state,
+                        reserved_at, expires_at, terminal_at, reason_code
+                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, NULL)
+                    """,
+                    (reservation_id, worker_id, instance_id, epoch, job_id, timestamp, expires_at),
+                )
+                row = await _select_capacity_reservation(db, reservation_id)
+                await db.commit()
+                assert row is not None
+                return _capacity_reservation_from_row(row)
+        except (WorkerRegistryConflictError, WorkerCapacityExhaustedError):
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法预留 Worker capacity。") from exc
+
+    async def release_capacity(
+        self,
+        *,
+        reservation_id: str,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        reason_code: str,
+        released_at: str,
+    ) -> WorkerCapacityReservation:
+        """Release only the exact reservation owner; stale workers are fenced."""
+        for field, value in (
+            ("reservation_id", reservation_id),
+            ("worker_id", worker_id),
+            ("instance_id", instance_id),
+        ):
+            _validate_identifier(value, field=field)
+        _validate_reason(reason_code)
+        timestamp = normalize_worker_timestamp(released_at, field="released_at")
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _expire_capacity_reservations(db, worker_id=worker_id, now=timestamp)
+                row = await _select_capacity_reservation(db, reservation_id)
+                if row is None:
+                    raise WorkerRegistryConflictError("Capacity reservation 不存在。")
+                reservation = _capacity_reservation_from_row(row)
+                if (
+                    reservation.worker_id != worker_id
+                    or reservation.instance_id != instance_id
+                    or reservation.epoch != epoch
+                ):
+                    raise WorkerRegistryConflictError("Capacity reservation owner 不匹配。")
+                if reservation.state is WorkerCapacityReservationState.RELEASED:
+                    if reservation.reason_code != reason_code:
+                        raise WorkerRegistryConflictError("Capacity reservation 已由不同原因释放。")
+                    await db.commit()
+                    return reservation
+                if reservation.state is not WorkerCapacityReservationState.ACTIVE:
+                    raise WorkerRegistryConflictError("Capacity reservation 已被终结或 fencing。")
+                if datetime.fromisoformat(timestamp) < datetime.fromisoformat(
+                    reservation.reserved_at
+                ):
+                    raise WorkerRegistryConflictError("released_at 早于 reserved_at。")
+                await db.execute(
+                    """
+                    UPDATE worker_capacity_reservations
+                    SET state = 'released', terminal_at = ?, reason_code = ?
+                    WHERE reservation_id = ? AND state = 'active'
+                    """,
+                    (timestamp, reason_code, reservation_id),
+                )
+                updated = await _select_capacity_reservation(db, reservation_id)
+                await db.commit()
+                assert updated is not None
+                return _capacity_reservation_from_row(updated)
+        except WorkerRegistryConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法释放 Worker capacity。") from exc
+
+    async def capacity_snapshot(
+        self,
+        *,
+        worker_id: str,
+        assessed_at: str,
+    ) -> WorkerCapacitySnapshot | None:
+        _validate_identifier(worker_id, field="worker_id")
+        timestamp = normalize_worker_timestamp(assessed_at, field="assessed_at")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_active(db, worker_id)
+                if row is None:
+                    await db.commit()
+                    return None
+                registration = _registration_from_row(row)
+                await _expire_capacity_reservations(db, worker_id=worker_id, now=timestamp)
+                contract = registration.contract
+                reserved = await _count_active_capacity(
+                    db, worker_id, contract.instance_id, contract.epoch
+                )
+                await db.commit()
+                maximum = contract.resources.max_concurrent_jobs
+                return WorkerCapacitySnapshot(
+                    worker_id=worker_id,
+                    instance_id=contract.instance_id,
+                    epoch=contract.epoch,
+                    maximum=maximum,
+                    reserved=reserved,
+                    available=max(0, maximum - reserved),
+                    assessed_at=timestamp,
+                )
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 Worker capacity。") from exc
 
     async def assess_admission(
         self,
@@ -301,6 +546,12 @@ class WorkerRegistryStore:
                                 "Worker registry 是未知的未版本化数据库。"
                             )
                         for statement in _SCHEMA_V1_STATEMENTS:
+                            await db.execute(statement)
+                        for statement in _SCHEMA_V2_STATEMENTS:
+                            await db.execute(statement)
+                        await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
+                    elif version == 1:
+                        for statement in _SCHEMA_V2_STATEMENTS:
                             await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version != WORKER_REGISTRY_SCHEMA_VERSION:
@@ -432,6 +683,42 @@ def _registration_from_row(row: aiosqlite.Row) -> WorkerRegistration:
     return deserialize_worker_registration(dict(row))
 
 
+def _capacity_reservation_from_row(row: aiosqlite.Row) -> WorkerCapacityReservation:
+    record = dict(row)
+    for field in ("reservation_id", "worker_id", "instance_id", "job_id"):
+        _validate_identifier(str(record[field]), field=field)
+    epoch = int(record["epoch"])
+    if epoch < 1:
+        raise ValueError("Capacity reservation epoch 必须是正整数。")
+    reserved_at = normalize_worker_timestamp(str(record["reserved_at"]), field="reserved_at")
+    expires_at = normalize_worker_timestamp(str(record["expires_at"]), field="expires_at")
+    terminal_at = (
+        normalize_worker_timestamp(str(record["terminal_at"]), field="terminal_at")
+        if record["terminal_at"] is not None
+        else None
+    )
+    if datetime.fromisoformat(expires_at) <= datetime.fromisoformat(reserved_at):
+        raise ValueError("Capacity reservation expires_at 必须晚于 reserved_at。")
+    reason = str(record["reason_code"]) if record["reason_code"] is not None else None
+    if reason is not None:
+        _validate_reason(reason)
+    state = WorkerCapacityReservationState(str(record["state"]))
+    if (state is WorkerCapacityReservationState.ACTIVE) != (terminal_at is None and reason is None):
+        raise ValueError("Capacity reservation 终态字段不一致。")
+    return WorkerCapacityReservation(
+        reservation_id=str(record["reservation_id"]),
+        worker_id=str(record["worker_id"]),
+        instance_id=str(record["instance_id"]),
+        epoch=epoch,
+        job_id=str(record["job_id"]),
+        state=state,
+        reserved_at=reserved_at,
+        expires_at=expires_at,
+        terminal_at=terminal_at,
+        reason_code=reason,
+    )
+
+
 def deserialize_worker_registration(record: Mapping[str, object]) -> WorkerRegistration:
     """Validate one durable registry record without trusting its index columns."""
     required = {
@@ -520,6 +807,93 @@ async def _select_latest(
     return await cursor.fetchone()
 
 
+async def _select_capacity_reservation(
+    db: aiosqlite.Connection, reservation_id: str
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_capacity_reservations WHERE reservation_id = ?",
+        (reservation_id,),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_capacity_job(
+    db: aiosqlite.Connection, worker_id: str, epoch: int, job_id: str
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM worker_capacity_reservations
+        WHERE worker_id = ? AND epoch = ? AND job_id = ?
+        """,
+        (worker_id, epoch, job_id),
+    )
+    return await cursor.fetchone()
+
+
+async def _count_active_capacity(
+    db: aiosqlite.Connection, worker_id: str, instance_id: str, epoch: int
+) -> int:
+    cursor = await db.execute(
+        """
+        SELECT * FROM worker_capacity_reservations
+        WHERE worker_id = ? AND epoch = ? AND state = 'active'
+        """,
+        (worker_id, epoch),
+    )
+    reservations = tuple(_capacity_reservation_from_row(row) for row in await cursor.fetchall())
+    if any(item.instance_id != instance_id for item in reservations):
+        raise ValueError("Capacity reservation 与 active Worker instance 不一致。")
+    return len(reservations)
+
+
+async def _expire_capacity_reservations(
+    db: aiosqlite.Connection, *, worker_id: str, now: str
+) -> None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM worker_capacity_reservations
+        WHERE worker_id = ? AND state = 'active'
+        """,
+        (worker_id,),
+    )
+    assessed = datetime.fromisoformat(now)
+    reservations = tuple(_capacity_reservation_from_row(row) for row in await cursor.fetchall())
+    expired_ids = [
+        item.reservation_id
+        for item in reservations
+        if datetime.fromisoformat(item.expires_at) <= assessed
+    ]
+    if not expired_ids:
+        return
+    placeholders = ",".join("?" for _ in expired_ids)
+    await db.execute(
+        f"""
+        UPDATE worker_capacity_reservations
+        SET state = 'expired', terminal_at = ?, reason_code = 'ttl_expired'
+        WHERE reservation_id IN ({placeholders}) AND state = 'active'
+        """,  # noqa: S608 - placeholders are generated, values remain parameterized.
+        (now, *expired_ids),
+    )
+
+
+async def _fence_capacity_reservations(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    epoch: int,
+    fenced_at: str,
+    reason_code: str,
+) -> None:
+    await db.execute(
+        """
+        UPDATE worker_capacity_reservations
+        SET state = 'fenced', terminal_at = ?, reason_code = ?
+        WHERE worker_id = ? AND epoch = ? AND state = 'active'
+        """,
+        (fenced_at, reason_code, worker_id, epoch),
+    )
+
+
 async def _user_tables(db: aiosqlite.Connection) -> tuple[str, ...]:
     cursor = await db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
@@ -596,8 +970,42 @@ ON worker_registrations (worker_id, epoch DESC)
 )
 
 
+_SCHEMA_V2_STATEMENTS = (
+    """
+CREATE TABLE worker_capacity_reservations (
+    reservation_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    job_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('active', 'released', 'expired', 'fenced')),
+    reserved_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    terminal_at TEXT,
+    reason_code TEXT,
+    UNIQUE (worker_id, epoch, job_id),
+    FOREIGN KEY (worker_id, epoch) REFERENCES worker_registrations(worker_id, epoch),
+    CHECK (expires_at > reserved_at),
+    CHECK (
+        (state = 'active' AND terminal_at IS NULL AND reason_code IS NULL)
+        OR (state != 'active' AND terminal_at IS NOT NULL AND reason_code IS NOT NULL)
+    )
+)
+""",
+    """
+CREATE INDEX active_worker_capacity
+ON worker_capacity_reservations (worker_id, instance_id, epoch, expires_at)
+WHERE state = 'active'
+""",
+)
+
+
 __all__ = [
     "WORKER_REGISTRY_SCHEMA_VERSION",
+    "WorkerCapacityExhaustedError",
+    "WorkerCapacityReservation",
+    "WorkerCapacityReservationState",
+    "WorkerCapacitySnapshot",
     "WorkerRegistration",
     "WorkerRegistrationState",
     "WorkerRegistryConflictError",
