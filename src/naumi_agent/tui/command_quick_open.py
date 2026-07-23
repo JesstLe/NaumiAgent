@@ -1,4 +1,4 @@
-"""Textual QuickOpen backed by authoritative command, task, and session projections."""
+"""Textual QuickOpen backed by authoritative terminal projections."""
 
 from __future__ import annotations
 
@@ -23,6 +23,12 @@ from naumi_agent.ui.command_index import (
     TerminalCommandIndexEntry,
     search_terminal_commands,
     terminal_command_template,
+)
+from naumi_agent.ui.page_index import (
+    TerminalPageIndexEntry,
+    build_terminal_page_index,
+    search_terminal_pages,
+    terminal_page_template,
 )
 from naumi_agent.ui.session_list import SessionListItem, build_session_list_snapshot
 from naumi_agent.ui.session_quick_open import (
@@ -144,6 +150,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
     ) -> None:
         super().__init__()
         self._entries = tuple(entries)
+        self._page_entries = build_terminal_page_index("tui")
         self._recent_commands = tuple(recent_commands)[:20]
         self._engine = engine
         self._provider = "commands"
@@ -172,7 +179,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             | TaskViewItem
             | SessionListItem
             | WorkspaceFileItem
-            | AgentDescriptor,
+            | AgentDescriptor
+            | TerminalPageIndexEntry,
             ...,
         ] = ()
 
@@ -180,7 +188,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         with Container():
             yield Label(
                 "[bold]命令 QuickOpen[/bold] · "
-                "Tab 切换任务/会话/文件/Agent · 选择后仅填入输入框",
+                "Tab 切换任务/会话/文件/Agent/页面 · 选择后仅填入输入框",
                 id="command-quick-open-title",
             )
             yield Input(
@@ -191,7 +199,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             yield ListView(id="command-quick-open-results")
             yield Static("", id="command-quick-open-detail")
             yield Static(
-                "Tab 切换命令/任务/会话/文件/Agent · "
+                "Tab 切换命令/任务/会话/文件/Agent/页面 · "
                 "↑/↓ 选择 · Enter 填入 · Esc 取消 · 不会自动执行",
                 id="command-quick-open-help",
             )
@@ -254,6 +262,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             self._results = self._file_items
         elif self._provider == "agents":
             self._results = search_terminal_agents(self._agent_items, query, limit=50)
+        elif self._provider == "pages":
+            self._results = search_terminal_pages(self._page_entries, query, limit=32)
         else:
             self._results = search_terminal_commands(
                 self._entries,
@@ -278,6 +288,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             | SessionListItem
             | WorkspaceFileItem
             | AgentDescriptor
+            | TerminalPageIndexEntry
         ),
     ) -> str:
         if isinstance(entry, TaskViewItem):
@@ -309,6 +320,12 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"[bold]{escape(entry.name)}[/bold] "
                 f"[{style}]{escape(state)}[/] · {kind} · "
                 f"任务 {entry.task_count}{tier}"
+            )
+        if isinstance(entry, TerminalPageIndexEntry):
+            return (
+                f"[bold]{escape(entry.label)}[/bold] · "
+                f"[cyan]{escape(entry.command)}[/cyan] · "
+                f"{escape(entry.description)}"
             )
         syntax = f" {entry.arguments.syntax}" if entry.arguments.syntax else ""
         risk = _RISK_LABELS[entry.permission_risk]
@@ -351,6 +368,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                     "sessions": "会话",
                     "files": "文件",
                     "agents": "Agent",
+                    "pages": "页面",
                 }.get(self._provider, "命令")
                 detail.update(f"[yellow]没有匹配{label}。[/yellow]")
             return
@@ -389,6 +407,13 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 f"将填入：[bold]{escape(terminal_agent_template(selected))}[/bold]"
             )
             return
+        if isinstance(selected, TerminalPageIndexEntry):
+            keywords = "、".join(selected.keywords) or "无"
+            detail.update(
+                f"页面：{escape(selected.label)} · 关键词：{escape(keywords)}\n"
+                f"将填入：[bold]{escape(terminal_page_template(selected))}[/bold]"
+            )
+            return
         aliases = "、".join(selected.aliases) if selected.aliases else "无"
         detail.update(
             f"类别：{escape(selected.category)} · 来源：{escape(selected.source)} · "
@@ -404,6 +429,7 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
         | SessionListItem
         | WorkspaceFileItem
         | AgentDescriptor
+        | TerminalPageIndexEntry
         | None
     ):
         if not self._results:
@@ -423,6 +449,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
                 if isinstance(selected, WorkspaceFileItem)
                 else terminal_agent_template(selected)
                 if isinstance(selected, AgentDescriptor)
+                else terminal_page_template(selected)
+                if isinstance(selected, TerminalPageIndexEntry)
                 else terminal_command_template(selected)
             )
             self.dismiss(template)
@@ -435,7 +463,8 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             "tasks": "sessions",
             "sessions": "files",
             "files": "agents",
-            "agents": "commands",
+            "agents": "pages",
+            "pages": "commands",
         }[self._provider]
         query = self.query_one("#command-quick-open-query", Input)
         query.value = ""
@@ -459,10 +488,16 @@ class CommandQuickOpenScreen(ModalScreen[str | None]):
             )
             query.placeholder = "搜索 Agent 名称、说明、状态、能力或工具…"
             await self._load_agents()
+        elif self._provider == "pages":
+            title.update(
+                "[bold]页面 QuickOpen[/bold] · "
+                "Tab 切换命令 · 选择后仅填入输入框"
+            )
+            query.placeholder = "搜索页面名称、命令、说明或关键词…"
         else:
             title.update(
                 "[bold]命令 QuickOpen[/bold] · "
-                "Tab 切换任务/会话/文件/Agent · 选择后仅填入输入框"
+                "Tab 切换任务/会话/文件/Agent/页面 · 选择后仅填入输入框"
             )
             query.placeholder = "搜索命令、别名、说明、类别或风险…"
         await self._refresh_results("")

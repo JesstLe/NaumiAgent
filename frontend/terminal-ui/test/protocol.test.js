@@ -2494,6 +2494,50 @@ test("normalizes authoritative terminal welcome identity fields", () => {
   );
 });
 
+test("runtime status validates canonical navigation page metadata", () => {
+  const validPage = {
+    schema_version: 1,
+    page_id: "goals",
+    command: "/goal",
+    label: "Goal",
+    description: "查看持久 Goal、Pursuit 状态与阻塞信息。",
+    keywords: ["goal", "pursuit", "目标"],
+    order: 20,
+    surface: "new_ui",
+  };
+  const record = normalizeServerRecord({
+    type: "runtime/status",
+    version: 1,
+    payload: { navigation_pages: [validPage] },
+  });
+
+  assert.deepEqual(record.payload.navigation_pages, [validPage]);
+  for (const invalid of [
+    [{ ...validPage, command: "/goal now" }],
+    [{ ...validPage, surface: "tui" }],
+    [{ ...validPage, private_payload: "must-reject" }],
+    [{ ...validPage, keywords: ["目标", "goal"] }],
+    [validPage, { ...validPage }],
+  ]) {
+    assert.throws(
+      () => normalizeServerRecord({
+        type: "runtime/status",
+        version: 1,
+        payload: { navigation_pages: invalid },
+      }),
+      /navigation_pages/,
+    );
+  }
+  assert.deepEqual(
+    normalizeServerRecord({
+      type: "runtime/status",
+      version: 1,
+      payload: {},
+    }).payload,
+    {},
+  );
+});
+
 test("normalizes and validates evolution patch recovery status", () => {
   const record = normalizeServerRecord({
     type: "ready",

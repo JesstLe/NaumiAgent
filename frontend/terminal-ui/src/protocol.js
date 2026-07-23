@@ -1422,6 +1422,100 @@ function normalizeHelloNegotiation(raw) {
   };
 }
 
+function normalizeNavigationPages(value, source) {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new Error(`${source} 必须是最多 32 项的数组`);
+  }
+  const expectedKeys = [
+    "command",
+    "description",
+    "keywords",
+    "label",
+    "order",
+    "page_id",
+    "schema_version",
+    "surface",
+  ];
+  const normalized = value.map((raw, index) => {
+    const name = `${source}[${index}]`;
+    const page = requireObject(raw, name);
+    const keys = Object.keys(page).sort();
+    if (keys.length !== expectedKeys.length
+      || keys.some((key, keyIndex) => key !== expectedKeys[keyIndex])) {
+      throw new Error(`${name} 字段集合无效`);
+    }
+    if (page.schema_version !== 1) {
+      throw new Error(`${name}.schema_version 不兼容`);
+    }
+    const pageId = strictNavigationPageText(page.page_id, `${name}.page_id`, 64);
+    const command = strictNavigationPageText(page.command, `${name}.command`, 65);
+    const label = strictNavigationPageText(page.label, `${name}.label`, 80);
+    const description = strictNavigationPageText(
+      page.description,
+      `${name}.description`,
+      300,
+    );
+    if (!/^[a-z][a-z0-9_-]{0,63}$/.test(pageId)) {
+      throw new Error(`${name}.page_id 格式无效`);
+    }
+    if (!/^\/[a-z][a-z0-9_-]{0,63}$/.test(command)) {
+      throw new Error(`${name}.command 格式无效`);
+    }
+    if (page.surface !== "new_ui") {
+      throw new Error(`${name}.surface 必须是 new_ui`);
+    }
+    if (!Number.isInteger(page.order) || page.order < 0 || page.order > 1_000) {
+      throw new Error(`${name}.order 必须是 0..1000 的整数`);
+    }
+    if (!Array.isArray(page.keywords) || page.keywords.length > 12) {
+      throw new Error(`${name}.keywords 必须是最多 12 项的数组`);
+    }
+    const keywords = page.keywords.map((item, keywordIndex) => (
+      strictNavigationPageText(item, `${name}.keywords[${keywordIndex}]`, 80)
+    ));
+    const canonicalKeywords = [...new Set(keywords)].sort();
+    if (keywords.length !== canonicalKeywords.length
+      || keywords.some((keyword, keywordIndex) => keyword !== canonicalKeywords[keywordIndex])) {
+      throw new Error(`${name}.keywords 必须排序且不得重复`);
+    }
+    return {
+      schema_version: 1,
+      page_id: pageId,
+      command,
+      label,
+      description,
+      keywords,
+      order: page.order,
+      surface: "new_ui",
+    };
+  });
+  if (new Set(normalized.map((page) => page.page_id)).size !== normalized.length) {
+    throw new Error(`${source} 包含重复 page_id`);
+  }
+  if (new Set(normalized.map((page) => page.command)).size !== normalized.length) {
+    throw new Error(`${source} 包含重复 command`);
+  }
+  const canonicalOrder = [...normalized].sort(
+    (left, right) => left.order - right.order || left.page_id.localeCompare(right.page_id),
+  );
+  if (normalized.some((page, index) => page !== canonicalOrder[index])) {
+    throw new Error(`${source} 必须按 order 和 page_id 排序`);
+  }
+  return normalized;
+}
+
+function strictNavigationPageText(value, name, maxLength) {
+  if (typeof value !== "string"
+    || value.length < 1
+    || value.length > maxLength
+    || value !== value.trim()
+    || value !== value.normalize("NFKC")
+    || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`${name} 必须是规范化且无控制字符的文本`);
+  }
+  return value;
+}
+
 function normalizeRuntimeStatus(payload, source = "runtime/status") {
   const status = normalizeObject(payload);
   const normalized = { ...status };
@@ -1454,6 +1548,12 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
     normalized.model_contract = normalizeModelContract(
       status.model_contract,
       `${source}.model_contract`,
+    );
+  }
+  if (Object.hasOwn(status, "navigation_pages")) {
+    normalized.navigation_pages = normalizeNavigationPages(
+      status.navigation_pages,
+      `${source}.navigation_pages`,
     );
   }
   if (Object.hasOwn(status, "retention_worker")) {

@@ -335,6 +335,7 @@ export function createInitialState() {
     },
     showReasoning: false,
     slashCommands: DEFAULT_SLASH_COMMAND_CANDIDATES,
+    navigationPages: [],
     slashCompletion: {
       input: "",
       selectedIndex: 0,
@@ -1526,6 +1527,9 @@ export function mergeStatus(state, payload) {
   }
   if (Array.isArray(payload.slash_commands)) {
     state.slashCommands = normalizeSlashCommandList(payload.slash_commands);
+  }
+  if (Array.isArray(payload.navigation_pages)) {
+    state.navigationPages = payload.navigation_pages.slice(0, 32);
   }
   if (payload.mode) {
     state.mode = payload.mode;
@@ -3086,6 +3090,7 @@ export function handleSubmitText(state, text, send) {
   }
   if (commandText === "/chat") {
     setComposerIntent(state, "chat");
+    returnToConversationView(state, send);
     return;
   }
   if (commandText === "/task") {
@@ -4339,6 +4344,35 @@ function setComposerIntent(state, intent) {
     "info",
   );
   return next;
+}
+
+function returnToConversationView(state, send) {
+  const anchor = state.route?.originAnchor || {};
+  state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
+  state.followTail = anchor.followTail !== false;
+  if (state.agents?.open) {
+    state.agents.open = false;
+    state.agents.loading = false;
+    if (typeof send === "function") {
+      send("agents/request", {
+        open: false,
+        known_revision: state.agents.revision,
+        session_id: String(state.currentSessionId || ""),
+      });
+    }
+  }
+  if (state.inspector?.open) {
+    state.inspector.open = false;
+    state.inspector.focused = false;
+    if (typeof send === "function") {
+      send("inspector/request", {
+        open: false,
+        known_revision: state.inspector.revision,
+        session_id: String(state.currentSessionId || ""),
+      });
+    }
+  }
+  state.route = { name: "conversation", originAnchor: null };
 }
 
 export function submitUserMessage(state, text, send, existingMessage = null) {

@@ -70,6 +70,67 @@ test("terminal UI command QuickOpen fills composer without submitting", async ()
   }
 });
 
+test("terminal UI page QuickOpen fills an authoritative destination without navigating", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "openai/kimi-for-coding", 7000);
+    app.stdin.write("\x10");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("\t\t\t\t\t");
+    await waitForLatestScreen(output, "页面 QuickOpen", 7000);
+    app.stdin.write("目标");
+    await waitForLatestScreen(output, "Goal · /goal", 7000);
+    app.stdin.write("\n");
+    await waitForLatestScreenWithout(output, "页面 QuickOpen", 7000);
+    await waitForLatestScreen(output, "/goal▌", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    assert.equal(events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    ).length, 0);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI page QuickOpen consumes the Python bridge authority end to end", async () => {
+  const app = launchTerminalUi(null, {
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "python-fixture-capable", 7000);
+    app.stdin.write("\x10");
+    await waitForLatestScreen(output, "命令 QuickOpen", 7000);
+    app.stdin.write("\t\t\t\t\t");
+    await waitForLatestScreen(output, "页面 QuickOpen", 7000);
+    await waitForLatestScreen(output, "查看持久 Goal", 7000);
+    app.stdin.write("权限");
+    await waitForLatestScreen(output, "权限 · /permissions", 7000);
+    app.stdin.write("\n");
+    await waitForLatestScreen(output, "/permissions▌", 7000);
+
+    const events = readDebugEvents(app.debugLogPath);
+    assert(events.some(
+      (record) => record.event === "protocol.receive.record"
+        && Array.isArray(record.payload.payload?.navigation_pages)
+        && record.payload.payload.navigation_pages.length === 8,
+    ));
+    assert.equal(events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "submit",
+    ).length, 0);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI task QuickOpen loads typed tasks and fills detail without submitting", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

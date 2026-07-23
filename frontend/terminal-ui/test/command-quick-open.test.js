@@ -15,11 +15,13 @@ import {
   getCommandQuickOpenItems,
   moveCommandQuickOpenSelection,
   openCommandQuickOpen,
+  pageTemplate,
   recordRecentCommand,
   searchCommandEntries,
   searchTaskEntries,
   searchSessionEntries,
   searchAgentEntries,
+  searchPageEntries,
   sessionTemplate,
   switchCommandQuickOpenProvider,
   requestCommandQuickOpenFiles,
@@ -53,6 +55,19 @@ const COMMANDS = [
     syntax: "<path> <content>",
   }),
   command("/delete", { risk: "destructive", description: "删除会话" }),
+];
+const PAGES = [
+  page("conversation", "/chat", "对话", "返回主对话与输入区。", 0, ["chat", "聊天"]),
+  page("goals", "/goal", "Goal", "查看持久 Goal、Pursuit 状态与阻塞信息。", 20, [
+    "goal",
+    "pursuit",
+    "目标",
+  ]),
+  page("permissions", "/permissions", "权限", "查看待确认请求、授权范围与撤销入口。", 50, [
+    "approval",
+    "permission",
+    "权限",
+  ]),
 ];
 
 test("command QuickOpen ranks canonical alias fuzzy and localized risk metadata", () => {
@@ -111,6 +126,89 @@ test("command QuickOpen page renders textual safety and no-auto-execute contract
   assert.equal(renderScreen(state, 100, 30).length, 30);
   assert.match(screen, /命令 QuickOpen/);
   assert.doesNotMatch(screen, /Workbench 权威视图/);
+});
+
+test("page QuickOpen consumes strict status metadata and only fills navigation command", () => {
+  const state = createInitialState();
+  const [action] = reduceServerEvent(state, normalizeServerRecord({
+    type: "runtime/status",
+    version: 1,
+    payload: { navigation_pages: PAGES },
+  }));
+  assert.equal(action, undefined);
+  assert.deepEqual(state.navigationPages, PAGES);
+  state.route = {
+    name: "workbench",
+    originAnchor: { scrollOffset: 4, followTail: false },
+  };
+
+  openCommandQuickOpen(state);
+  for (let index = 0; index < 5; index += 1) switchCommandQuickOpenProvider(state);
+  assert.equal(state.commandQuickOpen.provider, "pages");
+  appendCommandQuickOpenQuery(state, "目标");
+  assert.equal(getCommandQuickOpenItems(state)[0].page_id, "goals");
+
+  const rendered = stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n"));
+  assert.match(rendered, /页面 QuickOpen/);
+  assert.match(rendered, /Goal · \/goal/);
+  assert.match(rendered, /不会自动发送或执行/);
+
+  assert.equal(acceptCommandQuickOpen(state), true);
+  assert.equal(state.input, "/goal");
+  assert.equal(state.commandQuickOpen.open, false);
+  assert.equal(state.route.name, "workbench");
+});
+
+test("page QuickOpen search is bounded and rejects unsafe templates", () => {
+  assert.equal(searchPageEntries(PAGES, "授权")[0].page_id, "permissions");
+  assert.equal(searchPageEntries(PAGES, "prmssn")[0].page_id, "permissions");
+  assert.equal(pageTemplate(PAGES[0]), "/chat");
+  assert.throws(
+    () => pageTemplate({ ...PAGES[0], command: "/chat now" }),
+    /无法安全填入/,
+  );
+  assert.deepEqual(
+    searchPageEntries([{ ...PAGES[0], label: "坏\n页面" }], ""),
+    [],
+  );
+
+  const legacyBridgeState = createInitialState();
+  openCommandQuickOpen(legacyBridgeState);
+  for (let index = 0; index < 5; index += 1) {
+    switchCommandQuickOpenProvider(legacyBridgeState);
+  }
+  assert.match(
+    stripAnsi(renderCommandQuickOpenPage(legacyBridgeState, 100, 24).join("\n")),
+    /当前 Bridge 未提供页面索引/,
+  );
+});
+
+test("explicit /chat submission returns from a page and closes live overlays", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-page";
+  state.route = {
+    name: "agents",
+    originAnchor: { scrollOffset: 7, followTail: false },
+  };
+  state.agents.open = true;
+  state.agents.revision = 4;
+  state.inspector.open = true;
+  state.inspector.revision = 3;
+  const sent = [];
+
+  handleSubmitText(state, "/chat", (type, payload) => {
+    sent.push({ type, payload });
+  });
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 7);
+  assert.equal(state.followTail, false);
+  assert.equal(state.composerIntent, "chat");
+  assert.equal(state.agents.open, false);
+  assert.equal(state.inspector.open, false);
+  assert.deepEqual(sent.map((item) => item.type), ["agents/request", "inspector/request"]);
+  assert(sent.every((item) => item.payload.open === false));
+  assert.equal(sent.some((item) => item.type === "submit"), false);
 });
 
 test("blocking permission or interaction closes command QuickOpen", () => {
@@ -465,6 +563,19 @@ test("invalid Agent deep links remain local and explain the accepted form", () =
   assert.equal(sent.length, 0);
   assert.match(state.messages.at(-1).content, /\/agents agent <name>/);
 });
+
+function page(pageId, commandName, label, description, order, keywords) {
+  return {
+    schema_version: 1,
+    page_id: pageId,
+    command: commandName,
+    label,
+    description,
+    keywords: [...keywords].sort(),
+    order,
+    surface: "new_ui",
+  };
+}
 
 function command(commandName, { aliases = [], risk, description, syntax = "" }) {
   return {

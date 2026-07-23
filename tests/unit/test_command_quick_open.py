@@ -257,3 +257,37 @@ async def test_tui_quick_open_deep_links_authoritative_agent_without_execution()
         assert isinstance(app.screen, AgentControlScreen)
         assert app.screen.selected_id == "Explore Worker"
         assert app._agent_busy is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_tui_quick_open_searches_authoritative_pages_and_only_fills() -> None:
+    app = NaumiApp(AgentEngine(AppConfig()))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        composer = app.query_one("#msg-input", Input)
+        composer.value = "保留草稿"
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandQuickOpenScreen)
+
+        for _ in range(5):
+            await pilot.press("tab")
+            await pilot.pause()
+
+        assert screen._provider == "pages"  # noqa: SLF001
+        query = screen.query_one("#command-quick-open-query", Input)
+        query.value = "目标"
+        await pilot.pause()
+        assert screen._results[0].page_id == "goals"  # noqa: SLF001
+        assert "页面 QuickOpen" in str(
+            screen.query_one("#command-quick-open-title").render()
+        )
+        assert "/chat" not in {
+            entry.command for entry in screen._page_entries  # noqa: SLF001
+        }
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert composer.value == "/goal"
+        assert app._agent_busy is False  # noqa: SLF001
