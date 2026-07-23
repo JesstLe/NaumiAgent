@@ -300,6 +300,7 @@ class TestPermissionChecker:
         "tool_name",
         [
             "harness_eval_baseline_promote",
+            "harness_eval_sandbox_retry_prune_execute",
             "goal_create",
             "goal_update",
             "goal_interaction_cancel",

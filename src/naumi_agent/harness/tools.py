@@ -23,6 +23,7 @@ from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
 from naumi_agent.harness.sandbox_retry_detail import render_sandbox_retry_detail
 from naumi_agent.harness.sandbox_retry_prune import (
+    render_sandbox_retry_prune_execution_receipt,
     render_sandbox_retry_prune_receipt,
 )
 from naumi_agent.harness.sandbox_retry_retention import (
@@ -65,6 +66,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalSandboxRetryDetailTool(service),
         HarnessEvalSandboxRetryRetentionPreviewTool(service),
         HarnessEvalSandboxRetryPruneAuthorizeTool(service),
+        HarnessEvalSandboxRetryPruneExecuteTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -1101,6 +1103,122 @@ class HarnessEvalSandboxRetryPruneAuthorizeTool(Tool):
             code = getattr(exc, "code", "sandbox_retry_prune_unavailable")
             return f"Sandbox retry prune authorize 暂不可用（`{code}`）：{exc}"
         return render_sandbox_retry_prune_receipt(receipt)
+
+
+class HarnessEvalSandboxRetryPruneExecuteTool(Tool):
+    """Atomically consume one accepted prune authorization receipt."""
+
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_retry_prune_execute"
+
+    @property
+    def description(self) -> str:
+        return "原子消费 Sandbox retry prune 授权回执并清理精确安全集"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=True,
+            concurrency_safe=True,
+            requires_confirmation=True,
+            requires_persistent_authorization=True,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox retry prune execute receipt atomic delete"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        properties: dict[str, Any] = {
+            "action_id": {
+                "type": "string",
+                "pattern": r"^hsrpe_[0-9a-f]{24}$",
+            },
+            "authorization_action_id": {
+                "type": "string",
+                "pattern": r"^hsrpa_[0-9a-f]{24}$",
+            },
+            "authorization_receipt_id": {
+                "type": "string",
+                "pattern": r"^hsrpr_[0-9a-f]{24}$",
+            },
+            "authorization_receipt_sha256": {
+                "type": "string",
+                "pattern": r"^[0-9a-f]{64}$",
+            },
+            "candidate_id": {
+                "type": "string",
+                "pattern": r"^hsrrp_[0-9a-f]{24}$",
+            },
+            "candidate_sha256": {
+                "type": "string",
+                "pattern": r"^[0-9a-f]{64}$",
+            },
+            "retry_action_id": {
+                "type": "string",
+                "pattern": r"^hsar_[0-9a-f]{24}$",
+            },
+            "dispatch_id": {
+                "type": "string",
+                "pattern": r"^hsard_[0-9a-f]{24}$",
+            },
+            "protection_refs_sha256": {
+                "type": "string",
+                "pattern": r"^[0-9a-f]{64}$",
+            },
+            "reason": {"type": "string", "minLength": 1, "maxLength": 500},
+            "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        }
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        patterns = {
+            "action_id": r"hsrpe_[0-9a-f]{24}",
+            "authorization_action_id": r"hsrpa_[0-9a-f]{24}",
+            "authorization_receipt_id": r"hsrpr_[0-9a-f]{24}",
+            "authorization_receipt_sha256": r"[0-9a-f]{64}",
+            "candidate_id": r"hsrrp_[0-9a-f]{24}",
+            "candidate_sha256": r"[0-9a-f]{64}",
+            "retry_action_id": r"hsar_[0-9a-f]{24}",
+            "dispatch_id": r"hsard_[0-9a-f]{24}",
+            "protection_refs_sha256": r"[0-9a-f]{64}",
+        }
+        if any(
+            not isinstance(kwargs.get(name), str)
+            or re.fullmatch(pattern, kwargs[name]) is None
+            for name, pattern in patterns.items()
+        ):
+            return "Sandbox retry prune execute 参数无效：ID 或摘要格式错误。"
+        for name, maximum in (("reason", 500), ("run_id", 128)):
+            value = kwargs.get(name)
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value) > maximum
+            ):
+                return f"Sandbox retry prune execute 参数无效：{name} 无效。"
+        try:
+            receipt = await self._service.execute_sandbox_retry_prune(**kwargs)
+        except (HarnessSandboxEvalServiceError, HarnessStoreError, ValueError) as exc:
+            code = getattr(
+                exc,
+                "code",
+                "sandbox_retry_prune_execution_unavailable",
+            )
+            return f"Sandbox retry prune execute 暂不可用（`{code}`）：{exc}"
+        return render_sandbox_retry_prune_execution_receipt(receipt)
 
 
 class HarnessEvalSandboxResumeTool(Tool):

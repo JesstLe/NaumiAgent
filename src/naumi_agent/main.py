@@ -4022,6 +4022,10 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "--dispatch-sha256 <digest> --updated-at <ISO8601> "
         "--refs-sha256 <digest> --preview-assessed-at <ISO8601> "
         "--retention-days <n> --limit <n> --scan-limit <n> --reason <原因>\n"
+        "      /harness eval sandbox retry-prune-execute <authorization-action> "
+        "--receipt <id> --receipt-sha256 <digest> --candidate <id> "
+        "--candidate-sha256 <digest> --retry-action <id> --dispatch <id> "
+        "--refs-sha256 <digest> --reason <原因>\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4219,6 +4223,105 @@ async def _run_harness(engine: Any, arg: str) -> None:
             ToolCall(
                 id=f"manual-harness-sandbox-retries-{uuid.uuid4().hex}",
                 name="harness_eval_sandbox_retries",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 3
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "retry-prune-execute"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        authorization_action_id = parts[3] if len(parts) >= 4 else ""
+        parsed: dict[str, str] = {}
+        index = 4
+        valid = bool(authorization_action_id)
+        allowed = {
+            "--receipt",
+            "--receipt-sha256",
+            "--candidate",
+            "--candidate-sha256",
+            "--retry-action",
+            "--dispatch",
+            "--refs-sha256",
+            "--reason",
+        }
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in allowed
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        sha_options = (
+            "--receipt-sha256",
+            "--candidate-sha256",
+            "--refs-sha256",
+        )
+        if (
+            not valid
+            or set(parsed) != allowed
+            or re.fullmatch(
+                r"hsrpa_[0-9a-f]{24}",
+                authorization_action_id,
+            )
+            is None
+            or re.fullmatch(
+                r"hsrpr_[0-9a-f]{24}",
+                parsed.get("--receipt", ""),
+            )
+            is None
+            or re.fullmatch(
+                r"hsrrp_[0-9a-f]{24}",
+                parsed.get("--candidate", ""),
+            )
+            is None
+            or re.fullmatch(
+                r"hsar_[0-9a-f]{24}",
+                parsed.get("--retry-action", ""),
+            )
+            is None
+            or re.fullmatch(
+                r"hsard_[0-9a-f]{24}",
+                parsed.get("--dispatch", ""),
+            )
+            is None
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", parsed.get(option, "")) is None
+                for option in sha_options
+            )
+            or not parsed.get("--reason", "").strip()
+            or len(parsed.get("--reason", "")) > 500
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        session = await engine.get_or_create_session()
+        run_id = f"manual:{session.id}"
+        arguments: dict[str, object] = {
+            "action_id": f"hsrpe_{uuid.uuid4().hex[:24]}",
+            "authorization_action_id": authorization_action_id,
+            "authorization_receipt_id": parsed["--receipt"],
+            "authorization_receipt_sha256": parsed["--receipt-sha256"],
+            "candidate_id": parsed["--candidate"],
+            "candidate_sha256": parsed["--candidate-sha256"],
+            "retry_action_id": parsed["--retry-action"],
+            "dispatch_id": parsed["--dispatch"],
+            "protection_refs_sha256": parsed["--refs-sha256"],
+            "reason": parsed["--reason"],
+            "run_id": run_id,
+        }
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-retry-prune-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox_retry_prune_execute",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
         )

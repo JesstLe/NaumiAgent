@@ -102,6 +102,6 @@ accepted 文案明确“本轮没有删除任何记录”；rejected 文案明�
 - 不跨 workspace 复用 candidate；
 - 不允许 receipt 自己绕过未来状态校验。
 
-下一最小切片 HAR-08.4o3j 才能实现 receipt consumption 与原子 prune execution。4o3j 必须重新校验
-accepted receipt、当前 protection refs 和共享引用，在一个事务内按依赖顺序删除，并生成独立执行回执；
-失败时不得部分删除。
+HAR-08.4o3j 已实现 receipt consumption 与原子 prune execution；本 4o3i 回执自身仍不删除任何事实。
+4o3j 会重新校验 accepted receipt、当前 protection refs 和共享引用，在一个事务内按依赖顺序删除并
+生成独立执行回执；详见 `HAR-08-4o3j-sandbox-retry-prune-execution.md`。
