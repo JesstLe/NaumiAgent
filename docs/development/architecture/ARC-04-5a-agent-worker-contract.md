@@ -79,12 +79,14 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 本切片是执行合同，不是完整 Agent daemon：
 
 - ARC-04.5c 已让 embedded 路径消费加密 Agent Job authority，request/context 可在 live claim 下恢复；
-- completed response 原文尚未进入可恢复的加密 terminal payload，父进程发布前崩溃仍可能丢失展示结果；
+- ARC-04.5d1 已将 response/error 加密绑定到 terminal result，并要求生产发布前重新认证恢复；
+- publication outbox 与父进程崩溃后的自动重放仍未完成；
 - Agent 仍由 embedded Runtime 直接调用模型，不是注册到 Worker Registry 的持久 incarnation；
 - 尚未消费 Worker capacity reservation/FIFO、claim owner lease 或 workspace/provider fairness；
 - message bus 仍是 session-scoped 内存实现；
 - 没有 Supervisor、crash takeover、跨主机身份或 100 并发 soak 证据。
 
 ARC-04.5b1 已交付 OS credential-backed key 与 bounded AES-256-GCM envelope，ARC-04.5b2 已建立
-加密 Agent Job Store，ARC-04.5c 已把生产委派接入该 authority。下一步必须跨 Harness/ARC-06/UI
+加密 Agent Job Store，ARC-04.5c 已把生产委派接入该 authority，ARC-04.5d1 已补齐 durable terminal
+payload source。下一步必须跨 Harness/ARC-06/UI
 重新选择最小用户价值切片，不默认继续线性扩展 ARC-04。

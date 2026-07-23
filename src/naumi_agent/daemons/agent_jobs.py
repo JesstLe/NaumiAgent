@@ -34,14 +34,18 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 2
+AGENT_JOB_SCHEMA_VERSION = 3
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
+_TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
+_TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TASK_ID_BYTES = 512
 _MAX_SESSION_ID_BYTES = 512
 _MAX_TASK_BYTES = 2 * 1024**2
 _MAX_CONTEXT_BYTES = 16 * 1024**2
+_MAX_RESPONSE_BYTES = 16 * 1024**2
+_MAX_ERROR_BYTES = 1024**2
 _MAX_TOPIC_BYTES = 768
 _MAX_REQUEST_BYTES = 64 * 1024
 _MAX_LEASE_SECONDS = 24 * 60 * 60
@@ -119,6 +123,28 @@ class AgentJobPayload:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentJobTerminalPayload:
+    """Raw terminal content encrypted at the same commit as its result receipt."""
+
+    response: str = field(repr=False)
+    error: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        _require_text(
+            self.response,
+            field="response",
+            maximum=_MAX_RESPONSE_BYTES,
+            allow_empty=True,
+        )
+        _require_text(
+            self.error,
+            field="error",
+            maximum=_MAX_ERROR_BYTES,
+            allow_empty=True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AgentJobLifecycleReceipt:
     schema_version: int
     receipt_id: str
@@ -186,6 +212,7 @@ class StoredAgentJob:
     job_id: str
     request: AgentWorkerRequest
     payload_envelope: PayloadEnvelope
+    terminal_payload_envelope: PayloadEnvelope | None
     state: AgentJobState
     claim_owner_id: str | None
     claim_epoch: int
@@ -719,9 +746,13 @@ class AgentJobStore:
         owner_id: str,
         claim_epoch: int,
         result: AgentWorkerResult,
+        terminal_payload: AgentJobTerminalPayload,
     ) -> AgentJobTransitionResult:
         if not isinstance(result, AgentWorkerResult):
             raise TypeError("result 必须是 AgentWorkerResult。")
+        if not isinstance(terminal_payload, AgentJobTerminalPayload):
+            raise TypeError("terminal_payload 必须是 AgentJobTerminalPayload。")
+        _verify_terminal_payload_binding(result, terminal_payload)
         target = AgentJobState(result.status.value)
         return await self._owner_transition(
             job_id,
@@ -729,9 +760,53 @@ class AgentJobStore:
             claim_epoch=claim_epoch,
             target_state=target,
             result=result,
+            terminal_payload=terminal_payload,
             reason_code=result.reason_code,
             allowed_states=frozenset({AgentJobState.RUNNING}),
         )
+
+    async def recover_terminal_payload(
+        self,
+        job_id: str,
+        *,
+        expected_result_sha256: str,
+    ) -> AgentJobTerminalPayload:
+        """Recover exact terminal content only when its receipt digest matches."""
+        _require_identifier(job_id, field="job_id")
+        _require_sha256(
+            expected_result_sha256,
+            field="expected_result_sha256",
+        )
+        if not _regular_file_exists(self._db_path):
+            raise AgentJobLifecycleConflictError("AgentJob 不存在。")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                stored = await _require_stored(db, job_id, key=key)
+                if stored.state not in TERMINAL_AGENT_JOB_STATES:
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob 尚未进入终态，不能恢复结果 payload。"
+                    )
+                if (
+                    stored.result is None
+                    or not hmac.compare_digest(
+                        stored.result.result_sha256,
+                        expected_result_sha256,
+                    )
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob terminal result fence 已变化或缺失。"
+                    )
+                payload = _open_terminal_payload(stored, key=key)
+                _verify_terminal_payload_binding(stored.result, payload)
+                await db.commit()
+                return payload
+        except (AgentJobError, AgentJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法恢复 AgentJob terminal payload。") from exc
 
     async def cancel_before_claim(self, job_id: str) -> AgentJobTransitionResult:
         _require_identifier(job_id, field="job_id")
@@ -961,6 +1036,7 @@ class AgentJobStore:
         result: AgentWorkerResult | None,
         reason_code: str,
         allowed_states: frozenset[AgentJobState],
+        terminal_payload: AgentJobTerminalPayload | None = None,
     ) -> AgentJobTransitionResult:
         _require_identifier(job_id, field="job_id")
         _require_identifier(owner_id, field="owner_id")
@@ -981,6 +1057,15 @@ class AgentJobStore:
                             "AgentJob owner 或 claim epoch 已变化。"
                         )
                     if result is None or stored.result == result:
+                        if terminal_payload is not None:
+                            persisted_payload = _open_terminal_payload(
+                                stored,
+                                key=key,
+                            )
+                            if persisted_payload != terminal_payload:
+                                raise AgentJobLifecycleConflictError(
+                                    "AgentJob terminal payload 幂等重放不一致。"
+                                )
                         await db.commit()
                         return AgentJobTransitionResult(stored, False)
                 _require_live_owner(
@@ -997,6 +1082,25 @@ class AgentJobStore:
                     raise AgentJobLifecycleConflictError(
                         "AgentJob result 未绑定当前 request。"
                     )
+                terminal_payload_envelope = None
+                if result is not None:
+                    if terminal_payload is None:
+                        raise AgentJobLifecycleConflictError(
+                            "AgentJob terminal transition 缺少结果 payload。"
+                        )
+                    _verify_terminal_payload_binding(result, terminal_payload)
+                    terminal_payload_envelope = seal_runtime_payload(
+                        _encode_terminal_payload(terminal_payload),
+                        aad=_terminal_payload_aad(
+                            stored.request_sha256,
+                            result.result_sha256,
+                        ),
+                        key=key,
+                    )
+                elif terminal_payload is not None:
+                    raise AgentJobLifecycleConflictError(
+                        "非结果 transition 不得包含 terminal payload。"
+                    )
                 transition = await _append_transition(
                     db,
                     stored=stored,
@@ -1008,6 +1112,7 @@ class AgentJobStore:
                     reason_code=reason_code,
                     occurred_at=now.isoformat(),
                     key=key,
+                    terminal_payload_envelope=terminal_payload_envelope,
                 )
                 await db.commit()
                 return transition
@@ -1103,12 +1208,20 @@ class AgentJobStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V2:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V3:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 1:
                         for statement in _SCHEMA_V2:
                             await db.execute(statement)
+                        await _apply_schema_v3(db)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 2:
+                        await _apply_schema_v3(db)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -1178,6 +1291,7 @@ def _prepare_admitted_job(
             job_id=job_id,
             request=request,
             payload_envelope=envelope,
+            terminal_payload_envelope=None,
             state=AgentJobState.ADMITTED,
             claim_owner_id=None,
             claim_epoch=0,
@@ -1269,6 +1383,33 @@ def _open_stored_payload(
         return payload
     except (PayloadEnvelopeError, TypeError, ValueError) as exc:
         raise AgentJobError("AgentJob payload 无法认证或恢复。") from exc
+
+
+def _open_terminal_payload(
+    stored: StoredAgentJob,
+    *,
+    key: RuntimePayloadKey,
+) -> AgentJobTerminalPayload:
+    envelope = stored.terminal_payload_envelope
+    result = stored.result
+    if envelope is None or result is None:
+        raise AgentJobError("AgentJob 没有可恢复的 terminal payload。")
+    try:
+        raw = open_runtime_payload(
+            envelope,
+            aad=_terminal_payload_aad(
+                stored.request_sha256,
+                result.result_sha256,
+            ),
+            key=key,
+        )
+        payload = _decode_terminal_payload(raw)
+        _verify_terminal_payload_binding(result, payload)
+        return payload
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentJobError(
+            "AgentJob terminal payload 无法认证或恢复。"
+        ) from exc
 
 
 async def _capacity_policy_locked(
@@ -1424,6 +1565,7 @@ async def _append_transition(
     reason_code: str,
     occurred_at: str,
     key: RuntimePayloadKey,
+    terminal_payload_envelope: PayloadEnvelope | None = None,
 ) -> AgentJobTransitionResult:
     receipt = _issue_receipt(
         job_id=stored.job_id,
@@ -1441,6 +1583,11 @@ async def _append_transition(
     )
     receipt_json = _serialize_receipt(receipt)
     result_json = _serialize_result(result) if result is not None else None
+    terminal_payload_envelope_json = (
+        _canonical_json(terminal_payload_envelope.to_dict())
+        if terminal_payload_envelope is not None
+        else None
+    )
     await _insert_receipt(db, receipt)
     cursor = await db.execute(
         """
@@ -1448,7 +1595,9 @@ async def _append_transition(
         SET state = ?, claim_owner_id = ?, claim_epoch = ?,
             claim_expires_at = ?, latest_sequence = ?,
             latest_receipt_sha256 = ?, latest_receipt_json = ?,
-            result_json = COALESCE(?, result_json)
+            result_json = COALESCE(?, result_json),
+            terminal_payload_envelope_json =
+                COALESCE(?, terminal_payload_envelope_json)
         WHERE job_id = ? AND latest_sequence = ?
         """,
         (
@@ -1460,6 +1609,7 @@ async def _append_transition(
             receipt.receipt_sha256,
             receipt_json,
             result_json,
+            terminal_payload_envelope_json,
             stored.job_id,
             stored.latest_receipt.sequence,
         ),
@@ -1473,6 +1623,11 @@ async def _append_transition(
             job_id=stored.job_id,
             request=stored.request,
             payload_envelope=stored.payload_envelope,
+            terminal_payload_envelope=(
+                terminal_payload_envelope
+                if terminal_payload_envelope is not None
+                else stored.terminal_payload_envelope
+            ),
             state=target_state,
             claim_owner_id=owner_id,
             claim_epoch=claim_epoch,
@@ -1550,10 +1705,19 @@ async def _stored_from_row(
             if result_raw is not None
             else None
         )
+        terminal_envelope_raw = row["terminal_payload_envelope_json"]
+        terminal_envelope = (
+            PayloadEnvelope.from_dict(
+                _load_json_object(str(terminal_envelope_raw))
+            )
+            if terminal_envelope_raw is not None
+            else None
+        )
         stored = StoredAgentJob(
             job_id=str(row["job_id"]),
             request=request,
             payload_envelope=envelope,
+            terminal_payload_envelope=terminal_envelope,
             state=state,
             claim_owner_id=(
                 str(row["claim_owner_id"])
@@ -1571,6 +1735,13 @@ async def _stored_from_row(
             result=result,
         )
         _validate_stored(stored, row)
+        if terminal_envelope is not None:
+            terminal_payload = _open_terminal_payload(stored, key=key)
+            if result is None:
+                raise AgentJobError(
+                    "AgentJob terminal payload 缺少 result 绑定。"
+                )
+            _verify_terminal_payload_binding(result, terminal_payload)
         await _validate_event_chain(db, stored, key=key)
         return stored
     except AgentJobError:
@@ -1768,6 +1939,86 @@ def _decode_payload(
     if offset != len(value):
         raise ValueError("AgentJob payload 包含尾随数据。")
     return request, AgentJobPayload(**decoded)
+
+
+def _verify_terminal_payload_binding(
+    result: AgentWorkerResult,
+    payload: AgentJobTerminalPayload,
+) -> None:
+    if not isinstance(result, AgentWorkerResult):
+        raise TypeError("result 必须是 AgentWorkerResult。")
+    if not isinstance(payload, AgentJobTerminalPayload):
+        raise TypeError("payload 必须是 AgentJobTerminalPayload。")
+    response_bytes = payload.response.encode("utf-8")
+    if result.response_bytes != len(response_bytes):
+        raise ValueError("AgentJob terminal response 长度与 result 不一致。")
+    if not hmac.compare_digest(
+        result.response_sha256,
+        hashlib.sha256(response_bytes).hexdigest(),
+    ):
+        raise ValueError("AgentJob terminal response 与 result 不一致。")
+    if not hmac.compare_digest(
+        result.error_sha256,
+        _text_digest(payload.error),
+    ):
+        raise ValueError("AgentJob terminal error 与 result 不一致。")
+
+
+def _encode_terminal_payload(payload: AgentJobTerminalPayload) -> bytes:
+    if not isinstance(payload, AgentJobTerminalPayload):
+        raise TypeError("payload 必须是 AgentJobTerminalPayload。")
+    parts = [_TERMINAL_PAYLOAD_MAGIC]
+    for value in (payload.response, payload.error):
+        encoded = value.encode("utf-8")
+        parts.append(struct.pack(">I", len(encoded)))
+        parts.append(encoded)
+    return b"".join(parts)
+
+
+def _decode_terminal_payload(value: bytes) -> AgentJobTerminalPayload:
+    if not isinstance(value, bytes) or not value.startswith(
+        _TERMINAL_PAYLOAD_MAGIC
+    ):
+        raise ValueError("AgentJob terminal payload header 无效。")
+    offset = len(_TERMINAL_PAYLOAD_MAGIC)
+    decoded: list[str] = []
+    for field_name, maximum in (
+        ("response", _MAX_RESPONSE_BYTES),
+        ("error", _MAX_ERROR_BYTES),
+    ):
+        if len(value) - offset < 4:
+            raise ValueError("AgentJob terminal payload framing 截断。")
+        length = struct.unpack(">I", value[offset : offset + 4])[0]
+        offset += 4
+        if length > maximum or len(value) - offset < length:
+            raise ValueError(
+                f"AgentJob terminal payload {field_name} 长度无效。"
+            )
+        raw = value[offset : offset + length]
+        offset += length
+        try:
+            decoded.append(raw.decode("utf-8"))
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"AgentJob terminal payload {field_name} 不是 UTF-8。"
+            ) from exc
+    if offset != len(value):
+        raise ValueError("AgentJob terminal payload 包含尾随数据。")
+    return AgentJobTerminalPayload(response=decoded[0], error=decoded[1])
+
+
+def _terminal_payload_aad(
+    request_sha256: str,
+    result_sha256: str,
+) -> bytes:
+    _require_sha256(request_sha256, field="request_sha256")
+    _require_sha256(result_sha256, field="result_sha256")
+    return (
+        _TERMINAL_PAYLOAD_AAD
+        + request_sha256.encode("ascii")
+        + b"\x00"
+        + result_sha256.encode("ascii")
+    )
 
 
 def _issue_receipt(
@@ -2145,6 +2396,23 @@ async def _user_tables(db: aiosqlite.Connection) -> tuple[str, ...]:
     return tuple(str(row[0]) for row in await cursor.fetchall())
 
 
+async def _apply_schema_v3(db: aiosqlite.Connection) -> None:
+    cursor = await db.execute("PRAGMA table_info(agent_jobs)")
+    columns = {
+        str(row[1]): (str(row[2]).upper(), int(row[3]))
+        for row in await cursor.fetchall()
+    }
+    existing = columns.get("terminal_payload_envelope_json")
+    if existing is not None:
+        if existing != ("TEXT", 0):
+            raise AgentJobError(
+                "AgentJob schema v3 terminal payload 列定义无效。"
+            )
+        return
+    for statement in _SCHEMA_V3:
+        await db.execute(statement)
+
+
 _STATE_VALUES = ", ".join(f"'{state.value}'" for state in AgentJobState)
 _SCHEMA_V1 = (
     f"""
@@ -2197,6 +2465,13 @@ _SCHEMA_V2 = (
     """,
 )
 
+_SCHEMA_V3 = (
+    """
+    ALTER TABLE agent_jobs
+    ADD COLUMN terminal_payload_envelope_json TEXT
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
@@ -2211,6 +2486,7 @@ __all__ = [
     "AgentJobPayload",
     "AgentJobState",
     "AgentJobStore",
+    "AgentJobTerminalPayload",
     "AgentJobTransitionResult",
     "StoredAgentJob",
     "TERMINAL_AGENT_JOB_STATES",

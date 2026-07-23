@@ -96,9 +96,9 @@
   - HAR-10.7b 已增加 `max_queued_agents` 进程内硬上限，direct/batch/DAG 共用活跃与等待预算；满载时返回
     明确中文过载回执，Runtime 同时展示排队上限，取消可复用容量。见
     [设计](HAR-10-7b-bounded-agent-waiting-queue.md)。
-  - HAR-10.7c 已让多个 embedded Runtime 共用 AgentJob schema v2 capacity policy、active token 与
+  - HAR-10.7c 已让多个 embedded Runtime 共用 AgentJob v2 引入的 capacity policy、active token 与
     有界 FIFO；`waiting_capacity` 可见、可停止，terminal 后下一项自动取得 claim，New UI/TUI 与
-    `/runtime` 显示同一共享计数。见
+    `/runtime` 显示同一共享计数。ARC-04.5d1 升级到 schema v3 后继续保留该 authority。见
     [设计](HAR-10-7c-durable-agent-capacity-admission.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见

@@ -71,8 +71,12 @@
 - ARC-06.2c 已在相同 AgentJob authority 上增加跨 Runtime embedded active 上限、有界 FIFO、
   `waiting_capacity` 停止和 recovery-blocking 计数；它不把 embedded Runtime 冒充独立 Worker。
   详见 `ARC-06-2c-durable-embedded-agent-capacity.md`。
+- ARC-04.5d1 已把 response/error 作为与 result digest 强绑定的 AEAD terminal payload，在同一
+  terminal transaction 原子提交；生产 manager 只发布从 Store 重新认证恢复的内容，恢复失败继续隔离。
+  详见 `ARC-04-5d1-durable-agent-terminal-payload.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
-  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon，response 原文也不可恢复。
+  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon，结果发布 outbox 与自动重放
+  也未完成。
   因此 ARC-04 保持 partial。
 
 ## 验收标准
@@ -111,4 +115,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2, 4.5c)。
+4.5b1a, 4.5b2, 4.5c, 4.5d1)。

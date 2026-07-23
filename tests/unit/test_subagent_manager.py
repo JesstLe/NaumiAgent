@@ -837,6 +837,14 @@ class TestSubAgentManager:
         assert stored.state is AgentJobState.COMPLETED
         assert stored.result is not None
         assert stored.result.result_sha256 == record.worker_result_sha256
+        terminal_payload = (
+            await manager._agent_job_store.recover_terminal_payload(
+                record.worker_job_id,
+                expected_result_sha256=record.worker_result_sha256,
+            )
+        )
+        assert terminal_payload.response == "durable-private-result-6bfa"
+        assert terminal_payload.error == ""
         raw_store = manager._agent_job_store.db_path.read_bytes()
         assert b"durable-private-task-8cd1" not in raw_store
         assert b"durable-private-result-6bfa" not in raw_store
@@ -1276,6 +1284,55 @@ class TestSubAgentManager:
         assert (
             record.worker_job_failure_code
             == "agent_job_terminal_commit_failed"
+        )
+
+    @pytest.mark.asyncio
+    async def test_terminal_payload_recovery_failure_isolates_committed_output(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        attempts = 0
+
+        async def execute(**_: object) -> AgentResult:
+            return AgentResult(
+                status="completed",
+                response="committed but unavailable result",
+                total_tokens=7,
+                turns=1,
+            )
+
+        async def fail_recovery(*args: object, **kwargs: object) -> object:
+            nonlocal attempts
+            attempts += 1
+            raise AgentJobError("key backend unavailable")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        monkeypatch.setattr(
+            manager._agent_job_store,
+            "recover_terminal_payload",
+            fail_recovery,
+        )
+
+        result = await manager.delegate(
+            SubTask("terminal-recovery-failed", "work", "coder")
+        )
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "terminal-recovery-failed"
+        )
+
+        assert attempts == 2
+        assert result.status == "error"
+        assert result.response == ""
+        assert "安全隔离" in (result.error or "")
+        assert record.worker_result_sha256
+        assert record.worker_job_state == AgentJobState.COMPLETED.value
+        assert (
+            record.worker_job_failure_code
+            == "agent_job_terminal_payload_recovery_failed"
         )
 
     @pytest.mark.asyncio

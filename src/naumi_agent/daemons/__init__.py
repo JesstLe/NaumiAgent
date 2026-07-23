@@ -14,6 +14,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobPayload,
     AgentJobState,
     AgentJobStore,
+    AgentJobTerminalPayload,
     AgentJobTransitionResult,
     StoredAgentJob,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "AgentJobPayload",
     "AgentJobState",
     "AgentJobStore",
+    "AgentJobTerminalPayload",
     "AgentJobTransitionResult",
     "StoredAgentJob",
     "TERMINAL_AGENT_JOB_STATES",
