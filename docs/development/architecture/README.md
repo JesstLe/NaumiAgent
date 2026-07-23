@@ -23,5 +23,7 @@ Journal 与稳定 session cursor；ARC-02.5b 已进一步交付客户端持久 A
 
 ARC-06.1a/1b 已建立 Worker capacity reservation 及 ToolJob lifecycle 接入；ARC-06.2a 进一步建立
 incarnation-fenced、有界 FIFO 的持久等待 authority，并让 claim 与 reservation 同事务。ARC-06.2b1
-已让生产 ToolJob 以 schema v3 `queued` receipt 安全入队、重启补建和取消；claimed dispatch/reconcile、
-Agent/Browser Worker、priority/公平调度与跨主机 topology 尚未实现，因此 ARC-06 保持 partial。
+已让生产 ToolJob 以 schema v3 `queued` receipt 安全入队、重启补建和取消；ARC-06.2b2 又把 active
+claim 接入 ToolJob/Shell dispatch-before-send、start 前复验、terminal release 与 lost-claim reconcile。
+自动 scheduler/claim lease、Agent/Browser Worker、priority/公平调度与跨主机 topology 尚未实现，因此
+ARC-06 保持 partial。

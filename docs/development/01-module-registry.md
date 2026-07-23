@@ -47,7 +47,7 @@
 | ARC-03 | 协议版本与兼容治理 | partial (3.2a, 3.2b1, 3.2b2, 3.3a, 3.4a, 3.5a) | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
 | ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3c) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
 | ARC-05 | 状态 Schema 与迁移平台 | partial (5.1, 5.2a) | ARC-01 | `architecture/ARC-05-state-migrations.md` |
-| ARC-06 | 高并发、背压与集群调度 | partial (6.1a, 6.1b, 6.2a, 6.2b1) | ARC-02, ARC-04 | `architecture/ARC-06-concurrency-cluster.md` |
+| ARC-06 | 高并发、背压与集群调度 | partial (6.1a, 6.1b, 6.2a, 6.2b1, 6.2b2) | ARC-02, ARC-04 | `architecture/ARC-06-concurrency-cluster.md` |
 | ARC-07 | 跨平台闭源打包与更新 | planned | ARC-02, UI-17 | `architecture/ARC-07-packaging-update.md` |
 | ARC-08 | 可观测性、SLO 与灾难恢复 | planned | ARC-02, ARC-05 | `architecture/ARC-08-reliability.md` |
 

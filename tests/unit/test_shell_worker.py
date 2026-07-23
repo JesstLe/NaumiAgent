@@ -57,6 +57,7 @@ from naumi_agent.daemons.worker_contract import (
     issue_worker_health_report,
 )
 from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityReservationState,
     WorkerRegistrationState,
     WorkerRegistryStore,
 )
@@ -79,6 +80,8 @@ T3 = "2026-07-19T00:00:03+00:00"
 T4 = "2026-07-19T00:00:04+00:00"
 T5 = "2026-07-19T00:00:05+00:00"
 T6 = "2026-07-19T00:00:06+00:00"
+T7 = "2026-07-19T00:00:07+00:00"
+T8 = "2026-07-19T00:00:08+00:00"
 
 
 def _request(
@@ -421,6 +424,125 @@ async def test_coordinator_consumes_tool_job_authority_and_reuses_terminal_recei
     assert not replay.payload_sent
     assert replay.command is None
     assert replay.job == result.job
+
+
+@pytest.mark.asyncio
+async def test_coordinator_only_executes_queued_job_after_durable_claim(
+    tmp_path: Path,
+) -> None:
+    _require_real_backend()
+    provisional = _request(
+        tmp_path,
+        code=(
+            "from pathlib import Path; "
+            "Path('queued.txt').write_text('claimed'); print('queued-ok')"
+        ),
+    )
+    admitted, tool_request, jobs, store, registry, contract = (
+        await _admitted_shell_job(tmp_path, provisional.spec)
+    )
+    blockers = [
+        await registry.reserve_capacity(
+            reservation_id=f"queued-shell-blocker-{index}",
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id=f"queued-shell-blocker-job-{index}",
+            reserved_at=T3,
+            ttl_seconds=10,
+        )
+        for index in range(contract.resources.max_concurrent_jobs)
+    ]
+    await jobs.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=tool_request,
+        worker_health=_health(contract),
+        requirements=_requirements(contract),
+        now=T4,
+        max_waiters=2,
+    )
+    shell_request = ShellCommandRequest(
+        job_id=admitted.contract.job_id,
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        worker_contract_sha256=contract.contract_sha256,
+        spec=provisional.spec,
+    )
+    timestamps = iter((T5, T6, T7, T8))
+    coordinator = ShellWorkerCoordinator(
+        jobs=jobs,
+        lifecycle=ToolJobLifecycleAuthority(store, registry),
+        worker_registry=registry,
+        transport=AuthenticatedLocalShellTransport(
+            runtime_dir=tmp_path / "queued-transport"
+        ),
+        now=lambda: next(timestamps),
+    )
+
+    with pytest.raises(ToolJobLifecycleConflictError, match="尚未被 claim"):
+        await coordinator.execute(
+            job_id=admitted.contract.job_id,
+            tool_job_request=tool_request,
+            shell_request=shell_request,
+            worker_health=_health(contract),
+            requirements=_requirements(contract),
+            dispatch_id="dispatch-queued-shell",
+        )
+    output = Path(provisional.spec.workspace_root) / "queued.txt"
+    assert not output.exists()
+
+    await registry.release_capacity(
+        reservation_id=blockers[0].reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="queue_slot_available",
+        released_at=T5,
+    )
+    claim = await registry.claim_next_capacity_waiter(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        claimed_at=T5,
+    )
+    assert claim is not None
+    result = await coordinator.execute(
+        job_id=admitted.contract.job_id,
+        tool_job_request=tool_request,
+        shell_request=shell_request,
+        worker_health=_health(contract),
+        requirements=_requirements(contract),
+        dispatch_id="dispatch-queued-shell",
+    )
+    replay = await coordinator.execute(
+        job_id=admitted.contract.job_id,
+        tool_job_request=tool_request,
+        shell_request=shell_request,
+        worker_health=_health(contract),
+        requirements=_requirements(contract),
+        dispatch_id="dispatch-queued-shell",
+    )
+    durable_claim = await registry.get_capacity_claim_for_job(
+        worker_id=contract.worker_id,
+        epoch=contract.epoch,
+        job_id=admitted.contract.job_id,
+        assessed_at=T8,
+    )
+
+    assert result.payload_sent
+    assert result.command is not None
+    assert result.command.status is ShellWorkerStatus.PASSED
+    assert result.job.state is ToolJobState.SUCCEEDED
+    assert result.job.latest_receipt.sequence == 5
+    assert output.read_text() == "claimed"
+    assert not replay.payload_sent
+    assert replay.job == result.job
+    assert durable_claim is not None
+    assert (
+        durable_claim.reservation.state
+        is WorkerCapacityReservationState.RELEASED
+    )
 
 
 @pytest.mark.asyncio

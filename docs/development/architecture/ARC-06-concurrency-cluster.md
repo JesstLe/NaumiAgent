@@ -27,8 +27,11 @@
   - ARC-06.2b1 已让生产 ToolJob 在真实容量饱和后进入该队列，以 ToolJob schema v3 `queued` receipt
     阻断直接派发旁路，并闭合重启补建 waiter 与 dispatch 前取消。见
     [设计与验证](ARC-06-2b1-tool-job-capacity-queue-admission.md)。
-  - 未完成：claimed ToolJob dispatch/reconcile、claim lease、priority、aging、跨 workspace 公平、
-    dependency DAG、affinity、cursor 与 starvation 指标。
+  - ARC-06.2b2 已让 claimed waiter 的 active reservation 进入 ToolJob dispatch-before-send 与真实
+    Shell start fence；terminal 统一释放 reservation，lost claim 可证据化 no-side-effect 收口。见
+    [设计与验证](ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。
+  - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
+    公平、dependency DAG、affinity、cursor 与 starvation 指标。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
 - ARC-06.4 Backpressure：producer pause、bounded queue、drop/coalesce policy、overload response。
 - ARC-06.5 Isolation：workspace lock、browser profile、env、artifact namespace、rate limit。
