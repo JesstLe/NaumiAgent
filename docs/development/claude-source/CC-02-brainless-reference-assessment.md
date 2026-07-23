@@ -58,6 +58,8 @@ tool/exec、diff、permission、prompt、slash menu、todo 等组件，以及组
 4. 用 Naumi typed fixtures 和跨平台测试重新验收，不能以截图相似作为完成标准。
 
 当前只借鉴公开设计和测试方法，不复制源码，因此不新增运行时依赖或第三方代码。
+CC-01.2a 当前提交的 scope 只绑定本地 Claude source，不能作为 Brainless 的 MIT 许可证证据；若未来
+复制或改编 Brainless 组件，必须为其单独建立 source identity、license scope 与 provenance。
 
 ## 已落实的最小动作
 

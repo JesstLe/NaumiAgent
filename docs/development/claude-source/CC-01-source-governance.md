@@ -35,5 +35,8 @@
 - `CC-01.1b`（2026-07-23）已完成：平台原生用户状态库保存 hash-chain 审批历史和稳定刷新提案；
   commit/license/mapping 变化均重新核验，并对 license/mapping 变化要求显式人工确认。详见
   `CC-01-1b-source-refresh-history.md`。
-- 尚未完成许可证适用范围、逐项 v2 mapping、intake classifier、provenance 和
+- `CC-01.2a`（2026-07-23）已完成：严格 license scope 绑定 identity/commit/license evidence，机械覆盖
+  legacy map 的每个 source path；当前真实 Claude source 因无独立标准许可证而保持受限，只允许
+  reference/reimplement。详见 `CC-01-2a-license-scope-boundary.md`。
+- 尚未完成人工法律批准、逐项 v2 mapping、intake classifier、provenance 和
   review gate，因此 CC-01 保持 `partial`。

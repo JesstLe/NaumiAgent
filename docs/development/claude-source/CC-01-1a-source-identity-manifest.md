@@ -41,7 +41,7 @@ dirty checkout 不允许静默生成基线；捕获时必须写明原因。workt
 
 ## 未完成项
 
-CC-01.1b 已建立刷新提案、显式审批与 hash-chain 历史，但 CC-01.2/1.3 仍需完成许可证适用范围和
-每条 mapping 的 v2 schema；CC-01.4-1.6 才提供 intake classifier、provenance 和完整 review
+CC-01.1b 已建立刷新提案、显式审批与 hash-chain 历史，CC-01.2a 已建立受限许可证适用范围；人工法律
+批准与 CC-01.3 每条 mapping 的 v2 schema 仍未完成。CC-01.4-1.6 才提供 intake classifier、provenance 和完整 review
 gate。v1 map 当前仍是映射内容权威，不能因 v2 identity valid 或 history approved 就宣称组件已经
 完成采纳审核。

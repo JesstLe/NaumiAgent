@@ -102,6 +102,6 @@ python3 -m naumi_agent.claude_source.refresh approve \
 
 ## 未完成项
 
-CC-01.2/1.3 仍需定义许可证适用范围和逐项 v2 mapping；CC-01.4-1.6 仍需 intake classifier、
-provenance 与完整 review gate。CC-05.1 已建立只读 baseline observation/read model，并严格引用本
+CC-01.2a 已定义受限许可证适用范围并绑定当前 identity；人工法律批准与 CC-01.3 逐项 v2 mapping 仍未
+完成。CC-01.4-1.6 仍需 intake classifier、provenance 与完整 review gate。CC-05.1 已建立只读 baseline observation/read model，并严格引用本
 模块的已批准 history；后续 CC-05 差异模块仍不得绕过审批或复制一套基线存储。

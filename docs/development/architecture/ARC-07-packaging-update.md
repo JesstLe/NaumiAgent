@@ -24,3 +24,9 @@
 - 更新后首次启动迁移失败自动进入安全模式并可回滚二进制与数据快照。
 - 三平台 clean install、upgrade N-1、rollback、offline、代理环境通过。
 - SBOM、第三方许可证、版本和 build provenance 可查询。
+
+## 已完成前置
+
+- CC-01.2a 已为当前 Claude research source 建立逐路径受限 license scope；因为没有独立标准许可证，
+  当前只允许 reference/reimplement，不能把 source copy/adapt 进入闭源产物。ARC-07 后续 artifact license
+  inventory 必须消费每个实际第三方 source 的独立 scope/provenance，不能把一个来源的许可推及另一个来源。
