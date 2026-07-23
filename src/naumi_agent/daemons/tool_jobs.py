@@ -34,10 +34,12 @@ from naumi_agent.daemons.worker_contract import (
     WorkerKind,
 )
 from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityReservationState,
     WorkerCapacityWaiter,
     WorkerCapacityWaiterState,
     WorkerRegistryConflictError,
     WorkerRegistryStore,
+    capacity_waiter_reservation_id,
 )
 
 TOOL_JOB_SCHEMA_VERSION = 3
@@ -45,6 +47,7 @@ _MAX_CONTRACT_BYTES = 64 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _CAPACITY_DISPATCH_RESULT_CODE = "dispatch_committed_capacity_v1"
+_QUEUED_CAPACITY_DISPATCH_RESULT_CODE = "dispatch_committed_capacity_queue_v1"
 _LEGACY_DISPATCH_RESULT_CODE = "dispatch_committed"
 
 
@@ -409,6 +412,10 @@ class ToolJobStore:
                 await db.commit()
                 if dispatch.result_code == _CAPACITY_DISPATCH_RESULT_CODE:
                     return _capacity_reservation_id(job_id)
+                if dispatch.result_code == _QUEUED_CAPACITY_DISPATCH_RESULT_CODE:
+                    return capacity_waiter_reservation_id(
+                        _tool_job_capacity_queue_id(job_id)
+                    )
                 if dispatch.result_code == _LEGACY_DISPATCH_RESULT_CODE:
                     return None
                 raise ToolJobError("ToolJob dispatch capacity 版本不受支持。")
@@ -971,6 +978,75 @@ class ToolJobAuthority:
             ),
         )
 
+    async def dispatch_claimed(
+        self,
+        *,
+        job_id: str,
+        request: ToolJobRequest,
+        worker_health: WorkerHealthReport,
+        requirements: WorkerAdmissionRequirements,
+        dispatch_id: str,
+        now: str,
+    ) -> ToolJobTransitionResult:
+        """Commit dispatch only for this ToolJob's durable active queue claim."""
+        validation = await self.validate_for_dispatch(
+            job_id=job_id,
+            request=request,
+            worker_health=worker_health,
+            requirements=requirements,
+            now=now,
+        )
+        if not validation.allowed:
+            reasons = ",".join(reason.value for reason in validation.reasons)
+            raise ToolJobLifecycleConflictError(
+                f"Queued ToolJob dispatch authority 被拒绝：{reasons}"
+            )
+        contract = validation.contract
+        assert contract is not None
+        stored = await self._store.get(job_id)
+        if stored is None or stored.state not in {
+            ToolJobState.QUEUED,
+            ToolJobState.DISPATCHED,
+        }:
+            raise ToolJobLifecycleConflictError(
+                "只有 queued/dispatched ToolJob 可以消费 capacity claim。"
+            )
+        try:
+            claim = await self._worker_registry.get_capacity_claim_for_job(
+                worker_id=contract.worker_id,
+                epoch=contract.worker_epoch,
+                job_id=contract.job_id,
+                assessed_at=validation.checked_at,
+            )
+        except WorkerRegistryConflictError as exc:
+            raise ToolJobLifecycleConflictError(
+                f"Queued ToolJob capacity claim 无效：{exc}"
+            ) from exc
+        if claim is None:
+            raise ToolJobLifecycleConflictError(
+                "Queued ToolJob 缺少 durable capacity claim。"
+            )
+        _require_tool_job_capacity_waiter(claim.waiter, contract)
+        if claim.reservation.state is not WorkerCapacityReservationState.ACTIVE:
+            raise ToolJobLifecycleConflictError(
+                "Queued ToolJob capacity claim 已失效；必须先 reconcile。"
+            )
+        if claim.waiter.reservation_id != claim.reservation.reservation_id:
+            raise ToolJobLifecycleConflictError(
+                "Queued ToolJob waiter 与 reservation identity 不一致。"
+            )
+        return await self._store._transition(
+            job_id=job_id,
+            target_state=ToolJobState.DISPATCHED,
+            dispatch_id=dispatch_id,
+            side_effect=ToolJobSideEffect.POSSIBLE,
+            result_code=_QUEUED_CAPACITY_DISPATCH_RESULT_CODE,
+            occurred_at=validation.checked_at,
+            allowed_current_states=frozenset(
+                {ToolJobState.QUEUED, ToolJobState.DISPATCHED}
+            ),
+        )
+
 
 class ToolJobLifecycleAuthority:
     """Fence Worker lifecycle updates against one immutable ToolJob incarnation."""
@@ -997,13 +1073,15 @@ class ToolJobLifecycleAuthority:
         worker_epoch: int,
         now: str,
     ) -> StoredToolJob:
-        await self._require_dispatch_identity(
+        stored = await self._require_dispatch_identity(
             job_id=job_id,
             dispatch_id=dispatch_id,
             worker_id=worker_id,
             worker_instance_id=worker_instance_id,
             worker_epoch=worker_epoch,
         )
+        if stored.state is ToolJobState.DISPATCHED:
+            await self._require_active_dispatch_capacity(stored, now=now)
         transition = await self._store._transition(
             job_id=job_id,
             target_state=ToolJobState.RUNNING,
@@ -1122,6 +1200,55 @@ class ToolJobLifecycleAuthority:
         )
         return transition.job
 
+    async def reconcile_lost_capacity_claim(
+        self,
+        *,
+        job_id: str,
+        now: str,
+    ) -> StoredToolJob:
+        """Close a queued ToolJob only after its claimed slot is terminal."""
+        stored = await self._require_job(job_id)
+        if stored.state not in {
+            ToolJobState.QUEUED,
+            ToolJobState.CANCELLED,
+        }:
+            raise ToolJobLifecycleConflictError(
+                "只有 queued/cancelled ToolJob 可以 reconcile capacity claim。"
+            )
+        contract = stored.contract
+        try:
+            claim = await self._worker_registry.get_capacity_claim_for_job(
+                worker_id=contract.worker_id,
+                epoch=contract.worker_epoch,
+                job_id=contract.job_id,
+                assessed_at=now,
+            )
+        except WorkerRegistryConflictError as exc:
+            raise ToolJobLifecycleConflictError(
+                f"Queued ToolJob capacity claim 无效：{exc}"
+            ) from exc
+        if claim is None:
+            raise ToolJobLifecycleConflictError(
+                "Queued ToolJob 缺少 durable capacity claim。"
+            )
+        _require_tool_job_capacity_waiter(claim.waiter, contract)
+        if claim.reservation.state is WorkerCapacityReservationState.ACTIVE:
+            raise ToolJobLifecycleConflictError(
+                "Capacity claim 仍然 active；不能作为 lost claim 收口。"
+            )
+        transition = await self._store._transition(
+            job_id=job_id,
+            target_state=ToolJobState.CANCELLED,
+            dispatch_id=None,
+            side_effect=ToolJobSideEffect.NONE,
+            result_code=f"capacity_claim_{claim.reservation.state.value}",
+            occurred_at=now,
+            allowed_current_states=frozenset(
+                {ToolJobState.QUEUED, ToolJobState.CANCELLED}
+            ),
+        )
+        return transition.job
+
     async def mark_recovery_unknown(
         self,
         *,
@@ -1150,6 +1277,36 @@ class ToolJobLifecycleAuthority:
             reason_code="tool_job_unknown",
         )
         return transition.job
+
+    async def _require_active_dispatch_capacity(
+        self,
+        stored: StoredToolJob,
+        *,
+        now: str,
+    ) -> None:
+        contract = stored.contract
+        reservation_id = await self._store._capacity_reservation_for_dispatch(
+            contract.job_id
+        )
+        if reservation_id is None:
+            return
+        reservation = await self._worker_registry.get_capacity_reservation(
+            reservation_id,
+            assessed_at=now,
+        )
+        if reservation is None or (
+            reservation.worker_id != contract.worker_id
+            or reservation.instance_id != contract.worker_instance_id
+            or reservation.epoch != contract.worker_epoch
+            or reservation.job_id != contract.job_id
+        ):
+            raise ToolJobLifecycleConflictError(
+                "ToolJob dispatch capacity reservation identity 无效。"
+            )
+        if reservation.state is not WorkerCapacityReservationState.ACTIVE:
+            raise ToolJobLifecycleConflictError(
+                "ToolJob dispatch capacity 已失效；禁止启动 payload。"
+            )
 
     async def _release_job_capacity(
         self,

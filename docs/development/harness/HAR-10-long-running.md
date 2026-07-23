@@ -107,13 +107,16 @@
     [设计](../architecture/ARC-06-2a-durable-worker-capacity-queue.md)。
   - ARC-06.2b1 已让生产 ToolJob 在容量饱和时写入 tamper-evident `queued` receipt 并绑定持久 waiter，
     同时阻断 direct dispatch、支持重启补建和 dispatch 前取消；见
-    [设计](../architecture/ARC-06-2b1-tool-job-capacity-queue-admission.md)。当前 Agent 尚未成为持久
-    Worker，且 claimed ToolJob dispatch/reconcile 尚未接入，因此仍只是 HAR-10.7 集群调度前置。
+    [设计](../architecture/ARC-06-2b1-tool-job-capacity-queue-admission.md)。
+  - ARC-06.2b2 已让 claimed ToolJob 进入真实 Shell dispatch/start/terminal 链，并在 start 前复验
+    reservation、对 lost claim 做 no-side-effect reconcile；见
+    [设计](../architecture/ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。当前 Agent 尚未成为持久
+    Worker，自动 scheduler 与 claim owner lease 尚未接入，因此仍只是 HAR-10.7 集群调度前置。
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。
-  - 未完成：Agent/Browser 持久 Worker dispatch 接入、claimed ToolJob reconcile、workspace 锁、
-    能力路由、亲和/反亲和、公平队列和隔离。
+  - 未完成：Agent/Browser 持久 Worker dispatch 接入、自动 claim/scheduler、workspace 锁、能力路由、
+    亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
     pytest/ruff/tox/nox 及主流语言测试入口 fail closed；见

@@ -514,6 +514,38 @@ class WorkerRegistryStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法释放 Worker capacity。") from exc
 
+    async def get_capacity_reservation(
+        self,
+        reservation_id: str,
+        *,
+        assessed_at: str,
+    ) -> WorkerCapacityReservation | None:
+        """Read one reservation after mechanically applying its TTL."""
+        _validate_identifier(reservation_id, field="reservation_id")
+        timestamp = normalize_worker_timestamp(assessed_at, field="assessed_at")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_capacity_reservation(db, reservation_id)
+                if row is None:
+                    await db.commit()
+                    return None
+                worker_id = str(row["worker_id"])
+                await _expire_capacity_reservations(
+                    db,
+                    worker_id=worker_id,
+                    now=timestamp,
+                )
+                updated = await _select_capacity_reservation(db, reservation_id)
+                await db.commit()
+                assert updated is not None
+                return _capacity_reservation_from_row(updated)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 Worker capacity reservation。") from exc
+
     async def capacity_snapshot(
         self,
         *,
@@ -817,7 +849,7 @@ class WorkerRegistryStore:
                     remaining,
                     7 * 24 * 60 * 60,
                 )
-                reservation_id = _capacity_waiter_reservation_id(waiter.queue_id)
+                reservation_id = capacity_waiter_reservation_id(waiter.queue_id)
                 duplicate = await _select_capacity_reservation(db, reservation_id)
                 if duplicate is not None:
                     raise WorkerRegistryStoreError(
@@ -938,6 +970,65 @@ class WorkerRegistryStore:
                 return waiter
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法读取 job capacity waiter。") from exc
+
+    async def get_capacity_claim_for_job(
+        self,
+        *,
+        worker_id: str,
+        epoch: int,
+        job_id: str,
+        assessed_at: str,
+    ) -> WorkerCapacityClaim | None:
+        """Read one claimed waiter and its current reservation as one snapshot."""
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(job_id, field="job_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        timestamp = normalize_worker_timestamp(assessed_at, field="assessed_at")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _expire_capacity_reservations(
+                    db,
+                    worker_id=worker_id,
+                    now=timestamp,
+                )
+                await _expire_capacity_waiters(
+                    db,
+                    worker_id=worker_id,
+                    now=timestamp,
+                )
+                row = await _select_capacity_waiter_job(
+                    db,
+                    worker_id=worker_id,
+                    epoch=epoch,
+                    job_id=job_id,
+                )
+                if row is None:
+                    await db.commit()
+                    return None
+                waiter = _capacity_waiter_from_row(row)
+                if waiter.state is not WorkerCapacityWaiterState.CLAIMED:
+                    raise WorkerRegistryConflictError(
+                        "Capacity waiter 尚未被 claim。"
+                    )
+                await _validate_capacity_waiter_links(db, (waiter,))
+                assert waiter.reservation_id is not None
+                reservation_row = await _select_capacity_reservation(
+                    db,
+                    waiter.reservation_id,
+                )
+                assert reservation_row is not None
+                reservation = _capacity_reservation_from_row(reservation_row)
+                await db.commit()
+                return WorkerCapacityClaim(waiter=waiter, reservation=reservation)
+        except WorkerRegistryConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 job capacity claim。") from exc
 
     async def list_capacity_waiters(
         self,
@@ -1287,7 +1378,7 @@ def deserialize_worker_capacity_waiter(
     elif datetime.fromisoformat(terminal_at) < datetime.fromisoformat(enqueued_at):
         raise ValueError("Capacity waiter terminal_at 早于 enqueued_at。")
     if state is WorkerCapacityWaiterState.CLAIMED:
-        if reservation_id != _capacity_waiter_reservation_id(str(record["queue_id"])):
+        if reservation_id != capacity_waiter_reservation_id(str(record["queue_id"])):
             raise ValueError("Claimed capacity waiter reservation identity 不一致。")
         if reason_code != "capacity_claimed":
             raise ValueError("Claimed capacity waiter reason_code 不一致。")
@@ -1660,7 +1751,8 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _capacity_waiter_reservation_id(queue_id: str) -> str:
+def capacity_waiter_reservation_id(queue_id: str) -> str:
+    """Return the stable reservation identity owned by one queue waiter."""
     _validate_identifier(queue_id, field="queue_id")
     digest = hashlib.sha256(queue_id.encode("utf-8")).hexdigest()
     return f"scheduler:{digest}"
@@ -1834,6 +1926,7 @@ __all__ = [
     "WorkerRegistryConflictError",
     "WorkerRegistryStore",
     "WorkerRegistryStoreError",
+    "capacity_waiter_reservation_id",
     "deserialize_worker_capacity_waiter",
     "deserialize_worker_capacity_reservation",
     "deserialize_worker_registration",

@@ -11,8 +11,8 @@ ToolJob 仍只能在容量不足时失败。本切片只交付安全接入所需
 - 跨 ToolJob Store 与 Worker Registry 的非原子窗口可恢复、失败关闭；
 - 队列仍不保存命令、参数、Prompt、secret 或 workspace 路径。
 
-本切片不自动 claim、发送 payload 或重试未知副作用。自动出队派发属于后续
-ARC-06.2b2，不能由本切片冒充。
+本切片不自动 claim、发送 payload 或重试未知副作用。ARC-06.2b2 已另行交付 claimed ToolJob
+dispatch/reconcile bridge；本切片本身不能冒充该能力。
 
 ## 2. 权威状态与数据边界
 
@@ -80,8 +80,8 @@ ToolJob `queued` 在前、Registry waiter 在后：
   fence 会拒绝 dispatch；已预留 slot 由既有短 TTL fail-safe 回收，不会执行 payload；
 - 若 ToolJob 与 waiter 关系冲突、waiter 已被 claim 或任一关联被篡改，则失败关闭并要求后续 reconcile。
 
-这保证失败不会变成旁路执行。后续 ARC-06.2b2 必须提供显式 orphan-queued catalog/reconcile，而不是
-依靠调用方猜测状态。
+这保证失败不会变成旁路执行。ARC-06.2b2 已为 claimed ToolJob 提供 dispatch 与 lost-claim reconcile；
+完整 orphan catalog 与自动 scheduler 仍不得依靠调用方猜测状态。
 
 ## 5. Dispatch 前取消
 
@@ -119,11 +119,12 @@ ToolJob `queued` 在前、Registry waiter 在后：
 本实现把状态、背压、幂等、迁移和崩溃窗口落实在真实数据库 authority 中，不是内存队列或
 Prompt 套壳。当前仍明确缺少：
 
-- claimed waiter 到唯一 dispatch receipt 的原子/可恢复 bridge；
-- claim owner lease、超时、发送前崩溃与发送后未知副作用 reconcile；
+- ARC-06.2b2 已交付 claimed waiter 到唯一 dispatch receipt 的可恢复 bridge、发送前 capacity 复验和
+  lost-claim reconcile；
+- claim owner lease、自动 claim/唤醒与发送后未知副作用的外部证据 reconcile；
 - orphan `queued` 运维 catalog、自动补偿与用户可见状态；
 - priority、aging、workspace 公平与 starvation 指标；
 - Agent/Browser Worker adapter。
 
-因此下一最小切片为 ARC-06.2b2：只实现 claimed ToolJob 的 queued dispatch/reconcile，不先扩展
-完整 Agent 集群或高级调度策略。
+因此下一步应重新比较 ARC-04.5a Agent Worker Contract 与 queue catalog/scheduler loop 的依赖，不先
+线性扩张完整 Agent 集群或高级调度策略。

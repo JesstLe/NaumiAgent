@@ -471,14 +471,25 @@ class ShellWorkerCoordinator:
                 payload_sent=False,
                 reconcile_required=True,
             )
-        dispatch = await self._jobs.dispatch(
-            job_id=job_id,
-            request=tool_job_request,
-            worker_health=worker_health,
-            requirements=requirements,
-            dispatch_id=dispatch_id,
-            now=self._now(),
-        )
+        dispatch_now = self._now()
+        if stored.state is ToolJobState.QUEUED:
+            dispatch = await self._jobs.dispatch_claimed(
+                job_id=job_id,
+                request=tool_job_request,
+                worker_health=worker_health,
+                requirements=requirements,
+                dispatch_id=dispatch_id,
+                now=dispatch_now,
+            )
+        else:
+            dispatch = await self._jobs.dispatch(
+                job_id=job_id,
+                request=tool_job_request,
+                worker_health=worker_health,
+                requirements=requirements,
+                dispatch_id=dispatch_id,
+                now=dispatch_now,
+            )
         if not dispatch.should_send_payload:
             return ShellJobExecutionResult(
                 job=dispatch.job,

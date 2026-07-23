@@ -47,6 +47,7 @@ from naumi_agent.daemons.worker_contract import (
 )
 from naumi_agent.daemons.worker_registry import (
     WorkerCapacityExhaustedError,
+    WorkerCapacityReservationState,
     WorkerCapacityWaiterState,
     WorkerRegistryStore,
 )
@@ -876,6 +877,382 @@ async def test_claimed_tool_job_waiter_blocks_direct_dispatch_and_cancel(
     )
     assert unchanged is not None and unchanged.state is ToolJobState.QUEUED
     assert snapshot is not None and (snapshot.reserved, snapshot.available) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_claimed_tool_job_dispatch_is_idempotent_and_releases_claim(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    blocker = await registry.reserve_capacity(
+        reservation_id="capacity-dispatch-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="dispatch-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    await registry.release_capacity(
+        reservation_id=blocker.reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="blocker_finished",
+        released_at=T4,
+    )
+    claim = await registry.claim_next_capacity_waiter(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        claimed_at=T5,
+    )
+    assert claim is not None
+
+    dispatched = await authority.dispatch_claimed(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        dispatch_id="dispatch-from-queue",
+        now=T5,
+    )
+    replay = await ToolJobAuthority(
+        store=ToolJobStore(store.db_path),
+        execution_grants=authority._execution_grants,
+        worker_registry=WorkerRegistryStore(registry.db_path),
+    ).dispatch_claimed(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        dispatch_id="dispatch-from-queue",
+        now=T6,
+    )
+
+    assert dispatched.should_send_payload
+    assert not replay.should_send_payload
+    assert replay.job == dispatched.job
+    assert dispatched.job.latest_receipt.sequence == 3
+    assert (
+        dispatched.job.latest_receipt.result_code
+        == "dispatch_committed_capacity_queue_v1"
+    )
+    lifecycle = ToolJobLifecycleAuthority(store, registry)
+    await lifecycle.mark_running(
+        job_id=admitted.contract.job_id,
+        dispatch_id="dispatch-from-queue",
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        now=T6,
+    )
+    terminal = await lifecycle.finish(
+        job_id=admitted.contract.job_id,
+        dispatch_id="dispatch-from-queue",
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        state=ToolJobState.SUCCEEDED,
+        side_effect=ToolJobSideEffect.OBSERVED,
+        result_code="queued_job_succeeded",
+        now=T7,
+        exit_code=0,
+    )
+    durable_claim = await registry.get_capacity_claim_for_job(
+        worker_id=contract.worker_id,
+        epoch=contract.epoch,
+        job_id=admitted.contract.job_id,
+        assessed_at=T7,
+    )
+
+    assert terminal.state is ToolJobState.SUCCEEDED
+    assert durable_claim is not None
+    assert (
+        durable_claim.reservation.state
+        is WorkerCapacityReservationState.RELEASED
+    )
+    assert durable_claim.reservation.reason_code == "tool_job_succeeded"
+
+
+@pytest.mark.asyncio
+async def test_waiting_tool_job_cannot_use_claimed_dispatch(
+    tmp_path: Path,
+) -> None:
+    authority, request, _, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    await registry.reserve_capacity(
+        reservation_id="capacity-waiting-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="waiting-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+
+    with pytest.raises(
+        ToolJobLifecycleConflictError,
+        match="尚未被 claim",
+    ):
+        await authority.dispatch_claimed(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            dispatch_id="dispatch-before-claim",
+            now=T5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_expired_claim_blocks_worker_start_after_dispatch_receipt(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    blocker = await registry.reserve_capacity(
+        reservation_id="capacity-start-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="start-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    await registry.release_capacity(
+        reservation_id=blocker.reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="blocker_finished",
+        released_at=T4,
+    )
+    assert (
+        await registry.claim_next_capacity_waiter(
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            claimed_at=T5,
+        )
+        is not None
+    )
+    dispatched = await authority.dispatch_claimed(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        dispatch_id="dispatch-expiring-claim",
+        now=T5,
+    )
+    assert dispatched.should_send_payload
+
+    with pytest.raises(ToolJobLifecycleConflictError, match="capacity 已失效"):
+        await ToolJobLifecycleAuthority(store, registry).mark_running(
+            job_id=admitted.contract.job_id,
+            dispatch_id="dispatch-expiring-claim",
+            worker_id=contract.worker_id,
+            worker_instance_id=contract.instance_id,
+            worker_epoch=contract.epoch,
+            now="2026-07-19T00:00:33+00:00",
+        )
+    unchanged = await store.get(admitted.contract.job_id)
+    assert unchanged is not None
+    assert unchanged.state is ToolJobState.DISPATCHED
+
+
+@pytest.mark.asyncio
+async def test_lost_capacity_claim_reconcile_is_evidence_bound_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    blocker = await registry.reserve_capacity(
+        reservation_id="capacity-reconcile-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="reconcile-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    await registry.release_capacity(
+        reservation_id=blocker.reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="blocker_finished",
+        released_at=T4,
+    )
+    claim = await registry.claim_next_capacity_waiter(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        claimed_at=T5,
+    )
+    assert claim is not None
+    lifecycle = ToolJobLifecycleAuthority(store, registry)
+    with pytest.raises(ToolJobLifecycleConflictError, match="仍然 active"):
+        await lifecycle.reconcile_lost_capacity_claim(
+            job_id=admitted.contract.job_id,
+            now=T6,
+        )
+
+    after_expiry = "2026-07-19T00:00:33+00:00"
+    cancelled = await lifecycle.reconcile_lost_capacity_claim(
+        job_id=admitted.contract.job_id,
+        now=after_expiry,
+    )
+    replay = await lifecycle.reconcile_lost_capacity_claim(
+        job_id=admitted.contract.job_id,
+        now=after_expiry,
+    )
+
+    assert cancelled == replay
+    assert cancelled.state is ToolJobState.CANCELLED
+    assert cancelled.latest_receipt.sequence == 3
+    assert cancelled.latest_receipt.side_effect is ToolJobSideEffect.NONE
+    assert cancelled.latest_receipt.result_code == "capacity_claim_expired"
+
+
+@pytest.mark.asyncio
+async def test_worker_takeover_fences_claim_before_no_side_effect_reconcile(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    blocker = await registry.reserve_capacity(
+        reservation_id="capacity-takeover-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="takeover-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    await registry.release_capacity(
+        reservation_id=blocker.reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="blocker_finished",
+        released_at=T4,
+    )
+    assert (
+        await registry.claim_next_capacity_waiter(
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            claimed_at=T5,
+        )
+        is not None
+    )
+    replacement = _contract(2, max_concurrent_jobs=1)
+    await registry.register(replacement, registered_at=T6)
+
+    cancelled = await ToolJobLifecycleAuthority(
+        store,
+        registry,
+    ).reconcile_lost_capacity_claim(
+        job_id=admitted.contract.job_id,
+        now=T6,
+    )
+    durable_claim = await registry.get_capacity_claim_for_job(
+        worker_id=contract.worker_id,
+        epoch=contract.epoch,
+        job_id=admitted.contract.job_id,
+        assessed_at=T6,
+    )
+
+    assert cancelled.state is ToolJobState.CANCELLED
+    assert cancelled.latest_receipt.side_effect is ToolJobSideEffect.NONE
+    assert cancelled.latest_receipt.result_code == "capacity_claim_fenced"
+    assert durable_claim is not None
+    assert (
+        durable_claim.reservation.state
+        is WorkerCapacityReservationState.FENCED
+    )
 
 
 @pytest.mark.asyncio
