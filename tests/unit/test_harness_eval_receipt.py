@@ -393,7 +393,7 @@ async def test_receipt_store_is_immutable_scoped_and_tamper_evident(
             "UPDATE harness_eval_comparison_receipts SET decision = 'failed'"
         )
         db.commit()
-    assert version == HARNESS_STORE_SCHEMA_VERSION == 18
+    assert version == HARNESS_STORE_SCHEMA_VERSION == 19
     with pytest.raises(HarnessStoreError, match="损坏"):
         await HarnessStore(store.db_path).get_eval_comparison_receipt(
             workspace,
@@ -585,4 +585,4 @@ async def test_schema_v15_baseline_migrates_to_promoted_purpose(tmp_path: Path) 
     assert restored.baseline_sha256 == baseline.baseline_sha256
     assert restored.purpose == "promotion"
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 16
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 19

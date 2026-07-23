@@ -231,6 +231,10 @@ class HarnessSandboxEvalExecutor:
             raise TypeError("current_profile 必须可调用。")
         await self._validate_parent(request, parent_receipt_id)
         await self._current_checks(request, current_profile)
+        await self.store.record_sandbox_eval_request(
+            request,
+            created_at=self._now(),
+        )
         identity, suite_sha256 = _baseline_identity(request)
 
         async def load_records() -> tuple[HarnessStoredEvalResult, ...]:

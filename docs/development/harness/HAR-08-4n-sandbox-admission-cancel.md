@@ -131,8 +131,12 @@ TUI 命令：
 - 管理员强制取消与批量取消；
 - 跨主机低延迟 push；当前其他进程依赖至多 1 秒的 durable poll。
 
-## 下一切片
+## 后续切片
 
-HAR-08.4o 应实现 cancel 后的显式 retry authority。retry 必须引用 accepted cancel receipt，
+HAR-08.4o1 已先持久化不可变 Sandbox Eval Request Manifest，使新进程可以从服务端 authority
+恢复原请求，而不信任客户端重述参数。详见
+`HAR-08-4o1-sandbox-eval-request-manifest.md`。
+
+HAR-08.4o2 应实现 cancel 后的显式 retry authority。retry 必须引用 accepted cancel receipt，
 生成新 `action_id`、新 ticket 与新 execution authority；不得复活旧 ticket，也不得把 retry
 隐式合并进 cancel。

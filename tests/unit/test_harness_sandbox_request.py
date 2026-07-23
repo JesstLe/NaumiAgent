@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -17,6 +19,11 @@ from naumi_agent.harness.sandbox_request import (
     HarnessSandboxEvalRequestBuilder,
     HarnessSandboxEvalRequestError,
     validate_request_checks,
+)
+from naumi_agent.harness.store import (
+    HarnessStore,
+    HarnessStoreConflictError,
+    HarnessStoreError,
 )
 
 
@@ -66,13 +73,14 @@ def _build(
     workspace: Path,
     *,
     profile: HarnessProfile | None = None,
+    profile_digest: str = "a" * 64,
     batch_id: str = "sandbox-batch-1",
     requested_samples: int = 5,
 ) -> HarnessSandboxEvalRequest:
     return HarnessSandboxEvalRequestBuilder().build(
         workspace_root=workspace,
         profile=profile or _profile(),
-        profile_digest="a" * 64,
+        profile_digest=profile_digest,
         profile_trusted=True,
         check_ids=("unit",),
         batch_id=batch_id,
@@ -117,6 +125,96 @@ def test_sandbox_request_compiles_clean_git_and_profile_authority(
         HarnessSandboxEvalRequest.model_validate(
             first.model_copy(update={"batch_id": "tampered"}).model_dump(mode="json")
         )
+
+
+@pytest.mark.asyncio
+async def test_request_manifest_survives_restart_and_fences_batch_identity(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    request = _build(workspace)
+    first = await HarnessStore(db_path).record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    repeated = await HarnessStore(db_path).record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:01:00+00:00",
+    )
+    restored = await HarnessStore(db_path).get_sandbox_eval_request(
+        workspace,
+        request.request_sha256,
+    )
+
+    assert repeated == first
+    assert restored == first
+    assert restored is not None
+    assert restored.created_at == "2026-07-23T01:00:00+00:00"
+    assert restored.request == request
+
+    drifted = _build(workspace, profile_digest="b" * 64)
+    with pytest.raises(HarnessStoreConflictError, match="batch"):
+        await HarnessStore(db_path).record_sandbox_eval_request(
+            drifted,
+            created_at="2026-07-23T01:02:00+00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_request_manifest_detects_persisted_content_tampering(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    request = _build(workspace)
+    store = HarnessStore(db_path)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """
+            UPDATE harness_sandbox_eval_requests
+            SET request_json = replace(request_json, ?, ?)
+            WHERE request_sha256 = ?
+            """,
+            ("sandbox-batch-1", "sandbox-batch-X", request.request_sha256),
+        )
+        db.commit()
+
+    with pytest.raises(HarnessStoreError, match="损坏"):
+        await HarnessStore(db_path).get_sandbox_eval_request(
+            workspace,
+            request.request_sha256,
+        )
+
+
+@pytest.mark.asyncio
+async def test_request_manifest_concurrent_process_facades_converge(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    request = _build(workspace)
+
+    first, second = await asyncio.gather(
+        HarnessStore(db_path).record_sandbox_eval_request(
+            request,
+            created_at="2026-07-23T01:00:00+00:00",
+        ),
+        HarnessStore(db_path).record_sandbox_eval_request(
+            request,
+            created_at="2026-07-23T01:00:01+00:00",
+        ),
+    )
+
+    assert first == second
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM harness_sandbox_eval_requests"
+        ).fetchone() == (1,)
 
 
 @pytest.mark.parametrize(

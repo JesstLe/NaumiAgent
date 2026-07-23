@@ -140,6 +140,10 @@
 - HAR-08.4n Sandbox Admission Owner-fenced Cancel：已实现。exact ticket/authority/epoch/state
   fencing、durable accepted/rejected receipt、New UI/TUI 同权威与跨进程有界停止。详见
   `HAR-08-4n-sandbox-admission-cancel.md`。
+- HAR-08.4o1 Sandbox Eval Request Manifest：已实现。Store v19 在权限与 Profile 复验后、admission
+  之前持久化完整不可变 request；新进程可按 workspace/request SHA 恢复，同 batch 漂移、并发覆盖和
+  持久内容篡改均失败关闭，为取消后的真实 retry 提供服务端 request authority。详见
+  `HAR-08-4o1-sandbox-eval-request-manifest.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -149,5 +153,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨进程/多主机 Batch admission、真实 queued/cancel/retry 与 Linux/Windows CI
-  证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
+- HAR-08.4 仍为 partial：跨主机 Batch admission、cancel 后新 execution authority/ticket 的真实 retry
+  与 Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
+  implemented。
