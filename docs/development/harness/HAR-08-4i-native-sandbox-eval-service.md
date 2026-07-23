@@ -16,7 +16,7 @@ kernel 与既有 H5a Store 组合成唯一共享 Service 执行入口。Tool、S
    immutable request；
 4. 把 request 与父权限交给共享 executor；
 5. executor 机械要求父回执的 tool 为 `harness_eval_sandbox`，参数摘要精确匹配
-   `check_ids + samples + batch_id`，并已委托 `bash_run`；
+   `check_ids + samples + batch_id + run_id`，且回执绑定 Runtime run 并已委托 `bash_run`；
 6. 每次恢复、执行前和持久化前重新读取 Profile，要求 digest、trust 与每项 check spec 都没有漂移；
 7. coordinator 取得 HAR-08.4g 容量槽、独占 Runtime lease 和一个 batch-scoped Run Grant；
 8. execution kernel 从 request 的精确 Git revision materialize 每个 sample，所有 checks 通过 ARC-04 Worker
@@ -50,7 +50,7 @@ check status 到 Eval status 的映射、ARC-04 lifecycle marker 和 `run_scope=
 - 使用真实临时 Git 仓库、真实 Profile/Trust Store、Permission Store、Run Grant Store 与 H5a SQLite；
 - 5 个 samples 完整执行后形成 5 条连续 H5a，Run Grant 已撤销，重复调用不再次执行并返回相同 receipt；
 - sample 2 中断时保留 2/5 前缀，重试使用新 Run Grant 从 sample 2 继续到 5/5，receipt 记录两个 grant digest；
-- 与 `check_ids + samples + batch_id` 不精确匹配的父权限在 lease/grant/执行前拒绝；
+- 与 `check_ids + samples + batch_id + run_id` 不精确匹配的父权限在 lease/grant/执行前拒绝；
 - 外来或伪造语义的 H5a 前缀在 grant/执行前拒绝；
 - kernel 返回的 check 顺序、Profile/source identity 或 ARC-04 evidence 不完整时，在 H5a 写入前拒绝并清理
   Run Grant/lease；
@@ -59,10 +59,9 @@ check status 到 Eval status 的映射、ARC-04 lifecycle marker 和 `run_scope=
 
 ## 当前边界与下一步
 
-HAR-08.4i 建立的是生产 Runtime 内部共享执行面，尚未注册 `harness_eval_sandbox` Tool，因此当前用户还不能从
-Slash/New UI/TUI 启动这条链路。测试中的 execution kernel 使用受控替身验证 Service 编排；真实 ARC-04
+HAR-08.4j 已注册 `harness_eval_sandbox` Tool 和 `/harness eval sandbox` 共享 Slash 路由，用户和 Agent
+均可进入本 Service。测试中的 execution kernel 使用受控替身验证 Service 编排；真实 ARC-04
 materialization/Worker 命令执行由既有 HAR-08.4e 与单检查真实后端测试覆盖，本切片没有重复实现 Worker。
 
-下一切片应注册唯一 `harness_eval_sandbox` Tool 与 permission rule，并让 `/harness eval sandbox` 通过
-`engine.execute_tool()` 获得精确父回执；随后新增共享 typed renderer，再接 New UI/TUI progress checkpoint。
+下一切片应把 coordinator checkpoint 接入共享 Runtime typed event，再由 New UI/TUI 渲染真实进度。
 跨进程 admission、跨主机 dispatcher 和 Linux/Windows 真实隔离 CI 仍不属于本切片。

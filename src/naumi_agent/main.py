@@ -3921,6 +3921,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness evidence [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness eval replay [run-id|latest]\n"
+        "      /harness eval sandbox <check-id...> [--samples 5] [--batch <id>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4010,6 +4011,70 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness Replay Eval 参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_eval(result)))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 2
+        and parts[1].lower() == "sandbox"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        check_ids: list[str] = []
+        parsed: dict[str, str] = {}
+        options_started = False
+        index = 2
+        valid = True
+        while index < len(parts):
+            value = parts[index]
+            if value.startswith("--"):
+                options_started = True
+                if (
+                    value not in {"--samples", "--batch"}
+                    or value in parsed
+                    or index + 1 >= len(parts)
+                    or parts[index + 1].startswith("--")
+                ):
+                    valid = False
+                    break
+                parsed[value] = parts[index + 1]
+                index += 2
+                continue
+            if options_started:
+                valid = False
+                break
+            check_ids.append(value)
+            index += 1
+        try:
+            samples = int(parsed.get("--samples", "5"))
+        except ValueError:
+            valid = False
+            samples = 5
+        if (
+            not valid
+            or not check_ids
+            or len(check_ids) != len(set(check_ids))
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        batch_id = parsed.get("--batch") or f"sandbox-{uuid.uuid4().hex[:16]}"
+        session = await engine.get_or_create_session()
+        run_id = f"manual:{session.id}"
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox",
+                arguments=json.dumps(
+                    {
+                        "check_ids": check_ids,
+                        "samples": samples,
+                        "batch_id": batch_id,
+                        "run_id": run_id,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        console.print(Markdown(result.content))
         return
     if subcommand == "eval" and len(parts) > 2:
         target = parts[1]
