@@ -24,7 +24,11 @@ from naumi_agent.daemons.worker_registry import (
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HARNESS_STORE_SCHEMA_VERSION, HarnessStore
-from naumi_agent.ui.doctor import DoctorReport, _worker_authority_check
+from naumi_agent.ui.doctor import (
+    DoctorReport,
+    _worker_authority_check,
+    render_doctor_report,
+)
 from naumi_agent.ui.doctor_health import build_doctor_health_snapshot
 
 T0 = "2026-07-19T00:00:00+00:00"
@@ -90,7 +94,17 @@ async def test_active_worker_combines_verified_contract_and_healthy_heartbeat(
     harness = tmp_path / "harness.db"
     workspace = tmp_path / "workspace"
     contract = _contract()
-    await WorkerRegistryStore(registry).register(contract, registered_at=T1)
+    registry_store = WorkerRegistryStore(registry)
+    await registry_store.register(contract, registered_at=T1)
+    await registry_store.reserve_capacity(
+        reservation_id="capacity-job-a",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="job-a",
+        reserved_at="2026-07-19T00:00:02+00:00",
+        ttl_seconds=10,
+    )
     await HarnessStore(harness).record_heartbeat(
         workspace_root=workspace,
         subject_kind=HarnessRunKind.TOOL,
@@ -118,10 +132,12 @@ async def test_active_worker_combines_verified_contract_and_healthy_heartbeat(
     assert snapshot.heartbeat_store_health == "ready"
     assert snapshot.workers[0].heartbeat_health == "healthy"
     assert snapshot.workers[0].heartbeat_age_seconds == 3
+    assert snapshot.workers[0].reserved_jobs == 1
+    assert snapshot.workers[0].available_jobs == 3
     assert check.status == "pass"
     assert "epoch 3" in check.detail
     assert "linux/x86_64" in check.detail
-    assert "容量 4" in check.detail
+    assert "容量占用 1/4、可用 3" in check.detail
     assert "心跳健康/3.0s" in check.detail
     assert "secret-bearing-internal-code" not in check.detail
     assert registry.read_bytes() == registry_before
@@ -130,6 +146,81 @@ async def test_active_worker_combines_verified_contract_and_healthy_heartbeat(
     typed = build_doctor_health_snapshot(DoctorReport(checks=(check,)))
     assert typed.items[0].domain == "runtime"
     assert typed.items[0].responsibility == "unknown"
+    assert "容量占用 1/4、可用 3" in render_doctor_report(
+        DoctorReport(checks=(check,))
+    )
+
+
+@pytest.mark.asyncio
+async def test_capacity_projection_ignores_expired_slot_without_writing_registry(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "worker-registry.db"
+    harness = tmp_path / "harness.db"
+    contract = _contract()
+    store = WorkerRegistryStore(registry)
+    await store.register(contract, registered_at=T1)
+    await store.reserve_capacity(
+        reservation_id="capacity-expired",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="expired-job",
+        reserved_at=T1,
+        ttl_seconds=1,
+    )
+    registry_before = registry.read_bytes()
+
+    snapshot = inspect_worker_authority_health(
+        registry_db_path=registry,
+        harness_db_path=harness,
+        workspace_root=tmp_path,
+        now="2026-07-19T00:00:05+00:00",
+    )
+
+    assert snapshot.workers[0].reserved_jobs == 0
+    assert snapshot.workers[0].available_jobs == 4
+    assert registry.read_bytes() == registry_before
+    with sqlite3.connect(registry) as db:
+        assert db.execute(
+            "SELECT state FROM worker_capacity_reservations "
+            "WHERE reservation_id = 'capacity-expired'"
+        ).fetchone()[0] == "active"
+
+
+@pytest.mark.asyncio
+async def test_capacity_projection_rejects_tampered_incarnation(tmp_path: Path) -> None:
+    registry = tmp_path / "worker-registry.db"
+    harness = tmp_path / "harness.db"
+    contract = _contract()
+    store = WorkerRegistryStore(registry)
+    await store.register(contract, registered_at=T1)
+    await store.reserve_capacity(
+        reservation_id="capacity-tampered",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="tampered-job",
+        reserved_at=T1,
+        ttl_seconds=10,
+    )
+    with sqlite3.connect(registry) as db:
+        db.execute(
+            "UPDATE worker_capacity_reservations SET instance_id = 'other-process' "
+            "WHERE reservation_id = 'capacity-tampered'"
+        )
+    registry_before = registry.read_bytes()
+
+    with pytest.raises(WorkerAuthorityHealthError) as raised:
+        inspect_worker_authority_health(
+            registry_db_path=registry,
+            harness_db_path=harness,
+            workspace_root=tmp_path,
+            now="2026-07-19T00:00:05+00:00",
+        )
+
+    assert raised.value.code == "registry_unreadable"
+    assert registry.read_bytes() == registry_before
 
 
 @pytest.mark.asyncio

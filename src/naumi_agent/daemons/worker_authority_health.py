@@ -10,10 +10,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from naumi_agent.daemons.worker_contract import WorkerContract
+from naumi_agent.daemons.worker_contract import (
+    WorkerContract,
+    normalize_worker_timestamp,
+)
 from naumi_agent.daemons.worker_registry import (
     WORKER_REGISTRY_SCHEMA_VERSION,
+    WorkerCapacityReservationState,
     WorkerRegistrationState,
+    deserialize_worker_capacity_reservation,
     deserialize_worker_registration,
 )
 from naumi_agent.harness.heartbeat import (
@@ -59,6 +64,8 @@ class WorkerAuthorityEntry:
     platform: str
     machine: str
     max_concurrent_jobs: int
+    reserved_jobs: int
+    available_jobs: int
     heartbeat_health: WorkerHeartbeatHealth
     heartbeat_age_seconds: float | None
 
@@ -86,7 +93,10 @@ def inspect_worker_authority_health(
     workspace = str(Path(workspace_root).expanduser().resolve(strict=False))
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
         raise ValueError("limit 必须在 1 到 20 之间。")
-    assessed_at = now or datetime.now(UTC).isoformat()
+    assessed_at = normalize_worker_timestamp(
+        now or datetime.now(UTC).isoformat(),
+        field="now",
+    )
 
     registry_kind = _file_kind(registry_path)
     if registry_kind == "absent":
@@ -96,6 +106,7 @@ def inspect_worker_authority_health(
 
     try:
         with closing(_open_read_only(registry_path)) as db:
+            db.execute("BEGIN")
             version = _user_version(db)
             if version != WORKER_REGISTRY_SCHEMA_VERSION:
                 raise WorkerAuthorityHealthError(
@@ -117,6 +128,14 @@ def inspect_worker_authority_health(
             registrations = tuple(deserialize_worker_registration(dict(row)) for row in rows)
             if any(item.state is not WorkerRegistrationState.ACTIVE for item in registrations):
                 raise ValueError("Worker registry active 查询返回了非 active 记录。")
+            capacities = {
+                item.contract.worker_id: _read_capacity(
+                    db,
+                    contract=item.contract,
+                    assessed_at=assessed_at,
+                )
+                for item in registrations
+            }
     except WorkerAuthorityHealthError:
         raise
     except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
@@ -135,6 +154,7 @@ def inspect_worker_authority_health(
     workers = tuple(
         _entry(
             registration.contract,
+            capacity=capacities[registration.contract.worker_id],
             heartbeats=heartbeats,
             heartbeat_store_health=heartbeat_store_health,
             now=assessed_at,
@@ -188,9 +208,45 @@ def _read_heartbeats(
         return "error", {}
 
 
+def _read_capacity(
+    db: sqlite3.Connection,
+    *,
+    contract: WorkerContract,
+    assessed_at: str,
+) -> tuple[int, int]:
+    maximum = contract.resources.max_concurrent_jobs
+    rows = db.execute(
+        """
+        SELECT * FROM worker_capacity_reservations
+        WHERE worker_id = ? AND epoch = ? AND state = 'active'
+        ORDER BY reservation_id ASC LIMIT ?
+        """,
+        (contract.worker_id, contract.epoch, maximum + 1),
+    ).fetchall()
+    if len(rows) > maximum:
+        raise ValueError("Worker active capacity reservation 超过合同上限。")
+    reservations = tuple(
+        deserialize_worker_capacity_reservation(dict(row)) for row in rows
+    )
+    if any(
+        item.worker_id != contract.worker_id
+        or item.instance_id != contract.instance_id
+        or item.epoch != contract.epoch
+        or item.state is not WorkerCapacityReservationState.ACTIVE
+        for item in reservations
+    ):
+        raise ValueError("Worker capacity reservation 与 active incarnation 不一致。")
+    assessed = datetime.fromisoformat(assessed_at)
+    reserved = sum(
+        datetime.fromisoformat(item.expires_at) > assessed for item in reservations
+    )
+    return reserved, maximum - reserved
+
+
 def _entry(
     contract: WorkerContract,
     *,
+    capacity: tuple[int, int],
     heartbeats: dict[str, tuple[HarnessHeartbeat, ...]],
     heartbeat_store_health: HeartbeatStoreHealth,
     now: str,
@@ -224,6 +280,8 @@ def _entry(
         platform=contract.platform.system,
         machine=contract.platform.machine,
         max_concurrent_jobs=contract.resources.max_concurrent_jobs,
+        reserved_jobs=capacity[0],
+        available_jobs=capacity[1],
         heartbeat_health=health,
         heartbeat_age_seconds=age,
     )

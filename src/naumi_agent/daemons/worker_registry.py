@@ -692,7 +692,27 @@ def _registration_from_row(row: aiosqlite.Row) -> WorkerRegistration:
 
 
 def _capacity_reservation_from_row(row: aiosqlite.Row) -> WorkerCapacityReservation:
-    record = dict(row)
+    return deserialize_worker_capacity_reservation(dict(row))
+
+
+def deserialize_worker_capacity_reservation(
+    record: Mapping[str, object],
+) -> WorkerCapacityReservation:
+    """Validate one durable capacity record for strict read-only consumers."""
+    required = {
+        "reservation_id",
+        "worker_id",
+        "instance_id",
+        "epoch",
+        "job_id",
+        "state",
+        "reserved_at",
+        "expires_at",
+        "terminal_at",
+        "reason_code",
+    }
+    if not isinstance(record, Mapping) or not required.issubset(record):
+        raise ValueError("Worker capacity reservation 记录字段不完整。")
     for field in ("reservation_id", "worker_id", "instance_id", "job_id"):
         _validate_identifier(str(record[field]), field=field)
     epoch = int(record["epoch"])
@@ -1019,5 +1039,6 @@ __all__ = [
     "WorkerRegistryConflictError",
     "WorkerRegistryStore",
     "WorkerRegistryStoreError",
+    "deserialize_worker_capacity_reservation",
     "deserialize_worker_registration",
 ]

@@ -50,4 +50,5 @@ ToolJob 与 Worker Registry 是两个独立 SQLite authority，当前不伪装�
   因此未伪造接入；
 - 尚无 capacity waiting queue、priority/deadline、公平与 starvation aging；
 - 尚无 workspace、provider、browser profile、token/cost 等多维 reservation；
-- crash 后主动回收仍依赖 TTL 或 Worker fencing，尚无跨 Store outbox/reconciler 与容量指标 UI。
+- crash 后主动回收仍依赖 TTL 或 Worker fencing，尚无跨 Store outbox/reconciler；UI-13.1d 已显示当前
+  reservation 占用/可用，但 queue wait、orphan age、利用率趋势仍未交付。
