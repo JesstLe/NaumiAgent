@@ -140,5 +140,6 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 
 ### 尚未完成
 
-- HAR-07.4b：断线重连后的 revision/gap 自动补发；显式 `/resume` 恢复已完成。
+- HAR-07.4b：ARC-03.3a 已补齐 attested additive informational 事件不会制造伪 gap 的最小前置；
+  Bridge 断线重连、ARC-02.5 cursor/Event Store 和 revision/gap 自动补发仍未实现。显式 `/resume` 恢复已完成。
 - HAR-07.5c+：完成卡入口与跨平台复制回执；`e/r` 刷新和 `v` Evidence 焦点已完成。

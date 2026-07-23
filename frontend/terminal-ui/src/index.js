@@ -378,7 +378,9 @@ function logDebug(event, payload) {
 
 function handleBridgeLine(line) {
   if (!line.trim()) return;
-  debugLog?.log("protocol.receive.line", { line });
+  debugLog?.log("protocol.receive.line", {
+    bytes: Buffer.byteLength(line, "utf8"),
+  });
   let record;
   let rawRecord;
   try {
@@ -393,7 +395,13 @@ function handleBridgeLine(line) {
     record = normalizeServerRecord(rawRecord);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    debugLog?.log("protocol.receive.error", { line, error: message });
+    debugLog?.log("protocol.receive.error", {
+      type: sanitizeTerminalText(String(rawRecord?.type ?? ""))
+        .replace(/\s+/g, " ")
+        .slice(0, 128),
+      bytes: Buffer.byteLength(line, "utf8"),
+      error: message,
+    });
     protocolEventBatcher.flush();
     if (rawRecord?.type === "ack" && rawRecord?.payload?.event === "hello") {
       deferredProtocolSends.length = 0;
@@ -413,6 +421,39 @@ function handleBridgeLine(line) {
     ? serverSequenceGuard.enable(record)
     : serverSequenceGuard.observe(record);
   if (!handleServerSequenceDecision(sequenceDecision, record)) return;
+  if (record.unknown_informational === true) {
+    protocolEventBatcher.flush();
+    const registryCompatibility = String(
+      state.status?.protocol_registry?.compatibility ?? "",
+    );
+    if (registryCompatibility !== "attested_additive") {
+      logDebug("protocol.unknown.rejected", {
+        type: record.type,
+        request_id: record.request_id ?? "",
+        seq: record.seq ?? null,
+        criticality: "informational",
+        reason: "registry_not_attested_additive",
+        payload_omitted: true,
+      });
+      pushSystemMessage(
+        state,
+        "bridge protocol",
+        `Bridge 发送了未被兼容清单证明的新增事件 ${record.type}；已忽略其内容并继续运行。`,
+        "warning",
+        { dismissWelcome: true },
+      );
+      scheduleRedraw();
+      return;
+    }
+    logDebug("protocol.unknown.informational", {
+      type: record.type,
+      request_id: record.request_id ?? "",
+      seq: record.seq ?? null,
+      criticality: "informational",
+      payload_omitted: true,
+    });
+    return;
+  }
   debugLog?.log("protocol.receive.record", { type: record.type, request_id: record.request_id, seq: record.seq, payload: record.payload });
   if (record.type === "pong") {
     processBridgeRecord(record);

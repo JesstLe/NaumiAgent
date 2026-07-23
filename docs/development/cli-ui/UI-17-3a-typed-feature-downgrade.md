@@ -45,7 +45,8 @@ Router 执行，不发送旧 Bridge 无法识别的 client event。
 
 UI-17.3 仍是 partial。当前只治理第一个新增 typed feature；Goal/Task 已有各自 Markdown fallback，但 session、
 Workbench、Harness detail、permission 等事件尚未统一进入 machine-readable capability-to-event registry。未知 server
-informational/control/terminal event 的“忽略、局部中止或全局拒绝”也仍未按 ARC-03.3 criticality 自动执行。
+informational event 的 attested additive 忽略已由 ARC-03.3a 完成；未知 control/terminal 的局部中止
+仍未按 request/run scope 实现。
 
 下一切片应先比较 UI-17.3b 通用 event-capability registry 与 HAR-07.4b sequence/gap recovery 的依赖价值，不应继续
 为每个页面手写分散判断。

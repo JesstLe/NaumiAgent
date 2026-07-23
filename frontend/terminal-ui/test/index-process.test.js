@@ -218,6 +218,7 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
       server_minimum_version: 1,
       server_maximum_version: 1,
       capabilities: [
+        "doctor_export",
         "evolution_evaluation_lane",
         "goal_snapshot",
         "heartbeat",
@@ -308,6 +309,65 @@ test("terminal UI quarantines a negotiated sequence gap and exits for TUI fallba
         && record.payload.type === "ready",
     ));
     assert(!stripAnsi(output.text).includes("gap-record-must-not-render"));
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI audits and skips attested additive informational events", async () => {
+  const app = launchTerminalUi("additive-informational-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "future/additive-status-confirmed", 7000);
+    const events = readDebugEvents(app.debugLogPath);
+    const unknown = events.find(
+      (record) => record.event === "protocol.unknown.informational",
+    );
+    assert(unknown);
+    assert.equal(unknown.payload.type, "future/progress");
+    assert.equal(unknown.payload.criticality, "informational");
+    assert.equal(unknown.payload.payload_omitted, true);
+    assert(!events.some(
+      (record) => record.event === "protocol.sequence.desync",
+    ));
+    assert(events.some(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "runtime/status",
+    ));
+    assert(!fs.readFileSync(app.debugLogPath, "utf8").includes(
+      "unknown-payload-must-never-enter-debug-log",
+    ));
+    assert(!stripAnsi(output.text).includes("bridge protocol"));
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI rejects unattested informational additions without desync", async () => {
+  const app = launchTerminalUi("unattested-informational-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "未被兼容清单证明的新增事件 future/progress", 7000);
+    await waitForLatestScreen(output, "unattested-stream-survived", 7000);
+    const events = readDebugEvents(app.debugLogPath);
+    const rejected = events.find(
+      (record) => record.event === "protocol.unknown.rejected",
+    );
+    assert(rejected);
+    assert.equal(rejected.payload.reason, "registry_not_attested_additive");
+    assert(!events.some(
+      (record) => record.event === "protocol.unknown.informational",
+    ));
+    assert(!events.some(
+      (record) => record.event === "protocol.sequence.desync",
+    ));
+    assert(!fs.readFileSync(app.debugLogPath, "utf8").includes(
+      "unattested-payload-must-never-enter-debug-log",
+    ));
+    assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);
   }
@@ -742,10 +802,10 @@ test("terminal UI process reports invalid bridge protocol records without crashi
   const output = collectOutput(app);
 
   try {
-    await waitForReadyWelcome(output, 7000);
+    await waitForLatestScreen(output, "chat >", 7000);
     app.stdin.write("bad bridge event\n");
     await waitForOutput(output, "bridge protocol");
-    await waitForOutput(output, "未知 Bridge 事件");
+    await waitForOutput(output, "未知关键 Bridge 事件");
 
     const code = await stopTerminalUi(app);
 
@@ -755,7 +815,7 @@ test("terminal UI process reports invalid bridge protocol records without crashi
       debugEvents.some(
         (record) =>
           record.event === "protocol.receive.error"
-          && String(record.payload.error).includes("未知 Bridge 事件"),
+          && String(record.payload.error).includes("未知关键 Bridge 事件"),
       ),
     );
   } finally {

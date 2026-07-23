@@ -86,6 +86,10 @@ class EventCapabilityBinding(_StrictModel):
 class ProtocolEventRegistry(_StrictModel):
     contract_version: StrictInt = Field(ge=1)
     registry_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    compatible_registry_sha256: tuple[str, ...] = Field(
+        min_length=1,
+        max_length=32,
+    )
     client: Mapping[str, EventPolicy]
     server: Mapping[str, EventPolicy]
     event_capabilities: Mapping[str, EventCapabilityBinding]
@@ -166,7 +170,30 @@ def load_protocol_event_registry(
         {str(event) for event in ServerEventType},
     )
     raw_negotiation = document.get("negotiation")
+    raw_compatibility = document.get("compatibility")
     raw_capability_registry = document.get("event_capabilities")
+    if (
+        not isinstance(raw_compatibility, dict)
+        or set(raw_compatibility)
+        != {"previous_registry_sha256", "unknown_informational_events"}
+        or raw_compatibility.get("unknown_informational_events")
+        != "ignore_and_audit"
+    ):
+        raise ProtocolRegistryError("protocol contract compatibility 策略无效。")
+    previous_registry_sha256 = raw_compatibility.get("previous_registry_sha256")
+    if (
+        not isinstance(previous_registry_sha256, list)
+        or len(previous_registry_sha256) > 31
+        or len(previous_registry_sha256) != len(set(previous_registry_sha256))
+        or any(
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in previous_registry_sha256
+        )
+    ):
+        raise ProtocolRegistryError(
+            "compatibility previous_registry_sha256 必须是唯一 SHA-256 数组。"
+        )
     if not isinstance(raw_negotiation, dict) or not isinstance(
         raw_negotiation.get("capabilities"), list
     ):
@@ -189,6 +216,11 @@ def load_protocol_event_registry(
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+    registry_sha256 = hashlib.sha256(canonical).hexdigest()
+    if registry_sha256 in previous_registry_sha256:
+        raise ProtocolRegistryError(
+            "compatibility previous_registry_sha256 不得重复当前注册表摘要。"
+        )
     try:
         bindings = {
             name: EventCapabilityBinding.model_validate(value)
@@ -197,9 +229,19 @@ def load_protocol_event_registry(
         _validate_capability_bindings(bindings)
         return ProtocolEventRegistry(
             contract_version=document.get("version", 0),
-            registry_sha256=hashlib.sha256(canonical).hexdigest(),
-            client={name: EventPolicy.model_validate(value) for name, value in raw_client.items()},
-            server={name: EventPolicy.model_validate(value) for name, value in raw_server.items()},
+            registry_sha256=registry_sha256,
+            compatible_registry_sha256=(
+                registry_sha256,
+                *previous_registry_sha256,
+            ),
+            client={
+                name: EventPolicy.model_validate(value)
+                for name, value in raw_client.items()
+            },
+            server={
+                name: EventPolicy.model_validate(value)
+                for name, value in raw_server.items()
+            },
             event_capabilities=bindings,
         )
     except (TypeError, ValueError) as exc:

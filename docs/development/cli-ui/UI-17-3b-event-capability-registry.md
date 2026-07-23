@@ -40,6 +40,7 @@ Python `ProtocolEventRegistry` 以 frozen typed model 加载 wheel 内同一合�
 
 ## 边界
 
-本切片建立发布注册表与 client request 执行门，不实现 ARC-03.3 的未知事件 criticality
-处置，也不实现 ARC-03.5/ARC-02.5 的 sequence、cursor、ack、gap recovery 或 Event Store。因此
+本切片建立发布注册表与 client request 执行门；ARC-03.3a 后续只补齐了 attested additive
+informational 事件处置，未知 control/terminal 局部隔离仍未实现。它也不实现 ARC-03.5/ARC-02.5 的
+cursor、ack、gap recovery 或 Event Store。因此
 UI-17.3 和 HAR-07.4b 仍为 partial。
