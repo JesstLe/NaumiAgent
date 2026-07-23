@@ -23,6 +23,7 @@ from naumi_agent.harness.sandbox_checks import (
 
 _SHA256_RE = r"^[0-9a-f]{64}$"
 type AuthorityRevalidator = Callable[[], Awaitable[bool]]
+type HarnessSandboxEvalLane = Literal["sandbox", "red", "green", "adversarial"]
 
 
 class _StrictModel(BaseModel):
@@ -88,7 +89,7 @@ class HarnessSandboxEvalExecutionKernel:
     async def execute(
         self,
         *,
-        lane: Literal["red", "green", "adversarial"],
+        lane: HarnessSandboxEvalLane,
         authority_key: str,
         parent_receipt_id: str,
         sample_index: int,
@@ -98,6 +99,11 @@ class HarnessSandboxEvalExecutionKernel:
         source: HarnessSandboxEvalSource,
         run_authority: HarnessSandboxEvalRunAuthority,
     ) -> tuple[HarnessSandboxCheckResult, ...]:
+        if lane not in {"sandbox", "red", "green", "adversarial"}:
+            raise HarnessSandboxEvalExecutionError(
+                "sandbox_eval_lane_invalid",
+                "Sandbox Eval lane 必须是 sandbox、red、green 或 adversarial。",
+            )
         if re.fullmatch(_SHA256_RE, authority_key) is None:
             raise HarnessSandboxEvalExecutionError(
                 "sandbox_eval_authority_key_invalid",
@@ -227,7 +233,7 @@ class HarnessSandboxEvalExecutionKernel:
 
 def _check_run_id(
     parent_run_id: str,
-    lane: Literal["red", "green", "adversarial"],
+    lane: HarnessSandboxEvalLane,
     sample_index: int,
     check_id: str,
     *,
@@ -235,7 +241,7 @@ def _check_run_id(
 ) -> str:
     if lane == "red":
         material = f"{parent_run_id}:{sample_index}:{check_id}"
-    elif lane == "adversarial":
+    elif lane in {"adversarial", "sandbox"}:
         material = (
             f"{parent_run_id}:{lane}:{authority_key}:{sample_index}:{check_id}"
         )
@@ -247,6 +253,7 @@ def _check_run_id(
 
 
 __all__ = [
+    "HarnessSandboxEvalLane",
     "HarnessSandboxEvalExecutionError",
     "HarnessSandboxEvalExecutionKernel",
     "HarnessSandboxEvalRunAuthority",

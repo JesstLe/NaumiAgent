@@ -51,6 +51,7 @@ Policy 或 receipt。authority 生命周期和证据语义仍由各自 coordinat
 ## 当前边界与下一步
 
 HAR-08.4f 已在 Harness 中用本 kernel 编排连续 sample、Run Grant 生命周期、H5a 前缀恢复与 partial
-checkpoint。EVO-03.6c 已用本 kernel 真实执行 adversarial RED revision 和 GREEN overlay，并写入 H5a。
-HAR-08.4 仍为 partial：通用 Service/Tool/UI surface、跨 Batch admission/backpressure 和 Linux/Windows CI
+checkpoint；HAR-08.4h 又补齐原生 `sandbox` lane 和不可变请求 authority。EVO-03.6c 已用本 kernel 真实执行
+adversarial RED revision 和 GREEN overlay，并写入 H5a。
+HAR-08.4 仍为 partial：通用 Service/Tool/UI surface、跨进程 Batch admission 和 Linux/Windows CI
 尚未完成；EVO-03.6 后续只接入现有 Batch coordinator 与 H5c，不能复制执行循环。

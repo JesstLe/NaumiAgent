@@ -41,7 +41,8 @@ admission、排队计数与取消清理，并拒绝容量饱和时会自锁的�
 公平调度仍属于 ARC-04/06 后续。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
-容量门。通用 Sandbox Eval surface、跨进程队列和三平台隔离 CI 仍未完成。
+容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request
+authority。通用 Sandbox Eval surface、跨进程队列和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

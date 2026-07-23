@@ -47,7 +47,8 @@ async def _current() -> bool:
     return True
 
 
-def test_adversarial_run_id_binds_lane_authority_without_changing_red_identity() -> None:
+def test_non_evolution_run_ids_bind_lane_authority_without_changing_red_identity(
+) -> None:
     red = _check_run_id(
         "run",
         "red",
@@ -69,10 +70,26 @@ def test_adversarial_run_id_binds_lane_authority_without_changing_red_identity()
         "unit",
         authority_key="b" * 64,
     )
+    sandbox_first = _check_run_id(
+        "run",
+        "sandbox",
+        0,
+        "unit",
+        authority_key="a" * 64,
+    )
+    sandbox_second = _check_run_id(
+        "run",
+        "sandbox",
+        0,
+        "unit",
+        authority_key="b" * 64,
+    )
 
     assert red == "evored-0dcb65bb9911b66ff2a9e2529ee810f9"
     assert first.startswith("hevaladversarial-")
     assert first != second
+    assert sandbox_first.startswith("hevalsandbox-")
+    assert sandbox_first != sandbox_second
 
 
 def test_sandbox_eval_rejects_cross_workspace_runner(tmp_path: Path) -> None:
@@ -127,6 +144,29 @@ async def test_sandbox_eval_rejects_invalid_identity_before_authority_read(
             run_authority=_authority(),
         )
     assert captured.value.code == code
+
+
+@pytest.mark.asyncio
+async def test_sandbox_eval_rejects_unknown_lane_before_authority_read(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(HarnessSandboxEvalExecutionError) as captured:
+        await _kernel(tmp_path).execute(
+            lane="unknown",  # type: ignore[arg-type]
+            authority_key="a" * 64,
+            parent_receipt_id="parent",
+            sample_index=0,
+            checks=(HarnessCheckSpec(id="unit", argv=("true",)),),
+            profile_digest="b" * 64,
+            profile_is_current=_current,
+            source=HarnessSandboxEvalSource(
+                revision="c" * 40,
+                revision_tree_sha256="d" * 64,
+            ),
+            run_authority=_authority(),
+        )
+
+    assert captured.value.code == "sandbox_eval_lane_invalid"
 
 
 @pytest.mark.asyncio
