@@ -31,18 +31,20 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",
+        "harness_eval_sandbox",
         "harness_eval_baseline_promote",
         "harness_eval_compare",
         "harness_read_knowledge",
         "harness_run_check",
     ]
     assert all(
-        tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 5, 6, 10)
+        tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 5, 6, 11)
     )
     assert not tools[7].metadata.read_only
     assert not tools[8].metadata.read_only
     assert not tools[9].metadata.read_only
-    assert not tools[11].metadata.read_only
+    assert not tools[10].metadata.read_only
+    assert not tools[12].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -147,6 +149,46 @@ async def test_harness_eval_tool_is_read_only_allowlisted_and_validates_suite(
     assert "参数无效" in await tool.execute(suite=" ")
     assert "参数无效" in await tool.execute(suite="x" * 1_025)
     assert "尚未配置" in await tool.execute()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_eval_tool_declares_delegation_and_validates_arguments(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+    )
+    tool = next(
+        item
+        for item in create_harness_tools(service)
+        if item.name == "harness_eval_sandbox"
+    )
+
+    assert not tool.metadata.read_only
+    assert tool.metadata.concurrency_safe
+    assert tool.metadata.delegated_tool_names == ("bash_run",)
+    assert tool.parameters_schema["required"] == [
+        "check_ids",
+        "samples",
+        "batch_id",
+        "run_id",
+    ]
+    assert "参数无效" in await tool.execute(
+        check_ids="unit",
+        samples=5,
+        batch_id="batch",
+        run_id="run-1",
+    )
+    unavailable = await tool.execute(
+        check_ids=["unit"],
+        samples=5,
+        batch_id="batch",
+        run_id="run-1",
+    )
+    assert "sandbox_eval_service_unavailable" in unavailable
 
 
 @pytest.mark.asyncio

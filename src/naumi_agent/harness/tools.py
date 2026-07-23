@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptError
+from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantError
 from naumi_agent.harness.eval import render_harness_eval
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
@@ -12,6 +14,13 @@ from naumi_agent.harness.eval_surface import (
     render_eval_promotion_status,
 )
 from naumi_agent.harness.explain import render_harness_explanation
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchError
+from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
+from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
+from naumi_agent.harness.sandbox_service import (
+    HarnessSandboxEvalServiceError,
+    render_sandbox_eval_batch_receipt,
+)
 from naumi_agent.harness.service import (
     HarnessService,
     render_harness_check,
@@ -20,6 +29,7 @@ from naumi_agent.harness.service import (
     render_harness_replay,
     render_harness_status,
 )
+from naumi_agent.harness.store import HarnessStoreError
 from naumi_agent.tools.base import Tool, ToolMetadata
 
 
@@ -33,6 +43,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalReplayTool(service),
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
+        HarnessEvalSandboxTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -377,6 +388,113 @@ class HarnessEvalBatchTool(Tool):
         except ValueError as exc:
             return f"Harness Eval Batch 参数无效：{exc}"
         return render_eval_batch_status(result)
+
+
+class HarnessEvalSandboxTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox"
+
+    @property
+    def description(self) -> str:
+        return "在精确 Git revision 的隔离 Worker 中重复执行受信 Profile checks"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox eval profile checks repeated batch h5a validation"
+            ),
+            delegated_tool_names=("bash_run",),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "check_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+                    },
+                    "minItems": 1,
+                    "maxItems": 80,
+                    "uniqueItems": True,
+                    "description": "按执行顺序排列的 Profile check IDs",
+                },
+                "samples": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 100,
+                    "default": 5,
+                },
+                "batch_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+                    "minLength": 1,
+                    "maxLength": 128,
+                },
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "当前 Runtime/会话的稳定运行标识",
+                },
+            },
+            "required": ["check_ids", "samples", "batch_id", "run_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        check_ids = kwargs.get("check_ids")
+        samples = kwargs.get("samples")
+        batch_id = kwargs.get("batch_id")
+        run_id = kwargs.get("run_id")
+        if (
+            not isinstance(check_ids, list)
+            or not check_ids
+            or any(not isinstance(item, str) for item in check_ids)
+            or isinstance(samples, bool)
+            or not isinstance(samples, int)
+            or not isinstance(batch_id, str)
+            or not isinstance(run_id, str)
+            or not run_id.strip()
+            or len(run_id.strip()) > 128
+        ):
+            return (
+                "Harness Sandbox Eval 参数无效："
+                "check_ids 必须是非空字符串数组，samples 必须是整数，"
+                "batch_id 和 run_id 必须是字符串。"
+            )
+        try:
+            receipt = await self._service.eval_sandbox(
+                check_ids=tuple(check_ids),
+                samples=samples,
+                batch_id=batch_id,
+            )
+        except (
+            HarnessSandboxEvalRequestError,
+            HarnessSandboxEvalServiceError,
+            HarnessSandboxBatchError,
+            HarnessSandboxEvalExecutionError,
+            HarnessStoreError,
+            PermissionDecisionReceiptError,
+            RunDelegationGrantError,
+        ) as exc:
+            code = getattr(exc, "code", "sandbox_eval_infrastructure_error")
+            return f"Harness Sandbox Eval 未完成（`{code}`）：{exc}"
+        return render_sandbox_eval_batch_receipt(receipt)
 
 
 class HarnessEvalBaselinePromoteTool(Tool):

@@ -340,6 +340,7 @@ class HarnessSandboxEvalExecutor:
         expected_arguments = {
             "batch_id": request.batch_id,
             "check_ids": [item.check_id for item in request.checks],
+            "run_id": parent.run_id if parent is not None else "",
             "samples": request.requested_samples,
         }
         if (
@@ -672,6 +673,31 @@ def _sha256_payload(payload: object) -> str:
     ).encode()).hexdigest()
 
 
+def render_sandbox_eval_batch_receipt(
+    receipt: HarnessSandboxEvalBatchReceipt,
+) -> str:
+    """Render a bounded shared completion view for Tool and slash surfaces."""
+    if not isinstance(receipt, HarnessSandboxEvalBatchReceipt):
+        raise TypeError("receipt 必须是 HarnessSandboxEvalBatchReceipt。")
+    checks = "、".join(f"`{item}`" for item in receipt.check_ids)
+    return "\n".join((
+        "## Harness Sandbox Eval 已完成",
+        "",
+        f"- Batch：`{receipt.batch_id}`",
+        f"- Suite：`{receipt.suite_id}`",
+        (
+            f"- 样本：{receipt.persisted_samples}/{receipt.requested_samples}"
+            "（H5a 已持久化）"
+        ),
+        f"- Checks：{checks}",
+        f"- Run Grant 批次：{len(receipt.run_grant_sha256)}",
+        f"- Request：`{receipt.request_id}`",
+        f"- 完成回执：`{receipt.receipt_id}`",
+        "",
+        "源码已按精确 Git revision 隔离执行；Profile 信任与 check authority 已复验。",
+    ))
+
+
 __all__ = [
     "HarnessSandboxEvalBatchReceipt",
     "HarnessSandboxEvalExecutor",
@@ -681,4 +707,5 @@ __all__ = [
     "SANDBOX_EVAL_RUNNER",
     "SANDBOX_EVAL_SERVICE_POLICY",
     "SandboxEvalProgressCallback",
+    "render_sandbox_eval_batch_receipt",
 ]

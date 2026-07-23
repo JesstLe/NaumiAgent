@@ -219,6 +219,7 @@ class TestPermissionChecker:
         "tool_name",
         [
             "harness_eval_batch",
+            "harness_eval_sandbox",
             "harness_eval_compare",
             "feedback_intake",
             "evolution_proposal_queue",

@@ -188,6 +188,7 @@ async def _runtime(
         arguments={
             "batch_id": "batch-1",
             "check_ids": ["unit"],
+            "run_id": "run-1",
             "samples": 5,
         },
         outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
@@ -341,6 +342,7 @@ async def test_service_rejects_permission_not_bound_to_exact_batch_arguments(
         arguments={
             "batch_id": "other-batch",
             "check_ids": ["unit"],
+            "run_id": "run-1",
             "samples": 5,
         },
         outcome=PermissionDecisionOutcome.POLICY_ALLOWED,

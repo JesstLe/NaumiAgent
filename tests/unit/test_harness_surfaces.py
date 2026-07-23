@@ -28,6 +28,7 @@ from naumi_agent.harness.models import (
     HarnessCompletionContract,
     HarnessTaskKind,
 )
+from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestBuilder
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
@@ -169,6 +170,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         eval_replay_tool = engine.tool_registry.get("harness_eval_replay")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
+        sandbox_tool = engine.tool_registry.get("harness_eval_sandbox")
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -187,6 +189,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert baseline_tool.metadata.concurrency_safe
         assert batch_tool is not None and not batch_tool.metadata.read_only
         assert batch_tool.metadata.concurrency_safe
+        assert sandbox_tool is not None and not sandbox_tool.metadata.read_only
+        assert sandbox_tool.metadata.concurrency_safe
+        assert sandbox_tool.metadata.delegated_tool_names == ("bash_run",)
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -278,6 +283,106 @@ async def test_harness_slash_check_uses_sandbox_worker_and_releases_authority(
         )
         child = next(receipt for receipt in receipts if receipt.tool_name == "bash_run")
         assert child.parent_receipt_id == parent.receipt_id
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
+    tmp_path: Path,
+) -> None:
+    _require_real_shell_backend()
+    engine = _engine(tmp_path)
+    try:
+        await execute_slash_command(engine, "/harness trust --confirm")
+
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox unit --samples 5 "
+                    "--batch sandbox-surface-1"
+                ),
+            )
+        )
+        status = await engine.harness_service.status()
+        assert status.snapshot.profile is not None
+        assert status.profile_digest is not None
+        request = HarnessSandboxEvalRequestBuilder().build(
+            workspace_root=engine.workspace_root,
+            profile=status.snapshot.profile,
+            profile_digest=status.profile_digest,
+            profile_trusted=status.trusted,
+            check_ids=("unit",),
+            batch_id="sandbox-surface-1",
+            requested_samples=5,
+        )
+        records = await engine.harness_service.store.list_eval_results(
+            engine.workspace_root,
+            request.batch_id,
+            request.suite_id,
+        )
+
+        assert "Harness Sandbox Eval 已完成" in rendered
+        assert "5/5" in rendered
+        assert "sandbox-surface-1" in rendered
+        assert len(records) == 5
+        assert [item.sample_index for item in records] == list(range(5))
+        assert all(item.result.status.value == "passed" for item in records)
+        assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
+        artifacts = list(
+            engine._paths.shell_worker_artifact_dir.glob("unit-*.log")
+        )
+        assert len(artifacts) == 5
+        assert all(
+            "surface check ok" in item.read_text(encoding="utf-8")
+            for item in artifacts
+        )
+        receipts = engine.list_permission_decision_receipts()
+        parents = [
+            item for item in receipts
+            if item.tool_name == "harness_eval_sandbox"
+        ]
+        children = [item for item in receipts if item.tool_name == "bash_run"]
+        assert len(parents) == 1
+        assert len(children) == 5
+        assert {item.parent_receipt_id for item in children} == {
+            parents[0].receipt_id
+        }
+        grant_ids = {item.run_delegation_grant_id for item in children}
+        assert len(grant_ids) == 1
+        validation = await engine.run_delegation_grant_authority.validate(
+            grant_id=next(iter(grant_ids)),
+            now=records[-1].created_at,
+        )
+        assert not validation.allowed
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_eval_slash_rejects_incomplete_or_ambiguous_args(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        missing = _plain(
+            await execute_slash_command(engine, "/harness eval sandbox")
+        )
+        misordered = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness eval sandbox --samples 5 unit",
+            )
+        )
+
+        assert "用法" in missing
+        assert "eval sandbox <check-id...>" in missing
+        assert "用法" in misordered
+        assert not any(
+            item.tool_name == "harness_eval_sandbox"
+            for item in engine.list_permission_decision_receipts()
+        )
     finally:
         await engine.shutdown()
 
