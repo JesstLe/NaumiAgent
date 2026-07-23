@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from naumi_agent.harness.interaction import new_interaction_record
+from naumi_agent.harness.interaction import answer_interaction, new_interaction_record
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import (
@@ -19,6 +19,7 @@ from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot,
     build_goal_pursuit_snapshot_with_recovery,
+    render_goal_interaction_detail,
     render_goal_pursuit_snapshot,
 )
 from naumi_agent.user_interaction import normalize_interaction_request
@@ -200,7 +201,99 @@ async def test_goal_snapshot_projects_only_linked_interaction_public_state(tmp_p
     assert "owner_id" not in str(payload["interactions"])
     rendered = render_goal_pursuit_snapshot(snapshot)
     assert "ask-goal-linked" in rendered
+    assert "/goal interaction detail ask-goal-linked" in rendered
     assert "/goal interaction cancel ask-goal-linked" in rendered
+
+
+def test_interaction_detail_distinguishes_takeover_eligibility_and_deadline() -> None:
+    request = normalize_interaction_request({
+        "header": "恢复方式",
+        "question": "请选择如何恢复。",
+        "options": [
+            {"value": "resume", "label": "继续"},
+            {"value": "stop", "label": "停止"},
+        ],
+    })
+    takeover_eligible = new_interaction_record(
+        request=request,
+        subject_kind="pursuit",
+        subject_id="pursuit_takeover_detail",
+        session_id="session-1",
+        agent_name="main",
+        owner_id="bridge-old",
+        created_at="2026-07-18T00:00:00+00:00",
+        owner_lease_seconds=30,
+        interaction_id="ask-goal-takeover-detail",
+    )
+    deadline_first = new_interaction_record(
+        request=request,
+        subject_kind="pursuit",
+        subject_id="pursuit_deadline_detail",
+        session_id="session-1",
+        agent_name="main",
+        owner_id="bridge-old",
+        created_at="2026-07-18T00:00:00+00:00",
+        owner_lease_seconds=300,
+        timeout_seconds=60,
+        interaction_id="ask-goal-deadline-detail",
+    )
+
+    takeover_output = render_goal_interaction_detail(
+        takeover_eligible,
+        assessed_at="2026-07-18T00:00:31+00:00",
+    )
+    deadline_output = render_goal_interaction_detail(
+        deadline_first,
+        assessed_at="2026-07-18T00:01:01+00:00",
+    )
+
+    assert "Owner 租约已过期 · 可由活动界面接管" in takeover_output
+    assert "宿主绑定的手动接管动作尚未开放" in takeover_output
+    assert "问题期限已到 · 等待 authority 收口为超时" in deadline_output
+    assert "可由活动界面接管" not in deadline_output
+
+
+def test_interaction_detail_renders_custom_terminal_answer_without_owner() -> None:
+    pending = new_interaction_record(
+        request=normalize_interaction_request({
+            "header": "补充说明",
+            "question": "请输入验收条件。",
+            "options": [
+                {"value": "accept", "label": "接受"},
+                {"value": "reject", "label": "拒绝"},
+            ],
+            "allow_custom": True,
+            "custom_label": "自定义验收条件",
+        }),
+        subject_kind="pursuit",
+        subject_id="pursuit_answer_detail",
+        session_id="session-1",
+        agent_name="main",
+        owner_id="private-owner",
+        created_at="2026-07-18T00:00:00+00:00",
+        owner_lease_seconds=60,
+        interaction_id="ask-goal-answer-detail",
+    )
+    answered = answer_interaction(
+        pending,
+        owner_id="private-owner",
+        owner_epoch=1,
+        response={"kind": "custom", "custom_text": "小模块测试通过后提交"},
+        answered_by="private-user",
+        now="2026-07-18T00:00:20+00:00",
+    )
+
+    output = render_goal_interaction_detail(
+        answered,
+        assessed_at="2026-07-18T00:05:00+00:00",
+    )
+
+    assert "状态：已回答" in output
+    assert "回答：自定义 · 小模块测试通过后提交" in output
+    assert "终态记录 · 不适用接管" in output
+    assert "/goal interaction cancel" not in output
+    assert "private-owner" not in output
+    assert "private-user" not in output
 
 
 def test_snapshot_exposes_missing_link_without_creating_pursuit_db(tmp_path) -> None:

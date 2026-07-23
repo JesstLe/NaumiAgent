@@ -84,7 +84,9 @@
     [设计](HAR-10-6b-interaction-runtime-integration.md)；
   - UI-18.4b 已让 Textual TUI 复用相同 durable adapter、实时 timeout 与启动 takeover/replay；
   - UI-18.4c 已交付 Goal interaction ledger、sequence-fenced 显式 cancel 和 New UI/CLI/TUI 动作闭环；
-  - 未完成：手动 takeover、cursor/优先级与跨 Store 原子提交。
+  - UI-18.4d1 已交付 Goal-linked interaction 的共享只读详情，展示选项、答案、fencing 和
+    takeover 资格，且不暴露 owner ID；
+  - 未完成：宿主绑定的手动 takeover、页内展开详情、cursor/优先级与跨 Store 原子提交。
 - HAR-10.7 Cluster scheduling（partial）：
   - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
     基于同一健康快照超卖最后槽位的问题；见

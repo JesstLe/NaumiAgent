@@ -67,7 +67,8 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
 ## 当前不足与下一步
 
 - UI-18.4b 已让 Textual TUI 复用 durable create/answer/expire/recover adapter，UI-18.4c 已补齐 Goal
-  interaction ledger 与显式 cancel；UI-18.4 仍因手动 takeover、cursor 和详情页未完成而保持 partial；
+  interaction ledger 与显式 cancel，UI-18.4d1 已补齐选项/答案/时序/租约资格的共享只读详情；
+  UI-18.4 仍因宿主绑手动 takeover、cursor 和页内详情未完成而保持 partial；
 - replay 回答后不会擅自启动一个新 Pursuit 执行器，用户需显式 `/pursue resume`，避免隐藏并发 owner；
 - cancelled authority 已由 UI-18.4c 开放 sequence-fenced 显式用户动作；
 - EVO-04.6b 已通过本 adapter 完成 escalated Decision 的 create-before-display、answer-before-resolution、
@@ -75,5 +76,6 @@ Harness interaction authority 与 PursuitStore 目前不是同一个事务域。
 - pending 列表目前上限 50，无 cursor 与优先级；这应与 HAR-10.3 durable queue 一起设计；
 - 跨 Store 原子提交、at-rest encryption 和多实例通知仍分别属于 ARC-05/08、ARC-08 与 ARC-06。
 
-HAR-10.3a 与 UI-18.4c 均已交付；下一步在 UI-18.4d takeover/details、HAR-10.3b durable queue authority
+HAR-10.3a、UI-18.4c 与 UI-18.4d1 均已交付；下一步在 UI-18.4d 宿主绑 takeover/页内详情、
+HAR-10.3b durable queue authority
 与其他路线间重新选择能直接改善用户闭环且不提前实现完整 ARC-06 的最小前置。

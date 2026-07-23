@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.harness.interaction import HarnessInteractionRecord
 from naumi_agent.orchestrator.goal_store import (
     GoalStatus,
     GoalStore,
@@ -18,6 +19,7 @@ from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot_with_recovery,
+    render_goal_interaction_detail,
     render_goal_pursuit_snapshot,
 )
 from naumi_agent.ui.pursuit_recovery import PursuitRecoveryAuthority
@@ -264,9 +266,7 @@ class GoalUpdateTool(Tool):
         return f"✅ 目标{label}。\n\n{format_goal(updated)}"
 
 
-class GoalInteractionCancelTool(Tool):
-    """Cancel one pending Pursuit interaction through Harness authority."""
-
+class _GoalInteractionTool(Tool):
     def __init__(
         self,
         store: GoalStore,
@@ -277,6 +277,80 @@ class GoalInteractionCancelTool(Tool):
         self._store = store
         self._authority = interaction_authority
         self._workspace_root = Path(workspace_root).expanduser().resolve()
+
+    async def _read_linked_record(
+        self,
+        interaction_id: str,
+    ) -> tuple[HarnessInteractionRecord | None, str]:
+        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
+            return None, "⚠️ interaction_id 格式无效。"
+        if self._authority is None:
+            return None, "⚠️ 持久交互 authority 不可用。"
+        try:
+            record = await self._authority.get_interaction(
+                workspace_root=self._workspace_root,
+                interaction_id=interaction_id,
+            )
+        except Exception:
+            return None, "⚠️ 持久交互读取失败，请运行 `/doctor`。"
+        if record is None:
+            return None, f"⚠️ 用户交互不存在：`{interaction_id}`。"
+        try:
+            linked_runs = {
+                goal.pursuit_run_id
+                for goal in self._store.list(include_finished=True, limit=50)
+                if goal.pursuit_run_id
+            }
+        except GoalStoreError:
+            return None, "⚠️ Goal 状态读取失败，请运行 `/doctor`。"
+        if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
+            return None, "⚠️ 该交互不属于当前 Goal 页面中的 Pursuit。"
+        return record, ""
+
+
+class GoalInteractionDetailTool(_GoalInteractionTool):
+    """Inspect one Goal-linked durable interaction without changing authority."""
+
+    @property
+    def name(self) -> str:
+        return "goal_interaction_detail"
+
+    @property
+    def description(self) -> str:
+        return "查看 Goal/Pursuit 持久用户交互的选项、答案、时序和租约状态。"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name="查看 Goal 用户交互详情",
+            search_hint="goal pursuit interaction detail answer lease takeover eligibility",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "interaction_id": {
+                    "type": "string",
+                    "pattern": r"^ask-[A-Za-z0-9._:-]{1,128}$",
+                    "description": "Goal 页面展示的持久交互 ID",
+                },
+            },
+            "required": ["interaction_id"],
+        }
+
+    async def execute(self, *, interaction_id: str, **kwargs: Any) -> str:
+        record, error = await self._read_linked_record(interaction_id)
+        if record is None:
+            return error
+        return render_goal_interaction_detail(record)
+
+
+class GoalInteractionCancelTool(_GoalInteractionTool):
+    """Cancel one pending Pursuit interaction through Harness authority."""
 
     @property
     def name(self) -> str:
@@ -310,29 +384,9 @@ class GoalInteractionCancelTool(Tool):
         }
 
     async def execute(self, *, interaction_id: str, **kwargs: Any) -> str:
-        if not re.fullmatch(r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id):
-            return "⚠️ interaction_id 格式无效。"
-        if self._authority is None:
-            return "⚠️ 持久交互 authority 不可用，取消未提交。"
-        try:
-            record = await self._authority.get_interaction(
-                workspace_root=self._workspace_root,
-                interaction_id=interaction_id,
-            )
-        except Exception:
-            return "⚠️ 持久交互读取失败，请运行 `/doctor`。"
+        record, error = await self._read_linked_record(interaction_id)
         if record is None:
-            return f"⚠️ 用户交互不存在：`{interaction_id}`。"
-        try:
-            linked_runs = {
-                goal.pursuit_run_id
-                for goal in self._store.list(include_finished=True, limit=50)
-                if goal.pursuit_run_id
-            }
-        except GoalStoreError:
-            return "⚠️ Goal 状态读取失败，请运行 `/doctor`。"
-        if record.subject_kind != "pursuit" or record.subject_id not in linked_runs:
-            return "⚠️ 该交互不属于当前 Goal 页面中的 Pursuit，拒绝取消。"
+            return error
         if record.state != "pending":
             return f"ℹ️ 用户交互已是终态：{record.state}。"
         try:
@@ -418,6 +472,11 @@ def create_goal_tools(
             workspace_root=workspace_root,
         ),
         GoalUpdateTool(store),
+        GoalInteractionDetailTool(
+            store,
+            recovery_authority,
+            workspace_root=workspace_root or store.base_dir.parent,
+        ),
         GoalInteractionCancelTool(
             store,
             recovery_authority,
