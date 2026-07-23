@@ -159,10 +159,10 @@ New UI 在 ready 时：
 仍未实现：
 
 - New UI 专用 typed resume action/button；当前使用可复制的共享 Slash；
-- dispatch detail 页面与多客户端竞争结果提示；
-- retry dispatch retention 的保护集合、preview、prune receipt；
+- dispatch detail 已由 HAR-08.4o3g 通过共享 Tool/Slash 交付；专用 typed 页面仍未实现；
+- retry dispatch retention preview、prune receipt；
 - 跨主机 Sandbox admission；
 - macOS/Linux/Windows 三平台真实隔离 Worker CI。
 
-下一切片应先比较 HAR-06 retention 合同与 HAR-08 dispatch detail 的用户价值，优先补
-“只读详情 + retention 保护集合/preview”，不能因为队列已可见就自动执行或删除 dispatch。
+HAR-08.4o3g 已交付只读详情和 retention 保护集合。下一切片 HAR-08.4o3h 应比较 HAR-06 retention
+合同并生成有界 preview，不能因为队列已可见就自动执行或删除 dispatch。

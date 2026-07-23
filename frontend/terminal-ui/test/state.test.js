@@ -4911,6 +4911,7 @@ test("Harness Sandbox retry transport rejection clears single-flight state", () 
 test("Harness Sandbox retry control commands stay on the shared Slash channel", () => {
   for (const command of [
     "/harness eval sandbox retries --state open --limit 5",
+    `/harness eval sandbox retry-detail hsar_${"1".repeat(24)} --dispatch hsard_${"2".repeat(24)}`,
     `/harness eval sandbox retry hsacr_${"a".repeat(24)} --sha256 ${"b".repeat(64)}`,
     `/harness eval sandbox resume hsar_${"c".repeat(24)} --dispatch hsard_${"d".repeat(24)} --receipt hsarr_${"e".repeat(24)} --sha256 ${"f".repeat(64)}`,
   ]) {

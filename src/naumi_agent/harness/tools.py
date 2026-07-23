@@ -21,6 +21,7 @@ from naumi_agent.harness.sandbox_batch import (
 )
 from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
+from naumi_agent.harness.sandbox_retry_detail import render_sandbox_retry_detail
 from naumi_agent.harness.sandbox_service import (
     HarnessSandboxEvalServiceError,
     SandboxEvalProgressCallback,
@@ -55,6 +56,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalSandboxRetryTool(service),
         HarnessEvalSandboxResumeTool(service),
         HarnessEvalSandboxRetryCatalogTool(service),
+        HarnessEvalSandboxRetryDetailTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -799,6 +801,79 @@ class HarnessEvalSandboxRetryCatalogTool(_HarnessReadOnlyTool):
             code = getattr(exc, "code", "sandbox_retry_catalog_unavailable")
             return f"Sandbox retry catalog 暂不可用（`{code}`）：{exc}"
         return render_sandbox_retry_catalog(page)
+
+
+class HarnessEvalSandboxRetryDetailTool(_HarnessReadOnlyTool):
+    """Inspect one exact retry dispatch without changing durable state."""
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_retry_detail"
+
+    @property
+    def description(self) -> str:
+        return "查看一个 Sandbox retry dispatch 的只读权威详情与保护引用"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox retry dispatch detail receipt ticket "
+                "recovery retention h5a"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "retry_action_id": {
+                    "type": "string",
+                    "pattern": r"^hsar_[0-9a-f]{24}$",
+                },
+                "dispatch_id": {
+                    "type": "string",
+                    "pattern": r"^hsard_[0-9a-f]{24}$",
+                },
+                "assessed_at": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "可选的 ISO 8601 评估时间",
+                },
+            },
+            "required": ["retry_action_id", "dispatch_id"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        retry_action_id = kwargs.get("retry_action_id")
+        dispatch_id = kwargs.get("dispatch_id")
+        assessed_at = kwargs.get("assessed_at")
+        if (
+            not isinstance(retry_action_id, str)
+            or re.fullmatch(r"hsar_[0-9a-f]{24}", retry_action_id) is None
+            or not isinstance(dispatch_id, str)
+            or re.fullmatch(r"hsard_[0-9a-f]{24}", dispatch_id) is None
+            or (assessed_at is not None and not isinstance(assessed_at, str))
+        ):
+            return (
+                "Sandbox retry detail 参数无效：需要合法的 retry_action_id、"
+                "dispatch_id 与可选 ISO 8601 assessed_at。"
+            )
+        try:
+            snapshot = await self._service.sandbox_retry_detail(
+                retry_action_id=retry_action_id,
+                dispatch_id=dispatch_id,
+                assessed_at=assessed_at,
+            )
+        except (HarnessSandboxEvalServiceError, HarnessStoreError, ValueError) as exc:
+            code = getattr(exc, "code", "sandbox_retry_detail_unavailable")
+            return f"Sandbox retry detail 暂不可用（`{code}`）：{exc}"
+        return render_sandbox_retry_detail(snapshot)
 
 
 class HarnessEvalSandboxResumeTool(Tool):

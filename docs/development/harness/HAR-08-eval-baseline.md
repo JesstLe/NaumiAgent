@@ -168,6 +168,10 @@
   做 20 项有界扫描，tamper-evident snapshot 不暴露 workspace/owner/authority；New UI/TUI 只显示
   人工恢复队列与精确共享 Slash，不自动 claim、续租或重放。真实 Git + SQLite + 新 Bridge 重启证明
   pending dispatch 未被改变。详见 `HAR-08-4o3f-sandbox-retry-startup-recovery-snapshot.md`。
+- HAR-08.4o3g Sandbox Retry Dispatch Detail：已实现。Store 在单次只读连接中校验 dispatch、
+  retry/cancel receipt、Request Manifest、ticket fence 与连续 H5a，并投影 tamper-evident snapshot、
+  retention 保护引用和 receipt-bound resume 命令；共享 Tool/Slash 同时服务 New UI/TUI。
+  详见 `HAR-08-4o3g-sandbox-retry-dispatch-detail.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。

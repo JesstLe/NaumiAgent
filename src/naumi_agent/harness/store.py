@@ -469,6 +469,20 @@ class HarnessSandboxRetryCatalogPage:
 
 
 @dataclass(frozen=True, slots=True)
+class HarnessSandboxRetryDetailRecord:
+    """One transactionally consistent retry dispatch detail authority."""
+
+    workspace_root: str
+    assessed_at: str
+    item: HarnessSandboxRetryCatalogItem
+    retry_receipt: HarnessSandboxAdmissionRetryReceipt
+    cancel_receipt: HarnessSandboxAdmissionCancelReceipt
+    request_manifest: HarnessStoredSandboxEvalRequest
+    ticket: HarnessSandboxAdmissionTicket | None
+    samples: tuple[HarnessStoredEvalResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class HarnessStoredSandboxEvalRequest:
     """One immutable native Sandbox Eval request manifest."""
 
@@ -6420,6 +6434,66 @@ class HarnessStore:
                 "Sandbox retry dispatch 损坏或无法读取。"
             ) from exc
 
+    async def get_sandbox_retry_detail(
+        self,
+        *,
+        workspace_root: str | Path,
+        retry_action_id: str,
+        dispatch_id: str,
+        assessed_at: str | None = None,
+    ) -> HarnessSandboxRetryDetailRecord | None:
+        """Read one exact dispatch and all of its validated immutable references."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(retry_action_id)
+        dispatch_identity = _normalize_sandbox_retry_dispatch_id(dispatch_id)
+        now = (
+            _normalize_utc_timestamp(assessed_at, field="assessed_at")
+            if assessed_at is not None
+            else datetime.now(UTC).isoformat()
+        )
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN DEFERRED")
+                try:
+                    row = await _select_sandbox_retry_dispatch(
+                        db,
+                        workspace_root=workspace,
+                        retry_action_id=action,
+                    )
+                    if row is None:
+                        return None
+                    dispatch = _sandbox_retry_dispatch_from_row(row)
+                    if not hmac.compare_digest(
+                        dispatch.dispatch_id,
+                        dispatch_identity,
+                    ):
+                        return None
+                    records = await _load_sandbox_retry_detail_records(
+                        db,
+                        workspace_root=workspace,
+                        assessed_at=now,
+                        dispatches=(dispatch,),
+                    )
+                    if len(records) != 1:
+                        raise HarnessStoreError(
+                            "Sandbox retry detail 无法建立唯一权威记录。"
+                        )
+                    return records[0]
+                finally:
+                    await db.rollback()
+        except HarnessStoreError:
+            raise
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Sandbox retry detail。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox retry detail 损坏或无法读取。"
+            ) from exc
+
     async def list_sandbox_retry_dispatches(
         self,
         *,
@@ -6510,143 +6584,13 @@ class HarnessStore:
                         next_cursor="",
                     )
 
-                retry_rows = await _select_rows_for_values(
+                records = await _load_sandbox_retry_detail_records(
                     db,
-                    table="harness_sandbox_admission_retry_attempts",
                     workspace_root=workspace,
-                    column="action_id",
-                    values=tuple(item.retry_action_id for item in dispatches),
+                    assessed_at=now,
+                    dispatches=dispatches,
                 )
-                retries = {
-                    receipt.action_id: receipt
-                    for receipt in (
-                        _sandbox_retry_receipt_from_row(row) for row in retry_rows
-                    )
-                }
-                manifest_rows = await _select_rows_for_values(
-                    db,
-                    table="harness_sandbox_eval_requests",
-                    workspace_root=workspace,
-                    column="request_sha256",
-                    values=tuple(item.eval_request_sha256 for item in dispatches),
-                )
-                manifests = {
-                    stored.request_sha256: stored
-                    for stored in (
-                        _sandbox_eval_request_from_row(row) for row in manifest_rows
-                    )
-                }
-                ticket_ids = tuple(
-                    item.ticket_id for item in dispatches if item.ticket_id
-                )
-                ticket_rows = await _select_rows_for_values(
-                    db,
-                    table="harness_sandbox_admission_tickets",
-                    workspace_root=workspace,
-                    column="ticket_id",
-                    values=ticket_ids,
-                )
-                tickets = {str(row["ticket_id"]): row for row in ticket_rows}
-                batch_ids = tuple(
-                    manifests[item.eval_request_sha256].batch_id
-                    for item in dispatches
-                    if item.eval_request_sha256 in manifests
-                )
-                eval_rows = await _select_rows_for_values(
-                    db,
-                    table="harness_eval_results",
-                    workspace_root=workspace,
-                    column="batch_id",
-                    values=batch_ids,
-                    order_by="batch_id ASC, suite_id ASC, sample_index ASC",
-                )
-                samples_by_cohort: dict[
-                    tuple[str, str], list[HarnessStoredEvalResult]
-                ] = {}
-                for row in eval_rows:
-                    sample = _eval_result_from_row(row)
-                    samples_by_cohort.setdefault(
-                        (sample.batch_id, sample.suite_id),
-                        [],
-                    ).append(sample)
-
-                items: list[HarnessSandboxRetryCatalogItem] = []
-                for dispatch in dispatches:
-                    retry = retries.get(dispatch.retry_action_id)
-                    manifest = manifests.get(dispatch.eval_request_sha256)
-                    if retry is None or manifest is None:
-                        raise HarnessStoreError(
-                            "Sandbox retry catalog 缺少 retry receipt 或 Request Manifest。"
-                        )
-                    if (
-                        retry.decision != "accepted"
-                        or retry.receipt_id != dispatch.retry_receipt_id
-                        or not hmac.compare_digest(
-                            retry.receipt_sha256,
-                            dispatch.retry_receipt_sha256,
-                        )
-                        or not hmac.compare_digest(
-                            retry.eval_request_sha256,
-                            dispatch.eval_request_sha256,
-                        )
-                        or not hmac.compare_digest(
-                            retry.execution_authority_key,
-                            dispatch.execution_authority_key,
-                        )
-                    ):
-                        raise HarnessStoreError(
-                            "Sandbox retry catalog receipt/dispatch authority 不一致。"
-                        )
-                    request = manifest.request
-                    if (
-                        manifest.workspace_root != workspace
-                        or request.workspace_root != workspace
-                        or not hmac.compare_digest(
-                            request.request_sha256,
-                            dispatch.eval_request_sha256,
-                        )
-                        or manifest.batch_id != request.batch_id
-                        or manifest.suite_id != request.suite_id
-                    ):
-                        raise HarnessStoreError(
-                            "Sandbox retry catalog Request Manifest identity 不一致。"
-                        )
-                    samples = samples_by_cohort.get(
-                        (request.batch_id, request.suite_id),
-                        [],
-                    )
-                    sample_indices = [sample.sample_index for sample in samples]
-                    if (
-                        sample_indices != list(range(len(sample_indices)))
-                        or len(sample_indices) > request.requested_samples
-                    ):
-                        raise HarnessStoreError(
-                            "Sandbox retry catalog H5a 不是受限连续前缀。"
-                        )
-                    ticket_state, lease_expires_at, recovery_status = (
-                        _sandbox_retry_catalog_ticket_status(
-                            dispatch,
-                            tickets.get(dispatch.ticket_id),
-                            workspace_root=workspace,
-                            requested_samples=request.requested_samples,
-                            assessed_at=now,
-                        )
-                    )
-                    items.append(
-                        HarnessSandboxRetryCatalogItem(
-                            dispatch=dispatch,
-                            cancel_receipt_id=retry.cancel_receipt_id,
-                            cancel_receipt_sha256=retry.cancel_receipt_sha256,
-                            source_ticket_id=retry.source_ticket_id,
-                            batch_id=request.batch_id,
-                            suite_id=request.suite_id,
-                            requested_samples=request.requested_samples,
-                            persisted_samples=len(samples),
-                            ticket_state=ticket_state,
-                            ticket_lease_expires_at=lease_expires_at,
-                            recovery_status=recovery_status,
-                        )
-                    )
+                items = tuple(record.item for record in records)
 
                 next_cursor = ""
                 if has_more and dispatches:
@@ -6663,7 +6607,7 @@ class HarnessStore:
                     assessed_at=now,
                     state_filter=normalized_filter,
                     limit=limit,
-                    items=tuple(items),
+                    items=items,
                     next_cursor=next_cursor,
                 )
         except HarnessStoreError:
@@ -7504,6 +7448,13 @@ def _normalize_sandbox_retry_action_id(value: str) -> str:
     return normalized
 
 
+def _normalize_sandbox_retry_dispatch_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_RETRY_DISPATCH_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry dispatch_id 格式无效。")
+    return normalized
+
+
 def _normalize_sandbox_retry_receipt_id(value: str) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     if _SANDBOX_ADMISSION_RETRY_RECEIPT_RE.fullmatch(normalized) is None:
@@ -8092,6 +8043,11 @@ async def _select_rows_for_values(
             "",
         ),
         (
+            "harness_sandbox_admission_cancel_attempts",
+            "receipt_id",
+            "",
+        ),
+        (
             "harness_sandbox_eval_requests",
             "request_sha256",
             "",
@@ -8303,6 +8259,204 @@ def _sandbox_retry_catalog_ticket_status(
     ) <= datetime.fromisoformat(assessed_at):
         return state, lease_expires_at, "recovery_required"
     return state, lease_expires_at, "live"
+
+
+async def _load_sandbox_retry_detail_records(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    assessed_at: str,
+    dispatches: tuple[HarnessSandboxRetryDispatch, ...],
+) -> tuple[HarnessSandboxRetryDetailRecord, ...]:
+    """Resolve and cross-check every authority referenced by exact dispatch rows."""
+    if not dispatches:
+        return ()
+    retry_rows = await _select_rows_for_values(
+        db,
+        table="harness_sandbox_admission_retry_attempts",
+        workspace_root=workspace_root,
+        column="action_id",
+        values=tuple(item.retry_action_id for item in dispatches),
+    )
+    retries = {
+        receipt.action_id: receipt
+        for receipt in (
+            _sandbox_retry_receipt_from_row(row) for row in retry_rows
+        )
+    }
+    cancel_rows = await _select_rows_for_values(
+        db,
+        table="harness_sandbox_admission_cancel_attempts",
+        workspace_root=workspace_root,
+        column="receipt_id",
+        values=tuple(receipt.cancel_receipt_id for receipt in retries.values()),
+    )
+    cancels = {
+        receipt.receipt_id: receipt
+        for receipt in (
+            _sandbox_cancel_receipt_from_row(row) for row in cancel_rows
+        )
+    }
+    manifest_rows = await _select_rows_for_values(
+        db,
+        table="harness_sandbox_eval_requests",
+        workspace_root=workspace_root,
+        column="request_sha256",
+        values=tuple(item.eval_request_sha256 for item in dispatches),
+    )
+    manifests = {
+        stored.request_sha256: stored
+        for stored in (
+            _sandbox_eval_request_from_row(row) for row in manifest_rows
+        )
+    }
+    ticket_ids = tuple(item.ticket_id for item in dispatches if item.ticket_id)
+    ticket_rows = await _select_rows_for_values(
+        db,
+        table="harness_sandbox_admission_tickets",
+        workspace_root=workspace_root,
+        column="ticket_id",
+        values=ticket_ids,
+    )
+    tickets = {str(row["ticket_id"]): row for row in ticket_rows}
+    batch_ids = tuple(
+        manifests[item.eval_request_sha256].batch_id
+        for item in dispatches
+        if item.eval_request_sha256 in manifests
+    )
+    eval_rows = await _select_rows_for_values(
+        db,
+        table="harness_eval_results",
+        workspace_root=workspace_root,
+        column="batch_id",
+        values=batch_ids,
+        order_by="batch_id ASC, suite_id ASC, sample_index ASC",
+    )
+    samples_by_cohort: dict[tuple[str, str], list[HarnessStoredEvalResult]] = {}
+    for row in eval_rows:
+        sample = _eval_result_from_row(row)
+        samples_by_cohort.setdefault(
+            (sample.batch_id, sample.suite_id),
+            [],
+        ).append(sample)
+
+    records: list[HarnessSandboxRetryDetailRecord] = []
+    for dispatch in dispatches:
+        retry = retries.get(dispatch.retry_action_id)
+        manifest = manifests.get(dispatch.eval_request_sha256)
+        cancel = cancels.get(retry.cancel_receipt_id) if retry is not None else None
+        if retry is None or cancel is None or manifest is None:
+            raise HarnessStoreError(
+                "Sandbox retry catalog 缺少 cancel/retry receipt 或 Request Manifest。"
+            )
+        if (
+            retry.decision != "accepted"
+            or retry.receipt_id != dispatch.retry_receipt_id
+            or not hmac.compare_digest(
+                retry.receipt_sha256,
+                dispatch.retry_receipt_sha256,
+            )
+            or not hmac.compare_digest(
+                retry.eval_request_sha256,
+                dispatch.eval_request_sha256,
+            )
+            or not hmac.compare_digest(
+                retry.execution_authority_key,
+                dispatch.execution_authority_key,
+            )
+        ):
+            raise HarnessStoreError(
+                "Sandbox retry catalog receipt/dispatch authority 不一致。"
+            )
+        if (
+            cancel.decision != "accepted"
+            or cancel.receipt_id != retry.cancel_receipt_id
+            or not hmac.compare_digest(
+                cancel.receipt_sha256,
+                retry.cancel_receipt_sha256,
+            )
+            or cancel.ticket_id != retry.source_ticket_id
+            or not hmac.compare_digest(
+                cancel.authority_key,
+                retry.source_authority_key,
+            )
+        ):
+            raise HarnessStoreError(
+                "Sandbox retry catalog cancel/retry receipt chain 不一致。"
+            )
+        request = manifest.request
+        if (
+            manifest.workspace_root != workspace_root
+            or request.workspace_root != workspace_root
+            or not hmac.compare_digest(
+                request.request_sha256,
+                dispatch.eval_request_sha256,
+            )
+            or manifest.batch_id != request.batch_id
+            or manifest.suite_id != request.suite_id
+        ):
+            raise HarnessStoreError(
+                "Sandbox retry catalog Request Manifest identity 不一致。"
+            )
+        samples = tuple(
+            samples_by_cohort.get(
+                (request.batch_id, request.suite_id),
+                [],
+            )
+        )
+        sample_indices = [sample.sample_index for sample in samples]
+        if (
+            sample_indices != list(range(len(sample_indices)))
+            or len(sample_indices) > request.requested_samples
+        ):
+            raise HarnessStoreError(
+                "Sandbox retry catalog H5a 不是受限连续前缀。"
+            )
+        ticket_row = tickets.get(dispatch.ticket_id)
+        ticket_state, lease_expires_at, recovery_status = (
+            _sandbox_retry_catalog_ticket_status(
+                dispatch,
+                ticket_row,
+                workspace_root=workspace_root,
+                requested_samples=request.requested_samples,
+                assessed_at=assessed_at,
+            )
+        )
+        item = HarnessSandboxRetryCatalogItem(
+            dispatch=dispatch,
+            cancel_receipt_id=retry.cancel_receipt_id,
+            cancel_receipt_sha256=retry.cancel_receipt_sha256,
+            source_ticket_id=retry.source_ticket_id,
+            batch_id=request.batch_id,
+            suite_id=request.suite_id,
+            requested_samples=request.requested_samples,
+            persisted_samples=len(samples),
+            ticket_state=ticket_state,
+            ticket_lease_expires_at=lease_expires_at,
+            recovery_status=recovery_status,
+        )
+        ticket = (
+            await _sandbox_admission_ticket_from_row(
+                db,
+                ticket_row,
+                now=assessed_at,
+            )
+            if ticket_row is not None
+            else None
+        )
+        records.append(
+            HarnessSandboxRetryDetailRecord(
+                workspace_root=workspace_root,
+                assessed_at=assessed_at,
+                item=item,
+                retry_receipt=retry,
+                cancel_receipt=cancel,
+                request_manifest=manifest,
+                ticket=ticket,
+                samples=samples,
+            )
+        )
+    return tuple(records)
 
 
 def _encode_sandbox_retry_catalog_cursor(
