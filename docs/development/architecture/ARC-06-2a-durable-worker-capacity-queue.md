@@ -107,14 +107,13 @@ reservation 都由真实 SQLite 事务执行。
 
 当前仍明确不包含：
 
-- ToolJob 的生产 waiting/dispatch/reconcile adapter；当前生产 `dispatch()` 容量不足时仍直接返回
-  capacity exhausted；
+- ARC-06.2b1 已另行交付 ToolJob 生产入队、`queued` receipt、直接派发旁路阻断与 dispatch 前取消；
+  本 authority 自身仍不负责 ToolJob payload 或 lifecycle；
 - claim owner lease、超时后重新投递、dispatch-before-send 的队列级回执；
 - priority、aging、跨 workspace 公平、cursor、deadline 调度策略与 starvation 指标；
 - Agent/Browser 持久 Worker contract、capability routing 或跨主机 leader；
 - 用户可见的 queue catalog/cancel 页面。
 
-因此 ARC-06.2 与 HAR-10.7 继续保持 `partial`。下一步应在
-`ARC-06.2b ToolJob Capacity Queue Adapter` 与 `ARC-04.5a Agent Worker Contract` 之间重新比较依赖：
-前者把本 authority 接入已有 ToolJob 生命周期，后者才允许 Agent 集群消费同一 reservation/queue；
-不得用本切片宣称完整高并发或 Agent 集群已经完成。
+因此 ARC-06.2 与 HAR-10.7 继续保持 `partial`。ARC-06.2b1 已证明 ToolJob 可安全进入本队列；下一步
+ARC-06.2b2 必须完成 claimed ToolJob 的 dispatch/reconcile，之后才可评估 ARC-04.5a Agent Worker
+Contract。不得用本切片宣称完整高并发或 Agent 集群已经完成。

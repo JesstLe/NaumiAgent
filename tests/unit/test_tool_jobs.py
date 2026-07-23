@@ -47,6 +47,7 @@ from naumi_agent.daemons.worker_contract import (
 )
 from naumi_agent.daemons.worker_registry import (
     WorkerCapacityExhaustedError,
+    WorkerCapacityWaiterState,
     WorkerRegistryStore,
 )
 from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
@@ -279,7 +280,10 @@ async def test_admit_reopen_validate_and_never_persist_raw_arguments(
     assert validation.reasons == (ToolJobValidationReason.VALID,)
     assert secret.encode() not in store.db_path.read_bytes()
     with sqlite3.connect(store.db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert (
+            db.execute("PRAGMA user_version").fetchone()[0]
+            == TOOL_JOB_SCHEMA_VERSION
+        )
     if os.name != "nt":
         assert store.db_path.stat().st_mode & 0o777 == 0o600
 
@@ -557,6 +561,321 @@ async def test_dispatch_capacity_is_bounded_replayed_and_released(
     )
     assert released is not None
     assert (released.reserved, released.available) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_tool_job_capacity_queue_requires_real_saturation_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    with pytest.raises(ToolJobLifecycleConflictError, match="仍有可用容量"):
+        await authority.enqueue_for_capacity(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            now=T4,
+            max_waiters=2,
+        )
+    await registry.reserve_capacity(
+        reservation_id="capacity-queue-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="queue-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    waiter = await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    reopened = ToolJobAuthority(
+        store=ToolJobStore(store.db_path),
+        execution_grants=authority._execution_grants,
+        worker_registry=WorkerRegistryStore(registry.db_path),
+    )
+    replay = await reopened.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T5,
+        max_waiters=2,
+    )
+
+    assert replay == waiter
+    assert waiter.state is WorkerCapacityWaiterState.WAITING
+    assert waiter.worker_id == admitted.contract.worker_id
+    assert waiter.instance_id == admitted.contract.worker_instance_id
+    assert waiter.epoch == admitted.contract.worker_epoch
+    assert waiter.job_id == admitted.contract.job_id
+    assert waiter.workspace_sha256 == admitted.contract.workspace_sha256
+    assert waiter.enqueued_at == admitted.contract.admitted_at
+    assert waiter.deadline_at == admitted.contract.expires_at
+    assert request.arguments["command"].encode() not in registry.db_path.read_bytes()
+    queued = await store.get(admitted.contract.job_id)
+    assert queued is not None
+    assert queued.state is ToolJobState.QUEUED
+    assert queued.latest_receipt.sequence == 2
+    assert queued.latest_receipt.result_code == "capacity_queue_bound_v1"
+    assert verify_tool_job_lifecycle_receipt(queued.latest_receipt)
+    with pytest.raises(ToolJobLifecycleConflictError, match="已进入 capacity queue"):
+        await authority.dispatch(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            dispatch_id="dispatch-queued",
+            now=T5,
+        )
+
+
+@pytest.mark.asyncio
+async def test_tool_job_capacity_queue_recovers_after_queued_commit_before_waiter(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    await registry.reserve_capacity(
+        reservation_id="capacity-recovery-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="recovery-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    await store._transition(
+        job_id=admitted.contract.job_id,
+        target_state=ToolJobState.QUEUED,
+        dispatch_id=None,
+        side_effect=ToolJobSideEffect.NONE,
+        result_code="capacity_queue_bound_v1",
+        occurred_at=T4,
+    )
+
+    assert (
+        await registry.get_capacity_waiter_for_job(
+            worker_id=contract.worker_id,
+            epoch=contract.epoch,
+            job_id=admitted.contract.job_id,
+        )
+        is None
+    )
+    waiter = await ToolJobAuthority(
+        store=ToolJobStore(store.db_path),
+        execution_grants=authority._execution_grants,
+        worker_registry=WorkerRegistryStore(registry.db_path),
+    ).enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T5,
+        max_waiters=2,
+    )
+
+    queued = await store.get(admitted.contract.job_id)
+    assert waiter.state is WorkerCapacityWaiterState.WAITING
+    assert queued is not None
+    assert queued.state is ToolJobState.QUEUED
+    assert queued.latest_receipt.sequence == 2
+
+
+@pytest.mark.asyncio
+async def test_direct_dispatch_cannot_race_queued_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    reserve_capacity = registry.reserve_capacity
+
+    async def reserve_after_queue_transition(**kwargs: object) -> object:
+        await store._transition(
+            job_id=admitted.contract.job_id,
+            target_state=ToolJobState.QUEUED,
+            dispatch_id=None,
+            side_effect=ToolJobSideEffect.NONE,
+            result_code="capacity_queue_bound_v1",
+            occurred_at=T4,
+            allowed_current_states=frozenset({ToolJobState.ADMITTED}),
+        )
+        return await reserve_capacity(**kwargs)
+
+    monkeypatch.setattr(registry, "reserve_capacity", reserve_after_queue_transition)
+    with pytest.raises(
+        ToolJobLifecycleConflictError,
+        match="当前状态不允许本次原子转换",
+    ):
+        await authority.dispatch(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            dispatch_id="dispatch-raced-by-queue",
+            now=T5,
+        )
+
+    queued = await store.get(admitted.contract.job_id)
+    assert queued is not None
+    assert queued.state is ToolJobState.QUEUED
+    assert queued.latest_receipt.sequence == 2
+
+
+@pytest.mark.asyncio
+async def test_pre_dispatch_cancel_closes_waiter_before_tool_job(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    await registry.reserve_capacity(
+        reservation_id="capacity-cancel-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="cancel-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    waiter = await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    lifecycle = ToolJobLifecycleAuthority(store, registry)
+    cancelled = await lifecycle.cancel_before_dispatch(
+        job_id=admitted.contract.job_id,
+        reason_code="operator_cancelled",
+        now=T5,
+    )
+    replay = await lifecycle.cancel_before_dispatch(
+        job_id=admitted.contract.job_id,
+        reason_code="operator_cancelled",
+        now=T6,
+    )
+    durable_waiter = await WorkerRegistryStore(
+        registry.db_path
+    ).get_capacity_waiter(waiter.queue_id)
+
+    assert cancelled == replay
+    assert cancelled.state is ToolJobState.CANCELLED
+    assert cancelled.latest_receipt.sequence == 3
+    assert durable_waiter is not None
+    assert durable_waiter.state is WorkerCapacityWaiterState.CANCELLED
+    assert durable_waiter.reason_code == "operator_cancelled"
+
+
+@pytest.mark.asyncio
+async def test_claimed_tool_job_waiter_blocks_direct_dispatch_and_cancel(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    blocker = await registry.reserve_capacity(
+        reservation_id="capacity-claim-blocker",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="claim-blocker",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    waiter = await authority.enqueue_for_capacity(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T4,
+        max_waiters=2,
+    )
+    await registry.release_capacity(
+        reservation_id=blocker.reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="blocker_finished",
+        released_at=T4,
+    )
+    claim = await registry.claim_next_capacity_waiter(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        claimed_at=T5,
+    )
+    assert claim is not None and claim.waiter.queue_id == waiter.queue_id
+
+    with pytest.raises(ToolJobLifecycleConflictError, match="已进入 capacity queue"):
+        await authority.dispatch(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            dispatch_id="dispatch-claimed",
+            now=T5,
+        )
+    with pytest.raises(ToolJobLifecycleConflictError, match="必须先完成"):
+        await ToolJobLifecycleAuthority(store, registry).cancel_before_dispatch(
+            job_id=admitted.contract.job_id,
+            reason_code="operator_cancelled",
+            now=T6,
+        )
+    unchanged = await store.get(admitted.contract.job_id)
+    snapshot = await registry.capacity_snapshot(
+        worker_id=contract.worker_id,
+        assessed_at=T6,
+    )
+    assert unchanged is not None and unchanged.state is ToolJobState.QUEUED
+    assert snapshot is not None and (snapshot.reserved, snapshot.available) == (1, 0)
 
 
 @pytest.mark.asyncio
@@ -975,10 +1294,43 @@ async def test_v1_store_migrates_to_genesis_receipt_without_losing_identity(
     assert migrated.latest_receipt.sequence == 1
     assert verify_tool_job_lifecycle_receipt(migrated.latest_receipt)
     with sqlite3.connect(legacy) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == TOOL_JOB_SCHEMA_VERSION
         assert db.execute(
             "SELECT COUNT(*) FROM tool_job_lifecycle_events"
         ).fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_v2_store_migrates_to_queued_capable_schema(tmp_path: Path) -> None:
+    authority, request, store, *_, contract, _ = await _authority(tmp_path)
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute("PRAGMA user_version = 2")
+
+    migrated_store = ToolJobStore(store.db_path)
+    migrated = await migrated_store.get(admitted.contract.job_id)
+
+    assert migrated is not None
+    assert migrated.contract == admitted.contract
+    assert migrated.state is ToolJobState.ADMITTED
+    assert verify_tool_job_lifecycle_receipt(migrated.latest_receipt)
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == TOOL_JOB_SCHEMA_VERSION
+        tool_job_sql = db.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'tool_jobs'"
+        ).fetchone()[0]
+        lifecycle_sql = db.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'tool_job_lifecycle_events'"
+        ).fetchone()[0]
+    assert "'queued'" in tool_job_sql
+    assert "'queued'" in lifecycle_sql
 
 
 @pytest.mark.asyncio
