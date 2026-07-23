@@ -33,6 +33,9 @@
 - ARC-06.1b 已把 ARC-06.1a capacity authority 接入上述真实 ToolJob dispatch/terminal lifecycle；ToolJob
   transport 前占位，终态释放，跨 Store 失败由 TTL fail-safe 收敛，详见
   `ARC-06-1b-tool-job-capacity-lifecycle.md`。
+- ARC-06.2b1 已把 ToolJob authority 升级到 schema v3：容量饱和后用 tamper-evident `queued` receipt
+  绑定 ARC-06.2a waiter，阻断 direct dispatch，并闭合重启补建与 dispatch 前取消；claimed waiter
+  的发送与 reconcile 尚未实现，详见 `ARC-06-2b1-tool-job-capacity-queue-admission.md`。
 - ARC-04.3a 已完成认证本地 non-PTY transport、默认断网 OS sandbox、process-tree cancel、资源上限、artifact
   digest，并由 Coordinator 消费 ARC-04.2b/2c 权威链，详见
   `ARC-04-3a-authenticated-non-pty-shell-worker.md`。

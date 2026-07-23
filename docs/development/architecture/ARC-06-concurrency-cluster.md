@@ -24,7 +24,10 @@
     `max_waiters` 按 worker epoch 固化为 durable policy，FIFO claim 与 capacity reservation 在同一
     SQLite 事务提交，Worker takeover 会 fence 旧等待项。见
     [设计与验证](ARC-06-2a-durable-worker-capacity-queue.md)。
-  - 未完成：生产 ToolJob queue adapter、claim lease/reconcile、priority、aging、跨 workspace 公平、
+  - ARC-06.2b1 已让生产 ToolJob 在真实容量饱和后进入该队列，以 ToolJob schema v3 `queued` receipt
+    阻断直接派发旁路，并闭合重启补建 waiter 与 dispatch 前取消。见
+    [设计与验证](ARC-06-2b1-tool-job-capacity-queue-admission.md)。
+  - 未完成：claimed ToolJob dispatch/reconcile、claim lease、priority、aging、跨 workspace 公平、
     dependency DAG、affinity、cursor 与 starvation 指标。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
 - ARC-06.4 Backpressure：producer pause、bounded queue、drop/coalesce policy、overload response。

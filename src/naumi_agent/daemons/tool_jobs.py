@@ -33,9 +33,14 @@ from naumi_agent.daemons.worker_contract import (
     WorkerHealthReport,
     WorkerKind,
 )
-from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityWaiter,
+    WorkerCapacityWaiterState,
+    WorkerRegistryConflictError,
+    WorkerRegistryStore,
+)
 
-TOOL_JOB_SCHEMA_VERSION = 2
+TOOL_JOB_SCHEMA_VERSION = 3
 _MAX_CONTRACT_BYTES = 64 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -45,6 +50,7 @@ _LEGACY_DISPATCH_RESULT_CODE = "dispatch_committed"
 
 class ToolJobState(StrEnum):
     ADMITTED = "admitted"
+    QUEUED = "queued"
     DISPATCHED = "dispatched"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -424,6 +430,7 @@ class ToolJobStore:
         output_sha256: str | None = None,
         artifact_manifest_sha256: str | None = None,
         expected_latest_receipt_sha256: str | None = None,
+        allowed_current_states: frozenset[ToolJobState] | None = None,
     ) -> ToolJobTransitionResult:
         """Append one monotonic lifecycle fact and atomically advance latest state."""
         _require_identifier(job_id, field="job_id")
@@ -446,6 +453,16 @@ class ToolJobStore:
                 expected_latest_receipt_sha256,
                 field="expected_latest_receipt_sha256",
             )
+        if allowed_current_states is not None and (
+            not isinstance(allowed_current_states, frozenset)
+            or not allowed_current_states
+            or any(
+                not isinstance(state, ToolJobState) for state in allowed_current_states
+            )
+        ):
+            raise TypeError(
+                "allowed_current_states 必须是非空 frozenset[ToolJobState]。"
+            )
         await self._ensure_schema()
         try:
             async with self._connection() as db:
@@ -459,6 +476,17 @@ class ToolJobStore:
                     raise ToolJobLifecycleConflictError("ToolJob 不存在。")
                 stored = _stored_job_from_row(row)
                 await _validate_event_chain(db, stored)
+                if (
+                    allowed_current_states is not None
+                    and stored.state not in allowed_current_states
+                ):
+                    allowed = ",".join(
+                        sorted(state.value for state in allowed_current_states)
+                    )
+                    raise ToolJobLifecycleConflictError(
+                        "ToolJob 当前状态不允许本次原子转换："
+                        f"{stored.state.value}（允许：{allowed}）。"
+                    )
                 if (
                     expected_latest_receipt_sha256 is not None
                     and stored.latest_receipt.receipt_sha256
@@ -592,13 +620,16 @@ class ToolJobStore:
                         tables = await _user_tables(db)
                         if tables:
                             raise ToolJobError("ToolJob 是未知的未版本化数据库。")
-                        for statement in _SCHEMA_V2:
+                        for statement in _SCHEMA_V3:
                             await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {TOOL_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 1:
                         await _migrate_v1_to_v2(db)
+                        await _migrate_v2_to_v3(db)
+                    elif version == 2:
+                        await _migrate_v2_to_v3(db)
                     elif version != TOOL_JOB_SCHEMA_VERSION:
                         raise ToolJobError(
                             f"ToolJob schema v{version} 不受支持；"
@@ -744,6 +775,112 @@ class ToolJobAuthority:
             worker_admission=worker_admission,
         )
 
+    async def enqueue_for_capacity(
+        self,
+        *,
+        job_id: str,
+        request: ToolJobRequest,
+        worker_health: WorkerHealthReport,
+        requirements: WorkerAdmissionRequirements,
+        now: str,
+        max_waiters: int,
+    ) -> WorkerCapacityWaiter:
+        """Bind one admitted ToolJob to the durable capacity queue authority."""
+        validation = await self.validate_for_dispatch(
+            job_id=job_id,
+            request=request,
+            worker_health=worker_health,
+            requirements=requirements,
+            now=now,
+        )
+        if not validation.allowed:
+            reasons = ",".join(reason.value for reason in validation.reasons)
+            raise ToolJobLifecycleConflictError(
+                f"ToolJob capacity queue admission 被拒绝：{reasons}"
+            )
+        contract = validation.contract
+        assert contract is not None
+        stored = await self._store.get(job_id)
+        if stored is None or stored.state not in {
+            ToolJobState.ADMITTED,
+            ToolJobState.QUEUED,
+        }:
+            raise ToolJobLifecycleConflictError(
+                "只有 admitted/queued ToolJob 可以进入 capacity queue。"
+            )
+        queue_id = _tool_job_capacity_queue_id(contract.job_id)
+        existing = await self._worker_registry.get_capacity_waiter_for_job(
+            worker_id=contract.worker_id,
+            epoch=contract.worker_epoch,
+            job_id=contract.job_id,
+        )
+        if existing is not None:
+            _require_tool_job_capacity_waiter(existing, contract)
+            if stored.state is not ToolJobState.QUEUED:
+                raise ToolJobLifecycleConflictError(
+                    "Capacity waiter 已存在但 ToolJob 未处于 queued 状态。"
+                )
+            return existing
+        if stored.state is ToolJobState.ADMITTED:
+            snapshot = await self._worker_registry.capacity_snapshot(
+                worker_id=contract.worker_id,
+                assessed_at=validation.checked_at,
+            )
+            if snapshot is None or (
+                snapshot.instance_id != contract.worker_instance_id
+                or snapshot.epoch != contract.worker_epoch
+            ):
+                raise ToolJobLifecycleConflictError(
+                    "ToolJob capacity queue Worker incarnation 已失效。"
+                )
+            if snapshot.available > 0:
+                raise ToolJobLifecycleConflictError(
+                    "Worker 仍有可用容量；请直接重试 dispatch，不创建等待项。"
+                )
+            await self._store._transition(
+                job_id=job_id,
+                target_state=ToolJobState.QUEUED,
+                dispatch_id=None,
+                side_effect=ToolJobSideEffect.NONE,
+                result_code="capacity_queue_bound_v1",
+                occurred_at=validation.checked_at,
+                allowed_current_states=frozenset({ToolJobState.ADMITTED}),
+            )
+        waiter = await self._worker_registry.enqueue_capacity_waiter(
+            queue_id=queue_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.worker_instance_id,
+            epoch=contract.worker_epoch,
+            job_id=contract.job_id,
+            workspace_sha256=contract.workspace_sha256,
+            enqueued_at=contract.admitted_at,
+            deadline_at=contract.expires_at,
+            max_waiters=max_waiters,
+        )
+        _require_tool_job_capacity_waiter(waiter, contract)
+        current = await self._store.get(job_id)
+        if current is None or current.state is not ToolJobState.QUEUED:
+            if waiter.state is WorkerCapacityWaiterState.WAITING:
+                try:
+                    await self._worker_registry.cancel_capacity_waiter(
+                        queue_id=waiter.queue_id,
+                        worker_id=waiter.worker_id,
+                        instance_id=waiter.instance_id,
+                        epoch=waiter.epoch,
+                        job_id=waiter.job_id,
+                        reason_code="tool_job_state_changed",
+                        cancelled_at=validation.checked_at,
+                    )
+                except WorkerRegistryConflictError as exc:
+                    raise ToolJobLifecycleConflictError(
+                        "ToolJob 状态变化且 capacity waiter 已被并发 claim；"
+                        "必须进入 queued reconcile。"
+                    ) from exc
+            raise ToolJobLifecycleConflictError(
+                "ToolJob 在 capacity queue admission 期间已离开 queued 状态。"
+            )
+        return waiter
+
     async def dispatch(
         self,
         *,
@@ -770,6 +907,10 @@ class ToolJobAuthority:
         contract = validation.contract
         assert contract is not None
         stored = await self._store.get(job_id)
+        if stored is not None and stored.state is ToolJobState.QUEUED:
+            raise ToolJobLifecycleConflictError(
+                "ToolJob 已进入 capacity queue；direct dispatch 被拒绝。"
+            )
         if stored is None or stored.state not in {
             ToolJobState.ADMITTED,
             ToolJobState.DISPATCHED,
@@ -783,6 +924,17 @@ class ToolJobAuthority:
                 side_effect=ToolJobSideEffect.POSSIBLE,
                 result_code=_CAPACITY_DISPATCH_RESULT_CODE,
                 occurred_at=validation.checked_at,
+            )
+        waiter = await self._worker_registry.get_capacity_waiter_for_job(
+            worker_id=contract.worker_id,
+            epoch=contract.worker_epoch,
+            job_id=contract.job_id,
+        )
+        if waiter is not None:
+            _require_tool_job_capacity_waiter(waiter, contract)
+            raise ToolJobLifecycleConflictError(
+                "ToolJob 已绑定 capacity queue"
+                f"（{waiter.state.value}）；必须走 queued dispatch/reconcile。"
             )
         active = await self._worker_registry.get_active(contract.worker_id)
         if active is None:
@@ -814,6 +966,9 @@ class ToolJobAuthority:
             side_effect=ToolJobSideEffect.POSSIBLE,
             result_code=_CAPACITY_DISPATCH_RESULT_CODE,
             occurred_at=validation.checked_at,
+            allowed_current_states=frozenset(
+                {ToolJobState.ADMITTED, ToolJobState.DISPATCHED}
+            ),
         )
 
 
@@ -918,6 +1073,45 @@ class ToolJobLifecycleAuthority:
         reason_code: str,
         now: str,
     ) -> StoredToolJob:
+        stored = await self._require_job(job_id)
+        if stored.state not in {
+            ToolJobState.ADMITTED,
+            ToolJobState.QUEUED,
+            ToolJobState.CANCELLED,
+        }:
+            raise ToolJobLifecycleConflictError(
+                "ToolJob 已越过 dispatch 边界，不能执行 pre-dispatch cancel。"
+            )
+        contract = stored.contract
+        waiter = await self._worker_registry.get_capacity_waiter_for_job(
+            worker_id=contract.worker_id,
+            epoch=contract.worker_epoch,
+            job_id=contract.job_id,
+        )
+        if waiter is not None:
+            _require_tool_job_capacity_waiter(waiter, contract)
+            if waiter.state is WorkerCapacityWaiterState.CLAIMED:
+                raise ToolJobLifecycleConflictError(
+                    "ToolJob capacity waiter 已被 claim；必须先完成 queued reconcile。"
+                )
+            if waiter.state in {
+                WorkerCapacityWaiterState.WAITING,
+                WorkerCapacityWaiterState.CANCELLED,
+            }:
+                try:
+                    await self._worker_registry.cancel_capacity_waiter(
+                        queue_id=waiter.queue_id,
+                        worker_id=waiter.worker_id,
+                        instance_id=waiter.instance_id,
+                        epoch=waiter.epoch,
+                        job_id=waiter.job_id,
+                        reason_code=reason_code,
+                        cancelled_at=now,
+                    )
+                except WorkerRegistryConflictError as exc:
+                    raise ToolJobLifecycleConflictError(
+                        f"ToolJob capacity queue 取消被拒绝：{exc}"
+                    ) from exc
         transition = await self._store._transition(
             job_id=job_id,
             target_state=ToolJobState.CANCELLED,
@@ -1028,6 +1222,30 @@ def tool_job_requirements_sha256(
 def _capacity_reservation_id(job_id: str) -> str:
     _require_identifier(job_id, field="job_id")
     return f"capacity-{job_id}"
+
+
+def _tool_job_capacity_queue_id(job_id: str) -> str:
+    _require_identifier(job_id, field="job_id")
+    return f"toolqueue:{hashlib.sha256(job_id.encode('utf-8')).hexdigest()}"
+
+
+def _require_tool_job_capacity_waiter(
+    waiter: WorkerCapacityWaiter,
+    contract: ImmutableToolJob,
+) -> None:
+    if (
+        waiter.queue_id != _tool_job_capacity_queue_id(contract.job_id)
+        or waiter.worker_id != contract.worker_id
+        or waiter.instance_id != contract.worker_instance_id
+        or waiter.epoch != contract.worker_epoch
+        or waiter.job_id != contract.job_id
+        or waiter.workspace_sha256 != contract.workspace_sha256
+        or waiter.enqueued_at != contract.admitted_at
+        or waiter.deadline_at != contract.expires_at
+    ):
+        raise ToolJobLifecycleConflictError(
+            "Capacity waiter 与 immutable ToolJob 事实不一致。"
+        )
 
 
 def verify_tool_job(contract: ImmutableToolJob) -> bool:
@@ -1273,7 +1491,22 @@ def _validate_lifecycle_receipt_semantics(receipt: ToolJobLifecycleReceipt) -> N
         _require_transition(receipt.previous_state, receipt.state)
     except ToolJobLifecycleConflictError as exc:
         raise ValueError("ToolJob lifecycle 状态转换无效。") from exc
-    if receipt.state is ToolJobState.CANCELLED and receipt.previous_state is ToolJobState.ADMITTED:
+    if receipt.state is ToolJobState.QUEUED:
+        if (
+            receipt.previous_state is not ToolJobState.ADMITTED
+            or receipt.dispatch_id is not None
+            or receipt.side_effect is not ToolJobSideEffect.NONE
+            or receipt.result_code != "capacity_queue_bound_v1"
+            or receipt.exit_code is not None
+            or receipt.output_sha256 is not None
+            or receipt.artifact_manifest_sha256 is not None
+        ):
+            raise ValueError("ToolJob queued lifecycle receipt 无效。")
+        return
+    if receipt.state is ToolJobState.CANCELLED and receipt.previous_state in {
+        ToolJobState.ADMITTED,
+        ToolJobState.QUEUED,
+    }:
         if receipt.dispatch_id is not None or receipt.side_effect is not ToolJobSideEffect.NONE:
             raise ValueError("dispatch 前取消不得声明副作用。")
         return
@@ -1297,6 +1530,11 @@ def _validate_lifecycle_receipt_semantics(receipt: ToolJobLifecycleReceipt) -> N
 def _require_transition(previous: ToolJobState, target: ToolJobState) -> None:
     allowed = {
         ToolJobState.ADMITTED: {
+            ToolJobState.QUEUED,
+            ToolJobState.DISPATCHED,
+            ToolJobState.CANCELLED,
+        },
+        ToolJobState.QUEUED: {
             ToolJobState.DISPATCHED,
             ToolJobState.CANCELLED,
         },
@@ -1624,6 +1862,56 @@ async def _migrate_v1_to_v2(db: aiosqlite.Connection) -> None:
             ),
         )
     await db.execute("DROP TABLE tool_jobs_v1")
+    await db.execute("PRAGMA user_version = 2")
+
+
+async def _migrate_v2_to_v3(db: aiosqlite.Connection) -> None:
+    tables = set(await _user_tables(db))
+    if tables != {"tool_jobs", "tool_job_lifecycle_events"}:
+        raise ToolJobError("ToolJob schema v2 表集合无效。")
+    cursor = await db.execute("SELECT * FROM tool_jobs ORDER BY admitted_at, job_id")
+    rows = await cursor.fetchall()
+    for row in rows:
+        stored = _stored_job_from_row(row)
+        await _validate_event_chain(db, stored)
+        if stored.state is ToolJobState.QUEUED:
+            raise ToolJobError("ToolJob schema v2 不应包含 queued 状态。")
+    await db.execute("DROP INDEX IF EXISTS tool_jobs_expiry")
+    await db.execute("DROP INDEX IF EXISTS tool_job_lifecycle_recovery")
+    await db.execute(
+        "ALTER TABLE tool_job_lifecycle_events RENAME TO tool_job_lifecycle_events_v2"
+    )
+    await db.execute("ALTER TABLE tool_jobs RENAME TO tool_jobs_v2")
+    for statement in _SCHEMA_V3:
+        await db.execute(statement)
+    await db.execute(
+        """
+        INSERT INTO tool_jobs (
+            job_id, idempotency_key, request_sha256, job_sha256,
+            admitted_at, expires_at, state, latest_sequence,
+            latest_receipt_sha256, latest_receipt_json, contract_json
+        )
+        SELECT
+            job_id, idempotency_key, request_sha256, job_sha256,
+            admitted_at, expires_at, state, latest_sequence,
+            latest_receipt_sha256, latest_receipt_json, contract_json
+        FROM tool_jobs_v2
+        """
+    )
+    await db.execute(
+        """
+        INSERT INTO tool_job_lifecycle_events (
+            job_id, sequence, transition_sha256, receipt_sha256,
+            occurred_at, state, receipt_json
+        )
+        SELECT
+            job_id, sequence, transition_sha256, receipt_sha256,
+            occurred_at, state, receipt_json
+        FROM tool_job_lifecycle_events_v2
+        """
+    )
+    await db.execute("DROP TABLE tool_job_lifecycle_events_v2")
+    await db.execute("DROP TABLE tool_jobs_v2")
     await db.execute(f"PRAGMA user_version = {TOOL_JOB_SCHEMA_VERSION}")
 
 
@@ -1659,6 +1947,53 @@ _SCHEMA_V2 = (
         state TEXT NOT NULL CHECK (
             state IN (
                 'admitted', 'dispatched', 'running', 'succeeded',
+                'failed', 'cancelled', 'unknown'
+            )
+        ),
+        receipt_json TEXT NOT NULL,
+        PRIMARY KEY (job_id, sequence),
+        UNIQUE (job_id, transition_sha256)
+    )
+    """,
+    """
+    CREATE INDEX tool_job_lifecycle_recovery
+    ON tool_job_lifecycle_events (state, occurred_at, job_id)
+    """,
+)
+
+
+_SCHEMA_V3 = (
+    """
+    CREATE TABLE tool_jobs (
+        job_id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        request_sha256 TEXT NOT NULL,
+        job_sha256 TEXT NOT NULL,
+        admitted_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'admitted', 'queued', 'dispatched', 'running', 'succeeded',
+                'failed', 'cancelled', 'unknown'
+            )
+        ),
+        latest_sequence INTEGER NOT NULL CHECK (latest_sequence >= 1),
+        latest_receipt_sha256 TEXT NOT NULL,
+        latest_receipt_json TEXT NOT NULL,
+        contract_json TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX tool_jobs_expiry ON tool_jobs (expires_at, job_id)",
+    """
+    CREATE TABLE tool_job_lifecycle_events (
+        job_id TEXT NOT NULL REFERENCES tool_jobs(job_id) ON DELETE RESTRICT,
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        transition_sha256 TEXT NOT NULL,
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        occurred_at TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+            state IN (
+                'admitted', 'queued', 'dispatched', 'running', 'succeeded',
                 'failed', 'cancelled', 'unknown'
             )
         ),

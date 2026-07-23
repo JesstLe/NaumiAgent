@@ -905,6 +905,40 @@ class WorkerRegistryStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法读取 capacity waiter。") from exc
 
+    async def get_capacity_waiter_for_job(
+        self,
+        *,
+        worker_id: str,
+        epoch: int,
+        job_id: str,
+    ) -> WorkerCapacityWaiter | None:
+        """Read the unique durable queue fact for one worker-incarnation job."""
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(job_id, field="job_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                row = await _select_capacity_waiter_job(
+                    db,
+                    worker_id=worker_id,
+                    epoch=epoch,
+                    job_id=job_id,
+                )
+                if row is None:
+                    await db.commit()
+                    return None
+                waiter = _capacity_waiter_from_row(row)
+                await _validate_capacity_waiter_links(db, (waiter,))
+                await db.commit()
+                return waiter
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 job capacity waiter。") from exc
+
     async def list_capacity_waiters(
         self,
         *,
