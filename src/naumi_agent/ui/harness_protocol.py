@@ -16,6 +16,7 @@ from naumi_agent.harness.eval_surface import (
 )
 from naumi_agent.harness.explain import HarnessExplainLookup, HarnessRunExplanation
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchCheckpoint
 
 HARNESS_DETAIL_SCHEMA_VERSION = 1
 HARNESS_DETAIL_REVISION = 1
@@ -105,6 +106,46 @@ def harness_eval_batch_payload(progress: HarnessEvalBatchProgress) -> dict[str, 
         "identity_sha256": progress.identity_sha256,
         "code": _text(progress.code),
         "message": _text(progress.message),
+    }
+
+
+def harness_sandbox_eval_progress_payload(
+    checkpoint: HarnessSandboxBatchCheckpoint,
+    *,
+    batch_id: str,
+    check_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    """Serialize one coordinator checkpoint without inventing Eval metrics."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", batch_id):
+        raise ValueError("Harness Sandbox Eval batch_id 格式无效。")
+    if (
+        not check_ids
+        or len(check_ids) > 80
+        or len(set(check_ids)) != len(check_ids)
+        or any(
+            re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", check_id) is None
+            for check_id in check_ids
+        )
+    ):
+        raise ValueError("Harness Sandbox Eval check_ids 格式无效。")
+    return {
+        "schema_version": HARNESS_DETAIL_SCHEMA_VERSION,
+        "kind": "sandbox",
+        "stage": checkpoint.stage,
+        "terminal": checkpoint.stage in {"completed", "failed"},
+        "batch_id": batch_id,
+        "check_ids": list(check_ids),
+        "requested": checkpoint.requested_samples,
+        "persisted": checkpoint.persisted_samples,
+        "checkpoint_id": checkpoint.checkpoint_id,
+        "checkpoint_sha256": checkpoint.checkpoint_sha256,
+        "authority_key": checkpoint.authority_key,
+        "lane": checkpoint.lane,
+        "run_id": checkpoint.run_id or "",
+        "run_grant_sha256": checkpoint.run_grant_sha256 or "",
+        "sample_result_sha256": list(checkpoint.sample_result_sha256),
+        "code": checkpoint.code,
+        "updated_at": checkpoint.updated_at,
     }
 
 
@@ -310,6 +351,7 @@ __all__ = [
     "HARNESS_DETAIL_SCHEMA_VERSION",
     "harness_eval_baseline_payload",
     "harness_eval_batch_payload",
+    "harness_sandbox_eval_progress_payload",
     "harness_eval_promotion_payload",
     "harness_explain_payload",
     "harness_replay_payload",

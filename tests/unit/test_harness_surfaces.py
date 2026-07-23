@@ -293,6 +293,18 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
 ) -> None:
     _require_real_shell_backend()
     engine = _engine(tmp_path)
+
+    class ProgressFrontend:
+        def __init__(self) -> None:
+            self.progress: list[dict[str, object]] = []
+
+        async def update_harness_sandbox_eval(
+            self,
+            progress: dict[str, object],
+        ) -> None:
+            self.progress.append(progress)
+
+    frontend = ProgressFrontend()
     try:
         await execute_slash_command(engine, "/harness trust --confirm")
 
@@ -303,6 +315,7 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
                     "/harness eval sandbox unit --samples 5 "
                     "--batch sandbox-surface-1"
                 ),
+                frontend=frontend,
             )
         )
         status = await engine.harness_service.status()
@@ -326,6 +339,19 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
         assert "Harness Sandbox Eval 已完成" in rendered
         assert "5/5" in rendered
         assert "sandbox-surface-1" in rendered
+        assert [item["stage"] for item in frontend.progress] == [
+            "recovering",
+            "acquiring",
+            *("executing" for _ in range(5)),
+            "completed",
+        ]
+        assert [item["persisted"] for item in frontend.progress] == [
+            0, 0, 1, 2, 3, 4, 5, 5,
+        ]
+        assert all(item["kind"] == "sandbox" for item in frontend.progress)
+        assert all(
+            item["check_ids"] == ["unit"] for item in frontend.progress
+        )
         assert len(records) == 5
         assert [item.sample_index for item in records] == list(range(5))
         assert all(item.result.status.value == "passed" for item in records)

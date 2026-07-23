@@ -279,6 +279,28 @@ class _TuiSlashCommandFrontend:
             f" · 已保存 {progress.persisted} · {progress.batch_id}"
         )
 
+    async def update_harness_sandbox_eval(
+        self,
+        progress: dict[str, object],
+    ) -> None:
+        """Project the authoritative Sandbox coordinator checkpoint."""
+        labels = {
+            "recovering": "恢复",
+            "acquiring": "申请 Worker",
+            "executing": "隔离执行",
+            "completed": "完成",
+            "failed": "失败",
+        }
+        stage = str(progress.get("stage") or "")
+        label = labels.get(stage, stage or "等待")
+        status = self._app.query_one(StatusBar)
+        status.status_text = (
+            f"Sandbox Eval {label}: "
+            f"{int(progress.get('persisted') or 0)}/"
+            f"{int(progress.get('requested') or 0)}"
+            f" · {str(progress.get('batch_id') or '-')}"
+        )
+
     async def request_user_interaction(
         self,
         payload: dict[str, Any],
@@ -2816,6 +2838,8 @@ class NaumiApp(App):
                     run_id = str(data.get("run_id") or "")
                     if run_id:
                         self._pending_harness_receipts[run_id] = dict(data)
+                case "harness_sandbox_eval_progress":
+                    await self._slash_frontend.update_harness_sandbox_eval(data)
                 case "tool_prepare_start" | "tool_prepare_snapshot":
                     prepare_text = format_tool_prepare_status(data)
                     chat.update_tool_prepare(prepare_text)

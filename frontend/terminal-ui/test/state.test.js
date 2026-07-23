@@ -4401,6 +4401,64 @@ test("Harness repeated Eval command opens live typed Batch route", () => {
   assert.equal(state.followTail, false);
 });
 
+test("Harness Sandbox Eval command keeps shared Slash execution and opens typed progress", () => {
+  const state = createInitialState();
+  state.scrollOffset = 7;
+  state.followTail = false;
+  const sent = [];
+
+  handleSubmitText(
+    state,
+    "/harness eval sandbox unit lint --samples 5 --batch sandbox-1",
+    (type, payload, options) => {
+      sent.push({ type, payload, options });
+    },
+  );
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.harnessEvalBatch.requestId, "submit-1");
+  assert.equal(state.harnessEvalBatch.batchId, "sandbox-1");
+  assert.deepEqual(sent, [{
+    type: "submit",
+    payload: {
+      text: "/harness eval sandbox unit lint --samples 5 --batch sandbox-1",
+    },
+    options: { id: "submit-1" },
+  }]);
+
+  reduceServerEvent(state, {
+    type: "harness/eval-batch",
+    request_id: "submit-1",
+    payload: {
+      schema_version: 1,
+      kind: "sandbox",
+      stage: "executing",
+      terminal: false,
+      batch_id: "sandbox-1",
+      check_ids: ["unit", "lint"],
+      requested: 5,
+      persisted: 2,
+      checkpoint_id: `hsbatch_${"a".repeat(24)}`,
+      checkpoint_sha256: "b".repeat(64),
+      authority_key: "c".repeat(64),
+      lane: "sandbox",
+      run_id: "manual:session-1",
+      run_grant_sha256: "d".repeat(64),
+      sample_result_sha256: ["1".repeat(64), "2".repeat(64)],
+      code: "",
+      updated_at: "2026-07-23T10:00:00+08:00",
+    },
+  });
+
+  assert.equal(state.route.name, "harness_eval_batch");
+  assert.equal(state.harnessEvalBatches["sandbox-1"].kind, "sandbox");
+  assert.equal(state.harnessEvalBatches["sandbox-1"].persisted, 2);
+  assert.equal(handleHarnessEvalBatchKey(state, INPUT_KEYS.escape), true);
+  assert.equal(state.route.name, "conversation");
+  assert.equal(state.scrollOffset, 7);
+  assert.equal(state.followTail, false);
+});
+
 test("Harness Baseline promotion command opens guided typed route and restores origin", () => {
   const state = createInitialState();
   state.scrollOffset = 8;

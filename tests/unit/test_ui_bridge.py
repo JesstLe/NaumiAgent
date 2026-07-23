@@ -852,6 +852,43 @@ async def test_bridge_assigns_sequence_in_actual_concurrent_write_order() -> Non
 
 
 @pytest.mark.asyncio
+async def test_bridge_projects_sandbox_runtime_progress_to_typed_harness_event() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._active_run_context = {"request_id": "submit-sandbox-1"}
+    payload = {
+        "schema_version": 1,
+        "kind": "sandbox",
+        "stage": "executing",
+        "terminal": False,
+        "batch_id": "sandbox-1",
+        "check_ids": ["unit"],
+        "requested": 5,
+        "persisted": 2,
+        "checkpoint_id": f"hsbatch_{'a' * 24}",
+        "checkpoint_sha256": "b" * 64,
+        "authority_key": "c" * 64,
+        "lane": "sandbox",
+        "run_id": "run-1",
+        "run_grant_sha256": "d" * 64,
+        "sample_result_sha256": ["1" * 64, "2" * 64],
+        "code": "",
+        "updated_at": "2026-07-23T10:00:00+08:00",
+    }
+
+    await bridge.handle_engine_event("harness_sandbox_eval_progress", payload)
+
+    records = _records(writer)
+    assert [record["type"] for record in records] == [
+        ServerEventType.ENGINE_EVENT,
+        ServerEventType.HARNESS_EVAL_BATCH,
+    ]
+    assert records[1]["request_id"] == "submit-sandbox-1"
+    assert records[1]["payload"] == payload
+
+
+@pytest.mark.asyncio
 async def test_bridge_ping_emits_current_retention_worker_status() -> None:
     writer = io.StringIO()
     engine = _FakeEngine()

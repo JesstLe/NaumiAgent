@@ -14,7 +14,10 @@ from naumi_agent.harness.eval_surface import (
     render_eval_promotion_status,
 )
 from naumi_agent.harness.explain import render_harness_explanation
-from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchError
+from naumi_agent.harness.sandbox_batch import (
+    HarnessSandboxBatchCheckpoint,
+    HarnessSandboxBatchError,
+)
 from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
 from naumi_agent.harness.sandbox_service import (
@@ -30,7 +33,9 @@ from naumi_agent.harness.service import (
     render_harness_status,
 )
 from naumi_agent.harness.store import HarnessStoreError
+from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
 from naumi_agent.tools.base import Tool, ToolMetadata
+from naumi_agent.ui.harness_protocol import harness_sandbox_eval_progress_payload
 
 
 def create_harness_tools(service: HarnessService) -> list[Tool]:
@@ -456,7 +461,12 @@ class HarnessEvalSandboxTool(Tool):
             "additionalProperties": False,
         }
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        *,
+        event_callback: LegacyEventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
         check_ids = kwargs.get("check_ids")
         samples = kwargs.get("samples")
         batch_id = kwargs.get("batch_id")
@@ -477,11 +487,28 @@ class HarnessEvalSandboxTool(Tool):
                 "check_ids 必须是非空字符串数组，samples 必须是整数，"
                 "batch_id 和 run_id 必须是字符串。"
             )
+        normalized_check_ids = tuple(check_ids)
+
+        async def publish_progress(
+            checkpoint: HarnessSandboxBatchCheckpoint,
+        ) -> None:
+            if event_callback is None:
+                return
+            await event_callback(
+                RuntimeEventType.HARNESS_SANDBOX_EVAL_PROGRESS.value,
+                harness_sandbox_eval_progress_payload(
+                    checkpoint,
+                    batch_id=batch_id,
+                    check_ids=normalized_check_ids,
+                ),
+            )
+
         try:
             receipt = await self._service.eval_sandbox(
-                check_ids=tuple(check_ids),
+                check_ids=normalized_check_ids,
                 samples=samples,
                 batch_id=batch_id,
+                on_progress=publish_progress,
             )
         except (
             HarnessSandboxEvalRequestError,

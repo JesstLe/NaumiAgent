@@ -44,7 +44,8 @@ RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `m
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request
 authority；HAR-08.4i 又把 request、admission、coordinator、kernel 与 H5a 组合为共享
 `HarnessService.eval_sandbox()`；HAR-08.4j 已开放 `harness_eval_sandbox` Tool 与共享 Slash 命令。
-New UI/TUI typed progress、跨进程队列和三平台隔离 CI 仍未完成。
+HAR-08.4k 已把 coordinator checkpoint 作为闭集 Runtime event 同步到 New UI/TUI，且只显示
+Store-confirmed 进度；跨进程队列、真实 queued/cancel/retry 和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

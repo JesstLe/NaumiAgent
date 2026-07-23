@@ -55,6 +55,7 @@ from naumi_agent.tui.app import (
     _captured_terminal_text,
     _find_latest_user_session_id,
     _format_tool_output_markdown,
+    _TuiSlashCommandFrontend,
 )
 from naumi_agent.tui.completion_receipt import (
     format_completion_receipt_markdown,
@@ -135,6 +136,27 @@ class _HistoryDispatchApp:
 
 
 class TestNaumiApp:
+    @pytest.mark.asyncio
+    async def test_sandbox_eval_checkpoint_updates_persistent_status(self) -> None:
+        status = SimpleNamespace(status_text="")
+
+        class _App:
+            def query_one(self, widget_type: type[object]) -> object:
+                assert widget_type is StatusBar
+                return status
+
+        frontend = _TuiSlashCommandFrontend(_App())  # type: ignore[arg-type]
+        await frontend.update_harness_sandbox_eval({
+            "stage": "executing",
+            "persisted": 2,
+            "requested": 5,
+            "batch_id": "sandbox-1",
+        })
+
+        assert status.status_text == (
+            "Sandbox Eval 隔离执行: 2/5 · sandbox-1"
+        )
+
     @pytest.mark.asyncio
     async def test_doctor_reports_unavailable_when_tui_factory_is_missing(
         self,

@@ -65,12 +65,11 @@ macOS 本地真实 Shell Worker 场景执行：
 
 Tool/schema/permission/registration/参数错误路径另有小模块测试；未运行全量测试。
 
-## 当前边界与下一步
+## 当前边界与后续
 
-HAR-08.4j 已让共享 slash backend 与 Agent Tool 可执行，但 Batch checkpoint 目前只存在于
-`HarnessSandboxBatchCoordinator.on_progress`，Tool 调用尚未把它转换成 Runtime typed event。因此 New UI/TUI
-可以发起命令并看到最终回执，却还不能原生显示 queued/recovering/acquiring/executing/completed 状态。
+HAR-08.4k 已将 `HarnessSandboxBatchCoordinator.on_progress` 转换为闭集 Runtime event，并同步到 New UI/TUI；
+两端直接显示 Store-confirmed persisted 数，不估算样本进度。详见
+`HAR-08-4k-sandbox-eval-typed-progress.md`。
 
-下一切片应新增一个共享 Runtime event adapter：由 Tool execution context 接收 4f typed checkpoint，写入唯一
-task/activity authority，再由 New UI 与 TUI 分别渲染；不得在前端估算 active/queued 或 sample 进度。其后再增加
-取消/重试动作和跨进程 admission。
+真实 `queued`、跨进程排队位置、取消和重试仍依赖 durable Sandbox admission authority，不能由前端或进程内
+semaphore 推断。

@@ -80,6 +80,13 @@ const HARNESS_EVAL_BATCH_STAGES = new Set([
   "partial",
   "error",
 ]);
+const HARNESS_SANDBOX_EVAL_STAGES = new Set([
+  "recovering",
+  "acquiring",
+  "executing",
+  "completed",
+  "failed",
+]);
 const HARNESS_EVAL_PROMOTION_STAGES = new Set([
   "awaiting_reason",
   "awaiting_confirmation",
@@ -1998,6 +2005,9 @@ function evaluationSuiteId(value) {
 }
 
 function normalizeHarnessEvalBatch(payload) {
+  if (payload.kind === "sandbox") {
+    return normalizeHarnessSandboxEvalProgress(payload);
+  }
   if (Number(payload.schema_version) !== 1) {
     throw new Error(`harness/eval-batch schema_version 不兼容: ${payload.schema_version}`);
   }
@@ -2061,6 +2071,136 @@ function normalizeHarnessEvalBatch(payload) {
     identity_sha256: identity,
     code: harnessText(payload.code, "harness/eval-batch code"),
     message: harnessText(payload.message, "harness/eval-batch message"),
+  };
+}
+
+function normalizeHarnessSandboxEvalProgress(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(
+      `harness/eval-batch sandbox schema_version 不兼容: ${payload.schema_version}`,
+    );
+  }
+  const stage = harnessChoice(
+    payload.stage,
+    "harness/eval-batch sandbox stage",
+    HARNESS_SANDBOX_EVAL_STAGES,
+  );
+  const terminal = harnessBoolean(
+    payload.terminal,
+    "harness/eval-batch sandbox terminal",
+  );
+  if (terminal !== ["completed", "failed"].includes(stage)) {
+    throw new Error("harness/eval-batch sandbox terminal 与 stage 不一致");
+  }
+  const requested = harnessPositiveInteger(
+    payload.requested,
+    "harness/eval-batch sandbox requested",
+  );
+  const persisted = harnessNonnegativeInteger(
+    payload.persisted,
+    "harness/eval-batch sandbox persisted",
+  );
+  if (requested < 5 || requested > 100 || persisted > requested) {
+    throw new Error("harness/eval-batch sandbox 进度计数无效");
+  }
+  if (stage === "completed" && persisted !== requested) {
+    throw new Error("harness/eval-batch sandbox completed 缺少完整样本");
+  }
+  const batchId = harnessText(
+    payload.batch_id,
+    "harness/eval-batch sandbox batch_id",
+  );
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(batchId)) {
+    throw new Error("harness/eval-batch sandbox batch_id 无效");
+  }
+  const checkIds = harnessTextArray(
+    payload.check_ids,
+    "harness/eval-batch sandbox check_ids",
+    81,
+  );
+  if (
+    checkIds.length < 1
+    || checkIds.length > 80
+    || new Set(checkIds).size !== checkIds.length
+    || checkIds.some((value) => !/^[a-z][a-z0-9_-]{0,63}$/.test(value))
+  ) {
+    throw new Error("harness/eval-batch sandbox check_ids 无效");
+  }
+  const resultDigests = harnessTextArray(
+    payload.sample_result_sha256,
+    "harness/eval-batch sandbox sample_result_sha256",
+    101,
+  ).map((value) => harnessSha256(
+    value,
+    "harness/eval-batch sandbox sample_result_sha256",
+  ));
+  if (resultDigests.length !== persisted) {
+    throw new Error("harness/eval-batch sandbox 样本摘要数量不一致");
+  }
+  const optionalSha = (value, label) => {
+    const normalized = harnessText(value, label);
+    return normalized ? harnessSha256(normalized, label) : "";
+  };
+  const checkpointId = harnessText(
+    payload.checkpoint_id,
+    "harness/eval-batch sandbox checkpoint_id",
+  );
+  if (!/^hsbatch_[0-9a-f]{24}$/.test(checkpointId)) {
+    throw new Error("harness/eval-batch sandbox checkpoint_id 无效");
+  }
+  const runId = harnessText(payload.run_id, "harness/eval-batch sandbox run_id");
+  const runGrantSha = optionalSha(
+    payload.run_grant_sha256,
+    "harness/eval-batch sandbox run_grant_sha256",
+  );
+  if (runId && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(runId)) {
+    throw new Error("harness/eval-batch sandbox run_id 无效");
+  }
+  if (Boolean(runId) !== Boolean(runGrantSha)) {
+    throw new Error("harness/eval-batch sandbox run/grant authority 不一致");
+  }
+  const code = harnessText(payload.code, "harness/eval-batch sandbox code");
+  if ((stage === "failed") !== Boolean(code)) {
+    throw new Error("harness/eval-batch sandbox failed stage 与 code 不一致");
+  }
+  const updatedAt = harnessText(
+    payload.updated_at,
+    "harness/eval-batch sandbox updated_at",
+  );
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(updatedAt)
+    || Number.isNaN(Date.parse(updatedAt))
+  ) {
+    throw new Error("harness/eval-batch sandbox updated_at 无效");
+  }
+  return {
+    schema_version: 1,
+    kind: "sandbox",
+    stage,
+    terminal,
+    batch_id: batchId,
+    check_ids: checkIds,
+    requested,
+    persisted,
+    checkpoint_id: checkpointId,
+    checkpoint_sha256: harnessSha256(
+      payload.checkpoint_sha256,
+      "harness/eval-batch sandbox checkpoint_sha256",
+    ),
+    authority_key: harnessSha256(
+      payload.authority_key,
+      "harness/eval-batch sandbox authority_key",
+    ),
+    lane: harnessChoice(
+      payload.lane,
+      "harness/eval-batch sandbox lane",
+      new Set(["sandbox", "red", "green", "adversarial"]),
+    ),
+    run_id: runId,
+    run_grant_sha256: runGrantSha,
+    sample_result_sha256: resultDigests,
+    code,
+    updated_at: updatedAt,
   };
 }
 
