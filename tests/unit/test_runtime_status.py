@@ -23,6 +23,8 @@ from naumi_agent.tools.runtime import (
     run_runtime_command,
 )
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 @pytest.fixture
 def engine(tmp_path, request) -> AgentEngine:

@@ -46,8 +46,9 @@ HAR-10.2g 已让真实 Agent 委派产生持久 heartbeat，HAR-10.7a/7b 已提�
 结果只保留 response/error SHA-256、response 字节数、token、微 USD、turns、aware completion time 和
 `result_sha256`。response/error 合同输入分别限制为 16MB/1MB，不保留模型响应或原始异常。
 
-如果第三方/动态 Agent 返回负 token、非有限费用等畸形指标，原执行仍按真实副作用边界结束，但不会伪造
-result digest；执行记录显示稳定 `agent_worker_result_invalid` 降级码。
+如果第三方/动态 Agent 返回负 token、非有限费用等畸形指标，不会伪造 result digest；ARC-04.5c
+建立 durable publication barrier 后，这类未经认证的结果也不会再返回给调用方或发布到 message bus，
+执行记录同时显示 `agent_worker_result_invalid` 和 `agent_job_terminal_receipt_invalid`。
 
 ## 4. New UI / TUI 共享投影
 
@@ -77,14 +78,13 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 
 本切片是执行合同，不是完整 Agent daemon：
 
-- 当前 embedded 路径的请求/结果仍只存在于进程内 execution history；ARC-04.5b2 已建立 durable
-  Agent Job authority，但 `SubAgentManager` 尚未消费；
-- raw task/context 没有受控加密 payload envelope，重启后不能由 scheduler 恢复；
+- ARC-04.5c 已让 embedded 路径消费加密 Agent Job authority，request/context 可在 live claim 下恢复；
+- completed response 原文尚未进入可恢复的加密 terminal payload，父进程发布前崩溃仍可能丢失展示结果；
 - Agent 仍由 embedded Runtime 直接调用模型，不是注册到 Worker Registry 的持久 incarnation；
 - 尚未消费 Worker capacity reservation/FIFO、claim owner lease 或 workspace/provider fairness；
 - message bus 仍是 session-scoped 内存实现；
 - 没有 Supervisor、crash takeover、跨主机身份或 100 并发 soak 证据。
 
 ARC-04.5b1 已交付 OS credential-backed key 与 bounded AES-256-GCM envelope，ARC-04.5b2 已建立
-加密 Agent Job Store、claim epoch、pre-start takeover 和 running recovery fence。下一步是
-`ARC-04.5c Embedded Agent Durable Dispatch`，把当前生产委派接入该 authority。
+加密 Agent Job Store，ARC-04.5c 已把生产委派接入该 authority。下一步必须跨 Harness/ARC-06/UI
+重新选择最小用户价值切片，不默认继续线性扩展 ARC-04。

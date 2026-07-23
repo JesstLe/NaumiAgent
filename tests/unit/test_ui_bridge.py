@@ -118,6 +118,8 @@ from naumi_agent.user_interaction import (
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 class _ReconfigurableStream:
     def __init__(self) -> None:

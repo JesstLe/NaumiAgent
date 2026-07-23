@@ -65,7 +65,7 @@ GCM tag 拒绝。
 
 ## 5. 自我审视与未完成
 
-- ARC-04.5b2 已在本原语之上保存加密 Agent Job；embedded 委派路径仍未切换；
+- ARC-04.5b2 已在本原语之上保存加密 Agent Job，ARC-04.5c 已让 embedded 委派消费；
 - key rotation 目前只有 key ID 形状，没有 old-key catalog、reencrypt 或 revoke 流程；
 - OS credential backend 的跨平台可用性仍需 Mac/Windows/Linux 打包矩阵验证；
 - 环境变量注入适合 CI/容器 secret，不应写入 shell history 或项目配置；
@@ -74,4 +74,4 @@ GCM tag 拒绝。
 - backup/export 不包含 key，恢复到新设备必须单独迁移或重新 provision 并明确旧 payload 不可解密。
 
 ARC-04.5b2 已使用 request SHA-256 作为 AAD，把 task/context 的有界二进制 envelope 与
-lifecycle/fencing 写入独立 Store。下一步 `ARC-04.5c` 将其接入 embedded Agent 生产派发。
+lifecycle/fencing 写入独立 Store；ARC-04.5c 已接入 embedded Agent 生产派发。

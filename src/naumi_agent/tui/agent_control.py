@@ -393,6 +393,16 @@ def _format_execution(snapshot: AgentControlSnapshot, selected_id: str) -> list[
                 else ""
             )
         ),
+        (
+            f"- 持久任务：`{_code(_short_digest(item.worker_job_id))}`"
+            f" · 状态 `{_code(item.worker_job_state or '未接入')}`"
+            f" · epoch {item.worker_claim_epoch}"
+            + (
+                f" · 降级 `{_code(item.worker_job_failure_code)}`"
+                if item.worker_job_failure_code
+                else ""
+            )
+        ),
         f"- 耗时：{item.elapsed_ms}ms · heartbeat：{item.heartbeat_age_ms}ms",
         (
             f"- 持久心跳：{item.heartbeat_phase or '未启用'}"

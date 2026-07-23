@@ -72,6 +72,10 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv(
+        "NAUMI_RUNTIME_PAYLOAD_KEY",
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    )
     engine = AgentEngine(AppConfig(
         workspace_root=str(tmp_path),
         memory=MemoryConfig(
@@ -154,6 +158,12 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
             item["status"] == "running"
             for item in opened["payload"]["executions"]
         )
+        assert all(
+            item["worker_job_state"] == "running"
+            and item["worker_claim_epoch"] == 1
+            and item["worker_job_id"].startswith("agent-job-")
+            for item in opened["payload"]["executions"]
+        )
 
         before = _render_records_with_node(
             project_root,
@@ -210,8 +220,12 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
         )
         by_id = {item["task_id"]: item for item in rendered["executions"]}
         assert by_id["target-task"]["status"] == "cancelled"
+        assert by_id["target-task"]["worker_job_state"] == "cancelled"
         assert by_id["sibling-task"]["status"] == "completed"
+        assert by_id["sibling-task"]["worker_job_state"] == "completed"
+        assert by_id["sibling-task"]["worker_job_failure_code"] == ""
         assert "cancelled" in rendered["screen"]
+        assert "持久任务" in rendered["screen"]
         assert "当前不可停止" in rendered["screen"]
 
         final_snapshot = await engine.agent_control.snapshot()
@@ -222,6 +236,7 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
         )
         assert "target-task" in textual
         assert "cancelled" in textual
+        assert "持久任务" in textual
         assert "不可停止" in textual
         sibling_textual = format_agent_control_markdown(
             final_snapshot,
@@ -230,6 +245,7 @@ async def test_real_manager_bridge_node_stop_and_textual_parity(
         )
         assert "sibling-task" in sibling_textual
         assert "completed" in sibling_textual
+        assert "状态 `completed`" in sibling_textual
         assert "Token：17" in sibling_textual
     finally:
         for delegated in (target_delegate, sibling_delegate):

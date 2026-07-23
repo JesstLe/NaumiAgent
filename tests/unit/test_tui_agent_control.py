@@ -50,6 +50,9 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "Worker 合同" in executions
     assert "aaaaaaaaaaaa" in executions
     assert "file_read" in executions
+    assert "持久任务" in executions
+    assert "agent-job-1" in executions
+    assert "epoch 3" in executions
     assert "team/review" in team
     assert "ready" in team
 
@@ -268,6 +271,10 @@ def _snapshot() -> AgentControlSnapshot:
             "worker_result_sha256": "",
             "worker_tool_scope": ["file_read"],
             "worker_contract_failure_code": "",
+            "worker_job_id": "agent-job-1234567890",
+            "worker_job_state": "running",
+            "worker_claim_epoch": 3,
+            "worker_job_failure_code": "",
             "current_tool": "file_read",
             "recent_tools": ["file_read"],
             "total_tokens": 42,

@@ -34,6 +34,10 @@ _EXECUTION_PHASES = frozenset({
 _HEARTBEAT_PHASES = frozenset({
     "starting", "running", "waiting", "draining", "stopped", "failed",
 })
+_WORKER_JOB_STATES = frozenset({
+    "admitted", "claimed", "running", "completed", "error", "timeout",
+    "max_turns", "cancelled", "unknown",
+})
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -200,6 +204,10 @@ class ExecutionDescriptor:
     worker_result_sha256: str = ""
     worker_tool_scope: tuple[str, ...] = ()
     worker_contract_failure_code: str = ""
+    worker_job_id: str = ""
+    worker_job_state: str = ""
+    worker_claim_epoch: int = 0
+    worker_job_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -218,6 +226,8 @@ class ExecutionDescriptor:
             "heartbeat_subject_id", "heartbeat_phase", "heartbeat_failure_code",
             "worker_request_sha256", "worker_result_sha256", "worker_tool_scope",
             "worker_contract_failure_code",
+            "worker_job_id", "worker_job_state", "worker_claim_epoch",
+            "worker_job_failure_code",
             "recent_tools", "total_tokens", "total_cost_usd", "turns", "error",
             "stop_supported", "stop_requested",
         }, "execution")
@@ -270,6 +280,27 @@ class ExecutionDescriptor:
             worker_contract_failure_code=_text(
                 data.get("worker_contract_failure_code"),
                 "execution.worker_contract_failure_code",
+            ),
+            worker_job_id=_text(
+                data.get("worker_job_id"),
+                "execution.worker_job_id",
+            ),
+            worker_job_state=(
+                _choice(
+                    data.get("worker_job_state"),
+                    "execution.worker_job_state",
+                    _WORKER_JOB_STATES,
+                )
+                if data.get("worker_job_state")
+                else ""
+            ),
+            worker_claim_epoch=_integer(
+                data.get("worker_claim_epoch", 0),
+                "execution.worker_claim_epoch",
+            ),
+            worker_job_failure_code=_text(
+                data.get("worker_job_failure_code"),
+                "execution.worker_job_failure_code",
             ),
             current_tool=_text(data.get("current_tool"), "execution.current_tool"),
             recent_tools=_texts(data.get("recent_tools"), "execution.recent_tools", 20),

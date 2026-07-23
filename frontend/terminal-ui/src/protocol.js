@@ -21,6 +21,7 @@ const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "i
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
 const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
 const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
+const WORKER_JOB_STATES = new Set(["admitted", "claimed", "running", "completed", "error", "timeout", "max_turns", "cancelled", "unknown"]);
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
 const REASONING_EFFORTS = new Set(["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const REASONING_EFFORT_SOURCES = new Set(["runtime", "model", "global", "auto"]);
@@ -5120,6 +5121,19 @@ function normalizeExecutionDescriptor(item) {
     worker_result_sha256: optionalSha256(item.worker_result_sha256, "execution.worker_result_sha256"),
     worker_tool_scope: agentTextArray(item.worker_tool_scope ?? [], "execution.worker_tool_scope", 256),
     worker_contract_failure_code: agentText(item.worker_contract_failure_code),
+    worker_job_id: agentText(item.worker_job_id),
+    worker_job_state: item.worker_job_state
+      ? strictChoice(
+        item.worker_job_state,
+        "execution.worker_job_state",
+        WORKER_JOB_STATES,
+      )
+      : "",
+    worker_claim_epoch: strictAgentNonnegativeInteger(
+      item.worker_claim_epoch ?? 0,
+      "execution.worker_claim_epoch",
+    ),
+    worker_job_failure_code: agentText(item.worker_job_failure_code),
     current_tool: agentText(item.current_tool),
     recent_tools: agentTextArray(item.recent_tools, "execution.recent_tools", 20),
     total_tokens: strictAgentNonnegativeInteger(item.total_tokens ?? 0, "execution.total_tokens"),

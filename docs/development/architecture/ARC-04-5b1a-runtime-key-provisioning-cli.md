@@ -55,4 +55,4 @@ CI/容器可以设置 canonical Base64 的 `NAUMI_RUNTIME_PAYLOAD_KEY`，不需�
 - 不支持 rotate/export/import/recovery；这些必须先设计 old-key catalog 和 reencrypt 流程；
 - New UI/TUI 内没有密钥管理页面，当前使用非交互 CLI 作为唯一显式管理入口；
 - status 是用户主动的 credential read，操作系统是否显示授权由平台 credential backend 决定；
-- ARC-04.5c 才会让 embedded Agent 执行实际依赖该 key。
+- ARC-04.5c 已让 embedded Agent durable dispatch 实际依赖该 key；缺 key 时在模型调用前给出本命令入口。

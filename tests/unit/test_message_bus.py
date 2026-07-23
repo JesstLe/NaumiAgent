@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,8 @@ from naumi_agent.agents.message_bus import (
     AgentMessageBus,
     MessagePriority,
 )
+
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 
 
 @pytest.fixture
@@ -420,6 +423,13 @@ class TestIntegrationWithSubAgentManager:
 
         # Mock the agent's execute to return a completed result
         mock_agent = MagicMock()
+        mock_agent.tool_names = ()
+        mock_agent.config = SimpleNamespace(
+            permission_level="moderate",
+            model_tier="capable",
+            max_turns=50,
+            max_budget_usd=None,
+        )
         mock_agent.execute = AsyncMock(return_value=AgentResult(
             status="completed",
             response="analysis complete",
@@ -469,6 +479,13 @@ class TestIntegrationWithSubAgentManager:
         # Mock agent to capture context
         captured_context: list[str] = []
         mock_agent = MagicMock()
+        mock_agent.tool_names = ()
+        mock_agent.config = SimpleNamespace(
+            permission_level="moderate",
+            model_tier="capable",
+            max_turns=50,
+            max_budget_usd=None,
+        )
 
         async def mock_execute(
             task: str, context: str = "",

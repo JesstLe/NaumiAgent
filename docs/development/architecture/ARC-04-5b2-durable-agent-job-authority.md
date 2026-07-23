@@ -6,8 +6,8 @@ ARC-04.5a 已签发低敏 request/result contract，ARC-04.5b1 已提供 Runtime
 envelope。本切片建立独立 `AgentJobStore`，让 scheduler 可以在进程重启后恢复尚未开始的 Agent 请求，
 同时不把 task、context、session ID 或 message topic 以明文写入 SQLite。
 
-它交付 durable authority，不等于 Agent daemon 已完成。当前 `SubAgentManager` 尚未切换到该 Store，
-模型原始 response 也尚未作为加密 payload 持久化。
+它交付 durable authority，不等于 Agent daemon 已完成。ARC-04.5c 已让 `SubAgentManager` 切换到该
+Store；模型原始 response 仍未作为可恢复的加密 terminal payload 持久化。
 
 ## 2. 不可变请求与加密 payload
 
@@ -96,14 +96,14 @@ key 也不能伪造 receipt authentication；事件或主表任一处被修改�
 
 ## 7. 自我审视与下一依赖
 
-仍未完成：
+ARC-04.5c 已完成 admit → claim → recover → running → renew → finish 生产链，并建立 terminal
+publication barrier。仍未完成：
 
-- `SubAgentManager` 尚未执行 admit → claim → recover → running → finish 生产链；
 - 没有自动 scheduler loop、claim-owner heartbeat 或 capacity reservation；
 - completed response 原文尚未加密持久化，父进程在终态提交后的崩溃仍可能丢失可展示结果；
 - `unknown` 只有证据化收口，没有 Provider request ID 对账或人工恢复动作；
 - key rotation、reencrypt、retention/GC、backup restore 和跨平台打包矩阵未完成。
 
-下一最小切片应为 `ARC-04.5c Embedded Agent Durable Dispatch`：让当前 embedded 执行路径消费该 Store，
-但仍不得把它宣称为长寿命 Agent daemon。随后再比较 ARC-06 capacity queue 与 encrypted response
-recovery 的依赖顺序。
+下一步需比较 ARC-06 capacity queue、encrypted response recovery 与 Agent recovery UI 的依赖顺序，
+仍不得把 embedded durable dispatch 宣称为长寿命 Agent daemon。见
+`ARC-04-5c-embedded-agent-durable-dispatch.md`。

@@ -18,6 +18,8 @@ from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import SubTask
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 def _engine(tmp_path: Path) -> AgentEngine:
     root = tmp_path / "workspace"
@@ -161,6 +163,10 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert execution.worker_result_sha256 == ""
         assert "file_read" in execution.worker_tool_scope
         assert execution.worker_contract_failure_code == ""
+        assert execution.worker_job_id.startswith("agent-job-")
+        assert execution.worker_job_state == "running"
+        assert execution.worker_claim_epoch == 1
+        assert execution.worker_job_failure_code == ""
         assert first.team_messages[0].topic == "team.review"
         assert first.team_messages[0].priority == "high"
         assert first.blackboard[0].key == "team/decision"

@@ -63,9 +63,14 @@
   replay 均有不泄密文案；普通启动仍不创建 key。
 - ARC-04.5b2 已建立 schema v1 加密 Agent Job Store、FIFO claim、epoch/lease fencing、pre-start
   takeover、running recovery unknown 和 append-only receipt chain，并进入 Runtime Resources/Store
-  Catalog；embedded Agent 尚未消费，详见 `ARC-04-5b2-durable-agent-job-authority.md`。
+  Catalog，详见 `ARC-04-5b2-durable-agent-job-authority.md`。
+- ARC-04.5c 已让生产 `SubAgentManager` 消费 admit/claim/recover/running/renew/finish 全链路；
+  缺 key、start fence、续租和 terminal commit 失败均 fail closed，未认证模型结果不会发布，
+  New UI/TUI Agent Control 显示相同 job state/epoch/降级码。详见
+  `ARC-04-5c-embedded-agent-durable-dispatch.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
-  Windows 隔离后端仍未完成；Agent contract 也尚未持久化或迁入 daemon。因此 ARC-04 保持 partial。
+  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon，response 原文也不可恢复。
+  因此 ARC-04 保持 partial。
 
 ## 验收标准
 
@@ -103,4 +108,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2)。
+4.5b1a, 4.5b2, 4.5c)。

@@ -17,6 +17,8 @@ from naumi_agent.runtime.agent_heartbeat import (
     AgentExecutionHeartbeatState,
 )
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 class _Clock:
     def __init__(self) -> None:

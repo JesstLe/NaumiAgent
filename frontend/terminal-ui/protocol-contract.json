@@ -263,6 +263,23 @@
       "worker_tool_scope",
       "worker_contract_failure_code"
     ],
+    "execution_worker_job_fields": [
+      "worker_job_id",
+      "worker_job_state",
+      "worker_claim_epoch",
+      "worker_job_failure_code"
+    ],
+    "worker_job_states": [
+      "admitted",
+      "claimed",
+      "running",
+      "completed",
+      "error",
+      "timeout",
+      "max_turns",
+      "cancelled",
+      "unknown"
+    ],
     "heartbeat_phases": [
       "starting",
       "running",

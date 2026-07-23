@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from inspect import signature
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from naumi_agent.agents.base import (
     AgentCapability,
@@ -23,6 +24,13 @@ from naumi_agent.agents.base import (
 from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
+from naumi_agent.daemons.agent_jobs import (
+    AgentJobError,
+    AgentJobKeyUnavailableError,
+    AgentJobPayload,
+    AgentJobState,
+    AgentJobStore,
+)
 from naumi_agent.daemons.agent_worker_contract import (
     AgentWorkerRequest,
     AgentWorkerResult,
@@ -43,6 +51,8 @@ logger = logging.getLogger(__name__)
 
 _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
+_AGENT_JOB_LEASE_SECONDS = 90
+_AGENT_JOB_RENEW_INTERVAL_SECONDS = 30
 _AGENT_ADMISSION_STACK: ContextVar[tuple[int, ...]] = ContextVar(
     "naumi_agent_admission_stack",
     default=(),
@@ -128,6 +138,10 @@ class AgentExecutionRecord:
     worker_result_sha256: str = ""
     worker_tool_scope: tuple[str, ...] = ()
     worker_contract_failure_code: str = ""
+    worker_job_id: str = ""
+    worker_job_state: str = ""
+    worker_claim_epoch: int = 0
+    worker_job_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -169,6 +183,11 @@ class _ActiveExecution:
     heartbeat_failure_code: str = ""
     worker_result: AgentWorkerResult | None = None
     worker_contract_failure_code: str = ""
+    worker_job_id: str = ""
+    worker_job_state: str = ""
+    worker_claim_epoch: int = 0
+    worker_job_failure_code: str = ""
+    worker_job_renewal_task: asyncio.Task[None] | None = None
 
 
 class SubAgentManager:
@@ -179,6 +198,7 @@ class SubAgentManager:
         engine: AgentEngine,
         *,
         heartbeat_factory: AgentExecutionHeartbeatFactory | None = None,
+        agent_job_store: AgentJobStore | None = None,
     ) -> None:
         if heartbeat_factory is not None and not isinstance(
             heartbeat_factory,
@@ -189,6 +209,17 @@ class SubAgentManager:
             )
         self._engine = engine
         self._heartbeat_factory = heartbeat_factory
+        resolved_agent_job_store = agent_job_store
+        if resolved_agent_job_store is None:
+            resolved_agent_job_store = getattr(
+                getattr(engine, "_resources", None),
+                "agent_job_store",
+                None,
+            )
+        if not isinstance(resolved_agent_job_store, AgentJobStore):
+            raise TypeError("agent_job_store 必须是 AgentJobStore。")
+        self._agent_job_store = resolved_agent_job_store
+        self._agent_job_owner_id = f"embedded-agent-{uuid4().hex}"
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
@@ -538,6 +569,130 @@ class SubAgentManager:
             )
             return True
 
+    async def _admit_and_claim_agent_job(
+        self,
+        task_id: str,
+        *,
+        request: AgentWorkerRequest,
+        payload: AgentJobPayload,
+    ) -> None:
+        admitted = await self._agent_job_store.admit(
+            request=request,
+            payload=payload,
+        )
+        claimed = await self._agent_job_store.claim(
+            admitted.job_id,
+            owner_id=self._agent_job_owner_id,
+            lease_seconds=_AGENT_JOB_LEASE_SECONDS,
+        )
+        recovered = await self._agent_job_store.recover_payload(
+            admitted.job_id,
+            owner_id=self._agent_job_owner_id,
+            claim_epoch=claimed.job.claim_epoch,
+        )
+        if recovered != payload:
+            raise AgentJobError(
+                "AgentJob 恢复 payload 与本次执行不一致。"
+            )
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                raise AgentJobError("AgentJob 对应的活动执行已消失。")
+            execution.worker_job_id = admitted.job_id
+            execution.worker_job_state = claimed.job.state.value
+            execution.worker_claim_epoch = claimed.job.claim_epoch
+            execution.last_updated_mono = time.monotonic()
+
+    async def _mark_agent_job_running(self, task_id: str) -> None:
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None or not execution.worker_job_id:
+                raise AgentJobError("AgentJob 活动执行绑定缺失。")
+            job_id = execution.worker_job_id
+            claim_epoch = execution.worker_claim_epoch
+        running = await self._agent_job_store.mark_running(
+            job_id,
+            owner_id=self._agent_job_owner_id,
+            claim_epoch=claim_epoch,
+        )
+        renewal = asyncio.create_task(
+            self._agent_job_renewal_loop(
+                task_id,
+                job_id=job_id,
+                claim_epoch=claim_epoch,
+            )
+        )
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                renewal.cancel()
+            else:
+                execution.worker_job_state = running.job.state.value
+                execution.worker_job_renewal_task = renewal
+                execution.last_updated_mono = time.monotonic()
+        if execution is None:
+            await asyncio.gather(renewal, return_exceptions=True)
+
+    async def _agent_job_renewal_loop(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+        claim_epoch: int,
+    ) -> None:
+        while True:
+            await asyncio.sleep(_AGENT_JOB_RENEW_INTERVAL_SECONDS)
+            try:
+                renewed = await self._agent_job_store.renew_claim(
+                    job_id,
+                    owner_id=self._agent_job_owner_id,
+                    claim_epoch=claim_epoch,
+                    lease_seconds=_AGENT_JOB_LEASE_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "AgentJob claim renewal failed [%s]: %s",
+                    task_id,
+                    type(exc).__name__,
+                )
+                execute_task: asyncio.Task[AgentResult] | None = None
+                async with self._execution_lock:
+                    execution = self._active_executions.get(task_id)
+                    if execution is not None:
+                        execution.worker_job_failure_code = (
+                            "agent_job_claim_renewal_failed"
+                        )
+                        execution.stop_reason = (
+                            "Agent 持久执行 claim 续期失败，"
+                            "已在下一安全边界停止模型执行。"
+                        )
+                        execution.status = "stopping"
+                        execution.phase = "stopping"
+                        execution.last_updated_mono = time.monotonic()
+                        execute_task = execution.execute_task
+                if execute_task is not None and not execute_task.done():
+                    execute_task.cancel()
+                return
+            async with self._execution_lock:
+                execution = self._active_executions.get(task_id)
+                if execution is None:
+                    return
+                execution.worker_job_state = renewed.job.state.value
+                execution.last_updated_mono = time.monotonic()
+
+    async def _set_agent_job_failure(
+        self,
+        task_id: str,
+        code: str,
+    ) -> None:
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is not None:
+                execution.worker_job_failure_code = code
+                execution.last_updated_mono = time.monotonic()
+
     async def _attach_execution_task(
         self,
         task_id: str,
@@ -550,9 +705,24 @@ class SubAgentManager:
                 execution.execute_task = execute_task
                 execution.phase = "running"
                 execution.last_updated_mono = time.monotonic()
-                should_cancel = execution.stop_requested
+                should_cancel = (
+                    execution.stop_requested
+                    or bool(execution.worker_job_failure_code)
+                )
         if should_cancel and not execute_task.done():
             execute_task.cancel()
+
+    async def _agent_job_preflight_failure(self, task_id: str) -> str:
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                return "Agent 持久执行已不再处于活动状态。"
+            if execution.worker_job_failure_code:
+                return (
+                    execution.stop_reason
+                    or "Agent 持久执行 fence 已失效，模型尚未调用。"
+                )
+            return ""
 
     async def _start_execution_heartbeat(self, task_id: str) -> None:
         factory = self._heartbeat_factory
@@ -631,44 +801,97 @@ class SubAgentManager:
         self,
         task_id: str,
         result: AgentResult,
-    ) -> None:
-        lifecycle: AgentExecutionHeartbeatLifecycle | None = None
-        execution: _ActiveExecution | None = None
+    ) -> AgentResult:
         async with self._execution_lock:
             execution = self._active_executions.pop(task_id, None)
             if execution is None:
-                return
+                return result
+
+        renewal = execution.worker_job_renewal_task
+        if renewal is not None and not renewal.done():
+            renewal.cancel()
+            await asyncio.gather(renewal, return_exceptions=True)
+
+        effective_result = result
+        try:
+            execution.worker_result = issue_agent_worker_result(
+                request=execution.worker_request,
+                status=result.status,
+                response=result.response,
+                error=result.error,
+                total_tokens=result.total_tokens,
+                total_cost_usd=result.total_cost_usd,
+                turns=result.turns,
+                completed_at=datetime.now(UTC).isoformat(),
+            )
+        except (TypeError, ValueError) as exc:
+            execution.worker_contract_failure_code = "agent_worker_result_invalid"
+            logger.warning(
+                "Agent Worker terminal contract rejected [%s]: %s",
+                task_id,
+                type(exc).__name__,
+            )
+
+        if (
+            execution.worker_job_id
+            and execution.worker_job_state == AgentJobState.RUNNING.value
+        ):
+            if execution.worker_result is None:
+                execution.worker_job_failure_code = (
+                    "agent_job_terminal_receipt_invalid"
+                )
+                effective_result = _isolated_agent_job_result(result)
+            else:
+                terminal_transition = None
+                for attempt in range(2):
+                    try:
+                        terminal_transition = await self._agent_job_store.finish(
+                            execution.worker_job_id,
+                            owner_id=self._agent_job_owner_id,
+                            claim_epoch=execution.worker_claim_epoch,
+                            result=execution.worker_result,
+                        )
+                        break
+                    except Exception as exc:
+                        logger.warning(
+                            "AgentJob terminal commit failed [%s, attempt=%d]: %s",
+                            task_id,
+                            attempt + 1,
+                            type(exc).__name__,
+                        )
+                if terminal_transition is None:
+                    execution.worker_job_failure_code = (
+                        "agent_job_terminal_commit_failed"
+                    )
+                    effective_result = _isolated_agent_job_result(result)
+                else:
+                    execution.worker_job_state = (
+                        terminal_transition.job.state.value
+                    )
+
+        lifecycle = execution.heartbeat_lifecycle
+        if lifecycle is not None:
             try:
-                execution.worker_result = issue_agent_worker_result(
-                    request=execution.worker_request,
-                    status=result.status,
-                    response=result.response,
-                    error=result.error,
-                    total_tokens=result.total_tokens,
-                    total_cost_usd=result.total_cost_usd,
-                    turns=result.turns,
-                    completed_at=datetime.now(UTC).isoformat(),
-                )
-            except (TypeError, ValueError) as exc:
-                execution.worker_contract_failure_code = (
-                    "agent_worker_result_invalid"
-                )
+                await lifecycle.finish(effective_result.status)
+            except Exception as exc:
                 logger.warning(
-                    "Agent Worker terminal contract rejected [%s]: %s",
+                    "Agent heartbeat terminal write failed [%s]: %s",
                     task_id,
                     type(exc).__name__,
                 )
-            lifecycle = execution.heartbeat_lifecycle
-            now_mono = time.monotonic()
+                execution.heartbeat_failure_code = (
+                    "agent_heartbeat_terminal_failed"
+                )
+
+        async with self._execution_lock:
             record = _execution_record(
                 execution,
-                now=now_mono,
-                result=result,
+                now=time.monotonic(),
+                result=effective_result,
                 finished_at=time.time(),
             )
             self._execution_history.append(record)
             self._execution_history = self._execution_history[-100:]
-
             if any(
                 item.agent_name == execution.agent_name
                 for item in self._active_executions.values()
@@ -680,36 +903,7 @@ class SubAgentManager:
                     agent_lifecycle.idle_since = None
             else:
                 self._transition(execution.agent_name, AgentState.IDLE)
-
-        if lifecycle is None:
-            return
-        try:
-            await lifecycle.finish(result.status)
-        except Exception as exc:
-            logger.warning(
-                "Agent heartbeat terminal write failed [%s]: %s",
-                task_id,
-                type(exc).__name__,
-            )
-            execution.heartbeat_failure_code = "agent_heartbeat_terminal_failed"
-        async with self._execution_lock:
-            record_index = next(
-                (
-                    index
-                    for index in range(len(self._execution_history) - 1, -1, -1)
-                    if self._execution_history[index].task_id == task_id
-                    and self._execution_history[index].started_at
-                    == execution.started_at
-                ),
-                -1,
-            )
-            if record_index >= 0:
-                self._execution_history[record_index] = _execution_record(
-                    execution,
-                    now=time.monotonic(),
-                    result=result,
-                    finished_at=self._execution_history[record_index].finished_at,
-                )
+        return effective_result
 
     async def delegate(
         self,
@@ -913,7 +1107,113 @@ class SubAgentManager:
                 error=f"Duplicate active sub-agent task id: {task.id}",
             )
 
+        job_payload = AgentJobPayload(
+            task_id=task.id,
+            session_id=str(
+                getattr(getattr(self._engine, "_session", None), "id", "") or ""
+            ),
+            task=task.description,
+            context=context,
+            message_topic=f"task.{task.id}.completed",
+        )
+        try:
+            await self._admit_and_claim_agent_job(
+                task.id,
+                request=worker_request,
+                payload=job_payload,
+            )
+        except AgentJobKeyUnavailableError:
+            await self._set_agent_job_failure(
+                task.id,
+                "agent_job_key_unavailable",
+            )
+            result = AgentResult(
+                status="error",
+                error=(
+                    "Agent 持久执行密钥尚未就绪；请先运行 "
+                    "`naumi runtime-key init`，或在自动化环境注入 "
+                    "NAUMI_RUNTIME_PAYLOAD_KEY。模型尚未调用。"
+                ),
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "AgentJob admission failed [%s]: %s",
+                task.id,
+                type(exc).__name__,
+            )
+            await self._set_agent_job_failure(
+                task.id,
+                "agent_job_admission_failed",
+            )
+            result = AgentResult(
+                status="error",
+                error="Agent 持久执行 admission 失败，已在模型调用前安全拒绝。",
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
+
+        try:
+            await self._mark_agent_job_running(task.id)
+        except Exception as exc:
+            logger.warning(
+                "AgentJob start fence failed [%s]: %s",
+                task.id,
+                type(exc).__name__,
+            )
+            await self._set_agent_job_failure(
+                task.id,
+                "agent_job_start_fenced",
+            )
+            result = AgentResult(
+                status="error",
+                error="Agent 持久执行 start fence 失败，模型尚未调用。",
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
+
         await self._start_execution_heartbeat(task.id)
+        preflight_failure = await self._agent_job_preflight_failure(task.id)
+        if preflight_failure:
+            result = AgentResult(
+                status="cancelled",
+                error=preflight_failure,
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status=result.status,
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
 
         logger.info("Delegating task %s to agent %s", task.id, agent_name)
         self._ensure_lifecycle(agent_name)
@@ -975,16 +1275,23 @@ class SubAgentManager:
                         await event_callback(event_type.value, data)
 
                 execute_kwargs["event_callback"] = observed_event
-            execute_task = asyncio.create_task(agent.execute(**execute_kwargs))
-            await self._attach_execution_task(task.id, execute_task)
-            timeout_seconds = _agent_timeout_seconds(agent)
-            if timeout_seconds > 0 and math.isfinite(timeout_seconds):
-                result = await asyncio.wait_for(
-                    execute_task,
-                    timeout=timeout_seconds,
+            preflight_failure = await self._agent_job_preflight_failure(task.id)
+            if preflight_failure:
+                result = AgentResult(
+                    status="cancelled",
+                    error=preflight_failure,
                 )
             else:
-                result = await execute_task
+                execute_task = asyncio.create_task(agent.execute(**execute_kwargs))
+                await self._attach_execution_task(task.id, execute_task)
+                timeout_seconds = _agent_timeout_seconds(agent)
+                if timeout_seconds > 0 and math.isfinite(timeout_seconds):
+                    result = await asyncio.wait_for(
+                        execute_task,
+                        timeout=timeout_seconds,
+                    )
+                else:
+                    result = await execute_task
             terminal_result = result
             await self._hooks.fire(HookContext(
                 point=HookPoint.AGENT_EXECUTE_END,
@@ -1056,7 +1363,10 @@ class SubAgentManager:
             ))
         finally:
             if terminal_result is not None:
-                await self._finish_execution(task.id, terminal_result)
+                result = await self._finish_execution(
+                    task.id,
+                    terminal_result,
+                )
 
         await self._emit_subagent_event(
             event_callback,
@@ -1377,6 +1687,20 @@ def _agent_result_message(result: AgentResult) -> str:
     return result.error or result.response[:300] or "子 Agent 未完成任务。"
 
 
+def _isolated_agent_job_result(result: AgentResult) -> AgentResult:
+    return AgentResult(
+        status="error",
+        response="",
+        total_tokens=result.total_tokens,
+        total_cost_usd=result.total_cost_usd,
+        turns=result.turns,
+        error=(
+            "子 Agent 已生成结果，但持久终态提交失败；"
+            "为避免展示未经认证的结果，已安全隔离。"
+        ),
+    )
+
+
 def _execution_record(
     execution: _ActiveExecution,
     *,
@@ -1418,6 +1742,10 @@ def _execution_record(
         worker_result_sha256=worker_result_sha256,
         worker_tool_scope=execution.worker_request.tool_scope,
         worker_contract_failure_code=execution.worker_contract_failure_code,
+        worker_job_id=execution.worker_job_id,
+        worker_job_state=execution.worker_job_state,
+        worker_claim_epoch=execution.worker_claim_epoch,
+        worker_job_failure_code=execution.worker_job_failure_code,
         current_tool=execution.current_tool,
         recent_tools=tuple(execution.recent_tools),
         total_tokens=result.total_tokens if result is not None else 0,
