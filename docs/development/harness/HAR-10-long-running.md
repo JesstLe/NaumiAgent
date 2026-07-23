@@ -102,6 +102,10 @@
   - ARC-06.1b 已让生产 ToolJob dispatch/terminal lifecycle 消费该 authority，验证容量耗尽、幂等重试、
     unknown recovery 与终态归还；见
     [设计](../architecture/ARC-06-1b-tool-job-capacity-lifecycle.md)。
+  - ARC-06.2a 已建立持久、有界、incarnation-fenced 的 Worker capacity FIFO 队列，并让 claim 与
+    reservation 同事务；见
+    [设计](../architecture/ARC-06-2a-durable-worker-capacity-queue.md)。当前 Agent 尚未成为持久
+    Worker，且生产 ToolJob queue adapter 尚未接入，因此该 authority 仍只是 HAR-10.7 集群调度前置。
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。

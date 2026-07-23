@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import math
 import os
 import stat
 from collections.abc import AsyncIterator, Mapping
@@ -33,8 +35,9 @@ from naumi_agent.daemons.worker_contract import (
     verify_worker_contract,
 )
 
-WORKER_REGISTRY_SCHEMA_VERSION = 2
+WORKER_REGISTRY_SCHEMA_VERSION = 3
 _MAX_CONTRACT_JSON_BYTES = 64 * 1024
+_MAX_CAPACITY_WAITERS = 10_000
 
 
 class WorkerRegistryStoreError(RuntimeError):
@@ -58,6 +61,14 @@ class WorkerRegistrationState(StrEnum):
 class WorkerCapacityReservationState(StrEnum):
     ACTIVE = "active"
     RELEASED = "released"
+    EXPIRED = "expired"
+    FENCED = "fenced"
+
+
+class WorkerCapacityWaiterState(StrEnum):
+    WAITING = "waiting"
+    CLAIMED = "claimed"
+    CANCELLED = "cancelled"
     EXPIRED = "expired"
     FENCED = "fenced"
 
@@ -94,6 +105,28 @@ class WorkerCapacitySnapshot:
     reserved: int
     available: int
     assessed_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCapacityWaiter:
+    queue_id: str
+    worker_id: str
+    instance_id: str
+    epoch: int
+    job_id: str
+    workspace_sha256: str
+    state: WorkerCapacityWaiterState
+    enqueued_at: str
+    deadline_at: str
+    reservation_id: str | None
+    terminal_at: str | None
+    reason_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCapacityClaim:
+    waiter: WorkerCapacityWaiter
+    reservation: WorkerCapacityReservation
 
 
 class WorkerRegistryStore:
@@ -167,6 +200,13 @@ class WorkerRegistryStore:
                             ),
                         )
                         await _fence_capacity_reservations(
+                            db,
+                            worker_id=latest.contract.worker_id,
+                            epoch=latest.contract.epoch,
+                            fenced_at=timestamp,
+                            reason_code="higher_epoch_registered",
+                        )
+                        await _fence_capacity_waiters(
                             db,
                             worker_id=latest.contract.worker_id,
                             epoch=latest.contract.epoch,
@@ -256,6 +296,13 @@ class WorkerRegistryStore:
                     ),
                 )
                 await _fence_capacity_reservations(
+                    db,
+                    worker_id=worker_id,
+                    epoch=epoch,
+                    fenced_at=timestamp,
+                    reason_code=reason_code,
+                )
+                await _fence_capacity_waiters(
                     db,
                     worker_id=worker_id,
                     epoch=epoch,
@@ -505,6 +552,397 @@ class WorkerRegistryStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法读取 Worker capacity。") from exc
 
+    async def enqueue_capacity_waiter(
+        self,
+        *,
+        queue_id: str,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        job_id: str,
+        workspace_sha256: str,
+        enqueued_at: str,
+        deadline_at: str,
+        max_waiters: int,
+    ) -> WorkerCapacityWaiter:
+        """Persist one exact-incarnation FIFO waiter under a hard queue bound."""
+        for field, value in (
+            ("queue_id", queue_id),
+            ("worker_id", worker_id),
+            ("instance_id", instance_id),
+            ("job_id", job_id),
+        ):
+            _validate_identifier(value, field=field)
+        _validate_sha256(workspace_sha256, field="workspace_sha256")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        if isinstance(max_waiters, bool) or not isinstance(max_waiters, int):
+            raise TypeError("max_waiters 必须是整数。")
+        if not 0 <= max_waiters <= _MAX_CAPACITY_WAITERS:
+            raise ValueError(f"max_waiters 必须在 0 到 {_MAX_CAPACITY_WAITERS} 之间。")
+        enqueued = normalize_worker_timestamp(enqueued_at, field="enqueued_at")
+        deadline = normalize_worker_timestamp(deadline_at, field="deadline_at")
+        if datetime.fromisoformat(deadline) <= datetime.fromisoformat(enqueued):
+            raise ValueError("Capacity waiter deadline_at 必须晚于 enqueued_at。")
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                registration_row = await _select_active(db, worker_id)
+                if registration_row is None:
+                    raise WorkerRegistryConflictError("Worker 当前没有 active incarnation。")
+                registration = _registration_from_row(registration_row)
+                if (
+                    registration.contract.instance_id != instance_id
+                    or registration.contract.epoch != epoch
+                ):
+                    raise WorkerRegistryConflictError(
+                        "Worker capacity waiter incarnation 已被 fencing。"
+                    )
+                await _ensure_capacity_queue_policy(
+                    db,
+                    worker_id=worker_id,
+                    instance_id=instance_id,
+                    epoch=epoch,
+                    max_waiters=max_waiters,
+                    configured_at=enqueued,
+                )
+                await _expire_capacity_waiters(
+                    db,
+                    worker_id=worker_id,
+                    now=enqueued,
+                )
+                existing_row = await _select_capacity_waiter(db, queue_id)
+                if existing_row is not None:
+                    existing = _capacity_waiter_from_row(existing_row)
+                    await _validate_capacity_waiter_links(db, (existing,))
+                    if (
+                        existing.worker_id != worker_id
+                        or existing.instance_id != instance_id
+                        or existing.epoch != epoch
+                        or existing.job_id != job_id
+                        or existing.workspace_sha256 != workspace_sha256
+                        or existing.enqueued_at != enqueued
+                        or existing.deadline_at != deadline
+                    ):
+                        raise WorkerRegistryConflictError(
+                            "Capacity waiter identity 被不同事实复用。"
+                        )
+                    await db.commit()
+                    return existing
+                duplicate = await _select_capacity_waiter_job(
+                    db,
+                    worker_id=worker_id,
+                    epoch=epoch,
+                    job_id=job_id,
+                )
+                if duplicate is not None:
+                    raise WorkerRegistryConflictError(
+                        "同一 Worker job 已使用其他 capacity waiter identity。"
+                    )
+                waiting_count = await _count_capacity_waiters(
+                    db,
+                    worker_id=worker_id,
+                    instance_id=instance_id,
+                    epoch=epoch,
+                )
+                if waiting_count >= max_waiters:
+                    raise WorkerCapacityExhaustedError(
+                        f"Worker capacity 等待队列已满（上限 {max_waiters}）。"
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO worker_capacity_waiters (
+                        queue_id, worker_id, instance_id, epoch, job_id,
+                        workspace_sha256, state, enqueued_at, deadline_at,
+                        reservation_id, terminal_at, reason_code
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, NULL, NULL, NULL)
+                    """,
+                    (
+                        queue_id,
+                        worker_id,
+                        instance_id,
+                        epoch,
+                        job_id,
+                        workspace_sha256,
+                        enqueued,
+                        deadline,
+                    ),
+                )
+                row = await _select_capacity_waiter(db, queue_id)
+                await db.commit()
+                assert row is not None
+                return _capacity_waiter_from_row(row)
+        except (WorkerRegistryConflictError, WorkerCapacityExhaustedError):
+            raise
+        except aiosqlite.IntegrityError as exc:
+            raise WorkerRegistryConflictError("Capacity waiter 与现有记录冲突。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法持久化 capacity waiter。") from exc
+
+    async def cancel_capacity_waiter(
+        self,
+        *,
+        queue_id: str,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        job_id: str,
+        reason_code: str,
+        cancelled_at: str,
+    ) -> WorkerCapacityWaiter:
+        """Cancel only the exact waiting request; claimed work cannot be withdrawn."""
+        for field, value in (
+            ("queue_id", queue_id),
+            ("worker_id", worker_id),
+            ("instance_id", instance_id),
+            ("job_id", job_id),
+        ):
+            _validate_identifier(value, field=field)
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        _validate_reason(reason_code)
+        timestamp = normalize_worker_timestamp(cancelled_at, field="cancelled_at")
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _expire_capacity_waiters(db, worker_id=worker_id, now=timestamp)
+                row = await _select_capacity_waiter(db, queue_id)
+                if row is None:
+                    raise WorkerRegistryConflictError("Capacity waiter 不存在。")
+                waiter = _capacity_waiter_from_row(row)
+                if (
+                    waiter.worker_id != worker_id
+                    or waiter.instance_id != instance_id
+                    or waiter.epoch != epoch
+                    or waiter.job_id != job_id
+                ):
+                    raise WorkerRegistryConflictError("Capacity waiter owner 不匹配。")
+                if waiter.state is WorkerCapacityWaiterState.CANCELLED:
+                    if waiter.reason_code != reason_code:
+                        raise WorkerRegistryConflictError("Capacity waiter 已由不同原因取消。")
+                    await db.commit()
+                    return waiter
+                if waiter.state is not WorkerCapacityWaiterState.WAITING:
+                    raise WorkerRegistryConflictError("Capacity waiter 已终结，不能取消。")
+                if datetime.fromisoformat(timestamp) < datetime.fromisoformat(waiter.enqueued_at):
+                    raise WorkerRegistryConflictError(
+                        "cancelled_at 早于 Capacity waiter enqueued_at。"
+                    )
+                await db.execute(
+                    """
+                    UPDATE worker_capacity_waiters
+                    SET state = 'cancelled', terminal_at = ?, reason_code = ?
+                    WHERE queue_id = ? AND state = 'waiting'
+                    """,
+                    (timestamp, reason_code, queue_id),
+                )
+                updated = await _select_capacity_waiter(db, queue_id)
+                await db.commit()
+                assert updated is not None
+                return _capacity_waiter_from_row(updated)
+        except WorkerRegistryConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法取消 capacity waiter。") from exc
+
+    async def claim_next_capacity_waiter(
+        self,
+        *,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        claimed_at: str,
+    ) -> WorkerCapacityClaim | None:
+        """Atomically claim the FIFO head and reserve one worker slot."""
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(instance_id, field="instance_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        timestamp = normalize_worker_timestamp(claimed_at, field="claimed_at")
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                registration_row = await _select_active(db, worker_id)
+                if registration_row is None:
+                    raise WorkerRegistryConflictError("Worker 当前没有 active incarnation。")
+                registration = _registration_from_row(registration_row)
+                contract = registration.contract
+                if contract.instance_id != instance_id or contract.epoch != epoch:
+                    raise WorkerRegistryConflictError(
+                        "Capacity waiter claim incarnation 已被 fencing。"
+                    )
+                await _expire_capacity_reservations(
+                    db,
+                    worker_id=worker_id,
+                    now=timestamp,
+                )
+                await _expire_capacity_waiters(
+                    db,
+                    worker_id=worker_id,
+                    now=timestamp,
+                )
+                active_count = await _count_active_capacity(
+                    db,
+                    worker_id,
+                    instance_id,
+                    epoch,
+                )
+                if active_count >= contract.resources.max_concurrent_jobs:
+                    await db.commit()
+                    return None
+                waiter_row = await _select_next_capacity_waiter(
+                    db,
+                    worker_id=worker_id,
+                    instance_id=instance_id,
+                    epoch=epoch,
+                )
+                if waiter_row is None:
+                    await db.commit()
+                    return None
+                waiter = _capacity_waiter_from_row(waiter_row)
+                remaining = math.ceil(
+                    (
+                        datetime.fromisoformat(waiter.deadline_at)
+                        - datetime.fromisoformat(timestamp)
+                    ).total_seconds()
+                )
+                if remaining < 1:
+                    raise WorkerRegistryStoreError("Capacity waiter expiry 与 FIFO claim 不一致。")
+                ttl_seconds = min(
+                    contract.resources.max_wall_seconds,
+                    remaining,
+                    7 * 24 * 60 * 60,
+                )
+                reservation_id = _capacity_waiter_reservation_id(waiter.queue_id)
+                duplicate = await _select_capacity_reservation(db, reservation_id)
+                if duplicate is not None:
+                    raise WorkerRegistryStoreError(
+                        "Capacity waiter reservation identity 已被占用。"
+                    )
+                duplicate_job = await _select_capacity_job(
+                    db,
+                    worker_id,
+                    epoch,
+                    waiter.job_id,
+                )
+                if duplicate_job is not None:
+                    raise WorkerRegistryStoreError("Capacity waiter job 已存在 reservation。")
+                expires_at = (
+                    datetime.fromisoformat(timestamp) + timedelta(seconds=ttl_seconds)
+                ).isoformat()
+                await db.execute(
+                    """
+                    INSERT INTO worker_capacity_reservations (
+                        reservation_id, worker_id, instance_id, epoch, job_id, state,
+                        reserved_at, expires_at, terminal_at, reason_code
+                    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, NULL, NULL)
+                    """,
+                    (
+                        reservation_id,
+                        worker_id,
+                        instance_id,
+                        epoch,
+                        waiter.job_id,
+                        timestamp,
+                        expires_at,
+                    ),
+                )
+                result = await db.execute(
+                    """
+                    UPDATE worker_capacity_waiters
+                    SET state = 'claimed', reservation_id = ?,
+                        terminal_at = ?, reason_code = 'capacity_claimed'
+                    WHERE queue_id = ? AND state = 'waiting'
+                    """,
+                    (reservation_id, timestamp, waiter.queue_id),
+                )
+                if result.rowcount != 1:
+                    raise WorkerRegistryStoreError("Capacity waiter FIFO claim 并发提交失败。")
+                claimed_row = await _select_capacity_waiter(db, waiter.queue_id)
+                reservation_row = await _select_capacity_reservation(
+                    db,
+                    reservation_id,
+                )
+                await db.commit()
+                assert claimed_row is not None and reservation_row is not None
+                return WorkerCapacityClaim(
+                    waiter=_capacity_waiter_from_row(claimed_row),
+                    reservation=_capacity_reservation_from_row(reservation_row),
+                )
+        except WorkerRegistryConflictError:
+            raise
+        except WorkerRegistryStoreError:
+            raise
+        except aiosqlite.IntegrityError as exc:
+            raise WorkerRegistryStoreError("Capacity waiter claim 与现有事实冲突。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法 claim capacity waiter。") from exc
+
+    async def get_capacity_waiter(
+        self,
+        queue_id: str,
+    ) -> WorkerCapacityWaiter | None:
+        """Read one exact waiter and verify any claimed reservation linkage."""
+        _validate_identifier(queue_id, field="queue_id")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                row = await _select_capacity_waiter(db, queue_id)
+                if row is None:
+                    await db.commit()
+                    return None
+                waiter = _capacity_waiter_from_row(row)
+                await _validate_capacity_waiter_links(db, (waiter,))
+                await db.commit()
+                return waiter
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 capacity waiter。") from exc
+
+    async def list_capacity_waiters(
+        self,
+        *,
+        worker_id: str,
+        assessed_at: str,
+        limit: int = 100,
+    ) -> tuple[WorkerCapacityWaiter, ...]:
+        """Read a bounded oldest-first catalog after applying deterministic expiry."""
+        _validate_identifier(worker_id, field="worker_id")
+        timestamp = normalize_worker_timestamp(assessed_at, field="assessed_at")
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit 必须是整数。")
+        if not 1 <= limit <= 200:
+            raise ValueError("limit 必须在 1 到 200 之间。")
+        if not _registry_file_exists(self._db_path):
+            return ()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _expire_capacity_waiters(db, worker_id=worker_id, now=timestamp)
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM worker_capacity_waiters
+                    WHERE worker_id = ?
+                    ORDER BY enqueued_at ASC, queue_id ASC
+                    LIMIT ?
+                    """,
+                    (worker_id, limit),
+                )
+                rows = await cursor.fetchall()
+                waiters = tuple(_capacity_waiter_from_row(row) for row in rows)
+                await _validate_capacity_waiter_links(db, waiters)
+                await db.commit()
+                return waiters
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 capacity waiter。") from exc
+
     async def assess_admission(
         self,
         *,
@@ -557,9 +995,17 @@ class WorkerRegistryStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V2_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V3_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 1:
                         for statement in _SCHEMA_V2_STATEMENTS:
+                            await db.execute(statement)
+                        for statement in _SCHEMA_V3_STATEMENTS:
+                            await db.execute(statement)
+                        await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
+                    elif version == 2:
+                        for statement in _SCHEMA_V3_STATEMENTS:
                             await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version != WORKER_REGISTRY_SCHEMA_VERSION:
@@ -695,6 +1141,10 @@ def _capacity_reservation_from_row(row: aiosqlite.Row) -> WorkerCapacityReservat
     return deserialize_worker_capacity_reservation(dict(row))
 
 
+def _capacity_waiter_from_row(row: aiosqlite.Row) -> WorkerCapacityWaiter:
+    return deserialize_worker_capacity_waiter(dict(row))
+
+
 def deserialize_worker_capacity_reservation(
     record: Mapping[str, object],
 ) -> WorkerCapacityReservation:
@@ -744,6 +1194,87 @@ def deserialize_worker_capacity_reservation(
         expires_at=expires_at,
         terminal_at=terminal_at,
         reason_code=reason,
+    )
+
+
+def deserialize_worker_capacity_waiter(
+    record: Mapping[str, object],
+) -> WorkerCapacityWaiter:
+    """Validate one durable queue record without trusting its index columns."""
+    required = {
+        "queue_id",
+        "worker_id",
+        "instance_id",
+        "epoch",
+        "job_id",
+        "workspace_sha256",
+        "state",
+        "enqueued_at",
+        "deadline_at",
+        "reservation_id",
+        "terminal_at",
+        "reason_code",
+    }
+    if not isinstance(record, Mapping) or not required.issubset(record):
+        raise ValueError("Worker capacity waiter 记录字段不完整。")
+    for field in ("queue_id", "worker_id", "instance_id", "job_id"):
+        _validate_identifier(str(record[field]), field=field)
+    _validate_sha256(str(record["workspace_sha256"]), field="workspace_sha256")
+    epoch = int(record["epoch"])
+    if epoch < 1:
+        raise ValueError("Capacity waiter epoch 必须是正整数。")
+    enqueued_at = normalize_worker_timestamp(
+        str(record["enqueued_at"]),
+        field="enqueued_at",
+    )
+    deadline_at = normalize_worker_timestamp(
+        str(record["deadline_at"]),
+        field="deadline_at",
+    )
+    if datetime.fromisoformat(deadline_at) <= datetime.fromisoformat(enqueued_at):
+        raise ValueError("Capacity waiter deadline_at 必须晚于 enqueued_at。")
+    reservation_id = str(record["reservation_id"]) if record["reservation_id"] is not None else None
+    if reservation_id is not None:
+        _validate_identifier(reservation_id, field="reservation_id")
+    terminal_at = (
+        normalize_worker_timestamp(str(record["terminal_at"]), field="terminal_at")
+        if record["terminal_at"] is not None
+        else None
+    )
+    reason_code = str(record["reason_code"]) if record["reason_code"] is not None else None
+    if reason_code is not None:
+        _validate_reason(reason_code)
+    state = WorkerCapacityWaiterState(str(record["state"]))
+    if state is WorkerCapacityWaiterState.WAITING:
+        if reservation_id is not None or terminal_at is not None or reason_code is not None:
+            raise ValueError("Waiting capacity waiter 不能包含终态字段。")
+    elif terminal_at is None or reason_code is None:
+        raise ValueError("终态 capacity waiter 缺少 terminal 字段。")
+    elif datetime.fromisoformat(terminal_at) < datetime.fromisoformat(enqueued_at):
+        raise ValueError("Capacity waiter terminal_at 早于 enqueued_at。")
+    if state is WorkerCapacityWaiterState.CLAIMED:
+        if reservation_id != _capacity_waiter_reservation_id(str(record["queue_id"])):
+            raise ValueError("Claimed capacity waiter reservation identity 不一致。")
+        if reason_code != "capacity_claimed":
+            raise ValueError("Claimed capacity waiter reason_code 不一致。")
+        assert terminal_at is not None
+        if datetime.fromisoformat(terminal_at) >= datetime.fromisoformat(deadline_at):
+            raise ValueError("Claimed capacity waiter 已超过 deadline。")
+    elif reservation_id is not None:
+        raise ValueError("非 claimed capacity waiter 不能绑定 reservation。")
+    return WorkerCapacityWaiter(
+        queue_id=str(record["queue_id"]),
+        worker_id=str(record["worker_id"]),
+        instance_id=str(record["instance_id"]),
+        epoch=epoch,
+        job_id=str(record["job_id"]),
+        workspace_sha256=str(record["workspace_sha256"]),
+        state=state,
+        enqueued_at=enqueued_at,
+        deadline_at=deadline_at,
+        reservation_id=reservation_id,
+        terminal_at=terminal_at,
+        reason_code=reason_code,
     )
 
 
@@ -858,6 +1389,128 @@ async def _select_capacity_job(
     return await cursor.fetchone()
 
 
+async def _select_capacity_waiter(
+    db: aiosqlite.Connection,
+    queue_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_capacity_waiters WHERE queue_id = ?",
+        (queue_id,),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_capacity_waiter_job(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    epoch: int,
+    job_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM worker_capacity_waiters
+        WHERE worker_id = ? AND epoch = ? AND job_id = ?
+        """,
+        (worker_id, epoch, job_id),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_next_capacity_waiter(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM worker_capacity_waiters
+        WHERE worker_id = ? AND instance_id = ? AND epoch = ?
+          AND state = 'waiting'
+        ORDER BY enqueued_at ASC, queue_id ASC
+        LIMIT 1
+        """,
+        (worker_id, instance_id, epoch),
+    )
+    return await cursor.fetchone()
+
+
+async def _ensure_capacity_queue_policy(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    max_waiters: int,
+    configured_at: str,
+) -> None:
+    cursor = await db.execute(
+        """
+        SELECT instance_id, max_waiters
+        FROM worker_capacity_queue_policies
+        WHERE worker_id = ? AND epoch = ?
+        """,
+        (worker_id, epoch),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        await db.execute(
+            """
+            INSERT INTO worker_capacity_queue_policies (
+                worker_id, instance_id, epoch, max_waiters, configured_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (worker_id, instance_id, epoch, max_waiters, configured_at),
+        )
+        return
+    if str(row["instance_id"]) != instance_id:
+        raise WorkerRegistryStoreError("Capacity queue policy 与 Worker instance 不一致。")
+    if int(row["max_waiters"]) != max_waiters:
+        raise WorkerRegistryConflictError("Capacity queue max_waiters 与 durable policy 不一致。")
+
+
+async def _validate_capacity_waiter_links(
+    db: aiosqlite.Connection,
+    waiters: tuple[WorkerCapacityWaiter, ...],
+) -> None:
+    for waiter in waiters:
+        if waiter.state is not WorkerCapacityWaiterState.CLAIMED:
+            continue
+        assert waiter.reservation_id is not None
+        row = await _select_capacity_reservation(db, waiter.reservation_id)
+        if row is None:
+            raise ValueError("Claimed capacity waiter 缺少 reservation。")
+        reservation = _capacity_reservation_from_row(row)
+        if (
+            reservation.worker_id != waiter.worker_id
+            or reservation.instance_id != waiter.instance_id
+            or reservation.epoch != waiter.epoch
+            or reservation.job_id != waiter.job_id
+        ):
+            raise ValueError("Claimed capacity waiter 与 reservation 不一致。")
+
+
+async def _count_capacity_waiters(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+) -> int:
+    cursor = await db.execute(
+        """
+        SELECT COUNT(*) FROM worker_capacity_waiters
+        WHERE worker_id = ? AND instance_id = ? AND epoch = ?
+          AND state = 'waiting'
+        """,
+        (worker_id, instance_id, epoch),
+    )
+    row = await cursor.fetchone()
+    return int(row[0]) if row is not None else 0
+
+
 async def _count_active_capacity(
     db: aiosqlite.Connection, worker_id: str, instance_id: str, epoch: int
 ) -> int:
@@ -922,6 +1575,40 @@ async def _fence_capacity_reservations(
     )
 
 
+async def _expire_capacity_waiters(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    now: str,
+) -> None:
+    await db.execute(
+        """
+        UPDATE worker_capacity_waiters
+        SET state = 'expired', terminal_at = ?, reason_code = 'deadline_expired'
+        WHERE worker_id = ? AND state = 'waiting' AND deadline_at <= ?
+        """,
+        (now, worker_id, now),
+    )
+
+
+async def _fence_capacity_waiters(
+    db: aiosqlite.Connection,
+    *,
+    worker_id: str,
+    epoch: int,
+    fenced_at: str,
+    reason_code: str,
+) -> None:
+    await db.execute(
+        """
+        UPDATE worker_capacity_waiters
+        SET state = 'fenced', terminal_at = ?, reason_code = ?
+        WHERE worker_id = ? AND epoch = ? AND state = 'waiting'
+        """,
+        (fenced_at, reason_code, worker_id, epoch),
+    )
+
+
 async def _user_tables(db: aiosqlite.Connection) -> tuple[str, ...]:
     cursor = await db.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
@@ -939,6 +1626,12 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+def _capacity_waiter_reservation_id(queue_id: str) -> str:
+    _validate_identifier(queue_id, field="queue_id")
+    digest = hashlib.sha256(queue_id.encode("utf-8")).hexdigest()
+    return f"scheduler:{digest}"
+
+
 def _validate_identifier(value: str, *, field: str) -> None:
     allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-"
     if (
@@ -949,6 +1642,16 @@ def _validate_identifier(value: str, *, field: str) -> None:
         or any(character not in allowed for character in value)
     ):
         raise ValueError(f"{field} 格式无效。")
+
+
+def _validate_sha256(value: str, *, field: str) -> None:
+    allowed = "0123456789abcdef"
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in allowed for character in value)
+    ):
+        raise ValueError(f"{field} 必须是小写 SHA-256。")
 
 
 def _validate_reason(value: str) -> None:
@@ -1028,17 +1731,76 @@ WHERE state = 'active'
 )
 
 
+_SCHEMA_V3_STATEMENTS = (
+    """
+CREATE TABLE worker_capacity_queue_policies (
+    worker_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    max_waiters INTEGER NOT NULL CHECK (max_waiters >= 0 AND max_waiters <= 10000),
+    configured_at TEXT NOT NULL,
+    PRIMARY KEY (worker_id, epoch),
+    FOREIGN KEY (worker_id, epoch) REFERENCES worker_registrations(worker_id, epoch)
+)
+""",
+    """
+CREATE TABLE worker_capacity_waiters (
+    queue_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    job_id TEXT NOT NULL,
+    workspace_sha256 TEXT NOT NULL CHECK (length(workspace_sha256) = 64),
+    state TEXT NOT NULL CHECK (
+        state IN ('waiting', 'claimed', 'cancelled', 'expired', 'fenced')
+    ),
+    enqueued_at TEXT NOT NULL,
+    deadline_at TEXT NOT NULL,
+    reservation_id TEXT UNIQUE,
+    terminal_at TEXT,
+    reason_code TEXT,
+    UNIQUE (worker_id, epoch, job_id),
+    FOREIGN KEY (worker_id, epoch)
+        REFERENCES worker_capacity_queue_policies(worker_id, epoch),
+    FOREIGN KEY (reservation_id)
+        REFERENCES worker_capacity_reservations(reservation_id),
+    CHECK (deadline_at > enqueued_at),
+    CHECK (
+        (state = 'waiting' AND reservation_id IS NULL
+            AND terminal_at IS NULL AND reason_code IS NULL)
+        OR (state = 'claimed' AND reservation_id IS NOT NULL
+            AND terminal_at IS NOT NULL AND reason_code = 'capacity_claimed')
+        OR (state IN ('cancelled', 'expired', 'fenced')
+            AND reservation_id IS NULL
+            AND terminal_at IS NOT NULL AND reason_code IS NOT NULL)
+    )
+)
+""",
+    """
+CREATE INDEX waiting_worker_capacity_fifo
+ON worker_capacity_waiters (
+    worker_id, instance_id, epoch, enqueued_at, queue_id
+)
+WHERE state = 'waiting'
+""",
+)
+
+
 __all__ = [
     "WORKER_REGISTRY_SCHEMA_VERSION",
+    "WorkerCapacityClaim",
     "WorkerCapacityExhaustedError",
     "WorkerCapacityReservation",
     "WorkerCapacityReservationState",
     "WorkerCapacitySnapshot",
+    "WorkerCapacityWaiter",
+    "WorkerCapacityWaiterState",
     "WorkerRegistration",
     "WorkerRegistrationState",
     "WorkerRegistryConflictError",
     "WorkerRegistryStore",
     "WorkerRegistryStoreError",
+    "deserialize_worker_capacity_waiter",
     "deserialize_worker_capacity_reservation",
     "deserialize_worker_registration",
 ]
