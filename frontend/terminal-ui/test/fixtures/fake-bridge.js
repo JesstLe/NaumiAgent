@@ -657,8 +657,27 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "shutdown") {
-    emit("shutdown", { ok: true });
-    setTimeout(() => process.exit(0), 5);
+    const delayMs = Math.max(
+      0,
+      Number(process.env.NAUMI_TEST_SHUTDOWN_DELAY_MS) || 0,
+    );
+    const acknowledgeShutdown = () => {
+      const failed = process.env.NAUMI_TEST_SHUTDOWN_FAIL === "1";
+      emit(
+        "shutdown",
+        failed
+          ? { ok: false, code: "runtime_shutdown_failed" }
+          : { ok: true },
+        record.id,
+      );
+      setTimeout(() => process.exit(0), 50);
+    };
+    if (delayMs > 0) {
+      setTimeout(acknowledgeShutdown, delayMs);
+    } else {
+      acknowledgeShutdown();
+    }
+    return;
   }
 });
 

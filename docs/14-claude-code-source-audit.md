@@ -65,6 +65,8 @@ NaumiAgent 当前第一阶段选择的是“协议分离 + 小型 Node 终端前
 协议原则：
 
 - UI 前端不直接调用工具，不绕过 Python 权限层。
+- New UI 的退出是 request/receipt 握手：Bridge 完成 draining、持久化和 Engine 清理后才以同
+  `request_id` 回执；前端在有界等待内不提前杀死 Python runtime。
 - 协议事件清单与阶段一关键 `ui/message` 字段由 `frontend/terminal-ui/protocol-contract.json` 固化；Node 前端启动时加载该契约校验 bridge 事件，Python 测试校验枚举和 UIMessage dataclass 字段与契约一致。
 - 工具参数和大输出进入 adapter 后只保留摘要、路径、长度、状态和必要预览。
 - `tool_prepare` 通过 `tool_call_id` 与后续 `tool_use` 精确匹配；ID 不匹配时前端不会把准备进度贴到错误工具卡。

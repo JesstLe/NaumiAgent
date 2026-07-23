@@ -4658,6 +4658,50 @@ async def test_bridge_shutdown_blocks_active_workbench_task() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_shutdown_receipt_preserves_request_identity() -> None:
+    engine = _FakeEngine()
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record({
+        "id": "shutdown-exact-1",
+        "type": ClientEventType.SHUTDOWN,
+        "payload": {},
+    })
+
+    records = _records(writer)
+    assert records[-1]["type"] == ServerEventType.SHUTDOWN
+    assert records[-1]["request_id"] == "shutdown-exact-1"
+    assert records[-1]["payload"] == {"ok": True}
+    assert engine.shutdown_called is True
+
+
+@pytest.mark.asyncio
+async def test_bridge_shutdown_failure_emits_correlated_failure_receipt() -> None:
+    engine = _FakeEngine()
+    engine.shutdown = AsyncMock(side_effect=RuntimeError("private shutdown detail"))
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    with pytest.raises(RuntimeError, match="private shutdown detail"):
+        await bridge.handle_client_record({
+            "id": "shutdown-failed-1",
+            "type": ClientEventType.SHUTDOWN,
+            "payload": {},
+        })
+
+    receipt = _records(writer)[-1]
+    assert receipt["type"] == ServerEventType.SHUTDOWN
+    assert receipt["request_id"] == "shutdown-failed-1"
+    assert receipt["payload"] == {
+        "ok": False,
+        "code": "runtime_shutdown_failed",
+    }
+
+
+@pytest.mark.asyncio
 async def test_bridge_task_submit_persists_real_workbench_graph(tmp_path: Path) -> None:
     database = tmp_path / "task-submit.db"
     engine = _TaskSubmitFakeEngine()
