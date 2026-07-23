@@ -115,6 +115,9 @@
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。
+  - UI-13.1e 已继续投影 durable queue policy、live waiting、active claim、oldest wait 与到期待收口数；
+    New UI/TUI 复用同一只读 authority，不暴露 job identity；见
+    [设计](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
   - 未完成：Agent/Browser 持久 Worker dispatch 接入、自动 claim/scheduler、workspace 锁、能力路由、
     亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。

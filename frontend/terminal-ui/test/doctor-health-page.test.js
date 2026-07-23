@@ -34,6 +34,13 @@ function snapshot() {
         detail: "tool-worker-a tool epoch 3 linux/x86_64 容量占用 1/4、可用 3 心跳健康/3.0s",
         suggestion: "",
       },
+      {
+        id: "runtime-worker-capacity-queue", domain: "runtime",
+        label: "Worker 容量队列", severity: "degraded",
+        responsibility: "product_runtime",
+        detail: "已配置队列 Worker 1 个。 tool-worker-a 等待 1/8、领取 1、最久 2.0s",
+        suggestion: "等待容量释放，避免无界重试。",
+      },
     ],
   };
 }
@@ -44,15 +51,16 @@ test("doctor health page renders typed local evidence at common widths", () => {
       snapshot: snapshot(),
       heartbeat: { status: "healthy", rttMs: 12, ageMs: 0 },
       scrollOffset: 0,
-    }, width, 22);
+    }, width, 30);
     const plain = lines.map(stripAnsi).join("\n");
-    assert.equal(lines.length, 22);
+    assert.equal(lines.length, 30);
     assert(lines.every((line) => visibleWidth(line) <= width));
     for (const expected of [
       "环境健康诊断", "本地只读", "Bridge 心跳", "Node.js", "API key", "用户配置",
       "诊断码", "provider_credentials_missing",
       "运行时心跳清理", "产品运行时", "清理失败不会中断模型执行", "下一步",
-      "Worker authority", "容量占用 1/4", "可用 3",
+      "Worker authority", "容量占用 1/4", "可用 3", "Worker 容量队列",
+      "等待 1/8", "领取 1", "最久 2.0s", "避免无界重试",
     ]) {
       assert(plain.includes(expected));
     }

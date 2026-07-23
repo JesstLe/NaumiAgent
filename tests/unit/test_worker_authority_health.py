@@ -27,6 +27,7 @@ from naumi_agent.harness.store import HARNESS_STORE_SCHEMA_VERSION, HarnessStore
 from naumi_agent.ui.doctor import (
     DoctorReport,
     _worker_authority_check,
+    _worker_queue_check,
     render_doctor_report,
 )
 from naumi_agent.ui.doctor_health import build_doctor_health_snapshot
@@ -186,6 +187,176 @@ async def test_capacity_projection_ignores_expired_slot_without_writing_registry
             "SELECT state FROM worker_capacity_reservations "
             "WHERE reservation_id = 'capacity-expired'"
         ).fetchone()[0] == "active"
+
+
+@pytest.mark.asyncio
+async def test_queue_backlog_projection_is_bounded_read_only_and_explicit(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "worker-registry.db"
+    harness = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    contract = _contract()
+    store = WorkerRegistryStore(registry)
+    await store.register(contract, registered_at=T1)
+    for queue_id, job_id, enqueued_at, deadline_at in (
+        (
+            "queue-a-claim",
+            "job-a-claim",
+            "2026-07-19T00:00:01+00:00",
+            "2026-07-19T00:00:12+00:00",
+        ),
+        (
+            "queue-b-live",
+            "job-b-live",
+            "2026-07-19T00:00:02+00:00",
+            "2026-07-19T00:00:12+00:00",
+        ),
+        (
+            "queue-c-expired",
+            "job-c-expired",
+            "2026-07-19T00:00:02+00:00",
+            "2026-07-19T00:00:04+00:00",
+        ),
+    ):
+        await store.enqueue_capacity_waiter(
+            queue_id=queue_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id=job_id,
+            workspace_sha256="a" * 64,
+            enqueued_at=enqueued_at,
+            deadline_at=deadline_at,
+            max_waiters=4,
+        )
+    claim = await store.claim_next_capacity_waiter(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        claimed_at="2026-07-19T00:00:03+00:00",
+    )
+    assert claim is not None and claim.waiter.queue_id == "queue-a-claim"
+    await HarnessStore(harness).record_heartbeat(
+        workspace_root=workspace,
+        subject_kind=HarnessRunKind.TOOL,
+        subject_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        sequence=1,
+        phase=HarnessHeartbeatPhase.RUNNING,
+        observed_at="2026-07-19T00:00:04+00:00",
+        timeout_seconds=10,
+        detail_code="ready",
+    )
+    registry_before = registry.read_bytes()
+
+    snapshot = inspect_worker_authority_health(
+        registry_db_path=registry,
+        harness_db_path=harness,
+        workspace_root=workspace,
+        now="2026-07-19T00:00:05+00:00",
+    )
+    worker = snapshot.workers[0]
+    authority_check = _worker_authority_check(snapshot)
+    check = _worker_queue_check(snapshot)
+
+    assert worker.queue_max_waiters == 4
+    assert worker.waiting_jobs == 1
+    assert worker.active_claims == 1
+    assert worker.expired_waiting_jobs == 1
+    assert worker.expired_claims == 0
+    assert worker.oldest_wait_seconds == 3
+    assert worker.reserved_jobs == 1
+    assert worker.available_jobs == 3
+    assert authority_check.status == "pass"
+    assert check.status == "warn"
+    assert "等待 1/4、领取 1、最久 3.0s、待收口 1" in check.detail
+    assert "运行调度器核对" in check.suggestion
+    assert "queue-a-claim" not in check.detail
+    assert "job-b-live" not in check.detail
+    typed = build_doctor_health_snapshot(DoctorReport(checks=(check,)))
+    assert "等待 1/4" in typed.items[0].detail
+    assert "领取 1" in typed.items[0].detail
+    assert "待收口 1" in render_doctor_report(DoctorReport(checks=(check,)))
+    assert registry.read_bytes() == registry_before
+    with sqlite3.connect(registry) as db:
+        assert db.execute(
+            "SELECT state FROM worker_capacity_waiters "
+            "WHERE queue_id = 'queue-c-expired'"
+        ).fetchone()[0] == "waiting"
+        db.execute(
+            "DELETE FROM worker_capacity_waiters WHERE queue_id = 'queue-a-claim'"
+        )
+    with pytest.raises(WorkerAuthorityHealthError) as raised:
+        inspect_worker_authority_health(
+            registry_db_path=registry,
+            harness_db_path=harness,
+            workspace_root=workspace,
+            now="2026-07-19T00:00:05+00:00",
+        )
+    assert raised.value.code == "registry_unreadable"
+
+
+@pytest.mark.asyncio
+async def test_queue_saturation_is_degraded_without_becoming_runtime_error(
+    tmp_path: Path,
+) -> None:
+    registry = tmp_path / "worker-registry.db"
+    harness = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    contract = _contract()
+    store = WorkerRegistryStore(registry)
+    await store.register(contract, registered_at=T1)
+    for index in range(2):
+        await store.enqueue_capacity_waiter(
+            queue_id=f"queue-full-{index}",
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id=f"job-full-{index}",
+            workspace_sha256="b" * 64,
+            enqueued_at="2026-07-19T00:00:02+00:00",
+            deadline_at="2026-07-19T00:00:12+00:00",
+            max_waiters=2,
+        )
+    await HarnessStore(harness).record_heartbeat(
+        workspace_root=workspace,
+        subject_kind=HarnessRunKind.TOOL,
+        subject_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        sequence=1,
+        phase=HarnessHeartbeatPhase.RUNNING,
+        observed_at="2026-07-19T00:00:02+00:00",
+        timeout_seconds=10,
+        detail_code="ready",
+    )
+
+    snapshot = inspect_worker_authority_health(
+        registry_db_path=registry,
+        harness_db_path=harness,
+        workspace_root=workspace,
+        now="2026-07-19T00:00:03+00:00",
+    )
+    check = _worker_queue_check(snapshot)
+
+    assert check.status == "warn"
+    assert "等待 2/2" in check.detail
+    assert "等待队列已满" in check.suggestion
+    with sqlite3.connect(registry) as db:
+        db.execute(
+            "UPDATE worker_capacity_queue_policies "
+            "SET instance_id = 'forged-process'"
+        )
+    with pytest.raises(WorkerAuthorityHealthError) as raised:
+        inspect_worker_authority_health(
+            registry_db_path=registry,
+            harness_db_path=harness,
+            workspace_root=workspace,
+            now="2026-07-19T00:00:03+00:00",
+        )
+    assert raised.value.code == "registry_unreadable"
 
 
 @pytest.mark.asyncio

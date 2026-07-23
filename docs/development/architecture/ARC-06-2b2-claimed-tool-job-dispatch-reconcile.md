@@ -129,7 +129,8 @@ ToolJob 终态原因释放；重试不重复释放。
 - 自动选择 Worker、周期 claim、唤醒与调度循环；
 - claim owner lease、ack deadline 与 owner takeover；
 - 原始 ToolJob 参数的受控持久 envelope；当前队列刻意只存 digest，调度方必须仍持有匹配请求；
-- queued/claimed/orphan catalog、用户取消与 New UI/TUI 状态；
+- UI-13.1e 已交付 New UI/TUI 共用的聚合 backlog health；job 级 queued/claimed/orphan catalog 与用户操作
+  仍未实现；
 - priority、aging、workspace 公平、starvation 指标；
 - Agent/Browser Worker contract 与 payload adapter；
 - 跨 Store outbox 或通用 ARC-08 reconciler。

@@ -30,6 +30,9 @@
   - ARC-06.2b2 已让 claimed waiter 的 active reservation 进入 ToolJob dispatch-before-send 与真实
     Shell start fence；terminal 统一释放 reservation，lost claim 可证据化 no-side-effect 收口。见
     [设计与验证](ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。
+  - UI-13.1e 已把 durable policy、live waiting、active claim、oldest wait 与到期待收口事实投影到
+    New UI/TUI 共用的只读 Doctor authority，为自动 scheduler 提供最小运维门。见
+    [设计与验证](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
   - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
     公平、dependency DAG、affinity、cursor 与 starvation 指标。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。

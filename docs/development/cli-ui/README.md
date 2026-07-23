@@ -21,7 +21,8 @@ UI-15.5a 已将 New UI 触摸板/滚轮方向 burst 从直接丢弃改为首步�
 反向可立即打断的控制器，慢滑可逐行定位，快速滑动不会形成长惯性队列。
 UI-15.5b 又将 Textual TUI 的全局 pointer sensitivity 从默认每事件 2 行收敛为 1 行，所有
 VerticalScroll 页面沿用同一逐行策略。
-UI-13.1c 与 ARC-01.4c1-4c3 已让 New UI/TUI Doctor 都展示各自 terminal lifecycle 的实时 retention 状态；缺少
+UI-13.1c 与 ARC-01.4c1-4c3 已让 New UI/TUI Doctor 都展示各自 terminal lifecycle 的实时 retention 状态；
+UI-13.1d/1e 又让两端从同一只读 Worker authority 看见 capacity 与 durable queue backlog；缺少
 Composition 注入时明确标记不可观测，而不是伪造调度健康。UI-17.1 已为两端发布 14 项严格 capability manifest；
 UI-13.2a 已让 Provider 本地配置与显式 live probe 失败产生低基数稳定诊断码，并由 New UI/TUI/CLI 共用；
 UI-13.5a 已让 New UI/TUI/CLI/Agent Tool 先预览固定 3 文件的脱敏诊断 ZIP，再以精确 Snapshot 摘要把

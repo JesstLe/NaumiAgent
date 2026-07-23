@@ -107,7 +107,7 @@ async def run_doctor(
         ),
         _check_workspace(root),
         _check_state_store_catalog(config),
-        _check_worker_authority(config, workspace_root=root),
+        *_check_worker_authority(config, workspace_root=root),
         _check_git(root),
         _check_command("Node.js", "node", ["node", "--version"]),
         _check_command("ripgrep", "rg", ["rg", "--version"]),
@@ -271,7 +271,7 @@ def _check_worker_authority(
     config: AppConfig,
     *,
     workspace_root: Path,
-) -> DoctorCheck:
+) -> tuple[DoctorCheck, ...]:
     """Project strictly read-only worker registration and heartbeat facts."""
     from naumi_agent.runtime.composition import build_runtime_paths
 
@@ -291,13 +291,15 @@ def _check_worker_authority(
             "path_unreadable": "状态路径不可读",
             "path_invalid": "状态路径配置无效",
         }.get(code, "未知的只读诊断错误")
-        return DoctorCheck(
-            "Worker authority",
-            "error",
-            f"注册 authority 无法可信读取：{reason}。",
-            "停止向 Worker 派发任务；保留数据库并运行迁移预检或导出脱敏诊断。",
+        return (
+            DoctorCheck(
+                "Worker authority",
+                "error",
+                f"注册 authority 无法可信读取：{reason}。",
+                "停止向 Worker 派发任务；保留数据库并运行迁移预检或导出脱敏诊断。",
+            ),
         )
-    return _worker_authority_check(snapshot)
+    return _worker_authority_check(snapshot), _worker_queue_check(snapshot)
 
 
 def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
@@ -358,6 +360,49 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
     return DoctorCheck("Worker authority", status, detail, suggestion)
 
 
+def _worker_queue_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
+    if snapshot.registry_health == "absent":
+        return DoctorCheck(
+            "Worker 容量队列",
+            "pass",
+            "尚未启动隔离 Worker；容量队列会在首次真实入队时按需创建。",
+        )
+    configured = tuple(
+        worker for worker in snapshot.workers if worker.queue_max_waiters is not None
+    )
+    if not configured:
+        return DoctorCheck(
+            "Worker 容量队列",
+            "pass",
+            "当前 active Worker 尚未启用持久容量队列。",
+        )
+    queue_pressure = any(
+        worker.queue_max_waiters is not None
+        and worker.queue_max_waiters > 0
+        and worker.waiting_jobs >= worker.queue_max_waiters
+        for worker in configured
+    )
+    queue_stale = any(
+        worker.expired_waiting_jobs or worker.expired_claims
+        for worker in configured
+    )
+    status: DoctorStatus = (
+        "warn" if queue_pressure or queue_stale or snapshot.truncated else "pass"
+    )
+    summaries = [_worker_queue_summary(worker) for worker in configured[:3]]
+    detail = f"已配置队列 Worker {len(configured)} 个。 " + "；".join(summaries)
+    if snapshot.active_count > len(snapshot.workers):
+        detail += f"；另有 {snapshot.active_count - len(snapshot.workers)} 个未检查"
+    suggestion = ""
+    if queue_stale:
+        suggestion = "存在到期但尚未收口的队列事实；运行调度器核对后刷新。"
+    elif queue_pressure:
+        suggestion = "Worker 等待队列已满；等待容量释放，避免无界重试。"
+    elif snapshot.truncated:
+        suggestion = "active Worker 数量超过本页上限；使用后续队列详情页检查其余 Worker。"
+    return DoctorCheck("Worker 容量队列", status, detail, suggestion)
+
+
 def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
     health = {
         "starting": "启动中",
@@ -387,6 +432,21 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
         f"可用 {worker.available_jobs} "
         f"心跳{health}{age}"
     )
+
+
+def _worker_queue_summary(worker: WorkerAuthorityEntry) -> str:
+    assert worker.queue_max_waiters is not None
+    worker_id = worker.worker_id if len(worker.worker_id) <= 48 else worker.worker_id[:47] + "…"
+    detail = (
+        f"{worker_id} 等待 {worker.waiting_jobs}/{worker.queue_max_waiters}、"
+        f"领取 {worker.active_claims}"
+    )
+    if worker.oldest_wait_seconds is not None:
+        detail += f"、最久 {worker.oldest_wait_seconds:.1f}s"
+    pending_expiry = worker.expired_waiting_jobs + worker.expired_claims
+    if pending_expiry:
+        detail += f"、待收口 {pending_expiry}"
+    return detail
 
 
 def _check_api_key(config: AppConfig) -> DoctorCheck:
