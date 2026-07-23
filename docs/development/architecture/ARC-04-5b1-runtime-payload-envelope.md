@@ -37,7 +37,7 @@ Agent 或普通 Doctor 不会自动创建 key。跨进程首次创建必须由�
 
 `seal_runtime_payload()` 只接受：
 
-- 最大 16MB plaintext；
+- 最大 20MB plaintext（覆盖 2MB task + 16MB context 与有界 framing）；
 - 1..4096 bytes AAD；
 - 精确 32-byte key 与精确 12-byte nonce。
 
@@ -61,7 +61,7 @@ GCM tag 拒绝。
 
 ## 5. 自我审视与未完成
 
-- 本切片不保存任何 Agent Job，也不改变现有 embedded 委派路径；
+- ARC-04.5b2 已在本原语之上保存加密 Agent Job；embedded 委派路径仍未切换；
 - key rotation 目前只有 key ID 形状，没有 old-key catalog、reencrypt 或 revoke 流程；
 - OS credential backend 的跨平台可用性仍需 Mac/Windows/Linux 打包矩阵验证；
 - 环境变量注入适合 CI/容器 secret，不应写入 shell history 或项目配置；
@@ -69,5 +69,5 @@ GCM tag 拒绝。
 - envelope 仍公开 ciphertext 长度；若未来任务需要隐藏长度，应在更高层引入有上限的 padding policy；
 - backup/export 不包含 key，恢复到新设备必须单独迁移或重新 provision 并明确旧 payload 不可解密。
 
-下一切片 `ARC-04.5b2 Durable Agent Job Authority` 才能使用 request SHA-256 作为 AAD，把 task/context 的
-受控 JSON envelope 与 lifecycle/fencing 写入独立 Store。它不得保存明文 fallback。
+ARC-04.5b2 已使用 request SHA-256 作为 AAD，把 task/context 的有界二进制 envelope 与
+lifecycle/fencing 写入独立 Store。下一步 `ARC-04.5c` 将其接入 embedded Agent 生产派发。

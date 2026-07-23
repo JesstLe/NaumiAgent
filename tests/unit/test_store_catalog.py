@@ -11,6 +11,7 @@ import pytest
 
 from naumi_agent.claude_source.refresh import CLAUDE_SOURCE_STORE_SCHEMA_VERSION
 from naumi_agent.config.settings import AppConfig
+from naumi_agent.daemons.agent_jobs import AGENT_JOB_SCHEMA_VERSION
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
 from naumi_agent.daemons.tool_jobs import TOOL_JOB_SCHEMA_VERSION
@@ -53,7 +54,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
 
     definitions = build_store_catalog(_config(tmp_path))
 
-    assert len(definitions) == 17
+    assert len(definitions) == 18
     assert len({item.store_id for item in definitions}) == len(definitions)
     assert len({item.path for item in definitions}) == len(definitions)
     assert all(item.path.is_absolute() for item in definitions)
@@ -91,6 +92,13 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
     assert tool_jobs.path == (tmp_path / "runtime" / "tool-jobs.db").resolve()
     assert tool_jobs.supported_schema_version == TOOL_JOB_SCHEMA_VERSION == 3
     assert tool_jobs.retention is RetentionPolicy.AUDIT_LONG_TERM
+    agent_jobs = next(
+        item for item in definitions if item.store_id == "runtime.agent_jobs"
+    )
+    assert agent_jobs.path == (tmp_path / "runtime" / "agent-jobs.db").resolve()
+    assert agent_jobs.supported_schema_version == AGENT_JOB_SCHEMA_VERSION == 1
+    assert agent_jobs.retention is RetentionPolicy.AUDIT_LONG_TERM
+    assert agent_jobs.sensitivity is DataSensitivity.RESTRICTED
     evolution = next(
         item for item in definitions if item.store_id == "evolution.candidates"
     )

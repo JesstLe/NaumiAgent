@@ -1,5 +1,18 @@
 """Execution-daemon contracts shared by Runtime and isolated workers."""
 
+from naumi_agent.daemons.agent_jobs import (
+    AGENT_JOB_SCHEMA_VERSION,
+    TERMINAL_AGENT_JOB_STATES,
+    AgentJobConflictError,
+    AgentJobError,
+    AgentJobLifecycleConflictError,
+    AgentJobLifecycleReceipt,
+    AgentJobPayload,
+    AgentJobState,
+    AgentJobStore,
+    AgentJobTransitionResult,
+    StoredAgentJob,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
     WorkerAdmissionReason,
@@ -37,6 +50,17 @@ from naumi_agent.daemons.worker_registry import (
 )
 
 __all__ = [
+    "AGENT_JOB_SCHEMA_VERSION",
+    "AgentJobConflictError",
+    "AgentJobError",
+    "AgentJobLifecycleConflictError",
+    "AgentJobLifecycleReceipt",
+    "AgentJobPayload",
+    "AgentJobState",
+    "AgentJobStore",
+    "AgentJobTransitionResult",
+    "StoredAgentJob",
+    "TERMINAL_AGENT_JOB_STATES",
     "WorkerAdmissionDecision",
     "WorkerAdmissionReason",
     "WorkerAdmissionRequirements",

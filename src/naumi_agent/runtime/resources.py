@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 
+from naumi_agent.daemons.agent_jobs import AgentJobStore
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
@@ -39,6 +40,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
     "tool_job_store": (
         ToolJobStore,
         "tool_job_store 必须是 ToolJobStore 实例。",
+    ),
+    "agent_job_store": (
+        AgentJobStore,
+        "agent_job_store 必须是 AgentJobStore 实例。",
     ),
     "chat_run_store": (
         ChatRunStore,
@@ -90,6 +95,7 @@ class RuntimeResources:
     run_delegation_grant_store: RunDelegationGrantStore
     permission_decision_store: PermissionDecisionReceiptStore
     tool_job_store: ToolJobStore
+    agent_job_store: AgentJobStore
     evolution_candidate_store: EvolutionCandidateStore
     harness_store: HarnessStore
     harness_trust_store: HarnessTrustStore
@@ -118,6 +124,7 @@ class RuntimeResourceOverrides:
     run_delegation_grant_store: RunDelegationGrantStore | None = None
     permission_decision_store: PermissionDecisionReceiptStore | None = None
     tool_job_store: ToolJobStore | None = None
+    agent_job_store: AgentJobStore | None = None
     evolution_candidate_store: EvolutionCandidateStore | None = None
     harness_store: HarnessStore | None = None
     harness_trust_store: HarnessTrustStore | None = None

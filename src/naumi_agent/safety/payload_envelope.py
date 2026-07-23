@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 _SHA256_LENGTH = 64
 _KEY_BYTES = 32
 _NONCE_BYTES = 12
-_MAX_PLAINTEXT_BYTES = 16 * 1024**2
+_MAX_PLAINTEXT_BYTES = 20 * 1024**2
 _MAX_AAD_BYTES = 4 * 1024
 _MAX_CIPHERTEXT_BYTES = _MAX_PLAINTEXT_BYTES + 16
 _KEY_ID_RE = re.compile(r"^runtime-payload-v1:[0-9a-f]{24}$")

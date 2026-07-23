@@ -77,13 +77,14 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 
 本切片是执行合同，不是完整 Agent daemon：
 
-- 请求/结果仍只存在于当前进程内 execution history，尚未写入 durable Agent Job Store；
+- 当前 embedded 路径的请求/结果仍只存在于进程内 execution history；ARC-04.5b2 已建立 durable
+  Agent Job authority，但 `SubAgentManager` 尚未消费；
 - raw task/context 没有受控加密 payload envelope，重启后不能由 scheduler 恢复；
 - Agent 仍由 embedded Runtime 直接调用模型，不是注册到 Worker Registry 的持久 incarnation；
 - 尚未消费 Worker capacity reservation/FIFO、claim owner lease 或 workspace/provider fairness；
 - message bus 仍是 session-scoped 内存实现；
 - 没有 Supervisor、crash takeover、跨主机身份或 100 并发 soak 证据。
 
-ARC-04.5b1 已先交付 OS credential-backed key 与 bounded AES-256-GCM envelope。下一步应实现
-`ARC-04.5b2 Durable Agent Job Authority` 消费该 envelope；不能只增加 claim lease，因为没有可恢复
-payload 时 scheduler 仍无法安全重派。
+ARC-04.5b1 已交付 OS credential-backed key 与 bounded AES-256-GCM envelope，ARC-04.5b2 已建立
+加密 Agent Job Store、claim epoch、pre-start takeover 和 running recovery fence。下一步是
+`ARC-04.5c Embedded Agent Durable Dispatch`，把当前生产委派接入该 authority。
