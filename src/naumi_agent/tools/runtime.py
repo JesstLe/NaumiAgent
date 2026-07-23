@@ -395,7 +395,7 @@ class _RuntimeSnapshot:
         lines = ["### Subagent"]
         manager = self.engine.subagent_manager
         lines.append(
-            "- 集群并发："
+            "- 进程内 Agent 并发："
             f"{manager.active_execution_count}/{manager.max_parallel_agents} 活跃 · "
             f"{manager.queued_parallel_agent_count} 排队"
         )

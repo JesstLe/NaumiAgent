@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
 from inspect import signature
@@ -35,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
+_AGENT_ADMISSION_STACK: ContextVar[tuple[int, ...]] = ContextVar(
+    "naumi_agent_admission_stack",
+    default=(),
+)
 
 # 关键词 → Agent 映射
 _KEYWORD_AGENT_MAP: dict[str, str] = {
@@ -182,7 +187,9 @@ class SubAgentManager:
         self._active_executions: dict[str, _ActiveExecution] = {}
         self._execution_history: list[AgentExecutionRecord] = []
         self._max_parallel_agents = engine._config.safety.max_parallel_agents
-        self._parallel_agent_slots = asyncio.Semaphore(self._max_parallel_agents)
+        self._parallel_agent_slots = asyncio.BoundedSemaphore(
+            self._max_parallel_agents
+        )
         self._queued_parallel_agents = 0
 
     # --- 生命周期状态机 ---
@@ -668,6 +675,58 @@ class SubAgentManager:
         extra_context: str = "",
         event_callback: LegacyEventCallback | None = None,
     ) -> AgentResult:
+        """Admit every direct delegation through the shared process-local limit."""
+        stack = _AGENT_ADMISSION_STACK.get()
+        if id(self) in stack and self._parallel_agent_slots.locked():
+            return AgentResult(
+                status="error",
+                error=(
+                    "Agent 并发容量已满；嵌套委派会形成自等待，已安全拒绝。"
+                ),
+            )
+
+        self._queued_parallel_agents += 1
+        acquired = False
+        try:
+            await self._parallel_agent_slots.acquire()
+            acquired = True
+            self._queued_parallel_agents -= 1
+            return await self._run_admitted_delegation(
+                task,
+                extra_context=extra_context,
+                event_callback=event_callback,
+            )
+        finally:
+            if acquired:
+                self._parallel_agent_slots.release()
+            else:
+                self._queued_parallel_agents -= 1
+
+    async def _run_admitted_delegation(
+        self,
+        task: SubTask,
+        *,
+        extra_context: str = "",
+        event_callback: LegacyEventCallback | None = None,
+    ) -> AgentResult:
+        """Run one delegation whose caller already owns a capacity slot."""
+        stack = _AGENT_ADMISSION_STACK.get()
+        token = _AGENT_ADMISSION_STACK.set((*stack, id(self)))
+        try:
+            return await self._delegate_admitted(
+                task,
+                extra_context=extra_context,
+                event_callback=event_callback,
+            )
+        finally:
+            _AGENT_ADMISSION_STACK.reset(token)
+
+    async def _delegate_admitted(
+        self,
+        task: SubTask,
+        extra_context: str = "",
+        event_callback: LegacyEventCallback | None = None,
+    ) -> AgentResult:
         """将子任务委派给合适的 Agent."""
         agent_name = task.agent_name or self.select_agent(task.description)
         if not agent_name:
@@ -1001,7 +1060,7 @@ class SubAgentManager:
                     async with self._parallel_agent_slots:
                         queued_remaining -= 1
                         self._queued_parallel_agents -= 1
-                        results[index] = await self.delegate(task)
+                        results[index] = await self._run_admitted_delegation(task)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
