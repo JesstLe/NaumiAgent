@@ -14,7 +14,10 @@ from naumi_agent.harness.models import (
     HarnessEvalSpec,
     HarnessProfile,
 )
-from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
+from naumi_agent.harness.sandbox_batch import (
+    HarnessSandboxBatchAdmission,
+    HarnessSandboxBatchError,
+)
 from naumi_agent.harness.sandbox_request import (
     HarnessSandboxEvalRequest,
     HarnessSandboxEvalRequestBuilder,
@@ -22,6 +25,8 @@ from naumi_agent.harness.sandbox_request import (
     validate_request_checks,
 )
 from naumi_agent.harness.store import (
+    HarnessSandboxAdmissionCapacityError,
+    HarnessSandboxRetryDispatchFenceError,
     HarnessStore,
     HarnessStoreConflictError,
     HarnessStoreError,
@@ -125,6 +130,39 @@ async def _cancel_ticket(
     assert cancelled is not None
     assert cancelled.state == "cancelled"
     return receipt
+
+
+async def _prepare_retry(
+    tmp_path: Path,
+    *,
+    cancel_token: str = "1",
+    retry_token: str = "2",
+):
+    workspace = _workspace(tmp_path)
+    store = HarnessStore(tmp_path / "harness.db")
+    request = _build(workspace)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=request.request_sha256,
+        token=cancel_token,
+    )
+    retry = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{retry_token * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="准备 retry dispatch",
+        authority_token="a" * 32,
+        now="2026-07-23T01:03:00+00:00",
+    )
+    assert retry.decision == "accepted"
+    return workspace, store, request, cancel, retry
 
 
 def test_sandbox_request_compiles_clean_git_and_profile_authority(
@@ -573,6 +611,365 @@ async def test_retry_authority_wrapper_and_tamper_detection(tmp_path: Path) -> N
             workspace_root=workspace,
             action_id=accepted.action_id,
         )
+
+
+@pytest.mark.asyncio
+async def test_retry_dispatch_claims_new_ticket_and_persists_terminal(
+    tmp_path: Path,
+) -> None:
+    workspace, store, request, cancel, retry = await _prepare_retry(tmp_path)
+    dispatch, ticket = await store.claim_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+        ticket_id=f"hsadm_{'3' * 24}",
+        owner_id="retry-worker-a",
+        now="2026-07-23T01:04:00+00:00",
+        lease_seconds=30,
+        max_active=4,
+        max_queued=8,
+    )
+
+    assert dispatch.state == "claimed"
+    assert dispatch.epoch == 1
+    assert dispatch.ticket_id == ticket.ticket_id
+    assert ticket.ticket_id != cancel.ticket_id
+    assert ticket.authority_key == retry.execution_authority_key
+    assert ticket.authority_key != request.request_sha256
+    assert ticket.requested_samples == request.requested_samples
+    with pytest.raises(
+        HarnessSandboxRetryDispatchFenceError,
+        match="存活 ticket",
+    ):
+        await HarnessStore(store.db_path).claim_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'4' * 24}",
+            owner_id="retry-worker-b",
+            now="2026-07-23T01:04:01+00:00",
+            lease_seconds=30,
+            max_active=4,
+            max_queued=8,
+        )
+
+    terminal_ticket = await store.finish_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=ticket.ticket_id,
+        owner_id=ticket.owner_id,
+        epoch=ticket.epoch,
+        state="completed",
+        terminal_code="",
+        now="2026-07-23T01:04:02+00:00",
+    )
+    terminal = await store.finish_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+        owner_id=dispatch.owner_id,
+        dispatch_epoch=dispatch.epoch,
+        ticket_id=terminal_ticket.ticket_id,
+        ticket_epoch=terminal_ticket.epoch,
+        state="completed",
+        terminal_code="",
+        now="2026-07-23T01:04:02+00:00",
+    )
+    restored = await HarnessStore(store.db_path).get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    )
+
+    assert terminal == restored
+    assert terminal.state == "completed"
+    with pytest.raises(HarnessSandboxRetryDispatchFenceError, match="终态"):
+        await store.claim_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'5' * 24}",
+            owner_id="retry-worker-c",
+            now="2026-07-23T01:04:03+00:00",
+            lease_seconds=30,
+            max_active=4,
+            max_queued=8,
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_dispatch_recovers_only_after_ticket_expiry(tmp_path: Path) -> None:
+    workspace, store, _request, _cancel, retry = await _prepare_retry(tmp_path)
+    first, first_ticket = await store.claim_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+        ticket_id=f"hsadm_{'6' * 24}",
+        owner_id="retry-crashed-a",
+        now="2026-07-23T01:04:00+00:00",
+        lease_seconds=2,
+        max_active=4,
+        max_queued=8,
+    )
+    recovered, recovered_ticket = await HarnessStore(
+        store.db_path
+    ).claim_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+        ticket_id=f"hsadm_{'7' * 24}",
+        owner_id="retry-recovery-b",
+        now="2026-07-23T01:04:03+00:00",
+        lease_seconds=2,
+        max_active=4,
+        max_queued=8,
+    )
+    expired = await store.get_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=first_ticket.ticket_id,
+        now="2026-07-23T01:04:03+00:00",
+    )
+
+    assert expired is not None
+    assert expired.state == "expired"
+    assert recovered.epoch == first.epoch + 1
+    assert recovered.owner_id == "retry-recovery-b"
+    assert recovered.ticket_id == recovered_ticket.ticket_id
+    assert recovered_ticket.ticket_id != first_ticket.ticket_id
+    with pytest.raises(HarnessSandboxRetryDispatchFenceError, match="fence"):
+        await store.finish_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            owner_id=first.owner_id,
+            dispatch_epoch=first.epoch,
+            ticket_id=first.ticket_id,
+            ticket_epoch=first.ticket_epoch,
+            state="failed",
+            terminal_code="stale-worker",
+            now="2026-07-23T01:04:04+00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_admission_facade_completes_dispatch_and_detects_tamper(
+    tmp_path: Path,
+) -> None:
+    workspace, store, _request, cancel, retry = await _prepare_retry(tmp_path)
+    admission = HarnessSandboxBatchAdmission(
+        max_active=4,
+        max_queued=8,
+        store=store,
+        workspace_root=workspace,
+        owner_id="retry-facade",
+        lease_seconds=30,
+        poll_interval_seconds=0.01,
+        token=lambda: "8" * 32,
+        now=lambda: "2026-07-23T01:04:00+00:00",
+    )
+
+    async with admission.admit_retry(
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+    ) as ticket:
+        assert ticket.ticket_id != cancel.ticket_id
+        assert ticket.authority_key == retry.execution_authority_key
+
+    dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    )
+    assert dispatch is not None
+    assert dispatch.state == "completed"
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            """
+            UPDATE harness_sandbox_retry_dispatches
+            SET request_sha256 = ?
+            WHERE retry_action_id = ?
+            """,
+            ("0" * 64, retry.action_id),
+        )
+        db.commit()
+    with pytest.raises(HarnessStoreError, match="dispatch 摘要"):
+        await HarnessStore(store.db_path).get_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+        )
+
+    non_durable = HarnessSandboxBatchAdmission()
+    with pytest.raises(HarnessSandboxBatchError, match="持久化"):
+        async with non_durable.admit_retry(
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+        ):
+            pytest.fail("non-durable retry must not enter")
+
+
+@pytest.mark.asyncio
+async def test_retry_dispatch_user_cancel_is_terminal_not_crash_recovery(
+    tmp_path: Path,
+) -> None:
+    workspace, store, _request, _cancel, retry = await _prepare_retry(tmp_path)
+    admission = HarnessSandboxBatchAdmission(
+        max_active=4,
+        max_queued=8,
+        store=store,
+        workspace_root=workspace,
+        owner_id="retry-cancel",
+        lease_seconds=30,
+        poll_interval_seconds=0.01,
+        token=lambda: "9" * 32,
+        now=lambda: "2026-07-23T01:04:00+00:00",
+    )
+    entered = asyncio.Event()
+    ticket_holder = []
+
+    async def execute() -> None:
+        async with admission.admit_retry(
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+        ) as ticket:
+            ticket_holder.append(ticket)
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(execute())
+    await entered.wait()
+    ticket = ticket_holder[0]
+    cancel, _current = await admission.cancel(
+        action_id=f"hsac_{'f' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state=ticket.state,
+        actor_id="request-test",
+        reason="用户取消 retry dispatch",
+    )
+    assert cancel.decision == "accepted"
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    )
+    assert dispatch is not None
+    assert dispatch.state == "cancelled"
+    with pytest.raises(HarnessSandboxRetryDispatchFenceError, match="终态"):
+        await store.claim_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'a' * 24}",
+            owner_id="must-not-recover",
+            now="2026-07-23T01:04:01+00:00",
+            lease_seconds=30,
+            max_active=4,
+            max_queued=8,
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_dispatch_capacity_failure_is_atomic(tmp_path: Path) -> None:
+    workspace, store, _request, _cancel, retry = await _prepare_retry(tmp_path)
+    blocker = await store.enqueue_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=f"hsadm_{'b' * 24}",
+        authority_key="b" * 64,
+        lane="sandbox",
+        requested_samples=5,
+        owner_id="capacity-blocker",
+        now="2026-07-23T01:04:00+00:00",
+        lease_seconds=30,
+        max_active=1,
+        max_queued=0,
+    )
+    with pytest.raises(HarnessSandboxAdmissionCapacityError):
+        await store.claim_sandbox_retry_dispatch(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'c' * 24}",
+            owner_id="capacity-retry",
+            now="2026-07-23T01:04:01+00:00",
+            lease_seconds=30,
+            max_active=1,
+            max_queued=0,
+        )
+    assert await store.get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    ) is None
+
+    await store.finish_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=blocker.ticket_id,
+        owner_id=blocker.owner_id,
+        epoch=blocker.epoch,
+        state="completed",
+        terminal_code="",
+        now="2026-07-23T01:04:02+00:00",
+    )
+    dispatch, ticket = await store.claim_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+        retry_receipt_id=retry.receipt_id,
+        retry_receipt_sha256=retry.receipt_sha256,
+        ticket_id=f"hsadm_{'c' * 24}",
+        owner_id="capacity-retry",
+        now="2026-07-23T01:04:03+00:00",
+        lease_seconds=30,
+        max_active=1,
+        max_queued=0,
+    )
+    assert dispatch.state == "claimed"
+    assert ticket.state == "active"
+
+
+@pytest.mark.asyncio
+async def test_retry_admission_exception_marks_dispatch_failed(tmp_path: Path) -> None:
+    workspace, store, _request, _cancel, retry = await _prepare_retry(tmp_path)
+    admission = HarnessSandboxBatchAdmission(
+        max_active=4,
+        max_queued=8,
+        store=store,
+        workspace_root=workspace,
+        owner_id="retry-failure",
+        lease_seconds=30,
+        poll_interval_seconds=0.01,
+        token=lambda: "d" * 32,
+        now=lambda: "2026-07-23T01:04:00+00:00",
+    )
+
+    with pytest.raises(RuntimeError, match="simulated dispatch body failure"):
+        async with admission.admit_retry(
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+        ):
+            raise RuntimeError("simulated dispatch body failure")
+
+    dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    )
+    assert dispatch is not None
+    assert dispatch.state == "failed"
+    ticket = await store.get_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=dispatch.ticket_id,
+        now="2026-07-23T01:04:00+00:00",
+    )
+    assert ticket is not None
+    assert ticket.state == "failed"
+    assert ticket.terminal_code == "sandbox_batch_execution_failed"
 
 
 @pytest.mark.parametrize(

@@ -36,6 +36,8 @@ from naumi_agent.harness.store import (
     HarnessSandboxAdmissionPolicyError,
     HarnessSandboxAdmissionRetryReceipt,
     HarnessSandboxAdmissionTicket,
+    HarnessSandboxRetryDispatch,
+    HarnessSandboxRetryDispatchFenceError,
     HarnessStore,
     HarnessStoredEvalResult,
     HarnessStoreError,
@@ -442,6 +444,32 @@ class HarnessSandboxBatchAdmission:
             ) from exc
 
     @asynccontextmanager
+    async def admit_retry(
+        self,
+        *,
+        retry_action_id: str,
+        retry_receipt_id: str,
+        retry_receipt_sha256: str,
+        on_transition: SandboxAdmissionProgressCallback | None = None,
+    ) -> AsyncIterator[HarnessSandboxAdmissionTicket]:
+        """Claim one accepted retry intent through a fresh durable ticket."""
+        if not self.durable:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_dispatch_unavailable",
+                "Sandbox retry dispatch 必须使用持久化 admission。",
+            )
+        async with self._admit_durable(
+            authority_key="",
+            lane="sandbox",
+            requested_samples=5,
+            on_transition=on_transition,
+            retry_action_id=retry_action_id,
+            retry_receipt_id=retry_receipt_id,
+            retry_receipt_sha256=retry_receipt_sha256,
+        ) as ticket:
+            yield ticket
+
+    @asynccontextmanager
     async def admit(
         self,
         *,
@@ -513,6 +541,9 @@ class HarnessSandboxBatchAdmission:
         lane: HarnessSandboxEvalLane,
         requested_samples: int,
         on_transition: SandboxAdmissionProgressCallback | None,
+        retry_action_id: str = "",
+        retry_receipt_id: str = "",
+        retry_receipt_sha256: str = "",
     ) -> AsyncIterator[HarnessSandboxAdmissionTicket]:
         assert self._store is not None
         assert self._workspace_root is not None
@@ -522,7 +553,17 @@ class HarnessSandboxBatchAdmission:
                 "sandbox_batch_nested_admission",
                 "Sandbox Batch 不允许在持有同一容量槽时同步嵌套启动。",
             )
-        if _SHA256_RE.fullmatch(authority_key) is None:
+        retry_dispatch = any(
+            (retry_action_id, retry_receipt_id, retry_receipt_sha256)
+        )
+        if retry_dispatch and not all(
+            (retry_action_id, retry_receipt_id, retry_receipt_sha256)
+        ):
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_dispatch_invalid",
+                "Sandbox retry dispatch authority 字段不完整。",
+            )
+        if not retry_dispatch and _SHA256_RE.fullmatch(authority_key) is None:
             raise HarnessSandboxBatchError(
                 "sandbox_batch_admission_authority_invalid",
                 "Sandbox Batch admission authority_key 必须是 SHA-256。",
@@ -552,8 +593,25 @@ class HarnessSandboxBatchAdmission:
             )
         ticket_id = f"hsadm_{normalized_token[:24]}"
         owner_id = f"{self._owner_id}-{normalized_token[:16]}"
-        enqueue_task = asyncio.create_task(
-            self._store.enqueue_sandbox_admission(
+
+        async def claim_or_enqueue() -> tuple[
+            HarnessSandboxRetryDispatch | None,
+            HarnessSandboxAdmissionTicket,
+        ]:
+            if retry_dispatch:
+                return await self._store.claim_sandbox_retry_dispatch(
+                    workspace_root=self._workspace_root,
+                    retry_action_id=retry_action_id,
+                    retry_receipt_id=retry_receipt_id,
+                    retry_receipt_sha256=retry_receipt_sha256,
+                    ticket_id=ticket_id,
+                    owner_id=owner_id,
+                    now=self._timestamp(),
+                    lease_seconds=self._lease_seconds,
+                    max_active=self.max_active,
+                    max_queued=self.max_queued,
+                )
+            ticket = await self._store.enqueue_sandbox_admission(
                 workspace_root=self._workspace_root,
                 ticket_id=ticket_id,
                 authority_key=authority_key,
@@ -564,14 +622,19 @@ class HarnessSandboxBatchAdmission:
                 lease_seconds=self._lease_seconds,
                 max_active=self.max_active,
                 max_queued=self.max_queued,
-            ),
+            )
+            return None, ticket
+
+        enqueue_task = asyncio.create_task(
+            claim_or_enqueue(),
             name=f"sandbox-admission-enqueue-{ticket_id}",
         )
+        dispatch: HarnessSandboxRetryDispatch | None = None
         try:
-            ticket = await asyncio.shield(enqueue_task)
+            dispatch, ticket = await asyncio.shield(enqueue_task)
         except asyncio.CancelledError:
             try:
-                admitted = await enqueue_task
+                claimed_dispatch, admitted = await enqueue_task
                 cancelled = await self._store.finish_sandbox_admission(
                     workspace_root=self._workspace_root,
                     ticket_id=admitted.ticket_id,
@@ -581,6 +644,18 @@ class HarnessSandboxBatchAdmission:
                     terminal_code="sandbox_batch_cancelled_during_enqueue",
                     now=self._timestamp(),
                 )
+                if claimed_dispatch is not None:
+                    await self._store.finish_sandbox_retry_dispatch(
+                        workspace_root=self._workspace_root,
+                        retry_action_id=claimed_dispatch.retry_action_id,
+                        owner_id=claimed_dispatch.owner_id,
+                        dispatch_epoch=claimed_dispatch.epoch,
+                        ticket_id=cancelled.ticket_id,
+                        ticket_epoch=cancelled.epoch,
+                        state="cancelled",
+                        terminal_code=cancelled.terminal_code,
+                        now=self._timestamp(),
+                    )
                 await self._publish_admission_transition(
                     on_transition,
                     stage="cancelled",
@@ -601,6 +676,11 @@ class HarnessSandboxBatchAdmission:
         except HarnessSandboxAdmissionPolicyError as exc:
             raise HarnessSandboxBatchError(
                 "sandbox_batch_admission_policy_conflict",
+                str(exc),
+            ) from exc
+        except HarnessSandboxRetryDispatchFenceError as exc:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_dispatch_fenced",
                 str(exc),
             ) from exc
         except HarnessStoreError as exc:
@@ -635,7 +715,7 @@ class HarnessSandboxBatchAdmission:
                 self._local_ticket_tasks.pop(ticket.ticket_id, None)
             state = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
             try:
-                await self._store.finish_sandbox_admission(
+                initial_terminal = await self._store.finish_sandbox_admission(
                     workspace_root=self._workspace_root,
                     ticket_id=ticket.ticket_id,
                     owner_id=ticket.owner_id,
@@ -644,6 +724,18 @@ class HarnessSandboxBatchAdmission:
                     terminal_code="sandbox_batch_admission_observer_failed",
                     now=self._timestamp(),
                 )
+                if dispatch is not None:
+                    await self._store.finish_sandbox_retry_dispatch(
+                        workspace_root=self._workspace_root,
+                        retry_action_id=dispatch.retry_action_id,
+                        owner_id=dispatch.owner_id,
+                        dispatch_epoch=dispatch.epoch,
+                        ticket_id=initial_terminal.ticket_id,
+                        ticket_epoch=initial_terminal.epoch,
+                        state=state,
+                        terminal_code=initial_terminal.terminal_code,
+                        now=self._timestamp(),
+                    )
             except HarnessStoreError:
                 logger.warning("Sandbox Batch initial transition cleanup failed")
             raise
@@ -801,6 +893,29 @@ class HarnessSandboxBatchAdmission:
                         "sandbox_batch_admission_cleanup_failed",
                         f"Sandbox Batch admission 终态写入失败：{exc}",
                     ) from exc
+            if (
+                dispatch is not None
+                and terminal_ticket is not None
+                and terminal_ticket.state in {"completed", "cancelled", "failed"}
+            ):
+                try:
+                    await self._store.finish_sandbox_retry_dispatch(
+                        workspace_root=self._workspace_root,
+                        retry_action_id=dispatch.retry_action_id,
+                        owner_id=dispatch.owner_id,
+                        dispatch_epoch=dispatch.epoch,
+                        ticket_id=terminal_ticket.ticket_id,
+                        ticket_epoch=terminal_ticket.epoch,
+                        state=terminal_ticket.state,
+                        terminal_code=terminal_ticket.terminal_code,
+                        now=self._timestamp(),
+                    )
+                except HarnessStoreError as exc:
+                    if body_failure is None and not lease_failure:
+                        raise HarnessSandboxBatchError(
+                            "sandbox_batch_retry_dispatch_cleanup_failed",
+                            f"Sandbox retry dispatch 终态写入失败：{exc}",
+                        ) from exc
             if terminal_ticket is not None and terminal_ticket.state in {
                 "completed",
                 "cancelled",

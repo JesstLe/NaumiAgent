@@ -7,8 +7,9 @@
 本切片把一个 accepted Sandbox admission cancel receipt 一次性转换为新的 durable execution
 authority。它解决 retry 的“谁有权重试、重试哪个不可变请求、是否已经消费”问题。
 
-本切片不创建 admission ticket，也不启动 Worker。HAR-08.4o3 必须消费这里的 accepted receipt，
-建立可恢复 dispatch、新 ticket 和真实 H5a 前缀恢复后，New UI/TUI 才能显示 retry 已启动。
+本切片不创建 admission ticket，也不启动 Worker。HAR-08.4o3a 已消费 accepted receipt，建立
+可恢复 dispatch 与新 ticket；仍须 HAR-08.4o3b 完成真实 H5a 前缀恢复后，New UI/TUI 才能显示
+retry 已启动。
 
 ## 为什么授权与 dispatch 分开
 
@@ -137,8 +138,11 @@ Agent Tool、Slash、Bridge 和两套终端 UI 尚未接入，避免把 intent r
 - dispatch 崩溃后的 claim/lease/recovery；
 - Tool、Slash、Bridge、New UI 与 TUI surface。
 
-## 下一切片
+## 后续切片
 
-HAR-08.4o3 应实现 retry dispatch authority。它必须消费 accepted `hsarr_` receipt，创建全新 ticket，
-以 receipt 中的 execution authority 进入 durable admission，并从 `eval_request_sha256` 恢复原请求。
-dispatch 必须可在进程崩溃后重新 claim，不能依赖一次前台协程完成启动。
+HAR-08.4o3a 已实现 retry dispatch authority：消费 accepted `hsarr_` receipt，原子创建全新 ticket，
+并支持 expired ticket 后由下一 owner 生成新 generation。详见
+`HAR-08-4o3a-sandbox-retry-dispatch.md`。
+
+HAR-08.4o3b 仍须在该 dispatch context 中从 `eval_request_sha256` 恢复原请求，以新 permission receipt、
+Runtime lease 和 Run Grant 真实继续 H5a。

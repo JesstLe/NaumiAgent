@@ -82,7 +82,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 20
+HARNESS_STORE_SCHEMA_VERSION = 21
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -109,6 +109,7 @@ _SANDBOX_ADMISSION_CANCEL_ACTION_RE = re.compile(r"^hsac_[0-9a-f]{24}$")
 _SANDBOX_ADMISSION_CANCEL_RECEIPT_RE = re.compile(r"^hsacr_[0-9a-f]{24}$")
 _SANDBOX_ADMISSION_RETRY_ACTION_RE = re.compile(r"^hsar_[0-9a-f]{24}$")
 _SANDBOX_ADMISSION_RETRY_RECEIPT_RE = re.compile(r"^hsarr_[0-9a-f]{24}$")
+_SANDBOX_ADMISSION_RETRY_DISPATCH_RE = re.compile(r"^hsard_[0-9a-f]{24}$")
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -151,6 +152,10 @@ class HarnessSandboxAdmissionCapacityError(HarnessStoreError):
 
 class HarnessSandboxAdmissionFenceError(HarnessStoreError):
     """Raised when a Sandbox admission owner no longer owns its ticket epoch."""
+
+
+class HarnessSandboxRetryDispatchFenceError(HarnessStoreError):
+    """Raised when a retry dispatch is live, terminal, or owned elsewhere."""
 
 
 class HarnessSandboxAdmissionPolicyError(HarnessStoreConflictError):
@@ -406,6 +411,27 @@ class HarnessSandboxAdmissionRetryReceipt:
     reason: str
     created_at: str
     receipt_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxRetryDispatch:
+    """Durable retry dispatch claim bound to exactly one current new ticket."""
+
+    dispatch_id: str
+    retry_action_id: str
+    retry_receipt_id: str
+    retry_receipt_sha256: str
+    eval_request_sha256: str
+    execution_authority_key: str
+    state: str
+    owner_id: str
+    epoch: int
+    ticket_id: str
+    ticket_epoch: int
+    created_at: str
+    updated_at: str
+    terminal_code: str
+    request_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -5904,6 +5930,448 @@ class HarnessStore:
                 "Sandbox Batch retry authority 损坏或无法读取。"
             ) from exc
 
+    async def claim_sandbox_retry_dispatch(
+        self,
+        *,
+        workspace_root: str | Path,
+        retry_action_id: str,
+        retry_receipt_id: str,
+        retry_receipt_sha256: str,
+        ticket_id: str,
+        owner_id: str,
+        now: str,
+        lease_seconds: int,
+        max_active: int,
+        max_queued: int,
+    ) -> tuple[HarnessSandboxRetryDispatch, HarnessSandboxAdmissionTicket]:
+        """Claim one retry intent and atomically create its next new ticket."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(retry_action_id)
+        receipt_id = _normalize_sandbox_retry_receipt_id(retry_receipt_id)
+        receipt_sha256 = _validate_sha256(
+            retry_receipt_sha256,
+            field="retry_receipt_sha256",
+        )
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        _validate_sandbox_admission_capacity(max_active, max_queued)
+        _validate_sandbox_admission_lease_seconds(lease_seconds)
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                retry_row = await _select_sandbox_retry_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                if retry_row is None:
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry intent 不存在。"
+                    )
+                retry = _sandbox_retry_receipt_from_row(retry_row)
+                if (
+                    retry.decision != "accepted"
+                    or retry.receipt_id != receipt_id
+                    or not hmac.compare_digest(
+                        retry.receipt_sha256,
+                        receipt_sha256,
+                    )
+                ):
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry intent 未获授权或 receipt 不匹配。"
+                    )
+                manifest_row = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_eval_requests
+                        WHERE workspace_root = ? AND request_sha256 = ?
+                        """,
+                        (workspace, retry.eval_request_sha256),
+                    )
+                ).fetchone()
+                if manifest_row is None:
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry Request Manifest 不存在。"
+                    )
+                manifest = _sandbox_eval_request_from_row(manifest_row)
+
+                dispatch_row = await _select_sandbox_retry_dispatch(
+                    db,
+                    workspace_root=workspace,
+                    retry_action_id=action,
+                )
+                if dispatch_row is None:
+                    request_sha256 = _sandbox_retry_dispatch_digest(
+                        workspace_root=workspace,
+                        retry_action_id=action,
+                        retry_receipt_id=receipt_id,
+                        retry_receipt_sha256=receipt_sha256,
+                        eval_request_sha256=retry.eval_request_sha256,
+                        execution_authority_key=retry.execution_authority_key,
+                        created_at=timestamp,
+                    )
+                    dispatch_id = f"hsard_{request_sha256[:24]}"
+                    await db.execute(
+                        """
+                        INSERT INTO harness_sandbox_retry_dispatches (
+                            workspace_root, dispatch_id, retry_action_id,
+                            retry_receipt_id, retry_receipt_sha256,
+                            eval_request_sha256, execution_authority_key,
+                            state, owner_id, epoch, ticket_id, ticket_epoch,
+                            created_at, updated_at, terminal_code, request_sha256
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', 0, '', 0,
+                                  ?, ?, '', ?)
+                        """,
+                        (
+                            workspace,
+                            dispatch_id,
+                            action,
+                            receipt_id,
+                            receipt_sha256,
+                            retry.eval_request_sha256,
+                            retry.execution_authority_key,
+                            timestamp,
+                            timestamp,
+                            request_sha256,
+                        ),
+                    )
+                    dispatch_row = await _select_sandbox_retry_dispatch(
+                        db,
+                        workspace_root=workspace,
+                        retry_action_id=action,
+                    )
+                    assert dispatch_row is not None
+                dispatch = _sandbox_retry_dispatch_from_row(dispatch_row)
+                if dispatch.state in {"completed", "failed", "cancelled"}:
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        f"Sandbox retry dispatch 已是终态：{dispatch.state}。"
+                    )
+                if dispatch.state == "claimed":
+                    previous_ticket = await _select_sandbox_admission_row(
+                        db,
+                        workspace_root=workspace,
+                        ticket_id=dispatch.ticket_id,
+                    )
+                    if previous_ticket is None:
+                        await db.rollback()
+                        raise HarnessStoreError(
+                            "Sandbox retry dispatch 当前 ticket 缺失。"
+                        )
+                    previous_state = str(previous_ticket["state"])
+                    if previous_state in {"completed", "failed", "cancelled"}:
+                        previous_code = str(previous_ticket["terminal_code"])
+                        await db.execute(
+                            """
+                            UPDATE harness_sandbox_retry_dispatches
+                            SET state = ?, terminal_code = ?, updated_at = ?
+                            WHERE workspace_root = ? AND retry_action_id = ?
+                            """,
+                            (
+                                previous_state,
+                                previous_code,
+                                timestamp,
+                                workspace,
+                                action,
+                            ),
+                        )
+                        await db.commit()
+                        raise HarnessSandboxRetryDispatchFenceError(
+                            "Sandbox retry dispatch 的当前 ticket 已进入终态。"
+                        )
+                    if previous_state != "expired":
+                        await db.rollback()
+                        raise HarnessSandboxRetryDispatchFenceError(
+                            "Sandbox retry dispatch 已由存活 ticket 持有。"
+                        )
+                if ticket in {
+                    retry.source_ticket_id,
+                    dispatch.ticket_id,
+                }:
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "Sandbox retry dispatch 必须创建全新 ticket。"
+                    )
+                await _ensure_sandbox_admission_policy(
+                    db,
+                    workspace_root=workspace,
+                    max_active=max_active,
+                    max_queued=max_queued,
+                    now=timestamp,
+                )
+                if await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                ) is not None:
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        f"Sandbox admission ticket {ticket} 已被占用。"
+                    )
+                active, queued = await _sandbox_admission_counts(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                if active < max_active:
+                    ticket_state = "active"
+                elif queued < max_queued:
+                    ticket_state = "queued"
+                else:
+                    await db.rollback()
+                    raise HarnessSandboxAdmissionCapacityError(
+                        "Sandbox Batch 等待队列已满"
+                        f"（活跃 {active}/{max_active}，"
+                        f"排队 {queued}/{max_queued}）；"
+                        "请等待现有批次完成后重试。"
+                    )
+                cursor = await db.execute(
+                    """
+                    SELECT COALESCE(MAX(sequence), 0) + 1
+                    FROM harness_sandbox_admission_tickets
+                    WHERE workspace_root = ?
+                    """,
+                    (workspace,),
+                )
+                sequence = int((await cursor.fetchone())[0])
+                ticket_sha256 = _sandbox_admission_request_digest(
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                    authority_key=retry.execution_authority_key,
+                    lane="sandbox",
+                    requested_samples=manifest.request.requested_samples,
+                    owner_id=owner,
+                    enqueued_at=timestamp,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_admission_tickets (
+                        workspace_root, ticket_id, authority_key, lane,
+                        requested_samples, owner_id, epoch, state, sequence,
+                        enqueued_at, lease_expires_at, updated_at, terminal_code,
+                        request_sha256
+                    ) VALUES (?, ?, ?, 'sandbox', ?, ?, 1, ?, ?, ?, ?, ?, '', ?)
+                    """,
+                    (
+                        workspace,
+                        ticket,
+                        retry.execution_authority_key,
+                        manifest.request.requested_samples,
+                        owner,
+                        ticket_state,
+                        sequence,
+                        timestamp,
+                        expires_at,
+                        timestamp,
+                        ticket_sha256,
+                    ),
+                )
+                next_epoch = dispatch.epoch + 1
+                await db.execute(
+                    """
+                    UPDATE harness_sandbox_retry_dispatches
+                    SET state = 'claimed', owner_id = ?, epoch = ?,
+                        ticket_id = ?, ticket_epoch = 1, updated_at = ?,
+                        terminal_code = ''
+                    WHERE workspace_root = ? AND retry_action_id = ?
+                    """,
+                    (
+                        owner,
+                        next_epoch,
+                        ticket,
+                        timestamp,
+                        workspace,
+                        action,
+                    ),
+                )
+                current_dispatch_row = await _select_sandbox_retry_dispatch(
+                    db,
+                    workspace_root=workspace,
+                    retry_action_id=action,
+                )
+                current_ticket_row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                assert current_dispatch_row is not None
+                assert current_ticket_row is not None
+                current_dispatch = _sandbox_retry_dispatch_from_row(
+                    current_dispatch_row
+                )
+                current_ticket = await _sandbox_admission_ticket_from_row(
+                    db,
+                    current_ticket_row,
+                    now=timestamp,
+                )
+                await db.commit()
+                return current_dispatch, current_ticket
+        except (
+            HarnessSandboxAdmissionCapacityError,
+            HarnessSandboxAdmissionPolicyError,
+            HarnessSandboxRetryDispatchFenceError,
+            HarnessStoreConflictError,
+        ):
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError(
+                "无法 claim Sandbox retry dispatch。"
+            ) from exc
+
+    async def finish_sandbox_retry_dispatch(
+        self,
+        *,
+        workspace_root: str | Path,
+        retry_action_id: str,
+        owner_id: str,
+        dispatch_epoch: int,
+        ticket_id: str,
+        ticket_epoch: int,
+        state: str,
+        terminal_code: str,
+        now: str,
+    ) -> HarnessSandboxRetryDispatch:
+        """Fence one claimed dispatch into the same terminal state as its ticket."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(retry_action_id)
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        epoch = _normalize_sandbox_admission_epoch(dispatch_epoch)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        normalized_ticket_epoch = _normalize_sandbox_admission_epoch(ticket_epoch)
+        normalized_state = state.strip().lower() if isinstance(state, str) else ""
+        if normalized_state not in {"completed", "failed", "cancelled"}:
+            raise ValueError("Sandbox retry dispatch terminal state 无效。")
+        code = (
+            _normalize_text(terminal_code, field="terminal_code", max_length=128)
+            if terminal_code
+            else ""
+        )
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_sandbox_retry_dispatch(
+                    db,
+                    workspace_root=workspace,
+                    retry_action_id=action,
+                )
+                if row is None:
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry dispatch 不存在。"
+                    )
+                current = _sandbox_retry_dispatch_from_row(row)
+                if (
+                    current.state == normalized_state
+                    and current.owner_id == owner
+                    and current.epoch == epoch
+                    and current.ticket_id == ticket
+                    and current.ticket_epoch == normalized_ticket_epoch
+                    and current.terminal_code == code
+                ):
+                    await db.rollback()
+                    return current
+                if (
+                    current.state != "claimed"
+                    or current.owner_id != owner
+                    or current.epoch != epoch
+                    or current.ticket_id != ticket
+                    or current.ticket_epoch != normalized_ticket_epoch
+                ):
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry dispatch owner/epoch/ticket fence 已失效。"
+                    )
+                ticket_row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                if (
+                    ticket_row is None
+                    or str(ticket_row["owner_id"]) != owner
+                    or int(ticket_row["epoch"]) != normalized_ticket_epoch
+                    or str(ticket_row["state"]) != normalized_state
+                    or str(ticket_row["terminal_code"]) != code
+                ):
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry dispatch 与 ticket 终态不一致。"
+                    )
+                if datetime.fromisoformat(timestamp) < datetime.fromisoformat(
+                    current.updated_at
+                ):
+                    await db.rollback()
+                    raise HarnessSandboxRetryDispatchFenceError(
+                        "Sandbox retry dispatch 时钟发生回退。"
+                    )
+                await db.execute(
+                    """
+                    UPDATE harness_sandbox_retry_dispatches
+                    SET state = ?, terminal_code = ?, updated_at = ?
+                    WHERE workspace_root = ? AND retry_action_id = ?
+                    """,
+                    (normalized_state, code, timestamp, workspace, action),
+                )
+                updated = await _select_sandbox_retry_dispatch(
+                    db,
+                    workspace_root=workspace,
+                    retry_action_id=action,
+                )
+                assert updated is not None
+                result = _sandbox_retry_dispatch_from_row(updated)
+                await db.commit()
+                return result
+        except (
+            HarnessSandboxRetryDispatchFenceError,
+            HarnessStoreConflictError,
+        ):
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError(
+                "无法结束 Sandbox retry dispatch。"
+            ) from exc
+
+    async def get_sandbox_retry_dispatch(
+        self,
+        *,
+        workspace_root: str | Path,
+        retry_action_id: str,
+    ) -> HarnessSandboxRetryDispatch | None:
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_action_id(retry_action_id)
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                row = await _select_sandbox_retry_dispatch(
+                    db,
+                    workspace_root=workspace,
+                    retry_action_id=action,
+                )
+                return _sandbox_retry_dispatch_from_row(row) if row is not None else None
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError("无法读取 Sandbox retry dispatch。") from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox retry dispatch 损坏或无法读取。"
+            ) from exc
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -5945,6 +6413,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V18)
                             await db.executescript(_SCHEMA_V19)
                             await db.executescript(_SCHEMA_V20)
+                            await db.executescript(_SCHEMA_V21)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -6723,6 +7192,13 @@ def _normalize_sandbox_retry_action_id(value: str) -> str:
     return normalized
 
 
+def _normalize_sandbox_retry_receipt_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_RETRY_RECEIPT_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry receipt_id 格式无效。")
+    return normalized
+
+
 def _normalize_sandbox_admission_lane(value: str) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     if normalized not in _SANDBOX_ADMISSION_LANES:
@@ -7164,6 +7640,142 @@ def _sandbox_retry_receipt_from_row(
         reason=reason,
         created_at=created_at,
         receipt_sha256=expected,
+    )
+
+
+def _sandbox_retry_dispatch_digest(
+    *,
+    workspace_root: str,
+    retry_action_id: str,
+    retry_receipt_id: str,
+    retry_receipt_sha256: str,
+    eval_request_sha256: str,
+    execution_authority_key: str,
+    created_at: str,
+) -> str:
+    payload = _json_dumps({
+        "policy_version": "harness-sandbox-retry-dispatch-v1",
+        "workspace_root": workspace_root,
+        "retry_action_id": retry_action_id,
+        "retry_receipt_id": retry_receipt_id,
+        "retry_receipt_sha256": retry_receipt_sha256,
+        "eval_request_sha256": eval_request_sha256,
+        "execution_authority_key": execution_authority_key,
+        "created_at": created_at,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _select_sandbox_retry_dispatch(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    retry_action_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_retry_dispatches
+            WHERE workspace_root = ? AND retry_action_id = ?
+            """,
+            (workspace_root, retry_action_id),
+        )
+    ).fetchone()
+
+
+def _sandbox_retry_dispatch_from_row(
+    row: aiosqlite.Row,
+) -> HarnessSandboxRetryDispatch:
+    workspace_root = _canonical_workspace(str(row["workspace_root"]))
+    retry_action_id = _normalize_sandbox_retry_action_id(
+        str(row["retry_action_id"])
+    )
+    retry_receipt_id = _normalize_sandbox_retry_receipt_id(
+        str(row["retry_receipt_id"])
+    )
+    retry_receipt_sha256 = _validate_sha256(
+        str(row["retry_receipt_sha256"]),
+        field="retry_receipt_sha256",
+    )
+    eval_request_sha256 = _validate_sha256(
+        str(row["eval_request_sha256"]),
+        field="eval_request_sha256",
+    )
+    execution_authority_key = _validate_sha256(
+        str(row["execution_authority_key"]),
+        field="execution_authority_key",
+    )
+    created_at = _normalize_utc_timestamp(
+        str(row["created_at"]),
+        field="created_at",
+    )
+    updated_at = _normalize_utc_timestamp(
+        str(row["updated_at"]),
+        field="updated_at",
+    )
+    if datetime.fromisoformat(updated_at) < datetime.fromisoformat(created_at):
+        raise HarnessStoreError("Sandbox retry dispatch updated_at 早于创建时间。")
+    state = str(row["state"])
+    if state not in {"pending", "claimed", "completed", "failed", "cancelled"}:
+        raise HarnessStoreError("Sandbox retry dispatch state 无效。")
+    owner_id = str(row["owner_id"])
+    epoch = int(row["epoch"])
+    ticket_id = str(row["ticket_id"])
+    ticket_epoch = int(row["ticket_epoch"])
+    terminal_code = str(row["terminal_code"])
+    if state == "pending" and (
+        owner_id or epoch != 0 or ticket_id or ticket_epoch != 0 or terminal_code
+    ):
+        raise HarnessStoreError("Sandbox retry pending dispatch 字段不一致。")
+    if state == "claimed" and (
+        not owner_id
+        or epoch < 1
+        or not ticket_id
+        or ticket_epoch < 1
+        or terminal_code
+    ):
+        raise HarnessStoreError("Sandbox retry claimed dispatch 字段不一致。")
+    if state in {"completed", "failed", "cancelled"} and (
+        not owner_id or epoch < 1 or not ticket_id or ticket_epoch < 1
+    ):
+        raise HarnessStoreError("Sandbox retry terminal dispatch 字段不一致。")
+    if owner_id:
+        _normalize_run_lease_id(owner_id, field="owner_id")
+    if ticket_id:
+        _normalize_sandbox_admission_ticket_id(ticket_id)
+    expected = _sandbox_retry_dispatch_digest(
+        workspace_root=workspace_root,
+        retry_action_id=retry_action_id,
+        retry_receipt_id=retry_receipt_id,
+        retry_receipt_sha256=retry_receipt_sha256,
+        eval_request_sha256=eval_request_sha256,
+        execution_authority_key=execution_authority_key,
+        created_at=created_at,
+    )
+    if not hmac.compare_digest(expected, str(row["request_sha256"])):
+        raise HarnessStoreError("Sandbox retry dispatch 摘要不一致。")
+    dispatch_id = f"hsard_{expected[:24]}"
+    if (
+        _SANDBOX_ADMISSION_RETRY_DISPATCH_RE.fullmatch(dispatch_id) is None
+        or not hmac.compare_digest(dispatch_id, str(row["dispatch_id"]))
+    ):
+        raise HarnessStoreError("Sandbox retry dispatch identity 不一致。")
+    return HarnessSandboxRetryDispatch(
+        dispatch_id=dispatch_id,
+        retry_action_id=retry_action_id,
+        retry_receipt_id=retry_receipt_id,
+        retry_receipt_sha256=retry_receipt_sha256,
+        eval_request_sha256=eval_request_sha256,
+        execution_authority_key=execution_authority_key,
+        state=state,
+        owner_id=owner_id,
+        epoch=epoch,
+        ticket_id=ticket_id,
+        ticket_epoch=ticket_epoch,
+        created_at=created_at,
+        updated_at=updated_at,
+        terminal_code=terminal_code,
+        request_sha256=expected,
     )
 
 
@@ -8723,4 +9335,41 @@ ON harness_sandbox_admission_retry_attempts (
     workspace_root, execution_authority_key
 )
 WHERE decision = 'accepted';
+"""
+
+_SCHEMA_V21 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_retry_dispatches (
+    workspace_root TEXT NOT NULL,
+    dispatch_id TEXT NOT NULL,
+    retry_action_id TEXT NOT NULL,
+    retry_receipt_id TEXT NOT NULL,
+    retry_receipt_sha256 TEXT NOT NULL,
+    eval_request_sha256 TEXT NOT NULL,
+    execution_authority_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (
+        state IN ('pending', 'claimed', 'completed', 'failed', 'cancelled')
+    ),
+    owner_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 0),
+    ticket_id TEXT NOT NULL,
+    ticket_epoch INTEGER NOT NULL CHECK (ticket_epoch >= 0),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    terminal_code TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, retry_action_id),
+    UNIQUE (workspace_root, dispatch_id),
+    UNIQUE (workspace_root, retry_receipt_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_harness_sandbox_retry_dispatch_ticket
+ON harness_sandbox_retry_dispatches (
+    workspace_root, ticket_id
+)
+WHERE ticket_id <> '';
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_retry_dispatch_state
+ON harness_sandbox_retry_dispatches (
+    workspace_root, state, updated_at, retry_action_id
+);
 """

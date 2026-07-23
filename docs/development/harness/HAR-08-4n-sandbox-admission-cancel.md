@@ -141,5 +141,6 @@ HAR-08.4o2 已实现 cancel 后的 durable retry intent authority：accepted can
 并生成新 `action_id`、receipt 与 execution authority。详见
 `HAR-08-4o2-sandbox-retry-intent-authority.md`。
 
-HAR-08.4o3 仍须创建可恢复 dispatch 与新 ticket，并真实恢复执行；不得复活旧 ticket，也不得把 retry
-隐式合并进 cancel。
+HAR-08.4o3a 已创建可恢复 dispatch 与新 ticket，且只允许 expired generation 的崩溃恢复。详见
+`HAR-08-4o3a-sandbox-retry-dispatch.md`。HAR-08.4o3b 仍须真实恢复执行；不得复活旧 ticket，也不得把
+retry 隐式合并进 cancel。
