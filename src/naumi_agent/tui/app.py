@@ -423,6 +423,7 @@ class ArchiveSessionMessage(Message):
         self.title = title
 
 _THINKING_LABEL = "\U0001f4ad 思考中"  # 💭 思考中
+TUI_POINTER_SCROLL_LINES = 1.0
 
 
 class AgentTokenMessage(Message):
@@ -1701,6 +1702,7 @@ class NaumiApp(App):
         self.BINDINGS = _build_textual_bindings(self._keybindings)
         self.CSS = self.CSS + "\n" + self._style_config.tui_css()
         super().__init__(**kwargs)
+        self.scroll_sensitivity_y = TUI_POINTER_SCROLL_LINES
         self.engine = engine
         self.debug_trace = debug_trace
         self._show_reasoning = show_reasoning

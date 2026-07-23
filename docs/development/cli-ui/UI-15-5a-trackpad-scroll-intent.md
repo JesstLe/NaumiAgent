@@ -56,6 +56,7 @@
 
 - 大多数终端只把触摸板滚动暴露为离散方向序列，当前输入合同没有像素或小数 delta，因此本切片不能
   伪造真正的亚行滚动；它提供的是逐行、匀速、有界合并。
-- Textual TUI 走其自身 mouse/scroll 事件系统，本切片没有声称共享 Node 控制器；UI-15.5 仍为 partial。
+- Textual TUI 走其自身 mouse/scroll 事件系统，没有共享 Node 控制器；UI-15.5b 已通过应用级
+  sensitivity 补齐离散滚轮逐行定位，但两端都没有伪造 fractional delta。
 - Windows Terminal、iTerm2、Terminal.app 和 Linux 主流终端的真实设备录制尚未进入 UI-17.4 发布矩阵。
 - 若后续终端 capability 能提供 wheel delta，应新增归一化合同和设备矩阵，而不是扩大当前待输出队列。
