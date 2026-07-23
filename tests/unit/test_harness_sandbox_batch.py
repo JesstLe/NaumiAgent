@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from naumi_agent.harness.sandbox_batch import (
     HarnessSandboxBatchCoordinator,
     HarnessSandboxBatchError,
 )
+from naumi_agent.harness.store import HarnessStore
 
 
 class _FrozenModel(BaseModel):
@@ -204,6 +206,163 @@ async def test_inherited_admission_context_expires_when_parent_batch_releases(
     assert child_entered.is_set()
     assert admission.snapshot().active == 0
     assert admission.snapshot().queued == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_cancellation_removes_waiter_across_instances(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "harness.db"
+    active_gate = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=1,
+        store=HarnessStore(db_path),
+        workspace_root=tmp_path,
+        owner_id="runtime-a",
+        lease_seconds=2,
+        poll_interval_seconds=0.01,
+        token=lambda: "a" * 32,
+    )
+    waiting_gate = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=1,
+        store=HarnessStore(db_path),
+        workspace_root=tmp_path,
+        owner_id="runtime-b",
+        lease_seconds=2,
+        poll_interval_seconds=0.01,
+        token=lambda: "b" * 32,
+    )
+    active_started = asyncio.Event()
+    release_active = asyncio.Event()
+
+    async def hold_active() -> None:
+        async with active_gate.admit(
+            authority_key="a" * 64,
+            lane="sandbox",
+            requested_samples=5,
+        ):
+            active_started.set()
+            await release_active.wait()
+
+    async def wait_for_slot() -> None:
+        async with waiting_gate.admit(
+            authority_key="b" * 64,
+            lane="sandbox",
+            requested_samples=5,
+        ):
+            pytest.fail("cancelled waiter must not enter")
+
+    active = asyncio.create_task(hold_active())
+    await active_started.wait()
+    waiting = asyncio.create_task(wait_for_slot())
+    for _ in range(100):
+        snapshot = await waiting_gate.snapshot_durable()
+        if snapshot.queued == 1:
+            break
+        await asyncio.sleep(0.01)
+    assert snapshot.active == 1
+    assert snapshot.queued == 1
+
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    snapshot = await waiting_gate.snapshot_durable()
+    assert snapshot.active == 1
+    assert snapshot.queued == 0
+
+    release_active.set()
+    await active
+    assert (await active_gate.snapshot_durable()).active == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_cancellation_during_enqueue_cleans_committed_ticket(
+    tmp_path: Path,
+) -> None:
+    class _DelayedHarnessStore(HarnessStore):
+        def __init__(self, db_path: Path) -> None:
+            super().__init__(db_path)
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def enqueue_sandbox_admission(self, **kwargs):
+            self.started.set()
+            await self.release.wait()
+            return await super().enqueue_sandbox_admission(**kwargs)
+
+    store = _DelayedHarnessStore(tmp_path / "harness.db")
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=store,
+        workspace_root=tmp_path,
+        owner_id="runtime-enqueue-cancel",
+        lease_seconds=2,
+        poll_interval_seconds=0.01,
+        token=lambda: "d" * 32,
+    )
+
+    async def enter() -> None:
+        async with admission.admit(
+            authority_key="d" * 64,
+            lane="sandbox",
+            requested_samples=5,
+        ):
+            pytest.fail("cancelled enqueue must not enter")
+
+    task = asyncio.create_task(enter())
+    await store.started.wait()
+    task.cancel()
+    store.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    snapshot = await admission.snapshot_durable()
+    assert snapshot.active == 0
+    assert snapshot.queued == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_fence_loss_cancels_active_body(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=store,
+        workspace_root=tmp_path,
+        owner_id="runtime-fence",
+        lease_seconds=2,
+        poll_interval_seconds=0.05,
+        token=lambda: "c" * 32,
+    )
+    entered = asyncio.Event()
+
+    async def execute() -> None:
+        with pytest.raises(HarnessSandboxBatchError) as captured:
+            async with admission.admit(
+                authority_key="c" * 64,
+                lane="sandbox",
+                requested_samples=5,
+            ):
+                entered.set()
+                await asyncio.sleep(1)
+        assert captured.value.code == "sandbox_batch_admission_fence_lost"
+
+    task = asyncio.create_task(execute())
+    await entered.wait()
+    await store.finish_sandbox_admission(
+        workspace_root=tmp_path,
+        ticket_id=f"hsadm_{'c' * 24}",
+        owner_id=f"runtime-fence-{'c' * 16}",
+        epoch=1,
+        state="cancelled",
+        terminal_code="external_fence",
+        now=datetime.now(UTC).isoformat(),
+    )
+    await asyncio.wait_for(task, timeout=1)
 
 
 @pytest.mark.asyncio

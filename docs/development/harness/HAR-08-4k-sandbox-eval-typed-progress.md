@@ -107,5 +107,9 @@ Sandbox Eval <阶段>: <persisted>/<requested> · <batch-id>
 - Linux、Windows 的真实隔离 Worker/终端视觉 CI 仍缺失。
 - 取消和重试动作尚未进入 Sandbox typed 页面；必须在 durable admission/lease 语义完成后接入，不能只取消前端。
 
-下一依赖切片应优先实现跨进程 Sandbox admission/queue authority，再接 typed queued/cancel/retry；不应继续扩张
-纯视觉状态。
+HAR-08.4l 已实现跨进程 Sandbox admission/queue authority，包括 workspace-wide FIFO、
+queued/active lease、崩溃回收、策略冲突和 owner/epoch fencing。详见
+`HAR-08-4l-durable-sandbox-admission.md`。
+
+下一依赖切片应基于真实 ticket transition 接 typed queued/admitted/cancelled 状态；不应继续扩张纯视觉
+状态，也不应从前端计时器或进程内 semaphore 推导 durable queued 状态。

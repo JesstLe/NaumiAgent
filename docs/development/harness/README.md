@@ -45,7 +45,10 @@ RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `m
 authority；HAR-08.4i 又把 request、admission、coordinator、kernel 与 H5a 组合为共享
 `HarnessService.eval_sandbox()`；HAR-08.4j 已开放 `harness_eval_sandbox` Tool 与共享 Slash 命令。
 HAR-08.4k 已把 coordinator checkpoint 作为闭集 Runtime event 同步到 New UI/TUI，且只显示
-Store-confirmed 进度；跨进程队列、真实 queued/cancel/retry 和三平台隔离 CI 仍未完成。
+Store-confirmed 进度。HAR-08.4l 又把进程内 Sandbox Batch gate 升级为 Harness Store v17 的
+workspace-wide durable authority：跨进程 FIFO、queued/active lease、崩溃回收、策略冲突和
+owner/epoch fencing 均由 SQLite 原子状态转换负责。生产 Harness Sandbox 与 Evolution
+RED/GREEN/adversarial lane 共享同一容量权威；typed queued/cancel/retry 和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
