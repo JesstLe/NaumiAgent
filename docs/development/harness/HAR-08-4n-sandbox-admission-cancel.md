@@ -137,6 +137,9 @@ HAR-08.4o1 已先持久化不可变 Sandbox Eval Request Manifest，使新进程
 恢复原请求，而不信任客户端重述参数。详见
 `HAR-08-4o1-sandbox-eval-request-manifest.md`。
 
-HAR-08.4o2 应实现 cancel 后的显式 retry authority。retry 必须引用 accepted cancel receipt，
-生成新 `action_id`、新 ticket 与新 execution authority；不得复活旧 ticket，也不得把 retry
+HAR-08.4o2 已实现 cancel 后的 durable retry intent authority：accepted cancel receipt 被一次性消费，
+并生成新 `action_id`、receipt 与 execution authority。详见
+`HAR-08-4o2-sandbox-retry-intent-authority.md`。
+
+HAR-08.4o3 仍须创建可恢复 dispatch 与新 ticket，并真实恢复执行；不得复活旧 ticket，也不得把 retry
 隐式合并进 cancel。

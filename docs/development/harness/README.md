@@ -53,7 +53,9 @@ admitted、released completed 与异常终态同步到 New UI/TUI。HAR-08.4n �
 cancel：New UI、TUI 共享 Store v18 原子裁决，accepted/rejected 均生成 durable receipt，
 跨进程 active owner 在有界 poll 内停止。HAR-08.4o1 又以 Store v19 持久化不可变
 Sandbox Eval Request Manifest：新进程可按服务端 request authority 恢复原请求，同 batch 漂移、
-并发覆盖与持久内容篡改均失败关闭；retry action/execution authority 和三平台隔离 CI 仍未完成。
+并发覆盖与持久内容篡改均失败关闭。HAR-08.4o2 已以 Store v20 一次性消费 accepted cancel receipt，
+生成可恢复的新 retry action/receipt 与 execution authority，并支持 retry chain 回溯原 request；
+durable dispatch、新 ticket、真实恢复执行和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

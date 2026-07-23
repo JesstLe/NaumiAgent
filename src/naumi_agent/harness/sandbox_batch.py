@@ -34,6 +34,7 @@ from naumi_agent.harness.store import (
     HarnessSandboxAdmissionCapacityError,
     HarnessSandboxAdmissionFenceError,
     HarnessSandboxAdmissionPolicyError,
+    HarnessSandboxAdmissionRetryReceipt,
     HarnessSandboxAdmissionTicket,
     HarnessStore,
     HarnessStoredEvalResult,
@@ -400,6 +401,45 @@ class HarnessSandboxBatchAdmission:
             if owner_task is not None and not owner_task.done():
                 owner_task.cancel()
         return receipt, ticket
+
+    async def authorize_retry(
+        self,
+        *,
+        action_id: str,
+        cancel_receipt_id: str,
+        cancel_receipt_sha256: str,
+        actor_id: str,
+        reason: str,
+    ) -> HarnessSandboxAdmissionRetryReceipt:
+        """Issue one server-generated execution authority from an accepted cancel."""
+        if self._store is None or self._workspace_root is None:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_authority_unavailable",
+                "当前 Sandbox admission 未启用持久化 retry 权威。",
+            )
+        raw_token = self._token()
+        token = raw_token.strip().lower() if isinstance(raw_token, str) else ""
+        if re.fullmatch(r"[0-9a-f]{32,64}", token) is None:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_token_invalid",
+                "Sandbox retry authority token 格式无效。",
+            )
+        try:
+            return await self._store.authorize_sandbox_admission_retry(
+                workspace_root=self._workspace_root,
+                action_id=action_id,
+                cancel_receipt_id=cancel_receipt_id,
+                cancel_receipt_sha256=cancel_receipt_sha256,
+                actor_id=actor_id,
+                reason=reason,
+                authority_token=token,
+                now=self._timestamp(),
+            )
+        except (ValueError, HarnessStoreError) as exc:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_retry_unavailable",
+                f"Sandbox Batch retry 权威不可用：{exc}",
+            ) from exc
 
     @asynccontextmanager
     async def admit(

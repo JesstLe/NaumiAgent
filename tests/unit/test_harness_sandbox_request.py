@@ -14,6 +14,7 @@ from naumi_agent.harness.models import (
     HarnessEvalSpec,
     HarnessProfile,
 )
+from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
 from naumi_agent.harness.sandbox_request import (
     HarnessSandboxEvalRequest,
     HarnessSandboxEvalRequestBuilder,
@@ -86,6 +87,44 @@ def _build(
         batch_id=batch_id,
         requested_samples=requested_samples,
     )
+
+
+async def _cancel_ticket(
+    store: HarnessStore,
+    workspace: Path,
+    *,
+    authority_key: str,
+    token: str,
+    enqueued_at: str = "2026-07-23T01:01:00+00:00",
+    now: str = "2026-07-23T01:02:00+00:00",
+):
+    ticket = await store.enqueue_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=f"hsadm_{token * 24}",
+        authority_key=authority_key,
+        lane="sandbox",
+        requested_samples=5,
+        owner_id=f"request-test-{token}",
+        now=enqueued_at,
+        lease_seconds=300,
+        max_active=4,
+        max_queued=8,
+    )
+    receipt, cancelled = await store.cancel_sandbox_admission(
+        workspace_root=workspace,
+        action_id=f"hsac_{token * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=authority_key,
+        epoch=ticket.epoch,
+        expected_state=ticket.state,
+        actor_id="request-test",
+        reason="构造 accepted cancel receipt",
+        now=now,
+    )
+    assert receipt.decision == "accepted"
+    assert cancelled is not None
+    assert cancelled.state == "cancelled"
+    return receipt
 
 
 def test_sandbox_request_compiles_clean_git_and_profile_authority(
@@ -215,6 +254,325 @@ async def test_request_manifest_concurrent_process_facades_converge(
         assert db.execute(
             "SELECT COUNT(*) FROM harness_sandbox_eval_requests"
         ).fetchone() == (1,)
+
+
+@pytest.mark.asyncio
+async def test_retry_authority_consumes_cancel_once_and_survives_restart(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    store = HarnessStore(db_path)
+    request = _build(workspace)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=request.request_sha256,
+        token="1",
+    )
+
+    accepted = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'2' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="用户显式重试",
+        authority_token="a" * 32,
+        now="2026-07-23T01:03:00+00:00",
+    )
+    replayed = await HarnessStore(db_path).authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=accepted.action_id,
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="用户显式重试",
+        authority_token="b" * 32,
+        now="2026-07-23T01:04:00+00:00",
+    )
+    restored = await HarnessStore(db_path).get_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=accepted.action_id,
+    )
+    consumed = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'3' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="不允许重复消费",
+        authority_token="c" * 32,
+        now="2026-07-23T01:05:00+00:00",
+    )
+
+    assert accepted == replayed == restored
+    assert accepted.decision == "accepted"
+    assert accepted.code == "sandbox_batch_retry_authorized"
+    assert accepted.eval_request_sha256 == request.request_sha256
+    assert accepted.execution_authority_key != request.request_sha256
+    assert consumed.decision == "rejected"
+    assert consumed.code == "sandbox_batch_retry_cancel_receipt_consumed"
+    assert consumed.execution_authority_key == ""
+    with pytest.raises(HarnessStoreConflictError, match="不同请求"):
+        await store.authorize_sandbox_admission_retry(
+            workspace_root=workspace,
+            action_id=accepted.action_id,
+            cancel_receipt_id=cancel.receipt_id,
+            cancel_receipt_sha256=cancel.receipt_sha256,
+            actor_id="request-test",
+            reason="改写同 action 的理由",
+            authority_token="d" * 32,
+            now="2026-07-23T01:06:00+00:00",
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_authority_rejects_untrusted_cancel_or_missing_manifest(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    store = HarnessStore(tmp_path / "harness.db")
+    request = _build(workspace)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=request.request_sha256,
+        token="4",
+    )
+
+    mismatch = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'5' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256="f" * 64,
+        actor_id="request-test",
+        reason="错误 cancel digest",
+        authority_token="d" * 32,
+        now="2026-07-23T01:03:00+00:00",
+    )
+    missing_cancel = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'6' * 24}",
+        cancel_receipt_id=f"hsacr_{'0' * 24}",
+        cancel_receipt_sha256="0" * 64,
+        actor_id="request-test",
+        reason="不存在的 cancel receipt",
+        authority_token="e" * 32,
+        now="2026-07-23T01:03:00+00:00",
+    )
+    rollback = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'0' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="回退时钟",
+        authority_token="0" * 32,
+        now="2026-07-23T00:59:00+00:00",
+    )
+    rejected_cancel, _ = await store.cancel_sandbox_admission(
+        workspace_root=workspace,
+        action_id=f"hsac_{'a' * 24}",
+        ticket_id=cancel.ticket_id,
+        authority_key=cancel.authority_key,
+        epoch=cancel.presented_epoch,
+        expected_state=cancel.presented_state,
+        actor_id="request-test",
+        reason="终态 ticket 的 rejected cancel",
+        now="2026-07-23T01:03:00+00:00",
+    )
+    not_accepted = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'b' * 24}",
+        cancel_receipt_id=rejected_cancel.receipt_id,
+        cancel_receipt_sha256=rejected_cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="rejected cancel 不得重试",
+        authority_token="b" * 32,
+        now="2026-07-23T01:04:00+00:00",
+    )
+    foreign_cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key="e" * 64,
+        token="7",
+    )
+    missing_manifest = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'8' * 24}",
+        cancel_receipt_id=foreign_cancel.receipt_id,
+        cancel_receipt_sha256=foreign_cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="没有 request manifest",
+        authority_token="f" * 32,
+        now="2026-07-23T01:03:00+00:00",
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            """
+            UPDATE harness_sandbox_admission_tickets
+            SET state = 'completed'
+            WHERE ticket_id = ?
+            """,
+            (cancel.ticket_id,),
+        )
+        db.commit()
+    invalid_source = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'c' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="source ticket 已被篡改",
+        authority_token="c" * 32,
+        now="2026-07-23T01:05:00+00:00",
+    )
+
+    assert mismatch.code == "sandbox_batch_retry_cancel_receipt_mismatch"
+    assert missing_cancel.code == "sandbox_batch_retry_cancel_receipt_not_found"
+    assert rollback.code == "sandbox_batch_retry_clock_rollback"
+    assert not_accepted.code == "sandbox_batch_retry_cancel_not_accepted"
+    assert missing_manifest.code == "sandbox_batch_retry_request_manifest_missing"
+    assert invalid_source.code == "sandbox_batch_retry_source_ticket_invalid"
+    assert {
+        mismatch.decision,
+        missing_cancel.decision,
+        rollback.decision,
+        not_accepted.decision,
+        missing_manifest.decision,
+        invalid_source.decision,
+    } == {"rejected"}
+
+
+@pytest.mark.asyncio
+async def test_retry_authority_concurrency_and_chain_resolve_original_request(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    store = HarnessStore(db_path)
+    request = _build(workspace)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=request.request_sha256,
+        token="9",
+    )
+
+    decisions = await asyncio.gather(
+        HarnessStore(db_path).authorize_sandbox_admission_retry(
+            workspace_root=workspace,
+            action_id=f"hsar_{'a' * 24}",
+            cancel_receipt_id=cancel.receipt_id,
+            cancel_receipt_sha256=cancel.receipt_sha256,
+            actor_id="process-a",
+            reason="并发重试 A",
+            authority_token="1" * 32,
+            now="2026-07-23T01:03:00+00:00",
+        ),
+        HarnessStore(db_path).authorize_sandbox_admission_retry(
+            workspace_root=workspace,
+            action_id=f"hsar_{'b' * 24}",
+            cancel_receipt_id=cancel.receipt_id,
+            cancel_receipt_sha256=cancel.receipt_sha256,
+            actor_id="process-b",
+            reason="并发重试 B",
+            authority_token="2" * 32,
+            now="2026-07-23T01:03:00+00:00",
+        ),
+    )
+    accepted = next(item for item in decisions if item.decision == "accepted")
+    rejected = next(item for item in decisions if item.decision == "rejected")
+    assert rejected.code == "sandbox_batch_retry_cancel_receipt_consumed"
+
+    chained_cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=accepted.execution_authority_key,
+        token="c",
+        enqueued_at="2026-07-23T01:05:00+00:00",
+        now="2026-07-23T01:06:00+00:00",
+    )
+    chained = await store.authorize_sandbox_admission_retry(
+        workspace_root=workspace,
+        action_id=f"hsar_{'d' * 24}",
+        cancel_receipt_id=chained_cancel.receipt_id,
+        cancel_receipt_sha256=chained_cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="取消 retry 后再次显式重试",
+        authority_token="3" * 32,
+        now="2026-07-23T01:07:00+00:00",
+    )
+
+    assert chained.decision == "accepted"
+    assert chained.eval_request_sha256 == request.request_sha256
+    assert chained.source_authority_key == accepted.execution_authority_key
+    assert chained.execution_authority_key not in {
+        request.request_sha256,
+        accepted.execution_authority_key,
+    }
+
+
+@pytest.mark.asyncio
+async def test_retry_authority_wrapper_and_tamper_detection(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    db_path = tmp_path / "harness.db"
+    store = HarnessStore(db_path)
+    request = _build(workspace)
+    await store.record_sandbox_eval_request(
+        request,
+        created_at="2026-07-23T01:00:00+00:00",
+    )
+    cancel = await _cancel_ticket(
+        store,
+        workspace,
+        authority_key=request.request_sha256,
+        token="e",
+    )
+    admission = HarnessSandboxBatchAdmission(
+        max_active=4,
+        max_queued=8,
+        store=store,
+        workspace_root=workspace,
+        token=lambda: "4" * 32,
+        now=lambda: "2026-07-23T01:03:00+00:00",
+    )
+    accepted = await admission.authorize_retry(
+        action_id=f"hsar_{'f' * 24}",
+        cancel_receipt_id=cancel.receipt_id,
+        cancel_receipt_sha256=cancel.receipt_sha256,
+        actor_id="request-test",
+        reason="通过 admission facade 授权",
+    )
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            """
+            UPDATE harness_sandbox_admission_retry_attempts
+            SET action_sha256 = ?
+            WHERE action_id = ?
+            """,
+            ("0" * 64, accepted.action_id),
+        )
+        db.commit()
+
+    with pytest.raises(HarnessStoreError, match="action 摘要"):
+        await HarnessStore(db_path).get_sandbox_admission_retry(
+            workspace_root=workspace,
+            action_id=accepted.action_id,
+        )
 
 
 @pytest.mark.parametrize(
