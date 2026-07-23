@@ -105,6 +105,14 @@ from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckRunner,
     HarnessSandboxCheckStatus,
 )
+from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestBuilder
+from naumi_agent.harness.sandbox_service import (
+    HarnessSandboxEvalBatchReceipt,
+    HarnessSandboxEvalExecutor,
+    HarnessSandboxEvalProfileAuthority,
+    HarnessSandboxEvalServiceError,
+    SandboxEvalProgressCallback,
+)
 from naumi_agent.harness.store import (
     HarnessSessionDeleteImpact,
     HarnessStore,
@@ -199,6 +207,7 @@ class HarnessService:
         authorization_receipt_provider: (
             Callable[[], PermissionDecisionReceipt | None] | None
         ) = None,
+        sandbox_eval_executor: HarnessSandboxEvalExecutor | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
@@ -209,18 +218,26 @@ class HarnessService:
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
-        sandbox_dependencies = (
+        sandbox_check_dependencies = (
             sandbox_check_runner,
             shell_admission_composer,
-            authorization_receipt_provider,
         )
-        if any(item is not None for item in sandbox_dependencies) and not all(
-            item is not None for item in sandbox_dependencies
+        if any(item is not None for item in sandbox_check_dependencies) and not (
+            all(item is not None for item in sandbox_check_dependencies)
+            and authorization_receipt_provider is not None
         ):
             raise ValueError("Sandbox Harness 依赖必须同时提供。")
         self._sandbox_check_runner = sandbox_check_runner
         self._shell_admission_composer = shell_admission_composer
         self._authorization_receipt_provider = authorization_receipt_provider
+        if sandbox_eval_executor is not None and authorization_receipt_provider is None:
+            raise ValueError("Sandbox Eval executor 需要权限回执 provider。")
+        if sandbox_eval_executor is not None and (
+            sandbox_eval_executor.workspace_root != self.workspace_root
+        ):
+            raise ValueError("Sandbox Eval executor 与 Harness workspace 不一致。")
+        self._sandbox_eval_executor = sandbox_eval_executor
+        self._sandbox_eval_request_builder = HarnessSandboxEvalRequestBuilder()
         self._completion_gate = CompletionGate()
         self._explainer = HarnessExplainer()
         self._check_results: OrderedDict[
@@ -301,6 +318,82 @@ class HarnessService:
             normalized_target,
             profile_digest=status.profile_digest,
             profile_trusted=status.trusted,
+        )
+
+    async def eval_sandbox(
+        self,
+        *,
+        check_ids: tuple[str, ...],
+        samples: int,
+        batch_id: str,
+        on_progress: SandboxEvalProgressCallback | None = None,
+    ) -> HarnessSandboxEvalBatchReceipt:
+        """Run exact trusted Profile checks as one resumable native Sandbox batch."""
+        executor = self._sandbox_eval_executor
+        receipt_provider = self._authorization_receipt_provider
+        if executor is None or receipt_provider is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_unavailable",
+                "当前 Runtime 尚未配置 Sandbox Eval 执行基础设施。",
+            )
+        parent = receipt_provider()
+        if parent is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_parent_permission_missing",
+                "Sandbox Eval 缺少当前工具调用的持久权限回执。",
+            )
+        status = await self.status()
+        if status.code is HarnessStatusCode.MISSING:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_profile_missing",
+                "当前工作区尚未配置 Harness Profile。",
+            )
+        if status.code is HarnessStatusCode.INVALID:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_profile_invalid",
+                "Harness Profile 无效；请先运行 /harness doctor。",
+            )
+        if (
+            not status.trusted
+            or status.snapshot.profile is None
+            or status.profile_digest is None
+        ):
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_profile_untrusted",
+                "Harness Profile 未受信任；请先运行 /harness trust。",
+            )
+        request = await asyncio.to_thread(
+            self._sandbox_eval_request_builder.build,
+            workspace_root=self.workspace_root,
+            profile=status.snapshot.profile,
+            profile_digest=status.profile_digest,
+            profile_trusted=True,
+            check_ids=check_ids,
+            batch_id=batch_id,
+            requested_samples=samples,
+        )
+
+        async def current_profile() -> HarnessSandboxEvalProfileAuthority:
+            current = await self.status()
+            if (
+                not current.trusted
+                or current.snapshot.profile is None
+                or current.profile_digest is None
+            ):
+                raise HarnessSandboxEvalServiceError(
+                    "sandbox_eval_service_profile_trust_revalidation_failed",
+                    "Sandbox Eval 执行期间 Harness Profile 信任已失效。",
+                )
+            return HarnessSandboxEvalProfileAuthority(
+                profile=current.snapshot.profile,
+                profile_sha256=current.profile_digest,
+            )
+
+        return await executor.execute(
+            request=request,
+            parent_receipt_id=parent.receipt_id,
+            current_profile=current_profile,
+            on_progress=on_progress,
         )
 
     async def eval_baseline_status(

@@ -122,6 +122,9 @@
 - HAR-08.4h Native Sandbox Eval Request Authority：已实现。补齐原生 `sandbox` lane，并从受信 Profile、
   干净精确 Git revision、ordered checks、batch 与预算编译防篡改 request；执行前可机械拒绝 Profile 漂移。
   详见 `HAR-08-4h-native-sandbox-eval-request.md`。
+- HAR-08.4i Native Sandbox Eval Service：已实现。`HarnessService` 复用 4h/4g/4f/4e，精确校验父权限，
+  以 batch-scoped Run Grant 执行并即时写入 H5a；支持连续前缀恢复、外来 H5a 拒绝和稳定完成 receipt。
+  详见 `HAR-08-4i-native-sandbox-eval-service.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -131,5 +134,5 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：通用 Sandbox Eval Service/Tool/UI surface、跨进程/多主机 Batch admission 与
+- HAR-08.4 仍为 partial：通用 Sandbox Eval Tool/Slash/UI surface、跨进程/多主机 Batch admission 与
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
