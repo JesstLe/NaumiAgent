@@ -84,5 +84,6 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 - message bus 仍是 session-scoped 内存实现；
 - 没有 Supervisor、crash takeover、跨主机身份或 100 并发 soak 证据。
 
-下一步应比较 `ARC-04.5b Durable Agent Job Authority` 与 ARC-06 scheduler 所需的通用加密 payload
-envelope。不能只增加 claim lease，因为没有可恢复 payload 时 scheduler 仍无法安全重派。
+ARC-04.5b1 已先交付 OS credential-backed key 与 bounded AES-256-GCM envelope。下一步应实现
+`ARC-04.5b2 Durable Agent Job Authority` 消费该 envelope；不能只增加 claim lease，因为没有可恢复
+payload 时 scheduler 仍无法安全重派。
