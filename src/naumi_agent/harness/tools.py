@@ -23,6 +23,7 @@ from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
 from naumi_agent.harness.sandbox_service import (
     HarnessSandboxEvalServiceError,
+    SandboxEvalProgressCallback,
     render_sandbox_eval_batch_receipt,
 )
 from naumi_agent.harness.service import (
@@ -52,12 +53,60 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalBatchTool(service),
         HarnessEvalSandboxTool(service),
         HarnessEvalSandboxRetryTool(service),
+        HarnessEvalSandboxResumeTool(service),
         HarnessEvalSandboxRetryCatalogTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
         HarnessRunCheckTool(service),
     ]
+
+
+def _sandbox_retry_progress_callback(
+    service: HarnessService,
+    *,
+    retry_action_id: str,
+    event_callback: LegacyEventCallback | None,
+) -> SandboxEvalProgressCallback:
+    """Project one retry/resume checkpoint through the shared typed protocol."""
+    manifest_metadata: tuple[str, tuple[str, ...]] | None = None
+
+    async def publish_progress(
+        checkpoint: HarnessSandboxBatchCheckpoint,
+    ) -> None:
+        nonlocal manifest_metadata
+        if event_callback is None:
+            return
+        if manifest_metadata is None and service.store is not None:
+            retry = await service.store.get_sandbox_admission_retry(
+                workspace_root=service.workspace_root,
+                action_id=retry_action_id,
+            )
+            if retry is not None and retry.decision == "accepted":
+                stored = await service.store.get_sandbox_eval_request(
+                    service.workspace_root,
+                    retry.eval_request_sha256,
+                )
+                if stored is not None:
+                    manifest_metadata = (
+                        stored.request.batch_id,
+                        tuple(item.check_id for item in stored.request.checks),
+                    )
+        if manifest_metadata is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_retry_progress_manifest_missing",
+                "Sandbox Eval retry/resume 无法恢复进度展示所需的 Request Manifest。",
+            )
+        await event_callback(
+            RuntimeEventType.HARNESS_SANDBOX_EVAL_PROGRESS.value,
+            harness_sandbox_eval_progress_payload(
+                checkpoint,
+                batch_id=manifest_metadata[0],
+                check_ids=manifest_metadata[1],
+            ),
+        )
+
+    return publish_progress
 
 
 class _HarnessReadOnlyTool(Tool):
@@ -645,50 +694,17 @@ class HarnessEvalSandboxRetryTool(Tool):
         normalized_cancel = cancel_receipt_id.strip().lower()
         normalized_cancel_sha256 = cancel_receipt_sha256.strip().lower()
         normalized_reason = reason.strip()
-        manifest_metadata: tuple[str, tuple[str, ...]] | None = None
-
-        async def publish_progress(
-            checkpoint: HarnessSandboxBatchCheckpoint,
-        ) -> None:
-            nonlocal manifest_metadata
-            if event_callback is None:
-                return
-            if manifest_metadata is None and self._service.store is not None:
-                retry = await self._service.store.get_sandbox_admission_retry(
-                    workspace_root=self._service.workspace_root,
-                    action_id=normalized_action,
-                )
-                if retry is not None and retry.decision == "accepted":
-                    stored = await self._service.store.get_sandbox_eval_request(
-                        self._service.workspace_root,
-                        retry.eval_request_sha256,
-                    )
-                    if stored is not None:
-                        manifest_metadata = (
-                            stored.request.batch_id,
-                            tuple(item.check_id for item in stored.request.checks),
-                        )
-            if manifest_metadata is None:
-                raise HarnessSandboxEvalServiceError(
-                    "sandbox_eval_service_retry_progress_manifest_missing",
-                    "Sandbox Eval retry 无法恢复进度展示所需的 Request Manifest。",
-                )
-            await event_callback(
-                RuntimeEventType.HARNESS_SANDBOX_EVAL_PROGRESS.value,
-                harness_sandbox_eval_progress_payload(
-                    checkpoint,
-                    batch_id=manifest_metadata[0],
-                    check_ids=manifest_metadata[1],
-                ),
-            )
-
         try:
             receipt = await self._service.retry_sandbox(
                 retry_action_id=normalized_action,
                 cancel_receipt_id=normalized_cancel,
                 cancel_receipt_sha256=normalized_cancel_sha256,
                 reason=normalized_reason,
-                on_progress=publish_progress,
+                on_progress=_sandbox_retry_progress_callback(
+                    self._service,
+                    retry_action_id=normalized_action,
+                    event_callback=event_callback,
+                ),
             )
         except (
             HarnessSandboxEvalRequestError,
@@ -783,6 +799,131 @@ class HarnessEvalSandboxRetryCatalogTool(_HarnessReadOnlyTool):
             code = getattr(exc, "code", "sandbox_retry_catalog_unavailable")
             return f"Sandbox retry catalog 暂不可用（`{code}`）：{exc}"
         return render_sandbox_retry_catalog(page)
+
+
+class HarnessEvalSandboxResumeTool(Tool):
+    """Resume one existing durable retry dispatch without a new retry intent."""
+
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_resume"
+
+    @property
+    def description(self) -> str:
+        return "使用既有 retry receipt 与 dispatch fence 恢复中断的 Sandbox Eval"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox retry resume dispatch expired crash recovery h5a"
+            ),
+            delegated_tool_names=("bash_run",),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "retry_action_id": {
+                    "type": "string",
+                    "pattern": "^hsar_[0-9a-f]{24}$",
+                },
+                "dispatch_id": {
+                    "type": "string",
+                    "pattern": "^hsard_[0-9a-f]{24}$",
+                },
+                "retry_receipt_id": {
+                    "type": "string",
+                    "pattern": "^hsarr_[0-9a-f]{24}$",
+                },
+                "retry_receipt_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "当前 Runtime/会话的稳定运行标识",
+                },
+            },
+            "required": [
+                "retry_action_id",
+                "dispatch_id",
+                "retry_receipt_id",
+                "retry_receipt_sha256",
+                "run_id",
+            ],
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        event_callback: LegacyEventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
+        retry_action_id = kwargs.get("retry_action_id")
+        dispatch_id = kwargs.get("dispatch_id")
+        retry_receipt_id = kwargs.get("retry_receipt_id")
+        retry_receipt_sha256 = kwargs.get("retry_receipt_sha256")
+        run_id = kwargs.get("run_id")
+        values = (
+            retry_action_id,
+            dispatch_id,
+            retry_receipt_id,
+            retry_receipt_sha256,
+            run_id,
+        )
+        if (
+            any(not isinstance(item, str) for item in values)
+            or re.fullmatch(r"hsar_[0-9a-f]{24}", retry_action_id) is None
+            or re.fullmatch(r"hsard_[0-9a-f]{24}", dispatch_id) is None
+            or re.fullmatch(r"hsarr_[0-9a-f]{24}", retry_receipt_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", retry_receipt_sha256) is None
+            or run_id != run_id.strip()
+            or not run_id
+            or len(run_id) > 128
+        ):
+            return (
+                "Harness Sandbox Eval resume 参数无效："
+                "action、dispatch、retry receipt、SHA-256 与 run_id 均必须精确提供。"
+            )
+        try:
+            receipt = await self._service.resume_sandbox_retry(
+                retry_action_id=retry_action_id,
+                dispatch_id=dispatch_id,
+                retry_receipt_id=retry_receipt_id,
+                retry_receipt_sha256=retry_receipt_sha256,
+                on_progress=_sandbox_retry_progress_callback(
+                    self._service,
+                    retry_action_id=retry_action_id,
+                    event_callback=event_callback,
+                ),
+            )
+        except (
+            HarnessSandboxEvalRequestError,
+            HarnessSandboxEvalServiceError,
+            HarnessSandboxBatchError,
+            HarnessSandboxEvalExecutionError,
+            HarnessStoreError,
+            PermissionDecisionReceiptError,
+            RunDelegationGrantError,
+        ) as exc:
+            code = getattr(exc, "code", "sandbox_eval_resume_infrastructure_error")
+            return f"Harness Sandbox Eval resume 未完成（`{code}`）：{exc}"
+        return render_sandbox_eval_batch_receipt(receipt)
 
 
 class HarnessEvalBaselinePromoteTool(Tool):

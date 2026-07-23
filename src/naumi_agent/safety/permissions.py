@@ -130,6 +130,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="harness_eval_execution",
     ),
+    "harness_eval_sandbox_resume": PermissionRule(
+        tool_name="harness_eval_sandbox_resume",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=10,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="harness_eval_execution",
+    ),
     "harness_eval_baseline_promote": PermissionRule(
         tool_name="harness_eval_baseline_promote",
         allowed_modes=[

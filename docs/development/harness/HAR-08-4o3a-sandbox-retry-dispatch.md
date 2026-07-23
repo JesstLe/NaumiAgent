@@ -5,8 +5,9 @@
 已实现，2026-07-23。
 
 本切片把 HAR-08.4o2 的 accepted retry intent 转换为可崩溃恢复的 dispatch claim，并在同一
-SQLite 事务创建全新的 admission ticket。它关闭“intent 已提交，但前台协程尚未创建 ticket”以及
-“ticket 已创建，但 dispatch 尚未记录”的双向崩溃窗口。
+SQLite 事务创建全新的 admission ticket。HAR-08.4o3e 进一步让 accepted retry receipt 与 pending
+dispatch 在授权事务中共同落盘，真正关闭“intent 已提交，但前台协程尚未调用 claim”的窗口；本切片的
+claim 事务继续关闭“ticket 已创建，但 dispatch 尚未记录”的窗口。
 
 本切片自身不调用 Sandbox Eval Executor，也不开放 Tool、Slash 或 UI。HAR-08.4o3b 已在本 dispatch
 上下文中恢复 Request Manifest、取得新权限/Run Grant，并真实继续 H5a。
@@ -108,3 +109,6 @@ ticket 的 lane、requested samples 和 authority 全部来自服务端 manifest
 HAR-08.4o3b 已让 `HarnessSandboxEvalExecutor` 接受 retry dispatch context：业务 kernel 继续使用原始
 request SHA，admission/coordinator 使用新的 execution authority，并以新 permission receipt 和 Run Grant
 恢复未完成 H5a。详见 `HAR-08-4o3b-sandbox-retry-execution.md`。
+
+HAR-08.4o3e 已让 accepted receipt 原子生成 pending dispatch，并提供不重复消费 cancel receipt 的
+receipt-bound resume Tool/Slash。详见 `HAR-08-4o3e-sandbox-retry-receipt-bound-resume.md`。

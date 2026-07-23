@@ -33,6 +33,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_eval_batch",
         "harness_eval_sandbox",
         "harness_eval_sandbox_retry",
+        "harness_eval_sandbox_resume",
         "harness_eval_sandbox_retries",
         "harness_eval_baseline_promote",
         "harness_eval_compare",
@@ -41,14 +42,14 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     ]
     assert all(
         tools[index].metadata.read_only
-        for index in (0, 1, 2, 3, 4, 5, 6, 10, 13)
+        for index in (0, 1, 2, 3, 4, 5, 6, 11, 14)
     )
     assert not tools[7].metadata.read_only
     assert not tools[8].metadata.read_only
     assert not tools[9].metadata.read_only
-    assert not tools[11].metadata.read_only
     assert not tools[12].metadata.read_only
-    assert not tools[14].metadata.read_only
+    assert not tools[13].metadata.read_only
+    assert not tools[15].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -233,6 +234,49 @@ async def test_harness_sandbox_retry_tool_requires_exact_durable_authority(
         cancel_receipt_id=f"hsacr_{'a' * 24}",
         cancel_receipt_sha256="a" * 64,
         reason="恢复",
+        run_id="run-1",
+    )
+    assert "sandbox_eval_service_unavailable" in unavailable
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_resume_tool_binds_existing_dispatch_authority(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.db"),
+    )
+    tool = next(
+        item
+        for item in create_harness_tools(service)
+        if item.name == "harness_eval_sandbox_resume"
+    )
+
+    assert not tool.metadata.read_only
+    assert tool.metadata.concurrency_safe
+    assert tool.metadata.delegated_tool_names == ("bash_run",)
+    assert tool.parameters_schema["required"] == [
+        "retry_action_id",
+        "dispatch_id",
+        "retry_receipt_id",
+        "retry_receipt_sha256",
+        "run_id",
+    ]
+    assert "参数无效" in await tool.execute(
+        retry_action_id=f"hsar_{'a' * 24}",
+        dispatch_id="",
+        retry_receipt_id=f"hsarr_{'b' * 24}",
+        retry_receipt_sha256="c" * 64,
+        run_id="run-1",
+    )
+    unavailable = await tool.execute(
+        retry_action_id=f"hsar_{'a' * 24}",
+        dispatch_id=f"hsard_{'d' * 24}",
+        retry_receipt_id=f"hsarr_{'b' * 24}",
+        retry_receipt_sha256="c" * 64,
         run_id="run-1",
     )
     assert "sandbox_eval_service_unavailable" in unavailable

@@ -228,11 +228,24 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
 class HarnessSandboxBatchRetryContext(_StrictModel):
     """Exact durable authority chain used to dispatch one cancelled batch retry."""
 
+    authorization_kind: Literal["retry", "resume"] = "retry"
     retry_action_id: str = Field(pattern=r"^hsar_[0-9a-f]{24}$")
     retry_receipt_id: str = Field(pattern=r"^hsarr_[0-9a-f]{24}$")
     retry_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     eval_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     execution_authority_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dispatch_id: str | None = Field(
+        default=None,
+        pattern=r"^hsard_[0-9a-f]{24}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_authorization_kind(self) -> Self:
+        if self.authorization_kind == "retry" and self.dispatch_id is not None:
+            raise ValueError("首次 retry context 不得预声明 dispatch_id。")
+        if self.authorization_kind == "resume" and self.dispatch_id is None:
+            raise ValueError("恢复 retry context 必须绑定 dispatch_id。")
+        return self
 
 
 class HarnessSandboxBatchError(RuntimeError):
@@ -1118,7 +1131,7 @@ class HarnessSandboxBatchCoordinator:
         receipts = await validate_existing_prefix(records)
         self._require_receipt_prefix(receipts, records, lane_name)
         validate_run_evidence(records)
-        if len(records) == requested_samples:
+        if len(records) == requested_samples and retry_context is None:
             await self._emit(
                 on_progress,
                 authority_key=authority_key,

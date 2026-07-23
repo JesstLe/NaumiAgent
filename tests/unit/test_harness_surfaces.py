@@ -176,6 +176,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         sandbox_retry_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retry"
         )
+        sandbox_resume_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_resume"
+        )
         sandbox_retries_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retries"
         )
@@ -204,6 +207,10 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert not sandbox_retry_tool.metadata.read_only
         assert sandbox_retry_tool.metadata.concurrency_safe
         assert sandbox_retry_tool.metadata.delegated_tool_names == ("bash_run",)
+        assert sandbox_resume_tool is not None
+        assert not sandbox_resume_tool.metadata.read_only
+        assert sandbox_resume_tool.metadata.concurrency_safe
+        assert sandbox_resume_tool.metadata.delegated_tool_names == ("bash_run",)
         assert sandbox_retries_tool is not None
         assert sandbox_retries_tool.metadata.read_only
         assert sandbox_retries_tool.metadata.concurrency_safe
@@ -589,8 +596,145 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
 
         assert "租约已过期，需要恢复" in rendered
         assert retry.action_id in rendered
+        assert retry.receipt_id in rendered
+        assert retry.receipt_sha256 in rendered
         assert cancel.receipt_id in rendered
         assert "当前目录只读" in rendered
+        assert "/harness eval sandbox resume" in rendered
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_resume_slash_recovers_real_expired_dispatch(
+    tmp_path: Path,
+) -> None:
+    _require_real_shell_backend()
+    engine = _engine(tmp_path)
+    try:
+        await execute_slash_command(engine, "/harness trust --confirm")
+        status = await engine.harness_service.status()
+        assert status.trusted
+        assert status.snapshot.profile is not None
+        assert status.profile_digest is not None
+        request = HarnessSandboxEvalRequestBuilder().build(
+            workspace_root=engine.workspace_root,
+            profile=status.snapshot.profile,
+            profile_digest=status.profile_digest,
+            profile_trusted=True,
+            check_ids=("unit",),
+            batch_id="sandbox-resume-surface",
+            requested_samples=5,
+        )
+        store = engine.harness_service.store
+        assert store is not None
+        started = datetime.now(UTC) - timedelta(seconds=12)
+
+        def stamp(offset: int) -> str:
+            return (started + timedelta(seconds=offset)).isoformat()
+
+        await store.record_sandbox_eval_request(request, created_at=stamp(0))
+        source = await store.enqueue_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            ticket_id=f"hsadm_{'6' * 24}",
+            authority_key=request.request_sha256,
+            lane="sandbox",
+            requested_samples=5,
+            owner_id="resume-surface-source",
+            now=stamp(1),
+            lease_seconds=30,
+            max_active=engine.harness_sandbox_batch_admission.max_active,
+            max_queued=engine.harness_sandbox_batch_admission.max_queued,
+        )
+        cancel, _ = await store.cancel_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            action_id=f"hsac_{'7' * 24}",
+            ticket_id=source.ticket_id,
+            authority_key=source.authority_key,
+            epoch=source.epoch,
+            expected_state=source.state,
+            actor_id="surface",
+            reason="构造真实跨进程恢复",
+            now=stamp(2),
+        )
+        retry = await store.authorize_sandbox_admission_retry(
+            workspace_root=engine.workspace_root,
+            action_id=f"hsar_{'8' * 24}",
+            cancel_receipt_id=cancel.receipt_id,
+            cancel_receipt_sha256=cancel.receipt_sha256,
+            actor_id="crashed-surface",
+            reason="首次 retry 在 claim 后崩溃",
+            authority_token="9" * 32,
+            now=stamp(3),
+        )
+        pending = await store.get_sandbox_retry_dispatch(
+            workspace_root=engine.workspace_root,
+            retry_action_id=retry.action_id,
+        )
+        assert pending is not None and pending.state == "pending"
+        claimed, crashed_ticket = await store.claim_sandbox_retry_dispatch(
+            workspace_root=engine.workspace_root,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'a' * 24}",
+            owner_id="crashed-surface-owner",
+            now=stamp(4),
+            lease_seconds=2,
+            max_active=engine.harness_sandbox_batch_admission.max_active,
+            max_queued=engine.harness_sandbox_batch_admission.max_queued,
+        )
+
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox resume "
+                    f"{retry.action_id} "
+                    f"--dispatch {claimed.dispatch_id} "
+                    f"--receipt {retry.receipt_id} "
+                    f"--sha256 {retry.receipt_sha256}"
+                ),
+            )
+        )
+        restored_retry = await store.get_sandbox_admission_retry(
+            workspace_root=engine.workspace_root,
+            action_id=retry.action_id,
+        )
+        dispatch = await store.get_sandbox_retry_dispatch(
+            workspace_root=engine.workspace_root,
+            retry_action_id=retry.action_id,
+        )
+        records = await store.list_eval_results(
+            engine.workspace_root,
+            request.batch_id,
+            request.suite_id,
+        )
+        resume_receipts = [
+            item
+            for item in engine.list_permission_decision_receipts()
+            if item.tool_name == "harness_eval_sandbox_resume"
+        ]
+        child_receipts = [
+            item
+            for item in engine.list_permission_decision_receipts()
+            if item.tool_name == "bash_run"
+        ]
+
+        assert "Harness Sandbox Eval 已完成" in rendered
+        assert "5/5" in rendered
+        assert restored_retry == retry
+        assert dispatch is not None
+        assert dispatch.state == "completed"
+        assert dispatch.epoch == 2
+        assert dispatch.ticket_id != crashed_ticket.ticket_id
+        assert [item.sample_index for item in records] == list(range(5))
+        assert len(resume_receipts) == 1
+        assert len(child_receipts) == 5
+        assert all(
+            item.parent_receipt_id == resume_receipts[0].receipt_id
+            for item in child_receipts
+        )
     finally:
         await engine.shutdown()
 
