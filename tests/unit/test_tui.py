@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import zipfile
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -220,6 +221,115 @@ class TestNaumiApp:
         assert "UNKNOWN 运行时心跳清理" in chat.mounted
         assert "当前客户端未接入 terminal runtime lifecycle" in chat.mounted
         assert status.status_text == "环境诊断存在未知项"
+
+    @pytest.mark.asyncio
+    async def test_tui_doctor_export_previews_then_writes_exact_snapshot(
+        self,
+        monkeypatch,
+        tmp_path,
+    ) -> None:
+        from naumi_agent.tui import app as tui_module
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        state_home = tmp_path / "state"
+        monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+        report = DoctorReport(checks=(
+            DoctorCheck("Node.js", "pass", "v22"),
+        ))
+        monkeypatch.setattr(tui_module, "run_doctor", AsyncMock(return_value=report))
+        monkeypatch.setattr(tui_module, "Markdown", lambda content, **_: content)
+
+        class Chat:
+            mounted: list[str] = []
+
+            def mount(self, value) -> None:
+                self.mounted.append(value)
+
+        chat = Chat()
+        status = SimpleNamespace(status_text="")
+        engine = SimpleNamespace(
+            _config=AppConfig(workspace_root=str(workspace)),
+            workspace_root=workspace,
+            _mcp_manager=None,
+            router=object(),
+        )
+
+        class FakeApp:
+            def __init__(self) -> None:
+                self.engine = engine
+                self.debug_trace = None
+                self._terminal_runtime_lifecycle = None
+                self._terminal_runtime_lifecycle_factory = None
+                self._doctor_health_snapshot = None
+                self._doctor_export_plan = None
+
+            _runtime_heartbeat_retention_status_payload = (
+                NaumiApp._runtime_heartbeat_retention_status_payload
+            )
+
+            def query_one(self, widget_type):
+                return chat if widget_type is ChatPanel else status
+
+        app = FakeApp()
+        await NaumiApp._run_doctor.__wrapped__(
+            app,
+            export_action="preview",
+            expected_snapshot_sha256="",
+        )
+
+        assert app._doctor_export_plan is not None
+        digest = app._doctor_export_plan.preview.source_snapshot_sha256
+        assert "脱敏诊断包预览" in chat.mounted[-1]
+        assert digest in chat.mounted[-1]
+        assert not (state_home / "diagnostics").exists()
+
+        await NaumiApp._run_doctor.__wrapped__(
+            app,
+            export_action="write",
+            expected_snapshot_sha256=digest,
+        )
+        assert "诊断包导出完成" in chat.mounted[-1]
+        archives = list((state_home / "diagnostics").glob("*.zip"))
+        assert len(archives) == 1
+        with zipfile.ZipFile(archives[0]) as archive:
+            assert archive.namelist() == [
+                "health.json",
+                "README.txt",
+                "manifest.json",
+            ]
+        assert app._doctor_export_plan is None
+        assert status.status_text == "诊断包已保存到本机状态目录"
+
+    def test_tui_doctor_export_command_requires_exact_digest_form(self) -> None:
+        calls: list[dict[str, str]] = []
+        messages: list[str] = []
+        status = SimpleNamespace(status_text="")
+
+        class FakeApp:
+            debug_trace = None
+
+            def _run_doctor(self, **kwargs):
+                calls.append(kwargs)
+
+            def query_one(self, widget_type):
+                if widget_type is StatusBar:
+                    return status
+                return SimpleNamespace(mount=lambda value: messages.append(str(value)))
+
+        app = FakeApp()
+        NaumiApp._handle_slash_command(app, "/doctor export")
+        NaumiApp._handle_slash_command(app, "/doctor export " + "A" * 64)
+        NaumiApp._handle_slash_command(app, "/doctor raw")
+
+        assert calls == [
+            {"export_action": "preview", "expected_snapshot_sha256": ""},
+            {
+                "export_action": "write",
+                "expected_snapshot_sha256": "a" * 64,
+            },
+        ]
+        assert "用法" in status.status_text
 
     def test_tui_does_not_construct_terminal_runtime_components(self) -> None:
         source = inspect.getsource(NaumiApp)

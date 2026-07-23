@@ -245,6 +245,52 @@ function doctorHealthPayload() {
   };
 }
 
+function doctorExportPayload(status = "preview") {
+  const payload = {
+    schema_version: 1,
+    status,
+    bundle_format: "zip",
+    source_snapshot_sha256: "a".repeat(64),
+    manifest_sha256: "b".repeat(64),
+    bundle_sha256: "c".repeat(64),
+    total_bytes: 2048,
+    files: [
+      {
+        path: "health.json",
+        sha256: "d".repeat(64),
+        size_bytes: 800,
+        description: "脱敏 Health",
+      },
+      {
+        path: "README.txt",
+        sha256: "e".repeat(64),
+        size_bytes: 224,
+        description: "说明",
+      },
+      {
+        path: "manifest.json",
+        sha256: "b".repeat(64),
+        size_bytes: 640,
+        description: "清单",
+      },
+    ],
+    privacy_notice: "不包含聊天、reasoning、原始 trace、凭据或源码。",
+    private_payload: "must-drop",
+  };
+  if (status === "written") {
+    payload.receipt = {
+      schema_version: 1,
+      output_path: "/state/diagnostics/report.zip",
+      bundle_sha256: payload.bundle_sha256,
+      source_snapshot_sha256: payload.source_snapshot_sha256,
+      size_bytes: payload.total_bytes,
+      reused_existing: false,
+      private_payload: "must-drop",
+    };
+  }
+  return payload;
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -478,6 +524,7 @@ test("protocol contract drives client and server event validation", () => {
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "doctor_export",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -625,6 +672,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "doctor_export",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -1008,6 +1056,37 @@ test("doctor health response is strict bounded and drops private fields", () => 
   assert.throws(
     () => normalizeServerRecord({ type: "doctor/health", payload: invalidCode }),
     /diagnostic_code/,
+  );
+});
+
+test("doctor export response validates preview and exact written receipt", () => {
+  const preview = normalizeServerRecord({
+    type: "doctor/export/result",
+    payload: doctorExportPayload(),
+  }).payload;
+  const written = normalizeServerRecord({
+    type: "doctor/export/result",
+    payload: doctorExportPayload("written"),
+  }).payload;
+
+  assert.equal(preview.status, "preview");
+  assert.equal(preview.receipt, null);
+  assert.equal(preview.files.length, 3);
+  assert.equal(Object.hasOwn(preview, "private_payload"), false);
+  assert.equal(written.receipt.output_path, "/state/diagnostics/report.zip");
+  assert.equal(Object.hasOwn(written.receipt, "private_payload"), false);
+
+  const mismatch = doctorExportPayload("written");
+  mismatch.receipt.bundle_sha256 = "f".repeat(64);
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/export/result", payload: mismatch }),
+    /摘要不一致/,
+  );
+  const duplicate = doctorExportPayload();
+  duplicate.files[2].path = "health.json";
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/export/result", payload: duplicate }),
+    /必须唯一/,
   );
 });
 

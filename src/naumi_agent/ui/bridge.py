@@ -68,6 +68,14 @@ from naumi_agent.runtime.terminal_runtime import (
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.ui.command_index import build_terminal_command_index
+from naumi_agent.ui.doctor_export import (
+    DoctorExportPlan,
+    build_doctor_export_plan,
+    doctor_export_preview_payload,
+    doctor_export_receipt_payload,
+    write_doctor_export,
+)
+from naumi_agent.ui.doctor_health import DoctorHealthSnapshot
 from naumi_agent.ui.evaluation_lane_receipt import evaluation_lane_receipt_payload
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
@@ -555,6 +563,8 @@ class JsonlEngineBridge:
         self._inspector_snapshot: RuntimeInspectorSnapshot | None = None
         self._agents_subscribed = False
         self._agents_snapshot: AgentControlSnapshot | None = None
+        self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
+        self._doctor_export_plan: DoctorExportPlan | None = None
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, PendingPermission] = {}
         self._pending_interactions: dict[str, PendingInteraction] = {}
@@ -1459,6 +1469,9 @@ class JsonlEngineBridge:
 
         if event_type == ClientEventType.DOCTOR:
             await self.show_doctor_report(request_id=request_id)
+            return
+        if event_type == ClientEventType.DOCTOR_EXPORT:
+            await self.export_doctor_report(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.SHUTDOWN:
@@ -4033,6 +4046,8 @@ class JsonlEngineBridge:
                 report,
                 additional_items=tuple(additional_items),
             )
+        self._doctor_health_snapshot = health_snapshot
+        self._doctor_export_plan = None
         await self.emit(
             ServerEventType.DOCTOR_HEALTH,
             doctor_health_payload(health_snapshot),
@@ -4051,6 +4066,64 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def export_doctor_report(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Preview or atomically write the last typed Doctor snapshot."""
+        snapshot = self._doctor_health_snapshot
+        if snapshot is None:
+            await self.emit_error(
+                "请先打开 `/doctor` 生成本轮 typed Health 快照，再预览导出包。",
+                code="doctor_export_snapshot_missing",
+                request_id=request_id,
+            )
+            return
+        action = str(payload.get("action") or "preview")
+        try:
+            if action == "preview":
+                plan = build_doctor_export_plan(
+                    snapshot,
+                    workspace_root=self.engine.workspace_root,
+                )
+                self._doctor_export_plan = plan
+                response = doctor_export_preview_payload(plan.preview)
+            else:
+                expected = str(payload.get("expected_snapshot_sha256") or "")
+                plan = self._doctor_export_plan
+                if (
+                    plan is None
+                    or expected != snapshot.snapshot_sha256
+                    or plan.preview.source_snapshot_sha256 != expected
+                ):
+                    self._doctor_export_plan = None
+                    await self.emit_error(
+                        "诊断事实已变化或预览已失效；请重新按 `e` 预览后再导出。",
+                        code="doctor_export_preview_stale",
+                        request_id=request_id,
+                    )
+                    return
+                receipt = write_doctor_export(plan)
+                response = doctor_export_receipt_payload(plan.preview, receipt)
+                self._doctor_export_plan = None
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Doctor export failed (%s)", type(exc).__name__)
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.doctor_export", exc)
+            await self.emit_error(
+                "诊断包导出失败；未写入不完整文件。请检查 Naumi 状态目录权限。",
+                code="doctor_export_failed",
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.DOCTOR_EXPORT_RESULT,
+            response,
+            request_id=request_id,
+        )
 
     async def _current_pursuit_recovery_snapshot(self) -> Any | None:
         """Read the current Goal's recovery facts without mutating runtime state."""

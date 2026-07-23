@@ -55,7 +55,9 @@ def test_new_ui_command_index_is_complete_deterministic_and_unique() -> None:
     assert by_name["/agents"].arguments.required is False
     assert by_name["/write"].arguments.required is True
     assert by_name["/models"].arguments.required is False
-    assert by_name["/doctor"].arguments.takes_arguments is False
+    assert by_name["/doctor"].arguments.syntax == "[export [snapshot-sha256]]"
+    assert by_name["/doctor"].arguments.required is False
+    assert by_name["/doctor"].permission_risk == "tool_execution"
 
 
 def test_tui_index_uses_same_runtime_metadata_with_only_real_local_commands() -> None:

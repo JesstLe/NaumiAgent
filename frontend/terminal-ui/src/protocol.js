@@ -706,6 +706,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "doctor/health") {
     return normalizeDoctorHealth(payload);
   }
+  if (type === "doctor/export/result") {
+    return normalizeDoctorExportResult(payload);
+  }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
   }
@@ -2536,6 +2539,127 @@ function normalizeDoctorHealth(payload) {
     snapshot_sha256: snapshotSha256,
     items: normalizedItems,
   };
+}
+
+function normalizeDoctorExportResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`doctor/export schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "doctor/export status",
+    new Set(["preview", "written"]),
+  );
+  if (payload.bundle_format !== "zip") {
+    throw new Error("doctor/export bundle_format 必须是 zip");
+  }
+  const sourceSnapshotSha256 = harnessSha256(
+    payload.source_snapshot_sha256,
+    "doctor/export source_snapshot_sha256",
+  );
+  const manifestSha256 = harnessSha256(
+    payload.manifest_sha256,
+    "doctor/export manifest_sha256",
+  );
+  const bundleSha256 = harnessSha256(
+    payload.bundle_sha256,
+    "doctor/export bundle_sha256",
+  );
+  const totalBytes = doctorExportInteger(
+    payload.total_bytes,
+    "doctor/export total_bytes",
+    1,
+    512 * 1024,
+  );
+  const files = harnessObjectArray(payload.files, "doctor/export files", 4);
+  if (files.length !== 3) throw new Error("doctor/export 必须包含 3 个公开文件");
+  const allowedPaths = new Set(["health.json", "README.txt", "manifest.json"]);
+  const normalizedFiles = files.map((file) => {
+    const path = harnessText(file.path, "doctor/export file.path");
+    if (!allowedPaths.has(path)) throw new Error("doctor/export file.path 无效");
+    return {
+      path,
+      sha256: harnessSha256(file.sha256, "doctor/export file.sha256"),
+      size_bytes: doctorExportInteger(
+        file.size_bytes,
+        "doctor/export file.size_bytes",
+        0,
+        512 * 1024,
+      ),
+      description: harnessText(file.description, "doctor/export file.description"),
+    };
+  });
+  if (new Set(normalizedFiles.map((file) => file.path)).size !== 3) {
+    throw new Error("doctor/export file.path 必须唯一");
+  }
+  const privacyNotice = harnessText(
+    payload.privacy_notice,
+    "doctor/export privacy_notice",
+  );
+  if (!privacyNotice || privacyNotice.length > 500) {
+    throw new Error("doctor/export privacy_notice 必须为 1..500 字符");
+  }
+  const normalized = {
+    schema_version: 1,
+    status,
+    bundle_format: "zip",
+    source_snapshot_sha256: sourceSnapshotSha256,
+    manifest_sha256: manifestSha256,
+    bundle_sha256: bundleSha256,
+    total_bytes: totalBytes,
+    files: normalizedFiles,
+    privacy_notice: privacyNotice,
+    receipt: null,
+  };
+  if (status === "written") {
+    const receipt = harnessObject(payload.receipt, "doctor/export receipt");
+    const outputPath = harnessText(receipt.output_path, "doctor/export receipt.output_path");
+    if (!outputPath || outputPath.length > 2_000) {
+      throw new Error("doctor/export receipt.output_path 必须为 1..2000 字符");
+    }
+    const receiptBundleSha = harnessSha256(
+      receipt.bundle_sha256,
+      "doctor/export receipt.bundle_sha256",
+    );
+    const receiptSnapshotSha = harnessSha256(
+      receipt.source_snapshot_sha256,
+      "doctor/export receipt.source_snapshot_sha256",
+    );
+    const sizeBytes = doctorExportInteger(
+      receipt.size_bytes,
+      "doctor/export receipt.size_bytes",
+      1,
+      512 * 1024,
+    );
+    if (
+      receiptBundleSha !== bundleSha256
+      || receiptSnapshotSha !== sourceSnapshotSha256
+      || sizeBytes !== totalBytes
+    ) {
+      throw new Error("doctor/export receipt 与预览摘要不一致");
+    }
+    normalized.receipt = {
+      schema_version: 1,
+      output_path: outputPath,
+      bundle_sha256: receiptBundleSha,
+      source_snapshot_sha256: receiptSnapshotSha,
+      size_bytes: sizeBytes,
+      reused_existing: harnessBoolean(
+        receipt.reused_existing,
+        "doctor/export receipt.reused_existing",
+      ),
+    };
+  } else if (payload.receipt !== undefined && payload.receipt !== null) {
+    throw new Error("doctor/export preview 不能包含 receipt");
+  }
+  return normalized;
+}
+
+function doctorExportInteger(value, field, minimum, maximum) {
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${field} 必须是 ${minimum}..${maximum} 的整数`);
+  }
+  return value;
 }
 
 function harnessSha256(value, field) {

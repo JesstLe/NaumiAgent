@@ -521,6 +521,11 @@ function processBridgeRecord(record) {
         known_revision: action.knownRevision ?? state.workbench.revision,
       });
     }
+    if (action.type === "doctor_export_preview") {
+      state.doctorHealth.exportRequestId = String(send("doctor/export", {
+        action: "preview",
+      }) || "");
+    }
   }
   if (actions.some((action) => action.type === "exit")) {
     exit();

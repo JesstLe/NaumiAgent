@@ -23,7 +23,11 @@
     },
     "doctor_debug": {
       "state": "supported",
-      "evidence": ["frontend/terminal-ui/src/components/doctor-health-page.js", "frontend/terminal-ui/test/doctor-health-page.test.js"]
+      "evidence": [
+        "frontend/terminal-ui/src/components/doctor-health-page.js",
+        "frontend/terminal-ui/test/doctor-health-page.test.js",
+        "frontend/terminal-ui/test/index-process.test.js"
+      ]
     },
     "goal_pursuit": {
       "state": "supported",

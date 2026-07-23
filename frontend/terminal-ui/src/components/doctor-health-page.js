@@ -22,6 +22,8 @@ export function renderDoctorHealthPage(view, width, height) {
   const snapshot = object(value.snapshot);
   const heartbeat = heartbeatItem(value.heartbeat);
   const items = [heartbeat, ...array(snapshot.items)];
+  const exportPreview = object(value.exportPreview);
+  const exportReceipt = object(value.exportReceipt);
   const counts = items.reduce((result, item) => {
     const key = SEVERITY[item.severity] ? item.severity : "unknown";
     result[key] += 1;
@@ -29,7 +31,10 @@ export function renderDoctorHealthPage(view, width, height) {
   }, { ok: 0, degraded: 0, error: 0, unknown: 0 });
   const logical = [
     color(ANSI.cyan, "环境健康诊断"),
-    color(ANSI.dim, "本地只读检查 · 不会探测付费模型 · r 刷新 · Esc 返回"),
+    color(
+      ANSI.dim,
+      "本地只读检查 · 不会探测付费模型 · r 刷新 · e 预览/导出 · Esc 返回",
+    ),
     value.loading && !snapshot.schema_version
       ? color(ANSI.cyan, "正在检查本机环境…")
       : `正常 ${counts.ok} · 受限 ${counts.degraded} · 错误 ${counts.error} · 未知 ${counts.unknown}`,
@@ -38,6 +43,9 @@ export function renderDoctorHealthPage(view, width, height) {
     ...(snapshot.snapshot_sha256
       ? [color(ANSI.dim, `Snapshot · ${text(snapshot.snapshot_sha256).slice(0, 12)}`)]
       : []),
+    ...(value.exportLoading ? [color(ANSI.cyan, "正在准备脱敏诊断包…")] : []),
+    ...(value.exportError ? [color(ANSI.red, `导出失败 · ${text(value.exportError)}`)] : []),
+    ...renderExportPreview(exportPreview, exportReceipt),
   ];
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const offset = Math.min(
@@ -47,6 +55,34 @@ export function renderDoctorHealthPage(view, width, height) {
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function renderExportPreview(preview, receipt) {
+  if (!preview.schema_version) return [];
+  const lines = [
+    color(ANSI.cyan, "诊断包预览"),
+    `${array(preview.files).length} 个文件 · ${formatBytes(preview.total_bytes)} · ZIP`,
+    ...array(preview.files).map(
+      (file) => `  ${text(file.path)} · ${formatBytes(file.size_bytes)} · ${text(file.description)}`,
+    ),
+    color(ANSI.dim, `Bundle · ${text(preview.bundle_sha256).slice(0, 16)}`),
+    color(ANSI.yellow, text(preview.privacy_notice)),
+  ];
+  if (receipt.output_path) {
+    lines.push(color(
+      ANSI.green,
+      `${receipt.reused_existing ? "已复用" : "已导出"} · ${text(receipt.output_path)}`,
+    ));
+  } else {
+    lines.push(color(ANSI.cyan, "确认清单无误后，再按 e 写入 Naumi 状态目录。"));
+  }
+  return lines;
+}
+
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(1)} KiB`;
 }
 
 function renderItem(item) {

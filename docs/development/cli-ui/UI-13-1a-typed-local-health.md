@@ -55,7 +55,8 @@ ripgrep、Docker、browser daemon、MCP、debug log 和 terminal 检查，并新
 - UI-13.3：用户显式启动、可取消、有预算的 live probes；
 - UI-13.4：基于 DebugTrace 的 typed trace viewer；
 - ARC-08：把相同 Health contract 接入 SLO、故障审计和恢复建议；
-- CC-03：诊断组件对齐时复用该 contract，而不是解析 Markdown。
+- UI-13.5a：已基于该 contract 实现先预览、精确摘要确认、再原子写入的脱敏诊断包；
+- CC-03：诊断组件对齐时复用 Health 与 Export contract，而不是解析 Markdown。
 
 HAR-10.2b 已把当前 Goal 的 Pursuit Recovery Snapshot 作为独立 runtime health item 接入本页，并参与整体
 severity；现有 Bridge heartbeat 仍只代表前端连接活性，与 worker heartbeat 分栏呈现。没有当前 Pursuit 时

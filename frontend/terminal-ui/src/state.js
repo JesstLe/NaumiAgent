@@ -74,7 +74,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/permissions", description: "显示待确认权限面板" },
   { command: "/evolution", description: "审阅 Candidate，并显式加入 Workbench 队列" },
   { command: "/agents", description: "打开 Agent 控制中心" },
-  { command: "/doctor", description: "运行环境诊断" },
+  { command: "/doctor", description: "运行环境诊断或预览脱敏诊断包" },
   { command: "/harness", description: "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考文本" },
@@ -421,6 +421,12 @@ export function createInitialState() {
       snapshot: null,
       error: "",
       scrollOffset: 0,
+      exportLoading: false,
+      exportError: "",
+      exportPreview: null,
+      exportReceipt: null,
+      exportRequestId: "",
+      exportAutoPreview: false,
     },
     permissionCenter: {
       loading: false,
@@ -900,7 +906,34 @@ export function reduceServerEvent(state, record) {
     case "doctor/health":
       state.doctorHealth.loading = false;
       state.doctorHealth.error = "";
+      if (
+        state.doctorHealth.exportPreview
+        && state.doctorHealth.exportPreview.source_snapshot_sha256 !== payload.snapshot_sha256
+      ) {
+        state.doctorHealth.exportPreview = null;
+        state.doctorHealth.exportReceipt = null;
+      }
       state.doctorHealth.snapshot = payload;
+      if (state.doctorHealth.exportAutoPreview) {
+        state.doctorHealth.exportAutoPreview = false;
+        state.doctorHealth.exportLoading = true;
+        state.doctorHealth.exportError = "";
+        return [{ type: "doctor_export_preview" }];
+      }
+      break;
+    case "doctor/export/result":
+      if (
+        !state.doctorHealth.exportRequestId
+        || String(record.request_id || "") !== state.doctorHealth.exportRequestId
+      ) {
+        break;
+      }
+      state.doctorHealth.exportLoading = false;
+      state.doctorHealth.exportError = "";
+      state.doctorHealth.exportRequestId = "";
+      state.doctorHealth.exportPreview = payload;
+      state.doctorHealth.exportReceipt = payload.status === "written"
+        ? payload.receipt : null;
       break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
@@ -1131,6 +1164,12 @@ export function reduceServerEvent(state, record) {
         snapshot: null,
         error: "",
         scrollOffset: 0,
+        exportLoading: false,
+        exportError: "",
+        exportPreview: null,
+        exportReceipt: null,
+        exportRequestId: "",
+        exportAutoPreview: false,
       };
       if (
         wasHarnessDetailRoute
@@ -1263,6 +1302,23 @@ export function reduceServerEvent(state, record) {
         state.evolutionEvaluationLane.loading = false;
         state.evolutionEvaluationLane.error = payload.message
           ?? "Evaluation Lane Receipt 加载失败。";
+        break;
+      }
+      if (String(payload.code || "").startsWith("doctor_export_")) {
+        if (
+          !state.doctorHealth.exportRequestId
+          || String(record.request_id || "") !== state.doctorHealth.exportRequestId
+        ) {
+          break;
+        }
+        state.doctorHealth.exportLoading = false;
+        state.doctorHealth.exportError = payload.message
+          ?? "诊断包导出失败，请检查 Naumi 状态目录权限。";
+        state.doctorHealth.exportRequestId = "";
+        if (payload.code === "doctor_export_preview_stale") {
+          state.doctorHealth.exportPreview = null;
+          state.doctorHealth.exportReceipt = null;
+        }
         break;
       }
       if (payload.code === "workbench_review_failed") {
@@ -3153,7 +3209,7 @@ export function handleSubmitText(state, text, send) {
     send("evolution/review/request", request);
     return;
   }
-  if (text === "/doctor") {
+  if (text === "/doctor" || text === "/doctor export") {
     const originAnchor = {
       scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
       followTail: Boolean(state.followTail),
@@ -3162,7 +3218,22 @@ export function handleSubmitText(state, text, send) {
     state.doctorHealth.loading = true;
     state.doctorHealth.error = "";
     state.doctorHealth.scrollOffset = 0;
+    state.doctorHealth.exportLoading = false;
+    state.doctorHealth.exportError = "";
+    state.doctorHealth.exportPreview = null;
+    state.doctorHealth.exportReceipt = null;
+    state.doctorHealth.exportRequestId = "";
+    state.doctorHealth.exportAutoPreview = text === "/doctor export";
     send("doctor", {});
+    return;
+  }
+  if (text.toLocaleLowerCase("und").startsWith("/doctor ")) {
+    pushSystemMessage(
+      state,
+      "Doctor",
+      "用法：/doctor 或 /doctor export；导出前会显示脱敏清单。",
+      "warning",
+    );
     return;
   }
   if (text.startsWith("/mode ")) {
@@ -3778,7 +3849,32 @@ export function handleDoctorHealthKey(state, key, send) {
   if (key === "r" || key === "R") {
     state.doctorHealth.loading = true;
     state.doctorHealth.error = "";
+    state.doctorHealth.exportLoading = false;
+    state.doctorHealth.exportError = "";
+    state.doctorHealth.exportPreview = null;
+    state.doctorHealth.exportReceipt = null;
+    state.doctorHealth.exportRequestId = "";
+    state.doctorHealth.exportAutoPreview = false;
     send("doctor", {});
+    return true;
+  }
+  if (key === "e" || key === "E") {
+    if (state.doctorHealth.loading || state.doctorHealth.exportLoading) return true;
+    const snapshotSha = String(state.doctorHealth.snapshot?.snapshot_sha256 || "");
+    if (!snapshotSha) {
+      state.doctorHealth.exportError = "当前没有可导出的 typed Health 快照，请先按 r 刷新。";
+      return true;
+    }
+    const preview = state.doctorHealth.exportPreview;
+    const action = preview?.source_snapshot_sha256 === snapshotSha
+      && !state.doctorHealth.exportReceipt
+      ? "write" : "preview";
+    state.doctorHealth.exportLoading = true;
+    state.doctorHealth.exportError = "";
+    state.doctorHealth.exportRequestId = String(send("doctor/export", {
+      action,
+      ...(action === "write" ? { expected_snapshot_sha256: snapshotSha } : {}),
+    }) || "");
     return true;
   }
   const current = Math.max(0, Number(state.doctorHealth.scrollOffset) || 0);

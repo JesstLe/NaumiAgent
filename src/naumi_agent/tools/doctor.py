@@ -6,6 +6,14 @@ from typing import Any
 
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+from naumi_agent.ui.doctor_export import (
+    DoctorExportPlan,
+    build_doctor_export_plan,
+    render_doctor_export_preview,
+    render_doctor_export_receipt,
+    write_doctor_export,
+)
+from naumi_agent.ui.doctor_health import build_doctor_health_snapshot
 
 
 class DoctorDiagnosticsTool(Tool):
@@ -49,3 +57,94 @@ class DoctorDiagnosticsTool(Tool):
             model_router=self._engine.router,
         )
         return render_doctor_report(report)
+
+
+class DoctorExportTool(Tool):
+    """Preview and export the same bounded local Doctor facts."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+        self._previewed_plan: DoctorExportPlan | None = None
+
+    @property
+    def name(self) -> str:
+        return "doctor_export_diagnostics"
+
+    @property
+    def description(self) -> str:
+        return (
+            "先预览再导出脱敏诊断 ZIP。包内只有 typed Health、manifest 和说明，"
+            "不会包含聊天、reasoning、原始 trace、环境变量全集、凭据或源码。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            requires_confirmation=False,
+            path_argument_names=(),
+            user_facing_name="导出脱敏诊断包",
+            search_hint=(
+                "doctor export diagnostics bundle manifest redacted health support"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["preview", "write"],
+                    "description": "preview 不写文件；write 需要上一轮来源快照摘要。",
+                },
+                "expected_snapshot_sha256": {
+                    "type": "string",
+                    "description": "write 时必须等于 preview 返回的来源快照 SHA-256。",
+                },
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        action: str,
+        expected_snapshot_sha256: str = "",
+        **kwargs: Any,
+    ) -> str:
+        normalized_action = str(action or "").strip().lower()
+        if normalized_action not in {"preview", "write"}:
+            raise ValueError("action 必须是 preview 或 write。")
+        expected = str(expected_snapshot_sha256 or "").strip().lower()
+        if normalized_action == "preview" and expected:
+            raise ValueError("preview 不能携带 expected_snapshot_sha256。")
+        if normalized_action == "write":
+            if self._previewed_plan is None:
+                raise ValueError("缺少本进程内的诊断包 preview，拒绝写入。")
+            if expected != self._previewed_plan.preview.source_snapshot_sha256:
+                raise ValueError("诊断 preview 摘要不匹配，拒绝写入。")
+
+        report = await run_doctor(
+            self._engine._config,
+            workspace_root=self._engine.workspace_root,
+            mcp_manager=self._engine._mcp_manager,
+            model_router=self._engine.router,
+        )
+        snapshot = build_doctor_health_snapshot(report)
+        if normalized_action == "preview":
+            plan = build_doctor_export_plan(
+                snapshot,
+                workspace_root=self._engine.workspace_root,
+            )
+            self._previewed_plan = plan
+            return render_doctor_export_preview(plan.preview)
+        if expected != snapshot.snapshot_sha256:
+            self._previewed_plan = None
+            raise ValueError("诊断事实已变化或缺少精确 preview 摘要，拒绝写入。")
+        previewed_plan = self._previewed_plan
+        self._previewed_plan = None
+        return render_doctor_export_receipt(write_doctor_export(previewed_plan))

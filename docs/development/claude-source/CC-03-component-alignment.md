@@ -24,6 +24,11 @@
 
 ## 已完成前置
 
-UI-13.2a 已建立 Provider 稳定诊断码，并由 Doctor Health typed payload、New UI、TUI 与 CLI 共用。CC-03
-迁入 Doctor/StatusNotices 交互时必须消费该 code/domain/responsibility 合同，不得解析中文错误文本或把
-原始 Provider 异常带入组件。完整 source behavior inventory、export 流程与 golden scenarios 仍未实现。
+UI-13.2a 已建立 Provider 稳定诊断码，并由 Doctor Health typed payload、New UI、TUI 与 CLI 共用。
+UI-13.5a 已完成 Doctor export 的 Naumi 侧产品合同：固定 bounded 文件集、预览、精确 Snapshot 摘要确认、
+同一 Bundle 原子写入和本地回执。CC-03 迁入 Doctor/StatusNotices 交互时必须消费这些
+code/domain/responsibility/export view model，不得解析中文错误文本、重新构造 ZIP，或把原始 Provider
+异常带入组件。
+
+这仍只是 CC-03 的前置，不是 source alignment 本身。完整 source behavior inventory、source→target
+语义映射、divergence log 与同 fixture golden scenarios 尚未实现，CC-03 状态继续保持 `planned`。

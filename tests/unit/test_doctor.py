@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -318,6 +319,50 @@ async def test_doctor_tool_is_registered_and_uses_shared_report(tmp_path) -> Non
     assert "## 环境诊断" in output
     assert "Python 环境" in output
     await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_doctor_export_tool_previews_then_writes_platform_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+    engine = AgentEngine(_config(tmp_path))
+    try:
+        tool = engine.tool_registry.get("doctor_export_diagnostics")
+        assert tool is not None
+        assert tool.metadata.read_only is False
+        assert tool.metadata.requires_confirmation is False
+
+        with pytest.raises(ValueError, match="缺少本进程内"):
+            await tool.execute(
+                action="write",
+                expected_snapshot_sha256="a" * 64,
+            )
+
+        preview = await tool.execute(action="preview")
+        digest = re.search(r"来源快照：`([0-9a-f]{64})`", preview)
+        preview_bundle = re.search(r"Bundle：`([0-9a-f]{64})`", preview)
+        assert digest is not None
+        assert preview_bundle is not None
+        assert "脱敏诊断包预览" in preview
+        assert not (state_home / "diagnostics").exists()
+
+        written = await tool.execute(
+            action="write",
+            expected_snapshot_sha256=digest.group(1),
+        )
+        assert "诊断包导出完成" in written
+        assert f"Bundle：`{preview_bundle.group(1)}`" in written
+        assert len(list((state_home / "diagnostics").glob("*.zip"))) == 1
+        with pytest.raises(ValueError, match="缺少本进程内"):
+            await tool.execute(
+                action="write",
+                expected_snapshot_sha256=digest.group(1),
+            )
+    finally:
+        await engine.shutdown()
 
 
 @pytest.mark.asyncio

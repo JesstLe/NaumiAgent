@@ -23,7 +23,11 @@
     },
     "doctor_debug": {
       "state": "supported",
-      "evidence": ["src/naumi_agent/tui/app.py", "tests/unit/test_doctor_health.py"]
+      "evidence": [
+        "src/naumi_agent/tui/app.py",
+        "tests/unit/test_doctor_health.py",
+        "tests/unit/test_tui.py"
+      ]
     },
     "goal_pursuit": {
       "state": "supported",

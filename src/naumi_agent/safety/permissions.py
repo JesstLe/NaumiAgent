@@ -959,6 +959,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "doctor_export_diagnostics": PermissionRule(
+        tool_name="doctor_export_diagnostics",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="diagnostics",
+        allow_session_grant=True,
+    ),
     "pursue_goal": PermissionRule(
         tool_name="pursue_goal",
         allowed_modes=[

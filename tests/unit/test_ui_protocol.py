@@ -313,6 +313,34 @@ def test_protocol_normalizes_harness_eval_promotion_request() -> None:
     }
 
 
+def test_protocol_normalizes_doctor_export_preview_and_write() -> None:
+    preview = normalize_client_record({
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {"action": " PREVIEW "},
+    })
+    write = normalize_client_record({
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {
+            "action": "write",
+            "expected_snapshot_sha256": "A" * 64,
+        },
+    })
+
+    assert preview["payload"] == {
+        "action": "preview",
+        "expected_snapshot_sha256": "",
+    }
+    assert write["payload"] == {
+        "action": "write",
+        "expected_snapshot_sha256": "a" * 64,
+    }
+    with pytest.raises(ValueError, match="snapshot SHA-256"):
+        normalize_client_record({
+            "type": ClientEventType.DOCTOR_EXPORT,
+            "payload": {"action": "write"},
+        })
+
+
 @pytest.mark.parametrize(
     "payload",
     [

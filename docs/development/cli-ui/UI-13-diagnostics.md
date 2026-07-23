@@ -39,5 +39,10 @@
 - UI-13.2a Provider Diagnostic Codes：已实现。Doctor 以低基数稳定码区分凭据、配置、404、429、5xx、
   timeout 与连接错误；结构化 HTTP 状态优先，New UI/TUI/CLI 复用同一 typed authority，详见
   `UI-13-2a-provider-diagnostic-codes.md`。
-- 显式 live probes 页面、Trace viewer、脱敏导出与修复动作仍为 planned；不得把 UI-13
+- UI-13.5a Typed 脱敏诊断包导出：已实现。共享 authority 构建固定 3 文件、最大 512 KiB 的确定性 ZIP，
+  先展示文件/大小/digest/隐私边界，再以进程内 Plan 和精确 Snapshot 摘要原子写入平台状态目录；
+  New UI、TUI、CLI fallback 与 Agent Tool 复用同一实现，详见
+  `UI-13-5a-typed-diagnostic-export.md`。
+- 显式 live probes 页面、Trace viewer、可选 trace attachment、Windows DACL 显式校验与修复动作仍为
+  planned；不得把 UI-13
   整体标记为 implemented。
