@@ -115,5 +115,6 @@ reservation 都由真实 SQLite 事务执行。
 - 用户可见的 queue catalog/cancel 页面。
 
 因此 ARC-06.2 与 HAR-10.7 继续保持 `partial`。ARC-06.2b1 已证明 ToolJob 可安全进入本队列，
-ARC-06.2b2 已完成 claimed ToolJob 的 dispatch/reconcile bridge。下一步需重新评估 ARC-04.5a Agent
-Worker Contract 与自动 scheduler/catalog 的依赖；不得用本切片宣称完整高并发或 Agent 集群已经完成。
+ARC-06.2b2 已完成 claimed ToolJob 的 dispatch/reconcile bridge；ARC-06.2c 又在 AgentJob authority
+内交付跨 Runtime embedded active 上限与 durable FIFO。独立 Agent Worker 的物理 slot reservation、
+自动 recovery scheduler 与 catalog 动作仍未完成；不得用任一切片宣称完整 Agent 集群。

@@ -3,6 +3,9 @@
 from naumi_agent.daemons.agent_jobs import (
     AGENT_JOB_SCHEMA_VERSION,
     TERMINAL_AGENT_JOB_STATES,
+    AgentJobCapacityExhaustedError,
+    AgentJobCapacityPolicy,
+    AgentJobCapacitySnapshot,
     AgentJobConflictError,
     AgentJobError,
     AgentJobKeyUnavailableError,
@@ -52,6 +55,9 @@ from naumi_agent.daemons.worker_registry import (
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
+    "AgentJobCapacityExhaustedError",
+    "AgentJobCapacityPolicy",
+    "AgentJobCapacitySnapshot",
     "AgentJobConflictError",
     "AgentJobError",
     "AgentJobKeyUnavailableError",

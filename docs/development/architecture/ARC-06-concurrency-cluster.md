@@ -30,6 +30,10 @@
   - ARC-06.2b2 已让 claimed waiter 的 active reservation 进入 ToolJob dispatch-before-send 与真实
     Shell start fence；terminal 统一释放 reservation，lost claim 可证据化 no-side-effect 收口。见
     [设计与验证](ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。
+  - ARC-06.2c 已让 embedded AgentJob claim lease 同时成为跨 Runtime 的共享 capacity token：
+    active/waiting policy、原子 admit+claim、有界 FIFO、等待取消和 recovery-blocking 计数均由同一
+    SQLite authority 决定；它不伪造独立 Worker incarnation。见
+    [设计与验证](ARC-06-2c-durable-embedded-agent-capacity.md)。
   - UI-13.1e 已把 durable policy、live waiting、active claim、oldest wait 与到期待收口事实投影到
     New UI/TUI 共用的只读 Doctor authority，为自动 scheduler 提供最小运维门。见
     [设计与验证](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
@@ -38,7 +42,8 @@
   - ARC-04.5b1 已提供 OS credential-backed Runtime payload key 与 authenticated envelope；
     ARC-04.5b2 已建立 durable Agent Job Store、FIFO claim、epoch/lease fencing、pre-start takeover
     与 running recovery fence；ARC-04.5c 已让 embedded Agent 消费 admit/claim/run/renew/finish
-    并阻断未认证终态发布。自动 scheduler、capacity reservation 和跨进程公平队列尚未消费。见
+    并阻断未认证终态发布。ARC-06.2c 又补齐 embedded 多 Runtime 的共享 active 上限与 durable FIFO；
+    独立 Worker reservation、自动 recovery scheduler 和跨 workspace 公平仍未完成。见
     [设计与验证](ARC-04-5c-embedded-agent-durable-dispatch.md)。
   - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
     公平、dependency DAG、affinity、cursor 与 starvation 指标。

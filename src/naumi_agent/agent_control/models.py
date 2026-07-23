@@ -29,7 +29,8 @@ _EXECUTION_STATUSES = frozenset({
     "max_turns", "cancelled",
 })
 _EXECUTION_PHASES = frozenset({
-    "starting", "running", "preparing_tool", "running_tool", "stopping", "finished",
+    "starting", "waiting_capacity", "running", "preparing_tool",
+    "running_tool", "stopping", "finished",
 })
 _HEARTBEAT_PHASES = frozenset({
     "starting", "running", "waiting", "draining", "stopped", "failed",
@@ -124,6 +125,13 @@ class AgentControlSummary:
     attention_agents: int = 0
     stoppable_executions: int = 0
     pending_messages: int = 0
+    durable_capacity_configured: bool = False
+    durable_active_jobs: int = 0
+    durable_max_active_jobs: int = 0
+    durable_waiting_jobs: int = 0
+    durable_max_waiters: int = 0
+    durable_reclaimable_jobs: int = 0
+    durable_recovery_required_jobs: int = 0
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentControlSummary:
@@ -131,6 +139,10 @@ class AgentControlSummary:
         _only(data, {
             "total_agents", "active_agents", "attention_agents",
             "stoppable_executions", "pending_messages",
+            "durable_capacity_configured", "durable_active_jobs",
+            "durable_max_active_jobs", "durable_waiting_jobs",
+            "durable_max_waiters", "durable_reclaimable_jobs",
+            "durable_recovery_required_jobs",
         }, "summary")
         return cls(
             total_agents=_integer(data.get("total_agents", 0), "summary.total_agents"),
@@ -143,6 +155,34 @@ class AgentControlSummary:
             ),
             pending_messages=_integer(
                 data.get("pending_messages", 0), "summary.pending_messages"
+            ),
+            durable_capacity_configured=_boolean(
+                data.get("durable_capacity_configured", False),
+                "summary.durable_capacity_configured",
+            ),
+            durable_active_jobs=_integer(
+                data.get("durable_active_jobs", 0),
+                "summary.durable_active_jobs",
+            ),
+            durable_max_active_jobs=_integer(
+                data.get("durable_max_active_jobs", 0),
+                "summary.durable_max_active_jobs",
+            ),
+            durable_waiting_jobs=_integer(
+                data.get("durable_waiting_jobs", 0),
+                "summary.durable_waiting_jobs",
+            ),
+            durable_max_waiters=_integer(
+                data.get("durable_max_waiters", 0),
+                "summary.durable_max_waiters",
+            ),
+            durable_reclaimable_jobs=_integer(
+                data.get("durable_reclaimable_jobs", 0),
+                "summary.durable_reclaimable_jobs",
+            ),
+            durable_recovery_required_jobs=_integer(
+                data.get("durable_recovery_required_jobs", 0),
+                "summary.durable_recovery_required_jobs",
             ),
         )
 

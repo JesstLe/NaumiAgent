@@ -142,6 +142,12 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert first.summary.active_agents == 1
         assert first.summary.stoppable_executions == 1
         assert first.summary.pending_messages == 1
+        assert first.summary.durable_capacity_configured is True
+        assert first.summary.durable_active_jobs == 1
+        assert first.summary.durable_max_active_jobs == 4
+        assert first.summary.durable_waiting_jobs == 0
+        assert first.summary.durable_max_waiters == 64
+        assert first.summary.durable_recovery_required_jobs == 0
         observer = next(item for item in first.agents if item.name == "observer")
         assert observer.kind == "dynamic"
         assert observer.state == "running"

@@ -845,6 +845,184 @@ class TestSubAgentManager:
         assert stopped.code == "already_finished"
 
     @pytest.mark.asyncio
+    async def test_two_runtime_managers_share_durable_capacity_fifo(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=1,
+        ))
+        path = tmp_path / "shared-agent-jobs.db"
+        first = SubAgentManager(
+            AgentEngine(config),
+            agent_job_store=AgentJobStore(path),
+        )
+        second = SubAgentManager(
+            AgentEngine(config),
+            agent_job_store=AgentJobStore(path),
+        )
+        first_agent = first.get_agent("coder")
+        second_agent = second.get_agent("coder")
+        assert first_agent is not None
+        assert second_agent is not None
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        second_started = asyncio.Event()
+
+        async def execute_first(**_: object) -> AgentResult:
+            first_started.set()
+            await release_first.wait()
+            return AgentResult(status="completed", response="first")
+
+        async def execute_second(**_: object) -> AgentResult:
+            second_started.set()
+            return AgentResult(status="completed", response="second")
+
+        monkeypatch.setattr(first_agent, "execute", execute_first)
+        monkeypatch.setattr(second_agent, "execute", execute_second)
+        first_task = asyncio.create_task(first.delegate(
+            SubTask("shared-first", "work", "coder")
+        ))
+        second_task: asyncio.Task[AgentResult] | None = None
+        try:
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            second_task = asyncio.create_task(second.delegate(
+                SubTask("shared-second", "work", "coder")
+            ))
+            for _ in range(100):
+                active = [
+                    item for item in second.list_executions()
+                    if item.task_id == "shared-second"
+                ]
+                if active and active[0].phase == "waiting_capacity":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("第二个 Runtime 未进入持久 capacity 等待。")
+            assert not second_started.is_set()
+            snapshot = await second.capacity_snapshot()
+            assert snapshot is not None
+            assert (snapshot.active_jobs, snapshot.waiting_jobs) == (1, 1)
+
+            release_first.set()
+            assert (await asyncio.wait_for(first_task, timeout=2)).response == "first"
+            assert (await asyncio.wait_for(second_started.wait(), timeout=2)) is True
+            assert second_task is not None
+            assert (await asyncio.wait_for(second_task, timeout=2)).response == "second"
+            snapshot = await first.capacity_snapshot()
+            assert snapshot is not None
+            assert (snapshot.active_jobs, snapshot.waiting_jobs) == (0, 0)
+        finally:
+            release_first.set()
+            for pending in (first_task, second_task):
+                if pending is not None and not pending.done():
+                    pending.cancel()
+            await asyncio.gather(
+                *[
+                    pending
+                    for pending in (first_task, second_task)
+                    if pending is not None
+                ],
+                return_exceptions=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_stop_waiting_capacity_cancels_durable_job_without_model_call(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        config = AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=1,
+        ))
+        path = tmp_path / "shared-agent-jobs.db"
+        running_manager = SubAgentManager(
+            AgentEngine(config),
+            agent_job_store=AgentJobStore(path),
+        )
+        waiting_manager = SubAgentManager(
+            AgentEngine(config),
+            agent_job_store=AgentJobStore(path),
+        )
+        running_agent = running_manager.get_agent("coder")
+        waiting_agent = waiting_manager.get_agent("coder")
+        assert running_agent is not None
+        assert waiting_agent is not None
+        running_started = asyncio.Event()
+        release_running = asyncio.Event()
+        waiting_called = False
+
+        async def running_execute(**_: object) -> AgentResult:
+            running_started.set()
+            await release_running.wait()
+            return AgentResult(status="completed")
+
+        async def waiting_execute(**_: object) -> AgentResult:
+            nonlocal waiting_called
+            waiting_called = True
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(running_agent, "execute", running_execute)
+        monkeypatch.setattr(waiting_agent, "execute", waiting_execute)
+        running = asyncio.create_task(running_manager.delegate(
+            SubTask("capacity-running", "work", "coder")
+        ))
+        waiting: asyncio.Task[AgentResult] | None = None
+        try:
+            await asyncio.wait_for(running_started.wait(), timeout=1)
+            waiting = asyncio.create_task(waiting_manager.delegate(
+                SubTask("capacity-waiting", "work", "coder")
+            ))
+            for _ in range(100):
+                records = [
+                    item for item in waiting_manager.list_executions()
+                    if item.task_id == "capacity-waiting"
+                ]
+                if records and records[0].phase == "waiting_capacity":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("等待任务未进入 durable capacity queue。")
+            stopped = await waiting_manager.stop_execution(
+                "capacity-waiting",
+                "用户取消持久等待。",
+            )
+            assert stopped.accepted
+            assert waiting is not None
+            result = await asyncio.wait_for(waiting, timeout=1)
+            assert result.status == "cancelled"
+            assert waiting_called is False
+            record = next(
+                item for item in waiting_manager.list_executions()
+                if item.task_id == "capacity-waiting"
+            )
+            assert record.worker_job_state == AgentJobState.CANCELLED.value
+            stored = await waiting_manager._agent_job_store.get(
+                record.worker_job_id
+            )
+            assert stored is not None
+            assert stored.state is AgentJobState.CANCELLED
+            snapshot = await waiting_manager.capacity_snapshot()
+            assert snapshot is not None
+            assert snapshot.waiting_jobs == 0
+        finally:
+            release_running.set()
+            for pending in (running, waiting):
+                if pending is not None and not pending.done():
+                    pending.cancel()
+            await asyncio.gather(
+                *[
+                    pending
+                    for pending in (running, waiting)
+                    if pending is not None
+                ],
+                return_exceptions=True,
+            )
+
+    @pytest.mark.asyncio
     async def test_delegate_rejects_duplicate_active_task_id(
         self,
         manager: SubAgentManager,

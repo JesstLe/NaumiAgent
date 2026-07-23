@@ -25,11 +25,15 @@ from naumi_agent.agents.factory import DynamicAgentFactory
 from naumi_agent.agents.message_bus import AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 from naumi_agent.daemons.agent_jobs import (
+    AgentJobCapacityExhaustedError,
+    AgentJobCapacitySnapshot,
     AgentJobError,
     AgentJobKeyUnavailableError,
     AgentJobPayload,
     AgentJobState,
     AgentJobStore,
+    AgentJobTransitionResult,
+    StoredAgentJob,
 )
 from naumi_agent.daemons.agent_worker_contract import (
     AgentWorkerRequest,
@@ -53,6 +57,8 @@ _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
 _AGENT_JOB_LEASE_SECONDS = 90
 _AGENT_JOB_RENEW_INTERVAL_SECONDS = 30
+_AGENT_JOB_CAPACITY_POLL_MIN_SECONDS = 0.05
+_AGENT_JOB_CAPACITY_POLL_MAX_SECONDS = 0.5
 _AGENT_ADMISSION_STACK: ContextVar[tuple[int, ...]] = ContextVar(
     "naumi_agent_admission_stack",
     default=(),
@@ -86,6 +92,10 @@ class AgentState(StrEnum):
     RUNNING = "running"
     IDLE = "idle"
     DESTROYED = "destroyed"
+
+
+class _AgentCapacityWaitCancelledError(RuntimeError):
+    """Internal control flow for a user-cancelled durable capacity wait."""
 
 
 @dataclass
@@ -496,6 +506,10 @@ class SubAgentManager:
         history = list(reversed(self._execution_history))
         return (active + history)[:safe_limit]
 
+    async def capacity_snapshot(self) -> AgentJobCapacitySnapshot | None:
+        """Expose the durable embedded capacity authority without raw jobs."""
+        return await self._agent_job_store.capacity_snapshot()
+
     async def stop_execution(
         self,
         task_id: str,
@@ -576,17 +590,27 @@ class SubAgentManager:
         request: AgentWorkerRequest,
         payload: AgentJobPayload,
     ) -> None:
-        admitted = await self._agent_job_store.admit(
+        admission = await self._agent_job_store.admit_for_capacity(
             request=request,
             payload=payload,
-        )
-        claimed = await self._agent_job_store.claim(
-            admitted.job_id,
             owner_id=self._agent_job_owner_id,
             lease_seconds=_AGENT_JOB_LEASE_SECONDS,
+            max_active_jobs=self._max_parallel_agents,
+            max_waiters=self._max_queued_agents,
         )
+        await self._record_agent_job_transition(task_id, admission.job)
+        claimed = admission
+        if admission.job.state is AgentJobState.ADMITTED:
+            claimed = await self._await_agent_job_capacity(
+                task_id,
+                job_id=admission.job.job_id,
+            )
+        if claimed.job.state is not AgentJobState.CLAIMED:
+            raise AgentJobError(
+                "AgentJob capacity admission 未取得可执行 claim。"
+            )
         recovered = await self._agent_job_store.recover_payload(
-            admitted.job_id,
+            claimed.job.job_id,
             owner_id=self._agent_job_owner_id,
             claim_epoch=claimed.job.claim_epoch,
         )
@@ -594,13 +618,74 @@ class SubAgentManager:
             raise AgentJobError(
                 "AgentJob 恢复 payload 与本次执行不一致。"
             )
+        await self._record_agent_job_transition(task_id, claimed.job)
+
+    async def _await_agent_job_capacity(
+        self,
+        task_id: str,
+        *,
+        job_id: str,
+    ) -> AgentJobTransitionResult:
+        delay = _AGENT_JOB_CAPACITY_POLL_MIN_SECONDS
+        while True:
+            async with self._execution_lock:
+                execution = self._active_executions.get(task_id)
+                if execution is None:
+                    raise AgentJobError("AgentJob 对应的活动执行已消失。")
+                execution.phase = "waiting_capacity"
+                execution.last_updated_mono = time.monotonic()
+                stop_requested = execution.stop_requested
+                stop_reason = execution.stop_reason
+            if stop_requested:
+                cancelled = await self._agent_job_store.cancel_before_claim(job_id)
+                await self._record_agent_job_transition(
+                    task_id,
+                    cancelled.job,
+                )
+                raise _AgentCapacityWaitCancelledError(
+                    stop_reason or "用户请求停止等待中的子 Agent。"
+                )
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                cancelled = await self._agent_job_store.cancel_before_claim(job_id)
+                await self._record_agent_job_transition(
+                    task_id,
+                    cancelled.job,
+                )
+                raise
+            transition = await self._agent_job_store.claim_for_capacity(
+                job_id,
+                owner_id=self._agent_job_owner_id,
+                lease_seconds=_AGENT_JOB_LEASE_SECONDS,
+                max_active_jobs=self._max_parallel_agents,
+                max_waiters=self._max_queued_agents,
+            )
+            await self._record_agent_job_transition(
+                task_id,
+                transition.job,
+            )
+            if transition.job.state is AgentJobState.CLAIMED:
+                return transition
+            delay = min(
+                _AGENT_JOB_CAPACITY_POLL_MAX_SECONDS,
+                delay * 2,
+            )
+
+    async def _record_agent_job_transition(
+        self,
+        task_id: str,
+        job: StoredAgentJob,
+    ) -> None:
         async with self._execution_lock:
             execution = self._active_executions.get(task_id)
             if execution is None:
                 raise AgentJobError("AgentJob 对应的活动执行已消失。")
-            execution.worker_job_id = admitted.job_id
-            execution.worker_job_state = claimed.job.state.value
-            execution.worker_claim_epoch = claimed.job.claim_epoch
+            execution.worker_job_id = job.job_id
+            execution.worker_job_state = job.state.value
+            execution.worker_claim_epoch = job.claim_epoch
+            if job.state is AgentJobState.CLAIMED:
+                execution.phase = "starting"
             execution.last_updated_mono = time.monotonic()
 
     async def _mark_agent_job_running(self, task_id: str) -> None:
@@ -813,15 +898,40 @@ class SubAgentManager:
             await asyncio.gather(renewal, return_exceptions=True)
 
         effective_result = result
+        if (
+            execution.worker_job_id
+            and execution.worker_job_state == AgentJobState.ADMITTED.value
+        ):
+            try:
+                cancelled = await self._agent_job_store.cancel_before_claim(
+                    execution.worker_job_id,
+                )
+                execution.worker_job_state = cancelled.job.state.value
+            except Exception as exc:
+                logger.warning(
+                    "AgentJob waiting cleanup failed [%s]: %s",
+                    task_id,
+                    type(exc).__name__,
+                )
+                execution.worker_job_failure_code = (
+                    "agent_job_waiting_cleanup_failed"
+                )
+                effective_result = AgentResult(
+                    status="error",
+                    error=(
+                        "Agent 持久等待任务清理失败；"
+                        "已停止本地执行，请在 Agent Control 中检查恢复状态。"
+                    ),
+                )
         try:
             execution.worker_result = issue_agent_worker_result(
                 request=execution.worker_request,
-                status=result.status,
-                response=result.response,
-                error=result.error,
-                total_tokens=result.total_tokens,
-                total_cost_usd=result.total_cost_usd,
-                turns=result.turns,
+                status=effective_result.status,
+                response=effective_result.response,
+                error=effective_result.error,
+                total_tokens=effective_result.total_tokens,
+                total_cost_usd=effective_result.total_cost_usd,
+                turns=effective_result.turns,
                 completed_at=datetime.now(UTC).isoformat(),
             )
         except (TypeError, ValueError) as exc:
@@ -1122,6 +1232,51 @@ class SubAgentManager:
                 request=worker_request,
                 payload=job_payload,
             )
+        except asyncio.CancelledError:
+            result = AgentResult(
+                status="cancelled",
+                error="父运行已取消等待中的 Agent 执行。",
+            )
+            await self._finish_execution(task.id, result)
+            raise
+        except _AgentCapacityWaitCancelledError as exc:
+            result = AgentResult(
+                status="cancelled",
+                error=str(exc),
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status="cancelled",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
+        except AgentJobCapacityExhaustedError:
+            await self._set_agent_job_failure(
+                task.id,
+                "agent_job_capacity_exhausted",
+            )
+            result = AgentResult(
+                status="error",
+                error=(
+                    "Agent 共享持久等待队列已满"
+                    f"（上限 {self._max_queued_agents}）；"
+                    "请等待其他 Runtime 的 Agent 任务完成后重试。"
+                ),
+            )
+            result = await self._finish_execution(task.id, result)
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=agent_name,
+                description=task.description,
+                message=result.error,
+            )
+            return result
         except AgentJobKeyUnavailableError:
             await self._set_agent_job_failure(
                 task.id,

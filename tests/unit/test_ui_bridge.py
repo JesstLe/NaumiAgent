@@ -1094,10 +1094,18 @@ def test_protocol_contract_matches_python_enums() -> None:
 
     assert contract["version"] == 1
     assert contract["transport"] == "jsonl"
-    assert contract["compatibility"] == {
-        "previous_registry_sha256": [],
-        "unknown_informational_events": "ignore_and_audit",
-    }
+    compatibility = contract["compatibility"]
+    assert compatibility["unknown_informational_events"] == "ignore_and_audit"
+    assert len(compatibility["previous_registry_sha256"]) <= 31
+    assert len(compatibility["previous_registry_sha256"]) == len(
+        set(compatibility["previous_registry_sha256"])
+    )
+    assert all(
+        isinstance(digest, str)
+        and len(digest) == 64
+        and set(digest) <= set("0123456789abcdef")
+        for digest in compatibility["previous_registry_sha256"]
+    )
     assert contract["client_events"] == [str(event) for event in ClientEventType]
     assert contract["server_events"] == [str(event) for event in ServerEventType]
     assert contract["negotiation"] == {
@@ -1127,7 +1135,11 @@ def test_protocol_contract_matches_python_enums() -> None:
         "evolution_evaluation_lane": {
             "client_events": ["evolution/evaluation-lane/request"],
             "server_events": ["evolution/evaluation-lane"],
-        }
+        },
+        "terminal_event_recovery": {
+            "client_events": ["terminal_events/ack"],
+            "server_events": ["terminal_events/recovery"],
+        },
     }
 
 

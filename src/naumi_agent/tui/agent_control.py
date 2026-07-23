@@ -50,6 +50,11 @@ def format_agent_control_markdown(
             f"运行 {summary.active_agents} · 需注意 {summary.attention_agents} · "
             f"可停止 {summary.stoppable_executions} · 消息 {summary.pending_messages}"
         ),
+        *(
+            [_durable_capacity_line(summary)]
+            if summary.durable_capacity_configured
+            else []
+        ),
         f"最后更新：{_plain(snapshot.generated_at) or '-'}",
     ]
     if tab == "agents":
@@ -61,6 +66,28 @@ def format_agent_control_markdown(
     for warning in snapshot.warnings[:5]:
         lines.append(f"- 警告：{_plain(warning)}")
     return "\n".join(lines).strip()
+
+
+def _durable_capacity_line(summary: Any) -> str:
+    active = (
+        f"{summary.durable_active_jobs}/{summary.durable_max_active_jobs}"
+    )
+    waiting = (
+        f"{summary.durable_waiting_jobs}/{summary.durable_max_waiters}"
+    )
+    if summary.durable_recovery_required_jobs:
+        status = (
+            f"🔴 待恢复 {summary.durable_recovery_required_jobs}"
+        )
+    elif summary.durable_waiting_jobs or summary.durable_reclaimable_jobs:
+        status = (
+            f"🟡 可接管 {summary.durable_reclaimable_jobs}"
+        )
+    else:
+        status = "🟢 正常"
+    return (
+        f"**共享 Agent capacity**：`{active}` · 等待 `{waiting}` · {status}"
+    )
 
 
 class AgentControlScreen(Screen[None]):

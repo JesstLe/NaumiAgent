@@ -45,6 +45,9 @@ export function renderAgentControlPage(view, width, height) {
 function renderSummary(view, snapshot) {
   const summary = snapshot?.summary || {};
   const revision = Number(snapshot?.revision ?? view?.revision ?? 0) || 0;
+  const durable = summary.durable_capacity_configured
+    ? durableCapacitySummary(summary)
+    : "";
   return [
     `rev ${revision}`,
     `Agent ${number(summary.total_agents)}`,
@@ -52,8 +55,29 @@ function renderSummary(view, snapshot) {
     `需注意 ${number(summary.attention_agents)}`,
     `可停止 ${number(summary.stoppable_executions)}`,
     `消息 ${number(summary.pending_messages)}`,
+    durable,
     snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
+}
+
+function durableCapacitySummary(summary) {
+  const active = `${number(summary.durable_active_jobs)}/${number(summary.durable_max_active_jobs)}`;
+  const waiting = `${number(summary.durable_waiting_jobs)}/${number(summary.durable_max_waiters)}`;
+  const recovery = number(summary.durable_recovery_required_jobs);
+  const reclaimable = number(summary.durable_reclaimable_jobs);
+  if (recovery > 0) {
+    return color(
+      ANSI.red,
+      `共享容量 ${active} · 等待 ${waiting} · 待恢复 ${recovery}`,
+    );
+  }
+  if (Number(summary.durable_waiting_jobs) > 0 || reclaimable > 0) {
+    return color(
+      ANSI.yellow,
+      `共享容量 ${active} · 等待 ${waiting} · 可接管 ${reclaimable}`,
+    );
+  }
+  return color(ANSI.green, `共享容量 ${active} · 等待 ${waiting}`);
 }
 
 function renderTabs(selected) {

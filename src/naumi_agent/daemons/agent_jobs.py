@@ -34,7 +34,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 1
+AGENT_JOB_SCHEMA_VERSION = 2
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -92,6 +92,10 @@ class AgentJobKeyUnavailableError(AgentJobError):
 
 class AgentJobLifecycleConflictError(AgentJobError):
     """Raised when a stale owner or invalid state attempts a transition."""
+
+
+class AgentJobCapacityExhaustedError(AgentJobError):
+    """Raised when durable Agent active or waiting capacity is exhausted."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +209,75 @@ class AgentJobTransitionResult:
         return self.applied and self.job.state is AgentJobState.CLAIMED
 
 
+@dataclass(frozen=True, slots=True)
+class AgentJobCapacityPolicy:
+    max_active_jobs: int
+    max_waiters: int
+    configured_at: str
+    updated_at: str
+
+    def __post_init__(self) -> None:
+        _require_capacity_limit(
+            self.max_active_jobs,
+            field="max_active_jobs",
+            minimum=1,
+        )
+        _require_capacity_limit(
+            self.max_waiters,
+            field="max_waiters",
+            minimum=0,
+        )
+        configured = _aware_time(self.configured_at, field="configured_at")
+        updated = _aware_time(self.updated_at, field="updated_at")
+        if updated < configured:
+            raise ValueError("AgentJob capacity updated_at 早于 configured_at。")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobCapacitySnapshot:
+    policy: AgentJobCapacityPolicy
+    active_jobs: int
+    waiting_jobs: int
+    reclaimable_prestart_jobs: int
+    recovery_required_jobs: int
+    available_jobs: int
+    assessed_at: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.policy, AgentJobCapacityPolicy):
+            raise TypeError("policy 必须是 AgentJobCapacityPolicy。")
+        for field_name in (
+            "active_jobs",
+            "waiting_jobs",
+            "reclaimable_prestart_jobs",
+            "recovery_required_jobs",
+            "available_jobs",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} 必须是非负整数。")
+        if self.available_jobs != max(
+            0,
+            self.policy.max_active_jobs - self.active_jobs,
+        ):
+            raise ValueError("AgentJob capacity available_jobs 不一致。")
+        _aware_time(self.assessed_at, field="assessed_at")
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedAdmittedJob:
+    job: StoredAgentJob
+    payload: AgentJobPayload = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class _CapacityCounts:
+    active_jobs: int
+    waiting_jobs: int
+    reclaimable_prestart_jobs: int
+    recovery_required_jobs: int
+
+
 class AgentJobStore:
     """SQLite authority that never persists raw Agent task or context."""
 
@@ -238,99 +311,112 @@ class AgentJobStore:
         request: AgentWorkerRequest,
         payload: AgentJobPayload,
     ) -> StoredAgentJob:
-        if not isinstance(request, AgentWorkerRequest):
-            raise TypeError("request 必须是 AgentWorkerRequest。")
-        if not isinstance(payload, AgentJobPayload):
-            raise TypeError("payload 必须是 AgentJobPayload。")
-        _verify_payload_binding(request, payload)
         key = self._runtime_key()
-        envelope = seal_runtime_payload(
-            _encode_payload(request, payload),
-            aad=request.request_sha256.encode("ascii"),
+        prepared = _prepare_admitted_job(
+            request=request,
+            payload=payload,
             key=key,
-        )
-        job_id = _job_id(request.request_sha256)
-        admitted_at = self._now().isoformat()
-        receipt = _issue_receipt(
-            job_id=job_id,
-            sequence=1,
-            previous_state=None,
-            state=AgentJobState.ADMITTED,
-            owner_id=None,
-            claim_epoch=0,
-            claim_expires_at=None,
-            result_sha256=None,
-            reason_code="agent_job_admitted",
-            occurred_at=admitted_at,
-            previous_receipt_sha256=None,
-            authentication_key=key.key_bytes,
+            admitted_at=self._now().isoformat(),
         )
         await self._ensure_schema()
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
-                cursor = await db.execute(
-                    "SELECT * FROM agent_jobs WHERE request_id = ?",
-                    (request.request_id,),
+                existing = await _existing_admission(
+                    db,
+                    request=request,
+                    payload=payload,
+                    key=key,
                 )
-                row = await cursor.fetchone()
-                if row is not None:
-                    existing = await _stored_from_row(db, row, key=key)
-                    if not hmac.compare_digest(
-                        existing.request_sha256,
-                        request.request_sha256,
-                    ):
-                        raise AgentJobConflictError(
-                            "AgentJob request_id 已绑定其他请求。"
-                        )
-                    recovered = self._open_payload(existing, key=key)
-                    if recovered != payload:
-                        raise AgentJobConflictError(
-                            "AgentJob request_id 已绑定其他 payload。"
-                        )
+                if existing is not None:
                     await db.commit()
                     return existing
-                envelope_json = _canonical_json(envelope.to_dict())
-                receipt_json = _serialize_receipt(receipt)
-                await db.execute(
-                    """
-                    INSERT INTO agent_jobs (
-                        job_id, request_id, request_sha256, state,
-                        claim_owner_id, claim_epoch, claim_expires_at,
-                        admitted_at, latest_sequence, latest_receipt_sha256,
-                        latest_receipt_json, payload_envelope_json, result_json
-                    ) VALUES (?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, ?, ?, NULL)
-                    """,
-                    (
-                        job_id,
-                        request.request_id,
-                        request.request_sha256,
-                        AgentJobState.ADMITTED.value,
-                        admitted_at,
-                        receipt.sequence,
-                        receipt.receipt_sha256,
-                        receipt_json,
-                        envelope_json,
-                    ),
-                )
-                await _insert_receipt(db, receipt)
+                policy = await _capacity_policy_locked(db)
+                if policy is not None:
+                    counts = await _capacity_counts_locked(db, now=self._now())
+                    if counts.waiting_jobs >= policy.max_waiters:
+                        raise AgentJobCapacityExhaustedError(
+                            "Agent 持久等待队列已满；请使用 capacity admission "
+                            "原子取得执行槽位。"
+                        )
+                stored = await _insert_admitted_job(db, prepared)
                 await db.commit()
-                return StoredAgentJob(
-                    job_id=job_id,
-                    request=request,
-                    payload_envelope=envelope,
-                    state=AgentJobState.ADMITTED,
-                    claim_owner_id=None,
-                    claim_epoch=0,
-                    claim_expires_at=None,
-                    admitted_at=admitted_at,
-                    latest_receipt=receipt,
-                    result=None,
-                )
+                return stored
         except (AgentJobConflictError, AgentJobError):
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法持久化 AgentJob。") from exc
+
+    async def admit_for_capacity(
+        self,
+        *,
+        request: AgentWorkerRequest,
+        payload: AgentJobPayload,
+        owner_id: str,
+        lease_seconds: int,
+        max_active_jobs: int,
+        max_waiters: int,
+    ) -> AgentJobTransitionResult:
+        """Atomically admit and claim, or enter the bounded durable FIFO."""
+        _require_identifier(owner_id, field="owner_id")
+        _require_lease_seconds(lease_seconds)
+        _require_capacity_limit(
+            max_active_jobs,
+            field="max_active_jobs",
+            minimum=1,
+        )
+        _require_capacity_limit(max_waiters, field="max_waiters", minimum=0)
+        key = self._runtime_key()
+        now = self._now()
+        prepared = _prepare_admitted_job(
+            request=request,
+            payload=payload,
+            key=key,
+            admitted_at=now.isoformat(),
+        )
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                policy = await _ensure_capacity_policy_locked(
+                    db,
+                    max_active_jobs=max_active_jobs,
+                    max_waiters=max_waiters,
+                    now=now,
+                )
+                existing = await _existing_admission(
+                    db,
+                    request=request,
+                    payload=payload,
+                    key=key,
+                )
+                if existing is None:
+                    counts = await _capacity_counts_locked(db, now=now)
+                    can_claim_now = (
+                        counts.active_jobs < policy.max_active_jobs
+                        and counts.waiting_jobs == 0
+                    )
+                    if not can_claim_now and counts.waiting_jobs >= policy.max_waiters:
+                        raise AgentJobCapacityExhaustedError(
+                            "Agent 持久等待队列已满"
+                            f"（上限 {policy.max_waiters}）。"
+                        )
+                    existing = await _insert_admitted_job(db, prepared)
+                transition = await self._claim_for_capacity_locked(
+                    db,
+                    stored=existing,
+                    owner_id=owner_id,
+                    lease_seconds=lease_seconds,
+                    now=now,
+                    key=key,
+                    policy=policy,
+                )
+                await db.commit()
+                return transition
+        except (AgentJobCapacityExhaustedError, AgentJobConflictError, AgentJobError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法执行 AgentJob capacity admission。") from exc
 
     async def get(self, job_id: str) -> StoredAgentJob | None:
         _require_identifier(job_id, field="job_id")
@@ -357,6 +443,40 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法读取 AgentJob。") from exc
 
+    async def capacity_snapshot(self) -> AgentJobCapacitySnapshot | None:
+        """Return the current shared embedded Agent capacity authority."""
+        if not _regular_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                policy = await _capacity_policy_locked(db)
+                if policy is None:
+                    await db.commit()
+                    return None
+                counts = await _capacity_counts_locked(db, now=now)
+                await db.commit()
+                return AgentJobCapacitySnapshot(
+                    policy=policy,
+                    active_jobs=counts.active_jobs,
+                    waiting_jobs=counts.waiting_jobs,
+                    reclaimable_prestart_jobs=(
+                        counts.reclaimable_prestart_jobs
+                    ),
+                    recovery_required_jobs=counts.recovery_required_jobs,
+                    available_jobs=max(
+                        0,
+                        policy.max_active_jobs - counts.active_jobs,
+                    ),
+                    assessed_at=now.isoformat(),
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取 AgentJob capacity。") from exc
+
     async def claim_next(
         self,
         *,
@@ -371,6 +491,12 @@ class AgentJobStore:
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
+                policy = await _capacity_policy_locked(db)
+                if policy is not None:
+                    counts = await _capacity_counts_locked(db, now=now)
+                    if counts.active_jobs >= policy.max_active_jobs:
+                        await db.commit()
+                        return None
                 cursor = await db.execute(
                     """
                     SELECT * FROM agent_jobs
@@ -422,20 +548,87 @@ class AgentJobStore:
             async with self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
                 stored = await _require_stored(db, job_id, key=key)
-                result = await self._claim_locked(
-                    db,
-                    stored=stored,
-                    owner_id=owner_id,
-                    lease_seconds=lease_seconds,
-                    now=now,
-                    key=key,
-                )
+                policy = await _capacity_policy_locked(db)
+                if policy is None:
+                    result = await self._claim_locked(
+                        db,
+                        stored=stored,
+                        owner_id=owner_id,
+                        lease_seconds=lease_seconds,
+                        now=now,
+                        key=key,
+                    )
+                else:
+                    result = await self._claim_for_capacity_locked(
+                        db,
+                        stored=stored,
+                        owner_id=owner_id,
+                        lease_seconds=lease_seconds,
+                        now=now,
+                        key=key,
+                        policy=policy,
+                    )
+                    if (
+                        result.job.state is AgentJobState.ADMITTED
+                        and not result.applied
+                    ):
+                        raise AgentJobCapacityExhaustedError(
+                            "AgentJob 尚未轮到持久 FIFO 或共享容量已满。"
+                        )
                 await db.commit()
                 return result
         except (AgentJobError, AgentJobLifecycleConflictError):
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法 claim AgentJob。") from exc
+
+    async def claim_for_capacity(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        lease_seconds: int,
+        max_active_jobs: int,
+        max_waiters: int,
+    ) -> AgentJobTransitionResult:
+        """Try to claim this exact FIFO head without bypassing shared capacity."""
+        _require_identifier(job_id, field="job_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_lease_seconds(lease_seconds)
+        _require_capacity_limit(
+            max_active_jobs,
+            field="max_active_jobs",
+            minimum=1,
+        )
+        _require_capacity_limit(max_waiters, field="max_waiters", minimum=0)
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                policy = await _ensure_capacity_policy_locked(
+                    db,
+                    max_active_jobs=max_active_jobs,
+                    max_waiters=max_waiters,
+                    now=now,
+                )
+                stored = await _require_stored(db, job_id, key=key)
+                result = await self._claim_for_capacity_locked(
+                    db,
+                    stored=stored,
+                    owner_id=owner_id,
+                    lease_seconds=lease_seconds,
+                    now=now,
+                    key=key,
+                    policy=policy,
+                )
+                await db.commit()
+                return result
+        except (AgentJobError, AgentJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法 claim AgentJob capacity。") from exc
 
     async def recover_payload(
         self,
@@ -707,6 +900,57 @@ class AgentJobStore:
             key=key,
         )
 
+    async def _claim_for_capacity_locked(
+        self,
+        db: aiosqlite.Connection,
+        *,
+        stored: StoredAgentJob,
+        owner_id: str,
+        lease_seconds: int,
+        now: datetime,
+        key: RuntimePayloadKey,
+        policy: AgentJobCapacityPolicy,
+    ) -> AgentJobTransitionResult:
+        if not isinstance(policy, AgentJobCapacityPolicy):
+            raise TypeError("policy 必须是 AgentJobCapacityPolicy。")
+        if stored.state is AgentJobState.CLAIMED:
+            expiry = _required_claim_expiry(stored)
+            if expiry > now:
+                if stored.claim_owner_id == owner_id:
+                    return AgentJobTransitionResult(stored, False)
+                raise AgentJobLifecycleConflictError(
+                    "AgentJob 已由其他 live owner claim。"
+                )
+        elif stored.state is AgentJobState.ADMITTED:
+            cursor = await db.execute(
+                """
+                SELECT job_id FROM agent_jobs
+                WHERE state = ?
+                ORDER BY admitted_at, job_id
+                LIMIT 1
+                """,
+                (AgentJobState.ADMITTED.value,),
+            )
+            row = await cursor.fetchone()
+            if row is None or str(row["job_id"]) != stored.job_id:
+                return AgentJobTransitionResult(stored, False)
+        else:
+            raise AgentJobLifecycleConflictError(
+                f"AgentJob 状态 {stored.state.value} 不允许 capacity claim。"
+            )
+
+        counts = await _capacity_counts_locked(db, now=now)
+        if counts.active_jobs >= policy.max_active_jobs:
+            return AgentJobTransitionResult(stored, False)
+        return await self._claim_locked(
+            db,
+            stored=stored,
+            owner_id=owner_id,
+            lease_seconds=lease_seconds,
+            now=now,
+            key=key,
+        )
+
     async def _owner_transition(
         self,
         job_id: str,
@@ -811,19 +1055,10 @@ class AgentJobStore:
         *,
         key: RuntimePayloadKey | None = None,
     ) -> AgentJobPayload:
-        try:
-            raw = open_runtime_payload(
-                stored.payload_envelope,
-                aad=stored.request_sha256.encode("ascii"),
-                key=key or self._runtime_key(),
-            )
-            request, payload = _decode_payload(raw)
-            if request != stored.request:
-                raise ValueError("AgentJob encrypted request 与主记录不一致。")
-            _verify_payload_binding(stored.request, payload)
-            return payload
-        except (PayloadEnvelopeError, TypeError, ValueError) as exc:
-            raise AgentJobError("AgentJob payload 无法认证或恢复。") from exc
+        return _open_stored_payload(
+            stored,
+            key=key or self._runtime_key(),
+        )
 
     def _runtime_key(self) -> RuntimePayloadKey:
         try:
@@ -866,6 +1101,14 @@ class AgentJobStore:
                             )
                         for statement in _SCHEMA_V1:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V2:
+                            await db.execute(statement)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 1:
+                        for statement in _SCHEMA_V2:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -893,6 +1136,280 @@ class AgentJobStore:
             yield db
         finally:
             await db.close()
+
+
+def _prepare_admitted_job(
+    *,
+    request: AgentWorkerRequest,
+    payload: AgentJobPayload,
+    key: RuntimePayloadKey,
+    admitted_at: str,
+) -> _PreparedAdmittedJob:
+    if not isinstance(request, AgentWorkerRequest):
+        raise TypeError("request 必须是 AgentWorkerRequest。")
+    if not isinstance(payload, AgentJobPayload):
+        raise TypeError("payload 必须是 AgentJobPayload。")
+    if not isinstance(key, RuntimePayloadKey):
+        raise TypeError("key 必须是 RuntimePayloadKey。")
+    _verify_payload_binding(request, payload)
+    timestamp = _aware_time(admitted_at, field="admitted_at").isoformat()
+    envelope = seal_runtime_payload(
+        _encode_payload(request, payload),
+        aad=request.request_sha256.encode("ascii"),
+        key=key,
+    )
+    job_id = _job_id(request.request_sha256)
+    receipt = _issue_receipt(
+        job_id=job_id,
+        sequence=1,
+        previous_state=None,
+        state=AgentJobState.ADMITTED,
+        owner_id=None,
+        claim_epoch=0,
+        claim_expires_at=None,
+        result_sha256=None,
+        reason_code="agent_job_admitted",
+        occurred_at=timestamp,
+        previous_receipt_sha256=None,
+        authentication_key=key.key_bytes,
+    )
+    return _PreparedAdmittedJob(
+        job=StoredAgentJob(
+            job_id=job_id,
+            request=request,
+            payload_envelope=envelope,
+            state=AgentJobState.ADMITTED,
+            claim_owner_id=None,
+            claim_epoch=0,
+            claim_expires_at=None,
+            admitted_at=timestamp,
+            latest_receipt=receipt,
+            result=None,
+        ),
+        payload=payload,
+    )
+
+
+async def _existing_admission(
+    db: aiosqlite.Connection,
+    *,
+    request: AgentWorkerRequest,
+    payload: AgentJobPayload,
+    key: RuntimePayloadKey,
+) -> StoredAgentJob | None:
+    cursor = await db.execute(
+        "SELECT * FROM agent_jobs WHERE request_id = ?",
+        (request.request_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    existing = await _stored_from_row(db, row, key=key)
+    if not hmac.compare_digest(
+        existing.request_sha256,
+        request.request_sha256,
+    ):
+        raise AgentJobConflictError(
+            "AgentJob request_id 已绑定其他请求。"
+        )
+    if _open_stored_payload(existing, key=key) != payload:
+        raise AgentJobConflictError(
+            "AgentJob request_id 已绑定其他 payload。"
+        )
+    return existing
+
+
+async def _insert_admitted_job(
+    db: aiosqlite.Connection,
+    prepared: _PreparedAdmittedJob,
+) -> StoredAgentJob:
+    if not isinstance(prepared, _PreparedAdmittedJob):
+        raise TypeError("prepared 必须是 _PreparedAdmittedJob。")
+    job = prepared.job
+    await db.execute(
+        """
+        INSERT INTO agent_jobs (
+            job_id, request_id, request_sha256, state,
+            claim_owner_id, claim_epoch, claim_expires_at,
+            admitted_at, latest_sequence, latest_receipt_sha256,
+            latest_receipt_json, payload_envelope_json, result_json
+        ) VALUES (?, ?, ?, ?, NULL, 0, NULL, ?, ?, ?, ?, ?, NULL)
+        """,
+        (
+            job.job_id,
+            job.request.request_id,
+            job.request_sha256,
+            AgentJobState.ADMITTED.value,
+            job.admitted_at,
+            job.latest_receipt.sequence,
+            job.latest_receipt.receipt_sha256,
+            _serialize_receipt(job.latest_receipt),
+            _canonical_json(job.payload_envelope.to_dict()),
+        ),
+    )
+    await _insert_receipt(db, job.latest_receipt)
+    return job
+
+
+def _open_stored_payload(
+    stored: StoredAgentJob,
+    *,
+    key: RuntimePayloadKey,
+) -> AgentJobPayload:
+    try:
+        raw = open_runtime_payload(
+            stored.payload_envelope,
+            aad=stored.request_sha256.encode("ascii"),
+            key=key,
+        )
+        request, payload = _decode_payload(raw)
+        if request != stored.request:
+            raise ValueError("AgentJob encrypted request 与主记录不一致。")
+        _verify_payload_binding(stored.request, payload)
+        return payload
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentJobError("AgentJob payload 无法认证或恢复。") from exc
+
+
+async def _capacity_policy_locked(
+    db: aiosqlite.Connection,
+) -> AgentJobCapacityPolicy | None:
+    cursor = await db.execute(
+        """
+        SELECT max_active_jobs, max_waiters, configured_at, updated_at
+        FROM agent_job_capacity_policy
+        WHERE policy_id = 1
+        """
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    try:
+        return AgentJobCapacityPolicy(
+            max_active_jobs=int(row["max_active_jobs"]),
+            max_waiters=int(row["max_waiters"]),
+            configured_at=str(row["configured_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise AgentJobError("AgentJob capacity policy 记录无效。") from exc
+
+
+async def _ensure_capacity_policy_locked(
+    db: aiosqlite.Connection,
+    *,
+    max_active_jobs: int,
+    max_waiters: int,
+    now: datetime,
+) -> AgentJobCapacityPolicy:
+    _require_capacity_limit(
+        max_active_jobs,
+        field="max_active_jobs",
+        minimum=1,
+    )
+    _require_capacity_limit(max_waiters, field="max_waiters", minimum=0)
+    existing = await _capacity_policy_locked(db)
+    timestamp = now.isoformat()
+    if existing is None:
+        await db.execute(
+            """
+            INSERT INTO agent_job_capacity_policy (
+                policy_id, max_active_jobs, max_waiters,
+                configured_at, updated_at
+            ) VALUES (1, ?, ?, ?, ?)
+            """,
+            (max_active_jobs, max_waiters, timestamp, timestamp),
+        )
+        return AgentJobCapacityPolicy(
+            max_active_jobs=max_active_jobs,
+            max_waiters=max_waiters,
+            configured_at=timestamp,
+            updated_at=timestamp,
+        )
+    if (
+        existing.max_active_jobs == max_active_jobs
+        and existing.max_waiters == max_waiters
+    ):
+        return existing
+    counts = await _capacity_counts_locked(db, now=now)
+    if (
+        counts.active_jobs
+        or counts.waiting_jobs
+        or counts.reclaimable_prestart_jobs
+    ):
+        raise AgentJobConflictError(
+            "AgentJob capacity policy 与当前 Runtime 配置不一致；"
+            "存在未终结任务时不能改写共享容量。"
+        )
+    await db.execute(
+        """
+        UPDATE agent_job_capacity_policy
+        SET max_active_jobs = ?, max_waiters = ?, updated_at = ?
+        WHERE policy_id = 1
+        """,
+        (max_active_jobs, max_waiters, timestamp),
+    )
+    return AgentJobCapacityPolicy(
+        max_active_jobs=max_active_jobs,
+        max_waiters=max_waiters,
+        configured_at=existing.configured_at,
+        updated_at=timestamp,
+    )
+
+
+async def _capacity_counts_locked(
+    db: aiosqlite.Connection,
+    *,
+    now: datetime,
+) -> _CapacityCounts:
+    cursor = await db.execute(
+        """
+        SELECT state, claim_expires_at
+        FROM agent_jobs
+        WHERE state IN (?, ?, ?)
+        """,
+        (
+            AgentJobState.ADMITTED.value,
+            AgentJobState.CLAIMED.value,
+            AgentJobState.RUNNING.value,
+        ),
+    )
+    active = 0
+    waiting = 0
+    reclaimable = 0
+    recovery_required = 0
+    for row in await cursor.fetchall():
+        try:
+            state = AgentJobState(str(row["state"]))
+            if state is AgentJobState.ADMITTED:
+                if row["claim_expires_at"] is not None:
+                    raise ValueError("admitted job 包含 claim expiry")
+                waiting += 1
+                continue
+            raw_expiry = row["claim_expires_at"]
+            if raw_expiry is None:
+                raise ValueError("active job 缺少 claim expiry")
+            expiry = _aware_time(
+                str(raw_expiry),
+                field="claim_expires_at",
+            )
+            if state is AgentJobState.CLAIMED:
+                if expiry <= now:
+                    reclaimable += 1
+                else:
+                    active += 1
+            elif state is AgentJobState.RUNNING:
+                active += 1
+                if expiry <= now:
+                    recovery_required += 1
+        except (TypeError, ValueError) as exc:
+            raise AgentJobError("AgentJob capacity 状态记录无效。") from exc
+    return _CapacityCounts(
+        active_jobs=active,
+        waiting_jobs=waiting,
+        reclaimable_prestart_jobs=reclaimable,
+        recovery_required_jobs=recovery_required,
+    )
 
 
 async def _append_transition(
@@ -1551,6 +2068,22 @@ def _require_positive_int(value: int, *, field: str) -> None:
         raise ValueError(f"{field} 必须是正整数。")
 
 
+def _require_capacity_limit(
+    value: int,
+    *,
+    field: str,
+    minimum: int,
+) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not minimum <= value <= 10_000
+    ):
+        raise ValueError(
+            f"{field} 必须是 {minimum} 到 10000 之间的整数。"
+        )
+
+
 def _require_lease_seconds(value: int) -> None:
     if (
         isinstance(value, bool)
@@ -1650,9 +2183,26 @@ _SCHEMA_V1 = (
     """,
 )
 
+_SCHEMA_V2 = (
+    """
+    CREATE TABLE agent_job_capacity_policy (
+        policy_id INTEGER PRIMARY KEY CHECK (policy_id = 1),
+        max_active_jobs INTEGER NOT NULL
+            CHECK (max_active_jobs BETWEEN 1 AND 10000),
+        max_waiters INTEGER NOT NULL
+            CHECK (max_waiters BETWEEN 0 AND 10000),
+        configured_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
+    "AgentJobCapacityExhaustedError",
+    "AgentJobCapacityPolicy",
+    "AgentJobCapacitySnapshot",
     "AgentJobConflictError",
     "AgentJobError",
     "AgentJobKeyUnavailableError",

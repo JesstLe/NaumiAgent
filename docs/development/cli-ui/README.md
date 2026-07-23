@@ -50,6 +50,9 @@ ARC-04.5a 已继续扩展同一 Agent Control execution descriptor，让 New UI/
 Worker 请求摘要、终态结果摘要、精确工具范围与合同降级码，不在前端重算合同；
 ARC-04.5c 又以 additive 字段同步 durable Agent job ID、state、claim epoch 与稳定降级码；两端只消费
 Agent Control authority，不直接读取 Agent Job SQLite，也不展示 owner、expiry 或敏感 payload；
+HAR-10.7c/ARC-06.2c 继续把共享 active/waiting 上限、reclaimable 与 recovery-required 计数加入
+summary，并以 `waiting_capacity` 呈现尚未调用模型的执行：New UI 使用绿/黄/红状态色，Textual
+复用同一权威状态；
 UI-14.2g 已增加 surface-aware 权威页面索引，两端页面 provider 只填入精确导航命令；
 跨启动历史、typed argument form 与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。

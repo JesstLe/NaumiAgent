@@ -28,7 +28,7 @@ claim 接入 ToolJob/Shell dispatch-before-send、start 前复验、terminal rel
 ARC-04.5a 又为真实 Agent 委派增加模型调用前 request contract、终态 result receipt 及 New UI/TUI
 共享证据；ARC-04.5b1 已补充 OS credential-backed key 与 authenticated payload envelope，
 ARC-04.5b2 已建立 durable Agent Job Store 与 fenced lifecycle，ARC-04.5c 已让 embedded Agent
-消费 admit/claim/run/renew/finish 链并建立终态发布屏障；Agent 仍不是 daemon。自动 scheduler、
-可恢复 response、Agent/Browser 持久
-Worker、priority/公平调度与跨主机 topology 尚未实现，因此
+消费 admit/claim/run/renew/finish 链并建立终态发布屏障；ARC-06.2c 又建立跨 Runtime embedded Agent
+active 上限、有界 FIFO 与等待取消。Agent 仍不是 daemon，自动 recovery scheduler、可恢复 response、
+Agent/Browser 持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

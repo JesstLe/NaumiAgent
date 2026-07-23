@@ -68,6 +68,9 @@
   缺 key、start fence、续租和 terminal commit 失败均 fail closed，未认证模型结果不会发布，
   New UI/TUI Agent Control 显示相同 job state/epoch/降级码。详见
   `ARC-04-5c-embedded-agent-durable-dispatch.md`。
+- ARC-06.2c 已在相同 AgentJob authority 上增加跨 Runtime embedded active 上限、有界 FIFO、
+  `waiting_capacity` 停止和 recovery-blocking 计数；它不把 embedded Runtime 冒充独立 Worker。
+  详见 `ARC-06-2c-durable-embedded-agent-capacity.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon，response 原文也不可恢复。
   因此 ARC-04 保持 partial。

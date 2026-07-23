@@ -19,7 +19,7 @@ const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "team_message
 const AGENT_KINDS = new Set(["preset", "dynamic"]);
 const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "idle", "destroyed"]);
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
-const EXECUTION_PHASES = new Set(["starting", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
+const EXECUTION_PHASES = new Set(["starting", "waiting_capacity", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
 const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
 const WORKER_JOB_STATES = new Set(["admitted", "claimed", "running", "completed", "error", "timeout", "max_turns", "cancelled", "unknown"]);
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
@@ -5078,6 +5078,34 @@ function normalizeAgentSummary(value) {
     attention_agents: strictAgentNonnegativeInteger(summary.attention_agents, "summary.attention_agents"),
     stoppable_executions: strictAgentNonnegativeInteger(summary.stoppable_executions, "summary.stoppable_executions"),
     pending_messages: strictAgentNonnegativeInteger(summary.pending_messages, "summary.pending_messages"),
+    durable_capacity_configured: strictBoolean(
+      summary.durable_capacity_configured ?? false,
+      "summary.durable_capacity_configured",
+    ),
+    durable_active_jobs: strictAgentNonnegativeInteger(
+      summary.durable_active_jobs ?? 0,
+      "summary.durable_active_jobs",
+    ),
+    durable_max_active_jobs: strictAgentNonnegativeInteger(
+      summary.durable_max_active_jobs ?? 0,
+      "summary.durable_max_active_jobs",
+    ),
+    durable_waiting_jobs: strictAgentNonnegativeInteger(
+      summary.durable_waiting_jobs ?? 0,
+      "summary.durable_waiting_jobs",
+    ),
+    durable_max_waiters: strictAgentNonnegativeInteger(
+      summary.durable_max_waiters ?? 0,
+      "summary.durable_max_waiters",
+    ),
+    durable_reclaimable_jobs: strictAgentNonnegativeInteger(
+      summary.durable_reclaimable_jobs ?? 0,
+      "summary.durable_reclaimable_jobs",
+    ),
+    durable_recovery_required_jobs: strictAgentNonnegativeInteger(
+      summary.durable_recovery_required_jobs ?? 0,
+      "summary.durable_recovery_required_jobs",
+    ),
   };
 }
 

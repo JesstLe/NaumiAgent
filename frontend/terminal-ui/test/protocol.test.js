@@ -1927,6 +1927,9 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.executions[0].worker_job_id, "agent-job-test");
   assert.equal(normalized.executions[0].worker_job_state, "running");
   assert.equal(normalized.executions[0].worker_claim_epoch, 2);
+  assert.equal(normalized.summary.durable_capacity_configured, true);
+  assert.equal(normalized.summary.durable_active_jobs, 1);
+  assert.equal(normalized.summary.durable_waiting_jobs, 2);
 
   const update = normalizeServerRecord({
     type: "agents/update",
@@ -2071,6 +2074,13 @@ function agentControlSnapshotFixture(revision) {
       attention_agents: 0,
       stoppable_executions: 1,
       pending_messages: 0,
+      durable_capacity_configured: true,
+      durable_active_jobs: 1,
+      durable_max_active_jobs: 4,
+      durable_waiting_jobs: 2,
+      durable_max_waiters: 64,
+      durable_reclaimable_jobs: 0,
+      durable_recovery_required_jobs: 0,
     },
     agents: [{
       name: "coder",

@@ -39,8 +39,9 @@
 
 - 这是 embedded Runtime 的进程内 admission；进程重启不会恢复等待队列，也不能协调多个 Runtime 实例。
 - 本切片交付时等待队列尚无容量上限；后续
-  [HAR-10.7b](HAR-10-7b-bounded-agent-waiting-queue.md) 已补齐进程内硬上限与过载回执，但持久容量、
-  priority、deadline、aging 和 provider/workspace 维度仍属于 ARC-06 scheduler authority。
-- Agent 仍不是 ARC-04 持久 Worker producer，因此本切片不写 Worker Registry reservation；持久 incarnation、
-  crash fencing 和跨进程容量必须在 Agent Worker 合同建立后接入 ARC-06.1a authority。
+  [HAR-10.7b](HAR-10-7b-bounded-agent-waiting-queue.md) 已补齐进程内硬上限与过载回执；
+  [HAR-10.7c](HAR-10-7c-durable-agent-capacity-admission.md) 又补齐跨 Runtime active 上限与 durable
+  FIFO。priority、deadline、aging 和 provider/workspace 维度仍属于 ARC-06 scheduler authority。
+- Agent 仍不是 ARC-04 独立 Worker producer，因此 HAR-10.7c 复用 AgentJob claim lease 管理 embedded
+  capacity，而不伪造 Worker Registry incarnation；物理 Worker reservation 仍须等待独立 Worker。
 - Browser TaskRunner 有自己的进程内 queue，本切片不改变 Browser admission。
