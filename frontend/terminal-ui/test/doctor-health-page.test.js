@@ -70,3 +70,38 @@ test("doctor health page distinguishes stale and unknown heartbeat", () => {
   assert(stale.includes("不要自动重复提交"));
   assert(starting.includes("等待首次心跳证据"));
 });
+
+test("doctor health page renders export preview and written receipt", () => {
+  const preview = {
+    schema_version: 1,
+    status: "written",
+    bundle_format: "zip",
+    source_snapshot_sha256: "a".repeat(64),
+    manifest_sha256: "b".repeat(64),
+    bundle_sha256: "c".repeat(64),
+    total_bytes: 2048,
+    privacy_notice: "不包含聊天、reasoning、原始 trace、凭据或源码。",
+    files: [
+      { path: "health.json", size_bytes: 1000, description: "脱敏 Health" },
+      { path: "README.txt", size_bytes: 200, description: "说明" },
+      { path: "manifest.json", size_bytes: 500, description: "清单" },
+    ],
+  };
+  const lines = renderDoctorHealthPage({
+    snapshot: snapshot(),
+    heartbeat: { status: "healthy", rttMs: 12 },
+    exportPreview: preview,
+    exportReceipt: {
+      output_path: "/state/diagnostics/report.zip",
+      reused_existing: false,
+    },
+  }, 100, 40);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert.match(plain, /诊断包预览/);
+  assert.match(plain, /3 个文件 · 2.0 KiB/);
+  assert.match(plain, /health.json/);
+  assert.match(plain, /不包含聊天/);
+  assert.match(plain, /已导出 · .*report.zip/);
+  assert(lines.every((line) => visibleWidth(line) <= 100));
+});

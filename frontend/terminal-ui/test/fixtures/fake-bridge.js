@@ -11,6 +11,7 @@ let inspectorOpen = false;
 let agentsOpen = false;
 let agentStopped = false;
 let agentPermissionSent = false;
+const doctorSnapshotSha = "a".repeat(64);
 
 attachJsonlLineReader(process.stdin, (line) => {
   if (!line.trim()) return;
@@ -24,7 +25,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         selected_version: 1,
         server_minimum_version: 1,
         server_maximum_version: 1,
-        capabilities: ["goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+        capabilities: ["doctor_export", "goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
       },
     }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
@@ -572,6 +573,23 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "doctor") {
+    emit("doctor/health", {
+      schema_version: 1,
+      status: "degraded",
+      generated_at: "2026-07-23T10:00:00+00:00",
+      live_probe: false,
+      snapshot_sha256: doctorSnapshotSha,
+      items: [{
+        id: "browser-fixture",
+        domain: "browser",
+        label: "browser daemon",
+        severity: "degraded",
+        responsibility: "external_service",
+        detail: "browser daemon 集成已禁用",
+        suggestion: "需要浏览器能力时再启动。",
+        diagnostic_code: "",
+      }],
+    }, record.id);
     emitUi({
       type: "system_notice",
       title: "doctor",
@@ -586,6 +604,36 @@ attachJsonlLineReader(process.stdin, (line) => {
       level: "warn",
     });
     emit("runtime/status", statusPayload());
+    return;
+  }
+
+  if (record.type === "doctor/export") {
+    const base = {
+      schema_version: 1,
+      status: payload.action === "write" ? "written" : "preview",
+      bundle_format: "zip",
+      source_snapshot_sha256: doctorSnapshotSha,
+      manifest_sha256: "b".repeat(64),
+      bundle_sha256: "c".repeat(64),
+      total_bytes: 2048,
+      files: [
+        { path: "health.json", sha256: "d".repeat(64), size_bytes: 900, description: "脱敏 Health" },
+        { path: "README.txt", sha256: "e".repeat(64), size_bytes: 200, description: "说明" },
+        { path: "manifest.json", sha256: "b".repeat(64), size_bytes: 600, description: "清单" },
+      ],
+      privacy_notice: "不包含聊天、reasoning、原始 trace、凭据或源码。",
+    };
+    if (payload.action === "write") {
+      base.receipt = {
+        schema_version: 1,
+        output_path: "/tmp/naumi-state/diagnostics/report.zip",
+        bundle_sha256: base.bundle_sha256,
+        source_snapshot_sha256: base.source_snapshot_sha256,
+        size_bytes: base.total_bytes,
+        reused_existing: false,
+      };
+    }
+    emit("doctor/export/result", base, record.id);
     return;
   }
 

@@ -6,6 +6,7 @@
     "maximum_version": 1,
     "capabilities": [
       "evolution_evaluation_lane",
+      "doctor_export",
       "goal_snapshot",
       "heartbeat",
       "session_list",
@@ -20,6 +21,10 @@
     ]
   },
   "event_capabilities": {
+    "doctor_export": {
+      "client_events": ["doctor/export"],
+      "server_events": ["doctor/export/result"]
+    },
     "evolution_evaluation_lane": {
       "client_events": ["evolution/evaluation-lane/request"],
       "server_events": ["evolution/evaluation-lane"]
@@ -64,6 +69,7 @@
     "task_cancel",
     "permissions_panel",
     "doctor",
+    "doctor/export",
     "ping",
     "shutdown"
   ],
@@ -85,6 +91,7 @@
     "harness/eval-sandbox/cancel-result",
     "harness/eval-promotion",
     "doctor/health",
+    "doctor/export/result",
     "inspector/snapshot",
     "inspector/update",
     "agents/snapshot",
@@ -158,6 +165,7 @@
       "task_cancel": {"owner":"tasks","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "permissions_panel": {"owner":"safety","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "doctor": {"owner":"diagnostics","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
+      "doctor/export": {"owner":"diagnostics","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "ping": {"owner":"protocol","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "shutdown": {"owner":"protocol","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"}
     },
@@ -179,6 +187,7 @@
       "harness/eval-sandbox/cancel-result": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
       "harness/eval-promotion": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.promotion_reason"],"redaction":"required"},
       "doctor/health": {"owner":"diagnostics","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items.detail","payload.items.suggestion"],"redaction":"required"},
+      "doctor/export/result": {"owner":"diagnostics","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.receipt.output_path"],"redaction":"required"},
       "inspector/snapshot": {"owner":"inspector","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "inspector/update": {"owner":"inspector","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "agents/snapshot": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},

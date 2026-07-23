@@ -1170,6 +1170,42 @@ test("terminal UI process opens doctor diagnostics through bridge protocol", asy
   }
 });
 
+test("terminal UI process previews and writes a bounded doctor export", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "chat >", 7000);
+    app.stdin.write("/doctor export\n");
+    await waitForLatestScreen(output, "诊断包预览", 7000);
+    await waitForLatestScreen(output, "3 个文件 · 2.0 KiB · ZIP", 7000);
+    await waitForLatestScreen(output, "不包含聊天、reasoning、原始 trace、凭据或源码", 7000);
+    await waitForLatestScreen(output, "再按 e 写入 Naumi 状态目录", 7000);
+
+    app.stdin.write("e");
+    await waitForLatestScreen(
+      output,
+      "已导出 · /tmp/naumi-state/diagnostics/report.zip",
+      7000,
+    );
+
+    const exportSends = readDebugEvents(app.debugLogPath).filter(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "doctor/export",
+    );
+    assert.equal(exportSends.length, 2);
+    assert.deepEqual(exportSends[0].payload.record.payload, { action: "preview" });
+    assert.deepEqual(exportSends[1].payload.record.payload, {
+      action: "write",
+      expected_snapshot_sha256: "a".repeat(64),
+    });
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI process selects slash completion before deliberate submit", async () => {
   const app = launchTerminalUi();
   const output = collectOutput(app);

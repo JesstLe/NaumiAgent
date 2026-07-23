@@ -50,6 +50,40 @@ class TestPermissionChecker:
         assert not allowed.requires_confirmation
         assert not blocked.allowed
 
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+    )
+    def test_doctor_export_uses_fixed_low_risk_preview_gate(
+        self,
+        mode: PermissionMode,
+    ) -> None:
+        result = PermissionChecker(mode).check(
+            "doctor_export_diagnostics",
+            {
+                "action": "write",
+                "expected_snapshot_sha256": "a" * 64,
+            },
+        )
+
+        assert result.allowed
+        assert not result.requires_confirmation
+        assert result.risk_level is PermissionRiskLevel.LOW
+
+    def test_doctor_export_is_blocked_in_lockdown(self) -> None:
+        result = PermissionChecker(PermissionMode.LOCKDOWN).check(
+            "doctor_export_diagnostics",
+            {"action": "preview"},
+        )
+
+        assert not result.allowed
+        assert result.code is PermissionReasonCode.MODE_BLOCKED
+
     def test_workbench_proposal_governance_confirms_except_in_bypass(self) -> None:
         moderate = PermissionChecker(PermissionMode.MODERATE)
         bypass = PermissionChecker(PermissionMode.BYPASS)

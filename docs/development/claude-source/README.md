@@ -18,4 +18,5 @@
 
 CC-01 治理先行；CC-02 是 Ink 决策实验；CC-03/04 按产品优先级迁入；CC-05.1 已提供只读批准
 基线 observation，CC-05.2a 已提供 Git tree 与 mapped path 结构差异；后续符号/行为差异仍不得
-绕过 source refresh approval。
+绕过 source refresh approval。CC-03 的 Naumi Doctor export 产品合同已由 UI-13.5a 提供，但 source
+behavior inventory、语义迁移和 golden 对齐尚未开始，不得因此把 CC-03 标记为完成或 partial。

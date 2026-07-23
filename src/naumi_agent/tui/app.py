@@ -77,7 +77,16 @@ from naumi_agent.ui.command_index import (
     record_recent_terminal_command,
 )
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+from naumi_agent.ui.doctor_export import (
+    DoctorExportPlan,
+    build_doctor_export_plan,
+    render_doctor_export_preview,
+    render_doctor_export_receipt,
+    write_doctor_export,
+)
 from naumi_agent.ui.doctor_health import (
+    DoctorHealthSnapshot,
+    build_doctor_health_snapshot,
     render_doctor_health_item_markdown,
     runtime_heartbeat_retention_health_item,
 )
@@ -1735,6 +1744,8 @@ class NaumiApp(App):
         self._run_cancel_pending = False
         self._recent_commands: tuple[str, ...] = ()
         self._pending_harness_receipts: dict[str, dict[str, Any]] = {}
+        self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
+        self._doctor_export_plan: DoctorExportPlan | None = None
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -2619,6 +2630,31 @@ class NaumiApp(App):
         parts = raw.split(maxsplit=1)
         command = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
+        if command == "/doctor":
+            export_match = re.fullmatch(
+                r"export(?:\s+([0-9a-fA-F]{64}))?",
+                arg.strip(),
+            )
+            if not arg:
+                self._run_doctor()
+            elif export_match is not None:
+                digest = str(export_match.group(1) or "").lower()
+                self._run_doctor(
+                    export_action="write" if digest else "preview",
+                    expected_snapshot_sha256=digest,
+                )
+            else:
+                self.query_one(StatusBar).status_text = (
+                    "用法：/doctor 或 /doctor export [snapshot-sha256]"
+                )
+                self.query_one(ChatPanel).mount(
+                    Markdown(
+                        "Doctor 用法：`/doctor` 或 "
+                        "`/doctor export [snapshot-sha256]`。",
+                        classes="agent-msg",
+                    )
+                )
+            return
         if command == "/agents":
             target = parse_terminal_agent_deep_link(raw)
             if arg and target is None:
@@ -3795,9 +3831,55 @@ class NaumiApp(App):
         status.status_text = "用法: /history retention-worker [status|start|stop|wake]"
 
     @work(exclusive=True, exit_on_error=False)
-    async def _run_doctor(self) -> None:
+    async def _run_doctor(
+        self,
+        *,
+        export_action: str = "",
+        expected_snapshot_sha256: str = "",
+    ) -> None:
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
+        if export_action == "write":
+            plan = self._doctor_export_plan
+            if (
+                plan is None
+                or not expected_snapshot_sha256
+                or plan.preview.source_snapshot_sha256
+                != expected_snapshot_sha256
+            ):
+                status.status_text = "诊断包预览不存在或已失效"
+                chat.mount(
+                    Markdown(
+                        "诊断包尚未写入。请先运行 `/doctor export` 查看脱敏清单，"
+                        "再使用回显的 snapshot SHA-256 确认。",
+                        classes="agent-msg",
+                    )
+                )
+                return
+            try:
+                receipt = write_doctor_export(plan)
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning("TUI Doctor export failed (%s)", type(exc).__name__)
+                if self.debug_trace is not None:
+                    self.debug_trace.exception("tui.doctor_export", exc)
+                status.status_text = "诊断包导出失败"
+                chat.mount(
+                    Markdown(
+                        "诊断包未写入完整文件。请检查 Naumi 状态目录权限后重试。",
+                        classes="agent-msg",
+                    )
+                )
+                return
+            chat.mount(
+                Markdown(
+                    render_doctor_export_receipt(receipt),
+                    classes="agent-msg",
+                )
+            )
+            self._doctor_export_plan = None
+            status.status_text = "诊断包已保存到本机状态目录"
+            return
+
         status.status_text = "环境诊断中"
         report = await run_doctor(
             self.engine._config,
@@ -3808,6 +3890,12 @@ class NaumiApp(App):
         retention_item = runtime_heartbeat_retention_health_item(
             self._runtime_heartbeat_retention_status_payload()
         )
+        snapshot = build_doctor_health_snapshot(
+            report,
+            additional_items=(retention_item,),
+        )
+        self._doctor_health_snapshot = snapshot
+        self._doctor_export_plan = None
         content = (
             render_doctor_report(report)
             + "\n\n"
@@ -3821,6 +3909,42 @@ class NaumiApp(App):
         }[report.status]
         if report.status == "pass" and retention_item.severity == "unknown":
             status.status_text = "环境诊断存在未知项"
+        if export_action == "preview":
+            try:
+                plan = build_doctor_export_plan(
+                    snapshot,
+                    workspace_root=getattr(
+                        self.engine,
+                        "workspace_root",
+                        Path.cwd(),
+                    ),
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "TUI Doctor export preview failed (%s)",
+                    type(exc).__name__,
+                )
+                if self.debug_trace is not None:
+                    self.debug_trace.exception("tui.doctor_export_preview", exc)
+                status.status_text = "诊断包预览失败"
+                chat.mount(
+                    Markdown(
+                        "无法构建脱敏清单；未写入任何文件。",
+                        classes="agent-msg",
+                    )
+                )
+                return
+            self._doctor_export_plan = plan
+            chat.mount(
+                Markdown(
+                    render_doctor_export_preview(plan.preview)
+                    + "\n\n"
+                    + "确认后运行："
+                    + f"`/doctor export {plan.preview.source_snapshot_sha256}`",
+                    classes="agent-msg",
+                )
+            )
+            status.status_text = "诊断包等待确认写入"
 
     @work(exclusive=True, exit_on_error=False)
     async def _archive_session(self, session_id: str) -> None:

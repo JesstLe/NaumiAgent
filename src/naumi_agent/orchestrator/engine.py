@@ -1590,7 +1590,7 @@ class AgentEngine:
             self._tool_registry.register(tool)
 
         # Runtime status tools
-        from naumi_agent.tools.doctor import DoctorDiagnosticsTool
+        from naumi_agent.tools.doctor import DoctorDiagnosticsTool, DoctorExportTool
         from naumi_agent.tools.evolution_review import create_evolution_review_tools
         from naumi_agent.tools.feedback import create_feedback_tools
         from naumi_agent.tools.runtime import create_runtime_tools
@@ -1599,6 +1599,7 @@ class AgentEngine:
         from naumi_agent.tools.user_interaction import RequestUserInputTool
 
         self._tool_registry.register(DoctorDiagnosticsTool(self))
+        self._tool_registry.register(DoctorExportTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
         for tool in create_feedback_tools(self, self.feedback_intake_service):
             self._tool_registry.register(tool)

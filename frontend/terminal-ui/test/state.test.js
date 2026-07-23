@@ -2280,6 +2280,90 @@ test("doctor command opens typed health route refreshes and restores origin", ()
   assert.equal(state.followTail, false);
 });
 
+test("doctor export previews before writing and keeps malformed forms local", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return `request-${sent.length}`;
+  };
+  handleSubmitText(state, "/doctor export", send);
+  const actions = reduceServerEvent(state, {
+    type: "doctor/health",
+    payload: {
+      schema_version: 1,
+      status: "ok",
+      generated_at: "2026-07-23T10:00:00+00:00",
+      live_probe: false,
+      snapshot_sha256: "a".repeat(64),
+      items: [],
+    },
+  });
+  assert.deepEqual(actions, [{ type: "doctor_export_preview" }]);
+  assert.equal(state.doctorHealth.exportLoading, true);
+  state.doctorHealth.exportRequestId = "request-preview";
+
+  const preview = {
+    schema_version: 1,
+    status: "preview",
+    bundle_format: "zip",
+    source_snapshot_sha256: "a".repeat(64),
+    manifest_sha256: "b".repeat(64),
+    bundle_sha256: "c".repeat(64),
+    total_bytes: 2048,
+    files: [],
+    privacy_notice: "不包含聊天、reasoning、原始 trace、凭据或源码。",
+    receipt: null,
+  };
+  reduceServerEvent(state, {
+    type: "doctor/export/result",
+    request_id: "request-preview",
+    payload: preview,
+  });
+  assert.equal(handleDoctorHealthKey(state, "e", send), true);
+  assert.deepEqual(sent.at(-1), {
+    type: "doctor/export",
+    payload: {
+      action: "write",
+      expected_snapshot_sha256: "a".repeat(64),
+    },
+  });
+  reduceServerEvent(state, {
+    type: "doctor/export/result",
+    request_id: "stale-write",
+    payload: {
+      ...preview,
+      status: "written",
+      receipt: {
+        output_path: "/state/diagnostics/stale.zip",
+        reused_existing: false,
+      },
+    },
+  });
+  assert.equal(state.doctorHealth.exportReceipt, null);
+  reduceServerEvent(state, {
+    type: "doctor/export/result",
+    request_id: "request-2",
+    payload: {
+      ...preview,
+      status: "written",
+      receipt: {
+        output_path: "/state/diagnostics/report.zip",
+        reused_existing: false,
+      },
+    },
+  });
+  assert.equal(
+    state.doctorHealth.exportReceipt.output_path,
+    "/state/diagnostics/report.zip",
+  );
+
+  const before = sent.length;
+  handleSubmitText(state, "/doctor raw", send);
+  assert.equal(sent.length, before);
+  assert.match(state.messages.at(-1).content, /用法/);
+});
+
 test("local exit commands never enter transport or the outbox", () => {
   for (const command of ["/q", "/quit", "/exit", "  /Q  "]) {
     const state = createInitialState();

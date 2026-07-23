@@ -2053,6 +2053,56 @@ async def _run_tool_slash_command(
         console.print(f"[green]命令已执行: {slash_command}[/green]")
 
 
+async def _run_doctor_command(engine: Any, arg: str) -> None:
+    """Run Doctor or dispatch a privacy-bounded export through Engine policy."""
+    normalized = str(arg or "").strip()
+    if not normalized:
+        report = await run_doctor(
+            engine._config,
+            workspace_root=getattr(engine, "workspace_root", Path.cwd()),
+            mcp_manager=getattr(engine, "_mcp_manager", None),
+            model_router=engine.router,
+        )
+        console.print(Markdown(render_doctor_report(report)))
+        return
+
+    try:
+        tokens = shlex.split(normalized)
+    except ValueError:
+        tokens = []
+    expected_snapshot_sha256 = ""
+    if tokens == ["export"]:
+        action = "preview"
+    elif (
+        len(tokens) == 2
+        and tokens[0] == "export"
+        and re.fullmatch(r"[0-9a-fA-F]{64}", tokens[1])
+    ):
+        action = "write"
+        expected_snapshot_sha256 = tokens[1].lower()
+    else:
+        console.print(
+            "[yellow]用法: /doctor 或 /doctor export "
+            "[preview 返回的 snapshot-sha256][/yellow]"
+        )
+        return
+
+    await _run_tool_slash_command(
+        engine,
+        slash_command="/doctor",
+        tool_name="doctor_export_diagnostics",
+        parse_args=lambda _arg: {
+            "action": action,
+            **(
+                {"expected_snapshot_sha256": expected_snapshot_sha256}
+                if expected_snapshot_sha256
+                else {}
+            ),
+        },
+        arg="",
+    )
+
+
 def _parse_models_command_arg(arg: str) -> tuple[str | None, bool] | None:
     try:
         parts = shlex.split(arg)
@@ -2181,13 +2231,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
         case "/effort":
             _handle_effort_command(engine, arg)
         case "/doctor":
-            report = await run_doctor(
-                engine._config,
-                workspace_root=getattr(engine, "workspace_root", Path.cwd()),
-                mcp_manager=getattr(engine, "_mcp_manager", None),
-                model_router=engine.router,
-            )
-            console.print(Markdown(render_doctor_report(report)))
+            await _run_doctor_command(engine, arg)
         case "/harness":
             await _run_harness(engine, arg)
         case "/tool-output":
@@ -2740,7 +2784,7 @@ def _print_help() -> None:
         ("/style", "显示当前主题和输出风格"),
         ("/reasoning [on|off|toggle]", "显示或隐藏模型思考文本"),
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
-        ("/doctor", "运行环境诊断"),
+        ("/doctor", "运行环境诊断或预览/导出脱敏诊断包"),
         (
             "/harness [status|doctor|explain|replay|detail|evidence|eval|baseline|"
             "knowledge|check|trust|untrust]",

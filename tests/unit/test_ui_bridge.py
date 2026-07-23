@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import types
+import zipfile
 from dataclasses import fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,7 +78,7 @@ from naumi_agent.tasks.store import TaskStore
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.ui import bridge as ui_bridge
 from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
-from naumi_agent.ui.doctor import DoctorCheck
+from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
     PermissionBubbleMessage,
@@ -6778,6 +6779,109 @@ async def test_bridge_doctor_failure_returns_typed_product_runtime_fallback(
     assert item["responsibility"] == "product_runtime"
     assert "诊断流程自身失败" in item["detail"]
     assert "private doctor failure" not in json.dumps(health, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_export_requires_preview_and_writes_private_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-doctor-export",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["doctor_export", "typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+    secret = "sk-proj-1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"
+
+    async def fake_run_doctor(*args: Any, **kwargs: Any) -> DoctorReport:
+        return DoctorReport(checks=(
+            DoctorCheck(
+                "config 文件",
+                "warn",
+                f"workspace={workspace}; api_key={secret}",
+            ),
+        ))
+
+    monkeypatch.setattr("naumi_agent.ui.doctor.run_doctor", fake_run_doctor)
+    await bridge.handle_client_record({
+        "id": "doctor-export-before-snapshot",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {"action": "preview"},
+    })
+    assert _records(writer)[-1]["payload"]["code"] == "doctor_export_snapshot_missing"
+
+    await bridge.handle_client_record({
+        "id": "doctor-for-export",
+        "type": ClientEventType.DOCTOR,
+        "payload": {},
+    })
+    await bridge.handle_client_record({
+        "id": "doctor-export-preview",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {"action": "preview"},
+    })
+    preview = _records(writer)[-1]
+    assert preview["type"] == "doctor/export/result"
+    assert preview["payload"]["status"] == "preview"
+    assert preview["payload"]["total_bytes"] <= 512 * 1024
+    assert [item["path"] for item in preview["payload"]["files"]] == [
+        "health.json",
+        "README.txt",
+        "manifest.json",
+    ]
+
+    await bridge.handle_client_record({
+        "id": "doctor-export-stale",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {
+            "action": "write",
+            "expected_snapshot_sha256": "0" * 64,
+        },
+    })
+    assert _records(writer)[-1]["payload"]["code"] == "doctor_export_preview_stale"
+
+    await bridge.handle_client_record({
+        "id": "doctor-export-preview-2",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {"action": "preview"},
+    })
+    preview = _records(writer)[-1]["payload"]
+    await bridge.handle_client_record({
+        "id": "doctor-export-write",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {
+            "action": "write",
+            "expected_snapshot_sha256": preview["source_snapshot_sha256"],
+        },
+    })
+    assert bridge._doctor_export_plan is None
+    written = _records(writer)[-1]
+    assert written["type"] == "doctor/export/result"
+    assert written["payload"]["status"] == "written"
+    output_path = Path(written["payload"]["receipt"]["output_path"])
+    assert output_path.parent == state_home / "diagnostics"
+    assert output_path.exists()
+    with zipfile.ZipFile(output_path) as archive:
+        contents = b"\n".join(archive.read(name) for name in archive.namelist())
+    assert secret.encode() not in contents
+    assert str(workspace).encode() not in contents
+    assert not list(output_path.parent.glob("*.tmp"))
 
 
 def _interaction_payload() -> dict[str, Any]:

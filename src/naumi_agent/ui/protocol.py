@@ -23,6 +23,7 @@ PROTOCOL_VERSION = 1
 PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
+    "doctor_export",
     "evolution_evaluation_lane",
     "goal_snapshot",
     "heartbeat",
@@ -86,6 +87,7 @@ class ClientEventType(StrEnum):
     TASK_CANCEL = "task_cancel"
     PERMISSIONS_PANEL = "permissions_panel"
     DOCTOR = "doctor"
+    DOCTOR_EXPORT = "doctor/export"
     PING = "ping"
     SHUTDOWN = "shutdown"
 
@@ -118,6 +120,7 @@ class ServerEventType(StrEnum):
     HARNESS_EVAL_SANDBOX_CANCEL_RESULT = "harness/eval-sandbox/cancel-result"
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     DOCTOR_HEALTH = "doctor/health"
+    DOCTOR_EXPORT_RESULT = "doctor/export/result"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -336,6 +339,25 @@ def _normalize_client_payload(
 
     if event_type == ClientEventType.WORKSPACE_FILES_CANCEL:
         return {}
+
+    if event_type == ClientEventType.DOCTOR_EXPORT:
+        action = str(payload.get("action") or "preview").strip().lower()
+        if action not in {"preview", "write"}:
+            raise ValueError("Doctor export action 必须是 preview 或 write。")
+        expected_snapshot_sha256 = str(
+            payload.get("expected_snapshot_sha256") or ""
+        ).strip().lower()
+        if action == "write" and not re.fullmatch(
+            r"[0-9a-f]{64}",
+            expected_snapshot_sha256,
+        ):
+            raise ValueError("写入诊断包需要预览返回的 snapshot SHA-256。")
+        if action == "preview" and expected_snapshot_sha256:
+            raise ValueError("预览诊断包不能携带 expected_snapshot_sha256。")
+        return {
+            "action": action,
+            "expected_snapshot_sha256": expected_snapshot_sha256,
+        }
 
     if event_type in {
         ClientEventType.HARNESS_EXPLAIN_REQUEST,
