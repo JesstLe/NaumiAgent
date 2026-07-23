@@ -116,7 +116,8 @@ HAR-08.4o3b 的真实 Git + 隔离 Worker 场景已经证明 2/5 取消后续跑
 
 仍未实现：
 
-- HAR-08.4o3d/4o3g/4o3h 已补齐 retry dispatch catalog、共享详情与只读 retention preview；
+- HAR-08.4o3d/4o3g/4o3h/4o3i 已补齐 retry dispatch catalog、共享详情、只读 retention preview
+  与 prune receipt；
   专用 typed 详情页和 prune receipt/执行仍未完成；
 - Bridge 重启后的 retry control-task 主动恢复；HAR-08.4o3e 已提供 receipt-bound resume Tool/共享
   Slash，HAR-08.4o3f 已提供启动有界 snapshot 与 New UI/TUI 人工恢复队列；UI 仍不自动重放

@@ -59,6 +59,7 @@ class ToolMetadata:
     user_facing_name: str | None = None
     search_hint: str = ""
     delegated_tool_names: tuple[str, ...] = ()
+    requires_persistent_authorization: bool = False
 
 
 class Tool(ABC):

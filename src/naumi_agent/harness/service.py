@@ -129,6 +129,7 @@ from naumi_agent.harness.sandbox_service import (
 )
 from naumi_agent.harness.store import (
     HarnessSandboxRetryCatalogPage,
+    HarnessSandboxRetryPruneReceipt,
     HarnessSessionDeleteImpact,
     HarnessStore,
     HarnessStoredEvalComparisonReceipt,
@@ -625,6 +626,134 @@ class HarnessService:
             scan_limit=scan_limit,
         )
         return build_sandbox_retry_retention_preview(page)
+
+    async def authorize_sandbox_retry_prune(
+        self,
+        *,
+        action_id: str,
+        preview_id: str,
+        preview_sha256: str,
+        candidate_id: str,
+        candidate_sha256: str,
+        retry_action_id: str,
+        dispatch_id: str,
+        dispatch_epoch: int,
+        dispatch_request_sha256: str,
+        dispatch_updated_at: str,
+        protection_refs_sha256: str,
+        preview_assessed_at: str,
+        retention_days: int,
+        limit: int,
+        scan_limit: int,
+        reason: str,
+        run_id: str,
+    ) -> HarnessSandboxRetryPruneReceipt:
+        """Authorize one exact preview candidate; never delete retry facts."""
+        store = self._store
+        receipt_provider = self._authorization_receipt_provider
+        if store is None or receipt_provider is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_prune_service_unavailable",
+                "当前 Runtime 尚未配置 Sandbox retry prune 回执基础设施。",
+            )
+        expected_arguments: dict[str, object] = {
+            "action_id": action_id,
+            "preview_id": preview_id,
+            "preview_sha256": preview_sha256,
+            "candidate_id": candidate_id,
+            "candidate_sha256": candidate_sha256,
+            "retry_action_id": retry_action_id,
+            "dispatch_id": dispatch_id,
+            "dispatch_epoch": dispatch_epoch,
+            "dispatch_request_sha256": dispatch_request_sha256,
+            "dispatch_updated_at": dispatch_updated_at,
+            "protection_refs_sha256": protection_refs_sha256,
+            "preview_assessed_at": preview_assessed_at,
+            "retention_days": retention_days,
+            "limit": limit,
+            "scan_limit": scan_limit,
+            "reason": reason,
+            "run_id": run_id,
+        }
+        parent = receipt_provider()
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or parent.tool_name
+            != "harness_eval_sandbox_retry_prune_authorize"
+            or parent.run_id != run_id
+            or parent.arguments_sha256
+            != permission_arguments_sha256(expected_arguments)
+        ):
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_prune_parent_permission_mismatch",
+                "Sandbox retry prune 缺少与当前候选精确匹配的持久权限回执。",
+            )
+
+        preview = await self.sandbox_retry_retention_preview(
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+            assessed_at=preview_assessed_at,
+        )
+        preflight_code = ""
+        if (
+            preview.preview_id != preview_id
+            or preview.preview_sha256 != preview_sha256
+        ):
+            preflight_code = "sandbox_retry_prune_preview_mismatch"
+        candidate = next(
+            (
+                item
+                for item in preview.candidates
+                if item.candidate_id == candidate_id
+                and item.candidate_sha256 == candidate_sha256
+            ),
+            None,
+        )
+        if not preflight_code and candidate is None:
+            preflight_code = "sandbox_retry_prune_candidate_missing"
+        if candidate is not None and not preflight_code:
+            supplied_fence = (
+                retry_action_id,
+                dispatch_id,
+                dispatch_epoch,
+                dispatch_request_sha256,
+                dispatch_updated_at,
+                protection_refs_sha256,
+            )
+            current_fence = (
+                candidate.retry_action_id,
+                candidate.dispatch_id,
+                candidate.dispatch_epoch,
+                candidate.dispatch_request_sha256,
+                candidate.updated_at,
+                candidate.protection_refs_sha256,
+            )
+            if supplied_fence != current_fence:
+                preflight_code = "sandbox_retry_prune_candidate_drift"
+
+        actor_id = f"{parent.actor.value}:{parent.agent_name}"
+        return await store.authorize_sandbox_retry_prune(
+            workspace_root=self.workspace_root,
+            action_id=action_id,
+            preview_id=preview_id,
+            preview_sha256=preview_sha256,
+            candidate_id=candidate_id,
+            candidate_sha256=candidate_sha256,
+            retry_action_id=retry_action_id,
+            dispatch_id=dispatch_id,
+            dispatch_epoch=dispatch_epoch,
+            dispatch_request_sha256=dispatch_request_sha256,
+            dispatch_updated_at=dispatch_updated_at,
+            protection_refs_sha256=protection_refs_sha256,
+            parent_permission_receipt_id=parent.receipt_id,
+            parent_permission_receipt_sha256=parent.receipt_sha256,
+            actor_id=actor_id,
+            reason=reason,
+            created_at=datetime.now(UTC).isoformat(),
+            preflight_code=preflight_code,
+        )
 
     async def eval_baseline_status(
         self,

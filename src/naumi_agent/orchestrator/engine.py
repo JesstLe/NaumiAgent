@@ -5461,7 +5461,14 @@ class AgentEngine:
             )
 
         delegated_tool_names = tuple(tool.metadata.delegated_tool_names)
-        if decision.outcome is PermissionOutcome.ALLOW and delegated_tool_names:
+        requires_persistent_authorization = bool(
+            delegated_tool_names
+            or tool.metadata.requires_persistent_authorization
+        )
+        if (
+            decision.outcome is PermissionOutcome.ALLOW
+            and requires_persistent_authorization
+        ):
             direct_source = (
                 PermissionDecisionSource.BYPASS
                 if self._permission_port.mode is PermissionMode.BYPASS
@@ -5491,7 +5498,7 @@ class AgentEngine:
                     ),
                 )
             execution_authorization_receipt = receipt
-        elif delegated_tool_names:
+        elif requires_persistent_authorization:
             execution_authorization_receipt = next(
                 (
                     receipt
@@ -5513,7 +5520,7 @@ class AgentEngine:
                     call_id=tc.id,
                     status="error",
                     content=(
-                        "权限拒绝：受委托工具缺少当前调用的持久权限回执。"
+                        "权限拒绝：当前工具缺少本次调用的持久权限回执。"
                     ),
                 )
 

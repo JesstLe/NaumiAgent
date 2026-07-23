@@ -16,7 +16,7 @@ from naumi_agent.harness.sandbox_retry_detail import (
 )
 from naumi_agent.harness.store import HarnessSandboxRetryRetentionPage
 
-SANDBOX_RETRY_RETENTION_SCHEMA_VERSION = 1
+SANDBOX_RETRY_RETENTION_SCHEMA_VERSION = 2
 RetentionPreviewStatus = Literal["ok", "unavailable"]
 TerminalState = Literal["completed", "failed", "cancelled"]
 _ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
@@ -43,6 +43,8 @@ class HarnessSandboxRetryRetentionCandidate(_StrictModel):
     candidate_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     retry_action_id: str = Field(pattern=r"^hsar_[0-9a-f]{24}$")
     dispatch_id: str = Field(pattern=r"^hsard_[0-9a-f]{24}$")
+    dispatch_epoch: int = Field(ge=1)
+    dispatch_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     terminal_state: TerminalState
     terminal_code: str = Field(max_length=128)
     updated_at: str = Field(min_length=1, max_length=64)
@@ -78,7 +80,7 @@ class HarnessSandboxRetryRetentionCandidate(_StrictModel):
 
 
 class HarnessSandboxRetryRetentionPreview(_StrictModel):
-    schema_version: Literal[1] = SANDBOX_RETRY_RETENTION_SCHEMA_VERSION
+    schema_version: Literal[2] = SANDBOX_RETRY_RETENTION_SCHEMA_VERSION
     preview_id: str = Field(pattern=r"^hsrrpv_[0-9a-f]{24}$")
     preview_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: RetentionPreviewStatus
@@ -201,6 +203,8 @@ def build_sandbox_retry_retention_preview(
         base = {
             "retry_action_id": detail.retry_action_id,
             "dispatch_id": detail.dispatch_id,
+            "dispatch_epoch": detail.dispatch_epoch,
+            "dispatch_request_sha256": detail.dispatch_request_sha256,
             "terminal_state": detail.dispatch_state,
             "terminal_code": detail.terminal_code,
             "updated_at": detail.updated_at,
@@ -344,7 +348,10 @@ def render_sandbox_retry_retention_preview(
                     f"#### `{candidate.dispatch_id}`",
                     "",
                     f"- 状态：`{candidate.terminal_state}`",
+                    f"- Candidate ID：`{candidate.candidate_id}`",
                     f"- Retry action：`{candidate.retry_action_id}`",
+                    f"- Dispatch epoch：{candidate.dispatch_epoch}",
+                    f"- Dispatch request：`{candidate.dispatch_request_sha256}`",
                     f"- 更新时间：`{candidate.updated_at}`",
                     f"- 年龄：{candidate.age_seconds // 86_400} 天",
                     f"- Batch/Suite：`{candidate.batch_id}` / `{candidate.suite_id}`",
@@ -353,6 +360,22 @@ def render_sandbox_retry_retention_preview(
                     + " · ".join(f"{kind} {count}" for kind, count in kinds.items()),
                     f"- 引用摘要：`{candidate.protection_refs_sha256}`",
                     f"- Candidate：`{candidate.candidate_sha256}`",
+                    "- 签发命令："
+                    f"`/harness eval sandbox retry-prune-authorize "
+                    f"{candidate.candidate_id} --preview {preview.preview_id} "
+                    f"--preview-sha256 {preview.preview_sha256} "
+                    f"--candidate-sha256 {candidate.candidate_sha256} "
+                    f"--retry-action {candidate.retry_action_id} "
+                    f"--dispatch {candidate.dispatch_id} "
+                    f"--epoch {candidate.dispatch_epoch} "
+                    f"--dispatch-sha256 {candidate.dispatch_request_sha256} "
+                    f"--updated-at {candidate.updated_at} "
+                    f"--refs-sha256 {candidate.protection_refs_sha256} "
+                    f"--preview-assessed-at {preview.assessed_at} "
+                    f"--retention-days {preview.policy.retention_days} "
+                    f"--limit {preview.policy.limit} "
+                    f"--scan-limit {preview.policy.scan_limit} "
+                    '--reason "清理超过保留期的终态 retry cohort"`',
                     "",
                 )
             )

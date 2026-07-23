@@ -123,7 +123,8 @@ queued/admitted/recovering/executing/completed 状态；不会显示伪造的第
 
 仍未实现：
 
-- HAR-08.4o3d/4o3g/4o3h 已补齐 retry dispatch catalog、详情与只读 retention preview；
+- HAR-08.4o3d/4o3g/4o3h/4o3i 已补齐 retry dispatch catalog、详情、只读 retention preview
+  与不可变 prune receipt；
   prune receipt/执行仍未完成；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI 证据。
