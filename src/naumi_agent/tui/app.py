@@ -285,20 +285,36 @@ class _TuiSlashCommandFrontend:
     ) -> None:
         """Project the authoritative Sandbox coordinator checkpoint."""
         labels = {
+            "queued": "排队",
+            "admitted": "已准入",
             "recovering": "恢复",
             "acquiring": "申请 Worker",
             "executing": "隔离执行",
             "completed": "完成",
             "failed": "失败",
+            "cancelled": "已取消",
+            "expired": "租约过期",
         }
         stage = str(progress.get("stage") or "")
         label = labels.get(stage, stage or "等待")
         status = self._app.query_one(StatusBar)
+        admission = ""
+        if progress.get("admission_ticket_id"):
+            if stage == "queued":
+                admission = (
+                    f" · 队列 {int(progress.get('queue_position') or 0)}"
+                    f"/{int(progress.get('max_queued') or 0)}"
+                )
+            else:
+                admission = (
+                    f" · 容量 {int(progress.get('active_count') or 0)}"
+                    f"/{int(progress.get('max_active') or 0)}"
+                )
         status.status_text = (
             f"Sandbox Eval {label}: "
             f"{int(progress.get('persisted') or 0)}/"
             f"{int(progress.get('requested') or 0)}"
-            f" · {str(progress.get('batch_id') or '-')}"
+            f" · {str(progress.get('batch_id') or '-')}{admission}"
         )
 
     async def request_user_interaction(

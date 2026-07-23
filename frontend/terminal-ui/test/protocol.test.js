@@ -178,7 +178,7 @@ function harnessSandboxEvalPayload(stage = "executing") {
     schema_version: 1,
     kind: "sandbox",
     stage,
-    terminal: ["completed", "failed"].includes(stage),
+    terminal: ["completed", "failed", "cancelled", "expired"].includes(stage),
     batch_id: "sandbox-1",
     check_ids: ["unit", "lint"],
     requested: 5,
@@ -193,7 +193,9 @@ function harnessSandboxEvalPayload(stage = "executing") {
       { length: persisted },
       (_, index) => String(index + 1).repeat(64),
     ),
-    code: stage === "failed" ? "sample_execution_interrupted" : "",
+    code: ["failed", "cancelled", "expired"].includes(stage)
+      ? `sandbox_batch_${stage}`
+      : "",
     updated_at: "2026-07-23T10:00:00+08:00",
   };
 }
@@ -857,6 +859,48 @@ test("harness sandbox eval response preserves coordinator checkpoint semantics",
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
     /摘要数量/,
+  );
+});
+
+test("harness sandbox admission response requires a coherent durable snapshot", () => {
+  const queuedPayload = {
+    ...harnessSandboxEvalPayload("queued"),
+    persisted: 0,
+    sample_result_sha256: [],
+    run_id: "",
+    run_grant_sha256: "",
+    admission_ticket_id: `hsadm_${"e".repeat(24)}`,
+    admission_epoch: 1,
+    admission_state: "queued",
+    queue_position: 2,
+    max_active: 1,
+    max_queued: 4,
+    active_count: 1,
+    queued_count: 3,
+  };
+  const queued = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: queuedPayload,
+  }).payload;
+
+  assert.equal(queued.stage, "queued");
+  assert.equal(queued.admission_ticket_id, `hsadm_${"e".repeat(24)}`);
+  assert.equal(queued.queue_position, 2);
+  assert.equal(queued.active_count, 1);
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/eval-batch",
+      payload: { ...queuedPayload, queue_position: 4 },
+    }),
+    /queue position/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/eval-batch",
+      payload: { ...queuedPayload, admission_state: "active" },
+    }),
+    /queue position|stage 与 admission state/,
   );
 });
 

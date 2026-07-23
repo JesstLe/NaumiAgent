@@ -134,6 +134,9 @@
 - HAR-08.4l Durable Sandbox Batch Admission：已实现。Harness Store v17 提供 workspace-wide FIFO、
   queued/active lease、崩溃回收、容量策略一致性和 owner/epoch fencing；生产 Harness/Evolution lane 共享同一
   durable authority。详见 `HAR-08-4l-durable-sandbox-admission.md`。
+- HAR-08.4m Sandbox Admission Typed Progress：已实现。Store-confirmed queued position、capacity、
+  admitted 与 terminal ticket state 经既有 Runtime event/Bridge 同步到 New UI/TUI；最终 completed 在容量
+  槽释放后发布。详见 `HAR-08-4m-sandbox-admission-typed-progress.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。

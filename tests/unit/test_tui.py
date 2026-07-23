@@ -156,6 +156,19 @@ class TestNaumiApp:
         assert status.status_text == (
             "Sandbox Eval 隔离执行: 2/5 · sandbox-1"
         )
+        await frontend.update_harness_sandbox_eval({
+            "stage": "queued",
+            "persisted": 0,
+            "requested": 5,
+            "batch_id": "sandbox-queued",
+            "admission_ticket_id": f"hsadm_{'a' * 24}",
+            "queue_position": 2,
+            "max_queued": 4,
+        })
+
+        assert status.status_text == (
+            "Sandbox Eval 排队: 0/5 · sandbox-queued · 队列 2/4"
+        )
 
     @pytest.mark.asyncio
     async def test_doctor_reports_unavailable_when_tui_factory_is_missing(

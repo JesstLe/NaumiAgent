@@ -81,11 +81,15 @@ const HARNESS_EVAL_BATCH_STAGES = new Set([
   "error",
 ]);
 const HARNESS_SANDBOX_EVAL_STAGES = new Set([
+  "queued",
+  "admitted",
   "recovering",
   "acquiring",
   "executing",
   "completed",
   "failed",
+  "cancelled",
+  "expired",
 ]);
 const HARNESS_EVAL_PROMOTION_STAGES = new Set([
   "awaiting_reason",
@@ -2089,7 +2093,7 @@ function normalizeHarnessSandboxEvalProgress(payload) {
     payload.terminal,
     "harness/eval-batch sandbox terminal",
   );
-  if (terminal !== ["completed", "failed"].includes(stage)) {
+  if (terminal !== ["completed", "failed", "cancelled", "expired"].includes(stage)) {
     throw new Error("harness/eval-batch sandbox terminal 与 stage 不一致");
   }
   const requested = harnessPositiveInteger(
@@ -2160,8 +2164,86 @@ function normalizeHarnessSandboxEvalProgress(payload) {
     throw new Error("harness/eval-batch sandbox run/grant authority 不一致");
   }
   const code = harnessText(payload.code, "harness/eval-batch sandbox code");
-  if ((stage === "failed") !== Boolean(code)) {
-    throw new Error("harness/eval-batch sandbox failed stage 与 code 不一致");
+  if (["failed", "cancelled", "expired"].includes(stage) !== Boolean(code)) {
+    throw new Error("harness/eval-batch sandbox terminal failure stage 与 code 不一致");
+  }
+  const admissionTicketId = harnessText(
+    payload.admission_ticket_id ?? "",
+    "harness/eval-batch sandbox admission_ticket_id",
+  );
+  const admissionEpoch = harnessNonnegativeInteger(
+    payload.admission_epoch ?? 0,
+    "harness/eval-batch sandbox admission_epoch",
+  );
+  const admissionState = harnessText(
+    payload.admission_state ?? "",
+    "harness/eval-batch sandbox admission_state",
+  );
+  const queuePosition = harnessNonnegativeInteger(
+    payload.queue_position ?? 0,
+    "harness/eval-batch sandbox queue_position",
+  );
+  const maxActive = harnessNonnegativeInteger(
+    payload.max_active ?? 0,
+    "harness/eval-batch sandbox max_active",
+  );
+  const maxQueued = harnessNonnegativeInteger(
+    payload.max_queued ?? 0,
+    "harness/eval-batch sandbox max_queued",
+  );
+  const activeCount = harnessNonnegativeInteger(
+    payload.active_count ?? 0,
+    "harness/eval-batch sandbox active_count",
+  );
+  const queuedCount = harnessNonnegativeInteger(
+    payload.queued_count ?? 0,
+    "harness/eval-batch sandbox queued_count",
+  );
+  if (admissionTicketId) {
+    if (
+      !/^hsadm_[0-9a-f]{24}$/.test(admissionTicketId)
+      || admissionEpoch < 1
+      || !["queued", "active", "completed", "cancelled", "failed", "expired"].includes(admissionState)
+      || maxActive < 1
+      || maxActive > 32
+      || maxQueued > 10000
+      || activeCount > maxActive
+      || queuedCount > maxQueued
+    ) {
+      throw new Error("harness/eval-batch sandbox admission snapshot 无效");
+    }
+    if (
+      (admissionState === "queued"
+        && (queuePosition < 1 || queuePosition > queuedCount))
+      || (admissionState !== "queued" && queuePosition !== 0)
+    ) {
+      throw new Error("harness/eval-batch sandbox queue position 无效");
+    }
+    const stageStates = {
+      queued: ["queued"],
+      admitted: ["active"],
+      recovering: ["active"],
+      acquiring: ["active"],
+      executing: ["active"],
+      completed: ["active", "completed"],
+      failed: ["active", "failed"],
+      cancelled: ["cancelled"],
+      expired: ["expired"],
+    };
+    if (!stageStates[stage].includes(admissionState)) {
+      throw new Error("harness/eval-batch sandbox stage 与 admission state 不一致");
+    }
+  } else if (
+    admissionEpoch !== 0
+    || admissionState
+    || queuePosition !== 0
+    || maxActive !== 0
+    || maxQueued !== 0
+    || activeCount !== 0
+    || queuedCount !== 0
+    || ["queued", "admitted", "cancelled", "expired"].includes(stage)
+  ) {
+    throw new Error("harness/eval-batch sandbox admission snapshot 不完整");
   }
   const updatedAt = harnessText(
     payload.updated_at,
@@ -2198,6 +2280,14 @@ function normalizeHarnessSandboxEvalProgress(payload) {
     ),
     run_id: runId,
     run_grant_sha256: runGrantSha,
+    admission_ticket_id: admissionTicketId,
+    admission_epoch: admissionEpoch,
+    admission_state: admissionState,
+    queue_position: queuePosition,
+    max_active: maxActive,
+    max_queued: maxQueued,
+    active_count: activeCount,
+    queued_count: queuedCount,
     sample_result_sha256: resultDigests,
     code,
     updated_at: updatedAt,

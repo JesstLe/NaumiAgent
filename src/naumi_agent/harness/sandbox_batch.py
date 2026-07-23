@@ -33,6 +33,7 @@ from naumi_agent.harness.store import (
     HarnessSandboxAdmissionCapacityError,
     HarnessSandboxAdmissionFenceError,
     HarnessSandboxAdmissionPolicyError,
+    HarnessSandboxAdmissionTicket,
     HarnessStore,
     HarnessStoredEvalResult,
     HarnessStoreError,
@@ -62,6 +63,10 @@ type BatchReceiptBuilder[SampleReceiptT: BaseModel, BatchReceiptT: BaseModel] = 
     BatchReceiptT,
 ]
 type BatchProgressCallback = Callable[["HarnessSandboxBatchCheckpoint"], Awaitable[None]]
+type SandboxAdmissionProgressCallback = Callable[
+    ["HarnessSandboxAdmissionTransition"],
+    Awaitable[None],
+]
 
 @dataclass(slots=True)
 class _SandboxBatchAdmissionOwnership:
@@ -93,7 +98,17 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
     checkpoint_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     authority_key: str = Field(pattern=r"^[0-9a-f]{64}$")
     lane: HarnessSandboxEvalLane
-    stage: Literal["recovering", "acquiring", "executing", "completed", "failed"]
+    stage: Literal[
+        "queued",
+        "admitted",
+        "recovering",
+        "acquiring",
+        "executing",
+        "completed",
+        "failed",
+        "cancelled",
+        "expired",
+    ]
     requested_samples: int = Field(ge=5, le=100)
     persisted_samples: int = Field(ge=0, le=100)
     sample_result_sha256: tuple[str, ...] = Field(max_length=100)
@@ -102,6 +117,24 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
     )
     run_grant_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    admission_ticket_id: str | None = Field(
+        default=None,
+        pattern=r"^hsadm_[0-9a-f]{24}$",
+    )
+    admission_epoch: int | None = Field(default=None, ge=1)
+    admission_state: Literal[
+        "queued",
+        "active",
+        "completed",
+        "cancelled",
+        "failed",
+        "expired",
+    ] | None = None
+    queue_position: int = Field(default=0, ge=0, le=10_000)
+    max_active: int = Field(default=0, ge=0, le=32)
+    max_queued: int = Field(default=0, ge=0, le=10_000)
+    active_count: int = Field(default=0, ge=0, le=32)
+    queued_count: int = Field(default=0, ge=0, le=10_000)
     code: str = Field(default="", pattern=r"^(?:|[a-z][a-z0-9_]{0,127})$")
     updated_at: str
 
@@ -129,10 +162,52 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
             raise ValueError("Sandbox Batch checkpoint 样本前缀不完整。")
         if self.stage == "completed" and self.persisted_samples != self.requested_samples:
             raise ValueError("completed Sandbox Batch 必须持久化全部样本。")
-        if (self.stage == "failed") != bool(self.code):
-            raise ValueError("Sandbox Batch failed stage 与 code 不一致。")
+        failed_stages = {"failed", "cancelled", "expired"}
+        if (self.stage in failed_stages) != bool(self.code):
+            raise ValueError("Sandbox Batch terminal failure stage 与 code 不一致。")
         if (self.run_grant_sha256 is None) != (self.run_id is None):
             raise ValueError("Sandbox Batch run/grant authority 必须同时存在。")
+        has_ticket = self.admission_ticket_id is not None
+        admission_fields_present = (
+            self.admission_epoch is not None
+            or self.admission_state is not None
+            or self.queue_position != 0
+            or self.max_active != 0
+            or self.max_queued != 0
+            or self.active_count != 0
+            or self.queued_count != 0
+        )
+        if has_ticket != admission_fields_present:
+            raise ValueError("Sandbox Batch admission snapshot 不完整。")
+        if has_ticket:
+            if (
+                self.admission_epoch is None
+                or self.admission_state is None
+                or self.max_active < 1
+                or self.active_count > self.max_active
+                or self.queued_count > self.max_queued
+            ):
+                raise ValueError("Sandbox Batch admission 容量事实无效。")
+            if self.admission_state == "queued":
+                if not 1 <= self.queue_position <= self.queued_count:
+                    raise ValueError("Sandbox Batch queued position 无效。")
+            elif self.queue_position != 0:
+                raise ValueError("非 queued Sandbox Batch 不能包含 queue position。")
+            expected_states = {
+                "queued": {"queued"},
+                "admitted": {"active"},
+                "recovering": {"active"},
+                "acquiring": {"active"},
+                "executing": {"active"},
+                "completed": {"active", "completed"},
+                "cancelled": {"cancelled"},
+                "expired": {"expired"},
+                "failed": {"active", "failed"},
+            }
+            if self.admission_state not in expected_states[self.stage]:
+                raise ValueError("Sandbox Batch stage 与 admission state 不一致。")
+        elif self.stage in {"queued", "admitted", "cancelled", "expired"}:
+            raise ValueError("Sandbox Batch admission stage 缺少 durable ticket。")
         expected = _sha256_payload(
             self.model_dump(
                 mode="json",
@@ -150,6 +225,22 @@ class HarnessSandboxBatchError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxAdmissionTransition:
+    """One Store-confirmed admission transition for typed progress projection."""
+
+    stage: Literal[
+        "queued",
+        "admitted",
+        "completed",
+        "cancelled",
+        "failed",
+        "expired",
+    ]
+    ticket: HarnessSandboxAdmissionTicket
+    code: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,18 +363,20 @@ class HarnessSandboxBatchAdmission:
         authority_key: str = "",
         lane: HarnessSandboxEvalLane = "sandbox",
         requested_samples: int = 5,
-    ) -> AsyncIterator[None]:
+        on_transition: SandboxAdmissionProgressCallback | None = None,
+    ) -> AsyncIterator[HarnessSandboxAdmissionTicket | None]:
         """Own one slot, preserving queue counts across cancellation and failure."""
         if self.durable:
             async with self._admit_durable(
                 authority_key=authority_key,
                 lane=lane,
                 requested_samples=requested_samples,
-            ):
-                yield
+                on_transition=on_transition,
+            ) as ticket:
+                yield ticket
             return
         async with self._admit_local():
-            yield
+            yield None
 
     @asynccontextmanager
     async def _admit_local(self) -> AsyncIterator[None]:
@@ -334,7 +427,8 @@ class HarnessSandboxBatchAdmission:
         authority_key: str,
         lane: HarnessSandboxEvalLane,
         requested_samples: int,
-    ) -> AsyncIterator[None]:
+        on_transition: SandboxAdmissionProgressCallback | None,
+    ) -> AsyncIterator[HarnessSandboxAdmissionTicket]:
         assert self._store is not None
         assert self._workspace_root is not None
         stack = _SANDBOX_BATCH_ADMISSION_STACK.get()
@@ -393,7 +487,7 @@ class HarnessSandboxBatchAdmission:
         except asyncio.CancelledError:
             try:
                 admitted = await enqueue_task
-                await self._store.finish_sandbox_admission(
+                cancelled = await self._store.finish_sandbox_admission(
                     workspace_root=self._workspace_root,
                     ticket_id=admitted.ticket_id,
                     owner_id=admitted.owner_id,
@@ -401,6 +495,12 @@ class HarnessSandboxBatchAdmission:
                     state="cancelled",
                     terminal_code="sandbox_batch_cancelled_during_enqueue",
                     now=self._timestamp(),
+                )
+                await self._publish_admission_transition(
+                    on_transition,
+                    stage="cancelled",
+                    ticket=cancelled,
+                    code=cancelled.terminal_code,
                 )
             except BaseException as exc:
                 logger.warning(
@@ -423,6 +523,24 @@ class HarnessSandboxBatchAdmission:
                 "sandbox_batch_admission_unavailable",
                 f"Sandbox Batch 持久化容量权威不可用：{exc}",
             ) from exc
+        last_queue_snapshot: tuple[int, int, int] | None = None
+        if ticket.state == "queued":
+            last_queue_snapshot = (
+                ticket.queue_position,
+                ticket.active_count,
+                ticket.queued_count,
+            )
+            await self._publish_admission_transition(
+                on_transition,
+                stage="queued",
+                ticket=ticket,
+            )
+        elif ticket.state == "active":
+            await self._publish_admission_transition(
+                on_transition,
+                stage="admitted",
+                ticket=ticket,
+            )
 
         ownership: _SandboxBatchAdmissionOwnership | None = None
         context_token = None
@@ -444,10 +562,29 @@ class HarnessSandboxBatchAdmission:
                     now=self._timestamp(),
                     lease_seconds=self._lease_seconds,
                 )
+                if ticket.state == "queued":
+                    current_queue_snapshot = (
+                        ticket.queue_position,
+                        ticket.active_count,
+                        ticket.queued_count,
+                    )
+                    if current_queue_snapshot != last_queue_snapshot:
+                        last_queue_snapshot = current_queue_snapshot
+                        await self._publish_admission_transition(
+                            on_transition,
+                            stage="queued",
+                            ticket=ticket,
+                        )
             if ticket.state != "active":
                 raise HarnessSandboxBatchError(
                     "sandbox_batch_admission_fence_lost",
                     "Sandbox Batch 未取得有效 active admission。",
+                )
+            if last_queue_snapshot is not None:
+                await self._publish_admission_transition(
+                    on_transition,
+                    stage="admitted",
+                    ticket=ticket,
                 )
             ownership = _SandboxBatchAdmissionOwnership(gate_id=id(self))
             context_token = _SANDBOX_BATCH_ADMISSION_STACK.set((*stack, ownership))
@@ -463,7 +600,7 @@ class HarnessSandboxBatchAdmission:
                 name=f"sandbox-admission-renew-{ticket.ticket_id}",
             )
             try:
-                yield
+                yield ticket
             except asyncio.CancelledError as exc:
                 body_failure = exc
                 terminal_state = "cancelled"
@@ -526,8 +663,9 @@ class HarnessSandboxBatchAdmission:
                 ownership.active = False
             if context_token is not None:
                 _SANDBOX_BATCH_ADMISSION_STACK.reset(context_token)
+            terminal_ticket: HarnessSandboxAdmissionTicket | None = None
             try:
-                await self._store.finish_sandbox_admission(
+                terminal_ticket = await self._store.finish_sandbox_admission(
                     workspace_root=self._workspace_root,
                     ticket_id=ticket.ticket_id,
                     owner_id=ticket.owner_id,
@@ -537,6 +675,14 @@ class HarnessSandboxBatchAdmission:
                     now=self._timestamp(),
                 )
             except HarnessSandboxAdmissionFenceError:
+                try:
+                    terminal_ticket = await self._store.get_sandbox_admission(
+                        workspace_root=self._workspace_root,
+                        ticket_id=ticket.ticket_id,
+                        now=self._timestamp(),
+                    )
+                except HarnessStoreError:
+                    terminal_ticket = None
                 if body_failure is None and not lease_failure:
                     raise HarnessSandboxBatchError(
                         "sandbox_batch_admission_fence_lost",
@@ -548,6 +694,23 @@ class HarnessSandboxBatchAdmission:
                         "sandbox_batch_admission_cleanup_failed",
                         f"Sandbox Batch admission 终态写入失败：{exc}",
                     ) from exc
+            if terminal_ticket is not None and terminal_ticket.state in {
+                "completed",
+                "cancelled",
+                "failed",
+                "expired",
+            }:
+                transition_stage = (
+                    terminal_ticket.state
+                    if terminal_ticket.state in {"completed", "cancelled", "expired"}
+                    else "failed"
+                )
+                await self._publish_admission_transition(
+                    on_transition,
+                    stage=transition_stage,
+                    ticket=terminal_ticket,
+                    code=terminal_ticket.terminal_code,
+                )
 
     async def _renew_durable_ticket(
         self,
@@ -586,6 +749,36 @@ class HarnessSandboxBatchAdmission:
                 if owner_task is not None and not owner_task.done():
                     owner_task.cancel()
                 return
+
+    async def _publish_admission_transition(
+        self,
+        callback: SandboxAdmissionProgressCallback | None,
+        *,
+        stage: Literal[
+            "queued",
+            "admitted",
+            "completed",
+            "cancelled",
+            "failed",
+            "expired",
+        ],
+        ticket: HarnessSandboxAdmissionTicket,
+        code: str = "",
+    ) -> None:
+        if callback is None:
+            return
+        transition = HarnessSandboxAdmissionTransition(
+            stage=stage,
+            ticket=ticket,
+            code=code,
+        )
+        try:
+            await asyncio.wait_for(callback(transition), timeout=1.0)
+        except Exception as exc:
+            logger.warning(
+                "Sandbox Batch admission progress delivery failed (%s)",
+                type(exc).__name__,
+            )
 
     def _timestamp(self) -> str:
         value = self._now()
@@ -691,11 +884,32 @@ class HarnessSandboxBatchCoordinator:
             )
             return build_receipt(records, receipts)
 
+        async def publish_admission(
+            transition: HarnessSandboxAdmissionTransition,
+        ) -> None:
+            admission_records = await load_records()
+            self._require_continuous_prefix(
+                admission_records,
+                requested_samples,
+                lane_name,
+            )
+            await self._emit(
+                on_progress,
+                authority_key=authority_key,
+                lane=lane,
+                stage=transition.stage,
+                requested_samples=requested_samples,
+                records=admission_records,
+                admission_ticket=transition.ticket,
+                code=transition.code,
+            )
+
         async with self.admission.admit(
             authority_key=authority_key,
             lane=lane,
             requested_samples=requested_samples,
-        ):
+            on_transition=publish_admission,
+        ) as admission_ticket:
             return await self._execute_admitted(
                 phase=phase,
                 authority_key=authority_key,
@@ -708,6 +922,7 @@ class HarnessSandboxBatchCoordinator:
                 execute_sample=execute_sample,
                 build_receipt=build_receipt,
                 on_progress=on_progress,
+                admission_ticket=admission_ticket,
             )
 
     async def _execute_admitted(
@@ -724,6 +939,7 @@ class HarnessSandboxBatchCoordinator:
         execute_sample: BatchSampleExecutor[_SampleReceiptT],
         build_receipt: BatchReceiptBuilder[_SampleReceiptT, _BatchReceiptT],
         on_progress: BatchProgressCallback | None = None,
+        admission_ticket: HarnessSandboxAdmissionTicket | None = None,
     ) -> _BatchReceiptT:
         lane = self._lane(phase)
         lane_name = lane.upper()
@@ -748,14 +964,15 @@ class HarnessSandboxBatchCoordinator:
         self._require_receipt_prefix(receipts, records, lane_name)
         validate_run_evidence(records)
         if len(records) == requested_samples:
-            await self._emit(
-                on_progress,
-                authority_key=authority_key,
-                lane=lane,
-                stage="completed",
-                requested_samples=requested_samples,
-                records=records,
-            )
+            if admission_ticket is None:
+                await self._emit(
+                    on_progress,
+                    authority_key=authority_key,
+                    lane=lane,
+                    stage="completed",
+                    requested_samples=requested_samples,
+                    records=records,
+                )
             return build_receipt(records, receipts)
         await self._emit(
             on_progress,
@@ -764,6 +981,7 @@ class HarnessSandboxBatchCoordinator:
             stage="recovering",
             requested_samples=requested_samples,
             records=records,
+            admission_ticket=admission_ticket,
         )
 
         parent = await self.permission_store.get(parent_receipt_id)
@@ -807,6 +1025,7 @@ class HarnessSandboxBatchCoordinator:
             stage="acquiring",
             requested_samples=requested_samples,
             records=records,
+            admission_ticket=admission_ticket,
         )
         grant_id: str | None = None
         grant_sha256: str | None = None
@@ -865,6 +1084,7 @@ class HarnessSandboxBatchCoordinator:
                     records=persisted,
                     run_id=parent.run_id,
                     run_grant_sha256=grant_sha256,
+                    admission_ticket=admission_ticket,
                 )
         finally:
             await self._release_authority(
@@ -886,6 +1106,7 @@ class HarnessSandboxBatchCoordinator:
                 run_id=parent.run_id,
                 run_grant_sha256=grant_sha256,
                 code="sample_execution_interrupted",
+                admission_ticket=admission_ticket,
             )
             raise sample_failure.with_traceback(sample_failure.__traceback__)
 
@@ -898,14 +1119,15 @@ class HarnessSandboxBatchCoordinator:
                 "persistence_incomplete",
                 f"{self._label(lane_name)} 未完整写入 H5a。",
             )
-        await self._emit(
-            on_progress,
-            authority_key=authority_key,
-            lane=lane,
-            stage="completed",
-            requested_samples=requested_samples,
-            records=persisted,
-        )
+        if admission_ticket is None:
+            await self._emit(
+                on_progress,
+                authority_key=authority_key,
+                lane=lane,
+                stage="completed",
+                requested_samples=requested_samples,
+                records=persisted,
+            )
         return build_receipt(persisted, receipts)
 
     def _lane(self, phase: str) -> HarnessSandboxEvalLane:
@@ -992,12 +1214,23 @@ class HarnessSandboxBatchCoordinator:
         *,
         authority_key: str,
         lane: HarnessSandboxEvalLane,
-        stage: Literal["recovering", "acquiring", "executing", "completed", "failed"],
+        stage: Literal[
+            "queued",
+            "admitted",
+            "recovering",
+            "acquiring",
+            "executing",
+            "completed",
+            "failed",
+            "cancelled",
+            "expired",
+        ],
         requested_samples: int,
         records: tuple[HarnessStoredEvalResult, ...],
         run_id: str | None = None,
         run_grant_sha256: str | None = None,
         code: str = "",
+        admission_ticket: HarnessSandboxAdmissionTicket | None = None,
     ) -> None:
         if callback is None:
             return
@@ -1012,6 +1245,30 @@ class HarnessSandboxBatchCoordinator:
             "sample_result_sha256": [item.result_sha256 for item in records],
             "run_id": run_id,
             "run_grant_sha256": run_grant_sha256,
+            "admission_ticket_id": (
+                admission_ticket.ticket_id if admission_ticket is not None else None
+            ),
+            "admission_epoch": (
+                admission_ticket.epoch if admission_ticket is not None else None
+            ),
+            "admission_state": (
+                admission_ticket.state if admission_ticket is not None else None
+            ),
+            "queue_position": (
+                admission_ticket.queue_position if admission_ticket is not None else 0
+            ),
+            "max_active": (
+                admission_ticket.max_active if admission_ticket is not None else 0
+            ),
+            "max_queued": (
+                admission_ticket.max_queued if admission_ticket is not None else 0
+            ),
+            "active_count": (
+                admission_ticket.active_count if admission_ticket is not None else 0
+            ),
+            "queued_count": (
+                admission_ticket.queued_count if admission_ticket is not None else 0
+            ),
             "code": code,
             "updated_at": self._now(lane.upper()),
         }
@@ -1081,6 +1338,7 @@ def _sandbox_admission_failure_code(exc: BaseException) -> str:
 
 
 __all__ = [
+    "HarnessSandboxAdmissionTransition",
     "HarnessSandboxBatchAdmission",
     "HarnessSandboxBatchAdmissionSnapshot",
     "HarnessSandboxBatchCheckpoint",

@@ -14,10 +14,14 @@ const STAGES = Object.freeze({
   completed: [ANSI.green, "评测完成"],
   partial: [ANSI.yellow, "部分完成"],
   error: [ANSI.red, "执行失败"],
+  queued: [ANSI.yellow, "等待容量"],
+  admitted: [ANSI.cyan, "已取得容量"],
   recovering: [ANSI.cyan, "恢复检查点"],
   acquiring: [ANSI.cyan, "申请隔离 Worker"],
   executing: [ANSI.blue, "隔离执行"],
   failed: [ANSI.red, "执行失败"],
+  cancelled: [ANSI.yellow, "已取消"],
+  expired: [ANSI.red, "租约过期"],
 });
 
 export function renderHarnessEvalBatchPage(view, width, height) {
@@ -80,6 +84,23 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
     `Batch · ${text(snapshot.batch_id || value.batchId) || "等待分配"}`,
     `样本 · 已持久化 ${persisted}/${requested || "-"}`,
     `Checks · ${checks.length ? checks.map(text).join(" · ") : "-"}`,
+    ...(snapshot.admission_ticket_id
+      ? [
+          section("容量权威"),
+          `Ticket · ${text(snapshot.admission_ticket_id)}`,
+          snapshot.admission_state === "queued"
+            ? color(
+                ANSI.yellow,
+                `排队 · 第 ${Number(snapshot.queue_position) || "-"} 位`
+                  + ` · active ${Number(snapshot.active_count) || 0}/${Number(snapshot.max_active) || 0}`
+                  + ` · queued ${Number(snapshot.queued_count) || 0}/${Number(snapshot.max_queued) || 0}`,
+              )
+            : `状态 · ${admissionStateLabel(snapshot.admission_state)}`
+              + ` · active ${Number(snapshot.active_count) || 0}/${Number(snapshot.max_active) || 0}`
+              + ` · queued ${Number(snapshot.queued_count) || 0}/${Number(snapshot.max_queued) || 0}`,
+          `Epoch · ${Number(snapshot.admission_epoch) || "-"}`,
+        ]
+      : []),
     section("执行权威"),
     `Lane · ${text(snapshot.lane) || "-"}`,
     `Checkpoint · ${text(snapshot.checkpoint_id) || "-"}`,
@@ -100,6 +121,17 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
   const lines = wrapped.slice(offset, offset + height);
   while (lines.length < height) lines.push("");
   return lines.slice(0, height).map((line) => padRight(fit(line, width), width));
+}
+
+function admissionStateLabel(value) {
+  return {
+    queued: "排队",
+    active: "已准入",
+    completed: "已释放",
+    cancelled: "已取消",
+    failed: "失败",
+    expired: "已过期",
+  }[text(value)] || "-";
 }
 
 function shortSha(value) {

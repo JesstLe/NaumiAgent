@@ -235,6 +235,7 @@ async def test_durable_admission_cancellation_removes_waiter_across_instances(
     )
     active_started = asyncio.Event()
     release_active = asyncio.Event()
+    waiting_transitions = []
 
     async def hold_active() -> None:
         async with active_gate.admit(
@@ -246,10 +247,14 @@ async def test_durable_admission_cancellation_removes_waiter_across_instances(
             await release_active.wait()
 
     async def wait_for_slot() -> None:
+        async def capture(transition) -> None:
+            waiting_transitions.append(transition)
+
         async with waiting_gate.admit(
             authority_key="b" * 64,
             lane="sandbox",
             requested_samples=5,
+            on_transition=capture,
         ):
             pytest.fail("cancelled waiter must not enter")
 
@@ -270,6 +275,9 @@ async def test_durable_admission_cancellation_removes_waiter_across_instances(
     snapshot = await waiting_gate.snapshot_durable()
     assert snapshot.active == 1
     assert snapshot.queued == 0
+    assert [item.stage for item in waiting_transitions] == ["queued", "cancelled"]
+    assert waiting_transitions[0].ticket.queue_position == 1
+    assert waiting_transitions[-1].ticket.state == "cancelled"
 
     release_active.set()
     await active
@@ -416,6 +424,85 @@ async def test_completed_sandbox_batch_bypasses_saturated_admission(
     assert not grants.issued
     assert len(checkpoints) == 1
     assert checkpoints[0].lane == "sandbox"
+
+
+@pytest.mark.asyncio
+async def test_durable_coordinator_projects_admitted_and_released_ticket_facts(
+    tmp_path: Path,
+) -> None:
+    store = _Store()
+    permissions = _PermissionStore()
+    grants = _RunGrantAuthority(tmp_path, permissions)
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=1,
+        store=HarnessStore(tmp_path / "harness.db"),
+        workspace_root=tmp_path,
+        owner_id="runtime-progress",
+        lease_seconds=2,
+        poll_interval_seconds=0.01,
+        token=lambda: "e" * 32,
+    )
+    checkpoints: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def load_records():
+        return tuple(store.records)
+
+    async def validate_prefix(records):
+        return [_SampleReceipt(sample_index=item.sample_index) for item in records]
+
+    async def execute_sample(index, _authority):
+        store.records.append(_record(index))
+        return _SampleReceipt(sample_index=index)
+
+    async def capture(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        checkpoints.append(checkpoint)
+
+    receipt = await _coordinator(
+        tmp_path,
+        store,
+        permissions,
+        grants,
+        token="f" * 32,
+        admission=admission,
+    ).execute(
+        phase="sandbox",
+        authority_key="e" * 64,
+        parent_receipt_id="parent",
+        requested_samples=5,
+        max_total_duration_seconds=60,
+        load_records=load_records,
+        validate_existing_prefix=validate_prefix,
+        validate_run_evidence=lambda _records: None,
+        execute_sample=execute_sample,
+        build_receipt=lambda records, _receipts: _BatchReceipt(
+            persisted_samples=len(records)
+        ),
+        on_progress=capture,
+    )
+
+    assert receipt.persisted_samples == 5
+    assert [item.stage for item in checkpoints] == [
+        "admitted",
+        "recovering",
+        "acquiring",
+        *("executing" for _ in range(5)),
+        "completed",
+    ]
+    assert {item.admission_ticket_id for item in checkpoints} == {
+        f"hsadm_{'e' * 24}"
+    }
+    assert all(item.admission_epoch == 1 for item in checkpoints)
+    assert all(item.admission_state == "active" for item in checkpoints[:-1])
+    assert checkpoints[-1].admission_state == "completed"
+    assert checkpoints[-1].active_count == 0
+    assert checkpoints[-1].code == ""
+    with pytest.raises(ValueError, match="digest"):
+        HarnessSandboxBatchCheckpoint.model_validate(
+            checkpoints[-1].model_copy(
+                update={"active_count": 1}
+            ).model_dump(mode="json")
+        )
 
 
 @pytest.mark.asyncio

@@ -155,13 +155,11 @@ Python 进程，共用同一个 Harness SQLite。配置 `max_active=1` 时，第
 
 这些限制不影响跨进程容量正确性，但 UI 仍不得提前显示可交互的排队取消按钮。
 
-## 下一依赖切片
+## 后续进展
 
-HAR-08.4m 应基于真实 ticket/snapshot 增加闭集 typed admission checkpoint：
+HAR-08.4m 已基于真实 ticket/snapshot 增加闭集 typed admission checkpoint，并同步到
+New UI/TUI。queued position、capacity snapshot、admitted 与 terminal state 均来自本切片
+Store transition；详见 `HAR-08-4m-sandbox-admission-typed-progress.md`。
 
-1. `queued` 包含 ticket id、真实 FIFO position 和容量 snapshot；
-2. `admitted` 来自 durable `queued -> active` transition；
-3. `cancelled/expired/fence_lost` 来自 Store 终态；
-4. New UI 与 TUI 只消费同一 Bridge projection；
-5. 先实现只读状态，再实现带 owner fencing 的 cancel action；
-6. 不在 HAR-08.4m 扩张 priority/deadline scheduler。
+下一切片 HAR-08.4n 应实现 owner-fenced cancel action；不应在该切片扩张
+priority/deadline scheduler。

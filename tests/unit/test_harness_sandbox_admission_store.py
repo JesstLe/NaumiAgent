@@ -141,6 +141,14 @@ async def test_expired_active_ticket_is_fenced_and_next_live_waiter_recovers(
             now=_T2_5,
             lease_seconds=2,
         )
+    observed = await store.get_sandbox_admission(
+        workspace_root=workspace,
+        ticket_id=expired.ticket_id,
+        now=_T2_5,
+    )
+    assert observed is not None
+    assert observed.state == "expired"
+    assert observed.terminal_code == "sandbox_batch_admission_lease_expired"
 
 
 @pytest.mark.asyncio

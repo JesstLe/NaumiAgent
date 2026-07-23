@@ -5215,6 +5215,44 @@ class HarnessStore:
         except (aiosqlite.Error, OSError) as exc:
             raise HarnessStoreError("无法读取 Sandbox Batch admission 状态。") from exc
 
+    async def get_sandbox_admission(
+        self,
+        *,
+        workspace_root: str | Path,
+        ticket_id: str,
+        now: str,
+    ) -> HarnessSandboxAdmissionTicket | None:
+        """Read one ticket after atomically expiring stale open state."""
+        workspace = _canonical_workspace(workspace_root)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                if row is None:
+                    await db.rollback()
+                    return None
+                result = await _sandbox_admission_ticket_from_row(
+                    db,
+                    row,
+                    now=timestamp,
+                )
+                await db.commit()
+                return result
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法读取 Sandbox Batch admission ticket。") from exc
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
