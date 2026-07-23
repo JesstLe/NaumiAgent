@@ -87,6 +87,16 @@ naumi configure
 
 自动化环境可使用 `--non-interactive --provider <name>`，并通过环境变量复用现有凭据；需要更新密钥时使用 `--api-key-stdin` 从标准输入传入，避免密钥进入 shell history。
 
+首次使用持久 Agent 任务前，显式初始化 Runtime payload 系统密钥：
+
+```bash
+naumi runtime-key init
+naumi runtime-key status
+```
+
+`init` 幂等且不会静默轮换已有密钥；命令只显示非敏感 key ID，不会打印密钥。CI/容器可由 secret
+manager 注入 `NAUMI_RUNTIME_PAYLOAD_KEY`，无需访问系统凭据库。
+
 配置完成后可以先运行纯本地诊断；显式增加 `--live` 才会发送一次最多 8 token 的真实模型请求：
 
 ```bash

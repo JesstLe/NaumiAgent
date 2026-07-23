@@ -116,7 +116,13 @@ workbench_app = typer.Typer(
     name="workbench",
     help="Workbench 治理与审计命令",
 )
+runtime_key_app = typer.Typer(
+    name="runtime-key",
+    help="管理 Agent 持久 payload 的系统密钥",
+    no_args_is_help=True,
+)
 app.add_typer(workbench_app, name="workbench")
+app.add_typer(runtime_key_app, name="runtime-key")
 console = Console()
 
 
@@ -141,6 +147,79 @@ def _ensure_onboarding_ready(config: str) -> None:
     ):
         console.print("[yellow]配置未完成，退出。[/yellow]")
         raise typer.Exit(1)
+
+
+@runtime_key_app.command("status")
+def runtime_key_status() -> None:
+    """只读检查 Runtime payload key，不创建或输出密钥。"""
+    from naumi_agent.config.credentials import (
+        CredentialStoreError,
+        decode_runtime_payload_key,
+        load_runtime_payload_key,
+    )
+    from naumi_agent.safety.payload_envelope import RuntimePayloadKey
+
+    try:
+        injected = os.environ.get("NAUMI_RUNTIME_PAYLOAD_KEY", "").strip()
+        key_bytes = (
+            decode_runtime_payload_key(injected)
+            if injected
+            else load_runtime_payload_key()
+        )
+    except CredentialStoreError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if key_bytes is None:
+        console.print(
+            "[yellow]Runtime payload 密钥尚未初始化。"
+            "请运行 `naumi runtime-key init`。[/yellow]"
+        )
+        raise typer.Exit(1)
+    identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
+    source = "环境变量" if injected else "系统凭据"
+    console.print(
+        f"[green]Runtime payload 密钥已就绪[/green] · {source} · {identity}"
+    )
+
+
+@runtime_key_app.command("init")
+def runtime_key_init() -> None:
+    """显式创建一次 Runtime payload key；已有密钥不会轮换。"""
+    from naumi_agent.config.credentials import (
+        CredentialStoreError,
+        decode_runtime_payload_key,
+        load_runtime_payload_key,
+        provision_runtime_payload_key,
+    )
+    from naumi_agent.safety.payload_envelope import RuntimePayloadKey
+
+    try:
+        injected = os.environ.get("NAUMI_RUNTIME_PAYLOAD_KEY", "").strip()
+        if injected:
+            key_bytes = decode_runtime_payload_key(injected)
+            identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
+            console.print(
+                "[green]Runtime payload 环境密钥已就绪，"
+                "未写入系统凭据。[/green]"
+                f" · {identity}"
+            )
+            return
+        existing = load_runtime_payload_key()
+        key_bytes = provision_runtime_payload_key()
+    except CredentialStoreError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
+    if existing is None:
+        console.print(
+            "[green]Runtime payload 密钥已安全初始化。[/green]"
+            f" · {identity}"
+        )
+        return
+    console.print(
+        "[green]Runtime payload 密钥已存在，未执行轮换。[/green]"
+        f" · {identity}"
+    )
 
 
 @app.callback(invoke_without_command=True)

@@ -23,6 +23,10 @@ claim lease，而是可恢复且 fail-closed 的 authenticated payload envelope�
 显式 provision 可能触发操作系统第一次凭据授权，这是唯一允许的 key 创建时机；导入配置、启动 embedded
 Agent 或普通 Doctor 不会自动创建 key。跨进程首次创建必须由单一配置流程完成，不能让多个 Runtime 竞态生成。
 
+ARC-04.5b1a 已提供可执行的 `naumi runtime-key status|init` 入口。`status` 只读，`init` 是显式创建
+动作；两者都只显示非敏感 key ID，不显示 key material，也不支持静默轮换。详见
+`ARC-04-5b1a-runtime-key-provisioning-cli.md`。
+
 ## 3. AES-256-GCM Envelope
 
 `RuntimePayloadKey` 只公开由 key SHA-256 前缀导出的 rotation identity，`repr` 不包含 key bytes。
