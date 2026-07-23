@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.harness.store import HarnessSandboxRetryDetailRecord
 
-SANDBOX_RETRY_DETAIL_SCHEMA_VERSION = 1
+SANDBOX_RETRY_DETAIL_SCHEMA_VERSION = 2
 
 RecoveryStatus = Literal[
     "pending",
@@ -28,6 +28,7 @@ ProtectionKind = Literal[
     "retry_receipt",
     "cancel_receipt",
     "request_manifest",
+    "source_ticket",
     "ticket",
     "h5a_sample",
 ]
@@ -96,6 +97,7 @@ class HarnessSandboxRetryProtectionRef(_StrictModel):
         "retry_authority",
         "cancel_chain",
         "request_replay",
+        "source_ticket_chain",
         "current_ticket_fence",
         "continuous_h5a_prefix",
     ]
@@ -116,6 +118,7 @@ class HarnessSandboxRetryDetail(_StrictModel):
     cancel_receipt_id: str = Field(pattern=r"^hsacr_[0-9a-f]{24}$")
     cancel_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_ticket_id: str = Field(pattern=r"^hsadm_[0-9a-f]{24}$")
+    source_ticket_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_id: str = Field(pattern=r"^hseval_[0-9a-f]{24}$")
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     batch_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -133,8 +136,8 @@ class HarnessSandboxRetryDetail(_StrictModel):
     ticket: HarnessSandboxRetryDetailTicket | None
     samples: tuple[HarnessSandboxRetryDetailSample, ...] = Field(max_length=100)
     protection_refs: tuple[HarnessSandboxRetryProtectionRef, ...] = Field(
-        min_length=4,
-        max_length=105,
+        min_length=5,
+        max_length=106,
     )
     can_resume: bool
     resume_command: str = Field(max_length=512)
@@ -199,7 +202,7 @@ class HarnessSandboxRetryDetail(_StrictModel):
 
 
 class HarnessSandboxRetryDetailSnapshot(_StrictModel):
-    schema_version: Literal[1] = SANDBOX_RETRY_DETAIL_SCHEMA_VERSION
+    schema_version: Literal[2] = SANDBOX_RETRY_DETAIL_SCHEMA_VERSION
     snapshot_id: str = Field(pattern=r"^hsrrd_[0-9a-f]{24}$")
     snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: DetailStatus
@@ -295,6 +298,7 @@ def build_sandbox_retry_detail_snapshot(
         cancel_receipt_id=cancel.receipt_id,
         cancel_receipt_sha256=cancel.receipt_sha256,
         source_ticket_id=cancel.ticket_id,
+        source_ticket_request_sha256=record.source_ticket.request_sha256,
         request_id=request.request_id,
         request_sha256=request.request_sha256,
         batch_id=request.batch_id,
@@ -424,7 +428,10 @@ def render_sandbox_retry_detail(
         f"- 创建/更新：`{detail.created_at}` / `{detail.updated_at}`",
         f"- Retry receipt：`{detail.retry_receipt_id}` / `{detail.retry_receipt_sha256}`",
         f"- Cancel receipt：`{detail.cancel_receipt_id}` / `{detail.cancel_receipt_sha256}`",
-        f"- Source ticket：`{detail.source_ticket_id}`",
+        (
+            f"- Source ticket：`{detail.source_ticket_id}` / "
+            f"`{detail.source_ticket_request_sha256}`"
+        ),
         "",
         "### Request Manifest",
         "",
@@ -515,6 +522,12 @@ def _protection_refs(
             ref_id=detail.request_id,
             sha256=detail.request_sha256,
             reason="request_replay",
+        ),
+        HarnessSandboxRetryProtectionRef(
+            kind="source_ticket",
+            ref_id=detail.source_ticket_id,
+            sha256=detail.source_ticket_request_sha256,
+            reason="source_ticket_chain",
         ),
     ]
     if detail.ticket is not None:
@@ -631,6 +644,7 @@ def _normalize_timestamp(value: str, *, field: str) -> str:
 __all__ = [
     "HarnessSandboxRetryDetail",
     "HarnessSandboxRetryDetailSnapshot",
+    "HarnessSandboxRetryProtectionRef",
     "build_sandbox_retry_detail_snapshot",
     "missing_sandbox_retry_detail_snapshot",
     "render_sandbox_retry_detail",

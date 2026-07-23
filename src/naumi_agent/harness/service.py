@@ -116,6 +116,10 @@ from naumi_agent.harness.sandbox_retry_recovery import (
     HarnessSandboxRetryRecoverySnapshot,
     build_sandbox_retry_recovery_snapshot,
 )
+from naumi_agent.harness.sandbox_retry_retention import (
+    HarnessSandboxRetryRetentionPreview,
+    build_sandbox_retry_retention_preview,
+)
 from naumi_agent.harness.sandbox_service import (
     HarnessSandboxEvalBatchReceipt,
     HarnessSandboxEvalExecutor,
@@ -598,6 +602,29 @@ class HarnessService:
                 assessed_at=assessment,
             )
         return build_sandbox_retry_detail_snapshot(record)
+
+    async def sandbox_retry_retention_preview(
+        self,
+        *,
+        retention_days: int = 30,
+        limit: int = 20,
+        scan_limit: int = 100,
+        assessed_at: str | None = None,
+    ) -> HarnessSandboxRetryRetentionPreview:
+        """Preview old terminal retry cohorts without granting prune authority."""
+        if self._store is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_retention_store_unavailable",
+                "Harness 状态库尚未初始化，无法读取 Sandbox retry retention。",
+            )
+        page = await self._store.preview_sandbox_retry_retention(
+            workspace_root=self.workspace_root,
+            assessed_at=assessed_at,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+        )
+        return build_sandbox_retry_retention_preview(page)
 
     async def eval_baseline_status(
         self,

@@ -91,6 +91,7 @@ async def test_retry_detail_reads_exact_authority_chain_without_mutation(
         "retry_receipt",
         "cancel_receipt",
         "request_manifest",
+        "source_ticket",
         "ticket",
         "h5a_sample",
     }
@@ -250,6 +251,41 @@ async def test_retry_detail_fails_closed_on_cancel_receipt_chain_drift(
         db.commit()
 
     with pytest.raises(HarnessStoreError, match="摘要"):
+        await HarnessStore(store.db_path).get_sandbox_retry_detail(
+            workspace_root=workspace,
+            retry_action_id=retry.action_id,
+            dispatch_id=dispatch.dispatch_id,
+            assessed_at=ASSESSED,
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_detail_fails_closed_on_source_ticket_drift(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    store = HarnessStore(tmp_path / "harness.db")
+    _request, retry, dispatch = await _create_dispatch(
+        store,
+        workspace,
+        source_token="1",
+        retry_token="a",
+        ticket_token="2",
+        minute=6,
+        lease_seconds=300,
+    )
+    with sqlite3.connect(store.db_path) as db:
+        db.execute(
+            """
+            UPDATE harness_sandbox_admission_tickets
+            SET state = 'failed'
+            WHERE workspace_root = ? AND ticket_id = ?
+            """,
+            (str(workspace.resolve()), retry.source_ticket_id),
+        )
+        db.commit()
+
+    with pytest.raises(HarnessStoreError, match="source ticket 不一致"):
         await HarnessStore(store.db_path).get_sandbox_retry_detail(
             workspace_root=workspace,
             retry_action_id=retry.action_id,

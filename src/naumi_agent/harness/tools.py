@@ -22,6 +22,9 @@ from naumi_agent.harness.sandbox_batch import (
 from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionError
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestError
 from naumi_agent.harness.sandbox_retry_detail import render_sandbox_retry_detail
+from naumi_agent.harness.sandbox_retry_retention import (
+    render_sandbox_retry_retention_preview,
+)
 from naumi_agent.harness.sandbox_service import (
     HarnessSandboxEvalServiceError,
     SandboxEvalProgressCallback,
@@ -57,6 +60,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalSandboxResumeTool(service),
         HarnessEvalSandboxRetryCatalogTool(service),
         HarnessEvalSandboxRetryDetailTool(service),
+        HarnessEvalSandboxRetryRetentionPreviewTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -874,6 +878,90 @@ class HarnessEvalSandboxRetryDetailTool(_HarnessReadOnlyTool):
             code = getattr(exc, "code", "sandbox_retry_detail_unavailable")
             return f"Sandbox retry detail 暂不可用（`{code}`）：{exc}"
         return render_sandbox_retry_detail(snapshot)
+
+
+class HarnessEvalSandboxRetryRetentionPreviewTool(_HarnessReadOnlyTool):
+    """Preview old terminal retry cohorts without deleting durable facts."""
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_retry_retention_preview"
+
+    @property
+    def description(self) -> str:
+        return "预览超过保留期的 Sandbox retry 终态 cohort 与保护引用"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox retry retention preview terminal prune dry run"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "retention_days": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650,
+                    "default": 30,
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 20,
+                },
+                "scan_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 100,
+                },
+                "assessed_at": {
+                    "type": "string",
+                    "maxLength": 64,
+                },
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        retention_days = kwargs.get("retention_days", 30)
+        limit = kwargs.get("limit", 20)
+        scan_limit = kwargs.get("scan_limit", 100)
+        assessed_at = kwargs.get("assessed_at")
+        if (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or isinstance(scan_limit, bool)
+            or not isinstance(scan_limit, int)
+            or (assessed_at is not None and not isinstance(assessed_at, str))
+        ):
+            return (
+                "Sandbox retry retention preview 参数无效：天数、limit 与 "
+                "scan_limit 必须是整数，assessed_at 必须是字符串。"
+            )
+        try:
+            preview = await self._service.sandbox_retry_retention_preview(
+                retention_days=retention_days,
+                limit=limit,
+                scan_limit=scan_limit,
+                assessed_at=assessed_at,
+            )
+        except (HarnessSandboxEvalServiceError, HarnessStoreError, ValueError) as exc:
+            code = getattr(exc, "code", "sandbox_retry_retention_unavailable")
+            return f"Sandbox retry retention preview 暂不可用（`{code}`）：{exc}"
+        return render_sandbox_retry_retention_preview(preview)
 
 
 class HarnessEvalSandboxResumeTool(Tool):
