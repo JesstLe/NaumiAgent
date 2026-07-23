@@ -56,4 +56,5 @@ New UI 与 Textual TUI 的 `Ctrl+P` QuickOpen 现按 `命令 → 任务 → 会�
 - 当前索引按打开 QuickOpen 时显式 refresh；尚未接入文件系统 watcher，因此打开期间发生的文件变化不会实时推送。
 - New UI 真实子进程测试在本地被既有欢迎页前置断言阻塞：进程直接显示主界面而测试仍等待欢迎页。
   单元级真实 reducer/render/protocol 与 TUI Pilot 已通过，但该既有测试问题不作为 UI-14.2e 的成功证据。
-- Agent、页面 provider、Vim mode、typed argument form 与键位冲突诊断仍未实现，UI-14 保持 partial。
+- UI-14.2f 已补齐 Agent provider；页面 provider、Vim mode、typed argument form 与键位冲突诊断仍未实现，
+  UI-14 保持 partial。

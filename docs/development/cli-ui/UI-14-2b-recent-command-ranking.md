@@ -30,5 +30,6 @@ Python `search_terminal_commands()` 与 Node `searchCommandEntries()` 都按 `�
 
 ## 5. 当前边界
 
-UI-14.2 仍为 partial。本切片没有实现跨启动持久历史、workspace 文件索引、会话/任务/Agent provider 或跨 provider 合并；
-这些能力需要各自的有界索引、取消和隔离合同，不能把命令参数或完整输入历史误当成 QuickOpen 数据源。
+UI-14.2 仍为 partial。UI-14.2c-14.2f 已分别补齐任务、会话、文件和 Agent provider；本次启动最近命令
+仍不跨启动持久化，页面 provider 与跨 provider 合并也未实现。后续能力仍必须使用各自的有界索引、取消和隔离合同，
+不能把命令参数或完整输入历史误当成 QuickOpen 数据源。

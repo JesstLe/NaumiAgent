@@ -24,9 +24,12 @@ import {
   applyCommandQuickOpenTaskSnapshot,
   applyCommandQuickOpenSessionSnapshot,
   applyCommandQuickOpenFileSnapshot,
+  applyCommandQuickOpenAgentSnapshot,
   failCommandQuickOpenTaskSnapshot,
   failCommandQuickOpenSessionSnapshot,
   failCommandQuickOpenFileSnapshot,
+  failCommandQuickOpenAgentSnapshot,
+  parseAgentDeepLink,
   recordRecentCommand,
   resetCommandQuickOpenTaskCache,
 } from "./command-quick-open.js";
@@ -363,6 +366,14 @@ export function createInitialState() {
       fileError: "",
       fileRequestId: "",
       fileMeta: null,
+      agentItems: [],
+      agentWarnings: [],
+      agentLoaded: false,
+      agentLoading: false,
+      agentError: "",
+      agentRequestId: "",
+      agentRevision: 0,
+      agentDiscardRequestIds: [],
     },
     currentTurnStartedAtMs: null,
     currentTurnFirstTokenAtMs: null,
@@ -931,6 +942,7 @@ export function reduceServerEvent(state, record) {
       break;
     }
     case "agents/snapshot":
+      if (applyCommandQuickOpenAgentSnapshot(state, record.request_id, payload)) break;
       if (!agentControlMatchesCurrentSession(state, payload)) break;
       if (
         state.agents.snapshot?.session_id === payload.session_id
@@ -1217,6 +1229,11 @@ export function reduceServerEvent(state, record) {
         payload.message,
       )) break;
       if (failCommandQuickOpenFileSnapshot(
+        state,
+        record.request_id,
+        payload.message,
+      )) break;
+      if (failCommandQuickOpenAgentSnapshot(
         state,
         record.request_id,
         payload.message,
@@ -2923,8 +2940,23 @@ export function handleSubmitText(state, text, send) {
     requestWorkbenchSnapshot(state, send);
     return;
   }
-  if (commandText === "/agents") {
+  const agentTarget = parseAgentDeepLink(commandText);
+  if (commandText === "/agents" || agentTarget) {
     toggleAgentControlCenter(state, send, true);
+    if (agentTarget) {
+      state.agents.selectedTab = "agents";
+      state.agents.selectedByTab.agents = agentTarget;
+      state.agents.detailId = agentTarget;
+    }
+    return;
+  }
+  if (commandText.toLocaleLowerCase("und").startsWith("/agents ")) {
+    pushSystemMessage(
+      state,
+      "Agent Control",
+      "用法：/agents 或 /agents agent <name>",
+      "warning",
+    );
     return;
   }
   if (text === "/folds") {

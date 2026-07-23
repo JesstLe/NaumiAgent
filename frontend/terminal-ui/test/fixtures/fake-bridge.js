@@ -78,11 +78,13 @@ attachJsonlLineReader(process.stdin, (line) => {
   }
 
   if (record.type === "agents/request") {
-    agentsOpen = payload.open !== false;
-    if (!agentsOpen) {
+    const requestedOpen = payload.open !== false;
+    if (!requestedOpen) {
+      agentsOpen = false;
       emit("ack", { event: "agents/request", open: false, revision: agentStopped ? 2 : 1 }, record.id);
       return;
     }
+    if (payload.subscribe !== false) agentsOpen = true;
     emit("agents/snapshot", agentControlSnapshot(agentStopped ? 2 : 1), record.id);
     if (process.env.NAUMI_TEST_AGENT_PERMISSION === "1" && !agentPermissionSent) {
       agentPermissionSent = true;

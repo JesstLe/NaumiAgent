@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import { stripAnsi } from "../src/ansi.js";
 import {
   acceptCommandQuickOpen,
+  applyCommandQuickOpenAgentSnapshot,
   applyCommandQuickOpenFileSnapshot,
+  agentTemplate,
+  parseAgentDeepLink,
   appendCommandQuickOpenQuery,
   backspaceCommandQuickOpenQuery,
   closeCommandQuickOpen,
@@ -16,6 +19,7 @@ import {
   searchCommandEntries,
   searchTaskEntries,
   searchSessionEntries,
+  searchAgentEntries,
   sessionTemplate,
   switchCommandQuickOpenProvider,
   requestCommandQuickOpenFiles,
@@ -323,6 +327,143 @@ test("file QuickOpen consumes correlated bounded results and only fills read", (
   state.commandQuickOpen.query = "router";
   assert.equal(requestCommandQuickOpenFiles(state, requests.files), true);
   assert.equal(state.commandQuickOpen.fileRequestId, "router-false");
+});
+
+test("Agent QuickOpen uses one-shot snapshot and deep-links without execution", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-agent";
+  openCommandQuickOpen(state);
+  const requests = {
+    tasks: () => "task-request",
+    sessions: () => "session-request",
+    files: () => "file-request",
+    agents: () => "agent-request",
+  };
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  assert.equal(switchCommandQuickOpenProvider(state, requests), "agents");
+  assert.equal(state.commandQuickOpen.agentLoading, true);
+
+  reduceServerEvent(state, normalizeServerRecord({
+    id: "server-agents",
+    request_id: "agent-request",
+    type: "agents/snapshot",
+    payload: {
+      schema_version: 2,
+      session_id: "session-agent",
+      revision: 4,
+      generated_at: "2026-07-23T00:00:00+00:00",
+      summary: {
+        total_agents: 2,
+        active_agents: 1,
+        attention_agents: 0,
+        stoppable_executions: 0,
+        pending_messages: 0,
+      },
+      agents: [
+        {
+          name: "reviewer",
+          description: "代码审查",
+          kind: "preset",
+          state: "idle",
+          task_count: 0,
+          model_tier: "capable",
+          capabilities: ["review"],
+          tools: ["read"],
+          permission_level: "read_only",
+          age_ms: 10,
+          heartbeat_age_ms: 5,
+        },
+        {
+          name: "Explore Worker",
+          description: "探索项目",
+          kind: "dynamic",
+          state: "running",
+          task_count: 1,
+          model_tier: "fast",
+          capabilities: ["explore"],
+          tools: ["glob"],
+          permission_level: "read_only",
+          age_ms: 20,
+          heartbeat_age_ms: 2,
+        },
+      ],
+      executions: [],
+      team_messages: [],
+      blackboard: [],
+      warnings: [],
+    },
+  }));
+
+  assert.equal(state.agents.snapshot, null);
+  assert.equal(searchAgentEntries(state.commandQuickOpen.agentItems, "代码审查")[0].name, "reviewer");
+  assert.equal(getCommandQuickOpenItems(state)[0].name, "Explore Worker");
+  assert.equal(agentTemplate(getCommandQuickOpenItems(state)[0]), "/agents agent 'Explore Worker'");
+  assert.match(stripAnsi(renderCommandQuickOpenPage(state, 100, 24).join("\n")), /Agent QuickOpen/);
+  assert.equal(acceptCommandQuickOpen(state), true);
+  assert.equal(state.input, "/agents agent 'Explore Worker'");
+
+  const sent = [];
+  handleSubmitText(state, state.input, (type, payload) => {
+    sent.push({ type, payload });
+    return "agent-open";
+  });
+  assert.equal(state.route.name, "agents");
+  assert.equal(state.agents.detailId, "Explore Worker");
+  assert.equal(state.agents.selectedByTab.agents, "Explore Worker");
+  assert.equal(sent[0].type, "agents/request");
+  assert.equal(sent.some((item) => item.type === "submit"), false);
+});
+
+test("Agent QuickOpen quotes shell metacharacters as a plain Agent name", () => {
+  const name = "O'Brien $(touch nope)";
+  const template = agentTemplate({
+    name,
+    state: "ready",
+    kind: "dynamic",
+  });
+
+  assert.equal(template, "/agents agent 'O'\"'\"'Brien $(touch nope)'");
+  assert.equal(parseAgentDeepLink(template), name);
+});
+
+test("dismissed Agent QuickOpen consumes late correlated snapshots", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-agent";
+  openCommandQuickOpen(state);
+  const requests = {
+    tasks: () => "task-request",
+    sessions: () => "session-request",
+    files: () => "file-request",
+    agents: () => "agent-late",
+  };
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  switchCommandQuickOpenProvider(state, requests);
+  closeCommandQuickOpen(state);
+
+  assert.deepEqual(state.commandQuickOpen.agentDiscardRequestIds, ["agent-late"]);
+  assert.equal(applyCommandQuickOpenAgentSnapshot(state, "agent-late", {
+    session_id: "session-agent",
+    revision: 1,
+    agents: [],
+    warnings: [],
+  }), true);
+  assert.deepEqual(state.commandQuickOpen.agentDiscardRequestIds, []);
+  assert.equal(state.agents.snapshot, null);
+});
+
+test("invalid Agent deep links remain local and explain the accepted form", () => {
+  const state = createInitialState();
+  const sent = [];
+  handleSubmitText(state, "/agents execution task-1", (type, payload) => {
+    sent.push({ type, payload });
+  });
+
+  assert.equal(sent.length, 0);
+  assert.match(state.messages.at(-1).content, /\/agents agent <name>/);
 });
 
 function command(commandName, { aliases = [], risk, description, syntax = "" }) {

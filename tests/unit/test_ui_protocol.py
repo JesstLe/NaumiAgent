@@ -79,6 +79,26 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_one_shot_agent_snapshot_request() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.AGENTS_REQUEST,
+        "payload": {
+            "open": True,
+            "subscribe": False,
+            "known_revision": 12,
+            "session_id": " session-1 ",
+            "private": "drop",
+        },
+    })
+
+    assert record["payload"] == {
+        "open": True,
+        "subscribe": False,
+        "known_revision": 12,
+        "session_id": "session-1",
+    }
+
+
 def test_protocol_normalizes_workspace_file_requests() -> None:
     request = normalize_client_record({
         "type": ClientEventType.WORKSPACE_FILES_REQUEST,

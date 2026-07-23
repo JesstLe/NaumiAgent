@@ -443,6 +443,7 @@ def _normalize_client_payload(
             raise ValueError("Agent session_id 不能超过 500 个字符。")
         return {
             "open": _to_bool(payload.get("open", True)),
+            "subscribe": _to_bool(payload.get("subscribe", True)),
             "known_revision": known_revision,
             "session_id": session_id,
         }

@@ -2460,6 +2460,7 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
     })
     assert agents_record["payload"] == {
         "open": True,
+        "subscribe": True,
         "known_revision": 3,
         "session_id": "session-1",
     }
@@ -2593,6 +2594,86 @@ async def test_bridge_agent_snapshot_updates_and_session_isolation(
         )
     finally:
         await bridge.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_snapshot_only_does_not_create_subscription(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    bridge: JsonlEngineBridge | None = None
+    try:
+        session = await engine.get_or_create_session(title="Agent QuickOpen")
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+
+        await bridge.handle_client_record({
+            "id": "agents-quick-open",
+            "type": "agents/request",
+            "payload": {
+                "open": True,
+                "subscribe": False,
+                "known_revision": 0,
+                "session_id": session.id,
+            },
+        })
+        snapshot = next(
+            record for record in _records(writer)
+            if record["type"] == "agents/snapshot"
+        )
+        assert snapshot["request_id"] == "agents-quick-open"
+        assert bridge._agents_subscribed is False
+        assert bridge._agents_snapshot is None
+
+        before = len(_records(writer))
+        await engine.subagent_manager.message_bus.blackboard_set(
+            "quick-open/no-subscription",
+            "ready",
+            "coder",
+        )
+        await bridge.handle_engine_event("team_event", {
+            "event_type": "decision",
+            "sender": "coder",
+            "recipient": "reviewer",
+        })
+        assert not any(
+            record["type"] == "agents/update"
+            for record in _records(writer)[before:]
+        )
+
+        await bridge.handle_client_record({
+            "id": "agents-page-open",
+            "type": "agents/request",
+            "payload": {"open": True, "subscribe": True, "session_id": session.id},
+        })
+        subscribed_snapshot = bridge._agents_snapshot
+        assert bridge._agents_subscribed is True
+        assert subscribed_snapshot is not None
+
+        await bridge.handle_client_record({
+            "id": "agents-quick-open-while-page-open",
+            "type": "agents/request",
+            "payload": {
+                "open": True,
+                "subscribe": False,
+                "session_id": session.id,
+            },
+        })
+        assert bridge._agents_subscribed is True
+        assert bridge._agents_snapshot is subscribed_snapshot
+    finally:
+        if bridge is not None:
+            await bridge.shutdown()
+        else:
+            await engine.shutdown()
 
 
 @pytest.mark.asyncio

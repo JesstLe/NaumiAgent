@@ -69,6 +69,7 @@ from naumi_agent.tui.working_indicator import (
     WORKING_INDICATOR_FRAME_COUNT,
     render_working_indicator_frame,
 )
+from naumi_agent.ui.agent_quick_open import parse_terminal_agent_deep_link
 from naumi_agent.ui.budget import format_budget_detail
 from naumi_agent.ui.code_excerpt import excerpt_markdown_code_blocks
 from naumi_agent.ui.command_index import (
@@ -2619,7 +2620,20 @@ class NaumiApp(App):
         command = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
         if command == "/agents":
-            self._open_agent_control()
+            target = parse_terminal_agent_deep_link(raw)
+            if arg and target is None:
+                self.query_one(StatusBar).status_text = (
+                    "用法：/agents 或 /agents agent <name>"
+                )
+                self.query_one(ChatPanel).mount(
+                    Markdown(
+                        "Agent Control 用法：`/agents` 或 "
+                        "`/agents agent <name>`。",
+                        classes="agent-msg",
+                    )
+                )
+                return
+            self._open_agent_control(initial_agent=target or "")
             return
         if command == "/workbench":
             self._open_workbench_overview()
@@ -3363,11 +3377,17 @@ class NaumiApp(App):
             return
         self._open_agent_control()
 
-    def _open_agent_control(self) -> None:
+    def _open_agent_control(self, *, initial_agent: str = "") -> None:
         current = self.screen
         if isinstance(current, AgentControlScreen | ModalScreen):
             return
-        self.push_screen(AgentControlScreen(self.engine))
+        self.push_screen(
+            AgentControlScreen(
+                self.engine,
+                initial_tab="agents",
+                initial_id=initial_agent,
+            )
+        )
 
     def _open_workbench_overview(self) -> None:
         current = self.screen
