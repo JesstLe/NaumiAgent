@@ -4016,6 +4016,12 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness eval sandbox retry-retention-preview "
         "[--retention-days 1..3650] [--limit 1..20] "
         "[--scan-limit 1..100] [--assessed-at <ISO8601>]\n"
+        "      /harness eval sandbox retry-prune-authorize <candidate> "
+        "--preview <id> --preview-sha256 <digest> --candidate-sha256 <digest> "
+        "--retry-action <id> --dispatch <id> --epoch <n> "
+        "--dispatch-sha256 <digest> --updated-at <ISO8601> "
+        "--refs-sha256 <digest> --preview-assessed-at <ISO8601> "
+        "--retention-days <n> --limit <n> --scan-limit <n> --reason <原因>\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4213,6 +4219,119 @@ async def _run_harness(engine: Any, arg: str) -> None:
             ToolCall(
                 id=f"manual-harness-sandbox-retries-{uuid.uuid4().hex}",
                 name="harness_eval_sandbox_retries",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 3
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "retry-prune-authorize"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        candidate_id = parts[3] if len(parts) >= 4 else ""
+        parsed: dict[str, str] = {}
+        index = 4
+        valid = bool(candidate_id)
+        allowed = {
+            "--preview",
+            "--preview-sha256",
+            "--candidate-sha256",
+            "--retry-action",
+            "--dispatch",
+            "--epoch",
+            "--dispatch-sha256",
+            "--updated-at",
+            "--refs-sha256",
+            "--preview-assessed-at",
+            "--retention-days",
+            "--limit",
+            "--scan-limit",
+            "--reason",
+        }
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in allowed
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        try:
+            dispatch_epoch = int(parsed.get("--epoch", "0"))
+            retention_days = int(parsed.get("--retention-days", "0"))
+            limit = int(parsed.get("--limit", "0"))
+            scan_limit = int(parsed.get("--scan-limit", "0"))
+        except ValueError:
+            valid = False
+            dispatch_epoch = retention_days = limit = scan_limit = 0
+        sha_options = (
+            "--preview-sha256",
+            "--candidate-sha256",
+            "--dispatch-sha256",
+            "--refs-sha256",
+        )
+        if (
+            not valid
+            or set(parsed) != allowed
+            or re.fullmatch(r"hsrrp_[0-9a-f]{24}", candidate_id) is None
+            or re.fullmatch(
+                r"hsrrpv_[0-9a-f]{24}",
+                parsed.get("--preview", ""),
+            )
+            is None
+            or re.fullmatch(
+                r"hsar_[0-9a-f]{24}",
+                parsed.get("--retry-action", ""),
+            )
+            is None
+            or re.fullmatch(
+                r"hsard_[0-9a-f]{24}",
+                parsed.get("--dispatch", ""),
+            )
+            is None
+            or any(
+                re.fullmatch(r"[0-9a-f]{64}", parsed.get(option, "")) is None
+                for option in sha_options
+            )
+            or dispatch_epoch < 1
+            or not 1 <= retention_days <= 3650
+            or not 1 <= limit <= 20
+            or not limit <= scan_limit <= 100
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        session = await engine.get_or_create_session()
+        run_id = f"manual:{session.id}"
+        arguments: dict[str, object] = {
+            "action_id": f"hsrpa_{uuid.uuid4().hex[:24]}",
+            "preview_id": parsed["--preview"],
+            "preview_sha256": parsed["--preview-sha256"],
+            "candidate_id": candidate_id,
+            "candidate_sha256": parsed["--candidate-sha256"],
+            "retry_action_id": parsed["--retry-action"],
+            "dispatch_id": parsed["--dispatch"],
+            "dispatch_epoch": dispatch_epoch,
+            "dispatch_request_sha256": parsed["--dispatch-sha256"],
+            "dispatch_updated_at": parsed["--updated-at"],
+            "protection_refs_sha256": parsed["--refs-sha256"],
+            "preview_assessed_at": parsed["--preview-assessed-at"],
+            "retention_days": retention_days,
+            "limit": limit,
+            "scan_limit": scan_limit,
+            "reason": parsed["--reason"],
+            "run_id": run_id,
+        }
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-retry-prune-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox_retry_prune_authorize",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
         )

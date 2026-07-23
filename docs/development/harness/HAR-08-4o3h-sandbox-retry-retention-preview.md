@@ -91,8 +91,8 @@ Store 使用显式 `BEGIN DEFERRED` 只读事务：
 Renderer 明确使用“只读候选”：
 
 - 不展示 owner、actor、reason、execution authority 或 workspace 路径；
-- 不显示“确认删除”按钮；
-- 不提供 prune 命令；
+- 不显示会直接删除的按钮；
+- HAR-08.4o3i 交付后显示绑定完整 fence 与 reason 的 receipt 签发命令；
 - 显示每类保护引用数量与 digest；
 - 明确 open dispatch 仍受保护；
 - 明确 preview 本身永远不能执行删除。
@@ -113,7 +113,7 @@ Renderer 明确使用“只读候选”：
 
 ## 8. 后续边界
 
-下一切片 HAR-08.4o3i 才能设计 prune receipt authority。它至少必须绑定：
+HAR-08.4o3i 已实现 prune receipt authority，并绑定：
 
 - preview ID/SHA 与 candidate ID/SHA；
 - 当前 workspace；
@@ -122,5 +122,5 @@ Renderer 明确使用“只读候选”：
 - 所有 protection refs；
 - 明确的用户或治理 actor 与审计 reason。
 
-签发 receipt 前必须重新读取并验证 cohort 没有新增引用。即使 receipt 存在，真正删除仍应作为后续
-独立切片实现，并在一个写事务中按外键/共享引用顺序执行；4o3h 不包含这些能力。
+签发 receipt 前会重新读取并验证 cohort 没有新增引用。即使 receipt 存在，真正删除仍由后续
+HAR-08.4o3j 独立实现，并在一个写事务中按外键/共享引用顺序执行；4o3h/4o3i 都不删除记录。
