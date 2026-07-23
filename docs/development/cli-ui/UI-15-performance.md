@@ -31,7 +31,10 @@
   - UI-15.5a 已把 New UI 的事件丢弃式 32ms throttle 升级为 48ms 有界滚动意图控制器：首步立即、
     同方向 burst 最多保留一个待输出行、反向立即取消旧动量、shutdown 清理定时器，并继续复用
     follow-tail 状态机；见[设计与证据](UI-15-5a-trackpad-scroll-intent.md)。
-  - 未完成：具有真实 fractional delta 的亚行归一化、Textual TUI 对照和四类主流终端设备矩阵。
+  - UI-15.5b 已把 Textual TUI 的应用级 pointer sensitivity 从默认每事件 2 行收敛为 1 行，并用真实
+    MouseScroll 事件验证 ChatPanel 上下逐行定位；见
+    [设计与证据](UI-15-5b-tui-pointer-scroll-parity.md)。
+  - 未完成：具有真实 fractional delta 的亚行归一化和四类主流终端设备矩阵。
 - UI-15.6 Bench harness：可重复 fixture、CPU/内存/首帧/输入/滚动指标。
   - UI-15.6a 已实现 current renderer 的 `smoke|release` 可重复 fixture、三场景 JSON 指标与
     fixture digest，作为 UI 优化和 CC-02 Ink 实验的共同对照；见
@@ -59,4 +62,4 @@ stream delta 数量；UI-15.2a/15.3a 已让默认 New UI 的 warm deep-scroll �
 超长文本正文驻留在前端状态；UI-15.6a 已建立 current renderer benchmark 基线；CC-02.1a/2.2a 已加入同合同
 Ink 实验与核心视图对照。增量 virtual index、非文本 artifact、完整 cache revision、输入/resize/TUI benchmark
 与达到语义 parity 后的跨前端性能门仍未完成。UI-15.5a 已让 New UI 触摸板 burst 逐行匀速且无长惯性，
-但 fractional delta、TUI 对照和真实设备发布矩阵仍未完成。
+UI-15.5b 又补齐 TUI 离散滚轮逐行 parity；fractional delta 和真实设备发布矩阵仍未完成。
