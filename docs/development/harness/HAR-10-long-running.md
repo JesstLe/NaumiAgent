@@ -96,6 +96,10 @@
   - HAR-10.7b 已增加 `max_queued_agents` 进程内硬上限，direct/batch/DAG 共用活跃与等待预算；满载时返回
     明确中文过载回执，Runtime 同时展示排队上限，取消可复用容量。见
     [设计](HAR-10-7b-bounded-agent-waiting-queue.md)。
+  - HAR-10.7c 已让多个 embedded Runtime 共用 AgentJob schema v2 capacity policy、active token 与
+    有界 FIFO；`waiting_capacity` 可见、可停止，terminal 后下一项自动取得 claim，New UI/TUI 与
+    `/runtime` 显示同一共享计数。见
+    [设计](HAR-10-7c-durable-agent-capacity-admission.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
@@ -127,8 +131,8 @@
   - UI-13.1e 已继续投影 durable queue policy、live waiting、active claim、oldest wait 与到期待收口数；
     New UI/TUI 复用同一只读 authority，不暴露 job identity；见
     [设计](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
-  - 未完成：Agent/Browser 独立持久 Worker dispatch、Agent capacity admission、自动
-    claim/scheduler、可恢复 response、workspace 锁、能力路由、
+  - 未完成：Agent/Browser 独立持久 Worker dispatch、自动 recovery scheduler、可恢复 response、
+    workspace 锁、能力路由、
     亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域

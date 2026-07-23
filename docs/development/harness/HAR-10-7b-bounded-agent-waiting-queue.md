@@ -34,9 +34,11 @@ HAR-10.7a 已让 direct、batch 和 DAG 入口共用同一个进程内并发门�
 
 ## 明确保留边界
 
-- 队列仅存在于当前 Python Runtime 内；重启会丢失等待者，也不能协调多个进程或主机。
+- 本切片交付时队列仅存在于当前 Python Runtime；后续
+  [HAR-10.7c](HAR-10-7c-durable-agent-capacity-admission.md) 已增加跨 Runtime 的 durable active/waiting
+  authority，但独立 Worker 与跨主机调度仍未完成。
 - 当前只有 FIFO semaphore，没有 priority、deadline、aging、workspace/provider 配额、持久 overload receipt
   或跨客户端公平性；这些仍属于 ARC-06.2/06.4。
-- Agent 尚未作为 ARC-04 持久 Worker producer 消费 Registry reservation；因此本切片不能宣称完成
-  Agent cluster dispatch、crash recovery 或全局容量治理。
+- Agent 尚未作为 ARC-04 独立 Worker producer 消费 Registry reservation；HAR-10.7c 的 embedded
+  capacity 不能宣称完成 Agent cluster dispatch、crash recovery 或物理资源治理。
 - Browser TaskRunner 和工具批次继续使用各自的 admission，本切片不合并不同资源池。

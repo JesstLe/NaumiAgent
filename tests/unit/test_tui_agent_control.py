@@ -53,6 +53,8 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "持久任务" in executions
     assert "agent-job-1" in executions
     assert "epoch 3" in executions
+    assert "共享 Agent capacity" in executions
+    assert "1/4" in executions
     assert "team/review" in team
     assert "ready" in team
 
@@ -239,6 +241,13 @@ def _snapshot() -> AgentControlSnapshot:
             "attention_agents": 0,
             "stoppable_executions": 1,
             "pending_messages": 1,
+            "durable_capacity_configured": True,
+            "durable_active_jobs": 1,
+            "durable_max_active_jobs": 4,
+            "durable_waiting_jobs": 1,
+            "durable_max_waiters": 64,
+            "durable_reclaimable_jobs": 0,
+            "durable_recovery_required_jobs": 0,
         },
         "agents": [{
             "name": "coder",

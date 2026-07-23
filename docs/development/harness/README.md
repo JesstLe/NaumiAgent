@@ -37,11 +37,11 @@ HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/term
 精确取消和双端回执。跨客户端公平与 active worker 取消传播仍未完成。
 HAR-10.7a 已封住直接 Agent 委派绕过 `max_parallel_agents` 的入口，让 direct/batch/DAG 共用进程内
 admission、排队计数与取消清理，并拒绝容量饱和时会自锁的嵌套委派；HAR-10.7b 又以
-`max_queued_agents` 封住本地等待协程的无界增长，并提供稳定过载回执。持久 Agent Worker、跨进程队列与
-公平调度仍属于 ARC-04/06 后续。ARC-04.5a 已先让现有委派在模型调用前签发请求合同、终态签发低敏结果
-回执，并由 New UI/TUI 显示精确工具范围与摘要；ARC-04.5b2/5c 已进一步接入加密 durable Agent Job、
-claim renewal、终态发布屏障和双端 job state/epoch 证据。独立 Worker、capacity fairness、自动恢复与
-可展示 response 恢复仍未完成。
+`max_queued_agents` 封住本地等待协程的无界增长，并提供稳定过载回执。ARC-04.5a 已先让现有委派在
+模型调用前签发请求合同、终态签发低敏结果回执；ARC-04.5b2/5c 又接入加密 durable Agent Job、
+claim renewal、终态发布屏障和双端 job state/epoch 证据。HAR-10.7c/ARC-06.2c 进一步让多个 Runtime
+共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数。独立 Worker、跨 workspace/provider
+fairness、自动恢复与可展示 response 恢复仍未完成。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request

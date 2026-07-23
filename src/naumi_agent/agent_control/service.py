@@ -83,6 +83,7 @@ class AgentControlService:
         team_messages: tuple[TeamMessageDescriptor, ...] = ()
         blackboard: tuple[BlackboardDescriptor, ...] = ()
         pending_messages = 0
+        capacity = None
         manager = getattr(self._engine, "subagent_manager", None)
 
         try:
@@ -132,6 +133,23 @@ class AgentControlService:
         except Exception as exc:
             warnings.append(f"团队数据读取失败：{type(exc).__name__}: {exc}")
 
+        try:
+            if manager is not None:
+                capacity = await manager.capacity_snapshot()
+                if (
+                    capacity is not None
+                    and capacity.recovery_required_jobs
+                ):
+                    warnings.append(
+                        "共享 Agent capacity 中有 "
+                        f"{capacity.recovery_required_jobs} 个 running Job "
+                        "需要恢复裁决，容量不会自动释放。"
+                    )
+        except Exception as exc:
+            warnings.append(
+                f"Agent capacity 读取失败：{type(exc).__name__}: {exc}"
+            )
+
         active_agents = sum(item.state in _ACTIVE_AGENT_STATES for item in agents)
         attention_agents = len({
             item.agent_name
@@ -144,6 +162,19 @@ class AgentControlService:
             attention_agents=attention_agents,
             stoppable_executions=sum(item.stop_supported for item in executions),
             pending_messages=pending_messages,
+            durable_capacity_configured=capacity is not None,
+            durable_active_jobs=capacity.active_jobs if capacity else 0,
+            durable_max_active_jobs=(
+                capacity.policy.max_active_jobs if capacity else 0
+            ),
+            durable_waiting_jobs=capacity.waiting_jobs if capacity else 0,
+            durable_max_waiters=capacity.policy.max_waiters if capacity else 0,
+            durable_reclaimable_jobs=(
+                capacity.reclaimable_prestart_jobs if capacity else 0
+            ),
+            durable_recovery_required_jobs=(
+                capacity.recovery_required_jobs if capacity else 0
+            ),
         )
         return AgentControlSnapshot(
             schema_version=AGENT_CONTROL_SCHEMA_VERSION,

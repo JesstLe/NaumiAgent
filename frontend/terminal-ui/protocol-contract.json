@@ -252,6 +252,24 @@
   },
   "agent_control": {
     "schema_version": 2,
+    "summary_capacity_fields": [
+      "durable_capacity_configured",
+      "durable_active_jobs",
+      "durable_max_active_jobs",
+      "durable_waiting_jobs",
+      "durable_max_waiters",
+      "durable_reclaimable_jobs",
+      "durable_recovery_required_jobs"
+    ],
+    "execution_phases": [
+      "starting",
+      "waiting_capacity",
+      "running",
+      "preparing_tool",
+      "running_tool",
+      "stopping",
+      "finished"
+    ],
     "execution_heartbeat_fields": [
       "heartbeat_subject_id",
       "heartbeat_phase",

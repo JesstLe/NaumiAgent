@@ -84,7 +84,7 @@ async def build_runtime_status(
     if "team" in selected:
         blocks.append(await collector.team_section())
     if "subagent" in selected:
-        blocks.append(collector.subagent_section())
+        blocks.append(await collector.subagent_section())
     if "hooks" in selected:
         blocks.append(collector.hooks_section())
     if "resources" in selected:
@@ -391,7 +391,7 @@ class _RuntimeSnapshot:
             lines.append(f"- 团队黑板读取失败：{blackboard_error}")
         return "\n".join(lines)
 
-    def subagent_section(self) -> str:
+    async def subagent_section(self) -> str:
         lines = ["### Subagent"]
         manager = self.engine.subagent_manager
         lines.append(
@@ -399,6 +399,26 @@ class _RuntimeSnapshot:
             f"{manager.active_execution_count}/{manager.max_parallel_agents} 活跃 · "
             f"{manager.queued_parallel_agent_count}/{manager.max_queued_agents} 排队"
         )
+        try:
+            capacity = await manager.capacity_snapshot()
+        except Exception as exc:
+            lines.append(
+                "- 共享持久 Agent capacity：读取失败 "
+                f"({type(exc).__name__})"
+            )
+        else:
+            if capacity is None:
+                lines.append("- 共享持久 Agent capacity：尚未配置")
+            else:
+                lines.append(
+                    "- 共享持久 Agent capacity："
+                    f"{capacity.active_jobs}/"
+                    f"{capacity.policy.max_active_jobs} 活跃 · "
+                    f"{capacity.waiting_jobs}/"
+                    f"{capacity.policy.max_waiters} 等待 · "
+                    f"{capacity.reclaimable_prestart_jobs} 可接管 · "
+                    f"{capacity.recovery_required_jobs} 待恢复"
+                )
         agents = manager.list_agents()
         if agents:
             lines.append("- 生命周期：")

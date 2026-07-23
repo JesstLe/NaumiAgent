@@ -11,6 +11,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from naumi_agent.daemons.agent_jobs import (
+    AGENT_JOB_SCHEMA_VERSION,
+    AgentJobCapacityExhaustedError,
     AgentJobConflictError,
     AgentJobError,
     AgentJobLifecycleConflictError,
@@ -503,3 +505,356 @@ async def test_key_failure_is_sanitized_and_does_not_create_partial_db(
 
     assert "secret-backend-detail" not in str(exc_info.value)
     assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_capacity_admission_is_cross_store_bounded_and_reusable(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    first_store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    second_store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    first_request, first_payload = _facts(clock, task_id="capacity-first")
+    first = await first_store.admit_for_capacity(
+        request=first_request,
+        payload=first_payload,
+        owner_id="runtime-a",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    assert first.should_dispatch
+
+    clock.advance(seconds=1)
+    second_request, second_payload = _facts(clock, task_id="capacity-second")
+    second = await second_store.admit_for_capacity(
+        request=second_request,
+        payload=second_payload,
+        owner_id="runtime-b",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    assert not second.should_dispatch
+    assert second.job.state is AgentJobState.ADMITTED
+    snapshot = await first_store.capacity_snapshot()
+    assert snapshot is not None
+    assert snapshot.active_jobs == 1
+    assert snapshot.waiting_jobs == 1
+    assert snapshot.available_jobs == 0
+
+    await first_store.mark_running(
+        first.job.job_id,
+        owner_id="runtime-a",
+        claim_epoch=first.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=first_request,
+        status="completed",
+        response="完成",
+        error=None,
+        total_tokens=1,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await first_store.finish(
+        first.job.job_id,
+        owner_id="runtime-a",
+        claim_epoch=first.job.claim_epoch,
+        result=result,
+    )
+    claimed_second = await second_store.claim_for_capacity(
+        second.job.job_id,
+        owner_id="runtime-b",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    assert claimed_second.should_dispatch
+    snapshot = await second_store.capacity_snapshot()
+    assert snapshot is not None
+    assert snapshot.active_jobs == 1
+    assert snapshot.waiting_jobs == 0
+
+
+@pytest.mark.asyncio
+async def test_capacity_queue_hard_limit_is_atomic_across_stores(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    stores = [
+        AgentJobStore(path, key_provider=lambda: key, clock=clock)
+        for _ in range(3)
+    ]
+    facts = [
+        _facts(clock, task_id=f"capacity-race-{index}")
+        for index in range(3)
+    ]
+
+    outcomes = await asyncio.gather(
+        *[
+            store.admit_for_capacity(
+                request=request,
+                payload=payload,
+                owner_id=f"runtime-{index}",
+                lease_seconds=30,
+                max_active_jobs=1,
+                max_waiters=1,
+            )
+            for index, (store, (request, payload)) in enumerate(
+                zip(stores, facts, strict=True)
+            )
+        ],
+        return_exceptions=True,
+    )
+    accepted = [
+        item for item in outcomes
+        if not isinstance(item, Exception)
+    ]
+    rejected = [
+        item for item in outcomes
+        if isinstance(item, Exception)
+    ]
+    assert len(accepted) == 2
+    assert sum(item.should_dispatch for item in accepted) == 1
+    assert len(rejected) == 1
+    assert isinstance(rejected[0], AgentJobCapacityExhaustedError)
+    snapshot = await stores[0].capacity_snapshot()
+    assert snapshot is not None
+    assert (snapshot.active_jobs, snapshot.waiting_jobs) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_capacity_fifo_and_raw_claim_cannot_skip_oldest_waiter(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    store = AgentJobStore(
+        tmp_path / "agent-jobs.db",
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    active_request, active_payload = _facts(clock, task_id="capacity-active")
+    active = await store.admit_for_capacity(
+        request=active_request,
+        payload=active_payload,
+        owner_id="runtime-active",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=2,
+    )
+    clock.advance(seconds=1)
+    first_request, first_payload = _facts(clock, task_id="capacity-wait-first")
+    first = await store.admit_for_capacity(
+        request=first_request,
+        payload=first_payload,
+        owner_id="runtime-first",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=2,
+    )
+    clock.advance(seconds=1)
+    second_request, second_payload = _facts(clock, task_id="capacity-wait-second")
+    second = await store.admit_for_capacity(
+        request=second_request,
+        payload=second_payload,
+        owner_id="runtime-second",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=2,
+    )
+    with pytest.raises(AgentJobCapacityExhaustedError, match="FIFO"):
+        await store.claim(
+            second.job.job_id,
+            owner_id="runtime-second",
+            lease_seconds=30,
+        )
+    await store.cancel_before_claim(first.job.job_id)
+    await store.mark_running(
+        active.job.job_id,
+        owner_id="runtime-active",
+        claim_epoch=active.job.claim_epoch,
+    )
+    active_result = issue_agent_worker_result(
+        request=active_request,
+        status="completed",
+        response="done",
+        error=None,
+        total_tokens=1,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await store.finish(
+        active.job.job_id,
+        owner_id="runtime-active",
+        claim_epoch=active.job.claim_epoch,
+        result=active_result,
+    )
+    claimed = await store.claim_for_capacity(
+        second.job.job_id,
+        owner_id="runtime-second",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=2,
+    )
+    assert claimed.should_dispatch
+
+
+@pytest.mark.asyncio
+async def test_capacity_policy_reconfiguration_requires_empty_nonterminal_set(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    store = AgentJobStore(
+        tmp_path / "agent-jobs.db",
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    request, payload = _facts(clock, task_id="capacity-policy")
+    admitted = await store.admit_for_capacity(
+        request=request,
+        payload=payload,
+        owner_id="runtime-a",
+        lease_seconds=30,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    with pytest.raises(AgentJobConflictError, match="配置不一致"):
+        await store.claim_for_capacity(
+            admitted.job.job_id,
+            owner_id="runtime-a",
+            lease_seconds=30,
+            max_active_jobs=2,
+            max_waiters=2,
+        )
+    await store.mark_running(
+        admitted.job.job_id,
+        owner_id="runtime-a",
+        claim_epoch=admitted.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=request,
+        status="completed",
+        response="done",
+        error=None,
+        total_tokens=1,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await store.finish(
+        admitted.job.job_id,
+        owner_id="runtime-a",
+        claim_epoch=admitted.job.claim_epoch,
+        result=result,
+    )
+    next_request, next_payload = _facts(clock, task_id="capacity-policy-next")
+    changed = await store.admit_for_capacity(
+        request=next_request,
+        payload=next_payload,
+        owner_id="runtime-b",
+        lease_seconds=30,
+        max_active_jobs=2,
+        max_waiters=2,
+    )
+    assert changed.should_dispatch
+    snapshot = await store.capacity_snapshot()
+    assert snapshot is not None
+    assert snapshot.policy.max_active_jobs == 2
+    assert snapshot.policy.max_waiters == 2
+
+
+@pytest.mark.asyncio
+async def test_expired_running_job_blocks_capacity_until_recovery_unknown(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    store = AgentJobStore(
+        tmp_path / "agent-jobs.db",
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    request, payload = _facts(clock, task_id="capacity-recovery")
+    running = await store.admit_for_capacity(
+        request=request,
+        payload=payload,
+        owner_id="runtime-a",
+        lease_seconds=10,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    started = await store.mark_running(
+        running.job.job_id,
+        owner_id="runtime-a",
+        claim_epoch=running.job.claim_epoch,
+    )
+    clock.advance(seconds=11)
+    waiting_request, waiting_payload = _facts(
+        clock,
+        task_id="capacity-after-crash",
+    )
+    waiting = await store.admit_for_capacity(
+        request=waiting_request,
+        payload=waiting_payload,
+        owner_id="runtime-b",
+        lease_seconds=10,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    assert waiting.job.state is AgentJobState.ADMITTED
+    snapshot = await store.capacity_snapshot()
+    assert snapshot is not None
+    assert snapshot.active_jobs == 1
+    assert snapshot.recovery_required_jobs == 1
+    assert snapshot.available_jobs == 0
+    await store.mark_recovery_unknown(
+        running.job.job_id,
+        expected_latest_receipt_sha256=(
+            started.job.latest_receipt.receipt_sha256
+        ),
+    )
+    claimed = await store.claim_for_capacity(
+        waiting.job.job_id,
+        owner_id="runtime-b",
+        lease_seconds=10,
+        max_active_jobs=1,
+        max_waiters=1,
+    )
+    assert claimed.should_dispatch
+
+
+@pytest.mark.asyncio
+async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="capacity-migration")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_capacity_policy")
+        db.execute("PRAGMA user_version = 1")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    assert await reopened.capacity_snapshot() is None
+    restored = await reopened.get(admitted.job_id)
+    assert restored is not None
+    assert restored.request == request
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        table = db.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'agent_job_capacity_policy'
+            """
+        ).fetchone()
+    assert version == AGENT_JOB_SCHEMA_VERSION == 2
+    assert table == ("agent_job_capacity_policy",)

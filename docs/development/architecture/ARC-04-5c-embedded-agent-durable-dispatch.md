@@ -133,9 +133,10 @@ Textual formatter 都只消费该 authority：
 - Windows/macOS/Linux 独立打包后的 credential/SQLite/崩溃矩阵。
 
 后续不应继续线性做完整 ARC-04。应重新比较 Harness、ARC-06 与 UI 依赖，优先选择能产生独立用户价值的
-最小切片。当前候选是：
+最小切片。后续依赖审计已选择并完成第一项：
 
-1. `HAR-10.7c / ARC-06.2c Agent Capacity Admission`：让跨进程 Agent 等待真正消费共享 capacity；
+1. `HAR-10.7c / ARC-06.2c Agent Capacity Admission`：已让跨 Runtime Agent 等待消费共享 durable
+   capacity，见 [设计与验证](ARC-06-2c-durable-embedded-agent-capacity.md)；
 2. `ARC-04.5d Recoverable Agent Result Publication`：解决 terminal commit 后、父进程发布前崩溃造成的
    可展示结果缺口；
 3. Agent recovery UI：只读列出 claimed/running/unknown 并提供精确人工动作。
