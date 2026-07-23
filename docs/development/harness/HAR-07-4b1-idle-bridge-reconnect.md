@@ -67,9 +67,10 @@ Store 和显式 `/resume`。
 
 - 已实现“Bridge 进程能重启、重新协商并复用持久权威恢复空闲会话”，修复了此前 Bridge 一退出
   New UI 就结束的缺口。
-- 尚未实现 ARC-02.5 Event Store、global cursor、client ACK、bounded resend buffer、slow-client
-  policy 和 revision/gap 自动补发。因此 HAR-07.4b 仍为 partial。
+- ARC-02.5a 已实现两类安全回执的 Event Journal 与 session-scoped 稳定 cursor，但尚未实现
+  client ACK、cursor resend、slow-client policy 和 revision/gap 自动补发。因此 HAR-07.4b
+  仍为 partial。
 - 活动运行透明恢复必须等 Runtime Service 能证明哪些事件和副作用已经持久提交；不能根据前端
   最后一帧推断，也不能把 submit 重发当作恢复。
-- 后续最小 ARC 前置应定义 Event Envelope 的稳定 event id/cursor、持久写入顺序和 ACK/replay
-  合同，再把本切片的精确 session resume 升级为 cursor resume。
+- 后续最小 ARC 前置是 ARC-02.5b：实现客户端 ACK、`resume_after_cursor`、窗口内 resend 与窗口外
+  gap/snapshot，再把本切片的精确 session resume 升级为 cursor resume。

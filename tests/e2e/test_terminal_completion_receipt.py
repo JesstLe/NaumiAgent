@@ -256,14 +256,33 @@ async def test_real_git_pytest_sqlite_bridge_and_both_terminal_renderers(
             {"session_id": session.id, "clear": True},
             request_id="resume-real-e2e",
         )
+        await bridge.resend_completion_receipt(
+            {
+                "session_id": session.id,
+                "receipt_id": receipt.receipt_id,
+            },
+            request_id="resend-real-e2e",
+        )
         records = [json.loads(line) for line in writer.getvalue().splitlines()]
         replayed = [
             record
             for record in records
             if record["type"] == "completion/receipt"
         ]
-        assert len(replayed) == 1
-        assert replayed[0]["payload"]["receipt_id"] == receipt.receipt_id
+        assert len(replayed) == 2
+        assert all(
+            record["payload"]["receipt_id"] == receipt.receipt_id
+            for record in replayed
+        )
+        assert replayed[0]["event_id"] == replayed[1]["event_id"]
+        assert replayed[0]["stream_id"] == replayed[1]["stream_id"]
+        assert replayed[0]["cursor"] == replayed[1]["cursor"] == 1
+        journaled = await engine.terminal_event_store.get_by_idempotency_key(
+            session_id=session.id,
+            idempotency_key=f"completion:{receipt.receipt_id}",
+        )
+        assert journaled is not None
+        assert journaled.event_id == replayed[0]["event_id"]
 
         textual = format_completion_receipt_markdown(receipt)
         assert "完成回执 · 已完成" in textual

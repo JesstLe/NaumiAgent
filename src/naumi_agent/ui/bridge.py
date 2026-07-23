@@ -60,6 +60,11 @@ from naumi_agent.harness.store import (
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runtime.terminal_events import (
+    REPLAY_SAFE_TERMINAL_EVENTS,
+    TerminalEventJournalError,
+    TerminalEventJournalStore,
+)
 from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycle,
     TerminalRuntimeLifecycleFactory,
@@ -133,6 +138,32 @@ _MAX_QUEUED_CONVERSATIONS = 20
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
+
+
+def _terminal_event_idempotency_key(
+    event_type: str,
+    payload: dict[str, Any],
+) -> str:
+    """Derive a stable semantic identity without transport request metadata."""
+    if event_type == str(ServerEventType.COMPLETION_RECEIPT):
+        receipt_id = str(payload.get("receipt_id") or "").strip()
+        if not receipt_id:
+            raise TerminalEventJournalError("完成回执缺少 receipt_id。")
+        return f"completion:{receipt_id}"
+    if event_type == str(ServerEventType.HARNESS_RECEIPT):
+        run_id = str(payload.get("run_id") or "").strip()
+        revision = payload.get("revision")
+        if (
+            not run_id
+            or not isinstance(revision, int)
+            or isinstance(revision, bool)
+            or revision < 1
+        ):
+            raise TerminalEventJournalError(
+                "Harness 回执缺少有效的 run_id 或 revision。"
+            )
+        return f"harness:{run_id}:{revision}"
+    raise TerminalEventJournalError(f"事件不支持持久化: {event_type}")
 
 
 def _experiment_contract_public_payload(
@@ -544,6 +575,17 @@ class JsonlEngineBridge:
         self._writer: TextIO | None = None
         self._writer_lock = asyncio.Lock()
         self._protocol_event_registry = load_protocol_event_registry()
+        terminal_event_store = getattr(self.engine, "terminal_event_store", None)
+        if terminal_event_store is not None and not isinstance(
+            terminal_event_store,
+            TerminalEventJournalStore,
+        ):
+            raise TypeError(
+                "engine.terminal_event_store 必须是 TerminalEventJournalStore。"
+            )
+        self._terminal_event_store = terminal_event_store
+        if self._terminal_event_store is not None:
+            self._validate_terminal_event_policies()
         self._run_task: asyncio.Task[Any] | None = None
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
@@ -604,23 +646,60 @@ class JsonlEngineBridge:
         if self._writer is None:
             raise RuntimeError("bridge writer is not bound")
         async with self._writer_lock:
-            self._sequence += 1
             event_type = str(event)
+            policy = self._protocol_event_registry.policy("server", event_type)
+            durable_fields: dict[str, str | int] = {}
+            if (
+                self._terminal_event_store is not None
+                and event_type in REPLAY_SAFE_TERMINAL_EVENTS
+            ):
+                session_id = str(
+                    getattr(getattr(self.engine, "_session", None), "id", "") or ""
+                ).strip()
+                if not session_id:
+                    raise TerminalEventJournalError(
+                        "回执缺少会话边界，无法分配持久事件游标。"
+                    )
+                stored = await self._terminal_event_store.append(
+                    session_id=session_id,
+                    event_type=event_type,
+                    criticality=policy.criticality,
+                    idempotency_key=_terminal_event_idempotency_key(
+                        event_type,
+                        payload or {},
+                    ),
+                    payload=payload or {},
+                )
+                durable_fields = stored.envelope_fields()
+            next_sequence = self._sequence + 1
             record = make_envelope(
                 event,
                 payload or {},
                 request_id=request_id,
-                sequence=self._sequence,
-                criticality=self._protocol_event_registry.policy(
-                    "server",
-                    event_type,
-                ).criticality,
+                sequence=next_sequence,
+                criticality=policy.criticality,
+                **durable_fields,
             )
             text = encode_jsonl(record)
             self._writer.write(text)
             self._writer.flush()
+            self._sequence = next_sequence
         if self.debug_trace is not None:
             self.debug_trace.output("ui_bridge.stdout", text)
+
+    def _validate_terminal_event_policies(self) -> None:
+        """Fail closed if the shared registry makes a journaled event unsafe."""
+        for event_type in sorted(REPLAY_SAFE_TERMINAL_EVENTS):
+            policy = self._protocol_event_registry.policy("server", event_type)
+            if (
+                policy.criticality != "terminal"
+                or policy.persistence != "audit"
+                or policy.sensitive_fields
+                or policy.redaction != "none"
+            ):
+                raise TerminalEventJournalError(
+                    f"终端事件 {event_type} 的协议策略不再允许原文持久化。"
+                )
 
     async def emit_ready(self) -> None:
         heartbeat_error = await self._start_terminal_runtime_lifecycle()

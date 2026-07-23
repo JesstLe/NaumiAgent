@@ -995,11 +995,35 @@ async def test_bridge_cli_defaults_to_project_naumi_config(
 
 
 def test_protocol_decodes_strict_jsonl() -> None:
-    record = make_envelope(ServerEventType.READY, {"ok": True})
+    record = make_envelope(
+        ServerEventType.COMPLETION_RECEIPT,
+        {"ok": True},
+        event_id="tev_0123456789abcdef01234567",
+        stream_id="tes_89abcdef0123456701234567",
+        cursor=7,
+    )
     line = encode_jsonl(record)
     decoded = decode_jsonl_line(line)
-    assert decoded["type"] == "ready"
+    assert decoded["type"] == "completion/receipt"
     assert decoded["payload"] == {"ok": True}
+    assert decoded["event_id"] == "tev_0123456789abcdef01234567"
+    assert decoded["stream_id"] == "tes_89abcdef0123456701234567"
+    assert decoded["cursor"] == 7
+
+    with pytest.raises(ValueError, match="必须同时提供"):
+        make_envelope(
+            ServerEventType.COMPLETION_RECEIPT,
+            {"ok": True},
+            event_id="tev_0123456789abcdef01234567",
+        )
+    with pytest.raises(ValueError, match="正整数"):
+        make_envelope(
+            ServerEventType.COMPLETION_RECEIPT,
+            {"ok": True},
+            event_id="tev_0123456789abcdef01234567",
+            stream_id="tes_89abcdef0123456701234567",
+            cursor=0,
+        )
 
     with pytest.raises(ValueError, match="缺少 type"):
         decode_jsonl_line('{"payload":{}}\n')
@@ -1033,6 +1057,7 @@ def test_protocol_contract_matches_python_enums() -> None:
             "session_list",
             "sequence_integrity",
             "task_snapshot",
+            "terminal_event_cursor",
             "typed_ui_messages",
             "workbench_snapshot",
             "workbench_proposal_actions",

@@ -16,6 +16,7 @@
       "session_list",
       "sequence_integrity",
       "task_snapshot",
+      "terminal_event_cursor",
       "typed_ui_messages",
       "workbench_snapshot",
       "workbench_proposal_actions"

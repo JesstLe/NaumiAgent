@@ -30,6 +30,7 @@ PROTOCOL_CAPABILITIES = (
     "session_list",
     "sequence_integrity",
     "task_snapshot",
+    "terminal_event_cursor",
     "typed_ui_messages",
     "workbench_snapshot",
     "workbench_proposal_actions",
@@ -162,8 +163,20 @@ def make_envelope(
     request_id: str | None = None,
     sequence: int | None = None,
     criticality: str | None = None,
+    event_id: str | None = None,
+    stream_id: str | None = None,
+    cursor: int | None = None,
 ) -> dict[str, Any]:
     """Build one protocol envelope."""
+    durable_fields = (event_id, stream_id, cursor)
+    if any(value is not None for value in durable_fields) and not all(
+        value is not None for value in durable_fields
+    ):
+        raise ValueError("event_id、stream_id 与 cursor 必须同时提供。")
+    if cursor is not None and (
+        not isinstance(cursor, int) or isinstance(cursor, bool) or cursor < 1
+    ):
+        raise ValueError("cursor 必须是正整数。")
     record: dict[str, Any] = {
         "type": str(event),
         "version": PROTOCOL_VERSION,
@@ -177,6 +190,10 @@ def make_envelope(
         record["seq"] = sequence
     if criticality is not None:
         record["criticality"] = criticality
+    if event_id is not None and stream_id is not None and cursor is not None:
+        record["event_id"] = str(event_id)
+        record["stream_id"] = str(stream_id)
+        record["cursor"] = cursor
     return record
 
 

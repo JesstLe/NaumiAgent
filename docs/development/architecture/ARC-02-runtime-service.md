@@ -39,3 +39,8 @@
 - HAR-07.4b1 已让 New UI 在空闲边界内重启 stdio Bridge、重新 hello/sequence 协商，并以精确
   session 复用持久 Receipt 恢复；活动运行和未裁决输入仍 fail-closed。该能力证明了前端重连状态机，
   但没有 event cursor、ACK 或 gap resend，不能替代 ARC-02.3/ARC-02.5 的 Runtime Service 权威。
+- ARC-02.5a 已为 `completion/receipt` 与 `harness/receipt` 建立 Composition Root 管理的
+  `terminal-events.db`，提供跨 Bridge 稳定 `event_id/stream_id/cursor`、事务并发分配、写前提交、
+  双摘要完整性校验和每 session 4096 条有界保留。该切片仍没有客户端 ACK、cursor replay、
+  窗口外 gap/snapshot 或活动运行恢复，详见
+  [ARC-02.5a](./ARC-02-5a-terminal-event-journal.md)。

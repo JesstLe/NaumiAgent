@@ -594,6 +594,30 @@ export function normalizeServerRecord(record) {
     }
     normalized.seq = record.seq;
   }
+  const durableFields = ["event_id", "stream_id", "cursor"];
+  const durableCount = durableFields.filter((field) => record[field] != null).length;
+  if (durableCount > 0) {
+    if (durableCount !== durableFields.length) {
+      throw new Error("Bridge event_id、stream_id 与 cursor 必须同时提供");
+    }
+    if (!new Set(["completion/receipt", "harness/receipt"]).has(type)) {
+      throw new Error(`Bridge 事件不允许携带持久游标: ${type}`);
+    }
+    const eventId = String(record.event_id);
+    const streamId = String(record.stream_id);
+    if (!/^tev_[0-9a-f]{24}$/.test(eventId)) {
+      throw new Error("Bridge event_id 格式无效");
+    }
+    if (!/^tes_[0-9a-f]{24}$/.test(streamId)) {
+      throw new Error("Bridge stream_id 格式无效");
+    }
+    if (!isValidServerSequence(record.cursor)) {
+      throw new Error("Bridge cursor 必须是正安全整数");
+    }
+    normalized.event_id = eventId;
+    normalized.stream_id = streamId;
+    normalized.cursor = record.cursor;
+  }
   return normalized;
 }
 

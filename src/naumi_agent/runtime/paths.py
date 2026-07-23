@@ -14,6 +14,7 @@ class RuntimePaths:
     session_db_path: Path
     runtime_data_dir: Path
     chat_run_db_path: Path
+    terminal_event_db_path: Path
     worker_registry_db_path: Path
     execution_grant_db_path: Path
     run_delegation_grant_db_path: Path
@@ -41,6 +42,7 @@ class RuntimePaths:
         for name in (
             "session_db_path",
             "chat_run_db_path",
+            "terminal_event_db_path",
             "worker_registry_db_path",
             "execution_grant_db_path",
             "run_delegation_grant_db_path",

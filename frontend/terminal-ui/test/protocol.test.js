@@ -533,6 +533,7 @@ test("protocol contract drives client and server event validation", () => {
       "sequence_integrity",
       "session_list",
       "task_snapshot",
+      "terminal_event_cursor",
       "typed_ui_messages",
       "workbench_proposal_actions",
       "workbench_snapshot",
@@ -710,6 +711,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "sequence_integrity",
       "session_list",
       "task_snapshot",
+      "terminal_event_cursor",
       "typed_ui_messages",
       "workbench_proposal_actions",
       "workbench_snapshot",
@@ -753,6 +755,64 @@ test("hello ack requires a valid negotiated version and capability subset", () =
       },
     }),
     /协商版本不兼容/,
+  );
+});
+
+test("terminal receipt cursors are strict, complete, and event-scoped", () => {
+  const normalized = normalizeServerRecord({
+    type: "completion/receipt",
+    version: 1,
+    event_id: "tev_0123456789abcdef01234567",
+    stream_id: "tes_89abcdef0123456701234567",
+    cursor: 7,
+    payload: {
+      schema_version: 1,
+      receipt_id: "receipt-cursor",
+      run_id: "run-cursor",
+      outcome: "completed",
+    },
+  });
+  assert.equal(normalized.event_id, "tev_0123456789abcdef01234567");
+  assert.equal(normalized.stream_id, "tes_89abcdef0123456701234567");
+  assert.equal(normalized.cursor, 7);
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "completion/receipt",
+      event_id: "tev_0123456789abcdef01234567",
+      payload: {
+        schema_version: 1,
+        receipt_id: "receipt-cursor",
+        run_id: "run-cursor",
+        outcome: "completed",
+      },
+    }),
+    /必须同时提供/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ui/message",
+      event_id: "tev_0123456789abcdef01234567",
+      stream_id: "tes_89abcdef0123456701234567",
+      cursor: 7,
+      payload: { type: "text", content: "not journaled" },
+    }),
+    /不允许携带持久游标/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "completion/receipt",
+      event_id: "bad",
+      stream_id: "tes_89abcdef0123456701234567",
+      cursor: 7,
+      payload: {
+        schema_version: 1,
+        receipt_id: "receipt-cursor",
+        run_id: "run-cursor",
+        outcome: "completed",
+      },
+    }),
+    /event_id 格式无效/,
   );
 });
 

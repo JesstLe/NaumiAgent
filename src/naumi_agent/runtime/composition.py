@@ -40,6 +40,7 @@ from naumi_agent.runtime.resources import (
     validate_runtime_resource_overrides,
 )
 from naumi_agent.runtime.services import RuntimeServiceOverrides, RuntimeServices
+from naumi_agent.runtime.terminal_events import TerminalEventJournalStore
 from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
@@ -116,6 +117,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         session_db_path=session_db_path,
         runtime_data_dir=runtime_data_dir,
         chat_run_db_path=runtime_data_dir / "chat-runs.db",
+        terminal_event_db_path=runtime_data_dir / "terminal-events.db",
         worker_registry_db_path=runtime_data_dir / "worker-registry.db",
         execution_grant_db_path=runtime_data_dir / "execution-grants.db",
         run_delegation_grant_db_path=(
@@ -149,10 +151,25 @@ def build_runtime_resources(
     if not isinstance(resolved, RuntimeResourceOverrides):
         raise TypeError("overrides 必须是 RuntimeResourceOverrides。")
     validate_runtime_resource_overrides(resolved)
+    if (
+        resolved.terminal_event_store is not None
+        and Path(resolved.terminal_event_store.workspace_root)
+        != paths.workspace_root
+    ):
+        raise ValueError(
+            "terminal_event_store workspace_root 必须与 RuntimePaths 一致。"
+        )
 
     chat_run_store = resolved.chat_run_store
     if chat_run_store is None:
         chat_run_store = ChatRunStore(paths.chat_run_db_path)
+
+    terminal_event_store = resolved.terminal_event_store
+    if terminal_event_store is None:
+        terminal_event_store = TerminalEventJournalStore(
+            paths.terminal_event_db_path,
+            workspace_root=paths.workspace_root,
+        )
 
     worker_registry_store = resolved.worker_registry_store
     if worker_registry_store is None:
@@ -208,6 +225,7 @@ def build_runtime_resources(
 
     return RuntimeResources(
         chat_run_store=chat_run_store,
+        terminal_event_store=terminal_event_store,
         worker_registry_store=worker_registry_store,
         execution_grant_store=execution_grant_store,
         run_delegation_grant_store=run_delegation_grant_store,
