@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptError
@@ -49,6 +50,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
         HarnessEvalSandboxTool(service),
+        HarnessEvalSandboxRetryTool(service),
         HarnessEvalBaselinePromoteTool(service),
         HarnessEvalCompareTool(service),
         HarnessReadKnowledgeTool(service),
@@ -521,6 +523,182 @@ class HarnessEvalSandboxTool(Tool):
         ) as exc:
             code = getattr(exc, "code", "sandbox_eval_infrastructure_error")
             return f"Harness Sandbox Eval 未完成（`{code}`）：{exc}"
+        return render_sandbox_eval_batch_receipt(receipt)
+
+
+class HarnessEvalSandboxRetryTool(Tool):
+    """Resume one cancelled Sandbox Eval from its durable server-side request."""
+
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_sandbox_retry"
+
+    @property
+    def description(self) -> str:
+        return "使用已接受的取消回执和新执行权威恢复原 Sandbox Eval"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=(
+                "harness sandbox eval retry resume cancelled batch h5a recovery"
+            ),
+            delegated_tool_names=("bash_run",),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "retry_action_id": {
+                    "type": "string",
+                    "pattern": "^hsar_[0-9a-f]{24}$",
+                },
+                "cancel_receipt_id": {
+                    "type": "string",
+                    "pattern": "^hsacr_[0-9a-f]{24}$",
+                },
+                "cancel_receipt_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                },
+                "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+                "run_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "当前 Runtime/会话的稳定运行标识",
+                },
+            },
+            "required": [
+                "retry_action_id",
+                "cancel_receipt_id",
+                "cancel_receipt_sha256",
+                "reason",
+                "run_id",
+            ],
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        event_callback: LegacyEventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
+        retry_action_id = kwargs.get("retry_action_id")
+        cancel_receipt_id = kwargs.get("cancel_receipt_id")
+        cancel_receipt_sha256 = kwargs.get("cancel_receipt_sha256")
+        reason = kwargs.get("reason")
+        run_id = kwargs.get("run_id")
+        values = (
+            retry_action_id,
+            cancel_receipt_id,
+            cancel_receipt_sha256,
+            reason,
+            run_id,
+        )
+        if (
+            any(not isinstance(item, str) for item in values)
+            or any(not item.strip() for item in values)
+            or re.fullmatch(
+                r"hsar_[0-9a-f]{24}",
+                retry_action_id,
+            )
+            is None
+            or re.fullmatch(
+                r"hsacr_[0-9a-f]{24}",
+                cancel_receipt_id,
+            )
+            is None
+            or re.fullmatch(
+                r"[0-9a-f]{64}",
+                cancel_receipt_sha256,
+            )
+            is None
+            or reason != reason.strip()
+            or len(reason) > 500
+            or run_id != run_id.strip()
+            or len(run_id) > 128
+        ):
+            return (
+                "Harness Sandbox Eval retry 参数无效："
+                "action、cancel receipt、reason 和 run_id 均必须提供。"
+            )
+        normalized_action = retry_action_id.strip().lower()
+        normalized_cancel = cancel_receipt_id.strip().lower()
+        normalized_cancel_sha256 = cancel_receipt_sha256.strip().lower()
+        normalized_reason = reason.strip()
+        manifest_metadata: tuple[str, tuple[str, ...]] | None = None
+
+        async def publish_progress(
+            checkpoint: HarnessSandboxBatchCheckpoint,
+        ) -> None:
+            nonlocal manifest_metadata
+            if event_callback is None:
+                return
+            if manifest_metadata is None and self._service.store is not None:
+                retry = await self._service.store.get_sandbox_admission_retry(
+                    workspace_root=self._service.workspace_root,
+                    action_id=normalized_action,
+                )
+                if retry is not None and retry.decision == "accepted":
+                    stored = await self._service.store.get_sandbox_eval_request(
+                        self._service.workspace_root,
+                        retry.eval_request_sha256,
+                    )
+                    if stored is not None:
+                        manifest_metadata = (
+                            stored.request.batch_id,
+                            tuple(item.check_id for item in stored.request.checks),
+                        )
+            if manifest_metadata is None:
+                raise HarnessSandboxEvalServiceError(
+                    "sandbox_eval_service_retry_progress_manifest_missing",
+                    "Sandbox Eval retry 无法恢复进度展示所需的 Request Manifest。",
+                )
+            await event_callback(
+                RuntimeEventType.HARNESS_SANDBOX_EVAL_PROGRESS.value,
+                harness_sandbox_eval_progress_payload(
+                    checkpoint,
+                    batch_id=manifest_metadata[0],
+                    check_ids=manifest_metadata[1],
+                ),
+            )
+
+        try:
+            receipt = await self._service.retry_sandbox(
+                retry_action_id=normalized_action,
+                cancel_receipt_id=normalized_cancel,
+                cancel_receipt_sha256=normalized_cancel_sha256,
+                reason=normalized_reason,
+                on_progress=publish_progress,
+            )
+        except (
+            HarnessSandboxEvalRequestError,
+            HarnessSandboxEvalServiceError,
+            HarnessSandboxBatchError,
+            HarnessSandboxEvalExecutionError,
+            HarnessStoreError,
+            PermissionDecisionReceiptError,
+            RunDelegationGrantError,
+        ) as exc:
+            code = getattr(exc, "code", "sandbox_eval_retry_infrastructure_error")
+            return f"Harness Sandbox Eval retry 未完成（`{code}`）：{exc}"
         return render_sandbox_eval_batch_receipt(receipt)
 
 

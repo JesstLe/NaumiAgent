@@ -225,6 +225,16 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
         return self
 
 
+class HarnessSandboxBatchRetryContext(_StrictModel):
+    """Exact durable authority chain used to dispatch one cancelled batch retry."""
+
+    retry_action_id: str = Field(pattern=r"^hsar_[0-9a-f]{24}$")
+    retry_receipt_id: str = Field(pattern=r"^hsarr_[0-9a-f]{24}$")
+    retry_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    eval_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    execution_authority_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class HarnessSandboxBatchError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -1072,6 +1082,7 @@ class HarnessSandboxBatchCoordinator:
         execute_sample: BatchSampleExecutor[_SampleReceiptT],
         build_receipt: BatchReceiptBuilder[_SampleReceiptT, _BatchReceiptT],
         on_progress: BatchProgressCallback | None = None,
+        retry_context: HarnessSandboxBatchRetryContext | None = None,
     ) -> _BatchReceiptT:
         lane = self._lane(phase)
         lane_name = lane.upper()
@@ -1080,6 +1091,18 @@ class HarnessSandboxBatchCoordinator:
                 "authority_key_invalid",
                 f"{self._label(lane_name)} authority key 必须是 SHA-256。",
             )
+        if retry_context is not None:
+            retry_context = HarnessSandboxBatchRetryContext.model_validate(
+                retry_context.model_dump(mode="json")
+            )
+            if (
+                lane != "sandbox"
+                or retry_context.execution_authority_key != authority_key
+            ):
+                raise self._error(
+                    "retry_context_invalid",
+                    "Sandbox Batch retry context 与 lane 或 execution authority 不一致。",
+                )
         if (
             isinstance(requested_samples, bool)
             or not 5 <= requested_samples <= 100
@@ -1126,12 +1149,22 @@ class HarnessSandboxBatchCoordinator:
                 code=transition.code,
             )
 
-        async with self.admission.admit(
-            authority_key=authority_key,
-            lane=lane,
-            requested_samples=requested_samples,
-            on_transition=publish_admission,
-        ) as admission_ticket:
+        admission_context = (
+            self.admission.admit_retry(
+                retry_action_id=retry_context.retry_action_id,
+                retry_receipt_id=retry_context.retry_receipt_id,
+                retry_receipt_sha256=retry_context.retry_receipt_sha256,
+                on_transition=publish_admission,
+            )
+            if retry_context is not None
+            else self.admission.admit(
+                authority_key=authority_key,
+                lane=lane,
+                requested_samples=requested_samples,
+                on_transition=publish_admission,
+            )
+        )
+        async with admission_context as admission_ticket:
             return await self._execute_admitted(
                 phase=phase,
                 authority_key=authority_key,

@@ -56,7 +56,9 @@ Sandbox Eval Request Manifest：新进程可按服务端 request authority 恢�
 并发覆盖与持久内容篡改均失败关闭。HAR-08.4o2 已以 Store v20 一次性消费 accepted cancel receipt，
 生成可恢复的新 retry action/receipt 与 execution authority，并支持 retry chain 回溯原 request；
 HAR-08.4o3a 又以 Store v21 原子 claim dispatch 与全新 admission ticket，只允许 expired ticket 的
-崩溃恢复，用户取消/失败/完成均终态关闭；真实恢复执行和三平台隔离 CI 仍未完成。
+崩溃恢复，用户取消/失败/完成均终态关闭；HAR-08.4o3b 已用新的 retry permission、execution authority、
+ticket、Runtime lease 与 Run Grant 恢复原 Request Manifest 和连续 H5a，并开放共享 Tool/Slash。
+New UI/TUI 一键 retry action 和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
