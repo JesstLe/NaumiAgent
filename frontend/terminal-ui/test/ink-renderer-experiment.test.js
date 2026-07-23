@@ -9,10 +9,17 @@ import {
 import { runInkRendererBenchmark } from "../scripts/benchmark-ink-renderer.js";
 import { stripAnsi, visibleWidth } from "../src/ansi.js";
 import { captureInkExperimentGoldenFrame } from "../src/experiments/ink-golden-capture.js";
-import { renderInkExperimentScreen } from "../src/experiments/ink-renderer.js";
+import {
+  inkPresentationIndexDebug,
+  renderInkExperimentScreen,
+} from "../src/experiments/ink-renderer.js";
 import { normalizeServerRecord } from "../src/protocol.js";
 import { renderScreen } from "../src/render.js";
-import { createInitialState, reduceServerEvent } from "../src/state.js";
+import {
+  createInitialState,
+  handleAssistantStream,
+  reduceServerEvent,
+} from "../src/state.js";
 
 const fixturePath = new URL(
   "../../../tests/fixtures/ui17/terminal-run-lifecycle-golden.json",
@@ -70,6 +77,75 @@ test("Ink experiment renders bounded state without mutation", () => {
   assert(lines.every((line) => visibleWidth(line) === 80));
   assert.equal(JSON.stringify(state), before);
   assert.throws(() => renderInkExperimentScreen(state, 39, 16), /width 必须是 40-400/);
+});
+
+test("Ink presentation index preserves legacy viewport and reuses warm metadata", () => {
+  const state = createBenchmarkState({
+    messages: 300,
+    tools: 40,
+    log_chars: 10_000,
+    width: 80,
+    height: 16,
+  }, { scrollOffset: 420, includeLargeOutput: true });
+  const before = JSON.stringify(state);
+
+  const indexed = renderInkExperimentScreen(state, 80, 16);
+  const cold = inkPresentationIndexDebug(state);
+  const legacy = renderInkExperimentScreen(
+    state,
+    80,
+    16,
+    { disablePresentationIndex: true },
+  );
+  const repeated = renderInkExperimentScreen(state, 80, 16);
+  const warm = inkPresentationIndexDebug(state);
+
+  assert.deepEqual(indexed, legacy);
+  assert.deepEqual(repeated, indexed);
+  assert.equal(warm.buildCount, cold.buildCount);
+  assert(warm.reuseCount > cold.reuseCount);
+  assert(warm.lastRenderedRange.last - warm.lastRenderedRange.first < 20);
+  assert.equal(warm.storesRenderedLines, false);
+  assert.equal(JSON.stringify(state), before);
+});
+
+test("Ink presentation index consumes production append and token mutations", () => {
+  const state = createInitialState();
+  state.welcome.dismissed = true;
+  state.followTail = false;
+  state.scrollOffset = 1;
+  state.messages.push({
+    kind: "user",
+    id: "message-1",
+    content: "检查增量投影",
+  });
+
+  renderInkExperimentScreen(state, 80, 16);
+  const initial = inkPresentationIndexDebug(state);
+  handleAssistantStream(state, { phase: "start" });
+  renderInkExperimentScreen(state, 80, 16);
+  const appended = inkPresentationIndexDebug(state);
+  handleAssistantStream(state, {
+    phase: "token",
+    content: "第一段流式内容",
+  });
+  const indexed = renderInkExperimentScreen(state, 80, 16);
+  const updated = inkPresentationIndexDebug(state);
+  const legacy = renderInkExperimentScreen(
+    state,
+    80,
+    16,
+    { disablePresentationIndex: true },
+  );
+
+  assert.equal(appended.buildCount, initial.buildCount);
+  assert.equal(appended.appendCount, initial.appendCount + 1);
+  assert.equal(updated.buildCount, appended.buildCount);
+  assert.equal(
+    updated.partialUpdateCount,
+    appended.partialUpdateCount + 1,
+  );
+  assert.deepEqual(indexed, legacy);
 });
 
 test("Ink experiment captures the shared lifecycle fixture deterministically", () => {

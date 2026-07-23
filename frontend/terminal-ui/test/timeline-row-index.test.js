@@ -122,3 +122,32 @@ test("timeline row index rejects missing construction inputs", () => {
     /缺少 renderMessage/,
   );
 });
+
+test("timeline row index keeps renderer namespaces isolated", () => {
+  const state = {
+    messages: [{ id: "one" }, { id: "two" }],
+    renderCache: { generation: 0, revision: 0 },
+  };
+  const current = ensureTimelineRowIndex(
+    state,
+    { width: 80, timelineIndexNamespace: "current" },
+    () => ["one-line"],
+  );
+  const experiment = ensureTimelineRowIndex(
+    state,
+    { width: 80, timelineIndexNamespace: "ink-presentation-v1" },
+    () => ["first", "second"],
+  );
+
+  assert.equal(current.totalLines, 2);
+  assert.equal(experiment.totalLines, 4);
+  assert.equal(timelineRowIndexDebug(state, "current").totalLines, 2);
+  assert.equal(
+    timelineRowIndexDebug(state, "ink-presentation-v1").totalLines,
+    4,
+  );
+  assert.throws(
+    () => timelineRowIndexDebug(state, ""),
+    /namespace 无效/,
+  );
+});

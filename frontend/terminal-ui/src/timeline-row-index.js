@@ -9,7 +9,9 @@ export function ensureTimelineRowIndex(state, ctx, renderMessage) {
   const width = Math.max(1, Math.trunc(Number(ctx?.width) || 1));
   const generation = Math.max(0, Math.trunc(Number(state.renderCache?.generation) || 0));
   const cacheRevision = Math.max(0, Math.trunc(Number(state.renderCache?.revision) || 0));
-  const existing = INDEX_BY_STATE.get(state);
+  const namespace = normalizeIndexNamespace(ctx?.timelineIndexNamespace);
+  const indexes = INDEX_BY_STATE.get(state);
+  const existing = indexes?.get(namespace);
   if (existing
     && existing.messages === messages
     && existing.width === width
@@ -55,7 +57,11 @@ export function ensureTimelineRowIndex(state, ctx, renderMessage) {
     lastRenderedRange: null,
   };
   index.messagePositions = buildMessagePositions(index.segments);
-  INDEX_BY_STATE.set(state, index);
+  if (indexes) {
+    indexes.set(namespace, index);
+  } else {
+    INDEX_BY_STATE.set(state, new Map([[namespace, index]]));
+  }
   return index;
 }
 
@@ -78,8 +84,8 @@ export function findTimelineSegmentAtRow(index, row) {
   return match;
 }
 
-export function timelineRowIndexDebug(state) {
-  const index = INDEX_BY_STATE.get(state);
+export function timelineRowIndexDebug(state, namespace = "current") {
+  const index = INDEX_BY_STATE.get(state)?.get(normalizeIndexNamespace(namespace));
   if (!index) return null;
   return {
     width: index.width,
@@ -95,6 +101,14 @@ export function timelineRowIndexDebug(state) {
       : null,
     storesRenderedLines: false,
   };
+}
+
+function normalizeIndexNamespace(value) {
+  const namespace = String(value ?? "current").trim();
+  if (!namespace || namespace.length > 128) {
+    throw new Error("timeline index namespace 无效");
+  }
+  return namespace;
 }
 
 function appendTimelineMessages(index, messages, renderMessage) {

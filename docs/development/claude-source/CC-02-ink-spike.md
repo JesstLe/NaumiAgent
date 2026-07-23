@@ -14,7 +14,7 @@
   视图消费同一 production reducer state，并以 current/Ink 共享语义锚点验收；见
   [CC-02.2a 核心视图 parity](CC-02-2a-core-view-semantic-parity.md)。完整 Markdown/diff/fold/专页仍待实现。
 - CC-02.3 Input：multiline、IME、paste、key parsing、permission modal 优先级。
-- CC-02.4 Performance：1k cards、token burst、resize、scroll、memory、startup。
+- CC-02.4 Performance（partial）：1k cards、token burst、resize、scroll、memory、startup。
   - 前置 UI-15.6a 已提供 `naumi.renderer-benchmark.v1` current renderer runner 与
     `smoke|release` fixture；Ink runner 必须复用同一 fixture 参数、digest 和三场景指标合同。
   - CC-02.1a 已交付首轮同机 release 对照：Ink tail/paged P95 分别约慢 9.2/20.5 倍，deep-scroll
@@ -26,6 +26,10 @@
     CC-02.2a 的 92.746ms historical current 值作为替换收益。
   - UI-15.3a 又建立了 10k+1k 深滚动下的 semantic mutation benchmark：100 次 token render P95
     0.282ms，索引只 build 1 次。CC-02.4 的 Ink token burst 必须复用该事件路径与等价门，不能只测静态快照。
+  - CC-02.4a 已为 current/Ink 行高索引增加 renderer namespace，并让 Ink 只投影可见 segment 与
+    一条 overscan；1k smoke 的 tail/deep/paged P95 相对 Ink legacy 分别下降约 13.2%/19.9%/5.0%，
+    但仍明显慢于 current，结论保持 `defer`。见
+    [CC-02.4a Ink Presentation Index](CC-02-4a-ink-presentation-index.md)。
 - CC-02.5 Packaging：Node version、依赖体积、wheel/binary、offline install。
 - CC-02.6 Decision record：量化收益、缺陷、迁移成本和回退路径。
 
@@ -45,8 +49,9 @@
 “更像 Claude Code”作为结论。
 
 当前已完成 current renderer benchmark、UI-17.2f 双端固定视口 ANSI/text capture、CC-02.1a 实验
-adapter 和 CC-02.2a 五类核心视图语义 parity。Ink 未被采纳；CC-02.2 剩余项与 2.3-2.6 仍需按同一
-fixture/capture manifest 继续，不能另建只对 Ink 有利的视觉样本。
+adapter、CC-02.2a 五类核心视图语义 parity 与 CC-02.4a 有界 presentation index。Ink 未被采纳；
+CC-02.2 剩余项、2.3、2.4 剩余指标及 2.5-2.6 仍需按同一 fixture/capture manifest 继续，不能另建
+只对 Ink 有利的视觉样本。
 
 ## 外部参考边界
 
