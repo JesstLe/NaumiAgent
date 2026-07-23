@@ -19,6 +19,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobPayload,
     AgentJobState,
     AgentJobStore,
+    AgentJobTerminalPayload,
 )
 from naumi_agent.daemons.agent_worker_contract import (
     issue_agent_worker_request,
@@ -265,6 +266,10 @@ async def test_renew_running_finish_and_terminal_retry_are_fenced(
         owner_id="worker-a",
         claim_epoch=1,
         result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="敏感模型输出",
+            error="",
+        ),
     )
     assert finished.job.state is AgentJobState.COMPLETED
     assert finished.job.result == result
@@ -278,6 +283,10 @@ async def test_renew_running_finish_and_terminal_retry_are_fenced(
         owner_id="worker-a",
         claim_epoch=1,
         result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="敏感模型输出",
+            error="",
+        ),
     )
     assert not replay.applied
     with pytest.raises(AgentJobLifecycleConflictError, match="owner"):
@@ -286,12 +295,237 @@ async def test_renew_running_finish_and_terminal_retry_are_fenced(
             owner_id="worker-b",
             claim_epoch=1,
             result=result,
+            terminal_payload=AgentJobTerminalPayload(
+                response="敏感模型输出",
+                error="",
+            ),
         )
     reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
     persisted = await reopened.get(job.job_id)
     assert persisted is not None
     assert persisted.result == result
     assert persisted.state is AgentJobState.COMPLETED
+    assert persisted.terminal_payload_envelope is not None
+    recovered_terminal = await reopened.recover_terminal_payload(
+        job.job_id,
+        expected_result_sha256=result.result_sha256,
+    )
+    assert recovered_terminal == AgentJobTerminalPayload(
+        response="敏感模型输出",
+        error="",
+    )
+    raw_store = path.read_bytes()
+    assert "敏感模型输出".encode() not in raw_store
+    with pytest.raises(
+        AgentJobLifecycleConflictError,
+        match="fence",
+    ):
+        await reopened.recover_terminal_payload(
+            job.job_id,
+            expected_result_sha256="0" * 64,
+        )
+
+
+@pytest.mark.asyncio
+async def test_terminal_payload_mismatch_is_rejected_before_terminal_commit(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    store = AgentJobStore(
+        tmp_path / "agent-jobs.db",
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    request, payload = _facts(clock, task_id="terminal-mismatch")
+    admitted = await store.admit(request=request, payload=payload)
+    claimed = await store.claim(
+        admitted.job_id,
+        owner_id="worker-a",
+        lease_seconds=30,
+    )
+    await store.mark_running(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=request,
+        status="completed",
+        response="expected response",
+        error=None,
+        total_tokens=1,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+
+    with pytest.raises(ValueError, match="response"):
+        await store.finish(
+            admitted.job_id,
+            owner_id="worker-a",
+            claim_epoch=claimed.job.claim_epoch,
+            result=result,
+            terminal_payload=AgentJobTerminalPayload(
+                response="different response",
+                error="",
+            ),
+        )
+
+    persisted = await store.get(admitted.job_id)
+    assert persisted is not None
+    assert persisted.state is AgentJobState.RUNNING
+    assert persisted.result is None
+    assert persisted.terminal_payload_envelope is None
+
+
+@pytest.mark.asyncio
+async def test_error_terminal_payload_recovers_without_plaintext_on_disk(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    store = AgentJobStore(
+        path,
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    request, payload = _facts(clock, task_id="terminal-error")
+    admitted = await store.admit(request=request, payload=payload)
+    claimed = await store.claim(
+        admitted.job_id,
+        owner_id="worker-a",
+        lease_seconds=30,
+    )
+    await store.mark_running(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=request,
+        status="error",
+        response="bounded partial response",
+        error="private provider failure",
+        total_tokens=2,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await store.finish(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+        result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="bounded partial response",
+            error="private provider failure",
+        ),
+    )
+
+    reopened = AgentJobStore(
+        path,
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    recovered = await reopened.recover_terminal_payload(
+        admitted.job_id,
+        expected_result_sha256=result.result_sha256,
+    )
+    assert recovered.response == "bounded partial response"
+    assert recovered.error == "private provider failure"
+    raw_store = path.read_bytes()
+    assert recovered.response.encode() not in raw_store
+    assert recovered.error.encode() not in raw_store
+
+
+@pytest.mark.asyncio
+async def test_terminal_payload_ciphertext_tamper_fails_closed(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="terminal-tamper")
+    admitted = await store.admit(request=request, payload=payload)
+    claimed = await store.claim(
+        admitted.job_id,
+        owner_id="worker-a",
+        lease_seconds=30,
+    )
+    await store.mark_running(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=request,
+        status="completed",
+        response="recoverable private response",
+        error=None,
+        total_tokens=1,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await store.finish(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+        result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="recoverable private response",
+            error="",
+        ),
+    )
+
+    with sqlite3.connect(path) as db:
+        raw_envelope = db.execute(
+            """
+            SELECT terminal_payload_envelope_json
+            FROM agent_jobs WHERE job_id = ?
+            """,
+            (admitted.job_id,),
+        ).fetchone()[0]
+        envelope = json.loads(raw_envelope)
+        ciphertext = bytearray(
+            base64.b64decode(envelope["ciphertext_base64"])
+        )
+        ciphertext[-1] ^= 1
+        envelope["ciphertext_base64"] = base64.b64encode(ciphertext).decode()
+        public = {
+            name: value
+            for name, value in envelope.items()
+            if name != "envelope_sha256"
+        }
+        envelope["envelope_sha256"] = hashlib.sha256(
+            json.dumps(
+                public,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        db.execute(
+            """
+            UPDATE agent_jobs
+            SET terminal_payload_envelope_json = ?
+            WHERE job_id = ?
+            """,
+            (
+                json.dumps(
+                    envelope,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                admitted.job_id,
+            ),
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="terminal payload"):
+        await reopened.get(admitted.job_id)
 
 
 @pytest.mark.asyncio
@@ -565,6 +799,10 @@ async def test_capacity_admission_is_cross_store_bounded_and_reusable(
         owner_id="runtime-a",
         claim_epoch=first.job.claim_epoch,
         result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="完成",
+            error="",
+        ),
     )
     claimed_second = await second_store.claim_for_capacity(
         second.job.job_id,
@@ -695,6 +933,10 @@ async def test_capacity_fifo_and_raw_claim_cannot_skip_oldest_waiter(
         owner_id="runtime-active",
         claim_epoch=active.job.claim_epoch,
         result=active_result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="done",
+            error="",
+        ),
     )
     claimed = await store.claim_for_capacity(
         second.job.job_id,
@@ -753,6 +995,10 @@ async def test_capacity_policy_reconfiguration_requires_empty_nonterminal_set(
         owner_id="runtime-a",
         claim_epoch=admitted.job.claim_epoch,
         result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="done",
+            error="",
+        ),
     )
     next_request, next_payload = _facts(clock, task_id="capacity-policy-next")
     changed = await store.admit_for_capacity(
@@ -856,5 +1102,36 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 2
+    assert version == AGENT_JOB_SCHEMA_VERSION == 3
     assert table == ("agent_job_capacity_policy",)
+
+
+@pytest.mark.asyncio
+async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="terminal-migration")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "ALTER TABLE agent_jobs DROP COLUMN terminal_payload_envelope_json"
+        )
+        db.execute("PRAGMA user_version = 2")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    restored = await reopened.get(admitted.job_id)
+    assert restored is not None
+    assert restored.request == request
+    assert restored.terminal_payload_envelope is None
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        columns = {
+            row[1]
+            for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
+        }
+    assert version == AGENT_JOB_SCHEMA_VERSION == 3
+    assert "terminal_payload_envelope_json" in columns

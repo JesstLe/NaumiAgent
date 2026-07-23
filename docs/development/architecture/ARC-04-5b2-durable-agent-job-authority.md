@@ -97,10 +97,11 @@ key 也不能伪造 receipt authentication；事件或主表任一处被修改�
 ## 7. 自我审视与下一依赖
 
 ARC-04.5c 已完成 admit → claim → recover → running → renew → finish 生产链，并建立 terminal
-publication barrier。仍未完成：
+publication barrier；ARC-04.5d1 又把 response/error 加密绑定到 terminal result 并在生产发布前
+重新认证恢复。仍未完成：
 
 - 没有自动 scheduler loop、claim-owner heartbeat 或 capacity reservation；
-- completed response 原文尚未加密持久化，父进程在终态提交后的崩溃仍可能丢失可展示结果；
+- publication outbox、父进程崩溃后的自动结果重放与幂等消费回执；
 - `unknown` 只有证据化收口，没有 Provider request ID 对账或人工恢复动作；
 - key rotation、reencrypt、retention/GC、backup restore 和跨平台打包矩阵未完成。
 

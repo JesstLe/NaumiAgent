@@ -32,6 +32,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobPayload,
     AgentJobState,
     AgentJobStore,
+    AgentJobTerminalPayload,
     AgentJobTransitionResult,
     StoredAgentJob,
 )
@@ -960,6 +961,10 @@ class SubAgentManager:
                             owner_id=self._agent_job_owner_id,
                             claim_epoch=execution.worker_claim_epoch,
                             result=execution.worker_result,
+                            terminal_payload=AgentJobTerminalPayload(
+                                response=effective_result.response,
+                                error=effective_result.error or "",
+                            ),
                         )
                         break
                     except Exception as exc:
@@ -978,6 +983,42 @@ class SubAgentManager:
                     execution.worker_job_state = (
                         terminal_transition.job.state.value
                     )
+                    recovered_payload = None
+                    for attempt in range(2):
+                        try:
+                            recovered_payload = await (
+                                self._agent_job_store.recover_terminal_payload(
+                                    execution.worker_job_id,
+                                    expected_result_sha256=(
+                                        execution.worker_result.result_sha256
+                                    ),
+                                )
+                            )
+                            break
+                        except Exception as exc:
+                            logger.warning(
+                                "AgentJob terminal payload recovery failed "
+                                "[%s, attempt=%d]: %s",
+                                task_id,
+                                attempt + 1,
+                                type(exc).__name__,
+                            )
+                    if recovered_payload is None:
+                        execution.worker_job_failure_code = (
+                            "agent_job_terminal_payload_recovery_failed"
+                        )
+                        effective_result = (
+                            _isolated_agent_terminal_payload_result(result)
+                        )
+                    else:
+                        effective_result = AgentResult(
+                            status=effective_result.status,
+                            response=recovered_payload.response,
+                            total_tokens=effective_result.total_tokens,
+                            total_cost_usd=effective_result.total_cost_usd,
+                            turns=effective_result.turns,
+                            error=recovered_payload.error or None,
+                        )
 
         lifecycle = execution.heartbeat_lifecycle
         if lifecycle is not None:
@@ -1852,6 +1893,22 @@ def _isolated_agent_job_result(result: AgentResult) -> AgentResult:
         error=(
             "子 Agent 已生成结果，但持久终态提交失败；"
             "为避免展示未经认证的结果，已安全隔离。"
+        ),
+    )
+
+
+def _isolated_agent_terminal_payload_result(
+    result: AgentResult,
+) -> AgentResult:
+    return AgentResult(
+        status="error",
+        response="",
+        total_tokens=result.total_tokens,
+        total_cost_usd=result.total_cost_usd,
+        turns=result.turns,
+        error=(
+            "子 Agent 终态已持久提交，但结果原文未能通过认证恢复；"
+            "为避免展示不可信内容，已安全隔离。"
         ),
     )
 
