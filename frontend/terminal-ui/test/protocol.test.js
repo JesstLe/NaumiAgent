@@ -225,6 +225,83 @@ function harnessEvalPromotionPayload(stage = "promoted") {
   };
 }
 
+function sandboxRetryRecoveryPayload({ status = "ready" } = {}) {
+  const items = status === "ready"
+    ? [{
+      dispatch_id: `hsard_${"1".repeat(24)}`,
+      retry_action_id: `hsar_${"2".repeat(24)}`,
+      retry_receipt_id: `hsarr_${"3".repeat(24)}`,
+      retry_receipt_sha256: "4".repeat(64),
+      batch_id: "batch-restart",
+      suite_id: "startup-recovery",
+      requested_samples: 5,
+      persisted_samples: 2,
+      recovery_status: "pending",
+      dispatch_state: "pending",
+      dispatch_epoch: 0,
+      ticket_id: "",
+      ticket_epoch: 0,
+      ticket_state: "",
+      ticket_lease_expires_at: "",
+      updated_at: "2026-07-24T00:00:00+00:00",
+      can_resume: true,
+      resume_command: `/harness eval sandbox resume hsar_${"2".repeat(24)}`
+        + ` --dispatch hsard_${"1".repeat(24)}`
+        + ` --receipt hsarr_${"3".repeat(24)}`
+        + ` --sha256 ${"4".repeat(64)}`,
+    }]
+    : [];
+  const counts = {
+    pending: items.length,
+    live: 0,
+    recovery_required: 0,
+    reconcile_required: 0,
+    clock_regression: 0,
+    actionable: items.length,
+  };
+  const body = {
+    schema_version: 1,
+    status,
+    workspace_sha256: "a".repeat(64),
+    assessed_at: "2026-07-24T00:00:01+00:00",
+    limit: 20,
+    total: items.length,
+    truncated: false,
+    counts,
+    items,
+    error_code: status === "ready" ? "" : "startup_scan_failed",
+  };
+  const digest = createHash("sha256")
+    .update(canonicalTestJson(body), "utf8")
+    .digest("hex");
+  return {
+    schema_version: 1,
+    snapshot_id: `hsrrs_${digest.slice(0, 24)}`,
+    snapshot_sha256: digest,
+    status: body.status,
+    workspace_sha256: body.workspace_sha256,
+    assessed_at: body.assessed_at,
+    limit: body.limit,
+    total: body.total,
+    truncated: body.truncated,
+    counts: body.counts,
+    items: body.items,
+    error_code: body.error_code,
+  };
+}
+
+function canonicalTestJson(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalTestJson(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map(
+      (key) => `${JSON.stringify(key)}:${canonicalTestJson(value[key])}`,
+    ).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function doctorHealthPayload() {
   return {
     schema_version: 1,
@@ -2754,6 +2831,64 @@ test("normalizes and validates evolution patch recovery status", () => {
       },
     }),
     /单\/多文件事务分类不一致/,
+  );
+});
+
+test("normalizes and verifies bounded Sandbox retry startup recovery", () => {
+  const ready = sandboxRetryRecoveryPayload();
+  const record = normalizeServerRecord({
+    type: "ready",
+    version: 1,
+    payload: { sandbox_retry_recovery: ready },
+  });
+
+  assert.deepEqual(record.payload.sandbox_retry_recovery, ready);
+  assert.equal(
+    record.payload.sandbox_retry_recovery.items[0].can_resume,
+    true,
+  );
+
+  const commandTamper = structuredClone(ready);
+  commandTamper.items[0].resume_command = "/harness eval sandbox resume forged";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { sandbox_retry_recovery: commandTamper },
+    }),
+    /resume_command 与持久事实不一致/,
+  );
+
+  const countTamper = structuredClone(ready);
+  countTamper.counts.actionable = 0;
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { sandbox_retry_recovery: countTamper },
+    }),
+    /actionable\/total 不一致/,
+  );
+
+  const digestTamper = structuredClone(ready);
+  digestTamper.snapshot_sha256 = "f".repeat(64);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { sandbox_retry_recovery: digestTamper },
+    }),
+    /摘要或 snapshot_id 不一致/,
+  );
+
+  const unavailable = sandboxRetryRecoveryPayload({ status: "unavailable" });
+  assert.deepEqual(
+    normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      payload: { sandbox_retry_recovery: unavailable },
+    }).payload.sandbox_retry_recovery,
+    unavailable,
   );
 });
 

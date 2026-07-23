@@ -95,6 +95,13 @@ const HARNESS_SANDBOX_EVAL_STAGES = new Set([
   "cancelled",
   "expired",
 ]);
+const SANDBOX_RETRY_RECOVERY_STATUSES = new Set([
+  "pending",
+  "live",
+  "recovery_required",
+  "reconcile_required",
+  "clock_regression",
+]);
 const HARNESS_EVAL_PROMOTION_STAGES = new Set([
   "awaiting_reason",
   "awaiting_confirmation",
@@ -1700,6 +1707,12 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       `${source}.evolution_patch_recovery`,
     );
   }
+  if (Object.hasOwn(status, "sandbox_retry_recovery")) {
+    normalized.sandbox_retry_recovery = normalizeSandboxRetryRecoverySnapshot(
+      status.sandbox_retry_recovery,
+      `${source}.sandbox_retry_recovery`,
+    );
+  }
   if (Object.hasOwn(status, "protocol_registry")) {
     const registry = requireObject(status.protocol_registry, `${source}.protocol_registry`);
     const digest = strictStatusText(
@@ -1867,6 +1880,383 @@ function normalizePatchRecoveryStatus(value, source) {
     throw new Error(`${source}.filesystem_changed 超过 rolled_back`);
   }
   return normalized;
+}
+
+function normalizeSandboxRetryRecoverySnapshot(value, source) {
+  const raw = requireObject(value, source);
+  requireExactKeys(raw, [
+    "assessed_at",
+    "counts",
+    "error_code",
+    "items",
+    "limit",
+    "schema_version",
+    "snapshot_id",
+    "snapshot_sha256",
+    "status",
+    "total",
+    "truncated",
+    "workspace_sha256",
+  ], source);
+  if (raw.schema_version !== 1) {
+    throw new Error(`${source}.schema_version 不兼容`);
+  }
+  const status = strictSandboxRecoveryText(raw.status, `${source}.status`, 32);
+  if (!["ready", "unavailable"].includes(status)) {
+    throw new Error(`${source}.status 无效`);
+  }
+  const snapshotId = strictSandboxRecoveryText(
+    raw.snapshot_id,
+    `${source}.snapshot_id`,
+    30,
+  );
+  if (!/^hsrrs_[0-9a-f]{24}$/.test(snapshotId)) {
+    throw new Error(`${source}.snapshot_id 格式无效`);
+  }
+  const snapshotSha256 = strictSandboxRecoverySha(
+    raw.snapshot_sha256,
+    `${source}.snapshot_sha256`,
+  );
+  const workspaceSha256 = strictSandboxRecoverySha(
+    raw.workspace_sha256,
+    `${source}.workspace_sha256`,
+  );
+  const assessedAt = strictSandboxRecoveryTimestamp(
+    raw.assessed_at,
+    `${source}.assessed_at`,
+  );
+  const limit = strictSandboxRecoveryInteger(raw.limit, `${source}.limit`, 1, 20);
+  const total = strictSandboxRecoveryInteger(raw.total, `${source}.total`, 0, 20);
+  if (typeof raw.truncated !== "boolean") {
+    throw new Error(`${source}.truncated 必须是 boolean`);
+  }
+  if (!Array.isArray(raw.items) || raw.items.length > 20) {
+    throw new Error(`${source}.items 必须是最多 20 项的数组`);
+  }
+  const items = raw.items.map((item, index) => normalizeSandboxRetryRecoveryItem(
+    item,
+    `${source}.items[${index}]`,
+  ));
+  if (total !== items.length || total > limit) {
+    throw new Error(`${source}.total 与 items/limit 不一致`);
+  }
+  if (raw.truncated && total !== limit) {
+    throw new Error(`${source}.truncated 页必须达到 limit`);
+  }
+
+  const countRaw = requireObject(raw.counts, `${source}.counts`);
+  const countNames = [
+    "actionable",
+    "clock_regression",
+    "live",
+    "pending",
+    "reconcile_required",
+    "recovery_required",
+  ];
+  requireExactKeys(countRaw, countNames, `${source}.counts`);
+  const counts = Object.fromEntries(countNames.map((name) => [
+    name,
+    strictSandboxRecoveryInteger(
+      countRaw[name],
+      `${source}.counts.${name}`,
+      0,
+      20,
+    ),
+  ]));
+  const computed = Object.fromEntries([
+    "pending",
+    "live",
+    "recovery_required",
+    "reconcile_required",
+    "clock_regression",
+  ].map((name) => [
+    name,
+    items.filter((item) => item.recovery_status === name).length,
+  ]));
+  for (const [name, count] of Object.entries(computed)) {
+    if (counts[name] !== count) {
+      throw new Error(`${source}.counts.${name} 与 items 不一致`);
+    }
+  }
+  if (
+    counts.actionable !== counts.pending + counts.recovery_required
+    || Object.values(computed).reduce((sum, count) => sum + count, 0) !== total
+  ) {
+    throw new Error(`${source}.counts.actionable/total 不一致`);
+  }
+  const errorCode = strictSandboxRecoveryText(
+    raw.error_code,
+    `${source}.error_code`,
+    128,
+    { allowEmpty: true },
+  );
+  if (status === "ready" && errorCode) {
+    throw new Error(`${source}.ready 不能包含 error_code`);
+  }
+  if (
+    status === "unavailable"
+    && (
+      total !== 0
+      || raw.truncated
+      || counts.actionable !== 0
+      || !/^[a-z][a-z0-9_]{0,127}$/.test(errorCode)
+    )
+  ) {
+    throw new Error(`${source}.unavailable 内容不一致`);
+  }
+
+  const normalized = {
+    schema_version: 1,
+    snapshot_id: snapshotId,
+    snapshot_sha256: snapshotSha256,
+    status,
+    workspace_sha256: workspaceSha256,
+    assessed_at: assessedAt,
+    limit,
+    total,
+    truncated: raw.truncated,
+    counts,
+    items,
+    error_code: errorCode,
+  };
+  const digestPayload = { ...normalized };
+  delete digestPayload.snapshot_id;
+  delete digestPayload.snapshot_sha256;
+  const expectedSha256 = createHash("sha256")
+    .update(canonicalJson(digestPayload), "utf8")
+    .digest("hex");
+  if (
+    snapshotSha256 !== expectedSha256
+    || snapshotId !== `hsrrs_${expectedSha256.slice(0, 24)}`
+  ) {
+    throw new Error(`${source} 摘要或 snapshot_id 不一致`);
+  }
+  return normalized;
+}
+
+function normalizeSandboxRetryRecoveryItem(value, source) {
+  const raw = requireObject(value, source);
+  requireExactKeys(raw, [
+    "batch_id",
+    "can_resume",
+    "dispatch_epoch",
+    "dispatch_id",
+    "dispatch_state",
+    "persisted_samples",
+    "recovery_status",
+    "requested_samples",
+    "resume_command",
+    "retry_action_id",
+    "retry_receipt_id",
+    "retry_receipt_sha256",
+    "suite_id",
+    "ticket_epoch",
+    "ticket_id",
+    "ticket_lease_expires_at",
+    "ticket_state",
+    "updated_at",
+  ], source);
+  const dispatchId = strictSandboxRecoveryText(
+    raw.dispatch_id,
+    `${source}.dispatch_id`,
+    30,
+  );
+  const retryActionId = strictSandboxRecoveryText(
+    raw.retry_action_id,
+    `${source}.retry_action_id`,
+    29,
+  );
+  const retryReceiptId = strictSandboxRecoveryText(
+    raw.retry_receipt_id,
+    `${source}.retry_receipt_id`,
+    30,
+  );
+  if (
+    !/^hsard_[0-9a-f]{24}$/.test(dispatchId)
+    || !/^hsar_[0-9a-f]{24}$/.test(retryActionId)
+    || !/^hsarr_[0-9a-f]{24}$/.test(retryReceiptId)
+  ) {
+    throw new Error(`${source} dispatch/action/receipt identity 无效`);
+  }
+  const retryReceiptSha256 = strictSandboxRecoverySha(
+    raw.retry_receipt_sha256,
+    `${source}.retry_receipt_sha256`,
+  );
+  const recoveryStatus = strictSandboxRecoveryText(
+    raw.recovery_status,
+    `${source}.recovery_status`,
+    32,
+  );
+  if (!SANDBOX_RETRY_RECOVERY_STATUSES.has(recoveryStatus)) {
+    throw new Error(`${source}.recovery_status 无效`);
+  }
+  const dispatchState = strictSandboxRecoveryText(
+    raw.dispatch_state,
+    `${source}.dispatch_state`,
+    16,
+  );
+  const dispatchEpoch = strictSandboxRecoveryInteger(
+    raw.dispatch_epoch,
+    `${source}.dispatch_epoch`,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const ticketId = strictSandboxRecoveryText(
+    raw.ticket_id,
+    `${source}.ticket_id`,
+    128,
+    { allowEmpty: true },
+  );
+  const ticketEpoch = strictSandboxRecoveryInteger(
+    raw.ticket_epoch,
+    `${source}.ticket_epoch`,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const ticketState = strictSandboxRecoveryText(
+    raw.ticket_state,
+    `${source}.ticket_state`,
+    32,
+    { allowEmpty: true },
+  );
+  const lease = strictSandboxRecoveryText(
+    raw.ticket_lease_expires_at,
+    `${source}.ticket_lease_expires_at`,
+    64,
+    { allowEmpty: true },
+  );
+  if (lease) strictSandboxRecoveryTimestamp(lease, `${source}.ticket_lease_expires_at`);
+  const actionable = ["pending", "recovery_required"].includes(recoveryStatus);
+  if (raw.can_resume !== actionable) {
+    throw new Error(`${source}.can_resume 与 recovery_status 不一致`);
+  }
+  const expectedCommand = actionable
+    ? `/harness eval sandbox resume ${retryActionId}`
+      + ` --dispatch ${dispatchId}`
+      + ` --receipt ${retryReceiptId}`
+      + ` --sha256 ${retryReceiptSha256}`
+    : "";
+  const resumeCommand = strictSandboxRecoveryText(
+    raw.resume_command,
+    `${source}.resume_command`,
+    512,
+    { allowEmpty: !actionable },
+  );
+  if (resumeCommand !== expectedCommand) {
+    throw new Error(`${source}.resume_command 与持久事实不一致`);
+  }
+  if (recoveryStatus === "pending") {
+    if (
+      dispatchState !== "pending"
+      || dispatchEpoch !== 0
+      || ticketId
+      || ticketEpoch !== 0
+      || ticketState
+      || lease
+    ) {
+      throw new Error(`${source}.pending 不能包含 claim/ticket`);
+    }
+  } else if (
+    dispatchState !== "claimed"
+    || !/^hsadm_[0-9a-f]{24}$/.test(ticketId)
+    || ticketEpoch < 1
+    || !ticketState
+  ) {
+    throw new Error(`${source}.claimed ticket fence 无效`);
+  }
+  const requestedSamples = strictSandboxRecoveryInteger(
+    raw.requested_samples,
+    `${source}.requested_samples`,
+    1,
+    1_000,
+  );
+  const persistedSamples = strictSandboxRecoveryInteger(
+    raw.persisted_samples,
+    `${source}.persisted_samples`,
+    0,
+    requestedSamples,
+  );
+  return {
+    dispatch_id: dispatchId,
+    retry_action_id: retryActionId,
+    retry_receipt_id: retryReceiptId,
+    retry_receipt_sha256: retryReceiptSha256,
+    batch_id: strictSandboxRecoveryText(raw.batch_id, `${source}.batch_id`, 128),
+    suite_id: strictSandboxRecoveryText(raw.suite_id, `${source}.suite_id`, 128),
+    requested_samples: requestedSamples,
+    persisted_samples: persistedSamples,
+    recovery_status: recoveryStatus,
+    dispatch_state: dispatchState,
+    dispatch_epoch: dispatchEpoch,
+    ticket_id: ticketId,
+    ticket_epoch: ticketEpoch,
+    ticket_state: ticketState,
+    ticket_lease_expires_at: lease,
+    updated_at: strictSandboxRecoveryTimestamp(raw.updated_at, `${source}.updated_at`),
+    can_resume: actionable,
+    resume_command: resumeCommand,
+  };
+}
+
+function requireExactKeys(value, expected, source) {
+  const keys = Object.keys(value).sort();
+  const required = [...expected].sort();
+  if (
+    keys.length !== required.length
+    || keys.some((key, index) => key !== required[index])
+  ) {
+    throw new Error(`${source} 字段集合无效`);
+  }
+}
+
+function strictSandboxRecoveryText(
+  value,
+  source,
+  maxLength,
+  { allowEmpty = false } = {},
+) {
+  if (
+    typeof value !== "string"
+    || value.length > maxLength
+    || (!allowEmpty && value.length < 1)
+    || value !== value.trim()
+    || value !== value.normalize("NFKC")
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${source} 必须是规范化的有界文本`);
+  }
+  return value;
+}
+
+function strictSandboxRecoverySha(value, source) {
+  const digest = strictSandboxRecoveryText(value, source, 64);
+  if (!/^[0-9a-f]{64}$/.test(digest)) {
+    throw new Error(`${source} 必须是 SHA-256`);
+  }
+  return digest;
+}
+
+function strictSandboxRecoveryTimestamp(value, source) {
+  const timestamp = strictSandboxRecoveryText(value, source, 64);
+  if (
+    !/(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+    || !Number.isFinite(Date.parse(timestamp))
+  ) {
+    throw new Error(`${source} 必须是带时区的 ISO 8601 时间`);
+  }
+  return timestamp;
+}
+
+function strictSandboxRecoveryInteger(value, source, minimum, maximum) {
+  if (
+    typeof value !== "number"
+    || !Number.isSafeInteger(value)
+    || value < minimum
+    || value > maximum
+  ) {
+    throw new Error(`${source} 必须是 ${minimum}..${maximum} 的整数`);
+  }
+  return value;
 }
 
 function normalizeModelContract(value, source) {

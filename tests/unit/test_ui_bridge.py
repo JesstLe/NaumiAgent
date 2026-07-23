@@ -48,7 +48,15 @@ from naumi_agent.harness.interaction import new_interaction_record
 from naumi_agent.harness.models import HarnessTaskKind
 from naumi_agent.harness.replay_models import HarnessReplayLookup, HarnessReplayResult
 from naumi_agent.harness.run_lease import HarnessRunKind
-from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.sandbox_retry_recovery import (
+    build_sandbox_retry_recovery_snapshot,
+)
+from naumi_agent.harness.store import (
+    HarnessSandboxRetryCatalogItem,
+    HarnessSandboxRetryCatalogPage,
+    HarnessSandboxRetryDispatch,
+    HarnessStore,
+)
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.model.reasoning import (
     ReasoningEffort,
@@ -799,6 +807,49 @@ class _FakeBrowserTaskRunner:
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         return [{"id": "run_1", "status": "aborting"}][:limit]
+
+
+def _sandbox_retry_recovery_snapshot(workspace_root: Path):
+    dispatch = HarnessSandboxRetryDispatch(
+        dispatch_id=f"hsard_{'1' * 24}",
+        retry_action_id=f"hsar_{'2' * 24}",
+        retry_receipt_id=f"hsarr_{'3' * 24}",
+        retry_receipt_sha256="4" * 64,
+        eval_request_sha256="5" * 64,
+        execution_authority_key="6" * 64,
+        state="pending",
+        owner_id="",
+        epoch=0,
+        ticket_id="",
+        ticket_epoch=0,
+        created_at="2026-07-24T00:00:00+00:00",
+        updated_at="2026-07-24T00:00:00+00:00",
+        terminal_code="",
+        request_sha256="7" * 64,
+    )
+    page = HarnessSandboxRetryCatalogPage(
+        workspace_root=str(workspace_root.resolve()),
+        assessed_at="2026-07-24T00:00:01+00:00",
+        state_filter="open",
+        limit=20,
+        items=(
+            HarnessSandboxRetryCatalogItem(
+                dispatch=dispatch,
+                cancel_receipt_id=f"hscan_{'8' * 24}",
+                cancel_receipt_sha256="9" * 64,
+                source_ticket_id=f"hsadm_{'a' * 24}",
+                batch_id="batch-restart",
+                suite_id="startup-recovery",
+                requested_samples=5,
+                persisted_samples=2,
+                ticket_state="",
+                ticket_lease_expires_at="",
+                recovery_status="pending",
+            ),
+        ),
+        next_cursor="",
+    )
+    return build_sandbox_retry_recovery_snapshot(page)
 
 
 def _records(writer: io.StringIO) -> list[dict[str, Any]]:
@@ -3453,6 +3504,49 @@ async def test_bridge_ready_event_carries_authoritative_product_identity() -> No
     assert ready["payload"]["model"] == "fake-capable"
     assert ready["payload"]["workspace_root"]
     assert ready["payload"]["permission_mode"] == "moderate"
+
+
+@pytest.mark.asyncio
+async def test_bridge_ready_discovers_sandbox_retry_without_resuming() -> None:
+    engine = _FakeEngine()
+    snapshot = _sandbox_retry_recovery_snapshot(engine.workspace_root)
+    service = SimpleNamespace(
+        sandbox_retry_recovery_snapshot=AsyncMock(return_value=snapshot),
+        resume_sandbox_retry=AsyncMock(),
+    )
+    engine.harness_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.emit_ready()
+
+    ready = _records(writer)[0]["payload"]["sandbox_retry_recovery"]
+    assert ready == snapshot.model_dump(mode="json")
+    assert ready["counts"]["actionable"] == 1
+    service.sandbox_retry_recovery_snapshot.assert_awaited_once_with(limit=20)
+    service.resume_sandbox_retry.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bridge_ready_degrades_when_sandbox_retry_scan_fails() -> None:
+    engine = _FakeEngine()
+    service = SimpleNamespace(
+        sandbox_retry_recovery_snapshot=AsyncMock(
+            side_effect=RuntimeError("private database failure")
+        )
+    )
+    engine.harness_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.emit_ready()
+
+    ready = _records(writer)[0]["payload"]["sandbox_retry_recovery"]
+    assert ready["status"] == "unavailable"
+    assert ready["error_code"] == "startup_scan_failed"
+    assert "private database failure" not in str(ready)
 
 
 @pytest.mark.asyncio

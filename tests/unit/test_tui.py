@@ -27,7 +27,15 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
-from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.sandbox_retry_recovery import (
+    build_sandbox_retry_recovery_snapshot,
+)
+from naumi_agent.harness.store import (
+    HarnessSandboxRetryCatalogItem,
+    HarnessSandboxRetryCatalogPage,
+    HarnessSandboxRetryDispatch,
+    HarnessStore,
+)
 from naumi_agent.orchestrator.engine import (
     AgentEngine,
     AgentResult,
@@ -724,6 +732,84 @@ class TestNaumiApp:
         assert status.status_text == (
             "实验补丁恢复: 1/3 完成 · 多文件 1 · 失败 1 · 延后 1"
         )
+
+    @pytest.mark.asyncio
+    async def test_startup_recovery_surfaces_manual_sandbox_retry_queue(
+        self,
+        tmp_path,
+    ) -> None:
+        dispatch = HarnessSandboxRetryDispatch(
+            dispatch_id=f"hsard_{'1' * 24}",
+            retry_action_id=f"hsar_{'2' * 24}",
+            retry_receipt_id=f"hsarr_{'3' * 24}",
+            retry_receipt_sha256="4" * 64,
+            eval_request_sha256="5" * 64,
+            execution_authority_key="6" * 64,
+            state="pending",
+            owner_id="",
+            epoch=0,
+            ticket_id="",
+            ticket_epoch=0,
+            created_at="2026-07-24T00:00:00+00:00",
+            updated_at="2026-07-24T00:00:00+00:00",
+            terminal_code="",
+            request_sha256="7" * 64,
+        )
+        snapshot = build_sandbox_retry_recovery_snapshot(
+            HarnessSandboxRetryCatalogPage(
+                workspace_root=str(tmp_path),
+                assessed_at="2026-07-24T00:00:01+00:00",
+                state_filter="open",
+                limit=20,
+                items=(
+                    HarnessSandboxRetryCatalogItem(
+                        dispatch=dispatch,
+                        cancel_receipt_id=f"hscan_{'8' * 24}",
+                        cancel_receipt_sha256="9" * 64,
+                        source_ticket_id=f"hsadm_{'a' * 24}",
+                        batch_id="batch-restart",
+                        suite_id="startup-recovery",
+                        requested_samples=5,
+                        persisted_samples=2,
+                        ticket_state="",
+                        ticket_lease_expires_at="",
+                        recovery_status="pending",
+                    ),
+                ),
+                next_cursor="",
+            )
+        )
+        service = SimpleNamespace(
+            sandbox_retry_recovery_snapshot=AsyncMock(return_value=snapshot)
+        )
+        engine = SimpleNamespace(
+            workspace_root=tmp_path,
+            harness_service=service,
+            start_long_running_services=AsyncMock(return_value=()),
+        )
+        status = SimpleNamespace(status_text="")
+
+        class _Chat:
+            def __init__(self) -> None:
+                self.items = []
+
+            def mount(self, item) -> None:
+                self.items.append(item)
+
+        chat = _Chat()
+
+        class _App:
+            def __init__(self) -> None:
+                self.engine = engine
+
+            def query_one(self, widget_type: type[object]) -> object:
+                return {StatusBar: status, ChatPanel: chat}[widget_type]
+
+        await NaumiApp._recover_session_reconciliations.__wrapped__(_App())
+
+        service.sandbox_retry_recovery_snapshot.assert_awaited_once_with(limit=20)
+        assert status.status_text == "Sandbox retry 恢复队列: 1/1 可显式恢复"
+        assert len(chat.items) == 1
 
     @pytest.mark.asyncio
     async def test_delete_session_surfaces_durable_retry_and_clears_active_chat(

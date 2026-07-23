@@ -53,6 +53,11 @@ from naumi_agent.harness.interaction_runtime import (
     InteractionClaimError,
 )
 from naumi_agent.harness.replay_models import HarnessReplayLookup
+from naumi_agent.harness.sandbox_retry_recovery import (
+    SANDBOX_RETRY_RECOVERY_LIMIT,
+    HarnessSandboxRetryRecoverySnapshot,
+    unavailable_sandbox_retry_recovery_snapshot,
+)
 from naumi_agent.harness.store import (
     HarnessConversationQueueItem,
     HarnessStore,
@@ -139,6 +144,7 @@ _TERMINAL_MISSION_STATUSES = frozenset({
     "archived",
 })
 _MAX_QUEUED_CONVERSATIONS = 20
+_SANDBOX_RETRY_RECOVERY_TIMEOUT_SECONDS = 2.0
 _HARNESS_DETAIL_UNAVAILABLE = (
     "Harness 详情暂不可用。请确认当前工作区状态库可读，然后运行 `/harness doctor`。"
 )
@@ -644,6 +650,12 @@ class JsonlEngineBridge:
         self._show_reasoning = bool(getattr(ui_config, "show_reasoning", False))
         self._last_retention_worker_status: dict[str, object] | None = None
         self._last_runtime_heartbeat_retention_status: dict[str, object] | None = None
+        self._sandbox_retry_recovery_snapshot = (
+            unavailable_sandbox_retry_recovery_snapshot(
+                self.engine.workspace_root,
+                error_code="not_scanned",
+            )
+        )
         self._closed = False
 
         self.engine.set_permission_confirmer(self.confirm_permission)
@@ -753,6 +765,7 @@ class JsonlEngineBridge:
 
     async def emit_ready(self) -> None:
         heartbeat_error = await self._start_terminal_runtime_lifecycle()
+        await self._refresh_sandbox_retry_recovery_snapshot()
         payload = self.status_payload()
         retention_status = payload.get("retention_worker")
         if isinstance(retention_status, dict):
@@ -781,6 +794,49 @@ class JsonlEngineBridge:
         )
         if current_session_id:
             await self._recover_durable_conversation_queue(current_session_id)
+
+    async def _refresh_sandbox_retry_recovery_snapshot(self) -> None:
+        """Discover restart work without acquiring any retry execution fence."""
+        service = getattr(self.engine, "harness_service", None)
+        snapshot_builder = getattr(
+            service,
+            "sandbox_retry_recovery_snapshot",
+            None,
+        )
+        if not callable(snapshot_builder):
+            self._sandbox_retry_recovery_snapshot = (
+                unavailable_sandbox_retry_recovery_snapshot(
+                    self.engine.workspace_root,
+                    error_code="service_unavailable",
+                )
+            )
+            return
+        try:
+            snapshot = await asyncio.wait_for(
+                snapshot_builder(limit=SANDBOX_RETRY_RECOVERY_LIMIT),
+                timeout=_SANDBOX_RETRY_RECOVERY_TIMEOUT_SECONDS,
+            )
+            self._sandbox_retry_recovery_snapshot = (
+                HarnessSandboxRetryRecoverySnapshot.model_validate(
+                    snapshot.model_dump(mode="json")
+                )
+            )
+        except Exception as exc:
+            error_code = (
+                "startup_scan_timeout"
+                if isinstance(exc, TimeoutError)
+                else "startup_scan_failed"
+            )
+            self._sandbox_retry_recovery_snapshot = (
+                unavailable_sandbox_retry_recovery_snapshot(
+                    self.engine.workspace_root,
+                    error_code=error_code,
+                )
+            )
+            logger.warning(
+                "Sandbox retry startup discovery failed (%s)",
+                type(exc).__name__,
+            )
 
     def _terminal_runtime_service(self) -> TerminalRuntimeLifecycle | None:
         if self._terminal_runtime_lifecycle is not None:
@@ -1237,6 +1293,9 @@ class JsonlEngineBridge:
                 self._runtime_heartbeat_retention_status_payload()
             ),
             "evolution_patch_recovery": self._evolution_patch_recovery_payload(),
+            "sandbox_retry_recovery": (
+                self._sandbox_retry_recovery_snapshot.model_dump(mode="json")
+            ),
             "tasks": self._task_activity_payload(),
             "ui": {
                 "show_reasoning": self._show_reasoning,

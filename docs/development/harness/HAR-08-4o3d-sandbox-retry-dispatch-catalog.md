@@ -135,14 +135,16 @@ Profile check ID 并打开错误的 live Batch 页面；这些控制命令保持
 - Agent Tool、New UI Slash 与 Textual TUI Slash 共用 Service/Store；
 - 首次 retry 和 catalog recovery 的 action 语义不会被混淆：本切片不伪造 recovery action。
 
+HAR-08.4o3f 已让 Bridge 与 TUI 启动时复用本 catalog 的 `state=open, limit=20` 只读扫描，
+以 tamper-evident snapshot 建立人工恢复队列；启动过程不会 claim 或重放。
+
 仍未实现：
 
-- Bridge 启动时扫描 `recovery_required/reconcile_required` 并建立人工确认队列；
 - dispatch detail typed protocol 与 New UI 专用历史页；
 - retention policy、保护集合、preview/prune receipt；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI。
 
-HAR-08.4o3e 已实现 receipt-bound resume authority，并补齐 accepted intent 与 pending dispatch 的原子落盘。
-下一切片应比较 HAR-06 retention、HAR-07 Bridge recovery、ARC-02 Runtime lifecycle 与 CLI/TUI 恢复体验；
-不得直接自动重放 catalog 中的任务。
+HAR-08.4o3e 已实现 receipt-bound resume authority，并补齐 accepted intent 与 pending dispatch 的原子落盘；
+HAR-08.4o3f 已实现启动后可发现但不自动执行的恢复快照。下一切片应比较 HAR-06 retention 与 dispatch
+detail，不能自动重放或删除 catalog 中的任务。
