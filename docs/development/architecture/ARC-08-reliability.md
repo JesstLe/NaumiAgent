@@ -16,6 +16,12 @@
 - ARC-08.7 Backup/restore：用户状态 manifest、加密可选、验证、部分恢复。
 - ARC-08.8 Runbooks：检测、止损、恢复、验证、复盘和长期修复。
 
+## 已完成前置
+
+- UI-13.2a 已为 Provider 凭据、配置、401/403/404/429/5xx、timeout 与连接失败建立低基数稳定诊断码，
+  且不携带 URL、模型、用户或请求身份。ARC-08 后续 metrics/alert/runbook 应复用这些分类，但在真实计数、
+  时间窗口与采样合同落地前不得据此宣称 Provider SLO 已实现。
+
 ## 初始 SLO
 
 - Runtime 本地启动成功率 ≥99.5%；正常机器 ready P95 <2s。

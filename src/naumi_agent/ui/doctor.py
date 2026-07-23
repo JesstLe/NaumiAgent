@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,7 @@ class DoctorCheck:
     status: DoctorStatus
     detail: str
     suggestion: str = ""
+    diagnostic_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,7 @@ async def run_doctor(
                     + "、".join(failed_prerequisites)
                     + "）",
                     "先运行 `naumi configure` 修复配置和凭据。",
+                    "provider_prerequisite_failed",
                 )
             )
         else:
@@ -193,6 +196,9 @@ def render_doctor_report(report: DoctorReport) -> str:
     for check in report.checks:
         icon = {"pass": "PASS", "warn": "WARN", "error": "ERROR"}[check.status]
         lines.append(f"- **{icon} {check.name}**：{check.detail}")
+        diagnostic_code = normalize_doctor_diagnostic_code(check.diagnostic_code)
+        if diagnostic_code:
+            lines.append(f"  诊断码：`{diagnostic_code}`")
         if check.suggestion:
             lines.append(f"  建议：{check.suggestion}")
     lines.append("")
@@ -394,6 +400,7 @@ def _check_api_key(config: AppConfig) -> DoctorCheck:
         "error",
         "未检测到模型 API Key 或 provider 环境变量",
         "重新运行首次引导写入系统凭据库，或导出对应模型服务的环境变量。",
+        "provider_credentials_missing",
     )
 
 
@@ -405,6 +412,7 @@ def _check_model_provider(config: AppConfig) -> DoctorCheck:
             "error",
             "默认模型为空",
             "请配置 models.default_model。",
+            "provider_model_missing",
         )
     provider, error = validate_provider_configuration(
         provider=config.models.provider,
@@ -426,6 +434,11 @@ def _check_model_provider(config: AppConfig) -> DoctorCheck:
             "error",
             error,
             suggestion,
+            (
+                "provider_temperature_invalid"
+                if "temperature" in error
+                else "provider_config_invalid"
+            ),
         )
     return DoctorCheck(
         "model provider",
@@ -531,41 +544,102 @@ async def _default_live_probe(config: AppConfig) -> ModelResponse:
 
 
 def _classify_live_model_error(exc: Exception) -> DoctorCheck:
-    evidence = f"{type(exc).__name__} {exc}".lower()
-    if "401" in evidence or "authentication" in evidence or "unauthorized" in evidence:
+    status_code = _provider_http_status_code(exc)
+    evidence = f"{type(exc).__name__} {exc}"[:2000].lower()
+    unstructured = status_code is None
+    if status_code in {401, 403} or (
+        unstructured
+        and any(
+            token in evidence
+            for token in ("authentication", "unauthorized", "forbidden")
+        )
+    ):
         return DoctorCheck(
             "模型实时连接",
             "error",
-            "认证失败（401）",
+            f"认证失败（{status_code or 401}）",
             "运行 `naumi configure` 更新系统凭据，然后重试。",
+            "provider_auth_failed",
         )
-    if "404" in evidence or "notfound" in evidence or "not found" in evidence:
+    if status_code == 404 or (
+        unstructured and ("notfound" in evidence or "not found" in evidence)
+    ):
         return DoctorCheck(
             "模型实时连接",
             "error",
             "模型或 API 地址不存在（404）",
             "检查 provider、模型和 API Base；代理服务请使用 custom provider。",
+            "provider_resource_not_found",
         )
-    if "429" in evidence or "ratelimit" in evidence or "rate limit" in evidence:
+    if status_code == 429 or (
+        unstructured and ("ratelimit" in evidence or "rate limit" in evidence)
+    ):
         return DoctorCheck(
             "模型实时连接",
             "warn",
             "服务限流（429）",
             "凭据与地址通常有效，请稍后重试或检查服务额度。",
+            "provider_rate_limited",
         )
-    if "timeout" in evidence or "timed out" in evidence:
+    if status_code is not None and 500 <= status_code <= 599:
+        return DoctorCheck(
+            "模型实时连接",
+            "error",
+            f"模型服务暂时不可用（{status_code}）",
+            "稍后重试；若持续失败，请检查 provider 状态页或切换已验证模型。",
+            "provider_server_error",
+        )
+    if (
+        status_code == 408
+        or isinstance(exc, TimeoutError | httpx.TimeoutException)
+        or (
+            unstructured
+            and any(token in evidence for token in ("timeout", "timed out"))
+        )
+    ):
         return DoctorCheck(
             "模型实时连接",
             "error",
             "连接超时",
             "检查网络、代理和 API Base 可达性。",
+            "provider_timeout",
+        )
+    if isinstance(exc, httpx.NetworkError | ConnectionError):
+        return DoctorCheck(
+            "模型实时连接",
+            "error",
+            "无法连接模型服务",
+            "检查网络、代理、DNS 和 API Base 可达性。",
+            "provider_connection_failed",
         )
     return DoctorCheck(
         "模型实时连接",
         "error",
         f"连接失败（{type(exc).__name__}）",
         "查看 debug log，并检查 provider、网络和服务状态。",
+        "provider_request_failed",
     )
+
+
+def _provider_http_status_code(exc: Exception) -> int | None:
+    """Extract one provider HTTP status without trusting the exception body."""
+    response = getattr(exc, "response", None)
+    for value in (getattr(exc, "status_code", None), getattr(response, "status_code", None)):
+        if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+            return value
+    evidence = f"{type(exc).__name__} {exc}"[:2000]
+    match = re.search(r"(?<!\d)(401|403|404|429|5\d\d)(?!\d)", evidence)
+    return int(match.group(1)) if match else None
+
+
+def normalize_doctor_diagnostic_code(value: object) -> str:
+    """Return one bounded low-cardinality code safe for every Doctor surface."""
+    code = str(value or "").strip()
+    if not code:
+        return ""
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+        return code
+    return "diagnostic_code_invalid"
 
 
 def _check_workspace(root: Path) -> DoctorCheck:

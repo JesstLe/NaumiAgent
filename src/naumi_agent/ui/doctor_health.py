@@ -12,7 +12,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.safety.guardrails import OutputGuardrail
-from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
+from naumi_agent.ui.doctor import (
+    DoctorCheck,
+    DoctorReport,
+    normalize_doctor_diagnostic_code,
+)
 from naumi_agent.ui.pursuit_recovery import PursuitRecoverySnapshot
 
 DoctorHealthDomain = Literal[
@@ -48,6 +52,10 @@ class DoctorHealthItem(_StrictModel):
     responsibility: DoctorHealthResponsibility
     detail: str = Field(max_length=500)
     suggestion: str = Field(default="", max_length=500)
+    diagnostic_code: str = Field(
+        default="",
+        pattern=r"^(?:[a-z][a-z0-9_]{0,63})?$",
+    )
 
 
 class DoctorHealthSnapshot(_StrictModel):
@@ -91,9 +99,7 @@ def build_doctor_health_snapshot(
         *(_health_item(check) for check in report.checks),
         *tuple(additional_items),
     )
-    status = _worst_severity(
-        (_severity(report.status), *(item.severity for item in additional_items))
-    )
+    status = _worst_severity(tuple(item.severity for item in items))
     canonical = {
         "schema_version": 1,
         "status": status,
@@ -235,6 +241,8 @@ def render_doctor_health_item_markdown(item: DoctorHealthItem) -> str:
     lines = [f"- **{label} {item.label}**：{item.detail}"]
     if item.suggestion:
         lines.append(f"  建议：{item.suggestion}")
+    if item.diagnostic_code:
+        lines.append(f"  诊断码：`{item.diagnostic_code}`")
     return "\n".join(lines)
 
 
@@ -246,14 +254,28 @@ def doctor_health_payload(snapshot: DoctorHealthSnapshot) -> dict[str, object]:
 def _health_item(check: DoctorCheck) -> DoctorHealthItem:
     domain = _domain(check.name)
     stable_suffix = hashlib.sha256(check.name.encode("utf-8")).hexdigest()[:12]
+    diagnostic_code = normalize_doctor_diagnostic_code(check.diagnostic_code)
+    invalid_code = diagnostic_code == "diagnostic_code_invalid"
     return DoctorHealthItem(
         id=f"{domain}-{stable_suffix}",
         domain=domain,
         label=_bounded(check.name, 120),
-        severity=_severity(check.status),
-        responsibility=_responsibility(check.name, check.status),
+        severity="error" if invalid_code else _severity(check.status),
+        responsibility=(
+            "product_runtime"
+            if invalid_code
+            else _responsibility(check.name, check.status)
+        ),
         detail=_bounded(check.detail, 500),
-        suggestion=_bounded(check.suggestion, 500),
+        suggestion=_bounded(
+            (
+                "内部诊断码不符合协议；请升级或向维护者提供脱敏报告。"
+                if invalid_code
+                else check.suggestion
+            ),
+            500,
+        ),
+        diagnostic_code=diagnostic_code,
     )
 
 

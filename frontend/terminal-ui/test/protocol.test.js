@@ -210,6 +210,7 @@ function doctorHealthPayload() {
       responsibility: "user_config",
       detail: "未检测到凭据",
       suggestion: "运行 naumi configure。",
+      diagnostic_code: "provider_credentials_missing",
       private_payload: "must-drop",
     }],
     private_payload: "must-drop",
@@ -846,6 +847,7 @@ test("doctor health response is strict bounded and drops private fields", () => 
   assert.equal(normalized.status, "degraded");
   assert.equal(normalized.items[0].domain, "provider");
   assert.equal(normalized.items[0].responsibility, "user_config");
+  assert.equal(normalized.items[0].diagnostic_code, "provider_credentials_missing");
   assert.equal(Object.hasOwn(normalized, "private_payload"), false);
   assert.equal(Object.hasOwn(normalized.items[0], "private_payload"), false);
 
@@ -860,6 +862,12 @@ test("doctor health response is strict bounded and drops private fields", () => 
   assert.throws(
     () => normalizeServerRecord({ type: "doctor/health", payload: duplicate }),
     /必须唯一/,
+  );
+  const invalidCode = doctorHealthPayload();
+  invalidCode.items[0].diagnostic_code = "BAD-CODE";
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/health", payload: invalidCode }),
+    /diagnostic_code/,
   );
 });
 

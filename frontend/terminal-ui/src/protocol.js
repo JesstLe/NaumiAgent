@@ -2163,6 +2163,13 @@ function normalizeDoctorHealth(payload) {
   const normalizedItems = items.map((item) => {
     const id = harnessText(item.id, "doctor/health item.id");
     if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id)) throw new Error("doctor/health item.id 无效");
+    const diagnosticCode = harnessText(
+      item.diagnostic_code ?? "",
+      "doctor/health item.diagnostic_code",
+    );
+    if (diagnosticCode && !/^[a-z][a-z0-9_]{0,63}$/.test(diagnosticCode)) {
+      throw new Error("doctor/health item.diagnostic_code 无效");
+    }
     return {
       id,
       domain: harnessChoice(item.domain, "doctor/health item.domain", DOCTOR_HEALTH_DOMAINS),
@@ -2179,6 +2186,7 @@ function normalizeDoctorHealth(payload) {
       ),
       detail: harnessText(item.detail, "doctor/health item.detail"),
       suggestion: harnessText(item.suggestion, "doctor/health item.suggestion"),
+      diagnostic_code: diagnosticCode,
     };
   });
   if (new Set(normalizedItems.map((item) => item.id)).size !== normalizedItems.length) {
