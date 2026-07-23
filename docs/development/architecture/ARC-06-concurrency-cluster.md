@@ -14,6 +14,8 @@
   - ARC-06.1b 已让真实 ToolJob dispatch-before-send 原子占位，并在成功、失败、取消和 unknown 收口释放；
     同一 dispatch 重试不重复占位，跨 Store 中断以 TTL fail-safe 收敛。见
     [设计与验证](ARC-06-1b-tool-job-capacity-lifecycle.md)。
+  - HAR-10.7a 已先封住 embedded Runtime 的直接 Agent 委派旁路：所有 direct/batch/DAG 入口共用进程内
+    semaphore，并对等待取消和饱和嵌套自锁 fail closed。它不是持久 Worker reservation，不替代本模块。
   - 未完成：Agent/Browser worker dispatch、全局/用户/workspace/provider 多级容量与等待调度。
 - ARC-06.2 Scheduler：priority、deadline、fair queue、dependency DAG、affinity。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
