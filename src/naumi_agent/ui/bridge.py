@@ -1681,7 +1681,18 @@ class JsonlEngineBridge:
             return
 
         if event_type == ClientEventType.SHUTDOWN:
-            await self.shutdown()
+            try:
+                await self.shutdown(request_id=request_id)
+            except Exception:
+                await self.emit(
+                    ServerEventType.SHUTDOWN,
+                    {
+                        "ok": False,
+                        "code": "runtime_shutdown_failed",
+                    },
+                    request_id=request_id,
+                )
+                raise
             return
 
         await self.emit_error(f"未知客户端事件: {event_type}", request_id=request_id)
@@ -1768,7 +1779,7 @@ class JsonlEngineBridge:
             return
         normalized_text = text.strip()
         if _is_exit_command(normalized_text):
-            await self.shutdown()
+            await self.shutdown(request_id=request_id)
             return
         if normalized_text.startswith("/"):
             await self._run_cli_slash_command(normalized_text, request_id=request_id)
@@ -5299,7 +5310,7 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
 
-    async def shutdown(self) -> None:
+    async def shutdown(self, *, request_id: str | None = None) -> None:
         if self._closed:
             return
         self._closed = True
@@ -5430,7 +5441,11 @@ class JsonlEngineBridge:
                     "Terminal runtime stopped write failed (%s)",
                     type(exc).__name__,
                 )
-        await self.emit(ServerEventType.SHUTDOWN, {"ok": True})
+        await self.emit(
+            ServerEventType.SHUTDOWN,
+            {"ok": True},
+            request_id=request_id,
+        )
         if self.debug_trace is not None:
             self.debug_trace.close()
 

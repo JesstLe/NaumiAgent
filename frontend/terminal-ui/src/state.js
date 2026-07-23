@@ -3029,7 +3029,7 @@ export function handleSubmitText(state, text, send) {
     state.commandQuickOpen.recentCommands,
     commandText,
   );
-  if (["/q", "/quit", "/exit"].includes(commandText.toLowerCase())) {
+  if (isLocalExitCommand(commandText)) {
     return { type: "exit" };
   }
   const interactionCancel = commandText.match(
@@ -3445,6 +3445,12 @@ export function handleSubmitText(state, text, send) {
     return submitTaskMessage(state, text, send);
   }
   return submitUserMessage(state, text, send);
+}
+
+export function isLocalExitCommand(text) {
+  return ["/q", "/quit", "/exit"].includes(
+    String(text ?? "").trim().toLowerCase(),
+  );
 }
 
 function requestWorkbenchSnapshot(state, send) {

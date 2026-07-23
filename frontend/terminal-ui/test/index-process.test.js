@@ -714,6 +714,107 @@ test("terminal UI exits locally on slash q without submitting it", async () => {
   }
 });
 
+test("terminal UI waits for the matching delayed shutdown receipt", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: { NAUMI_TEST_SHUTDOWN_DELAY_MS: "220" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    const exitPromise = once(app, "exit");
+    const requestedAt = Date.now();
+    app.stdin.write("/q\n");
+
+    await delay(80);
+    assert.equal(app.exitCode, null);
+    await waitForLatestScreen(output, "正在安全关闭", 1000);
+
+    const [code] = await exitPromise;
+    assert.equal(code, 0);
+    assert(Date.now() - requestedAt >= 180);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const request = events.find(
+      (record) => record.event === "terminal_ui.shutdown.requested",
+    );
+    const sent = events.find(
+      (record) => record.event === "terminal_ui.shutdown.sent",
+    );
+    const finalized = events.find(
+      (record) => record.event === "terminal_ui.shutdown.finalized",
+    );
+    assert(request);
+    assert(sent);
+    assert(finalized);
+    assert.equal(finalized.payload.outcome, "ack");
+    assert.equal(finalized.payload.requestId, sent.payload.requestId);
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI completes the shutdown handshake with the Python Bridge", async () => {
+  const app = launchTerminalUi(null, {
+    bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "python-fixture-capable", 7000);
+    const exitPromise = once(app, "exit");
+    app.stdin.write("/q\n");
+
+    const [code] = await exitPromise;
+    assert.equal(code, 0);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const sent = events.find(
+      (record) => record.event === "terminal_ui.shutdown.sent",
+    );
+    const receipt = events.find(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "shutdown",
+    );
+    const finalized = events.find(
+      (record) => record.event === "terminal_ui.shutdown.finalized",
+    );
+    assert(sent);
+    assert(receipt);
+    assert(finalized);
+    assert.equal(receipt.payload.request_id, sent.payload.requestId);
+    assert.equal(finalized.payload.requestId, sent.payload.requestId);
+    assert.equal(finalized.payload.outcome, "ack");
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI exits nonzero when the Bridge reports shutdown failure", async () => {
+  const app = launchTerminalUi("fake-bridge.js", {
+    env: { NAUMI_TEST_SHUTDOWN_FAIL: "1" },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    const exitPromise = once(app, "exit");
+    app.stdin.write("/q\n");
+
+    const [code] = await exitPromise;
+    assert.equal(code, 1);
+    assert.match(output.text, /安全关闭未完成/);
+    const finalized = readDebugEvents(app.debugLogPath).find(
+      (record) => record.event === "terminal_ui.shutdown.finalized",
+    );
+    assert(finalized);
+    assert.equal(finalized.payload.outcome, "ack_failed");
+    assert.equal(finalized.payload.exitCode, 1);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI completes a structured interaction with arrow selection", async () => {
   const app = launchTerminalUi("fake-bridge.js");
   const output = collectOutput(app);

@@ -78,6 +78,7 @@ import {
   handlePermissionCenterKey,
   handleInteractionKey,
   handleSubmitText,
+  isLocalExitCommand,
   handleRuntimeInspectorKey,
   handleWorkbenchOverviewKey,
   hasTaskPanelFocus,
@@ -110,6 +111,10 @@ import {
   scrollTimeline,
 } from "./timeline-follow.js";
 import { createTrackpadScrollFilter } from "./scroll-input.js";
+import {
+  createGracefulShutdownController,
+  shutdownSignalsForPlatform,
+} from "./shutdown-controller.js";
 import { shouldAnimateWorkingIndicator } from "./components/working-indicator.js";
 import { createWorkingAnimationController } from "./working-animation.js";
 import { createScreenPainter } from "./screen-painter.js";
@@ -176,6 +181,55 @@ const workingAnimation = createWorkingAnimationController({
   onFrame(frame) {
     state.workingAnimationFrame = frame;
     if (!quitting) scheduleRedraw();
+  },
+});
+const shutdownController = createGracefulShutdownController({
+  sendShutdown() {
+    protocolEventBatcher.flush();
+    if (typeof send !== "function") {
+      throw new Error("Bridge 发送通道尚未建立");
+    }
+    return send("shutdown", {});
+  },
+  onRequest({ source }) {
+    quitting = true;
+    try {
+      persistUiSnapshot();
+    } catch (error) {
+      logDebug("terminal_ui.shutdown.persist_failed", {
+        source,
+        error: safeFatalMessage(error),
+      });
+    }
+    pushSystemMessage(
+      state,
+      "正在安全关闭",
+      "等待本地 Runtime 完成持久化与资源清理…",
+      "info",
+      { dismissWelcome: true },
+    );
+    redrawScheduler.flush();
+  },
+  onLifecycle(event, payload) {
+    logDebug(`terminal_ui.shutdown.${event}`, payload);
+  },
+  cleanup() {
+    restoreTerminal();
+    terminateBridge();
+    debugLog?.close();
+  },
+  exitProcess(code) {
+    if (code === 0) {
+      process.exit(0);
+      return;
+    }
+    try {
+      process.stderr.write(
+        "\nNaumi 终端 UI 安全关闭未完成；运行 `naumi doctor` 查看本地诊断。\n",
+      );
+    } finally {
+      process.exit(code);
+    }
   },
 });
 
@@ -324,7 +378,10 @@ function handleBridgeFailure(targetBridge, details) {
   clearBridgeRecoveryStabilityTimer();
   bridgeRecoveryReplayConfirmed = false;
   protocolEventBatcher.cancel();
-  if (quitting) return;
+  if (quitting) {
+    shutdownController.bridgeExited(details);
+    return;
+  }
 
   const activeRecovery = bridgeRecovery.snapshot().active;
   if (!activeRecovery) {
@@ -524,34 +581,38 @@ function restoreTerminal() {
   terminalSession.restore();
 }
 
-function exit() {
-  if (quitting) return;
-  quitting = true;
-  logDebug("terminal_ui.exit", {});
-  protocolEventBatcher.flush();
-  persistUiSnapshot();
-  try {
-    send("shutdown", {});
-  } catch {
-    // ignore shutdown write failures
+function exit(source = "user") {
+  if (shutdownController.request({ reason: source, exitCode: 0 })) return;
+  const snapshot = shutdownController.snapshot();
+  if (snapshot.phase === "requested" && source.startsWith("signal:")) {
+    shutdownController.force("repeated_signal", 0);
   }
-  restoreTerminal();
-  debugLog?.close();
-  terminateBridge();
-  process.exit(0);
 }
 
 function installProcessHandlers() {
-  process.on("SIGINT", exit);
-  process.on("SIGTERM", exit);
+  for (const signal of shutdownSignalsForPlatform(process.platform)) {
+    process.on(signal, () => exit(`signal:${signal}`));
+  }
+  process.on("exit", () => terminalSession.restore());
   process.on("uncaughtException", handleFatalError);
   process.on("unhandledRejection", handleFatalError);
 }
 
 function handleFatalError(reason) {
-  if (quitting) return;
-  quitting = true;
   const message = safeFatalMessage(reason);
+  if (quitting) {
+    logDebug("terminal_ui.shutdown.fatal", {
+      error: message,
+      stack: reason instanceof Error ? reason.stack : "",
+    });
+    try {
+      process.stderr.write(`\nNaumi 终端 UI 关闭期间发生错误：${message}\n`);
+    } finally {
+      shutdownController.force("fatal_during_shutdown", 1);
+    }
+    return;
+  }
+  quitting = true;
   logDebug("terminal_ui.fatal", {
     error: message,
     stack: reason instanceof Error ? reason.stack : "",
@@ -888,7 +949,10 @@ function processBridgeRecord(record) {
     }
   }
   if (actions.some((action) => action.type === "exit")) {
-    exit();
+    shutdownController.acknowledge({
+      responseRequestId: record.request_id,
+      ok: record.payload?.ok !== false,
+    });
     return;
   }
   scheduleUiSnapshotPersist();
@@ -1119,7 +1183,7 @@ function handleSingleKeyInput(chunk) {
       scheduleRedraw();
       return;
     }
-    exit();
+    exit("ctrl_c");
     return;
   }
   if (state.permission) {
@@ -1274,6 +1338,13 @@ function handleSingleKeyInput(chunk) {
     submitComposer();
     return;
   }
+  if (
+    (chunk === "\r" || chunk === "\n")
+    && isLocalExitCommand(state.input)
+  ) {
+    submitComposer();
+    return;
+  }
   if (isSlashCompletionOpen(state) && handleSlashCompletionKey(chunk)) {
     scheduleRedraw();
     return;
@@ -1411,7 +1482,7 @@ function submitComposer() {
   const action = handleSubmitText(state, text, send);
   if (action?.type === "exit") {
     clearInput(state);
-    exit();
+    exit("slash_command");
     return true;
   }
   rememberSubmittedInput(state, text);

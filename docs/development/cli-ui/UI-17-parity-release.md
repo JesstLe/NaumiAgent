@@ -45,8 +45,9 @@ ARC-01.4c1-4c3 已让 New UI 与 TUI 消费同一个 Composition-owned terminal 
 SQLite 验证两端 heartbeat/retention/Doctor/terminal 语义。UI-17.1 已建立可机读 manifest，UI-17.2a-17.2f 已锁定
 runtime-health、permission/bypass、interaction、基本 run lifecycle、stream/error/retry golden 与双端固定视口
 capture；UI-17.3a-17.3c 已交付 Evaluation Lane 与 Doctor Export 的真实 typed feature
-downgrade、通用 event-capability registry 和新旧 Bridge 进程证据，其余 golden scenarios 与 UI-17.3 compatibility negotiation
-尚未完成，不能凭局部对照通过发布门。
+downgrade、通用 event-capability registry 和新旧 Bridge 进程证据；UI-16.3a 已补齐 New UI 请求到
+Python runtime 清理完成回执的关联 ID 与有界等待，但 Windows 原生关闭窗口和三平台矩阵仍未验证。
+其余 golden scenarios 与 UI-17.3 compatibility negotiation 尚未完成，不能凭局部对照通过发布门。
 
 ## 验收标准
 
