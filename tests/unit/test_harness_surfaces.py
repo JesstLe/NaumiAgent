@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -172,6 +173,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
         sandbox_tool = engine.tool_registry.get("harness_eval_sandbox")
+        sandbox_retry_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_retry"
+        )
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -193,6 +197,10 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert sandbox_tool is not None and not sandbox_tool.metadata.read_only
         assert sandbox_tool.metadata.concurrency_safe
         assert sandbox_tool.metadata.delegated_tool_names == ("bash_run",)
+        assert sandbox_retry_tool is not None
+        assert not sandbox_retry_tool.metadata.read_only
+        assert sandbox_retry_tool.metadata.concurrency_safe
+        assert sandbox_retry_tool.metadata.delegated_tool_names == ("bash_run",)
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -464,7 +472,141 @@ async def test_harness_sandbox_cancel_slash_uses_durable_admission_authority(
         assert "取消 accepted" in rendered
         assert "sandbox_batch_cancelled_by_user" in rendered
         assert "Receipt: hsacr_" in rendered
+        assert "SHA-256:" in rendered
         assert current is not None and current.state == "cancelled"
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_retry_slash_resumes_real_cancelled_worker_batch(
+    tmp_path: Path,
+) -> None:
+    _require_real_shell_backend()
+    engine = _engine(tmp_path)
+
+    class ProgressFrontend:
+        def __init__(self) -> None:
+            self.progress: list[dict[str, object]] = []
+            self.two_persisted = asyncio.Event()
+
+        async def update_harness_sandbox_eval(
+            self,
+            progress: dict[str, object],
+        ) -> None:
+            self.progress.append(progress)
+            if (
+                progress.get("stage") == "executing"
+                and progress.get("persisted") == 2
+            ):
+                self.two_persisted.set()
+
+    frontend = ProgressFrontend()
+    try:
+        profile_path = engine.workspace_root / ".naumi" / "harness.yaml"
+        profile_path.write_text(
+            PROFILE.replace(
+                "print('surface check ok')",
+                "import time; time.sleep(0.2); print('surface check ok')",
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "add", ".naumi/harness.yaml"],
+            cwd=engine.workspace_root,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-qm", "slow sandbox fixture"],
+            cwd=engine.workspace_root,
+            check=True,
+        )
+        await execute_slash_command(engine, "/harness trust --confirm")
+        original = asyncio.create_task(
+            execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox unit --samples 5 "
+                    "--batch sandbox-retry-surface-1"
+                ),
+                frontend=frontend,
+            )
+        )
+        await asyncio.wait_for(frontend.two_persisted.wait(), timeout=10)
+        live = frontend.progress[-1]
+        cancel_receipt, cancelled = (
+            await engine.harness_sandbox_batch_admission.cancel(
+                action_id=f"hsac_{'c' * 24}",
+                ticket_id=str(live["admission_ticket_id"]),
+                authority_key=str(live["authority_key"]),
+                epoch=int(live["admission_epoch"]),
+                expected_state="active",
+                actor_id="tui",
+                reason="真实 Slash retry 回归",
+            )
+        )
+        assert cancel_receipt.decision == "accepted"
+        assert cancelled is not None and cancelled.state == "cancelled"
+        with pytest.raises(asyncio.CancelledError):
+            await original
+
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox retry "
+                    f"{cancel_receipt.receipt_id} "
+                    f"--sha256 {cancel_receipt.receipt_sha256} "
+                    "--reason 用户确认继续"
+                ),
+                frontend=frontend,
+            )
+        )
+        status = await engine.harness_service.status()
+        assert status.snapshot.profile is not None
+        assert status.profile_digest is not None
+        request = HarnessSandboxEvalRequestBuilder().build(
+            workspace_root=engine.workspace_root,
+            profile=status.snapshot.profile,
+            profile_digest=status.profile_digest,
+            profile_trusted=status.trusted,
+            check_ids=("unit",),
+            batch_id="sandbox-retry-surface-1",
+            requested_samples=5,
+        )
+        records = await engine.harness_service.store.list_eval_results(
+            engine.workspace_root,
+            request.batch_id,
+            request.suite_id,
+        )
+        retry_receipts = [
+            item
+            for item in engine.list_permission_decision_receipts()
+            if item.tool_name == "harness_eval_sandbox_retry"
+        ]
+        child_receipts = [
+            item
+            for item in engine.list_permission_decision_receipts()
+            if item.tool_name == "bash_run"
+        ]
+
+        assert "Harness Sandbox Eval 已完成" in rendered
+        assert "5/5" in rendered
+        assert [item.sample_index for item in records] == list(range(5))
+        assert len(retry_receipts) == 1
+        assert len(child_receipts) == 5
+        assert sum(
+            item.parent_receipt_id == retry_receipts[0].receipt_id
+            for item in child_receipts
+        ) == 3
+        retry_progress = [
+            item
+            for item in frontend.progress
+            if item["authority_key"] != request.request_sha256
+        ]
+        assert retry_progress[0]["persisted"] == 2
+        assert retry_progress[-1]["stage"] == "completed"
+        assert retry_progress[-1]["persisted"] == 5
     finally:
         await engine.shutdown()
 

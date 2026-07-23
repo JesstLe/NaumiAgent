@@ -36,6 +36,7 @@ from naumi_agent.harness.sandbox_batch import (
     HarnessSandboxBatchAdmission,
     HarnessSandboxBatchCheckpoint,
     HarnessSandboxBatchCoordinator,
+    HarnessSandboxBatchRetryContext,
 )
 from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckResult,
@@ -50,7 +51,11 @@ from naumi_agent.harness.sandbox_request import (
     HarnessSandboxEvalRequest,
     validate_request_checks,
 )
-from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
+from naumi_agent.harness.store import (
+    HarnessSandboxAdmissionRetryReceipt,
+    HarnessStore,
+    HarnessStoredEvalResult,
+)
 
 SANDBOX_EVAL_SERVICE_POLICY = "harness-sandbox-eval-service-v1"
 SANDBOX_EVAL_RUNNER = "harness_sandbox_eval@1"
@@ -218,6 +223,7 @@ class HarnessSandboxEvalExecutor:
         parent_receipt_id: str,
         current_profile: SandboxEvalProfileAuthorityProvider,
         on_progress: SandboxEvalProgressCallback | None = None,
+        retry_context: HarnessSandboxBatchRetryContext | None = None,
     ) -> HarnessSandboxEvalBatchReceipt:
         request = HarnessSandboxEvalRequest.model_validate(
             request.model_dump(mode="json")
@@ -229,7 +235,15 @@ class HarnessSandboxEvalExecutor:
             )
         if not callable(current_profile):
             raise TypeError("current_profile 必须可调用。")
-        await self._validate_parent(request, parent_receipt_id)
+        retry_receipt = await self._validate_retry_context(
+            request,
+            retry_context,
+        )
+        await self._validate_parent(
+            request,
+            parent_receipt_id,
+            retry_receipt=retry_receipt,
+        )
         await self._current_checks(request, current_profile)
         await self.store.record_sandbox_eval_request(
             request,
@@ -323,7 +337,11 @@ class HarnessSandboxEvalExecutor:
 
         return await self.coordinator.execute(
             phase="sandbox",
-            authority_key=request.request_sha256,
+            authority_key=(
+                retry_context.execution_authority_key
+                if retry_context is not None
+                else request.request_sha256
+            ),
             parent_receipt_id=parent_receipt_id,
             requested_samples=request.requested_samples,
             max_total_duration_seconds=request.max_total_duration_seconds,
@@ -333,33 +351,178 @@ class HarnessSandboxEvalExecutor:
             execute_sample=execute_sample,
             build_receipt=build_receipt,
             on_progress=on_progress,
+            retry_context=retry_context,
+        )
+
+    async def retry(
+        self,
+        *,
+        retry_action_id: str,
+        cancel_receipt_id: str,
+        cancel_receipt_sha256: str,
+        reason: str,
+        parent_receipt_id: str,
+        current_profile: SandboxEvalProfileAuthorityProvider,
+        on_progress: SandboxEvalProgressCallback | None = None,
+    ) -> HarnessSandboxEvalBatchReceipt:
+        """Authorize and execute one explicit retry without client-restated work."""
+        normalized_action = (
+            retry_action_id.strip().lower()
+            if isinstance(retry_action_id, str)
+            else ""
+        )
+        normalized_cancel = (
+            cancel_receipt_id.strip().lower()
+            if isinstance(cancel_receipt_id, str)
+            else ""
+        )
+        normalized_cancel_sha256 = (
+            cancel_receipt_sha256.strip().lower()
+            if isinstance(cancel_receipt_sha256, str)
+            else ""
+        )
+        normalized_reason = reason.strip() if isinstance(reason, str) else ""
+        parent = await self.permission_store.get(parent_receipt_id)
+        expected_arguments = {
+            "cancel_receipt_id": normalized_cancel,
+            "cancel_receipt_sha256": normalized_cancel_sha256,
+            "reason": normalized_reason,
+            "retry_action_id": normalized_action,
+            "run_id": parent.run_id if parent is not None else "",
+        }
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or not parent.run_id
+            or parent.tool_name != "harness_eval_sandbox_retry"
+            or "bash_run" not in parent.delegated_tool_names
+            or parent.arguments_sha256
+            != permission_arguments_sha256(expected_arguments)
+        ):
+            raise self._error(
+                "retry_parent_permission_invalid",
+                "Sandbox Eval retry 缺少与 action、cancel receipt、reason 精确匹配的执行权限回执。",
+            )
+        retry_receipt = await self.coordinator.admission.authorize_retry(
+            action_id=normalized_action,
+            cancel_receipt_id=normalized_cancel,
+            cancel_receipt_sha256=normalized_cancel_sha256,
+            actor_id=parent.agent_name,
+            reason=normalized_reason,
+        )
+        if retry_receipt.decision != "accepted":
+            raise self._error(
+                retry_receipt.code,
+                f"Sandbox Eval retry 未获授权：{retry_receipt.code}。",
+            )
+        stored = await self.store.get_sandbox_eval_request(
+            self.workspace_root,
+            retry_receipt.eval_request_sha256,
+        )
+        if stored is None:
+            raise self._error(
+                "retry_request_manifest_missing",
+                "Sandbox Eval retry 找不到原始 Request Manifest。",
+            )
+        retry_context = HarnessSandboxBatchRetryContext(
+            retry_action_id=retry_receipt.action_id,
+            retry_receipt_id=retry_receipt.receipt_id,
+            retry_receipt_sha256=retry_receipt.receipt_sha256,
+            eval_request_sha256=retry_receipt.eval_request_sha256,
+            execution_authority_key=retry_receipt.execution_authority_key,
+        )
+        return await self.execute(
+            request=stored.request,
+            parent_receipt_id=parent_receipt_id,
+            current_profile=current_profile,
+            on_progress=on_progress,
+            retry_context=retry_context,
         )
 
     async def _validate_parent(
         self,
         request: HarnessSandboxEvalRequest,
         parent_receipt_id: str,
+        *,
+        retry_receipt: HarnessSandboxAdmissionRetryReceipt | None,
     ) -> None:
         parent = await self.permission_store.get(parent_receipt_id)
-        expected_arguments = {
-            "batch_id": request.batch_id,
-            "check_ids": [item.check_id for item in request.checks],
-            "run_id": parent.run_id if parent is not None else "",
-            "samples": request.requested_samples,
-        }
+        if retry_receipt is None:
+            expected_tool_name = "harness_eval_sandbox"
+            expected_arguments = {
+                "batch_id": request.batch_id,
+                "check_ids": [item.check_id for item in request.checks],
+                "run_id": parent.run_id if parent is not None else "",
+                "samples": request.requested_samples,
+            }
+        else:
+            expected_tool_name = "harness_eval_sandbox_retry"
+            expected_arguments = {
+                "cancel_receipt_id": retry_receipt.cancel_receipt_id,
+                "cancel_receipt_sha256": retry_receipt.cancel_receipt_sha256,
+                "reason": retry_receipt.reason,
+                "retry_action_id": retry_receipt.action_id,
+                "run_id": parent.run_id if parent is not None else "",
+            }
         if (
             parent is None
             or not parent.authorizes_execution
             or not parent.run_id
-            or parent.tool_name != "harness_eval_sandbox"
+            or parent.tool_name != expected_tool_name
             or "bash_run" not in parent.delegated_tool_names
             or parent.arguments_sha256
             != permission_arguments_sha256(expected_arguments)
         ):
+            permission_scope = (
+                "action、cancel receipt、reason"
+                if retry_receipt is not None
+                else "checks、samples、batch"
+            )
             raise self._error(
                 "parent_permission_invalid",
-                "Sandbox Eval 缺少与 checks、samples、batch 精确匹配的执行权限回执。",
+                f"Sandbox Eval 缺少与 {permission_scope} 精确匹配的执行权限回执。",
             )
+
+    async def _validate_retry_context(
+        self,
+        request: HarnessSandboxEvalRequest,
+        retry_context: HarnessSandboxBatchRetryContext | None,
+    ) -> HarnessSandboxAdmissionRetryReceipt | None:
+        if retry_context is None:
+            return None
+        retry_context = HarnessSandboxBatchRetryContext.model_validate(
+            retry_context.model_dump(mode="json")
+        )
+        receipt = await self.store.get_sandbox_admission_retry(
+            workspace_root=self.workspace_root,
+            action_id=retry_context.retry_action_id,
+        )
+        if (
+            receipt is None
+            or receipt.decision != "accepted"
+            or receipt.receipt_id != retry_context.retry_receipt_id
+            or not hmac.compare_digest(
+                receipt.receipt_sha256,
+                retry_context.retry_receipt_sha256,
+            )
+            or not hmac.compare_digest(
+                receipt.eval_request_sha256,
+                retry_context.eval_request_sha256,
+            )
+            or not hmac.compare_digest(
+                receipt.execution_authority_key,
+                retry_context.execution_authority_key,
+            )
+            or not hmac.compare_digest(
+                request.request_sha256,
+                retry_context.eval_request_sha256,
+            )
+        ):
+            raise self._error(
+                "retry_context_invalid",
+                "Sandbox Eval retry context 与持久 authority chain 不一致。",
+            )
+        return receipt
 
     async def _current_checks(
         self,

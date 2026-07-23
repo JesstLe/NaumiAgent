@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import subprocess
 from pathlib import Path
@@ -83,6 +84,7 @@ class _ExecutionKernel:
         fail_once_at: int | None = None,
         drift_after_sample: int | None = None,
         wrong_source_at: int | None = None,
+        pause_once_at: int | None = None,
     ) -> None:
         self.workspace_root = workspace
         self.permission_store = permission_store
@@ -90,7 +92,11 @@ class _ExecutionKernel:
         self.fail_once_at = fail_once_at
         self.drift_after_sample = drift_after_sample
         self.wrong_source_at = wrong_source_at
+        self.pause_once_at = pause_once_at
         self.failed = False
+        self.paused = False
+        self.pause_reached = asyncio.Event()
+        self.pause_release = asyncio.Event()
         self.calls: list[SimpleNamespace] = []
 
     async def execute(self, **kwargs):
@@ -103,6 +109,10 @@ class _ExecutionKernel:
         assert validation.allowed
         assert await kwargs["profile_is_current"]()
         self.calls.append(SimpleNamespace(**kwargs))
+        if self.pause_once_at == sample_index and not self.paused:
+            self.paused = True
+            self.pause_reached.set()
+            await self.pause_release.wait()
         if (
             self.fail_once_at == sample_index
             and not self.failed
@@ -149,6 +159,8 @@ async def _runtime(
     fail_once_at: int | None = None,
     drift_after_sample: int | None = None,
     wrong_source_at: int | None = None,
+    pause_once_at: int | None = None,
+    durable_admission: bool = False,
 ):
     workspace = _workspace(tmp_path)
     permission_store = PermissionDecisionReceiptStore(tmp_path / "permissions.db")
@@ -166,6 +178,22 @@ async def _runtime(
         fail_once_at=fail_once_at,
         drift_after_sample=drift_after_sample,
         wrong_source_at=wrong_source_at,
+        pause_once_at=pause_once_at,
+    )
+    admission_tokens = iter(
+        hashlib.sha256(f"admission:{index}".encode()).hexdigest()
+        for index in range(1, 100)
+    )
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=1,
+        store=harness_store if durable_admission else None,
+        workspace_root=workspace if durable_admission else None,
+        owner_id="sandbox-service-test-owner" if durable_admission else None,
+        lease_seconds=30,
+        poll_interval_seconds=0.01,
+        now=lambda: NOW,
+        token=lambda: next(admission_tokens),
     )
     executor = HarnessSandboxEvalExecutor(
         workspace_root=workspace,
@@ -173,7 +201,7 @@ async def _runtime(
         permission_store=permission_store,
         run_grant_authority=grant_authority,
         execution_kernel=kernel,  # type: ignore[arg-type]
-        admission=HarnessSandboxBatchAdmission(max_active=1, max_queued=1),
+        admission=admission,
         now=lambda: NOW,
         token=lambda: "servicebatch",
     )
@@ -472,3 +500,183 @@ async def test_service_rejects_kernel_source_evidence_before_h5a_persistence(
         now=NOW,
     )
     assert not validation.allowed
+
+
+@pytest.mark.asyncio
+async def test_retry_uses_new_dispatch_authority_and_resumes_original_h5a_prefix(
+    tmp_path: Path,
+) -> None:
+    service, store, _grant_authority, kernel, _parent = await _runtime(
+        tmp_path,
+        pause_once_at=2,
+        durable_admission=True,
+    )
+    admission = service._sandbox_eval_executor.coordinator.admission
+    checkpoints: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def capture(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        checkpoints.append(checkpoint)
+
+    original_task = asyncio.create_task(
+        service.eval_sandbox(
+            check_ids=("unit",),
+            samples=5,
+            batch_id="batch-1",
+            on_progress=capture,
+        )
+    )
+    await asyncio.wait_for(kernel.pause_reached.wait(), timeout=2)
+    live = checkpoints[-1]
+    assert live.stage == "executing"
+    assert live.persisted_samples == 2
+    assert live.admission_ticket_id is not None
+    assert live.admission_epoch is not None
+    assert live.admission_state == "active"
+
+    cancel_receipt, cancelled_ticket = await admission.cancel(
+        action_id=f"hsac_{'a' * 24}",
+        ticket_id=live.admission_ticket_id,
+        authority_key=live.authority_key,
+        epoch=live.admission_epoch,
+        expected_state="active",
+        actor_id="test-user",
+        reason="验证持久化 retry 恢复",
+    )
+    assert cancel_receipt.decision == "accepted"
+    assert cancelled_ticket is not None
+    assert cancelled_ticket.state == "cancelled"
+    with pytest.raises(asyncio.CancelledError):
+        await original_task
+
+    request = await _request(service)
+    prefix = await store.list_eval_results(
+        service.workspace_root,
+        request.batch_id,
+        request.suite_id,
+    )
+    assert [item.sample_index for item in prefix] == [0, 1]
+
+    retry_arguments = {
+        "cancel_receipt_id": cancel_receipt.receipt_id,
+        "cancel_receipt_sha256": cancel_receipt.receipt_sha256,
+        "reason": "用户确认恢复原 Sandbox Eval",
+        "retry_action_id": f"hsar_{'b' * 24}",
+        "run_id": "run-1",
+    }
+    retry_parent = await kernel.permission_store.issue(
+        request_id="request-retry-1",
+        session_id="session-1",
+        run_id="run-1",
+        call_id="call-retry-1",
+        agent_name="main",
+        tool_name="harness_eval_sandbox_retry",
+        tool_family="harness_eval_execution",
+        arguments=retry_arguments,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=NOW,
+    )
+    service._authorization_receipt_provider = lambda: retry_parent
+    retry_checkpoints: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def capture_retry(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        retry_checkpoints.append(checkpoint)
+
+    completed = await service.retry_sandbox(
+        retry_action_id=retry_arguments["retry_action_id"],
+        cancel_receipt_id=retry_arguments["cancel_receipt_id"],
+        cancel_receipt_sha256=retry_arguments["cancel_receipt_sha256"],
+        reason=retry_arguments["reason"],
+        on_progress=capture_retry,
+    )
+    retry_authority = await store.get_sandbox_admission_retry(
+        workspace_root=service.workspace_root,
+        action_id=retry_arguments["retry_action_id"],
+    )
+    dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_arguments["retry_action_id"],
+    )
+    records = await store.list_eval_results(
+        service.workspace_root,
+        request.batch_id,
+        request.suite_id,
+    )
+
+    assert retry_authority is not None
+    assert retry_authority.decision == "accepted"
+    assert retry_authority.eval_request_sha256 == request.request_sha256
+    assert retry_authority.execution_authority_key != request.request_sha256
+    assert dispatch is not None
+    assert dispatch.state == "completed"
+    assert dispatch.ticket_id != cancel_receipt.ticket_id
+    assert dispatch.execution_authority_key == retry_authority.execution_authority_key
+    assert completed.persisted_samples == 5
+    assert len(completed.run_grant_sha256) == 2
+    assert [item.sample_index for item in records] == list(range(5))
+    assert len(kernel.calls) == 6
+    assert all(
+        item.authority_key == request.request_sha256
+        for item in kernel.calls
+    )
+    assert retry_checkpoints[0].stage == "admitted"
+    assert retry_checkpoints[0].authority_key == (
+        retry_authority.execution_authority_key
+    )
+    assert retry_checkpoints[-1].stage == "completed"
+    assert retry_checkpoints[-1].admission_state == "completed"
+
+
+@pytest.mark.asyncio
+async def test_retry_permission_mismatch_is_rejected_before_consuming_intent(
+    tmp_path: Path,
+) -> None:
+    service, store, _grant_authority, kernel, _parent = await _runtime(
+        tmp_path,
+        durable_admission=True,
+    )
+    action_id = f"hsar_{'d' * 24}"
+    wrong_parent = await kernel.permission_store.issue(
+        request_id="request-retry-wrong",
+        session_id="session-1",
+        run_id="run-1",
+        call_id="call-retry-wrong",
+        agent_name="main",
+        tool_name="harness_eval_sandbox_retry",
+        tool_family="harness_eval_execution",
+        arguments={
+            "cancel_receipt_id": f"hsacr_{'e' * 24}",
+            "cancel_receipt_sha256": "e" * 64,
+            "reason": "不同的理由",
+            "retry_action_id": action_id,
+            "run_id": "run-1",
+        },
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=NOW,
+    )
+    service._authorization_receipt_provider = lambda: wrong_parent
+
+    with pytest.raises(HarnessSandboxEvalServiceError) as captured:
+        await service.retry_sandbox(
+            retry_action_id=action_id,
+            cancel_receipt_id=f"hsacr_{'e' * 24}",
+            cancel_receipt_sha256="e" * 64,
+            reason="用户实际提交的理由",
+        )
+
+    assert captured.value.code == (
+        "sandbox_eval_service_retry_parent_permission_invalid"
+    )
+    assert await store.get_sandbox_admission_retry(
+        workspace_root=service.workspace_root,
+        action_id=action_id,
+    ) is None

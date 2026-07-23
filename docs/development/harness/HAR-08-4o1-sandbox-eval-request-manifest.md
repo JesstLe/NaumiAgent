@@ -102,13 +102,11 @@ claim，cancel receipt 保存的是取消裁决；三者都不能无歧义重建
 - 不允许同 batch 在重试时静默漂移到另一个 request；
 - 并发与进程重启走真实 SQLite，而不是进程内缓存。
 
-仍未实现：
+本切片边界之外仍未实现：
 
-- accepted cancel receipt 到 request manifest 的 retry transaction；
-- retry 专属 action/receipt；
-- 与原 request 分离的新 execution authority；
-- 新 ticket、Run Grant、真实恢复执行；
-- Slash、Bridge、New UI 与 TUI retry surface。
+- Bridge、New UI 与 TUI retry action；
+- dispatch catalog/retention；
+- 跨主机 admission。
 
 ## 后续切片
 
@@ -116,6 +114,6 @@ HAR-08.4o2 已在 durable transaction 中验证并消费 accepted cancel receipt
 action/receipt 和 execution authority。详见
 `HAR-08-4o2-sandbox-retry-intent-authority.md`。
 
-HAR-08.4o3 应以该 authority 恢复本 manifest，并使用新 permission receipt、admission ticket、
-Runtime lease 与 Run Grant 继续原 batch 的连续 H5a 前缀；不得复活旧 ticket，也不得接受客户端重述
-原请求。
+HAR-08.4o3a/4o3b 已以该 authority 恢复本 manifest，并使用新 permission receipt、admission ticket、
+Runtime lease 与 Run Grant 继续原 batch 的连续 H5a 前缀；未复活旧 ticket，也不接受客户端重述
+原请求。详见 `HAR-08-4o3b-sandbox-retry-execution.md`。

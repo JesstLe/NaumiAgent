@@ -8,8 +8,8 @@
 SQLite 事务创建全新的 admission ticket。它关闭“intent 已提交，但前台协程尚未创建 ticket”以及
 “ticket 已创建，但 dispatch 尚未记录”的双向崩溃窗口。
 
-本切片不调用 Sandbox Eval Executor，也不开放 Tool、Slash 或 UI。HAR-08.4o3b 必须在本 dispatch
-上下文中恢复 Request Manifest、取得新权限/Run Grant 并真实继续 H5a。
+本切片自身不调用 Sandbox Eval Executor，也不开放 Tool、Slash 或 UI。HAR-08.4o3b 已在本 dispatch
+上下文中恢复 Request Manifest、取得新权限/Run Grant，并真实继续 H5a。
 
 ## Store v21
 
@@ -98,16 +98,13 @@ ticket 的 lane、requested samples 和 authority 全部来自服务端 manifest
 - 每次恢复都创建新 ticket，而不是提高旧 ticket epoch；
 - retry intent、manifest、execution authority、dispatch 和 ticket 形成可机械复核的链。
 
-仍未实现：
+本切片边界之外仍未实现：
 
-- 从 dispatch 恢复 Request Manifest 后的真实 Sandbox Eval Executor 调用；
-- retry 专属 permission receipt 与父权限参数；
-- Runtime lease、Run Grant、H5a 连续前缀恢复的端到端组合；
 - dispatch catalog/retention；
-- Agent Tool、Slash、Bridge、New UI 与 TUI。
+- Bridge、New UI 与 TUI 的 retry action。
 
 ## 下一切片
 
-HAR-08.4o3b 应让 `HarnessSandboxEvalExecutor` 接受 retry dispatch context：业务 kernel 继续使用原始
+HAR-08.4o3b 已让 `HarnessSandboxEvalExecutor` 接受 retry dispatch context：业务 kernel 继续使用原始
 request SHA，admission/coordinator 使用新的 execution authority，并以新 permission receipt 和 Run Grant
-恢复未完成 H5a。只有该真实链路通过后，才能进入 UI surface。
+恢复未完成 H5a。详见 `HAR-08-4o3b-sandbox-retry-execution.md`。

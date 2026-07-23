@@ -396,6 +396,67 @@ class HarnessService:
             on_progress=on_progress,
         )
 
+    async def retry_sandbox(
+        self,
+        *,
+        retry_action_id: str,
+        cancel_receipt_id: str,
+        cancel_receipt_sha256: str,
+        reason: str,
+        on_progress: SandboxEvalProgressCallback | None = None,
+    ) -> HarnessSandboxEvalBatchReceipt:
+        """Resume the original persisted request through a new retry authority."""
+        executor = self._sandbox_eval_executor
+        receipt_provider = self._authorization_receipt_provider
+        if executor is None or receipt_provider is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_unavailable",
+                "当前 Runtime 尚未配置 Sandbox Eval retry 执行基础设施。",
+            )
+        parent = receipt_provider()
+        if parent is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_parent_permission_missing",
+                "Sandbox Eval retry 缺少当前工具调用的持久权限回执。",
+            )
+        status = await self.status()
+        if (
+            status.code is not HarnessStatusCode.TRUSTED
+            or not status.trusted
+            or status.snapshot.profile is None
+            or status.profile_digest is None
+        ):
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_profile_untrusted",
+                "Harness Profile 当前未受信任；retry 尚未消费，请先修复并重新信任。",
+            )
+
+        async def current_profile() -> HarnessSandboxEvalProfileAuthority:
+            current = await self.status()
+            if (
+                not current.trusted
+                or current.snapshot.profile is None
+                or current.profile_digest is None
+            ):
+                raise HarnessSandboxEvalServiceError(
+                    "sandbox_eval_service_profile_trust_revalidation_failed",
+                    "Sandbox Eval retry 执行期间 Harness Profile 信任已失效。",
+                )
+            return HarnessSandboxEvalProfileAuthority(
+                profile=current.snapshot.profile,
+                profile_sha256=current.profile_digest,
+            )
+
+        return await executor.retry(
+            retry_action_id=retry_action_id,
+            cancel_receipt_id=cancel_receipt_id,
+            cancel_receipt_sha256=cancel_receipt_sha256,
+            reason=reason,
+            parent_receipt_id=parent.receipt_id,
+            current_profile=current_profile,
+            on_progress=on_progress,
+        )
+
     async def eval_baseline_status(
         self,
         suite_id: str,

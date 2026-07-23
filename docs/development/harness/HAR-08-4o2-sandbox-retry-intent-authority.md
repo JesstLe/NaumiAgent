@@ -8,8 +8,8 @@
 authority。它解决 retry 的“谁有权重试、重试哪个不可变请求、是否已经消费”问题。
 
 本切片不创建 admission ticket，也不启动 Worker。HAR-08.4o3a 已消费 accepted receipt，建立
-可恢复 dispatch 与新 ticket；仍须 HAR-08.4o3b 完成真实 H5a 前缀恢复后，New UI/TUI 才能显示
-retry 已启动。
+可恢复 dispatch 与新 ticket；HAR-08.4o3b 已完成真实 H5a 前缀恢复与 Tool/Slash，New UI/TUI action
+仍待后续切片。
 
 ## 为什么授权与 dispatch 分开
 
@@ -130,13 +130,11 @@ Agent Tool、Slash、Bridge 和两套终端 UI 尚未接入，避免把 intent r
 - 并发消费由 SQLite 写事务和 partial unique index共同保护；
 - retry chain 保持业务 request 不变，同时轮换 execution authority。
 
-仍未实现：
+本切片边界之外仍未实现：
 
-- retry intent 的 durable dispatch/outbox 状态机；
-- 新 admission ticket 与 retry receipt 的绑定；
-- 新 permission receipt、Runtime lease、Run Grant 和真实 H5a 恢复；
-- dispatch 崩溃后的 claim/lease/recovery；
-- Tool、Slash、Bridge、New UI 与 TUI surface。
+- Bridge、New UI 与 TUI retry action；
+- dispatch catalog/retention；
+- 跨主机 admission。
 
 ## 后续切片
 
@@ -144,5 +142,5 @@ HAR-08.4o3a 已实现 retry dispatch authority：消费 accepted `hsarr_` receip
 并支持 expired ticket 后由下一 owner 生成新 generation。详见
 `HAR-08-4o3a-sandbox-retry-dispatch.md`。
 
-HAR-08.4o3b 仍须在该 dispatch context 中从 `eval_request_sha256` 恢复原请求，以新 permission receipt、
-Runtime lease 和 Run Grant 真实继续 H5a。
+HAR-08.4o3b 已在该 dispatch context 中从 `eval_request_sha256` 恢复原请求，以新 permission receipt、
+Runtime lease 和 Run Grant 真实继续 H5a。详见 `HAR-08-4o3b-sandbox-retry-execution.md`。
