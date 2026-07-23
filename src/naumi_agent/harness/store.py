@@ -82,7 +82,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 22
+HARNESS_STORE_SCHEMA_VERSION = 23
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -112,6 +112,8 @@ _SANDBOX_ADMISSION_RETRY_RECEIPT_RE = re.compile(r"^hsarr_[0-9a-f]{24}$")
 _SANDBOX_ADMISSION_RETRY_DISPATCH_RE = re.compile(r"^hsard_[0-9a-f]{24}$")
 _SANDBOX_RETRY_PRUNE_ACTION_RE = re.compile(r"^hsrpa_[0-9a-f]{24}$")
 _SANDBOX_RETRY_PRUNE_RECEIPT_RE = re.compile(r"^hsrpr_[0-9a-f]{24}$")
+_SANDBOX_RETRY_PRUNE_EXECUTION_ACTION_RE = re.compile(r"^hsrpe_[0-9a-f]{24}$")
+_SANDBOX_RETRY_PRUNE_EXECUTION_RECEIPT_RE = re.compile(r"^hsrper_[0-9a-f]{24}$")
 _SANDBOX_RETRY_PREVIEW_RE = re.compile(r"^hsrrpv_[0-9a-f]{24}$")
 _SANDBOX_RETRY_CANDIDATE_RE = re.compile(r"^hsrrp_[0-9a-f]{24}$")
 _SANDBOX_RETRY_PRUNE_CODES = frozenset(
@@ -121,6 +123,16 @@ _SANDBOX_RETRY_PRUNE_CODES = frozenset(
         "sandbox_retry_prune_candidate_drift",
         "sandbox_retry_prune_candidate_missing",
         "sandbox_retry_prune_preview_mismatch",
+    }
+)
+_SANDBOX_RETRY_PRUNE_EXECUTION_CODES = frozenset(
+    {
+        "sandbox_retry_prune_executed",
+        "sandbox_retry_prune_already_executed",
+        "sandbox_retry_prune_authorization_missing",
+        "sandbox_retry_prune_authorization_rejected",
+        "sandbox_retry_prune_authorization_mismatch",
+        "sandbox_retry_prune_candidate_drift",
     }
 )
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
@@ -471,6 +483,38 @@ class HarnessSandboxRetryPruneReceipt:
     actor_id: str
     reason: str
     created_at: str
+    receipt_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxRetryPruneExecutionReceipt:
+    """Immutable receipt for one atomic, authorization-bound prune execution."""
+
+    receipt_id: str
+    action_id: str
+    authorization_action_id: str
+    authorization_receipt_id: str
+    authorization_receipt_sha256: str
+    candidate_id: str
+    candidate_sha256: str
+    retry_action_id: str
+    retry_receipt_id: str
+    retry_receipt_sha256: str
+    cancel_receipt_id: str
+    dispatch_id: str
+    protection_refs_sha256: str
+    parent_permission_receipt_id: str
+    parent_permission_receipt_sha256: str
+    decision: str
+    code: str
+    deleted_dispatch_count: int
+    deleted_retry_attempt_count: int
+    deleted_ticket_count: int
+    retained_reference_count: int
+    actor_id: str
+    reason: str
+    created_at: str
+    action_sha256: str
     receipt_sha256: str
 
 
@@ -5925,10 +5969,22 @@ class HarnessStore:
                             workspace_root=workspace,
                             cancel_receipt_id=cancel_id,
                         )
+                        pruned = (
+                            await _select_executed_sandbox_prune_by_cancel(
+                                db,
+                                workspace_root=workspace,
+                                cancel_receipt_id=cancel_id,
+                            )
+                        )
                         if not eval_request_sha256:
                             code = "sandbox_batch_retry_request_manifest_missing"
                         elif consumed is not None:
                             _sandbox_retry_receipt_from_row(consumed)
+                            code = "sandbox_batch_retry_cancel_receipt_consumed"
+                        elif pruned is not None:
+                            _sandbox_retry_prune_execution_receipt_from_row(
+                                pruned
+                            )
                             code = "sandbox_batch_retry_cancel_receipt_consumed"
                         else:
                             decision = "accepted"
@@ -6995,6 +7051,488 @@ class HarnessStore:
                 "Sandbox retry prune receipt 损坏或无法读取。"
             ) from exc
 
+    async def execute_sandbox_retry_prune(
+        self,
+        *,
+        workspace_root: str | Path,
+        action_id: str,
+        authorization_action_id: str,
+        authorization_receipt_id: str,
+        authorization_receipt_sha256: str,
+        candidate_id: str,
+        candidate_sha256: str,
+        retry_action_id: str,
+        dispatch_id: str,
+        protection_refs_sha256: str,
+        parent_permission_receipt_id: str,
+        parent_permission_receipt_sha256: str,
+        actor_id: str,
+        reason: str,
+        created_at: str,
+    ) -> HarnessSandboxRetryPruneExecutionReceipt:
+        """Consume one accepted prune receipt and delete its safe set atomically."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_prune_execution_action_id(action_id)
+        authorization_action = _normalize_sandbox_retry_prune_action_id(
+            authorization_action_id
+        )
+        authorization_receipt = _normalize_sandbox_retry_prune_receipt_id(
+            authorization_receipt_id
+        )
+        authorization_digest = _validate_sha256(
+            authorization_receipt_sha256,
+            field="authorization_receipt_sha256",
+        )
+        candidate_identity = _normalize_sandbox_retry_candidate_id(candidate_id)
+        candidate_digest = _validate_sha256(
+            candidate_sha256,
+            field="candidate_sha256",
+        )
+        retry_action = _normalize_sandbox_retry_action_id(retry_action_id)
+        dispatch_identity = _normalize_sandbox_retry_dispatch_id(dispatch_id)
+        refs_digest = _validate_sha256(
+            protection_refs_sha256,
+            field="protection_refs_sha256",
+        )
+        permission_id = _normalize_text(
+            parent_permission_receipt_id,
+            field="parent_permission_receipt_id",
+            max_length=128,
+        )
+        permission_digest = _validate_sha256(
+            parent_permission_receipt_sha256,
+            field="parent_permission_receipt_sha256",
+        )
+        actor = _normalize_text(actor_id, field="actor_id", max_length=128)
+        normalized_reason = _normalize_text(reason, field="reason", max_length=500)
+        timestamp = _normalize_utc_timestamp(created_at, field="created_at")
+        action_sha256 = _sandbox_retry_prune_execution_action_digest(
+            workspace_root=workspace,
+            action_id=action,
+            authorization_action_id=authorization_action,
+            authorization_receipt_id=authorization_receipt,
+            authorization_receipt_sha256=authorization_digest,
+            candidate_id=candidate_identity,
+            candidate_sha256=candidate_digest,
+            retry_action_id=retry_action,
+            dispatch_id=dispatch_identity,
+            protection_refs_sha256=refs_digest,
+            parent_permission_receipt_id=permission_id,
+            parent_permission_receipt_sha256=permission_digest,
+            actor_id=actor,
+            reason=normalized_reason,
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_retry_prune_executions
+                        WHERE workspace_root = ? AND action_id = ?
+                        """,
+                        (workspace, action),
+                    )
+                ).fetchone()
+                if existing is not None:
+                    if not hmac.compare_digest(
+                        str(existing["action_sha256"]),
+                        action_sha256,
+                    ):
+                        raise HarnessStoreConflictError(
+                            "Sandbox retry prune execution action 已绑定不同请求。"
+                        )
+                    await db.rollback()
+                    return _sandbox_retry_prune_execution_receipt_from_row(
+                        existing
+                    )
+
+                decision = "rejected"
+                code = "sandbox_retry_prune_authorization_missing"
+                deleted_dispatch_count = 0
+                deleted_retry_attempt_count = 0
+                deleted_ticket_count = 0
+                retained_reference_count = 0
+                retry_receipt_id = ""
+                retry_receipt_sha256 = ""
+                cancel_receipt_id = ""
+                authorization_row = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_retry_prune_attempts
+                        WHERE workspace_root = ? AND action_id = ?
+                        """,
+                        (workspace, authorization_action),
+                    )
+                ).fetchone()
+                authorization: HarnessSandboxRetryPruneReceipt | None = None
+                if authorization_row is not None:
+                    authorization = _sandbox_retry_prune_receipt_from_row(
+                        authorization_row
+                    )
+                    supplied_authority = (
+                        authorization_receipt,
+                        authorization_digest,
+                        candidate_identity,
+                        candidate_digest,
+                        retry_action,
+                        dispatch_identity,
+                        refs_digest,
+                    )
+                    stored_authority = (
+                        authorization.receipt_id,
+                        authorization.receipt_sha256,
+                        authorization.candidate_id,
+                        authorization.candidate_sha256,
+                        authorization.retry_action_id,
+                        authorization.dispatch_id,
+                        authorization.protection_refs_sha256,
+                    )
+                    if supplied_authority != stored_authority:
+                        code = "sandbox_retry_prune_authorization_mismatch"
+                    elif authorization.decision != "accepted":
+                        code = "sandbox_retry_prune_authorization_rejected"
+                    else:
+                        consumed = await (
+                            await db.execute(
+                                """
+                                SELECT * FROM
+                                    harness_sandbox_retry_prune_executions
+                                WHERE workspace_root = ?
+                                  AND authorization_receipt_id = ?
+                                  AND decision = 'executed'
+                                LIMIT 1
+                                """,
+                                (workspace, authorization_receipt),
+                            )
+                        ).fetchone()
+                        if consumed is not None:
+                            _sandbox_retry_prune_execution_receipt_from_row(
+                                consumed
+                            )
+                            code = "sandbox_retry_prune_already_executed"
+                        else:
+                            dispatch_row = await _select_sandbox_retry_dispatch(
+                                db,
+                                workspace_root=workspace,
+                                retry_action_id=retry_action,
+                            )
+                            if dispatch_row is None:
+                                code = "sandbox_retry_prune_candidate_drift"
+                            else:
+                                dispatch = _sandbox_retry_dispatch_from_row(
+                                    dispatch_row
+                                )
+                                records = await _load_sandbox_retry_detail_records(
+                                    db,
+                                    workspace_root=workspace,
+                                    assessed_at=timestamp,
+                                    dispatches=(dispatch,),
+                                )
+                                from naumi_agent.harness.sandbox_retry_detail import (
+                                    build_sandbox_retry_detail_snapshot,
+                                )
+
+                                snapshot = build_sandbox_retry_detail_snapshot(
+                                    records[0]
+                                )
+                                detail = snapshot.detail
+                                current_refs_sha256 = hashlib.sha256(
+                                    _json_dumps(
+                                        [
+                                            ref.model_dump(mode="json")
+                                            for ref in (
+                                                detail.protection_refs
+                                                if detail is not None
+                                                else ()
+                                            )
+                                        ]
+                                    ).encode("utf-8")
+                                ).hexdigest()
+                                if (
+                                    detail is None
+                                    or detail.recovery_status != "terminal"
+                                    or dispatch.dispatch_id
+                                    != authorization.dispatch_id
+                                    or detail.dispatch_epoch
+                                    != authorization.dispatch_epoch
+                                    or not hmac.compare_digest(
+                                        detail.dispatch_request_sha256,
+                                        authorization.dispatch_request_sha256,
+                                    )
+                                    or detail.updated_at
+                                    != authorization.dispatch_updated_at
+                                    or not hmac.compare_digest(
+                                        current_refs_sha256,
+                                        authorization.protection_refs_sha256,
+                                    )
+                                ):
+                                    code = "sandbox_retry_prune_candidate_drift"
+                                else:
+                                    retry_receipt_id = detail.retry_receipt_id
+                                    retry_receipt_sha256 = (
+                                        detail.retry_receipt_sha256
+                                    )
+                                    cancel_receipt_id = detail.cancel_receipt_id
+                                    dispatch_delete = await db.execute(
+                                        """
+                                        DELETE FROM
+                                            harness_sandbox_retry_dispatches
+                                        WHERE workspace_root = ?
+                                          AND retry_action_id = ?
+                                          AND dispatch_id = ?
+                                          AND state IN (
+                                              'completed', 'failed', 'cancelled'
+                                          )
+                                          AND epoch = ?
+                                          AND request_sha256 = ?
+                                          AND updated_at = ?
+                                        """,
+                                        (
+                                            workspace,
+                                            retry_action,
+                                            dispatch_identity,
+                                            authorization.dispatch_epoch,
+                                            authorization.dispatch_request_sha256,
+                                            authorization.dispatch_updated_at,
+                                        ),
+                                    )
+                                    if dispatch_delete.rowcount != 1:
+                                        raise HarnessStoreError(
+                                            "Sandbox retry dispatch 原子删除失败。"
+                                        )
+                                    retry_delete = await db.execute(
+                                        """
+                                        DELETE FROM
+                                            harness_sandbox_admission_retry_attempts
+                                        WHERE workspace_root = ?
+                                          AND action_id = ?
+                                          AND receipt_id = ?
+                                          AND receipt_sha256 = ?
+                                          AND decision = 'accepted'
+                                        """,
+                                        (
+                                            workspace,
+                                            retry_action,
+                                            detail.retry_receipt_id,
+                                            detail.retry_receipt_sha256,
+                                        ),
+                                    )
+                                    if retry_delete.rowcount != 1:
+                                        raise HarnessStoreError(
+                                            "Sandbox retry receipt 原子删除失败。"
+                                        )
+                                    deleted_dispatch_count = 1
+                                    deleted_retry_attempt_count = 1
+                                    ticket = detail.ticket
+                                    if ticket is None:
+                                        raise HarnessStoreError(
+                                            "终态 Sandbox retry 缺少当前 ticket。"
+                                        )
+                                    shared_refs = await (
+                                        await db.execute(
+                                            """
+                                            SELECT
+                                              (
+                                                SELECT COUNT(*) FROM
+                                                  harness_sandbox_admission_cancel_attempts
+                                                WHERE workspace_root = ?
+                                                  AND ticket_id = ?
+                                              ) + (
+                                                SELECT COUNT(*) FROM
+                                                  harness_sandbox_admission_retry_attempts
+                                                WHERE workspace_root = ?
+                                                  AND source_ticket_id = ?
+                                              ) + (
+                                                SELECT COUNT(*) FROM
+                                                  harness_sandbox_retry_dispatches
+                                                WHERE workspace_root = ?
+                                                  AND ticket_id = ?
+                                              ) AS reference_count
+                                            """,
+                                            (
+                                                workspace,
+                                                ticket.ticket_id,
+                                                workspace,
+                                                ticket.ticket_id,
+                                                workspace,
+                                                ticket.ticket_id,
+                                            ),
+                                        )
+                                    ).fetchone()
+                                    assert shared_refs is not None
+                                    if int(shared_refs["reference_count"]) == 0:
+                                        ticket_delete = await db.execute(
+                                            """
+                                            DELETE FROM
+                                                harness_sandbox_admission_tickets
+                                            WHERE workspace_root = ?
+                                              AND ticket_id = ?
+                                              AND epoch = ?
+                                              AND state IN (
+                                                'completed', 'failed',
+                                                'cancelled', 'expired'
+                                              )
+                                              AND request_sha256 = ?
+                                            """,
+                                            (
+                                                workspace,
+                                                ticket.ticket_id,
+                                                ticket.epoch,
+                                                ticket.request_sha256,
+                                            ),
+                                        )
+                                        if ticket_delete.rowcount != 1:
+                                            raise HarnessStoreError(
+                                                "Sandbox retry ticket 原子删除失败。"
+                                            )
+                                        deleted_ticket_count = 1
+                                    retained_reference_count = (
+                                        len(detail.protection_refs)
+                                        - deleted_dispatch_count
+                                        - deleted_retry_attempt_count
+                                        - deleted_ticket_count
+                                    )
+                                    decision = "executed"
+                                    code = "sandbox_retry_prune_executed"
+
+                receipt_sha256 = _sandbox_retry_prune_execution_receipt_digest(
+                    workspace_root=workspace,
+                    action_id=action,
+                    authorization_action_id=authorization_action,
+                    authorization_receipt_id=authorization_receipt,
+                    authorization_receipt_sha256=authorization_digest,
+                    candidate_id=candidate_identity,
+                    candidate_sha256=candidate_digest,
+                    retry_action_id=retry_action,
+                    retry_receipt_id=retry_receipt_id,
+                    retry_receipt_sha256=retry_receipt_sha256,
+                    cancel_receipt_id=cancel_receipt_id,
+                    dispatch_id=dispatch_identity,
+                    protection_refs_sha256=refs_digest,
+                    parent_permission_receipt_id=permission_id,
+                    parent_permission_receipt_sha256=permission_digest,
+                    decision=decision,
+                    code=code,
+                    deleted_dispatch_count=deleted_dispatch_count,
+                    deleted_retry_attempt_count=deleted_retry_attempt_count,
+                    deleted_ticket_count=deleted_ticket_count,
+                    retained_reference_count=retained_reference_count,
+                    actor_id=actor,
+                    reason=normalized_reason,
+                    created_at=timestamp,
+                )
+                receipt_id = f"hsrper_{receipt_sha256[:24]}"
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_retry_prune_executions (
+                        workspace_root, action_id, receipt_id,
+                        authorization_action_id, authorization_receipt_id,
+                        authorization_receipt_sha256,
+                        candidate_id, candidate_sha256,
+                        retry_action_id, retry_receipt_id,
+                        retry_receipt_sha256, cancel_receipt_id,
+                        dispatch_id, protection_refs_sha256,
+                        parent_permission_receipt_id,
+                        parent_permission_receipt_sha256,
+                        decision, code,
+                        deleted_dispatch_count, deleted_retry_attempt_count,
+                        deleted_ticket_count, retained_reference_count,
+                        actor_id, reason, created_at,
+                        action_sha256, receipt_sha256
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        workspace,
+                        action,
+                        receipt_id,
+                        authorization_action,
+                        authorization_receipt,
+                        authorization_digest,
+                        candidate_identity,
+                        candidate_digest,
+                        retry_action,
+                        retry_receipt_id,
+                        retry_receipt_sha256,
+                        cancel_receipt_id,
+                        dispatch_identity,
+                        refs_digest,
+                        permission_id,
+                        permission_digest,
+                        decision,
+                        code,
+                        deleted_dispatch_count,
+                        deleted_retry_attempt_count,
+                        deleted_ticket_count,
+                        retained_reference_count,
+                        actor,
+                        normalized_reason,
+                        timestamp,
+                        action_sha256,
+                        receipt_sha256,
+                    ),
+                )
+                stored = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_retry_prune_executions
+                        WHERE workspace_root = ? AND action_id = ?
+                        """,
+                        (workspace, action),
+                    )
+                ).fetchone()
+                await db.commit()
+                assert stored is not None
+                return _sandbox_retry_prune_execution_receipt_from_row(stored)
+        except HarnessStoreConflictError:
+            raise
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "无法执行 Sandbox retry prune。"
+            ) from exc
+
+    async def get_sandbox_retry_prune_execution_receipt(
+        self,
+        *,
+        workspace_root: str | Path,
+        action_id: str,
+    ) -> HarnessSandboxRetryPruneExecutionReceipt | None:
+        """Read and verify one immutable prune execution receipt."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_retry_prune_execution_action_id(action_id)
+        try:
+            async with self._connection() as db:
+                row = await (
+                    await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_retry_prune_executions
+                        WHERE workspace_root = ? AND action_id = ?
+                        """,
+                        (workspace, action),
+                    )
+                ).fetchone()
+                if row is None:
+                    return None
+                return _sandbox_retry_prune_execution_receipt_from_row(row)
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError(
+                "无法读取 Sandbox retry prune execution receipt。"
+            ) from exc
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox retry prune execution receipt 损坏或无法读取。"
+            ) from exc
+
     async def list_sandbox_retry_dispatches(
         self,
         *,
@@ -7172,6 +7710,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V20)
                             await db.executescript(_SCHEMA_V21)
                             await db.executescript(_SCHEMA_V22)
+                            await db.executescript(_SCHEMA_V23)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -7964,6 +8503,27 @@ def _normalize_sandbox_retry_prune_action_id(value: str) -> str:
     return normalized
 
 
+def _normalize_sandbox_retry_prune_receipt_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_RETRY_PRUNE_RECEIPT_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry prune receipt_id 格式无效。")
+    return normalized
+
+
+def _normalize_sandbox_retry_prune_execution_action_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_RETRY_PRUNE_EXECUTION_ACTION_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry prune execution action_id 格式无效。")
+    return normalized
+
+
+def _normalize_sandbox_retry_prune_execution_receipt_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_RETRY_PRUNE_EXECUTION_RECEIPT_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox retry prune execution receipt_id 格式无效。")
+    return normalized
+
+
 def _normalize_sandbox_retry_preview_id(value: str) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     if _SANDBOX_RETRY_PREVIEW_RE.fullmatch(normalized) is None:
@@ -8277,6 +8837,24 @@ async def _select_accepted_sandbox_retry_by_cancel(
             SELECT * FROM harness_sandbox_admission_retry_attempts
             WHERE workspace_root = ? AND cancel_receipt_id = ?
               AND decision = 'accepted'
+            """,
+            (workspace_root, cancel_receipt_id),
+        )
+    ).fetchone()
+
+
+async def _select_executed_sandbox_prune_by_cancel(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    cancel_receipt_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_retry_prune_executions
+            WHERE workspace_root = ? AND cancel_receipt_id = ?
+              AND decision = 'executed'
             """,
             (workspace_root, cancel_receipt_id),
         )
@@ -8657,6 +9235,311 @@ def _sandbox_retry_prune_receipt_from_row(
         actor_id=actor_id,
         reason=reason,
         created_at=created_at,
+        receipt_sha256=receipt_sha256,
+    )
+
+
+def _sandbox_retry_prune_execution_action_digest(
+    *,
+    workspace_root: str,
+    action_id: str,
+    authorization_action_id: str,
+    authorization_receipt_id: str,
+    authorization_receipt_sha256: str,
+    candidate_id: str,
+    candidate_sha256: str,
+    retry_action_id: str,
+    dispatch_id: str,
+    protection_refs_sha256: str,
+    parent_permission_receipt_id: str,
+    parent_permission_receipt_sha256: str,
+    actor_id: str,
+    reason: str,
+) -> str:
+    return hashlib.sha256(
+        _json_dumps(
+            {
+                "policy_version": (
+                    "harness-sandbox-retry-prune-execution-action-v1"
+                ),
+                "workspace_root": workspace_root,
+                "action_id": action_id,
+                "authorization_action_id": authorization_action_id,
+                "authorization_receipt_id": authorization_receipt_id,
+                "authorization_receipt_sha256": authorization_receipt_sha256,
+                "candidate_id": candidate_id,
+                "candidate_sha256": candidate_sha256,
+                "retry_action_id": retry_action_id,
+                "dispatch_id": dispatch_id,
+                "protection_refs_sha256": protection_refs_sha256,
+                "parent_permission_receipt_id": parent_permission_receipt_id,
+                "parent_permission_receipt_sha256": (
+                    parent_permission_receipt_sha256
+                ),
+                "actor_id": actor_id,
+                "reason": reason,
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _sandbox_retry_prune_execution_receipt_digest(
+    *,
+    workspace_root: str,
+    action_id: str,
+    authorization_action_id: str,
+    authorization_receipt_id: str,
+    authorization_receipt_sha256: str,
+    candidate_id: str,
+    candidate_sha256: str,
+    retry_action_id: str,
+    retry_receipt_id: str,
+    retry_receipt_sha256: str,
+    cancel_receipt_id: str,
+    dispatch_id: str,
+    protection_refs_sha256: str,
+    parent_permission_receipt_id: str,
+    parent_permission_receipt_sha256: str,
+    decision: str,
+    code: str,
+    deleted_dispatch_count: int,
+    deleted_retry_attempt_count: int,
+    deleted_ticket_count: int,
+    retained_reference_count: int,
+    actor_id: str,
+    reason: str,
+    created_at: str,
+) -> str:
+    return hashlib.sha256(
+        _json_dumps(
+            {
+                "policy_version": (
+                    "harness-sandbox-retry-prune-execution-receipt-v1"
+                ),
+                "workspace_root": workspace_root,
+                "action_id": action_id,
+                "authorization_action_id": authorization_action_id,
+                "authorization_receipt_id": authorization_receipt_id,
+                "authorization_receipt_sha256": authorization_receipt_sha256,
+                "candidate_id": candidate_id,
+                "candidate_sha256": candidate_sha256,
+                "retry_action_id": retry_action_id,
+                "retry_receipt_id": retry_receipt_id,
+                "retry_receipt_sha256": retry_receipt_sha256,
+                "cancel_receipt_id": cancel_receipt_id,
+                "dispatch_id": dispatch_id,
+                "protection_refs_sha256": protection_refs_sha256,
+                "parent_permission_receipt_id": parent_permission_receipt_id,
+                "parent_permission_receipt_sha256": (
+                    parent_permission_receipt_sha256
+                ),
+                "decision": decision,
+                "code": code,
+                "deleted_dispatch_count": deleted_dispatch_count,
+                "deleted_retry_attempt_count": deleted_retry_attempt_count,
+                "deleted_ticket_count": deleted_ticket_count,
+                "retained_reference_count": retained_reference_count,
+                "actor_id": actor_id,
+                "reason": reason,
+                "created_at": created_at,
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _sandbox_retry_prune_execution_receipt_from_row(
+    row: aiosqlite.Row,
+) -> HarnessSandboxRetryPruneExecutionReceipt:
+    workspace = _canonical_workspace(str(row["workspace_root"]))
+    action_id = _normalize_sandbox_retry_prune_execution_action_id(
+        str(row["action_id"])
+    )
+    authorization_action_id = _normalize_sandbox_retry_prune_action_id(
+        str(row["authorization_action_id"])
+    )
+    authorization_receipt_id = _normalize_sandbox_retry_prune_receipt_id(
+        str(row["authorization_receipt_id"])
+    )
+    authorization_receipt_sha256 = _validate_sha256(
+        str(row["authorization_receipt_sha256"]),
+        field="authorization_receipt_sha256",
+    )
+    candidate_id = _normalize_sandbox_retry_candidate_id(str(row["candidate_id"]))
+    candidate_sha256 = _validate_sha256(
+        str(row["candidate_sha256"]),
+        field="candidate_sha256",
+    )
+    retry_action_id = _normalize_sandbox_retry_action_id(
+        str(row["retry_action_id"])
+    )
+    retry_receipt_id_raw = str(row["retry_receipt_id"])
+    retry_receipt_sha256_raw = str(row["retry_receipt_sha256"])
+    cancel_receipt_id_raw = str(row["cancel_receipt_id"])
+    dispatch_id = _normalize_sandbox_retry_dispatch_id(str(row["dispatch_id"]))
+    protection_refs_sha256 = _validate_sha256(
+        str(row["protection_refs_sha256"]),
+        field="protection_refs_sha256",
+    )
+    permission_id = _normalize_text(
+        str(row["parent_permission_receipt_id"]),
+        field="parent_permission_receipt_id",
+        max_length=128,
+    )
+    permission_sha256 = _validate_sha256(
+        str(row["parent_permission_receipt_sha256"]),
+        field="parent_permission_receipt_sha256",
+    )
+    decision = str(row["decision"])
+    code = str(row["code"])
+    if decision not in {"executed", "rejected"}:
+        raise HarnessStoreError("Sandbox retry prune execution decision 无效。")
+    if code not in _SANDBOX_RETRY_PRUNE_EXECUTION_CODES:
+        raise HarnessStoreError("Sandbox retry prune execution code 无效。")
+    if (decision == "executed") is not (
+        code == "sandbox_retry_prune_executed"
+    ):
+        raise HarnessStoreError(
+            "Sandbox retry prune execution decision/code 不一致。"
+        )
+    deleted_dispatch_count = int(row["deleted_dispatch_count"])
+    deleted_retry_attempt_count = int(row["deleted_retry_attempt_count"])
+    deleted_ticket_count = int(row["deleted_ticket_count"])
+    retained_reference_count = int(row["retained_reference_count"])
+    if (
+        deleted_dispatch_count not in {0, 1}
+        or deleted_retry_attempt_count not in {0, 1}
+        or deleted_ticket_count not in {0, 1}
+        or not 0 <= retained_reference_count <= 106
+    ):
+        raise HarnessStoreError("Sandbox retry prune execution 计数无效。")
+    if decision == "executed":
+        if deleted_dispatch_count != 1 or deleted_retry_attempt_count != 1:
+            raise HarnessStoreError(
+                "Sandbox retry prune execution 删除计数不完整。"
+            )
+        retry_receipt_id = _normalize_sandbox_retry_receipt_id(
+            retry_receipt_id_raw
+        )
+        retry_receipt_sha256 = _validate_sha256(
+            retry_receipt_sha256_raw,
+            field="retry_receipt_sha256",
+        )
+        cancel_receipt_id = _normalize_sandbox_cancel_receipt_id(
+            cancel_receipt_id_raw
+        )
+    elif any(
+        (
+            deleted_dispatch_count,
+            deleted_retry_attempt_count,
+            deleted_ticket_count,
+            retained_reference_count,
+        )
+    ):
+        raise HarnessStoreError(
+            "被拒绝的 Sandbox retry prune execution 不得声明变更。"
+        )
+    else:
+        if retry_receipt_id_raw or retry_receipt_sha256_raw or cancel_receipt_id_raw:
+            raise HarnessStoreError(
+                "被拒绝的 Sandbox retry prune execution 不得声明消费 tombstone。"
+            )
+        retry_receipt_id = ""
+        retry_receipt_sha256 = ""
+        cancel_receipt_id = ""
+    actor_id = _normalize_text(
+        str(row["actor_id"]),
+        field="actor_id",
+        max_length=128,
+    )
+    reason = _normalize_text(str(row["reason"]), field="reason", max_length=500)
+    created_at = _normalize_utc_timestamp(
+        str(row["created_at"]),
+        field="created_at",
+    )
+    action_sha256 = _sandbox_retry_prune_execution_action_digest(
+        workspace_root=workspace,
+        action_id=action_id,
+        authorization_action_id=authorization_action_id,
+        authorization_receipt_id=authorization_receipt_id,
+        authorization_receipt_sha256=authorization_receipt_sha256,
+        candidate_id=candidate_id,
+        candidate_sha256=candidate_sha256,
+        retry_action_id=retry_action_id,
+        dispatch_id=dispatch_id,
+        protection_refs_sha256=protection_refs_sha256,
+        parent_permission_receipt_id=permission_id,
+        parent_permission_receipt_sha256=permission_sha256,
+        actor_id=actor_id,
+        reason=reason,
+    )
+    if not hmac.compare_digest(action_sha256, str(row["action_sha256"])):
+        raise HarnessStoreError(
+            "Sandbox retry prune execution action 摘要不一致。"
+        )
+    receipt_sha256 = _sandbox_retry_prune_execution_receipt_digest(
+        workspace_root=workspace,
+        action_id=action_id,
+        authorization_action_id=authorization_action_id,
+        authorization_receipt_id=authorization_receipt_id,
+        authorization_receipt_sha256=authorization_receipt_sha256,
+        candidate_id=candidate_id,
+        candidate_sha256=candidate_sha256,
+        retry_action_id=retry_action_id,
+        retry_receipt_id=retry_receipt_id,
+        retry_receipt_sha256=retry_receipt_sha256,
+        cancel_receipt_id=cancel_receipt_id,
+        dispatch_id=dispatch_id,
+        protection_refs_sha256=protection_refs_sha256,
+        parent_permission_receipt_id=permission_id,
+        parent_permission_receipt_sha256=permission_sha256,
+        decision=decision,
+        code=code,
+        deleted_dispatch_count=deleted_dispatch_count,
+        deleted_retry_attempt_count=deleted_retry_attempt_count,
+        deleted_ticket_count=deleted_ticket_count,
+        retained_reference_count=retained_reference_count,
+        actor_id=actor_id,
+        reason=reason,
+        created_at=created_at,
+    )
+    if not hmac.compare_digest(receipt_sha256, str(row["receipt_sha256"])):
+        raise HarnessStoreError(
+            "Sandbox retry prune execution receipt 摘要不一致。"
+        )
+    receipt_id = f"hsrper_{receipt_sha256[:24]}"
+    if (
+        _SANDBOX_RETRY_PRUNE_EXECUTION_RECEIPT_RE.fullmatch(receipt_id) is None
+        or not hmac.compare_digest(receipt_id, str(row["receipt_id"]))
+    ):
+        raise HarnessStoreError(
+            "Sandbox retry prune execution receipt identity 不一致。"
+        )
+    return HarnessSandboxRetryPruneExecutionReceipt(
+        receipt_id=receipt_id,
+        action_id=action_id,
+        authorization_action_id=authorization_action_id,
+        authorization_receipt_id=authorization_receipt_id,
+        authorization_receipt_sha256=authorization_receipt_sha256,
+        candidate_id=candidate_id,
+        candidate_sha256=candidate_sha256,
+        retry_action_id=retry_action_id,
+        retry_receipt_id=retry_receipt_id,
+        retry_receipt_sha256=retry_receipt_sha256,
+        cancel_receipt_id=cancel_receipt_id,
+        dispatch_id=dispatch_id,
+        protection_refs_sha256=protection_refs_sha256,
+        parent_permission_receipt_id=permission_id,
+        parent_permission_receipt_sha256=permission_sha256,
+        decision=decision,
+        code=code,
+        deleted_dispatch_count=deleted_dispatch_count,
+        deleted_retry_attempt_count=deleted_retry_attempt_count,
+        deleted_ticket_count=deleted_ticket_count,
+        retained_reference_count=retained_reference_count,
+        actor_id=actor_id,
+        reason=reason,
+        created_at=created_at,
+        action_sha256=action_sha256,
         receipt_sha256=receipt_sha256,
     )
 
@@ -11007,6 +11890,65 @@ WHERE decision = 'accepted';
 
 CREATE INDEX IF NOT EXISTS idx_harness_sandbox_retry_prune_dispatch_audit
 ON harness_sandbox_retry_prune_attempts (
+    workspace_root, dispatch_id, created_at, action_id
+);
+"""
+
+_SCHEMA_V23 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_retry_prune_executions (
+    workspace_root TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    authorization_action_id TEXT NOT NULL,
+    authorization_receipt_id TEXT NOT NULL,
+    authorization_receipt_sha256 TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    candidate_sha256 TEXT NOT NULL,
+    retry_action_id TEXT NOT NULL,
+    retry_receipt_id TEXT NOT NULL,
+    retry_receipt_sha256 TEXT NOT NULL,
+    cancel_receipt_id TEXT NOT NULL,
+    dispatch_id TEXT NOT NULL,
+    protection_refs_sha256 TEXT NOT NULL,
+    parent_permission_receipt_id TEXT NOT NULL,
+    parent_permission_receipt_sha256 TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('executed', 'rejected')),
+    code TEXT NOT NULL,
+    deleted_dispatch_count INTEGER NOT NULL CHECK (
+        deleted_dispatch_count BETWEEN 0 AND 1
+    ),
+    deleted_retry_attempt_count INTEGER NOT NULL CHECK (
+        deleted_retry_attempt_count BETWEEN 0 AND 1
+    ),
+    deleted_ticket_count INTEGER NOT NULL CHECK (
+        deleted_ticket_count BETWEEN 0 AND 1
+    ),
+    retained_reference_count INTEGER NOT NULL CHECK (
+        retained_reference_count BETWEEN 0 AND 106
+    ),
+    actor_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    action_sha256 TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, action_id),
+    UNIQUE (workspace_root, receipt_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_harness_sandbox_retry_prune_consumed
+ON harness_sandbox_retry_prune_executions (
+    workspace_root, authorization_receipt_id
+)
+WHERE decision = 'executed';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_harness_sandbox_retry_prune_cancel_tombstone
+ON harness_sandbox_retry_prune_executions (
+    workspace_root, cancel_receipt_id
+)
+WHERE decision = 'executed';
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_retry_prune_execution_audit
+ON harness_sandbox_retry_prune_executions (
     workspace_root, dispatch_id, created_at, action_id
 );
 """

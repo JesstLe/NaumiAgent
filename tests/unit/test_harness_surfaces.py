@@ -191,6 +191,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         sandbox_retry_prune_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retry_prune_authorize"
         )
+        sandbox_retry_prune_execute_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_retry_prune_execute"
+        )
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -236,6 +239,15 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert not sandbox_retry_prune_tool.metadata.requires_confirmation
         assert (
             sandbox_retry_prune_tool.metadata.requires_persistent_authorization
+        )
+        assert sandbox_retry_prune_execute_tool is not None
+        assert not sandbox_retry_prune_execute_tool.metadata.read_only
+        assert sandbox_retry_prune_execute_tool.metadata.destructive
+        assert sandbox_retry_prune_execute_tool.metadata.concurrency_safe
+        assert sandbox_retry_prune_execute_tool.metadata.requires_confirmation
+        assert (
+            sandbox_retry_prune_execute_tool.metadata
+            .requires_persistent_authorization
         )
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe

@@ -180,6 +180,12 @@
   中重新校验 preview/candidate/dispatch fence 与完整 protection refs，精确绑定父 Permission
   receipt、actor 和 reason；并发 candidate 仅允许一个 accepted receipt。该切片只写审计回执，
   不删除任何 retry 事实。详见 `HAR-08-4o3i-sandbox-retry-prune-receipt.md`。
+- HAR-08.4o3j Sandbox Retry Prune Execution：已实现。Store v23 原子消费 accepted authorization
+  receipt，重新校验 dispatch fence、完整权威链与 protection refs，只删除精确 dispatch、retry
+  attempt 和无共享引用的当前 ticket；失败整事务回滚，成功/拒绝均生成独立 tamper-evident execution
+  receipt，并以 cancel receipt tombstone 保持一次性消费。共享 Tool/Slash 同步服务 New UI/TUI，
+  bypass 直通但保留持久审计。详见
+  `HAR-08-4o3j-sandbox-retry-prune-execution.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -189,6 +195,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨主机 Batch admission、retry receipt consumption/prune execution，以及
+- HAR-08.4 仍为 partial：跨主机 Batch admission、跨 workspace 批量 prune、共享事实深度回收，以及
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
   implemented。

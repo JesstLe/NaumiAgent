@@ -129,6 +129,7 @@ from naumi_agent.harness.sandbox_service import (
 )
 from naumi_agent.harness.store import (
     HarnessSandboxRetryCatalogPage,
+    HarnessSandboxRetryPruneExecutionReceipt,
     HarnessSandboxRetryPruneReceipt,
     HarnessSessionDeleteImpact,
     HarnessStore,
@@ -753,6 +754,74 @@ class HarnessService:
             reason=reason,
             created_at=datetime.now(UTC).isoformat(),
             preflight_code=preflight_code,
+        )
+
+    async def execute_sandbox_retry_prune(
+        self,
+        *,
+        action_id: str,
+        authorization_action_id: str,
+        authorization_receipt_id: str,
+        authorization_receipt_sha256: str,
+        candidate_id: str,
+        candidate_sha256: str,
+        retry_action_id: str,
+        dispatch_id: str,
+        protection_refs_sha256: str,
+        reason: str,
+        run_id: str,
+    ) -> HarnessSandboxRetryPruneExecutionReceipt:
+        """Consume one exact accepted receipt under a fresh permission receipt."""
+        store = self._store
+        receipt_provider = self._authorization_receipt_provider
+        if store is None or receipt_provider is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_prune_execution_service_unavailable",
+                "当前 Runtime 尚未配置 Sandbox retry prune 执行基础设施。",
+            )
+        expected_arguments: dict[str, object] = {
+            "action_id": action_id,
+            "authorization_action_id": authorization_action_id,
+            "authorization_receipt_id": authorization_receipt_id,
+            "authorization_receipt_sha256": authorization_receipt_sha256,
+            "candidate_id": candidate_id,
+            "candidate_sha256": candidate_sha256,
+            "retry_action_id": retry_action_id,
+            "dispatch_id": dispatch_id,
+            "protection_refs_sha256": protection_refs_sha256,
+            "reason": reason,
+            "run_id": run_id,
+        }
+        parent = receipt_provider()
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or parent.tool_name != "harness_eval_sandbox_retry_prune_execute"
+            or parent.run_id != run_id
+            or parent.arguments_sha256
+            != permission_arguments_sha256(expected_arguments)
+        ):
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_prune_execution_parent_permission_mismatch",
+                "Sandbox retry prune 执行缺少与当前授权回执精确匹配的持久权限回执。",
+            )
+        actor_id = f"{parent.actor.value}:{parent.agent_name}"
+        return await store.execute_sandbox_retry_prune(
+            workspace_root=self.workspace_root,
+            action_id=action_id,
+            authorization_action_id=authorization_action_id,
+            authorization_receipt_id=authorization_receipt_id,
+            authorization_receipt_sha256=authorization_receipt_sha256,
+            candidate_id=candidate_id,
+            candidate_sha256=candidate_sha256,
+            retry_action_id=retry_action_id,
+            dispatch_id=dispatch_id,
+            protection_refs_sha256=protection_refs_sha256,
+            parent_permission_receipt_id=parent.receipt_id,
+            parent_permission_receipt_sha256=parent.receipt_sha256,
+            actor_id=actor_id,
+            reason=reason,
+            created_at=datetime.now(UTC).isoformat(),
         )
 
     async def eval_baseline_status(
