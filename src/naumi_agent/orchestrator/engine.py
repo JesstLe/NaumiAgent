@@ -1647,6 +1647,7 @@ class AgentEngine:
         self.subagent_manager = SubAgentManager(
             self,
             heartbeat_factory=self.agent_execution_heartbeat_factory,
+            agent_job_store=self._resources.agent_job_store,
         )
         self.agent_control = AgentControlService(
             self,

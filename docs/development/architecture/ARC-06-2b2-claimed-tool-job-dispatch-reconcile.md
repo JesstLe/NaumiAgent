@@ -136,5 +136,6 @@ ToolJob 终态原因释放；重试不重复释放。
 - 跨 Store outbox 或通用 ARC-08 reconciler。
 
 ARC-04.5a 已交付 embedded Agent 的 request/result contract 与双端低敏证据，ARC-04.5b1 又交付通用
-Runtime payload key/envelope。下一步是 `ARC-04.5b2 Durable Agent Job Authority` 消费该 envelope；
+Runtime payload key/envelope；ARC-04.5b2/5c 已进一步交付 Agent Job authority 与 embedded durable
+dispatch。下一步需比较 Agent capacity admission 与可恢复 response publication；
 不能只增加 claim lease，也不能把本桥接宣称为完整高并发或 Agent 集群。

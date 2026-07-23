@@ -101,9 +101,10 @@
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
   - ARC-04.5b1 已提供显式 provision 的系统 Runtime payload key 与 bounded AES-256-GCM envelope；
     ARC-04.5b2 已用 request digest AAD 建立 durable Agent Job Store、pre-start takeover 与 running
-    recovery fence，但当前 embedded Agent 还没有生产消费。见
+    recovery fence；ARC-04.5c 已让 embedded Agent 生产路径执行 admit/claim/recover/run/renew/finish，
+    并将未认证终态隔离在用户/message bus 发布之前。见
     [Envelope](../architecture/ARC-04-5b1-runtime-payload-envelope.md) 与
-    [Agent Job authority](../architecture/ARC-04-5b2-durable-agent-job-authority.md)。
+    [Embedded dispatch](../architecture/ARC-04-5c-embedded-agent-durable-dispatch.md)。
   - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
     基于同一健康快照超卖最后槽位的问题；见
     [设计](../architecture/ARC-06-1a-worker-capacity-reservations.md)。
@@ -126,8 +127,8 @@
   - UI-13.1e 已继续投影 durable queue policy、live waiting、active claim、oldest wait 与到期待收口数；
     New UI/TUI 复用同一只读 authority，不暴露 job identity；见
     [设计](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
-  - 未完成：Agent contract/job durable authority、Agent/Browser 持久 Worker dispatch 接入、自动
-    claim/scheduler、workspace 锁、能力路由、
+  - 未完成：Agent/Browser 独立持久 Worker dispatch、Agent capacity admission、自动
+    claim/scheduler、可恢复 response、workspace 锁、能力路由、
     亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域

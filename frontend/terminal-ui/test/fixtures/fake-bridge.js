@@ -924,7 +924,7 @@ function inspectorSnapshot(revision) {
 function agentControlSnapshot(revision) {
   const stopped = revision > 1;
   return {
-    schema_version: 1,
+    schema_version: 2,
     session_id: sessionId,
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -962,6 +962,10 @@ function agentControlSnapshot(revision) {
       heartbeat_subject_id: "agent-execution-fake",
       heartbeat_phase: stopped ? "stopped" : "running",
       heartbeat_failure_code: "",
+      worker_job_id: "agent-job-fake",
+      worker_job_state: stopped ? "cancelled" : "running",
+      worker_claim_epoch: 1,
+      worker_job_failure_code: "",
       current_tool: stopped ? "" : "file_read",
       recent_tools: ["file_read"],
       total_tokens: 42,

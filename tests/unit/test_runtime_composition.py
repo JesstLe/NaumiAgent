@@ -685,6 +685,10 @@ def test_real_engine_composes_execution_grant_authority_lazily(
         engine._resources.agent_job_store.db_path
         == engine._paths.agent_job_db_path
     )
+    assert (
+        engine.subagent_manager._agent_job_store
+        is engine._resources.agent_job_store
+    )
     assert engine.shell_worker_coordinator._jobs is engine.tool_job_authority
     assert (
         engine.shell_worker_coordinator._lifecycle

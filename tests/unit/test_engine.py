@@ -55,6 +55,8 @@ from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tools.base import Tool, ToolCall, ToolMetadata, ToolResult
 from naumi_agent.tools.builtin import BashRunTool
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 class FakeTool(Tool):
     @property

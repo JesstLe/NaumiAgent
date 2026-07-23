@@ -13,6 +13,8 @@ from naumi_agent.model.router import ModelResponse, TokenUsage
 from naumi_agent.tools.analysis import MoERouteTool, _build_route_report, _scan_route
 from naumi_agent.tools.analysis_tools.route import MoERouteTool as SplitMoERouteTool
 
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
 
 def _write_route_source(path: Path) -> None:
     path.write_text(

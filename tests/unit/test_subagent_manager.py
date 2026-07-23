@@ -6,6 +6,7 @@ import pytest
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.config.settings import AppConfig, SafetyConfig
+from naumi_agent.daemons.agent_jobs import AgentJobError, AgentJobState, AgentJobStore
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import (
     AgentState,
@@ -14,6 +15,19 @@ from naumi_agent.orchestrator.subagent_manager import (
 )
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
+
+pytestmark = pytest.mark.usefixtures("runtime_payload_key")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_agent_job_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(
+        "NAUMI_MEMORY__SESSION_DB_PATH",
+        str(tmp_path / ".naumi" / "sessions.db"),
+    )
 
 
 @pytest.fixture
@@ -791,10 +805,19 @@ class TestSubAgentManager:
         assert agent is not None
 
         async def complete_execute(**kwargs: object) -> AgentResult:
-            return AgentResult(status="completed", response="done")
+            return AgentResult(
+                status="completed",
+                response="durable-private-result-6bfa",
+            )
 
         monkeypatch.setattr(agent, "execute", complete_execute)
-        result = await manager.delegate(SubTask("finished", "done", "coder"))
+        result = await manager.delegate(
+            SubTask(
+                "finished",
+                "durable-private-task-8cd1",
+                "coder",
+            )
+        )
 
         assert result.status == "completed"
         record = next(
@@ -805,6 +828,18 @@ class TestSubAgentManager:
         assert len(record.worker_result_sha256) == 64
         assert record.worker_tool_scope == tuple(sorted(agent.tool_names))
         assert record.worker_contract_failure_code == ""
+        assert record.worker_job_id.startswith("agent-job-")
+        assert record.worker_job_state == AgentJobState.COMPLETED.value
+        assert record.worker_claim_epoch == 1
+        assert record.worker_job_failure_code == ""
+        stored = await manager._agent_job_store.get(record.worker_job_id)
+        assert stored is not None
+        assert stored.state is AgentJobState.COMPLETED
+        assert stored.result is not None
+        assert stored.result.result_sha256 == record.worker_result_sha256
+        raw_store = manager._agent_job_store.db_path.read_bytes()
+        assert b"durable-private-task-8cd1" not in raw_store
+        assert b"durable-private-result-6bfa" not in raw_store
         stopped = await manager.stop_execution("finished")
         assert stopped.accepted is False
         assert stopped.code == "already_finished"
@@ -868,6 +903,202 @@ class TestSubAgentManager:
         assert record.status == "cancelled"
         assert record.stop_requested is False
         assert manager.get_state("coder") == AgentState.IDLE
+        stored = await manager._agent_job_store.get(record.worker_job_id)
+        assert stored is not None
+        assert stored.state is AgentJobState.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_missing_runtime_key_fails_closed_before_model_call(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        called = False
+
+        async def execute(**_: object) -> AgentResult:
+            nonlocal called
+            called = True
+            return AgentResult(status="completed", response="must-not-run")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        manager._agent_job_store = AgentJobStore(
+            tmp_path / "missing-key.db",
+            key_provider=lambda: b"invalid",
+        )
+
+        result = await manager.delegate(
+            SubTask("missing-runtime-key", "work", "coder")
+        )
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "missing-runtime-key"
+        )
+
+        assert result.status == "error"
+        assert "naumi runtime-key init" in (result.error or "")
+        assert called is False
+        assert record.worker_job_id == ""
+        assert record.worker_job_failure_code == "agent_job_key_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_start_fence_failure_blocks_model_call(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        called = False
+
+        async def execute(**_: object) -> AgentResult:
+            nonlocal called
+            called = True
+            return AgentResult(status="completed", response="must-not-run")
+
+        async def fail_mark_running(*args: object, **kwargs: object) -> object:
+            raise AgentJobError("fenced")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        monkeypatch.setattr(
+            manager._agent_job_store,
+            "mark_running",
+            fail_mark_running,
+        )
+
+        result = await manager.delegate(
+            SubTask("start-fenced", "work", "coder")
+        )
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "start-fenced"
+        )
+
+        assert result.status == "error"
+        assert "start fence" in (result.error or "")
+        assert called is False
+        assert record.worker_job_state == AgentJobState.CLAIMED.value
+        assert record.worker_claim_epoch == 1
+        assert record.worker_job_failure_code == "agent_job_start_fenced"
+
+    @pytest.mark.asyncio
+    async def test_claim_renewal_failure_cancels_and_commits_terminal_state(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        hook_entered = asyncio.Event()
+        release_hook = asyncio.Event()
+        called = False
+
+        async def execute(**_: object) -> AgentResult:
+            nonlocal called
+            called = True
+            return AgentResult(status="completed", response="must-not-return")
+
+        async def fail_renew(*args: object, **kwargs: object) -> object:
+            raise AgentJobError("lease lost")
+
+        async def slow_hook(context: object) -> None:
+            point = getattr(context, "point", None)
+            if str(point) == "delegate_start":
+                hook_entered.set()
+                await release_hook.wait()
+
+        monkeypatch.setattr(agent, "execute", execute)
+        monkeypatch.setattr(manager._hooks, "fire", slow_hook)
+        monkeypatch.setattr(
+            manager._agent_job_store,
+            "renew_claim",
+            fail_renew,
+        )
+        monkeypatch.setattr(
+            "naumi_agent.orchestrator.subagent_manager."
+            "_AGENT_JOB_RENEW_INTERVAL_SECONDS",
+            0.01,
+        )
+
+        delegated = asyncio.create_task(
+            manager.delegate(SubTask("renewal-failed", "work", "coder"))
+        )
+        await asyncio.wait_for(hook_entered.wait(), timeout=1)
+        for _ in range(100):
+            active = next(
+                item for item in manager.list_executions()
+                if item.task_id == "renewal-failed"
+            )
+            if active.worker_job_failure_code:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("AgentJob 续租失败未在预期时间内进入停止状态。")
+        release_hook.set()
+        result = await asyncio.wait_for(delegated, timeout=1)
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "renewal-failed"
+        )
+
+        assert result.status == "cancelled"
+        assert "claim 续期失败" in (result.error or "")
+        assert called is False
+        assert record.worker_job_state == AgentJobState.CANCELLED.value
+        assert (
+            record.worker_job_failure_code
+            == "agent_job_claim_renewal_failed"
+        )
+        stored = await manager._agent_job_store.get(record.worker_job_id)
+        assert stored is not None
+        assert stored.state is AgentJobState.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_terminal_commit_failure_isolates_model_output(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+        attempts = 0
+
+        async def execute(**_: object) -> AgentResult:
+            return AgentResult(
+                status="completed",
+                response="sensitive uncommitted result",
+                total_tokens=7,
+                turns=1,
+            )
+
+        async def fail_finish(*args: object, **kwargs: object) -> object:
+            nonlocal attempts
+            attempts += 1
+            raise AgentJobError("disk unavailable")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        monkeypatch.setattr(manager._agent_job_store, "finish", fail_finish)
+
+        result = await manager.delegate(
+            SubTask("terminal-commit-failed", "work", "coder")
+        )
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "terminal-commit-failed"
+        )
+
+        assert attempts == 2
+        assert result.status == "error"
+        assert result.response == ""
+        assert "持久终态提交失败" in (result.error or "")
+        assert record.worker_result_sha256
+        assert record.worker_job_state == AgentJobState.RUNNING.value
+        assert (
+            record.worker_job_failure_code
+            == "agent_job_terminal_commit_failed"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -1007,11 +1238,17 @@ class TestSubAgentManager:
             if item.task_id == "invalid-worker-result"
         )
 
-        assert result.status == "completed"
+        assert result.status == "error"
+        assert result.response == ""
+        assert "持久终态提交失败" in (result.error or "")
         assert record.worker_result_sha256 == ""
         assert (
             record.worker_contract_failure_code
             == "agent_worker_result_invalid"
+        )
+        assert (
+            record.worker_job_failure_code
+            == "agent_job_terminal_receipt_invalid"
         )
 
     @pytest.mark.asyncio

@@ -152,6 +152,12 @@ function renderDetail(view, snapshot, width) {
       item.worker_contract_failure_code
         ? color(ANSI.yellow, `Worker 合同降级 · ${item.worker_contract_failure_code}`)
         : `Worker 合同 · 请求 ${shortDigest(item.worker_request_sha256)} · 结果 ${shortDigest(item.worker_result_sha256)}`,
+      item.worker_job_failure_code
+        ? color(
+          ANSI.yellow,
+          `持久任务降级 · ${item.worker_job_failure_code} · 状态 ${item.worker_job_state || "未知"} · epoch ${number(item.worker_claim_epoch)}`,
+        )
+        : `持久任务 · ${shortDigest(item.worker_job_id)} · 状态 ${item.worker_job_state || "未接入"} · epoch ${number(item.worker_claim_epoch)}`,
       item.heartbeat_failure_code
         ? color(
           ANSI.yellow,

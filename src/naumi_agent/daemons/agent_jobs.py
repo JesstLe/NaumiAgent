@@ -86,6 +86,10 @@ class AgentJobConflictError(AgentJobError):
     """Raised when an immutable request identity is reused for other facts."""
 
 
+class AgentJobKeyUnavailableError(AgentJobError):
+    """Raised when encrypted Agent job state cannot resolve its Runtime key."""
+
+
 class AgentJobLifecycleConflictError(AgentJobError):
     """Raised when a stale owner or invalid state attempts a transition."""
 
@@ -825,7 +829,9 @@ class AgentJobStore:
         try:
             return RuntimePayloadKey.from_bytes(self._key_provider())
         except Exception as exc:
-            raise AgentJobError("AgentJob Runtime payload 密钥不可用。") from exc
+            raise AgentJobKeyUnavailableError(
+                "AgentJob Runtime payload 密钥不可用。"
+            ) from exc
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -1649,6 +1655,7 @@ __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
     "AgentJobConflictError",
     "AgentJobError",
+    "AgentJobKeyUnavailableError",
     "AgentJobLifecycleConflictError",
     "AgentJobLifecycleReceipt",
     "AgentJobPayload",
