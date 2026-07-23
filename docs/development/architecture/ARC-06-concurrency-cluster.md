@@ -11,7 +11,10 @@
   - ARC-06.1a 已在 Runtime Worker Registry v2 交付 incarnation-fenced、TTL 有界、SQLite 原子提交的
     worker slot reservation；并发调度者不能超卖 `max_concurrent_jobs`。见
     [设计与验证](ARC-06-1a-worker-capacity-reservations.md)。
-  - 未完成：全局/用户/workspace/provider/tool 多级容量与持久 worker dispatch 接入。
+  - ARC-06.1b 已让真实 ToolJob dispatch-before-send 原子占位，并在成功、失败、取消和 unknown 收口释放；
+    同一 dispatch 重试不重复占位，跨 Store 中断以 TTL fail-safe 收敛。见
+    [设计与验证](ARC-06-1b-tool-job-capacity-lifecycle.md)。
+  - 未完成：Agent/Browser worker dispatch、全局/用户/workspace/provider 多级容量与等待调度。
 - ARC-06.2 Scheduler：priority、deadline、fair queue、dependency DAG、affinity。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
 - ARC-06.4 Backpressure：producer pause、bounded queue、drop/coalesce policy、overload response。

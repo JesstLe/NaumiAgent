@@ -185,6 +185,16 @@ async def test_capacity_reservations_are_atomic_bounded_and_releasable(tmp_path:
     snapshot = await store.capacity_snapshot(worker_id=contract.worker_id, assessed_at=T3)
     assert snapshot is not None
     assert (snapshot.maximum, snapshot.reserved, snapshot.available) == (2, 2, 0)
+    replayed = await WorkerRegistryStore(db_path).reserve_capacity(
+        reservation_id=admitted[0].reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id=admitted[0].job_id,
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+    assert replayed == admitted[0]
 
     released = await store.release_capacity(
         reservation_id=admitted[0].reservation_id,
@@ -243,6 +253,16 @@ async def test_capacity_expiry_and_worker_takeover_fail_closed(tmp_path: Path) -
             reason_code="late_release",
             released_at=T4,
         )
+    expired_cleanup = await store.release_capacity(
+        reservation_id=reservation.reservation_id,
+        worker_id=first.worker_id,
+        instance_id=first.instance_id,
+        epoch=first.epoch,
+        reason_code="tool_job_finished",
+        released_at=T4,
+        accept_terminal=True,
+    )
+    assert expired_cleanup.state is WorkerCapacityReservationState.EXPIRED
 
     active = await store.reserve_capacity(
         reservation_id="reservation-fenced",
@@ -263,6 +283,16 @@ async def test_capacity_expiry_and_worker_takeover_fail_closed(tmp_path: Path) -
             reason_code="stale_release",
             released_at=T4,
         )
+    fenced_cleanup = await store.release_capacity(
+        reservation_id=active.reservation_id,
+        worker_id=first.worker_id,
+        instance_id=first.instance_id,
+        epoch=first.epoch,
+        reason_code="tool_job_finished",
+        released_at=T4,
+        accept_terminal=True,
+    )
+    assert fenced_cleanup.state is WorkerCapacityReservationState.FENCED
 
 
 @pytest.mark.asyncio

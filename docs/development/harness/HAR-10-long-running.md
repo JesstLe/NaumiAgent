@@ -89,7 +89,11 @@
   - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
     基于同一健康快照超卖最后槽位的问题；见
     [设计](../architecture/ARC-06-1a-worker-capacity-reservations.md)。
-  - 未完成：Agent/Browser dispatch 接入、workspace 锁、能力路由、亲和/反亲和、公平队列和隔离。
+  - ARC-06.1b 已让生产 ToolJob dispatch/terminal lifecycle 消费该 authority，验证容量耗尽、幂等重试、
+    unknown recovery 与终态归还；见
+    [设计](../architecture/ARC-06-1b-tool-job-capacity-lifecycle.md)。
+  - 未完成：Agent/Browser dispatch 接入、capacity waiting queue、workspace 锁、能力路由、亲和/反亲和、
+    公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
     pytest/ruff/tox/nox 及主流语言测试入口 fail closed；见
