@@ -154,7 +154,7 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
 
 ### 尚未完成
 
-- HAR-07.4b：ARC-03.3a 与 HAR-07.4b1 已补齐 additive informational 序号安全、空闲 Bridge
-  重启和精确 session resume；ARC-02.5 cursor/Event Store、活动运行恢复和 revision/gap 自动补发
-  仍未实现，不能把空闲进程重连描述为完整断线恢复。
+- HAR-07.4b：ARC-03.3a、HAR-07.4b1 与 ARC-02.5a 已补齐 additive informational 序号安全、
+  空闲 Bridge 重启、精确 session resume，以及两类安全回执的稳定持久 cursor；客户端 ACK、
+  cursor resend、活动运行恢复和 revision/gap 自动补发仍未完成，不能把当前状态描述为完整断线恢复。
 - HAR-07.5c+：完成卡入口与跨平台复制回执；`e/r` 刷新和 `v` Evidence 焦点已完成。

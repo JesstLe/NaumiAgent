@@ -16,4 +16,6 @@
 ARC-01.4c1-4c3 已交付由 Composition Root 构造的首个 `RuntimeServices` 切片、共享 terminal runtime lifecycle
 factory 与 New UI/TUI adapter 迁移；其余 Service 与全局关闭注册表仍未完成，因此 ARC-02 退出门尚未满足。
 ARC-03.3a 已交付显式 registry 兼容 ledger 和未知 informational 事件的 sequence-safe、payload-free
-忽略路径，为 HAR-07.4b reconnect 提供最小前置；cursor/Event Store 与未知关键事件局部恢复仍未完成。
+忽略路径，为 HAR-07.4b reconnect 提供最小前置。ARC-02.5a 已交付两类安全回执的持久 Event
+Journal 与稳定 session cursor；客户端 ACK、cursor resend、gap/snapshot 和未知关键事件局部恢复
+仍未完成。

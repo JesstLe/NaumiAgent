@@ -802,6 +802,7 @@ class AgentEngine:
         self.workspace_root = paths.workspace_root
         self.workspace_file_index = WorkspaceFileIndex(paths.workspace_root)
         self._runtime_data_dir = paths.runtime_data_dir
+        self.terminal_event_store = resources.terminal_event_store
         self.tool_output_archive = ToolOutputArchive(
             paths.runtime_data_dir / "tool-outputs"
         )

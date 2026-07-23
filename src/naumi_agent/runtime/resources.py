@@ -15,6 +15,7 @@ from naumi_agent.harness.trust import HarnessTrustStore
 from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.runs.store import ChatRunStore
+from naumi_agent.runtime.terminal_events import TerminalEventJournalStore
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -42,6 +43,10 @@ _RESOURCE_CONTRACTS: dict[str, tuple[type[object], str]] = {
     "chat_run_store": (
         ChatRunStore,
         "chat_run_store 必须是 ChatRunStore 实例。",
+    ),
+    "terminal_event_store": (
+        TerminalEventJournalStore,
+        "terminal_event_store 必须是 TerminalEventJournalStore 实例。",
     ),
     "evolution_candidate_store": (
         EvolutionCandidateStore,
@@ -79,6 +84,7 @@ class RuntimeResources:
     """Current complete set of externally owned runtime resources."""
 
     chat_run_store: ChatRunStore
+    terminal_event_store: TerminalEventJournalStore
     worker_registry_store: WorkerRegistryStore
     execution_grant_store: ExecutionGrantStore
     run_delegation_grant_store: RunDelegationGrantStore
@@ -106,6 +112,7 @@ class RuntimeResourceOverrides:
     """Optional resource instances; None alone requests a default resource."""
 
     chat_run_store: ChatRunStore | None = None
+    terminal_event_store: TerminalEventJournalStore | None = None
     worker_registry_store: WorkerRegistryStore | None = None
     execution_grant_store: ExecutionGrantStore | None = None
     run_delegation_grant_store: RunDelegationGrantStore | None = None

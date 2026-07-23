@@ -34,6 +34,7 @@ from naumi_agent.runtime.composition import (
 from naumi_agent.runtime.dependencies import RuntimePortOverrides
 from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.runtime.resources import RuntimeResourceOverrides, RuntimeResources
+from naumi_agent.runtime.terminal_events import TerminalEventJournalStore
 from naumi_agent.safety.permissions import PermissionChecker, PermissionMode
 from naumi_agent.streaming.sinks import NullEventSink
 from naumi_agent.tasks.store import TaskStore
@@ -52,6 +53,11 @@ class _FalseyHarnessStore(HarnessStore):
 
 
 class _FalseyChatRunStore(ChatRunStore):
+    def __bool__(self) -> bool:
+        return False
+
+
+class _FalseyTerminalEventStore(TerminalEventJournalStore):
     def __bool__(self) -> bool:
         return False
 
@@ -125,6 +131,7 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     assert paths.session_db_path == (tmp_path / ".naumi" / "sessions.db").resolve()
     assert paths.runtime_data_dir == (tmp_path / ".naumi").resolve()
     assert paths.chat_run_db_path == paths.runtime_data_dir / "chat-runs.db"
+    assert paths.terminal_event_db_path == paths.runtime_data_dir / "terminal-events.db"
     assert paths.worker_registry_db_path == paths.runtime_data_dir / "worker-registry.db"
     assert paths.execution_grant_db_path == paths.runtime_data_dir / "execution-grants.db"
     assert paths.run_delegation_grant_db_path == (
@@ -160,6 +167,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "session_db_path": absolute / "data" / "sessions.db",
         "runtime_data_dir": absolute / "data",
         "chat_run_db_path": absolute / "data" / "chat-runs.db",
+        "terminal_event_db_path": absolute / "data" / "terminal-events.db",
         "worker_registry_db_path": absolute / "data" / "worker-registry.db",
         "execution_grant_db_path": absolute / "data" / "execution-grants.db",
         "run_delegation_grant_db_path": (
@@ -196,6 +204,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
             **{
                 **values,
                 "chat_run_db_path": absolute / "outside" / "chat-runs.db",
+            }
+        )
+    with pytest.raises(ValueError, match="terminal_event_db_path 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "terminal_event_db_path": absolute / "outside" / "events.db",
             }
         )
     with pytest.raises(ValueError, match="worker_registry_db_path 必须位于"):
@@ -266,6 +281,10 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     trust_store = HarnessTrustStore(tmp_path / "custom-trust.db")
     evolution_store = EvolutionCandidateStore(tmp_path / "custom-evolution.db")
     chat_run_store = _FalseyChatRunStore(tmp_path / "custom-chat-runs.db")
+    terminal_event_store = _FalseyTerminalEventStore(
+        tmp_path / "custom-terminal-events.db",
+        workspace_root=tmp_path,
+    )
     worker_registry_store = _FalseyWorkerRegistryStore(tmp_path / "custom-workers.db")
     execution_grant_store = _FalseyExecutionGrantStore(tmp_path / "custom-grants.db")
     run_delegation_grant_store = _FalseyRunDelegationGrantStore(
@@ -284,6 +303,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
         paths,
         overrides=RuntimeResourceOverrides(
             chat_run_store=chat_run_store,
+            terminal_event_store=terminal_event_store,
             worker_registry_store=worker_registry_store,
             execution_grant_store=execution_grant_store,
             run_delegation_grant_store=run_delegation_grant_store,
@@ -301,6 +321,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
 
     assert defaults.harness_store.db_path == paths.harness_db_path
     assert defaults.chat_run_store.db_path == paths.chat_run_db_path
+    assert defaults.terminal_event_store.db_path == paths.terminal_event_db_path
     assert defaults.worker_registry_store.db_path == paths.worker_registry_db_path
     assert defaults.execution_grant_store.db_path == paths.execution_grant_db_path
     assert defaults.run_delegation_grant_store.db_path == (
@@ -316,6 +337,7 @@ def test_build_runtime_resources_selects_paths_and_preserves_overrides(
     assert defaults.workbench_store.db_path == paths.session_db_path
     assert overridden.evolution_candidate_store is evolution_store
     assert overridden.chat_run_store is chat_run_store
+    assert overridden.terminal_event_store is terminal_event_store
     assert overridden.worker_registry_store is worker_registry_store
     assert overridden.execution_grant_store is execution_grant_store
     assert overridden.run_delegation_grant_store is run_delegation_grant_store
@@ -365,10 +387,36 @@ def test_invalid_resource_override_fails_before_default_constructor(
     harness_store.assert_not_called()
 
 
+def test_terminal_event_override_rejects_cross_workspace_scope_before_defaults(
+    tmp_path: Path,
+) -> None:
+    paths = build_runtime_paths(_config(tmp_path))
+    mismatched = TerminalEventJournalStore(
+        tmp_path / "terminal-events.db",
+        workspace_root=tmp_path / "other-workspace",
+    )
+    with (
+        patch("naumi_agent.runtime.composition.ChatRunStore") as chat_run_store,
+        pytest.raises(ValueError, match="workspace_root 必须与 RuntimePaths 一致"),
+    ):
+        build_runtime_resources(
+            paths,
+            overrides=RuntimeResourceOverrides(
+                terminal_event_store=mismatched,
+            ),
+        )
+
+    chat_run_store.assert_not_called()
+
+
 def test_runtime_resources_reject_incomplete_bundle(tmp_path: Path) -> None:
     with pytest.raises(TypeError, match="harness_store 必须是"):
         RuntimeResources(
             chat_run_store=ChatRunStore(tmp_path / "chat-runs.db"),
+            terminal_event_store=TerminalEventJournalStore(
+                tmp_path / "terminal-events.db",
+                workspace_root=tmp_path,
+            ),
             worker_registry_store=WorkerRegistryStore(tmp_path / "workers.db"),
             execution_grant_store=ExecutionGrantStore(tmp_path / "grants.db"),
             run_delegation_grant_store=RunDelegationGrantStore(
@@ -397,6 +445,7 @@ def test_runtime_resources_reject_split_task_databases(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="必须共享同一个 SQLite"):
         RuntimeResources(
             chat_run_store=defaults.chat_run_store,
+            terminal_event_store=defaults.terminal_event_store,
             worker_registry_store=defaults.worker_registry_store,
             execution_grant_store=defaults.execution_grant_store,
             run_delegation_grant_store=defaults.run_delegation_grant_store,
