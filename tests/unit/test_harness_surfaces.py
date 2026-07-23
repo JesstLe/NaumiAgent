@@ -185,6 +185,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         sandbox_retry_detail_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retry_detail"
         )
+        sandbox_retry_retention_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_retry_retention_preview"
+        )
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -220,6 +223,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert sandbox_retry_detail_tool is not None
         assert sandbox_retry_detail_tool.metadata.read_only
         assert sandbox_retry_detail_tool.metadata.concurrency_safe
+        assert sandbox_retry_retention_tool is not None
+        assert sandbox_retry_retention_tool.metadata.read_only
+        assert sandbox_retry_retention_tool.metadata.concurrency_safe
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -514,6 +520,35 @@ async def test_harness_sandbox_retries_slash_uses_read_only_catalog_tool(
         assert "状态过滤：open" in rendered
         assert "没有符合条件" in rendered
         assert engine.tool_registry.get("harness_eval_sandbox_retries") is not None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_retry_retention_preview_slash_is_read_only(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox retry-retention-preview "
+                    "--retention-days 30 --limit 5 --scan-limit 10"
+                ),
+            )
+        )
+
+        assert "Sandbox retry retention 预览" in rendered
+        assert "不会生成 prune receipt" in rendered
+        assert "当前没有超过保留期" in rendered
+        assert (
+            engine.tool_registry.get(
+                "harness_eval_sandbox_retry_retention_preview"
+            )
+            is not None
+        )
     finally:
         await engine.shutdown()
 

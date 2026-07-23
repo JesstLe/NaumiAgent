@@ -172,6 +172,10 @@
   retry/cancel receipt、Request Manifest、ticket fence 与连续 H5a，并投影 tamper-evident snapshot、
   retention 保护引用和 receipt-bound resume 命令；共享 Tool/Slash 同时服务 New UI/TUI。
   详见 `HAR-08-4o3g-sandbox-retry-dispatch-detail.md`。
+- HAR-08.4o3h Sandbox Retry Retention Preview：已实现。显式 SQLite 读事务只选择超过 cutoff 的
+  已对账终态 cohort，以 oldest-first、limit/scan limit 硬边界生成 tamper-evident preview；source
+  ticket/current ticket/H5a 均进入完整保护引用，Tool/Slash 同步服务 New UI/TUI，不签发 prune receipt。
+  详见 `HAR-08-4o3h-sandbox-retry-retention-preview.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -181,6 +185,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨主机 Batch admission、retry dispatch detail/retention，以及
+- HAR-08.4 仍为 partial：跨主机 Batch admission、retry prune receipt/执行，以及
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
   implemented。

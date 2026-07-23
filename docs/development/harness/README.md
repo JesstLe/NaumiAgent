@@ -65,8 +65,9 @@ Permission receipt 精确绑定既有 dispatch/retry receipt，通过共享 Tool
 不重新消费 cancel receipt；HAR-08.4o3f 又让 Bridge/TUI 启动时复用 open catalog 建立 20 项
 tamper-evident 人工恢复队列，New UI/TUI 只展示精确 resume 命令，不自动 claim 或重放。
 HAR-08.4o3g 进一步提供精确 dispatch 详情、连续 H5a、ticket fence、tamper-evident snapshot 与
-retention 保护引用，并通过共享 Tool/Slash 同步呈现在 New UI/TUI。retention preview/prune receipt
-和三平台隔离 CI 仍未完成。
+retention 保护引用，并通过共享 Tool/Slash 同步呈现在 New UI/TUI；HAR-08.4o3h 又以显式只读事务、
+oldest-first 硬边界和完整 source/current ticket/H5a 保护集合交付 retention preview。prune receipt/
+执行和三平台隔离 CI 仍未完成。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

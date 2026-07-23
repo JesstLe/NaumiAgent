@@ -4013,6 +4013,9 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "[--limit 1..100] [--cursor <opaque>] [--assessed-at <ISO8601>]\n"
         "      /harness eval sandbox retry-detail <retry-action> "
         "--dispatch <dispatch> [--assessed-at <ISO8601>]\n"
+        "      /harness eval sandbox retry-retention-preview "
+        "[--retention-days 1..3650] [--limit 1..20] "
+        "[--scan-limit 1..100] [--assessed-at <ISO8601>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4210,6 +4213,68 @@ async def _run_harness(engine: Any, arg: str) -> None:
             ToolCall(
                 id=f"manual-harness-sandbox-retries-{uuid.uuid4().hex}",
                 name="harness_eval_sandbox_retries",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 3
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "retry-retention-preview"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        parsed: dict[str, str] = {}
+        index = 3
+        valid = True
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option
+                not in {
+                    "--retention-days",
+                    "--limit",
+                    "--scan-limit",
+                    "--assessed-at",
+                }
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        try:
+            retention_days = int(parsed.get("--retention-days", "30"))
+            limit = int(parsed.get("--limit", "20"))
+            scan_limit = int(parsed.get("--scan-limit", "100"))
+        except ValueError:
+            valid = False
+            retention_days = limit = scan_limit = 0
+        if (
+            not valid
+            or not 1 <= retention_days <= 3_650
+            or not 1 <= limit <= 20
+            or not limit <= scan_limit <= 100
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        arguments: dict[str, object] = {
+            "retention_days": retention_days,
+            "limit": limit,
+            "scan_limit": scan_limit,
+        }
+        if "--assessed-at" in parsed:
+            arguments["assessed_at"] = parsed["--assessed-at"]
+        result = await engine.execute_tool(
+            ToolCall(
+                id=(
+                    "manual-harness-sandbox-retry-retention-preview-"
+                    f"{uuid.uuid4().hex}"
+                ),
+                name="harness_eval_sandbox_retry_retention_preview",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
         )

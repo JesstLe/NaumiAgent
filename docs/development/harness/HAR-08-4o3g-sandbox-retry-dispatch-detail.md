@@ -32,7 +32,8 @@ New UI 将命令保留在共享 Slash 通道并渲染 Markdown；Textual TUI 复
 
 ## 3. 公开投影
 
-`HarnessSandboxRetryDetailSnapshot` 是严格、冻结、拒绝额外字段的 schema v1 模型。它公开：
+`HarnessSandboxRetryDetailSnapshot` 是严格、冻结、拒绝额外字段的 schema v2 模型。v2 在 v1
+基础上补入 source ticket digest 与保护引用。它公开：
 
 - retry action、dispatch、retry/cancel receipt 的 ID 与 digest；
 - dispatch state/epoch、时间与恢复分类；
@@ -61,9 +62,9 @@ identity fence、连续 H5a、保护引用集合与 snapshot digest，篡改会 
 
 ## 5. Retention 保护集合
 
-详情显式列出 dispatch、retry receipt、cancel receipt、Request Manifest、当前 ticket（若有）和每个
-连续 H5a sample result。本切片不定义保留期限、不计算 prune candidate、不删除记录，也不签发
-prune receipt。
+详情显式列出 dispatch、retry receipt、cancel receipt、Request Manifest、source ticket、
+当前 retry ticket（若有）和每个连续 H5a sample result。HAR-08.4o3h 已消费该集合
+生成只读 retention preview；详情本身仍不定义保留期限、不删除记录，也不签发 prune receipt。
 
 ## 6. 验收证据
 
@@ -76,6 +77,5 @@ Slash 与 New UI 共享 submit 通道均复用同一权威。
 
 ## 7. 后续依赖
 
-下一最小切片是 HAR-08.4o3h retention preview：读取本详情的保护引用，生成有界、只读、可解释的
-候选清单。只有 preview 的 workspace/fence/digest/并发语义被验证后，才设计显式确认的 prune
-receipt 与清理执行；不能直接从详情增加删除按钮。
+HAR-08.4o3h 已读取本详情的完整保护引用并生成有界、只读、可解释的候选清单。下一最小切片
+HAR-08.4o3i 是显式 prune receipt authority；清理执行仍必须独立交付，不能直接从详情增加删除按钮。

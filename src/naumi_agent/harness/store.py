@@ -478,8 +478,27 @@ class HarnessSandboxRetryDetailRecord:
     retry_receipt: HarnessSandboxAdmissionRetryReceipt
     cancel_receipt: HarnessSandboxAdmissionCancelReceipt
     request_manifest: HarnessStoredSandboxEvalRequest
+    source_ticket: HarnessSandboxAdmissionTicket
     ticket: HarnessSandboxAdmissionTicket | None
     samples: tuple[HarnessStoredEvalResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxRetryRetentionPage:
+    """Bounded read-only terminal dispatch cohort eligible by age."""
+
+    workspace_root: str
+    assessed_at: str
+    cutoff_at: str
+    retention_days: int
+    limit: int
+    scan_limit: int
+    total_dispatch_count: int
+    open_dispatch_count: int
+    terminal_dispatch_count: int
+    eligible_count: int
+    scanned_count: int
+    records: tuple[HarnessSandboxRetryDetailRecord, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -6494,6 +6513,138 @@ class HarnessStore:
                 "Sandbox retry detail 损坏或无法读取。"
             ) from exc
 
+    async def preview_sandbox_retry_retention(
+        self,
+        *,
+        workspace_root: str | Path,
+        assessed_at: str | None = None,
+        retention_days: int = 30,
+        limit: int = 20,
+        scan_limit: int = 100,
+    ) -> HarnessSandboxRetryRetentionPage:
+        """Preview old terminal dispatch cohorts without granting prune authority."""
+        workspace = _canonical_workspace(workspace_root)
+        now = (
+            _normalize_utc_timestamp(assessed_at, field="assessed_at")
+            if assessed_at is not None
+            else datetime.now(UTC).isoformat()
+        )
+        if (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or not 1 <= retention_days <= 3_650
+        ):
+            raise ValueError("Sandbox retry retention_days 必须在 1 到 3650 之间。")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+            raise ValueError("Sandbox retry retention preview limit 必须在 1 到 20 之间。")
+        if (
+            isinstance(scan_limit, bool)
+            or not isinstance(scan_limit, int)
+            or not 1 <= scan_limit <= 100
+            or scan_limit < limit
+        ):
+            raise ValueError(
+                "Sandbox retry retention scan_limit 必须在 limit 到 100 之间。"
+            )
+        cutoff = (
+            datetime.fromisoformat(now) - timedelta(days=retention_days)
+        ).isoformat()
+        empty = HarnessSandboxRetryRetentionPage(
+            workspace_root=workspace,
+            assessed_at=now,
+            cutoff_at=cutoff,
+            retention_days=retention_days,
+            limit=limit,
+            scan_limit=scan_limit,
+            total_dispatch_count=0,
+            open_dispatch_count=0,
+            terminal_dispatch_count=0,
+            eligible_count=0,
+            scanned_count=0,
+            records=(),
+        )
+        if not self._db_path.is_file():
+            return empty
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN DEFERRED")
+                try:
+                    counts_cursor = await db.execute(
+                        """
+                        SELECT
+                            COUNT(*) AS total_count,
+                            COALESCE(SUM(
+                                CASE WHEN state IN ('pending', 'claimed')
+                                THEN 1 ELSE 0 END
+                            ), 0) AS open_count,
+                            COALESCE(SUM(
+                                CASE WHEN state IN (
+                                    'completed', 'failed', 'cancelled'
+                                ) THEN 1 ELSE 0 END
+                            ), 0) AS terminal_count,
+                            COALESCE(SUM(
+                                CASE WHEN state IN (
+                                    'completed', 'failed', 'cancelled'
+                                ) AND updated_at <= ?
+                                THEN 1 ELSE 0 END
+                            ), 0) AS eligible_count
+                        FROM harness_sandbox_retry_dispatches
+                        WHERE workspace_root = ?
+                        """,
+                        (cutoff, workspace),
+                    )
+                    counts = await counts_cursor.fetchone()
+                    rows_cursor = await db.execute(
+                        """
+                        SELECT * FROM harness_sandbox_retry_dispatches
+                        WHERE workspace_root = ?
+                          AND state IN ('completed', 'failed', 'cancelled')
+                          AND updated_at <= ?
+                        ORDER BY updated_at ASC, retry_action_id ASC
+                        LIMIT ?
+                        """,
+                        (workspace, cutoff, scan_limit),
+                    )
+                    rows = await rows_cursor.fetchall()
+                    scanned_dispatches = tuple(
+                        _sandbox_retry_dispatch_from_row(row)
+                        for row in rows
+                    )
+                    records = await _load_sandbox_retry_detail_records(
+                        db,
+                        workspace_root=workspace,
+                        assessed_at=now,
+                        dispatches=scanned_dispatches,
+                    )
+                    return HarnessSandboxRetryRetentionPage(
+                        workspace_root=workspace,
+                        assessed_at=now,
+                        cutoff_at=cutoff,
+                        retention_days=retention_days,
+                        limit=limit,
+                        scan_limit=scan_limit,
+                        total_dispatch_count=int(counts["total_count"]),
+                        open_dispatch_count=int(counts["open_count"]),
+                        terminal_dispatch_count=int(counts["terminal_count"]),
+                        eligible_count=int(counts["eligible_count"]),
+                        scanned_count=len(records),
+                        records=records,
+                    )
+                finally:
+                    await db.rollback()
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return empty
+            raise HarnessStoreError(
+                "无法读取 Sandbox retry retention preview。"
+            ) from exc
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox retry retention preview 损坏或无法读取。"
+            ) from exc
+
     async def list_sandbox_retry_dispatches(
         self,
         *,
@@ -8310,7 +8461,22 @@ async def _load_sandbox_retry_detail_records(
             _sandbox_eval_request_from_row(row) for row in manifest_rows
         )
     }
-    ticket_ids = tuple(item.ticket_id for item in dispatches if item.ticket_id)
+    ticket_ids = tuple(
+        sorted(
+            {
+                *(
+                    item.ticket_id
+                    for item in dispatches
+                    if item.ticket_id
+                ),
+                *(
+                    receipt.source_ticket_id
+                    for receipt in retries.values()
+                    if receipt.source_ticket_id
+                ),
+            }
+        )
+    )
     ticket_rows = await _select_rows_for_values(
         db,
         table="harness_sandbox_admission_tickets",
@@ -8413,6 +8579,31 @@ async def _load_sandbox_retry_detail_records(
                 "Sandbox retry catalog H5a 不是受限连续前缀。"
             )
         ticket_row = tickets.get(dispatch.ticket_id)
+        source_ticket_row = tickets.get(retry.source_ticket_id)
+        if source_ticket_row is None:
+            raise HarnessStoreError(
+                "Sandbox retry catalog cancel chain 的 source ticket 缺失。"
+            )
+        source_ticket = await _sandbox_admission_ticket_from_row(
+            db,
+            source_ticket_row,
+            now=assessed_at,
+        )
+        if (
+            source_ticket.ticket_id != retry.source_ticket_id
+            or not hmac.compare_digest(
+                source_ticket.authority_key,
+                retry.source_authority_key,
+            )
+            or not hmac.compare_digest(
+                source_ticket.authority_key,
+                request.request_sha256,
+            )
+            or source_ticket.state != "cancelled"
+        ):
+            raise HarnessStoreError(
+                "Sandbox retry catalog cancel chain 的 source ticket 不一致。"
+            )
         ticket_state, lease_expires_at, recovery_status = (
             _sandbox_retry_catalog_ticket_status(
                 dispatch,
@@ -8452,6 +8643,7 @@ async def _load_sandbox_retry_detail_records(
                 retry_receipt=retry,
                 cancel_receipt=cancel,
                 request_manifest=manifest,
+                source_ticket=source_ticket,
                 ticket=ticket,
                 samples=samples,
             )
