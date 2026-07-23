@@ -100,8 +100,10 @@
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
   - ARC-04.5b1 已提供显式 provision 的系统 Runtime payload key 与 bounded AES-256-GCM envelope；
-    durable Agent Job Store 可复用 request digest 作为 AAD，但当前还没有生产消费者。见
-    [设计](../architecture/ARC-04-5b1-runtime-payload-envelope.md)。
+    ARC-04.5b2 已用 request digest AAD 建立 durable Agent Job Store、pre-start takeover 与 running
+    recovery fence，但当前 embedded Agent 还没有生产消费。见
+    [Envelope](../architecture/ARC-04-5b1-runtime-payload-envelope.md) 与
+    [Agent Job authority](../architecture/ARC-04-5b2-durable-agent-job-authority.md)。
   - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
     基于同一健康快照超卖最后槽位的问题；见
     [设计](../architecture/ARC-06-1a-worker-capacity-reservations.md)。

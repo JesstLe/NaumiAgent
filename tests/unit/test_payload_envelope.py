@@ -129,7 +129,7 @@ def test_envelope_rejects_structure_digest_nonce_and_size_abuse() -> None:
         )
     with pytest.raises(ValueError, match="plaintext 长度"):
         seal_runtime_payload(
-            b"x" * (16 * 1024**2 + 1),
+            b"x" * (20 * 1024**2 + 1),
             aad=b"request",
             key=_key(),
         )

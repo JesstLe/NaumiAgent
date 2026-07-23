@@ -15,6 +15,7 @@ from naumi_agent.claude_source.refresh import (
     CLAUDE_SOURCE_STORE_SCHEMA_VERSION,
     resolve_claude_source_db_path,
 )
+from naumi_agent.daemons.agent_jobs import AGENT_JOB_SCHEMA_VERSION
 from naumi_agent.daemons.execution_grants import EXECUTION_GRANT_SCHEMA_VERSION
 from naumi_agent.daemons.permission_decisions import PERMISSION_DECISION_SCHEMA_VERSION
 from naumi_agent.daemons.tool_jobs import TOOL_JOB_SCHEMA_VERSION
@@ -222,6 +223,20 @@ def build_store_catalog(config: AppConfig) -> tuple[StoreDefinition, ...]:
             DataSensitivity.RESTRICTED,
             RetentionPolicy.AUDIT_LONG_TERM,
             "不可变 ToolJob admission、单调生命周期与防篡改终态回执",
+        ),
+        _definition(
+            "runtime.agent_jobs",
+            runtime_dir / "agent-jobs.db",
+            StorageKind.SQLITE,
+            (
+                "runtime.agent_job_authority",
+                "runtime.agent_job_lifecycle_authority",
+            ),
+            VersionStrategy.SQLITE_USER_VERSION,
+            AGENT_JOB_SCHEMA_VERSION,
+            DataSensitivity.RESTRICTED,
+            RetentionPolicy.AUDIT_LONG_TERM,
+            "加密 Agent payload、claim epoch、单调生命周期与恢复收口",
         ),
         _definition(
             "runtime.goals",

@@ -36,9 +36,10 @@
   - ARC-04.5a 已为 embedded Agent 签发真实 request/result contract 并在 New UI/TUI 投影低敏摘要；
     但合同仍未持久化，不能由 scheduler 在重启后恢复。见
     [设计与验证](ARC-04-5a-agent-worker-contract.md)。
-  - ARC-04.5b1 已提供 OS credential-backed Runtime payload key 与 authenticated envelope，但尚无
-    Agent Job Store 消费者；因此 scheduler 仍不能恢复派发。见
-    [设计与验证](ARC-04-5b1-runtime-payload-envelope.md)。
+  - ARC-04.5b1 已提供 OS credential-backed Runtime payload key 与 authenticated envelope；
+    ARC-04.5b2 已建立 durable Agent Job Store、FIFO claim、epoch/lease fencing、pre-start takeover
+    与 running recovery fence。embedded Agent 和自动 scheduler 尚未消费。见
+    [设计与验证](ARC-04-5b2-durable-agent-job-authority.md)。
   - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
     公平、dependency DAG、affinity、cursor 与 starvation 指标。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
