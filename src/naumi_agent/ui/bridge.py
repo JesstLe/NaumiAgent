@@ -605,11 +605,16 @@ class JsonlEngineBridge:
             raise RuntimeError("bridge writer is not bound")
         async with self._writer_lock:
             self._sequence += 1
+            event_type = str(event)
             record = make_envelope(
                 event,
                 payload or {},
                 request_id=request_id,
                 sequence=self._sequence,
+                criticality=self._protocol_event_registry.policy(
+                    "server",
+                    event_type,
+                ).criticality,
             )
             text = encode_jsonl(record)
             self._writer.write(text)
@@ -1072,6 +1077,9 @@ class JsonlEngineBridge:
             "protocol_registry": {
                 "contract_version": self._protocol_event_registry.contract_version,
                 "registry_sha256": self._protocol_event_registry.registry_sha256,
+                "compatible_registry_sha256": list(
+                    self._protocol_event_registry.compatible_registry_sha256
+                ),
                 "client_event_count": len(self._protocol_event_registry.client),
                 "server_event_count": len(self._protocol_event_registry.server),
             },

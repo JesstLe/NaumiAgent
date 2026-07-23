@@ -854,6 +854,10 @@ async def test_bridge_assigns_sequence_in_actual_concurrent_write_order() -> Non
     records = _records(writer)
     assert [record["seq"] for record in records] == [1, 2]
     assert [record["payload"]["source"] for record in records] == ["second", "first"]
+    assert [record["criticality"] for record in records] == [
+        "informational",
+        "informational",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1012,6 +1016,10 @@ def test_protocol_contract_matches_python_enums() -> None:
 
     assert contract["version"] == 1
     assert contract["transport"] == "jsonl"
+    assert contract["compatibility"] == {
+        "previous_registry_sha256": [],
+        "unknown_informational_events": "ignore_and_audit",
+    }
     assert contract["client_events"] == [str(event) for event in ClientEventType]
     assert contract["server_events"] == [str(event) for event in ServerEventType]
     assert contract["negotiation"] == {
@@ -1019,6 +1027,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "maximum_version": 1,
         "capabilities": [
             "evolution_evaluation_lane",
+            "doctor_export",
             "goal_snapshot",
             "heartbeat",
             "session_list",
@@ -1031,6 +1040,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "required_capabilities": ["typed_ui_messages"],
     }
     assert contract["event_capabilities"] == {
+        "doctor_export": {
+            "client_events": ["doctor/export"],
+            "server_events": ["doctor/export/result"],
+        },
         "evolution_evaluation_lane": {
             "client_events": ["evolution/evaluation-lane/request"],
             "server_events": ["evolution/evaluation-lane"],
@@ -3182,6 +3195,9 @@ def test_bridge_status_payload_exposes_authoritative_product_identity() -> None:
     assert payload["protocol_registry"]["client_event_count"] == len(ClientEventType)
     assert payload["protocol_registry"]["server_event_count"] == len(ServerEventType)
     assert len(payload["protocol_registry"]["registry_sha256"]) == 64
+    assert payload["protocol_registry"]["compatible_registry_sha256"] == [
+        payload["protocol_registry"]["registry_sha256"]
+    ]
     assert payload["evolution_patch_recovery"]["total"] == 0
 
 

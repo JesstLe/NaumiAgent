@@ -13,11 +13,13 @@ import {
   normalizeServerRecord,
   parseArgs,
   parseBridgeCommandJson,
+  PROTOCOL_COMPATIBLE_REGISTRY_SHA256,
   PROTOCOL_CONTRACT,
   PROTOCOL_REGISTRY_SHA256,
   PROTOCOL_VERSION,
   requiredEventCapability,
   splitShellLike,
+  validateCompatibility,
   validateEventRegistry,
   validateEventCapabilities,
 } from "../src/protocol.js";
@@ -604,6 +606,27 @@ test("event governance registry exactly covers all published events", () => {
   assert.equal(eventPolicy("server", "permission/request").owner, "safety");
   assert.equal(eventPolicy("server", "run/completed").criticality, "terminal");
   assert.equal(eventPolicy("client", "ping").persistence, "never");
+});
+
+test("compatibility ledger accepts only explicit prior registry digests", () => {
+  assert.equal(validateCompatibility(structuredClone(PROTOCOL_CONTRACT)), true);
+  assert.deepEqual(PROTOCOL_COMPATIBLE_REGISTRY_SHA256, [
+    PROTOCOL_REGISTRY_SHA256,
+  ]);
+
+  const prior = structuredClone(PROTOCOL_CONTRACT);
+  prior.compatibility.previous_registry_sha256 = ["a".repeat(64)];
+  assert.equal(validateCompatibility(prior), true);
+
+  const duplicate = structuredClone(PROTOCOL_CONTRACT);
+  duplicate.compatibility.previous_registry_sha256 = [
+    PROTOCOL_REGISTRY_SHA256,
+  ];
+  assert.throws(() => validateCompatibility(duplicate), /不得重复当前摘要/);
+
+  const unsafePolicy = structuredClone(PROTOCOL_CONTRACT);
+  unsafePolicy.compatibility.unknown_informational_events = "render_payload";
+  assert.throws(() => validateCompatibility(unsafePolicy), /策略无效/);
 });
 
 test("event capability registry governs typed feature events", () => {
@@ -2150,7 +2173,7 @@ test("server sequence guard fails closed on missing and invalid negotiated seque
 test("normalizeServerRecord rejects invalid bridge records", () => {
   assert.throws(
     () => normalizeServerRecord({ type: "surprise", payload: {} }),
-    /未知 Bridge 事件/,
+    /未知.*Bridge 事件/,
   );
   assert.throws(
     () => normalizeServerRecord({ type: "ready", version: 99, payload: {} }),
@@ -2170,6 +2193,48 @@ test("normalizeServerRecord rejects invalid bridge records", () => {
       payload: { schema_version: 2, receipt_id: "r", run_id: "run", outcome: "completed" },
     }),
     /schema_version/,
+  );
+});
+
+test("unknown informational records consume only safe envelope metadata", () => {
+  const normalized = normalizeServerRecord({
+    type: "future/progress",
+    version: 1,
+    seq: 7,
+    request_id: "future-1",
+    criticality: "informational",
+    top_level_secret: "must-also-drop",
+    payload: {
+      secret: "must-not-enter-state-or-debug-record",
+      nested: { private: true },
+    },
+  });
+
+  assert.equal(normalized.type, "future/progress");
+  assert.equal(normalized.seq, 7);
+  assert.equal(normalized.request_id, "future-1");
+  assert.equal(normalized.criticality, "informational");
+  assert.equal(normalized.unknown_informational, true);
+  assert.deepEqual(normalized.payload, {});
+  assert.equal(Object.hasOwn(normalized, "top_level_secret"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "future/completed",
+      version: 1,
+      seq: 8,
+      criticality: "terminal",
+      payload: {},
+    }),
+    /未知关键 Bridge 事件/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "ready",
+      version: 1,
+      criticality: "informational",
+      payload: {},
+    }),
+    /criticality 与发布合同不一致/,
   );
 });
 
@@ -2221,6 +2286,7 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
+        compatible_registry_sha256: [PROTOCOL_REGISTRY_SHA256],
         client_event_count: PROTOCOL_CONTRACT.client_events.length,
         server_event_count: PROTOCOL_CONTRACT.server_events.length,
       },
@@ -2304,6 +2370,8 @@ test("normalizes authoritative terminal welcome identity fields", () => {
       protocol_registry: {
         contract_version: 1,
         registry_sha256: PROTOCOL_REGISTRY_SHA256,
+        compatible_registry_sha256: [PROTOCOL_REGISTRY_SHA256],
+        compatibility: "exact",
         client_event_count: PROTOCOL_CONTRACT.client_events.length,
         server_event_count: PROTOCOL_CONTRACT.server_events.length,
       },
@@ -2311,6 +2379,28 @@ test("normalizes authoritative terminal welcome identity fields", () => {
   );
   assert.equal(changed.payload.status.model, "anthropic/claude-opus-4-6");
   assert.deepEqual(partial.payload, { model: "openai/gpt-5.4-mini" });
+
+  const futureDigest = "f".repeat(64);
+  const additive = normalizeServerRecord({
+    type: "runtime/status",
+    version: 1,
+    payload: {
+      protocol_registry: {
+        contract_version: 1,
+        registry_sha256: futureDigest,
+        compatible_registry_sha256: [
+          futureDigest,
+          PROTOCOL_REGISTRY_SHA256,
+        ],
+        client_event_count: PROTOCOL_CONTRACT.client_events.length,
+        server_event_count: PROTOCOL_CONTRACT.server_events.length + 1,
+      },
+    },
+  });
+  assert.equal(
+    additive.payload.protocol_registry.compatibility,
+    "attested_additive",
+  );
 
   assert.throws(
     () => normalizeServerRecord({

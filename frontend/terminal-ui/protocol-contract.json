@@ -1,6 +1,10 @@
 {
   "version": 1,
   "transport": "jsonl",
+  "compatibility": {
+    "previous_registry_sha256": [],
+    "unknown_informational_events": "ignore_and_audit"
+  },
   "negotiation": {
     "minimum_version": 1,
     "maximum_version": 1,

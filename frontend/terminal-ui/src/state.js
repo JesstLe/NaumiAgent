@@ -4972,8 +4972,13 @@ function showFoldList(state) {
 function showDebugInfo(state) {
   const trace = state.debugTrace ?? {};
   const registry = state.status?.protocol_registry;
+  const registryCompatibility = registry?.compatibility === "attested_additive"
+    ? "兼容新增"
+    : "精确匹配";
   const registrySummary = registry
-    ? `v${registry.contract_version} · ${String(registry.registry_sha256).slice(0, 12)} · ${registry.client_event_count}/${registry.server_event_count}`
+    ? `v${registry.contract_version} · ${String(registry.registry_sha256).slice(0, 12)}`
+      + ` · ${registry.client_event_count}/${registry.server_event_count}`
+      + ` · ${registryCompatibility}`
     : "-";
   const lines = [
     `前端日志: ${state.frontendDebugLogPath || "未启用"}`,

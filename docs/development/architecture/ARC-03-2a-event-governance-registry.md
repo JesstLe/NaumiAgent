@@ -59,7 +59,9 @@
 2. 每个策略恰好六个字段；
 3. 枚举、敏感路径、重复项和 redaction 关系合法；
 4. `eventPolicy(direction, type)` 只返回注册事件的策略副本；
-5. Node 对同一 registry 计算确定性 SHA-256，并严格比较 Bridge 发布的版本、摘要与双向事件数量；仅校验摘要格式不算通过。
+5. Node 对同一 registry 计算确定性 SHA-256；默认严格比较 Bridge 发布的版本、摘要与双向事件数量。
+   ARC-03.3a 后续只允许 Bridge 用显式 previous-digest ledger 证明 additive informational 兼容，
+   不能由事件数量或摘要格式猜测兼容。
 
 ## 验收标准
 
@@ -78,7 +80,8 @@
 以下内容不属于 3.2a，仍不得把 ARC-03 标为完成：
 
 - 每事件完整 payload JSON Schema 和跨版本 fixture；
-- required/optional 字段兼容矩阵与未知关键事件处理；
+- required/optional 字段兼容矩阵与未知关键事件处理；未知 informational 事件的 attested additive
+  路径已由 ARC-03.3a 独立完成；
 - sequence、cursor、去重和 gap snapshot 恢复；
 - Python/TypeScript 类型代码生成；
 - 持久化前按字段策略执行 redaction/拒绝并生成审计证据；

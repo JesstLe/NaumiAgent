@@ -25,6 +25,7 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert set(registry.client) == {str(event) for event in ClientEventType}
     assert set(registry.server) == {str(event) for event in ServerEventType}
     assert len(registry.registry_sha256) == 64
+    assert registry.compatible_registry_sha256 == (registry.registry_sha256,)
     assert registry.policy("server", "permission/request").owner == "safety"
     assert registry.policy("server", "run/completed").criticality == "terminal"
     assert registry.policy("client", "ping").persistence == "never"
@@ -81,6 +82,35 @@ def test_registry_query_rejects_unknown_event() -> None:
         registry.policy("server", "future/unknown")
     with pytest.raises(ProtocolRegistryError, match="未知事件方向"):
         registry.policy("sideways", "ping")  # type: ignore[arg-type]
+
+
+def test_registry_accepts_only_explicit_unique_previous_digests(
+    tmp_path: Path,
+) -> None:
+    document = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    previous_digest = "a" * 64
+    document["compatibility"]["previous_registry_sha256"] = [previous_digest]
+    path = tmp_path / "compatible.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    registry = load_protocol_event_registry(path)
+
+    assert registry.compatible_registry_sha256 == (
+        registry.registry_sha256,
+        previous_digest,
+    )
+
+    document["compatibility"]["previous_registry_sha256"] = [
+        registry.registry_sha256,
+    ]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ProtocolRegistryError, match="不得重复当前"):
+        load_protocol_event_registry(path)
+
+    document["compatibility"]["previous_registry_sha256"] = ["not-a-digest"]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(ProtocolRegistryError, match="唯一 SHA-256"):
+        load_protocol_event_registry(path)
 
 
 def test_registry_rejects_unknown_top_level_policy_group(tmp_path: Path) -> None:

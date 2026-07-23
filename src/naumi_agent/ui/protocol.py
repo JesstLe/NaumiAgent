@@ -161,6 +161,7 @@ def make_envelope(
     *,
     request_id: str | None = None,
     sequence: int | None = None,
+    criticality: str | None = None,
 ) -> dict[str, Any]:
     """Build one protocol envelope."""
     record: dict[str, Any] = {
@@ -174,6 +175,8 @@ def make_envelope(
         record["request_id"] = request_id
     if sequence is not None:
         record["seq"] = sequence
+    if criticality is not None:
+        record["criticality"] = criticality
     return record
 
 

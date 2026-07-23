@@ -6,6 +6,10 @@ import EMBEDDED_PROTOCOL_CONTRACT from "../protocol-contract.json" with { type: 
 export const PROTOCOL_CONTRACT = loadProtocolContract();
 export const PROTOCOL_VERSION = Number(PROTOCOL_CONTRACT.version);
 export const PROTOCOL_REGISTRY_SHA256 = protocolRegistryDigest(PROTOCOL_CONTRACT);
+export const PROTOCOL_COMPATIBLE_REGISTRY_SHA256 = Object.freeze([
+  PROTOCOL_REGISTRY_SHA256,
+  ...PROTOCOL_CONTRACT.compatibility.previous_registry_sha256,
+]);
 
 const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
@@ -240,9 +244,45 @@ function loadProtocolContract() {
   if (negotiation.required_capabilities.some((item) => !negotiation.capabilities.includes(item))) {
     throw new Error("protocol-contract.json required_capabilities 必须是 capabilities 的子集");
   }
+  validateCompatibility(contract);
   validateEventRegistry(contract);
   validateEventCapabilities(contract);
   return contract;
+}
+
+export function validateCompatibility(contract) {
+  const compatibility = contract?.compatibility;
+  if (
+    !compatibility
+    || typeof compatibility !== "object"
+    || Array.isArray(compatibility)
+  ) {
+    throw new Error("protocol-contract.json 缺少 compatibility 对象");
+  }
+  if (
+    JSON.stringify(Object.keys(compatibility).sort())
+    !== JSON.stringify(["previous_registry_sha256", "unknown_informational_events"])
+  ) {
+    throw new Error("protocol-contract.json compatibility 字段不完整");
+  }
+  if (compatibility.unknown_informational_events !== "ignore_and_audit") {
+    throw new Error("protocol-contract.json 未知 informational 事件策略无效");
+  }
+  const previous = compatibility.previous_registry_sha256;
+  if (
+    !Array.isArray(previous)
+    || previous.length > 31
+    || previous.some(
+      (digest) => typeof digest !== "string" || !/^[0-9a-f]{64}$/.test(digest),
+    )
+    || new Set(previous).size !== previous.length
+  ) {
+    throw new Error("protocol-contract.json previous_registry_sha256 必须是唯一 SHA-256 数组");
+  }
+  if (previous.includes(protocolRegistryDigest(contract))) {
+    throw new Error("protocol-contract.json previous_registry_sha256 不得重复当前摘要");
+  }
+  return true;
 }
 
 export function validateEventRegistry(contract) {
@@ -495,9 +535,6 @@ export function normalizeServerRecord(record) {
   if (!type) {
     throw new Error("Bridge 事件缺少 type 字段");
   }
-  if (!SERVER_EVENT_TYPES.has(type)) {
-    throw new Error(`未知 Bridge 事件: ${type}`);
-  }
   if (record.version != null && Number(record.version) !== PROTOCOL_VERSION) {
     throw new Error(`Bridge 协议版本不兼容: ${record.version}`);
   }
@@ -505,18 +542,57 @@ export function normalizeServerRecord(record) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error("Bridge payload 必须是对象");
   }
+  const knownEvent = SERVER_EVENT_TYPES.has(type);
+  const declaredCriticality = record.criticality == null
+    ? ""
+    : String(record.criticality);
+  if (!knownEvent) {
+    if (
+      !/^[a-z][a-z0-9]*(?:[./_-][a-z0-9]+)*$/.test(type)
+      || type.length > 128
+    ) {
+      throw new Error("未知 Bridge 事件 type 无效");
+    }
+    if (declaredCriticality !== "informational") {
+      throw new Error(`未知关键 Bridge 事件: ${type}`);
+    }
+  } else if (
+    declaredCriticality
+    && declaredCriticality !== eventPolicy("server", type).criticality
+  ) {
+    throw new Error(`Bridge 事件 criticality 与发布合同不一致: ${type}`);
+  }
   const normalized = {
-    ...record,
+    ...(knownEvent ? record : {}),
     type,
     version: PROTOCOL_VERSION,
-    payload: normalizeServerPayload(type, payload),
+    payload: knownEvent ? normalizeServerPayload(type, payload) : {},
+    ...(knownEvent
+      ? {}
+      : { criticality: "informational", unknown_informational: true }),
   };
-  if (normalized.id != null) normalized.id = String(normalized.id);
-  if (normalized.request_id != null) normalized.request_id = String(normalized.request_id);
-  if (normalized.seq != null) {
-    if (!isValidServerSequence(normalized.seq)) {
+  for (const field of ["id", "request_id"]) {
+    if (record[field] == null) continue;
+    const value = String(record[field]);
+    if (
+      !knownEvent
+      && (
+        value.length > 200
+        || Array.from(value).some((char) => {
+          const codePoint = char.codePointAt(0) ?? 0;
+          return codePoint < 32 || codePoint === 127;
+        })
+      )
+    ) {
+      throw new Error(`未知 Bridge 事件 ${field} 无效`);
+    }
+    normalized[field] = value;
+  }
+  if (record.seq != null) {
+    if (!isValidServerSequence(record.seq)) {
       throw new Error("Bridge seq 必须是正安全整数");
     }
+    normalized.seq = record.seq;
   }
   return normalized;
 }
@@ -1389,15 +1465,46 @@ function normalizeRuntimeStatus(payload, source = "runtime/status") {
       registry.server_event_count,
       `${source}.protocol_registry.server_event_count`,
     );
+    const rawCompatibleDigests = Object.hasOwn(
+      registry,
+      "compatible_registry_sha256",
+    )
+      ? registry.compatible_registry_sha256
+      : [digest];
+    if (
+      !Array.isArray(rawCompatibleDigests)
+      || rawCompatibleDigests.length < 1
+      || rawCompatibleDigests.length > 32
+      || rawCompatibleDigests.some(
+        (item) => typeof item !== "string" || !/^[0-9a-f]{64}$/.test(item),
+      )
+      || new Set(rawCompatibleDigests).size !== rawCompatibleDigests.length
+      || !rawCompatibleDigests.includes(digest)
+    ) {
+      throw new Error(
+        `${source}.protocol_registry.compatible_registry_sha256 无效`,
+      );
+    }
+    const exactRegistry = digest === PROTOCOL_REGISTRY_SHA256;
+    const additiveRegistry = rawCompatibleDigests.includes(
+      PROTOCOL_REGISTRY_SHA256,
+    );
     if (contractVersion !== PROTOCOL_VERSION
-      || digest !== PROTOCOL_REGISTRY_SHA256
-      || clientEventCount !== PROTOCOL_CONTRACT.client_events.length
-      || serverEventCount !== PROTOCOL_CONTRACT.server_events.length) {
+      || (!exactRegistry && !additiveRegistry)
+      || clientEventCount < PROTOCOL_CONTRACT.client_events.length
+      || serverEventCount < PROTOCOL_CONTRACT.server_events.length
+      || (exactRegistry
+        && (
+          clientEventCount !== PROTOCOL_CONTRACT.client_events.length
+          || serverEventCount !== PROTOCOL_CONTRACT.server_events.length
+        ))) {
       throw new Error(`${source}.protocol_registry 与内置协议不一致`);
     }
     normalized.protocol_registry = {
       contract_version: contractVersion,
       registry_sha256: digest,
+      compatible_registry_sha256: [...rawCompatibleDigests],
+      compatibility: exactRegistry ? "exact" : "attested_additive",
       client_event_count: clientEventCount,
       server_event_count: serverEventCount,
     };
