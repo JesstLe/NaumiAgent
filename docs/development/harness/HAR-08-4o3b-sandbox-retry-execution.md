@@ -9,8 +9,8 @@ Sandbox Eval 后，可以用 accepted cancel receipt 发起一次显式 retry；
 创建新的 execution authority、admission ticket、Runtime lease 和 Run Grant，并从已持久化的连续 H5a
 前缀继续执行。
 
-本切片开放 Agent Tool 与共享 Slash 命令，但尚未在 New UI/TUI 中增加可点击 retry action。两端在 retry
-运行期间已经复用既有 typed Sandbox progress，不新增第二套进度协议。
+本切片开放 Agent Tool 与共享 Slash 命令。HAR-08.4o3c 已在 New UI 增加可点击 retry action，Textual TUI
+继续使用共享 Slash；两端在 retry 运行期间复用既有 typed Sandbox progress，不新增第二套进度协议。
 
 ## 权威分层
 
@@ -123,9 +123,9 @@ queued/admitted/recovering/executing/completed 状态；不会显示伪造的第
 
 仍未实现：
 
-- New UI/TUI 的 cancel receipt 完成卡与一键 retry action；
 - retry dispatch catalog、详情与 retention；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI 证据。
 
-下一切片应只增加共享 retry action protocol 和 New UI/TUI 双端投影，不复制本切片的授权或执行逻辑。
+HAR-08.4o3c 已增加共享 retry action protocol 和 New UI/TUI 双端投影，且没有复制本切片的授权或执行逻辑。
+详见 `HAR-08-4o3c-sandbox-retry-ui-action.md`。

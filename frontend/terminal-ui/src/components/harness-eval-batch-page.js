@@ -78,9 +78,16 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
   const checks = Array.isArray(snapshot.check_ids) ? snapshot.check_ids : [];
   const canCancel = ["queued", "active"].includes(snapshot.admission_state);
   const cancelReceipt = object(value.cancelReceipt);
+  const retryResult = object(value.retryResult);
+  const canRetry = cancelReceipt.decision === "accepted"
+    && Boolean(cancelReceipt.receipt_id)
+    && retryResult.decision !== "accepted";
   const logical = [
     color(ANSI.cyan, "Harness Sandbox Eval"),
-    color(ANSI.dim, "精确 Git revision · 隔离 Worker · ↑/↓ 滚动 · Esc 返回"),
+    color(
+      ANSI.dim,
+      "精确 Git revision · 隔离 Worker · C 取消 · R 恢复 · ↑/↓ 滚动 · Esc 返回",
+    ),
     section("状态"),
     color(tone, `${label} · ${snapshot.stage === "completed" ? 100 : progress}%`),
     `Batch · ${text(snapshot.batch_id || value.batchId) || "等待分配"}`,
@@ -123,6 +130,50 @@ function renderSandboxEvalBatchPage(value, snapshot, width, height) {
           ...(cancelReceipt.receipt_id
             ? [`Receipt · ${text(cancelReceipt.receipt_id)}`]
             : []),
+          ...(cancelReceipt.receipt_sha256
+            ? [`SHA-256 · ${shortSha(cancelReceipt.receipt_sha256)}`]
+            : []),
+          ...(canRetry
+            ? [
+                value.retryPending
+                  ? color(ANSI.yellow, "恢复请求正在通过新执行权威调度…")
+                  : color(ANSI.dim, "操作 · R 使用该回执恢复原请求（无需重填参数）"),
+              ]
+            : []),
+        ]
+      : []),
+    ...(value.retryPending && !cancelReceipt.receipt_id
+      ? [
+          section("恢复"),
+          color(ANSI.yellow, "恢复请求正在通过新执行权威调度…"),
+        ]
+      : []),
+    ...(retryResult.receipt_id || retryResult.code
+      ? [
+          section("恢复回执"),
+          color(
+            retryTone(retryResult.outcome),
+            retryOutcomeLabel(retryResult.outcome),
+          ),
+          `Code · ${text(retryResult.code)}`,
+          ...(retryResult.receipt_id
+            ? [`Receipt · ${text(retryResult.receipt_id)}`]
+            : []),
+          ...(retryResult.dispatch?.ticket_id
+            ? [
+                `新 Ticket · ${text(retryResult.dispatch.ticket_id)}`
+                  + ` · epoch ${Number(retryResult.dispatch.epoch) || "-"}`,
+              ]
+            : []),
+          ...(retryResult.persisted !== undefined
+            ? [
+                `H5a · ${Number(retryResult.persisted) || 0}/`
+                  + `${Number(retryResult.requested) || "-"}`,
+              ]
+            : []),
+          ...(retryResult.message
+            ? [color(ANSI.dim, text(retryResult.message))]
+            : []),
         ]
       : []),
     section("执行权威"),
@@ -156,6 +207,26 @@ function admissionStateLabel(value) {
     failed: "失败",
     expired: "已过期",
   }[text(value)] || "-";
+}
+
+function retryOutcomeLabel(value) {
+  return {
+    completed: "恢复完成 · 原请求证据连续",
+    failed: "恢复失败 · 已关闭本次执行权威",
+    cancelled: "恢复已取消 · 可使用新的取消回执再次恢复",
+    rejected: "恢复未获授权 · 原取消回执未被本次执行消费",
+    blocked: "恢复受阻 · 已有 owner 或权限状态需要刷新",
+  }[text(value)] || "恢复状态未知";
+}
+
+function retryTone(value) {
+  return {
+    completed: ANSI.green,
+    failed: ANSI.red,
+    cancelled: ANSI.yellow,
+    rejected: ANSI.yellow,
+    blocked: ANSI.yellow,
+  }[text(value)] || ANSI.dim;
 }
 
 function shortSha(value) {

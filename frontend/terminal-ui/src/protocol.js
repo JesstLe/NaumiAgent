@@ -181,12 +181,20 @@ export function splitShellLike(command) {
 }
 
 let nextSandboxCancelNonce = 1;
+let nextSandboxRetryNonce = 1;
 
 export function createHarnessSandboxCancelActionId(ticketId) {
   const digest = createHash("sha256")
     .update(`${process.pid}:${Date.now()}:${nextSandboxCancelNonce++}:${String(ticketId ?? "")}`)
     .digest("hex");
   return `hsac_${digest.slice(0, 24)}`;
+}
+
+export function createHarnessSandboxRetryActionId(cancelReceiptId) {
+  const digest = createHash("sha256")
+    .update(`${process.pid}:${Date.now()}:${nextSandboxRetryNonce++}:${String(cancelReceiptId ?? "")}`)
+    .digest("hex");
+  return `hsar_${digest.slice(0, 24)}`;
 }
 
 export function createEventSender(writable, { debugLog = null } = {}) {
@@ -799,6 +807,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "harness/eval-sandbox/cancel-result") {
     return normalizeHarnessSandboxCancelResult(payload);
+  }
+  if (type === "harness/eval-sandbox/retry-result") {
+    return normalizeHarnessSandboxRetryResult(payload);
   }
   if (type === "harness/eval-promotion") {
     return normalizeHarnessEvalPromotion(payload);
@@ -2536,6 +2547,202 @@ function normalizeHarnessSandboxCancelCurrent(value) {
     queued_count: harnessNonnegativeInteger(current.queued_count, "Sandbox cancel current queued_count"),
     updated_at: harnessText(current.updated_at, "Sandbox cancel current updated_at"),
     terminal_code: String(current.terminal_code ?? ""),
+  };
+}
+
+function normalizeHarnessSandboxRetryResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error("harness/eval-sandbox/retry-result schema_version 不兼容");
+  }
+  const receiptId = harnessText(payload.receipt_id, "Sandbox retry receipt_id");
+  const receiptSha256 = harnessText(payload.receipt_sha256, "Sandbox retry receipt_sha256");
+  const actionId = harnessText(payload.action_id, "Sandbox retry action_id");
+  const cancelReceiptId = harnessText(
+    payload.cancel_receipt_id,
+    "Sandbox retry cancel_receipt_id",
+  );
+  const cancelReceiptSha256 = harnessText(
+    payload.cancel_receipt_sha256,
+    "Sandbox retry cancel_receipt_sha256",
+  );
+  if (
+    !/^hsarr_[0-9a-f]{24}$/u.test(receiptId)
+    || !/^[0-9a-f]{64}$/u.test(receiptSha256)
+    || !/^hsar_[0-9a-f]{24}$/u.test(actionId)
+    || !/^hsacr_[0-9a-f]{24}$/u.test(cancelReceiptId)
+    || !/^[0-9a-f]{64}$/u.test(cancelReceiptSha256)
+  ) {
+    throw new Error("harness/eval-sandbox/retry-result identity 无效");
+  }
+  const decision = harnessChoice(
+    payload.decision,
+    "Sandbox retry decision",
+    new Set(["accepted", "rejected"]),
+  );
+  const outcome = harnessChoice(
+    payload.outcome,
+    "Sandbox retry outcome",
+    new Set(["completed", "failed", "cancelled", "rejected", "blocked"]),
+  );
+  const sourceTicketId = harnessText(
+    payload.source_ticket_id,
+    "Sandbox retry source_ticket_id",
+  );
+  const evalRequestSha256 = harnessText(
+    payload.eval_request_sha256,
+    "Sandbox retry eval_request_sha256",
+  );
+  const executionAuthorityKey = harnessText(
+    payload.execution_authority_key,
+    "Sandbox retry execution_authority_key",
+  );
+  if (
+    decision === "accepted"
+    && (
+      !/^hsadm_[0-9a-f]{24}$/u.test(sourceTicketId)
+      || !/^[0-9a-f]{64}$/u.test(evalRequestSha256)
+      || !/^[0-9a-f]{64}$/u.test(executionAuthorityKey)
+      || outcome === "rejected"
+    )
+  ) {
+    throw new Error("accepted Sandbox retry authority 不完整");
+  }
+  if (decision === "rejected" && outcome !== "rejected") {
+    throw new Error("rejected Sandbox retry outcome 不一致");
+  }
+  const dispatch = payload.dispatch === null || payload.dispatch === undefined
+    ? null
+    : normalizeHarnessSandboxRetryDispatch(payload.dispatch);
+  if (
+    (decision === "rejected" && dispatch !== null)
+    || (
+      dispatch
+      && (
+        dispatch.retry_action_id !== actionId
+        || dispatch.retry_receipt_id !== receiptId
+        || dispatch.retry_receipt_sha256 !== receiptSha256
+        || dispatch.execution_authority_key !== executionAuthorityKey
+      )
+    )
+  ) {
+    throw new Error("Sandbox retry dispatch 与 decision/action 不一致");
+  }
+  const requested = harnessNonnegativeInteger(
+    payload.requested,
+    "Sandbox retry requested",
+  );
+  const persisted = harnessNonnegativeInteger(
+    payload.persisted,
+    "Sandbox retry persisted",
+  );
+  if (requested > 100 || persisted > requested) {
+    throw new Error("Sandbox retry H5a 计数无效");
+  }
+  if (
+    (outcome === "completed" || dispatch?.state === "completed")
+    && (requested === 0 || persisted !== requested)
+  ) {
+    throw new Error("completed Sandbox retry 缺少完整 H5a");
+  }
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    receipt_sha256: receiptSha256,
+    action_id: actionId,
+    cancel_receipt_id: cancelReceiptId,
+    cancel_receipt_sha256: cancelReceiptSha256,
+    source_ticket_id: sourceTicketId,
+    eval_request_sha256: evalRequestSha256,
+    execution_authority_key: executionAuthorityKey,
+    decision,
+    outcome,
+    code: harnessText(payload.code, "Sandbox retry code"),
+    actor_id: harnessText(payload.actor_id, "Sandbox retry actor_id"),
+    reason: harnessText(payload.reason, "Sandbox retry reason"),
+    created_at: harnessText(payload.created_at, "Sandbox retry created_at"),
+    dispatch,
+    batch_id: harnessText(payload.batch_id, "Sandbox retry batch_id"),
+    requested,
+    persisted,
+    message: harnessText(payload.message, "Sandbox retry message"),
+  };
+}
+
+function normalizeHarnessSandboxRetryDispatch(value) {
+  const dispatch = value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+  if (!dispatch) throw new Error("Sandbox retry dispatch 必须是对象");
+  const dispatchId = harnessText(
+    dispatch.dispatch_id,
+    "Sandbox retry dispatch_id",
+  );
+  const retryActionId = harnessText(
+    dispatch.retry_action_id,
+    "Sandbox retry dispatch retry_action_id",
+  );
+  const retryReceiptId = harnessText(
+    dispatch.retry_receipt_id,
+    "Sandbox retry dispatch retry_receipt_id",
+  );
+  const retryReceiptSha256 = harnessText(
+    dispatch.retry_receipt_sha256,
+    "Sandbox retry dispatch retry_receipt_sha256",
+  );
+  const executionAuthorityKey = harnessText(
+    dispatch.execution_authority_key,
+    "Sandbox retry dispatch execution_authority_key",
+  );
+  const state = harnessChoice(
+    dispatch.state,
+    "Sandbox retry dispatch state",
+    new Set(["pending", "claimed", "completed", "failed", "cancelled"]),
+  );
+  const epoch = harnessNonnegativeInteger(
+    dispatch.epoch,
+    "Sandbox retry dispatch epoch",
+  );
+  const ticketId = harnessText(
+    dispatch.ticket_id,
+    "Sandbox retry dispatch ticket_id",
+  );
+  const ticketEpoch = harnessNonnegativeInteger(
+    dispatch.ticket_epoch,
+    "Sandbox retry dispatch ticket_epoch",
+  );
+  if (
+    !/^hsard_[0-9a-f]{24}$/u.test(dispatchId)
+    || !/^hsar_[0-9a-f]{24}$/u.test(retryActionId)
+    || !/^hsarr_[0-9a-f]{24}$/u.test(retryReceiptId)
+    || !/^[0-9a-f]{64}$/u.test(retryReceiptSha256)
+    || !/^[0-9a-f]{64}$/u.test(executionAuthorityKey)
+    || (state === "pending" && (epoch !== 0 || ticketId || ticketEpoch !== 0))
+    || (
+      state !== "pending"
+      && (
+        epoch < 1
+        || !/^hsadm_[0-9a-f]{24}$/u.test(ticketId)
+        || ticketEpoch < 1
+      )
+    )
+  ) {
+    throw new Error("Sandbox retry dispatch fence 无效");
+  }
+  return {
+    dispatch_id: dispatchId,
+    retry_action_id: retryActionId,
+    retry_receipt_id: retryReceiptId,
+    retry_receipt_sha256: retryReceiptSha256,
+    execution_authority_key: executionAuthorityKey,
+    state,
+    epoch,
+    ticket_id: ticketId,
+    ticket_epoch: ticketEpoch,
+    updated_at: harnessText(dispatch.updated_at, "Sandbox retry dispatch updated_at"),
+    terminal_code: harnessText(
+      dispatch.terminal_code,
+      "Sandbox retry dispatch terminal_code",
+    ),
   };
 }
 

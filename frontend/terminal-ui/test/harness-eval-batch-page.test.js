@@ -120,3 +120,54 @@ test("Harness Sandbox Eval page renders durable queue position and capacity", ()
   assert(plain.includes("active 1/1 · queued 3/4"));
   assert(lines.every((line) => visibleWidth(line) <= 110));
 });
+
+test("Harness Sandbox Eval page renders retry action and durable result", () => {
+  const base = {
+    batchId: "sandbox-retry",
+    cancelReceipt: {
+      receipt_id: `hsacr_${"a".repeat(24)}`,
+      receipt_sha256: "a".repeat(64),
+      decision: "accepted",
+      code: "sandbox_batch_cancelled_by_user",
+    },
+    snapshot: {
+      kind: "sandbox",
+      stage: "cancelled",
+      batch_id: "sandbox-retry",
+      check_ids: ["unit"],
+      requested: 5,
+      persisted: 2,
+      checkpoint_id: `hsbatch_${"b".repeat(24)}`,
+      authority_key: "b".repeat(64),
+      lane: "sandbox",
+      sample_result_sha256: ["c".repeat(64), "d".repeat(64)],
+      code: "sandbox_batch_cancelled_by_user",
+      updated_at: "2026-07-23T10:00:00+08:00",
+    },
+  };
+  const action = renderHarnessEvalBatchPage(base, 110, 30)
+    .map(stripAnsi)
+    .join("\n");
+  const completed = renderHarnessEvalBatchPage({
+    ...base,
+    retryResult: {
+      receipt_id: `hsarr_${"e".repeat(24)}`,
+      decision: "accepted",
+      outcome: "completed",
+      code: "sandbox_batch_retry_authorized",
+      requested: 5,
+      persisted: 5,
+      message: "原 H5a 已恢复完成。",
+      dispatch: {
+        ticket_id: `hsadm_${"f".repeat(24)}`,
+        epoch: 1,
+      },
+    },
+  }, 110, 30).map(stripAnsi).join("\n");
+
+  assert(action.includes("R 使用该回执恢复原请求"));
+  assert(action.includes("SHA-256 · aaaaaaaaaaaa"));
+  assert(completed.includes("恢复完成 · 原请求证据连续"));
+  assert(completed.includes(`新 Ticket · hsadm_${"f".repeat(24)}`));
+  assert(completed.includes("H5a · 5/5"));
+});

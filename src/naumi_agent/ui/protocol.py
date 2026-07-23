@@ -63,6 +63,7 @@ class ClientEventType(StrEnum):
     HARNESS_EVAL_BASELINE_REQUEST = "harness/eval-baseline/request"
     HARNESS_EVAL_BATCH_REQUEST = "harness/eval-batch/request"
     HARNESS_EVAL_SANDBOX_CANCEL = "harness/eval-sandbox/cancel"
+    HARNESS_EVAL_SANDBOX_RETRY = "harness/eval-sandbox/retry"
     HARNESS_EVAL_PROMOTION_REQUEST = "harness/eval-promotion/request"
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
@@ -121,6 +122,7 @@ class ServerEventType(StrEnum):
     HARNESS_EVAL_BASELINE = "harness/eval-baseline"
     HARNESS_EVAL_BATCH = "harness/eval-batch"
     HARNESS_EVAL_SANDBOX_CANCEL_RESULT = "harness/eval-sandbox/cancel-result"
+    HARNESS_EVAL_SANDBOX_RETRY_RESULT = "harness/eval-sandbox/retry-result"
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     DOCTOR_HEALTH = "doctor/health"
     DOCTOR_EXPORT_RESULT = "doctor/export/result"
@@ -439,6 +441,32 @@ def _normalize_client_payload(
             "authority_key": authority_key,
             "epoch": epoch,
             "expected_state": expected_state,
+            "reason": reason,
+        }
+
+    if event_type == ClientEventType.HARNESS_EVAL_SANDBOX_RETRY:
+        action_id = str(payload.get("action_id") or "").strip().lower()
+        if re.fullmatch(r"hsar_[0-9a-f]{24}", action_id) is None:
+            raise ValueError("Sandbox retry action_id 格式无效。")
+        cancel_receipt_id = (
+            str(payload.get("cancel_receipt_id") or "").strip().lower()
+        )
+        if re.fullmatch(r"hsacr_[0-9a-f]{24}", cancel_receipt_id) is None:
+            raise ValueError("Sandbox retry cancel_receipt_id 格式无效。")
+        cancel_receipt_sha256 = (
+            str(payload.get("cancel_receipt_sha256") or "").strip().lower()
+        )
+        if re.fullmatch(r"[0-9a-f]{64}", cancel_receipt_sha256) is None:
+            raise ValueError(
+                "Sandbox retry cancel_receipt_sha256 必须是 SHA-256。"
+            )
+        reason = str(payload.get("reason") or "").strip()
+        if not reason or len(reason) > 500:
+            raise ValueError("Sandbox retry reason 必须是 1..500 个字符。")
+        return {
+            "action_id": action_id,
+            "cancel_receipt_id": cancel_receipt_id,
+            "cancel_receipt_sha256": cancel_receipt_sha256,
             "reason": reason,
         }
 

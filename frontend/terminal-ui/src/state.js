@@ -18,6 +18,7 @@ import {
 import { jumpTimelineToLatest } from "./timeline-follow.js";
 import {
   createHarnessSandboxCancelActionId,
+  createHarnessSandboxRetryActionId,
   requiredEventCapability,
 } from "./protocol.js";
 import {
@@ -412,6 +413,9 @@ export function createInitialState() {
       cancelPending: false,
       cancelReceipt: null,
       cancelRequestId: "",
+      retryPending: false,
+      retryResult: null,
+      retryRequestId: "",
     },
     harnessEvalPromotion: {
       requestId: "",
@@ -894,6 +898,11 @@ export function reduceServerEvent(state, record) {
       state.harnessEvalBatch.cancelPending = false;
       state.harnessEvalBatch.cancelReceipt = payload;
       state.harnessEvalBatch.cancelRequestId = "";
+      if (payload.decision === "accepted") {
+        state.harnessEvalBatch.retryPending = false;
+        state.harnessEvalBatch.retryRequestId = "";
+        state.harnessEvalBatch.retryResult = null;
+      }
       const selected = state.harnessEvalBatches[state.harnessEvalBatch.batchId];
       if (
         selected?.kind === "sandbox"
@@ -909,6 +918,12 @@ export function reduceServerEvent(state, record) {
         selected.queued_count = payload.current.queued_count;
         selected.updated_at = payload.current.updated_at;
       }
+      break;
+    }
+    case "harness/eval-sandbox/retry-result": {
+      state.harnessEvalBatch.retryPending = false;
+      state.harnessEvalBatch.retryResult = payload;
+      state.harnessEvalBatch.retryRequestId = "";
       break;
     }
     case "harness/eval-promotion": {
@@ -1188,6 +1203,9 @@ export function reduceServerEvent(state, record) {
         cancelPending: false,
         cancelReceipt: null,
         cancelRequestId: "",
+        retryPending: false,
+        retryResult: null,
+        retryRequestId: "",
       };
       state.harnessEvalPromotion = {
         requestId: "",
@@ -1327,6 +1345,22 @@ export function reduceServerEvent(state, record) {
           decision: "rejected",
           code: String(payload.code || "sandbox_batch_cancel_unavailable"),
           reason: String(payload.message || "取消请求未能安全裁决。"),
+        };
+        break;
+      }
+      if (
+        state.harnessEvalBatch.retryPending
+        && state.harnessEvalBatch.retryRequestId
+        && state.harnessEvalBatch.retryRequestId === String(record.request_id || "")
+      ) {
+        state.harnessEvalBatch.retryPending = false;
+        state.harnessEvalBatch.retryRequestId = "";
+        state.harnessEvalBatch.retryResult = {
+          receipt_id: "",
+          decision: "rejected",
+          outcome: "rejected",
+          code: String(payload.code || "sandbox_eval_retry_unavailable"),
+          reason: String(payload.message || "retry 请求未能安全执行。"),
         };
         break;
       }
@@ -2944,6 +2978,9 @@ export function handleSubmitText(state, text, send) {
       cancelPending: false,
       cancelReceipt: null,
       cancelRequestId: "",
+      retryPending: false,
+      retryResult: null,
+      retryRequestId: "",
     };
     const message = submitUserMessage(state, commandText, send);
     state.harnessEvalBatch.requestId = String(message?.requestId || "");
@@ -2964,6 +3001,9 @@ export function handleSubmitText(state, text, send) {
       cancelPending: false,
       cancelReceipt: null,
       cancelRequestId: "",
+      retryPending: false,
+      retryResult: null,
+      retryRequestId: "",
     };
     state.harnessEvalBatch.requestId = String(send("harness/eval-batch/request", harnessBatch) || "");
     return;
@@ -3843,6 +3883,27 @@ export function handleHarnessEvalBatchKey(state, key, send) {
     return true;
   }
   const snapshot = state.harnessEvalBatches[state.harnessEvalBatch.batchId];
+  const cancelReceipt = state.harnessEvalBatch.cancelReceipt;
+  const retryResult = state.harnessEvalBatch.retryResult;
+  if (
+    key.toLowerCase() === "r"
+    && snapshot?.kind === "sandbox"
+    && cancelReceipt?.decision === "accepted"
+    && /^hsacr_[0-9a-f]{24}$/u.test(String(cancelReceipt.receipt_id || ""))
+    && /^[0-9a-f]{64}$/u.test(String(cancelReceipt.receipt_sha256 || ""))
+    && !state.harnessEvalBatch.retryPending
+    && retryResult?.decision !== "accepted"
+  ) {
+    state.harnessEvalBatch.retryPending = true;
+    state.harnessEvalBatch.retryResult = null;
+    state.harnessEvalBatch.retryRequestId = String(send("harness/eval-sandbox/retry", {
+      action_id: createHarnessSandboxRetryActionId(cancelReceipt.receipt_id),
+      cancel_receipt_id: cancelReceipt.receipt_id,
+      cancel_receipt_sha256: cancelReceipt.receipt_sha256,
+      reason: "用户在 Harness Sandbox 页面请求恢复",
+    }) || "");
+    return true;
+  }
   if (
     key.toLowerCase() === "c"
     && snapshot?.kind === "sandbox"
@@ -3854,6 +3915,9 @@ export function handleHarnessEvalBatchKey(state, key, send) {
   ) {
     state.harnessEvalBatch.cancelPending = true;
     state.harnessEvalBatch.cancelReceipt = null;
+    state.harnessEvalBatch.retryPending = false;
+    state.harnessEvalBatch.retryResult = null;
+    state.harnessEvalBatch.retryRequestId = "";
     state.harnessEvalBatch.cancelRequestId = String(send("harness/eval-sandbox/cancel", {
       action_id: createHarnessSandboxCancelActionId(snapshot.admission_ticket_id),
       ticket_id: snapshot.admission_ticket_id,

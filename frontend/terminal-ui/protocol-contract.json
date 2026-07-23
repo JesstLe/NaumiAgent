@@ -3,6 +3,7 @@
   "transport": "jsonl",
   "compatibility": {
     "previous_registry_sha256": [
+      "b013b4e5df1d767a220d676d8443347ea9291d2decca063cecdec4b8574864a4",
       "69aaabb584c1f1c364e969ca7b66352684fc938765f63bd5829bae8d3a5516d2"
     ],
     "unknown_informational_events": "ignore_and_audit"
@@ -55,6 +56,7 @@
     "harness/eval-baseline/request",
     "harness/eval-batch/request",
     "harness/eval-sandbox/cancel",
+    "harness/eval-sandbox/retry",
     "harness/eval-promotion/request",
     "inspector/request",
     "agents/request",
@@ -102,6 +104,7 @@
     "harness/eval-baseline",
     "harness/eval-batch",
     "harness/eval-sandbox/cancel-result",
+    "harness/eval-sandbox/retry-result",
     "harness/eval-promotion",
     "doctor/health",
     "doctor/export/result",
@@ -153,6 +156,7 @@
       "harness/eval-baseline/request": {"owner":"harness","stability":"stable","criticality":"control","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "harness/eval-batch/request": {"owner":"harness","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "harness/eval-sandbox/cancel": {"owner":"harness","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
+      "harness/eval-sandbox/retry": {"owner":"harness","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
       "harness/eval-promotion/request": {"owner":"harness","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
       "inspector/request": {"owner":"inspector","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "agents/request": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
@@ -200,6 +204,7 @@
       "harness/eval-baseline": {"owner":"harness","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "harness/eval-batch": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "harness/eval-sandbox/cancel-result": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.reason"],"redaction":"required"},
+      "harness/eval-sandbox/retry-result": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.reason","payload.message"],"redaction":"required"},
       "harness/eval-promotion": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.promotion_reason"],"redaction":"required"},
       "doctor/health": {"owner":"diagnostics","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items.detail","payload.items.suggestion"],"redaction":"required"},
       "doctor/export/result": {"owner":"diagnostics","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.receipt.output_path"],"redaction":"required"},

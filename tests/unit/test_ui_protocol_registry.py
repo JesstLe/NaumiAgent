@@ -25,7 +25,11 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert set(registry.client) == {str(event) for event in ClientEventType}
     assert set(registry.server) == {str(event) for event in ServerEventType}
     assert len(registry.registry_sha256) == 64
-    assert registry.compatible_registry_sha256 == (registry.registry_sha256,)
+    document = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    assert registry.compatible_registry_sha256 == (
+        registry.registry_sha256,
+        *document["compatibility"]["previous_registry_sha256"],
+    )
     assert registry.policy("server", "permission/request").owner == "safety"
     assert registry.policy("server", "run/completed").criticality == "terminal"
     assert registry.policy("client", "ping").persistence == "never"

@@ -48,6 +48,7 @@ export function assessIdleBridgeRecovery(state = {}) {
 function hasPendingControlOperation(state) {
   if (
     state.harnessEvalBatch?.cancelPending
+    || state.harnessEvalBatch?.retryPending
     || state.agents?.actionPendingTaskId
     || state.workbench?.proposal_action?.phase === "loading"
     || state.doctorHealth?.exportLoading

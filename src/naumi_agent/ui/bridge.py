@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import re
 import subprocess
@@ -90,6 +91,7 @@ from naumi_agent.ui.harness_protocol import (
     harness_explain_payload,
     harness_replay_payload,
     harness_sandbox_cancel_receipt_payload,
+    harness_sandbox_retry_result_payload,
 )
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.page_index import build_terminal_page_index
@@ -602,6 +604,7 @@ class JsonlEngineBridge:
             self._validate_terminal_event_policies()
         self._run_task: asyncio.Task[Any] | None = None
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
+        self._harness_eval_retry_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
         self._workspace_file_search_task: asyncio.Task[None] | None = None
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
@@ -1549,6 +1552,12 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL:
             await self.cancel_harness_eval_sandbox(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.HARNESS_EVAL_SANDBOX_RETRY:
+            await self.start_harness_eval_sandbox_retry(
+                payload,
+                request_id=request_id,
+            )
             return
         if event_type == ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST:
             await self.start_harness_eval_promotion(payload, request_id=request_id)
@@ -2712,6 +2721,151 @@ class JsonlEngineBridge:
             harness_sandbox_cancel_receipt_payload(receipt, ticket),
             request_id=request_id,
         )
+
+    async def start_harness_eval_sandbox_retry(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Run one retry through the authoritative Tool pipeline."""
+        if request_id in self._harness_eval_retry_tasks:
+            await self.emit_error(
+                "该 Sandbox retry 请求正在处理中。",
+                code="sandbox_eval_retry_duplicate",
+                request_id=request_id,
+            )
+            return
+        if len(self._harness_eval_retry_tasks) >= 4:
+            await self.emit_error(
+                "并行 Sandbox retry 已达上限（4 个），请等待任一请求完成。",
+                code="sandbox_eval_retry_limit",
+                request_id=request_id,
+            )
+            return
+        service = getattr(self.engine, "harness_service", None)
+        store = getattr(service, "store", None)
+        if service is None or store is None:
+            await self.emit_error(
+                "Sandbox retry 状态权威尚未初始化。",
+                code="sandbox_eval_retry_authority_unavailable",
+                request_id=request_id,
+            )
+            return
+
+        async def publish_tool_event(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            if event == "harness_sandbox_eval_progress":
+                await self.emit(
+                    ServerEventType.ENGINE_EVENT,
+                    {"event": event, "data": data},
+                    request_id=request_id,
+                )
+                await self.emit(
+                    ServerEventType.HARNESS_EVAL_BATCH,
+                    data,
+                    request_id=request_id,
+                )
+                return
+            await self.handle_engine_event(event, dict(data))
+
+        async def emit_result(message: str) -> bool:
+            retry = await store.get_sandbox_admission_retry(
+                workspace_root=self.engine.workspace_root,
+                action_id=str(payload["action_id"]),
+            )
+            if retry is None:
+                return False
+            dispatch = await store.get_sandbox_retry_dispatch(
+                workspace_root=self.engine.workspace_root,
+                retry_action_id=retry.action_id,
+            )
+            batch_id = ""
+            requested = 0
+            persisted = 0
+            if retry.eval_request_sha256:
+                stored = await store.get_sandbox_eval_request(
+                    self.engine.workspace_root,
+                    retry.eval_request_sha256,
+                )
+                if stored is not None:
+                    batch_id = stored.request.batch_id
+                    requested = stored.request.requested_samples
+                    records = await store.list_eval_results(
+                        self.engine.workspace_root,
+                        stored.request.batch_id,
+                        stored.request.suite_id,
+                        limit=requested + 1,
+                    )
+                    persisted = len(records)
+            await self.emit(
+                ServerEventType.HARNESS_EVAL_SANDBOX_RETRY_RESULT,
+                harness_sandbox_retry_result_payload(
+                    retry,
+                    dispatch,
+                    batch_id=batch_id,
+                    requested_samples=requested,
+                    persisted_samples=persisted,
+                    message=message,
+                ),
+                request_id=request_id,
+            )
+            return True
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            try:
+                session = await self.engine.get_or_create_session()
+                run_id = f"manual:{session.id}"
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=f"new-ui-harness-retry-{uuid4().hex}",
+                        name="harness_eval_sandbox_retry",
+                        arguments=json.dumps(
+                            {
+                                "retry_action_id": payload["action_id"],
+                                "cancel_receipt_id": payload["cancel_receipt_id"],
+                                "cancel_receipt_sha256": payload[
+                                    "cancel_receipt_sha256"
+                                ],
+                                "reason": payload["reason"],
+                                "run_id": run_id,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                if not await emit_result(result.content):
+                    await self.emit_error(
+                        "Sandbox retry 未产生可审计 authority；请检查权限状态后重试。",
+                        code="sandbox_eval_retry_not_authorized",
+                        request_id=request_id,
+                    )
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                if not await emit_result("Sandbox retry 已由用户取消。"):
+                    raise
+            except Exception as exc:
+                self._trace_harness_lookup_failure("eval_sandbox_retry", exc)
+                await self.emit_error(
+                    "Sandbox retry 未能安全完成，请刷新状态后重试。",
+                    code=getattr(exc, "code", "sandbox_eval_retry_unavailable"),
+                    request_id=request_id,
+                )
+            finally:
+                self._harness_eval_retry_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(
+            run(),
+            name=f"harness-eval-sandbox-retry-{request_id}",
+        )
+        self._harness_eval_retry_tasks[request_id] = task
 
     async def start_harness_eval_promotion(
         self,
@@ -5175,6 +5329,12 @@ class JsonlEngineBridge:
         if batch_tasks:
             await asyncio.gather(*batch_tasks, return_exceptions=True)
         self._harness_eval_batch_tasks.clear()
+        retry_tasks = tuple(self._harness_eval_retry_tasks.values())
+        for task in retry_tasks:
+            task.cancel()
+        if retry_tasks:
+            await asyncio.gather(*retry_tasks, return_exceptions=True)
+        self._harness_eval_retry_tasks.clear()
         promotion_tasks = tuple(self._harness_eval_promotion_tasks.values())
         for task in promotion_tasks:
             task.cancel()
