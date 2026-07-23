@@ -14,15 +14,16 @@
 
 ## 设计
 
-`safety.max_parallel_agents` 默认 4，可配置 1 至 32。`SubAgentManager` 使用两层有界调度：
+`safety.max_parallel_agents` 默认 4，可配置 1 至 32；`safety.max_queued_agents` 默认 64，
+可配置 0 至 10000。`SubAgentManager` 使用统一的有界 admission：
 
-1. 每个批次只创建 `min(limit, task_count)` 个 worker，不为所有排队任务创建协程；
-2. 所有同时运行的批次共享一个 Semaphore，保证整个 manager 的活跃 Agent 不超过上限；
-3. worker 按输入索引领取任务，形成 FIFO 背压；结果仍按原始顺序返回；
+1. direct、batch 与 DAG 都通过公开 `delegate()`，共享一个 Semaphore 和等待预算；
+2. 批次只为当前预算可接受的任务前缀创建协程，容量外项目按原始位置返回过载错误；
+3. 接受项按 FIFO 取得 slot，活跃数和等待数都不能超过各自配置；结果仍按原始顺序返回；
 4. 普通子任务异常只转换对应的 error 结果，不取消兄弟任务；
-5. 父级取消会取消活跃 worker，尚未领取的任务不会启动。
+5. 父级取消会取消活跃与等待任务，并准确归还两类容量。
 
-`/runtime subagent` 显示“活跃/上限”和排队数；排队计数在正常完成、异常和父级取消后
+`/runtime subagent` 显示“活跃/上限”和“排队/上限”；排队计数在正常完成、异常和父级取消后
 都会归零，避免给用户留下虚假的忙碌状态。
 
 `execute_dag()` 继续按依赖层调用同一个有界 `execute_parallel()`，因此宽 DAG 自动受相同
@@ -35,6 +36,7 @@
 - 单任务异常不影响兄弟任务；
 - 父级取消只取消两个活跃 worker，其余十八个任务未启动；
 - 配置拒绝 0 和 33，接受 1、4、32。
+- 等待上限拒绝 -1 和 10001，接受 0、64、10000；满载 direct、批次溢出、同时批次和取消复用均有测试。
 
 ## 后续边界
 

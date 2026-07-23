@@ -36,8 +36,9 @@ HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/term
 `/send-now`，并修复两端在本 owner live claim 期间无法重排后缀的问题。HAR-10.3b5 又补齐未 claim 普通消息的
 精确取消和双端回执。跨客户端公平与 active worker 取消传播仍未完成。
 HAR-10.7a 已封住直接 Agent 委派绕过 `max_parallel_agents` 的入口，让 direct/batch/DAG 共用进程内
-admission、排队计数与取消清理，并拒绝容量饱和时会自锁的嵌套委派；持久 Agent Worker、队列上限与
-跨进程公平调度仍属于 ARC-04/06 后续。
+admission、排队计数与取消清理，并拒绝容量饱和时会自锁的嵌套委派；HAR-10.7b 又以
+`max_queued_agents` 封住本地等待协程的无界增长，并提供稳定过载回执。持久 Agent Worker、跨进程队列与
+公平调度仍属于 ARC-04/06 后续。
 Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCollector、确定性 Explain、
 安全 Replay 与可审计评测闭环。权威代码位于
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。

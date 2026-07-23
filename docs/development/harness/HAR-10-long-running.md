@@ -93,6 +93,9 @@
   - HAR-10.7a 已让所有公开 Agent `delegate()` 与批量/DAG 入口共用 `max_parallel_agents` semaphore，
     直接委派等待也进入 Runtime queue 计数；取消会清理计数，饱和嵌套委派 fail closed 而不自锁。见
     [设计](HAR-10-7a-universal-agent-admission.md)。
+  - HAR-10.7b 已增加 `max_queued_agents` 进程内硬上限，direct/batch/DAG 共用活跃与等待预算；满载时返回
+    明确中文过载回执，Runtime 同时展示排队上限，取消可复用容量。见
+    [设计](HAR-10-7b-bounded-agent-waiting-queue.md)。
   - ARC-06.1a 已交付 worker incarnation/contract capacity 的原子 reservation authority，解决并发调度者
     基于同一健康快照超卖最后槽位的问题；见
     [设计](../architecture/ARC-06-1a-worker-capacity-reservations.md)。
@@ -102,7 +105,7 @@
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。
-  - 未完成：Agent/Browser 持久 Worker dispatch 接入、持久且有界的 capacity waiting queue、workspace 锁、
+  - 未完成：Agent/Browser 持久 Worker dispatch 接入、跨进程持久 capacity waiting queue、workspace 锁、
     能力路由、亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域

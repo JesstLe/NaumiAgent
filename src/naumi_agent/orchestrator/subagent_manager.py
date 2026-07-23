@@ -187,6 +187,8 @@ class SubAgentManager:
         self._active_executions: dict[str, _ActiveExecution] = {}
         self._execution_history: list[AgentExecutionRecord] = []
         self._max_parallel_agents = engine._config.safety.max_parallel_agents
+        self._max_queued_agents = engine._config.safety.max_queued_agents
+        self._admitted_parallel_agents = 0
         self._parallel_agent_slots = asyncio.BoundedSemaphore(
             self._max_parallel_agents
         )
@@ -197,6 +199,10 @@ class SubAgentManager:
     @property
     def max_parallel_agents(self) -> int:
         return self._max_parallel_agents
+
+    @property
+    def max_queued_agents(self) -> int:
+        return self._max_queued_agents
 
     @property
     def active_execution_count(self) -> int:
@@ -684,6 +690,20 @@ class SubAgentManager:
                     "Agent 并发容量已满；嵌套委派会形成自等待，已安全拒绝。"
                 ),
             )
+        if (
+            self._admitted_parallel_agents + self._queued_parallel_agents
+            >= self._max_parallel_agents + self._max_queued_agents
+        ):
+            result = self._queue_full_result()
+            await self._emit_subagent_event(
+                event_callback,
+                status="failed",
+                task_id=task.id,
+                agent_name=task.agent_name or "",
+                description=task.description,
+                message=result.error,
+            )
+            return result
 
         self._queued_parallel_agents += 1
         acquired = False
@@ -691,6 +711,7 @@ class SubAgentManager:
             await self._parallel_agent_slots.acquire()
             acquired = True
             self._queued_parallel_agents -= 1
+            self._admitted_parallel_agents += 1
             return await self._run_admitted_delegation(
                 task,
                 extra_context=extra_context,
@@ -698,9 +719,19 @@ class SubAgentManager:
             )
         finally:
             if acquired:
+                self._admitted_parallel_agents -= 1
                 self._parallel_agent_slots.release()
             else:
                 self._queued_parallel_agents -= 1
+
+    def _queue_full_result(self) -> AgentResult:
+        return AgentResult(
+            status="error",
+            error=(
+                "Agent 等待队列已满"
+                f"（上限 {self._max_queued_agents}）；请等待现有任务完成后重试。"
+            ),
+        )
 
     async def _run_admitted_delegation(
         self,
@@ -1041,43 +1072,32 @@ class SubAgentManager:
         return results
 
     async def execute_parallel(self, tasks: list[SubTask]) -> list[AgentResult]:
-        """Execute independent tasks with bounded FIFO backpressure."""
+        """Execute independent tasks through the same bounded admission gate."""
         if not tasks:
             return []
         results: list[AgentResult | None] = [None] * len(tasks)
-        next_index = 0
-        queued_remaining = len(tasks)
-        self._queued_parallel_agents += queued_remaining
+        total_limit = self._max_parallel_agents + self._max_queued_agents
+        outstanding = (
+            self._admitted_parallel_agents + self._queued_parallel_agents
+        )
+        accepted_count = min(len(tasks), max(0, total_limit - outstanding))
+        for index in range(accepted_count, len(tasks)):
+            results[index] = self._queue_full_result()
 
-        async def worker() -> None:
-            nonlocal next_index
-            nonlocal queued_remaining
-            while next_index < len(tasks):
-                index = next_index
-                next_index += 1
-                task = tasks[index]
-                try:
-                    async with self._parallel_agent_slots:
-                        queued_remaining -= 1
-                        self._queued_parallel_agents -= 1
-                        results[index] = await self._run_admitted_delegation(task)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    results[index] = AgentResult(
-                        status="error",
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
+        async def run_one(index: int) -> None:
+            try:
+                results[index] = await self.delegate(tasks[index])
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                results[index] = AgentResult(
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
 
-        worker_count = min(self._max_parallel_agents, len(tasks))
-        try:
-            async with asyncio.TaskGroup() as group:
-                for _ in range(worker_count):
-                    group.create_task(worker())
-        finally:
-            if queued_remaining:
-                self._queued_parallel_agents -= queued_remaining
-                queued_remaining = 0
+        async with asyncio.TaskGroup() as group:
+            for index in range(accepted_count):
+                group.create_task(run_one(index))
 
         if any(result is None for result in results):
             raise RuntimeError("Agent 集群调度结束时存在未完成任务。")

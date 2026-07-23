@@ -16,6 +16,8 @@
     [设计与验证](ARC-06-1b-tool-job-capacity-lifecycle.md)。
   - HAR-10.7a 已先封住 embedded Runtime 的直接 Agent 委派旁路：所有 direct/batch/DAG 入口共用进程内
     semaphore，并对等待取消和饱和嵌套自锁 fail closed。它不是持久 Worker reservation，不替代本模块。
+  - HAR-10.7b 已为同一进程内 admission 增加有界等待预算和明确 overload response，避免 embedded
+    Runtime 在持久 scheduler 落地前无界积压；它仍不提供跨进程公平、恢复或 reservation authority。
   - 未完成：Agent/Browser worker dispatch、全局/用户/workspace/provider 多级容量与等待调度。
 - ARC-06.2 Scheduler：priority、deadline、fair queue、dependency DAG、affinity。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。

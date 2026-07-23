@@ -264,6 +264,192 @@ class TestSubAgentManager:
         assert manager.queued_parallel_agent_count == 0
 
     @pytest.mark.asyncio
+    async def test_direct_delegation_rejects_when_waiting_queue_is_full(self) -> None:
+        engine = AgentEngine(AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=1,
+        )))
+        manager = SubAgentManager(engine)
+        release = asyncio.Event()
+        started = asyncio.Event()
+        events: list[tuple[str, dict[str, object]]] = []
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            started.set()
+            await release.wait()
+            return AgentResult(status="completed", response=task.id)
+
+        async def callback(event: str, data: dict[str, object]) -> None:
+            events.append((event, data))
+
+        manager._delegate_admitted = fake_delegate  # type: ignore[method-assign]
+        active = asyncio.create_task(manager.delegate(SubTask("active", "direct")))
+        queued: asyncio.Task[AgentResult] | None = None
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            queued = asyncio.create_task(
+                manager.delegate(SubTask("queued", "direct"))
+            )
+            async with asyncio.timeout(1):
+                while manager.queued_parallel_agent_count != 1:
+                    await asyncio.sleep(0)
+
+            rejected = await manager.delegate(
+                SubTask("rejected", "direct"),
+                event_callback=callback,
+            )
+            assert rejected.status == "error"
+            assert "等待队列已满（上限 1）" in (rejected.error or "")
+            assert manager.queued_parallel_agent_count == 1
+            assert any(
+                event == "subagent_event"
+                and data.get("status") == "failed"
+                and data.get("task_id") == "rejected"
+                for event, data in events
+            )
+
+            release.set()
+            assert (await asyncio.wait_for(active, timeout=1)).response == "active"
+            assert (await asyncio.wait_for(queued, timeout=1)).response == "queued"
+        finally:
+            release.set()
+            pending = [task for task in (active, queued) if task is not None]
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+        assert manager.queued_parallel_agent_count == 0
+
+    @pytest.mark.asyncio
+    async def test_zero_waiting_capacity_rejects_second_direct_delegation(self) -> None:
+        engine = AgentEngine(AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=0,
+        )))
+        manager = SubAgentManager(engine)
+        release = asyncio.Event()
+        started = asyncio.Event()
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            started.set()
+            await release.wait()
+            return AgentResult(status="completed", response=task.id)
+
+        manager._delegate_admitted = fake_delegate  # type: ignore[method-assign]
+        active = asyncio.create_task(manager.delegate(SubTask("active", "direct")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            rejected = await manager.delegate(SubTask("rejected", "direct"))
+            assert rejected.status == "error"
+            assert "等待队列已满（上限 0）" in (rejected.error or "")
+            assert manager.queued_parallel_agent_count == 0
+        finally:
+            release.set()
+            await asyncio.gather(active, return_exceptions=True)
+
+    @pytest.mark.asyncio
+    async def test_parallel_batch_rejects_items_beyond_shared_queue_budget(self) -> None:
+        engine = AgentEngine(AppConfig(safety=SafetyConfig(
+            max_parallel_agents=2,
+            max_queued_agents=2,
+        )))
+        manager = SubAgentManager(engine)
+        release = asyncio.Event()
+        first_wave = asyncio.Event()
+        started: list[str] = []
+        active = 0
+        peak = 0
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            started.append(task.id)
+            if len(started) == 2:
+                first_wave.set()
+            try:
+                await release.wait()
+                return AgentResult(status="completed", response=task.id)
+            finally:
+                active -= 1
+
+        manager._delegate_admitted = fake_delegate  # type: ignore[method-assign]
+        running = asyncio.create_task(manager.execute_parallel([
+            SubTask(str(index), "batch") for index in range(6)
+        ]))
+        try:
+            await asyncio.wait_for(first_wave.wait(), timeout=1)
+            await asyncio.sleep(0)
+            assert manager.queued_parallel_agent_count == 2
+            assert started == ["0", "1"]
+            release.set()
+            results = await asyncio.wait_for(running, timeout=1)
+        finally:
+            release.set()
+            if not running.done():
+                running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+
+        assert [result.status for result in results] == [
+            "completed",
+            "completed",
+            "completed",
+            "completed",
+            "error",
+            "error",
+        ]
+        assert all(
+            "等待队列已满（上限 2）" in (result.error or "")
+            for result in results[4:]
+        )
+        assert started == ["0", "1", "2", "3"]
+        assert peak == 2
+        assert manager.queued_parallel_agent_count == 0
+
+    @pytest.mark.asyncio
+    async def test_simultaneous_batches_share_active_and_waiting_budget(self) -> None:
+        engine = AgentEngine(AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=1,
+        )))
+        manager = SubAgentManager(engine)
+        release = asyncio.Event()
+        started: list[str] = []
+
+        async def fake_delegate(task: SubTask, **kwargs: object) -> AgentResult:
+            started.append(task.id)
+            await release.wait()
+            return AgentResult(status="completed", response=task.id)
+
+        manager._delegate_admitted = fake_delegate  # type: ignore[method-assign]
+        combined = asyncio.gather(
+            manager.execute_parallel([
+                SubTask(f"left-{index}", "left") for index in range(3)
+            ]),
+            manager.execute_parallel([
+                SubTask(f"right-{index}", "right") for index in range(3)
+            ]),
+        )
+        try:
+            async with asyncio.timeout(1):
+                while len(started) != 1 or manager.queued_parallel_agent_count != 1:
+                    await asyncio.sleep(0)
+            release.set()
+            left, right = await asyncio.wait_for(combined, timeout=1)
+        finally:
+            release.set()
+            if not combined.done():
+                combined.cancel()
+            await asyncio.gather(combined, return_exceptions=True)
+
+        results = [*left, *right]
+        assert sum(result.status == "completed" for result in results) == 2
+        assert sum(result.status == "error" for result in results) == 4
+        assert len(started) == 2
+        assert manager.queued_parallel_agent_count == 0
+
+    @pytest.mark.asyncio
     async def test_direct_and_batch_delegations_share_one_fifo_capacity_gate(self) -> None:
         engine = AgentEngine(
             AppConfig(safety=SafetyConfig(max_parallel_agents=1))
@@ -299,10 +485,10 @@ class TestSubAgentManager:
             assert manager.queued_parallel_agent_count == 2
 
             gates["batch-1"].set()
-            await asyncio.wait_for(began["direct"].wait(), timeout=1)
-            gates["direct"].set()
             await asyncio.wait_for(began["batch-2"].wait(), timeout=1)
             gates["batch-2"].set()
+            await asyncio.wait_for(began["direct"].wait(), timeout=1)
+            gates["direct"].set()
 
             assert (await asyncio.wait_for(direct, timeout=1)).response == "direct"
             batch_results = await asyncio.wait_for(batch, timeout=1)
@@ -323,9 +509,10 @@ class TestSubAgentManager:
 
     @pytest.mark.asyncio
     async def test_cancelled_direct_waiter_does_not_leak_queue_or_capacity(self) -> None:
-        engine = AgentEngine(
-            AppConfig(safety=SafetyConfig(max_parallel_agents=1))
-        )
+        engine = AgentEngine(AppConfig(safety=SafetyConfig(
+            max_parallel_agents=1,
+            max_queued_agents=1,
+        )))
         manager = SubAgentManager(engine)
         started: list[str] = []
         release = asyncio.Event()
@@ -341,6 +528,7 @@ class TestSubAgentManager:
         manager._delegate_admitted = fake_delegate  # type: ignore[method-assign]
         first = asyncio.create_task(manager.delegate(SubTask("first", "direct")))
         second: asyncio.Task[AgentResult] | None = None
+        replacement_task: asyncio.Task[AgentResult] | None = None
         try:
             await asyncio.wait_for(first_started.wait(), timeout=1)
             second = asyncio.create_task(
@@ -355,15 +543,21 @@ class TestSubAgentManager:
             assert manager.queued_parallel_agent_count == 0
             assert started == ["first"]
 
+            replacement_task = asyncio.create_task(
+                manager.delegate(SubTask("replacement", "direct"))
+            )
+            async with asyncio.timeout(1):
+                while manager.queued_parallel_agent_count != 1:
+                    await asyncio.sleep(0)
             release.set()
             assert (await asyncio.wait_for(first, timeout=1)).response == "first"
-            replacement = await asyncio.wait_for(
-                manager.delegate(SubTask("replacement", "direct")),
-                timeout=1,
-            )
+            replacement = await asyncio.wait_for(replacement_task, timeout=1)
         finally:
             release.set()
-            pending = [task for task in (first, second) if task is not None]
+            pending = [
+                task for task in (first, second, replacement_task)
+                if task is not None
+            ]
             for task in pending:
                 if not task.done():
                     task.cancel()

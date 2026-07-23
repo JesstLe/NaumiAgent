@@ -182,6 +182,7 @@ class SafetyConfig(BaseSettings):
     max_turns: int = Field(default=DEFAULT_RUNTIME_MAX_TURNS, ge=1)
     max_parallel_tools: int = Field(default=4, ge=1, le=16)
     max_parallel_agents: int = Field(default=4, ge=1, le=32)
+    max_queued_agents: int = Field(default=64, ge=0, le=10_000)
     max_input_tokens: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(default=None, ge=0)
 

@@ -293,12 +293,13 @@ class SubAgentManager:
 ### 3.2 并行子任务执行
 
 当前实现由 `SubAgentManager.execute_parallel()` 统一调度，不再对整个列表直接
-`asyncio.gather()`。每个批次只创建有限 worker，多个同时批次共享
-`safety.max_parallel_agents`（默认 4，范围 1-32）的 Semaphore。任务按输入顺序领取，
-结果按输入顺序返回；普通异常只影响对应任务，父级取消会停止活跃 worker，尚未领取的任务
-不会启动。`execute_dag()` 的每一层也复用同一调度器。
+`asyncio.gather()`。direct、batch 与 DAG 共用 `safety.max_parallel_agents`（默认 4，范围 1-32）
+的 Semaphore，以及 `safety.max_queued_agents`（默认 64，范围 0-10000）的进程内等待预算。
+批次只为当前共享预算可接受的前缀创建任务，容量外的项目按原位置返回明确错误；接受项按 FIFO
+进入，结果仍按输入顺序返回。普通异常只影响对应任务，父级取消会清理活跃与等待容量。
+`execute_dag()` 的每一层也复用同一调度器。
 
-运行 `/runtime subagent` 可以查看当前“活跃/上限”和排队数。
+运行 `/runtime subagent` 可以查看当前“活跃/上限”和“排队/上限”。
 
 ## 4. Agent 间通信
 

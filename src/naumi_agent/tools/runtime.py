@@ -397,7 +397,7 @@ class _RuntimeSnapshot:
         lines.append(
             "- 进程内 Agent 并发："
             f"{manager.active_execution_count}/{manager.max_parallel_agents} 活跃 · "
-            f"{manager.queued_parallel_agent_count} 排队"
+            f"{manager.queued_parallel_agent_count}/{manager.max_queued_agents} 排队"
         )
         agents = manager.list_agents()
         if agents:
