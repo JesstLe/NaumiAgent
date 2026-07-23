@@ -195,6 +195,8 @@ def test_harness_sandbox_eval_progress_payload_preserves_checkpoint_facts() -> N
     assert payload["persisted"] == 2
     assert payload["check_ids"] == ["unit", "lint"]
     assert payload["sample_result_sha256"] == ["c" * 64, "d" * 64]
+    assert payload["admission_ticket_id"] == ""
+    assert payload["queue_position"] == 0
     assert "workspace_root" not in payload
 
     with pytest.raises(ValueError, match="check_ids"):
@@ -203,6 +205,47 @@ def test_harness_sandbox_eval_progress_payload_preserves_checkpoint_facts() -> N
             batch_id="sandbox-batch-1",
             check_ids=("unit", "unit"),
         )
+
+
+def test_harness_sandbox_admission_payload_preserves_durable_capacity_facts() -> None:
+    checkpoint = HarnessSandboxBatchCheckpoint.model_construct(
+        schema_version=1,
+        policy_version="harness-sandbox-batch-v1",
+        checkpoint_id=f"hsbatch_{'1' * 24}",
+        checkpoint_sha256="1" * 64,
+        authority_key="2" * 64,
+        lane="sandbox",
+        stage="queued",
+        requested_samples=5,
+        persisted_samples=0,
+        sample_result_sha256=(),
+        run_id=None,
+        run_grant_sha256=None,
+        admission_ticket_id=f"hsadm_{'3' * 24}",
+        admission_epoch=2,
+        admission_state="queued",
+        queue_position=2,
+        max_active=1,
+        max_queued=4,
+        active_count=1,
+        queued_count=3,
+        code="",
+        updated_at="2026-07-23T10:00:00+08:00",
+    )
+
+    payload = harness_sandbox_eval_progress_payload(
+        checkpoint,
+        batch_id="sandbox-queued",
+        check_ids=("unit",),
+    )
+
+    assert payload["terminal"] is False
+    assert payload["admission_ticket_id"] == f"hsadm_{'3' * 24}"
+    assert payload["admission_epoch"] == 2
+    assert payload["admission_state"] == "queued"
+    assert payload["queue_position"] == 2
+    assert payload["active_count"] == 1
+    assert payload["queued_count"] == 3
 
 
 def test_harness_eval_promotion_payload_preserves_guided_and_terminal_state() -> None:

@@ -111,5 +111,6 @@ HAR-08.4l 已实现跨进程 Sandbox admission/queue authority，包括 workspac
 queued/active lease、崩溃回收、策略冲突和 owner/epoch fencing。详见
 `HAR-08-4l-durable-sandbox-admission.md`。
 
-下一依赖切片应基于真实 ticket transition 接 typed queued/admitted/cancelled 状态；不应继续扩张纯视觉
-状态，也不应从前端计时器或进程内 semaphore 推导 durable queued 状态。
+HAR-08.4m 已基于真实 ticket transition 接入 typed queued/admitted/completed/cancelled/failed/expired，
+并同步到 New UI/TUI；详见 `HAR-08-4m-sandbox-admission-typed-progress.md`。下一步是 owner-fenced
+cancel action，不应从前端计时器或展示文本推导 durable 状态。

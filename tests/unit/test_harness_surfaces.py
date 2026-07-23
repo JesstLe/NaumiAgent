@@ -340,14 +340,23 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
         assert "5/5" in rendered
         assert "sandbox-surface-1" in rendered
         assert [item["stage"] for item in frontend.progress] == [
+            "admitted",
             "recovering",
             "acquiring",
             *("executing" for _ in range(5)),
             "completed",
         ]
         assert [item["persisted"] for item in frontend.progress] == [
-            0, 0, 1, 2, 3, 4, 5, 5,
+            0, 0, 0, 1, 2, 3, 4, 5, 5,
         ]
+        ticket_ids = {
+            str(item["admission_ticket_id"]) for item in frontend.progress
+        }
+        assert len(ticket_ids) == 1
+        assert next(iter(ticket_ids)).startswith("hsadm_")
+        assert frontend.progress[0]["admission_state"] == "active"
+        assert frontend.progress[-1]["admission_state"] == "completed"
+        assert frontend.progress[-1]["active_count"] == 0
         assert all(item["kind"] == "sandbox" for item in frontend.progress)
         assert all(
             item["check_ids"] == ["unit"] for item in frontend.progress

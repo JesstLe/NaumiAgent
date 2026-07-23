@@ -83,3 +83,40 @@ test("Harness Sandbox Eval page renders only coordinator facts", () => {
   assert(!plain.includes("实现回归"));
   assert(lines.every((line) => visibleWidth(line) <= 100));
 });
+
+test("Harness Sandbox Eval page renders durable queue position and capacity", () => {
+  const lines = renderHarnessEvalBatchPage({
+    batchId: "sandbox-queued",
+    snapshot: {
+      kind: "sandbox",
+      stage: "queued",
+      batch_id: "sandbox-queued",
+      check_ids: ["unit"],
+      requested: 5,
+      persisted: 0,
+      admission_ticket_id: `hsadm_${"f".repeat(24)}`,
+      admission_epoch: 2,
+      admission_state: "queued",
+      queue_position: 2,
+      max_active: 1,
+      max_queued: 4,
+      active_count: 1,
+      queued_count: 3,
+      checkpoint_id: `hsbatch_${"a".repeat(24)}`,
+      authority_key: "b".repeat(64),
+      lane: "sandbox",
+      run_id: "",
+      run_grant_sha256: "",
+      sample_result_sha256: [],
+      code: "",
+      updated_at: "2026-07-23T10:00:00+08:00",
+    },
+  }, 110, 20);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert(plain.includes("等待容量 · 0%"));
+  assert(plain.includes(`Ticket · hsadm_${"f".repeat(24)}`));
+  assert(plain.includes("排队 · 第 2 位"));
+  assert(plain.includes("active 1/1 · queued 3/4"));
+  assert(lines.every((line) => visibleWidth(line) <= 110));
+});
