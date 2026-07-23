@@ -21,3 +21,9 @@
 - cancel/approve 仍调用 Python service；组件不直接发 shell/Git/Tool 命令。
 - source 更新导致行为变化时 CC-05 报告差异，不自动改变产品。
 - 用户测试能完成 task detail/cancel、permission rule explain、doctor export 三条真实流程。
+
+## 已完成前置
+
+UI-13.2a 已建立 Provider 稳定诊断码，并由 Doctor Health typed payload、New UI、TUI 与 CLI 共用。CC-03
+迁入 Doctor/StatusNotices 交互时必须消费该 code/domain/responsibility 合同，不得解析中文错误文本或把
+原始 Provider 异常带入组件。完整 source behavior inventory、export 流程与 golden scenarios 仍未实现。

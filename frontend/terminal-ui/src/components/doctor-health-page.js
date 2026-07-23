@@ -57,6 +57,7 @@ function renderItem(item) {
     color(tone, `● ${label} · ${domain} · ${text(item.label) || "未命名检查"}`),
     `  ${text(item.detail) || "暂无详情"}`,
     ...(item.severity !== "ok" ? [color(ANSI.dim, `  归因 · ${owner}`)] : []),
+    ...(item.diagnostic_code ? [color(ANSI.magenta, `  诊断码 · ${text(item.diagnostic_code)}`)] : []),
     ...(item.suggestion ? [color(ANSI.cyan, `  下一步 · ${text(item.suggestion)}`)] : []),
   ];
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
+from naumi_agent.ui.doctor import DoctorCheck, DoctorReport, render_doctor_report
 from naumi_agent.ui.doctor_health import (
     build_doctor_health_snapshot,
     pursuit_recovery_health_item,
@@ -16,7 +16,13 @@ def test_doctor_health_snapshot_maps_domains_severity_and_responsibility() -> No
     report = DoctorReport(
         checks=(
             DoctorCheck("Node.js", "pass", "v22.0.0"),
-            DoctorCheck("API key", "error", "未检测到凭据", "运行 naumi configure。"),
+            DoctorCheck(
+                "API key",
+                "error",
+                "未检测到凭据",
+                "运行 naumi configure。",
+                "provider_credentials_missing",
+            ),
             DoctorCheck("状态存储目录", "warn", "存在未版本化 Store", "运行迁移预检。"),
             DoctorCheck("browser daemon", "warn", "不可访问"),
             DoctorCheck("terminal capability", "pass", "TERM=xterm width=120"),
@@ -50,8 +56,22 @@ def test_doctor_health_snapshot_maps_domains_severity_and_responsibility() -> No
         "terminal",
     ]
     assert first.items[1].responsibility == "user_config"
+    assert first.items[1].diagnostic_code == "provider_credentials_missing"
     assert first.items[2].responsibility == "product_runtime"
     assert first.items[3].responsibility == "external_service"
+
+    without_code = build_doctor_health_snapshot(DoctorReport(checks=(
+        DoctorCheck("API key", "error", "未检测到凭据"),
+    )))
+    with_code = build_doctor_health_snapshot(DoctorReport(checks=(
+        DoctorCheck(
+            "API key",
+            "error",
+            "未检测到凭据",
+            diagnostic_code="provider_credentials_missing",
+        ),
+    )))
+    assert without_code.snapshot_sha256 != with_code.snapshot_sha256
 
 
 def test_doctor_health_snapshot_bounds_public_text_and_item_count() -> None:
@@ -85,6 +105,23 @@ def test_doctor_health_snapshot_redacts_secret_shaped_text() -> None:
 
     assert secret not in snapshot.items[0].detail
     assert "REDACTED" in snapshot.items[0].detail
+
+
+def test_doctor_health_snapshot_replaces_invalid_diagnostic_code() -> None:
+    report = DoctorReport(checks=(
+        DoctorCheck("model provider", "pass", "配置无效", diagnostic_code="BAD-CODE"),
+    ))
+    snapshot = build_doctor_health_snapshot(report)
+
+    assert snapshot.items[0].diagnostic_code == "diagnostic_code_invalid"
+    assert snapshot.items[0].severity == "error"
+    assert snapshot.items[0].responsibility == "product_runtime"
+    assert snapshot.status == "error"
+    rendered = render_doctor_health_item_markdown(snapshot.items[0])
+    assert "诊断码：`diagnostic_code_invalid`" in rendered
+    report_text = render_doctor_report(report)
+    assert "BAD-CODE" not in report_text
+    assert "`diagnostic_code_invalid`" in report_text
 
 
 def test_pursuit_recovery_item_uses_shared_state_and_raises_overall_severity() -> None:

@@ -205,7 +205,10 @@ async def test_run_doctor_reports_missing_api_key(tmp_path, monkeypatch) -> None
     report = await run_doctor(config, workspace_root=tmp_path)
 
     assert report.status == "error"
-    assert next(check for check in report.checks if check.name == "API key").status == "error"
+    check = next(check for check in report.checks if check.name == "API key")
+    assert check.status == "error"
+    assert check.diagnostic_code == "provider_credentials_missing"
+    assert "`provider_credentials_missing`" in render_doctor_report(report)
 
 
 @pytest.mark.asyncio
@@ -225,6 +228,7 @@ async def test_doctor_rejects_claude_model_with_kimi_api_base(
 
     check = next(item for item in report.checks if item.name == "model provider")
     assert check.status == "error"
+    assert check.diagnostic_code == "provider_config_invalid"
     assert "kimi" in check.detail
     assert "naumi configure" in check.suggestion
 
@@ -246,6 +250,18 @@ async def test_doctor_accepts_consistent_kimi_configuration(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_doctor_reports_stable_code_when_default_model_is_missing(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.models.default_model = ""
+
+    report = await run_doctor(config, workspace_root=tmp_path)
+
+    check = next(item for item in report.checks if item.name == "model provider")
+    assert check.status == "error"
+    assert check.diagnostic_code == "provider_model_missing"
+
+
+@pytest.mark.asyncio
 async def test_doctor_rejects_invalid_kimi_temperature_override(tmp_path) -> None:
     config = _config(tmp_path)
     config.models.provider = "kimi"
@@ -259,6 +275,7 @@ async def test_doctor_rejects_invalid_kimi_temperature_override(tmp_path) -> Non
 
     check = next(item for item in report.checks if item.name == "model provider")
     assert check.status == "error"
+    assert check.diagnostic_code == "provider_temperature_invalid"
     assert "temperature" in check.detail
     assert "NAUMI_MODELS__TEMPERATURE" in check.suggestion
 
@@ -285,6 +302,7 @@ async def test_live_doctor_skips_network_when_provider_configuration_is_invalid(
     check = next(item for item in report.checks if item.name == "模型实时连接")
     assert check.status == "error"
     assert "已跳过" in check.detail
+    assert check.diagnostic_code == "provider_prerequisite_failed"
 
 
 @pytest.mark.asyncio
@@ -337,18 +355,28 @@ async def test_live_doctor_reports_model_and_latency_without_response_body(tmp_p
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("message", "detail"),
+    ("message", "detail", "diagnostic_code"),
     [
-        ("401 invalid authentication secret-value", "认证失败（401）"),
-        ("404 resource not found secret-value", "模型或 API 地址不存在（404）"),
-        ("429 rate limit secret-value", "服务限流（429）"),
-        ("request timeout secret-value", "连接超时"),
+        (
+            "401 invalid authentication secret-value",
+            "认证失败（401）",
+            "provider_auth_failed",
+        ),
+        (
+            "404 resource not found secret-value",
+            "模型或 API 地址不存在（404）",
+            "provider_resource_not_found",
+        ),
+        ("429 rate limit secret-value", "服务限流（429）", "provider_rate_limited"),
+        ("503 unavailable secret-value", "模型服务暂时不可用（503）", "provider_server_error"),
+        ("request timeout secret-value", "连接超时", "provider_timeout"),
     ],
 )
 async def test_live_doctor_classifies_errors_without_leaking_raw_message(
     tmp_path,
     message: str,
     detail: str,
+    diagnostic_code: str,
 ) -> None:
     async def failed_probe(_config: AppConfig) -> ModelResponse:
         raise RuntimeError(message)
@@ -362,4 +390,39 @@ async def test_live_doctor_classifies_errors_without_leaking_raw_message(
 
     check = next(item for item in report.checks if item.name == "模型实时连接")
     assert detail in check.detail
+    assert check.diagnostic_code == diagnostic_code
     assert "secret-value" not in check.detail
+
+
+@pytest.mark.asyncio
+async def test_live_doctor_prefers_structured_http_status_over_message_text(
+    tmp_path,
+) -> None:
+    class ProviderFailureError(RuntimeError):
+        status_code = 429
+
+    async def failed_probe(_config: AppConfig) -> ModelResponse:
+        raise ProviderFailureError("mentions 401 but structured status is authoritative")
+
+    report = await run_doctor(
+        _config(tmp_path),
+        workspace_root=tmp_path,
+        live=True,
+        live_probe=failed_probe,
+    )
+
+    check = next(item for item in report.checks if item.name == "模型实时连接")
+    assert check.status == "warn"
+    assert check.detail == "服务限流（429）"
+    assert check.diagnostic_code == "provider_rate_limited"
+
+    ProviderFailureError.status_code = 400
+    report = await run_doctor(
+        _config(tmp_path),
+        workspace_root=tmp_path,
+        live=True,
+        live_probe=failed_probe,
+    )
+    check = next(item for item in report.checks if item.name == "模型实时连接")
+    assert check.status == "error"
+    assert check.diagnostic_code == "provider_request_failed"

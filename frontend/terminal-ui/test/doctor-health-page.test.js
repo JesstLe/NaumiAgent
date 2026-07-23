@@ -19,6 +19,7 @@ function snapshot() {
         id: "provider-2", domain: "provider", label: "API key", severity: "error",
         responsibility: "user_config", detail: "未检测到凭据",
         suggestion: "运行 naumi configure。",
+        diagnostic_code: "provider_credentials_missing",
       },
       {
         id: "runtime-heartbeat-retention", domain: "runtime",
@@ -49,6 +50,7 @@ test("doctor health page renders typed local evidence at common widths", () => {
     assert(lines.every((line) => visibleWidth(line) <= width));
     for (const expected of [
       "环境健康诊断", "本地只读", "Bridge 心跳", "Node.js", "API key", "用户配置",
+      "诊断码", "provider_credentials_missing",
       "运行时心跳清理", "产品运行时", "清理失败不会中断模型执行", "下一步",
       "Worker authority", "容量占用 1/4", "可用 3",
     ]) {
