@@ -103,6 +103,11 @@ class BaseAgent:
             workspace_root=workspace_root or None,
         )
 
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Return the exact immutable tool scope resolved for this instance."""
+        return tuple(self._tool_names)
+
     def _resolve_tools(self) -> list[str]:
         """根据能力和显式配置解析工具列表."""
         return list(resolve_agent_tool_names(

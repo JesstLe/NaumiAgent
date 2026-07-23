@@ -47,6 +47,9 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "task-1" in executions
     assert "running_tool" in executions
     assert "可停止" in executions
+    assert "Worker 合同" in executions
+    assert "aaaaaaaaaaaa" in executions
+    assert "file_read" in executions
     assert "team/review" in team
     assert "ready" in team
 
@@ -261,6 +264,10 @@ def _snapshot() -> AgentControlSnapshot:
             "heartbeat_subject_id": "agent-execution-test",
             "heartbeat_phase": "running",
             "heartbeat_failure_code": "",
+            "worker_request_sha256": "a" * 64,
+            "worker_result_sha256": "",
+            "worker_tool_scope": ["file_read"],
+            "worker_contract_failure_code": "",
             "current_tool": "file_read",
             "recent_tools": ["file_read"],
             "total_tokens": 42,

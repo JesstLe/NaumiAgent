@@ -797,6 +797,14 @@ class TestSubAgentManager:
         result = await manager.delegate(SubTask("finished", "done", "coder"))
 
         assert result.status == "completed"
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "finished"
+        )
+        assert len(record.worker_request_sha256) == 64
+        assert len(record.worker_result_sha256) == 64
+        assert record.worker_tool_scope == tuple(sorted(agent.tool_names))
+        assert record.worker_contract_failure_code == ""
         stopped = await manager.stop_execution("finished")
         assert stopped.accepted is False
         assert stopped.code == "already_finished"
@@ -914,6 +922,9 @@ class TestSubAgentManager:
         assert active.phase == "running_tool"
         assert active.current_tool == "file_read"
         assert active.recent_tools == ("file_read",)
+        assert len(active.worker_request_sha256) == 64
+        assert active.worker_result_sha256 == ""
+        assert "file_read" in active.worker_tool_scope
         assert [item for item in forwarded if item[0] == "tool_start"] == [
             ("tool_start", {"tool_name": "file_read"})
         ]
@@ -931,6 +942,77 @@ class TestSubAgentManager:
         ]
         finish.set()
         assert (await delegated).status == "completed"
+        terminal = next(
+            item for item in manager.list_executions()
+            if item.task_id == "tool-progress"
+        )
+        assert len(terminal.worker_result_sha256) == 64
+
+    @pytest.mark.asyncio
+    async def test_invalid_worker_request_contract_blocks_before_model_call(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        manager.spawn(AgentConfig(
+            name="invalid-contract",
+            description="invalid",
+            capabilities=[],
+            model_tier="unsupported",
+        ))
+        agent = manager.get_agent("invalid-contract")
+        assert agent is not None
+        called = False
+
+        async def execute(**_: object) -> AgentResult:
+            nonlocal called
+            called = True
+            return AgentResult(status="completed")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        result = await manager.delegate(
+            SubTask("invalid-worker-contract", "work", "invalid-contract")
+        )
+
+        assert result.status == "error"
+        assert "模型调用前安全拒绝" in (result.error or "")
+        assert called is False
+        assert all(
+            item.task_id != "invalid-worker-contract"
+            for item in manager.list_executions()
+        )
+
+    @pytest.mark.asyncio
+    async def test_invalid_terminal_metrics_are_visible_contract_degradation(
+        self,
+        manager: SubAgentManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        agent = manager.get_agent("coder")
+        assert agent is not None
+
+        async def execute(**_: object) -> AgentResult:
+            return AgentResult(
+                status="completed",
+                response="done",
+                total_tokens=-1,
+            )
+
+        monkeypatch.setattr(agent, "execute", execute)
+        result = await manager.delegate(
+            SubTask("invalid-worker-result", "work", "coder")
+        )
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "invalid-worker-result"
+        )
+
+        assert result.status == "completed"
+        assert record.worker_result_sha256 == ""
+        assert (
+            record.worker_contract_failure_code
+            == "agent_worker_result_invalid"
+        )
 
     @pytest.mark.asyncio
     async def test_delegate_rejects_unknown_child_runtime_event_before_forwarding(

@@ -25,5 +25,7 @@ ARC-06.1a/1b 已建立 Worker capacity reservation 及 ToolJob lifecycle 接入�
 incarnation-fenced、有界 FIFO 的持久等待 authority，并让 claim 与 reservation 同事务。ARC-06.2b1
 已让生产 ToolJob 以 schema v3 `queued` receipt 安全入队、重启补建和取消；ARC-06.2b2 又把 active
 claim 接入 ToolJob/Shell dispatch-before-send、start 前复验、terminal release 与 lost-claim reconcile。
-自动 scheduler/claim lease、Agent/Browser Worker、priority/公平调度与跨主机 topology 尚未实现，因此
+ARC-04.5a 又为真实 Agent 委派增加模型调用前 request contract、终态 result receipt 及 New UI/TUI
+共享证据，但合同尚未持久化，Agent 也还不是 daemon。自动 scheduler/claim lease、Agent/Browser 持久
+Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

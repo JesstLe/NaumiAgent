@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
@@ -34,6 +35,7 @@ _HEARTBEAT_PHASES = frozenset({
     "starting", "running", "waiting", "draining", "stopped", "failed",
 })
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:
@@ -83,6 +85,15 @@ def _boolean(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{name} must be a boolean")
     return value
+
+
+def _sha256(value: Any, name: str, *, optional: bool = True) -> str:
+    result = _text(value, name)
+    if not result and optional:
+        return ""
+    if not _SHA256_RE.fullmatch(result):
+        raise ValueError(f"{name} must be a lowercase SHA-256")
+    return result
 
 
 def _sequence(value: Any, name: str, limit: int = _MAX_ITEMS) -> tuple[Any, ...]:
@@ -185,6 +196,10 @@ class ExecutionDescriptor:
     heartbeat_subject_id: str = ""
     heartbeat_phase: str = ""
     heartbeat_failure_code: str = ""
+    worker_request_sha256: str = ""
+    worker_result_sha256: str = ""
+    worker_tool_scope: tuple[str, ...] = ()
+    worker_contract_failure_code: str = ""
     current_tool: str = ""
     recent_tools: tuple[str, ...] = ()
     total_tokens: int = 0
@@ -201,6 +216,8 @@ class ExecutionDescriptor:
             "task_id", "session_id", "agent_name", "description", "status", "phase",
             "started_at", "finished_at", "elapsed_ms", "heartbeat_age_ms", "current_tool",
             "heartbeat_subject_id", "heartbeat_phase", "heartbeat_failure_code",
+            "worker_request_sha256", "worker_result_sha256", "worker_tool_scope",
+            "worker_contract_failure_code",
             "recent_tools", "total_tokens", "total_cost_usd", "turns", "error",
             "stop_supported", "stop_requested",
         }, "execution")
@@ -236,6 +253,23 @@ class ExecutionDescriptor:
             heartbeat_failure_code=_text(
                 data.get("heartbeat_failure_code"),
                 "execution.heartbeat_failure_code",
+            ),
+            worker_request_sha256=_sha256(
+                data.get("worker_request_sha256"),
+                "execution.worker_request_sha256",
+            ),
+            worker_result_sha256=_sha256(
+                data.get("worker_result_sha256"),
+                "execution.worker_result_sha256",
+            ),
+            worker_tool_scope=_texts(
+                data.get("worker_tool_scope"),
+                "execution.worker_tool_scope",
+                256,
+            ),
+            worker_contract_failure_code=_text(
+                data.get("worker_contract_failure_code"),
+                "execution.worker_contract_failure_code",
             ),
             current_tool=_text(data.get("current_tool"), "execution.current_tool"),
             recent_tools=_texts(data.get("recent_tools"), "execution.recent_tools", 20),
