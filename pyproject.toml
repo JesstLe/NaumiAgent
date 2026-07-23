@@ -40,6 +40,8 @@ dependencies = [
     "httpx>=0.28",
     "readability-lxml>=0.8",
     "markdownify>=1.1",
+    "regex>=2024.11.6",
+    "wcwidth>=0.7.0",
 ]
 
 [project.optional-dependencies]
@@ -78,6 +80,7 @@ packages = ["src/naumi_agent"]
 "frontend/terminal-ui/protocol-contract.json" = "naumi_agent/frontend/terminal-ui/protocol-contract.json"
 "frontend/terminal-ui/capability-manifest.json" = "naumi_agent/frontend/terminal-ui/capability-manifest.json"
 "frontend/terminal-ui/terminal-capability-contract.json" = "naumi_agent/frontend/terminal-ui/terminal-capability-contract.json"
+"frontend/terminal-ui/terminal-width-contract.json" = "naumi_agent/frontend/terminal-ui/terminal-width-contract.json"
 "frontend/terminal-ui/src" = "naumi_agent/frontend/terminal-ui/src"
 "src/naumi_agent/tui/capability-manifest.json" = "naumi_agent/tui/capability-manifest.json"
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from naumi_agent.ui.terminal_width import pad_or_truncate
+
 
 @dataclass(frozen=True)
 class BottomBarState:
@@ -93,48 +95,10 @@ def build_full_status_text(
 def clip_to_width(text: str, width: int) -> str:
     """Clip text to exactly *width* terminal cells.
 
-    Uses prompt_toolkit's get_cwidth for CJK/emoji-safe measurement.
-    Falls back to len() if prompt_toolkit is unavailable.
+    Uses the shared grapheme-aware width contract for CJK, combining text,
+    flags, keycaps and ZWJ emoji.
     """
-    if width <= 0:
-        return ""
-    try:
-        from prompt_toolkit.utils import get_cwidth
-
-        text_width = sum(get_cwidth(ch) for ch in text)
-    except ImportError:
-        text_width = len(text)
-
-    if text_width <= width:
-        return text + " " * (width - text_width)
-
-    # Truncate with ellipsis
-    marker = "…"
-    try:
-        from prompt_toolkit.utils import get_cwidth
-
-        marker_w = get_cwidth(marker)
-    except ImportError:
-        marker_w = 1
-
-    target = width - marker_w
-    if target <= 0:
-        return marker[:width]
-
-    out: list[str] = []
-    current_width = 0
-    for ch in text:
-        try:
-            from prompt_toolkit.utils import get_cwidth
-
-            ch_w = get_cwidth(ch)
-        except ImportError:
-            ch_w = 1
-        if current_width + ch_w > target:
-            break
-        out.append(ch)
-        current_width += ch_w
-    return "".join(out) + marker
+    return pad_or_truncate(text, width)
 
 
 def compute_output_guard_height(

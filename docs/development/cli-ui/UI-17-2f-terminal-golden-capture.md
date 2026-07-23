@@ -74,3 +74,7 @@ manifest 记录 fixture SHA-256、视口、surface/renderer 身份、ANSI/text S
 
 下一步应把此 capture 作为 CC-02 current/Ink 同 fixture 对照和 UI-16 跨平台矩阵的测量入口；不得先复制更多
 Brainless 组件，也不得用当前单个 frame 宣称 UI-17.2 完成。
+
+UI-16.2a 已在此基础上补充 Python/Node 共享 Unicode cell 合同，并把 frame 宽度复核切换到
+`naumi_agent.ui.terminal_width.display_width()`；CJK、组合字符、旗帜、keycap 与 ZWJ emoji 不再
+依赖两端各自的隐式逐字符估算。真实 PTY/字体/Ambiguous 宽度矩阵仍属于 UI-16.2b 与 UI-17.4。

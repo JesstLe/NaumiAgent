@@ -1,4 +1,4 @@
-import { charWidth } from "./ansi.js";
+import { graphemeCellWidths } from "./ansi.js";
 
 export const INPUT_KEYS = {
   shiftTab: "\x1b[Z",
@@ -359,11 +359,12 @@ function segmentGraphemes(text) {
 
 function wrapComposerTokens(tokens, width) {
   if (!tokens.length) return [""];
+  const widths = graphemeCellWidths(tokens.join(""));
   const lines = [];
   let current = "";
   let currentWidth = 0;
-  for (const token of tokens) {
-    const tokenWidth = charWidth(token);
+  for (const [index, token] of tokens.entries()) {
+    const tokenWidth = widths[index] ?? 0;
     if (current && currentWidth + tokenWidth > width) {
       lines.push(current);
       current = "";
