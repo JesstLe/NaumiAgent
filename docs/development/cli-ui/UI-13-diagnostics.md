@@ -33,7 +33,7 @@
 - UI-13.1c Runtime Heartbeat Retention Health：已实现。New UI 投影真实 Bridge 调度状态，TUI fallback 复用
   同一 item 并明确标记进程内状态不可观测；两端均不在 Doctor 打开时触发清理，详见
   `UI-13-1c-runtime-heartbeat-retention-health.md`。
-- UI-13.1d Worker Capacity Health：已实现。共享只读 authority 从 Worker Registry v2 投影真实 reservation
+- UI-13.1d Worker Capacity Health：已实现。共享只读 authority 从 Worker Registry v3 投影真实 reservation
   占用/可用槽位，按 assessed time 逻辑忽略过期项但不写回；New UI/TUI 显示同一中文容量事实，详见
   `UI-13-1d-worker-capacity-health.md`。
 - UI-13.2a Provider Diagnostic Codes：已实现。Doctor 以低基数稳定码区分凭据、配置、404、429、5xx、

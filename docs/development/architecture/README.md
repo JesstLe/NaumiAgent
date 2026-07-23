@@ -20,3 +20,8 @@ ARC-03.3a 已交付显式 registry 兼容 ledger 和未知 informational 事件�
 Journal 与稳定 session cursor；ARC-02.5b 已进一步交付客户端持久 ACK、窗口内 cursor resend 与
 窗口外明确 snapshot baseline。活动运行恢复、多客户端策略、未知关键事件局部恢复和 socket transport
 仍未完成，因此 ARC-02 只标记 partial。
+
+ARC-06.1a/1b 已建立 Worker capacity reservation 及 ToolJob lifecycle 接入；ARC-06.2a 进一步建立
+incarnation-fenced、有界 FIFO 的持久等待 authority，并让 claim 与 reservation 同事务。生产 ToolJob
+queue adapter、Agent/Browser Worker、priority/公平调度与跨主机 topology 尚未实现，因此 ARC-06 保持
+partial。

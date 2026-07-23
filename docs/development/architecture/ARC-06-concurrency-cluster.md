@@ -19,7 +19,13 @@
   - HAR-10.7b 已为同一进程内 admission 增加有界等待预算和明确 overload response，避免 embedded
     Runtime 在持久 scheduler 落地前无界积压；它仍不提供跨进程公平、恢复或 reservation authority。
   - 未完成：Agent/Browser worker dispatch、全局/用户/workspace/provider 多级容量与等待调度。
-- ARC-06.2 Scheduler：priority、deadline、fair queue、dependency DAG、affinity。
+- ARC-06.2 Scheduler（partial）：
+  - ARC-06.2a 已在 Worker Registry v3 交付 exact-incarnation、deadline、有界 FIFO 的持久等待队列；
+    `max_waiters` 按 worker epoch 固化为 durable policy，FIFO claim 与 capacity reservation 在同一
+    SQLite 事务提交，Worker takeover 会 fence 旧等待项。见
+    [设计与验证](ARC-06-2a-durable-worker-capacity-queue.md)。
+  - 未完成：生产 ToolJob queue adapter、claim lease/reconcile、priority、aging、跨 workspace 公平、
+    dependency DAG、affinity、cursor 与 starvation 指标。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
 - ARC-06.4 Backpressure：producer pause、bounded queue、drop/coalesce policy、overload response。
 - ARC-06.5 Isolation：workspace lock、browser profile、env、artifact namespace、rate limit。

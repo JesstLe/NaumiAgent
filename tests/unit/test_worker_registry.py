@@ -304,6 +304,9 @@ async def test_registry_migrates_v1_capacity_schema_without_losing_registration(
     contract = _contract()
     await store.register(contract, registered_at=T1)
     with sqlite3.connect(db_path) as db:
+        db.execute("DROP INDEX waiting_worker_capacity_fifo")
+        db.execute("DROP TABLE worker_capacity_waiters")
+        db.execute("DROP TABLE worker_capacity_queue_policies")
         db.execute("DROP INDEX active_worker_capacity")
         db.execute("DROP TABLE worker_capacity_reservations")
         db.execute("PRAGMA user_version = 1")
@@ -322,7 +325,7 @@ async def test_registry_migrates_v1_capacity_schema_without_losing_registration(
     )
     assert reservation.state is WorkerCapacityReservationState.ACTIVE
     with sqlite3.connect(db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == WORKER_REGISTRY_SCHEMA_VERSION
 
 
 @pytest.mark.asyncio
