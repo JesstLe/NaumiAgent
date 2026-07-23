@@ -20,6 +20,8 @@ Composition 注入时明确标记不可观测，而不是伪造调度健康。UI
 UI-13.2a 已让 Provider 本地配置与显式 live probe 失败产生低基数稳定诊断码，并由 New UI/TUI/CLI 共用；
 UI-13.5a 已让 New UI/TUI/CLI/Agent Tool 先预览固定 3 文件的脱敏诊断 ZIP，再以精确 Snapshot 摘要把
 同一 Bundle 原子写入平台 Naumi 状态目录；包不含聊天、reasoning、raw trace、环境变量全集、凭据或源码；
+UI-17.3c 已进一步让 New UI 在旧 Bridge 不声明 `doctor_export` 时保留 Health 页面、显示兼容提示并阻止
+preview/write 发送，Python Bridge 也会在 Plan/写盘之前拒绝未协商请求；
 UI-17.2a-17.2f 已用共享 fixture 锁定 Bridge、TUI 与 Node reducer 的 runtime-health 八字段语义、权限脱敏、
 bypass/session grant 四选择、模型主动询问和 canonical answer、submit/tool/receipt/cancel 基本运行生命周期，以及
 Evaluation Lane RED/GREEN、资源证据与强制非最终边界，以及 token 合并、相关错误断流、发送 retry identity 和
@@ -44,4 +46,5 @@ UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-18 按 Goal
 UI-17 是统一发布门；17.1 manifest 已完成，17.2a runtime-health、17.2b permission/interaction 与
 17.2c terminal run lifecycle、17.2d Evaluation Lane Receipt、17.2e stream recovery 与 17.2f terminal capture 已完成；17.3a 已验证
 New UI 对旧 Bridge 的 Evaluation Lane typed→Slash 降级，17.3b 已建立发布合同驱动的通用
-event-capability registry。仍需断连 uncertain/权限恢复 golden、未知关键事件分类和 17.3c-17.6。
+event-capability registry，17.3c 已完成 Doctor Export 的失败关闭降级。仍需断连 uncertain/权限恢复 golden、
+未知关键事件分类和 17.3 其余治理、17.4-17.6。

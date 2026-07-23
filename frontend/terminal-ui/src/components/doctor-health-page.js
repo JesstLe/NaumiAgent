@@ -44,6 +44,9 @@ export function renderDoctorHealthPage(view, width, height) {
       ? [color(ANSI.dim, `Snapshot · ${text(snapshot.snapshot_sha256).slice(0, 12)}`)]
       : []),
     ...(value.exportLoading ? [color(ANSI.cyan, "正在准备脱敏诊断包…")] : []),
+    ...(value.exportNotice
+      ? [color(ANSI.yellow, `兼容模式 · ${text(value.exportNotice)}`)]
+      : []),
     ...(value.exportError ? [color(ANSI.red, `导出失败 · ${text(value.exportError)}`)] : []),
     ...renderExportPreview(exportPreview, exportReceipt),
   ];

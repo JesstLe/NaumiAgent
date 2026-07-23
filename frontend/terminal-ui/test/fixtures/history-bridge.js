@@ -43,6 +43,18 @@ attachJsonlLineReader(process.stdin, (line) => {
     return;
   }
 
+  if (record.type === "doctor") {
+    emit("doctor/health", {
+      schema_version: 1,
+      status: "ok",
+      generated_at: "2026-07-23T10:00:00+00:00",
+      live_probe: false,
+      snapshot_sha256: "d".repeat(64),
+      items: [],
+    }, record.id);
+    return;
+  }
+
   if (record.type === "shutdown") {
     emit("shutdown", { ok: true });
     setTimeout(() => process.exit(0), 5);
