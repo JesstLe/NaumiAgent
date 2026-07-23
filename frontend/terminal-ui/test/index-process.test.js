@@ -194,6 +194,109 @@ test("terminal UI heartbeat detects an unresponsive Bridge and reports recovery"
   }
 });
 
+test("terminal UI reconnects an idle Bridge and restores one authoritative receipt", async () => {
+  const markerPath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-reconnect-${Date.now()}-${Math.random()}.marker`,
+  );
+  const app = launchTerminalUi("reconnecting-bridge.js", {
+    env: {
+      NAUMI_TEST_BRIDGE_RESTART_MARKER: markerPath,
+      NAUMI_BRIDGE_RECOVERY_TIMEOUT_MS: "1000",
+    },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForOutput(output, "恢复后的权威回执。", 7000);
+    await waitForLatestScreen(output, "已重新连接并从权威存储恢复会话", 7000);
+    assert.equal(app.exitCode, null);
+
+    const events = readDebugEvents(app.debugLogPath);
+    const helloSends = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "hello",
+    );
+    const resumeSends = events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "resume",
+    );
+    assert.equal(helloSends.length, 2);
+    assert.equal(resumeSends.length, 1);
+    assert.deepEqual(resumeSends[0].payload.record.payload, {
+      session_id: "session-reconnect-1",
+      clear: true,
+    });
+    assert(events.some(
+      (record) => record.event === "bridge.recovery.completed"
+        && record.payload.session_id === "session-reconnect-1"
+        && record.payload.source === "resume_status",
+    ));
+    const helloAcks = events.filter(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "ack"
+        && record.payload.payload?.event === "hello",
+    );
+    assert.deepEqual(helloAcks.map((record) => record.payload.seq), [1, 1]);
+    const harnessReceiptIndex = events.findIndex(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "harness/receipt",
+    );
+    const completionReceiptIndex = events.findIndex(
+      (record) => record.event === "protocol.receive.record"
+        && record.payload.type === "completion/receipt",
+    );
+    const recoveryCompletedIndex = events.findIndex(
+      (record) => record.event === "bridge.recovery.completed",
+    );
+    assert(harnessReceiptIndex >= 0);
+    assert(completionReceiptIndex > harnessReceiptIndex);
+    assert(recoveryCompletedIndex > completionReceiptIndex);
+    assert.equal(countLatestScreen(output, "恢复后的权威回执。"), 1);
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+    fs.rmSync(markerPath, { force: true });
+  }
+});
+
+test("terminal UI fails closed instead of reconnecting an active run", async () => {
+  const markerPath = path.join(
+    tmpdir(),
+    `naumi-terminal-ui-active-disconnect-${Date.now()}-${Math.random()}.marker`,
+  );
+  const app = launchTerminalUi("reconnecting-bridge.js", {
+    env: {
+      NAUMI_TEST_BRIDGE_RESTART_MARKER: markerPath,
+      NAUMI_TEST_BRIDGE_EXIT_DURING_RUN: "1",
+    },
+  });
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("不要自动重放这个任务\n");
+    const [code] = await Promise.race([
+      once(app, "exit"),
+      delay(7000).then(() => assert.fail("活动运行断线后 New UI 未 fail-closed")),
+    ]);
+    assert.equal(code, 1);
+    assert(stripAnsi(output.text).includes("当前运行仍在执行，不能自动重启后端"));
+    const events = readDebugEvents(app.debugLogPath);
+    assert.equal(events.filter(
+      (record) => record.event === "protocol.send"
+        && record.payload.record.type === "hello",
+    ).length, 1);
+    assert(events.some(
+      (record) => record.event === "bridge.recovery.failed_closed"
+        && record.payload.reason === "active_run",
+    ));
+  } finally {
+    forceKill(app);
+    fs.rmSync(markerPath, { force: true });
+  }
+});
+
 test("terminal UI welcome consumes identity from the real Python JSONL Bridge", async () => {
   const app = launchTerminalUi("python-bridge-fixture.py", {
     bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],

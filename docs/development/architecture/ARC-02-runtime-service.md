@@ -36,3 +36,6 @@
   场景验证。
 - 这只解决 ARC-02.5 的持久化 owner 前置，不等于 cursor/revision/ack/resume 已实现。ARC-02 仍需先
   完成其余 Runtime Resource/Service 边界，再定义不会重复投递 tool result/receipt 的 Event Store 合同。
+- HAR-07.4b1 已让 New UI 在空闲边界内重启 stdio Bridge、重新 hello/sequence 协商，并以精确
+  session 复用持久 Receipt 恢复；活动运行和未裁决输入仍 fail-closed。该能力证明了前端重连状态机，
+  但没有 event cursor、ACK 或 gap resend，不能替代 ARC-02.3/ARC-02.5 的 Runtime Service 权威。

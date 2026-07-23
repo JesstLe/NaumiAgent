@@ -576,6 +576,20 @@ export function updateBridgeHeartbeat(state, value = {}) {
   return notificationAdded;
 }
 
+export function markBridgeReconnecting(state) {
+  state.bridgeReady = false;
+  state.protocolNegotiated = false;
+  state.protocolNegotiation = null;
+  state.bridgeHeartbeat = { status: "starting", rttMs: null, ageMs: 0 };
+  if (state.status?.protocol_registry) {
+    const { protocol_registry: _staleRegistry, ...status } = state.status;
+    state.status = status;
+  }
+  if (state.inspector?.snapshot) state.inspector.stale = true;
+  if (state.agents?.snapshot) state.agents.stale = true;
+  clearRenderCache(state.renderCache);
+}
+
 function workbenchMatchesCurrentSession(state, payload) {
   const sessionId = String(payload.session_id || "");
   return Boolean(sessionId)
