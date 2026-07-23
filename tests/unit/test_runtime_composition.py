@@ -663,6 +663,8 @@ def test_real_engine_composes_execution_grant_authority_lazily(
     batch_admission = engine.harness_sandbox_batch_admission
     assert batch_admission.max_active == config.safety.max_parallel_sandbox_batches
     assert batch_admission.max_queued == config.safety.max_queued_sandbox_batches
+    assert batch_admission.durable
+    assert batch_admission._store is engine._harness_store  # noqa: SLF001
     assert (
         engine.evolution_interventional_red_cohort_executor
         ._cohort_kernel.admission

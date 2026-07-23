@@ -131,6 +131,9 @@
 - HAR-08.4k Sandbox Eval Typed Progress：已实现。Coordinator checkpoint 经闭集 Runtime event 同步到
   New UI/TUI；两端展示真实 stage、Store-confirmed persisted、authority 与 run/grant 摘要，且 Sandbox 页面
   不伪造普通 Eval Case/Baseline 指标。详见 `HAR-08-4k-sandbox-eval-typed-progress.md`。
+- HAR-08.4l Durable Sandbox Batch Admission：已实现。Harness Store v17 提供 workspace-wide FIFO、
+  queued/active lease、崩溃回收、容量策略一致性和 owner/epoch fencing；生产 Harness/Evolution lane 共享同一
+  durable authority。详见 `HAR-08-4l-durable-sandbox-admission.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。

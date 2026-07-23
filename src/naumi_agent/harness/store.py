@@ -81,7 +81,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 16
+HARNESS_STORE_SCHEMA_VERSION = 17
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -89,6 +89,11 @@ _RUN_LEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _INTERACTION_ID_RE = re.compile(r"^ask-[A-Za-z0-9._:-]{1,128}$")
 _CONVERSATION_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CONVERSATION_QUEUE_TERMINAL_STATES = frozenset({"completed", "cancelled", "failed"})
+_SANDBOX_ADMISSION_TERMINAL_STATES = frozenset(
+    {"completed", "cancelled", "failed", "expired"}
+)
+_SANDBOX_ADMISSION_LANES = frozenset({"sandbox", "red", "green", "adversarial"})
+_SANDBOX_ADMISSION_TICKET_RE = re.compile(r"^hsadm_[0-9a-f]{24}$")
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -122,6 +127,18 @@ class HarnessStoreError(RuntimeError):
 
 class HarnessStoreConflictError(HarnessStoreError):
     """Raised when an idempotency key is reused for different immutable data."""
+
+
+class HarnessSandboxAdmissionCapacityError(HarnessStoreError):
+    """Raised when both durable active and queued capacity are exhausted."""
+
+
+class HarnessSandboxAdmissionFenceError(HarnessStoreError):
+    """Raised when a Sandbox admission owner no longer owns its ticket epoch."""
+
+
+class HarnessSandboxAdmissionPolicyError(HarnessStoreConflictError):
+    """Raised when live tickets prevent an admission policy change."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +314,43 @@ class HarnessConversationQueueResolution:
     actor_id: str
     reason: str
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxAdmissionTicket:
+    """One durable FIFO Sandbox batch capacity claim."""
+
+    workspace_root: str
+    ticket_id: str
+    authority_key: str
+    lane: str
+    requested_samples: int
+    owner_id: str
+    epoch: int
+    state: str
+    sequence: int
+    queue_position: int
+    max_active: int
+    max_queued: int
+    active_count: int
+    queued_count: int
+    enqueued_at: str
+    lease_expires_at: str
+    updated_at: str
+    terminal_code: str
+    request_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxAdmissionSnapshot:
+    """Durable workspace-wide Sandbox admission capacity snapshot."""
+
+    workspace_root: str
+    max_active: int
+    max_queued: int
+    active_count: int
+    queued_count: int
+    observed_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -4778,6 +4832,389 @@ class HarnessStore:
         except (aiosqlite.Error, OSError) as exc:
             raise HarnessStoreError("无法清理会话关联的 Harness 记录。") from exc
 
+    async def enqueue_sandbox_admission(
+        self,
+        *,
+        workspace_root: str | Path,
+        ticket_id: str,
+        authority_key: str,
+        lane: str,
+        requested_samples: int,
+        owner_id: str,
+        now: str,
+        lease_seconds: int,
+        max_active: int,
+        max_queued: int,
+    ) -> HarnessSandboxAdmissionTicket:
+        """Atomically admit or enqueue one durable workspace-wide Sandbox batch."""
+        workspace = _canonical_workspace(workspace_root)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        authority = _validate_sha256(authority_key, field="authority_key")
+        normalized_lane = _normalize_sandbox_admission_lane(lane)
+        samples = _normalize_sandbox_admission_samples(requested_samples)
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        _validate_sandbox_admission_capacity(max_active, max_queued)
+        _validate_sandbox_admission_lease_seconds(lease_seconds)
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                await _ensure_sandbox_admission_policy(
+                    db,
+                    workspace_root=workspace,
+                    max_active=max_active,
+                    max_queued=max_queued,
+                    now=timestamp,
+                )
+                existing = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                if existing is not None:
+                    restored = await _sandbox_admission_ticket_from_row(
+                        db,
+                        existing,
+                        now=timestamp,
+                    )
+                    expected = _sandbox_admission_request_digest(
+                        workspace_root=workspace,
+                        ticket_id=ticket,
+                        authority_key=authority,
+                        lane=normalized_lane,
+                        requested_samples=samples,
+                        owner_id=owner,
+                        enqueued_at=str(existing["enqueued_at"]),
+                    )
+                    if not hmac.compare_digest(restored.request_sha256, expected):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            f"Sandbox admission ticket {ticket} 已被不同请求占用。"
+                        )
+                    await db.rollback()
+                    return restored
+
+                counts = await _sandbox_admission_counts(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                if counts[0] < max_active:
+                    state = "active"
+                elif counts[1] < max_queued:
+                    state = "queued"
+                else:
+                    await db.rollback()
+                    raise HarnessSandboxAdmissionCapacityError(
+                        "Sandbox Batch 等待队列已满"
+                        f"（活跃 {counts[0]}/{max_active}，"
+                        f"排队 {counts[1]}/{max_queued}）；"
+                        "请等待现有批次完成后重试。"
+                    )
+                cursor = await db.execute(
+                    """
+                    SELECT COALESCE(MAX(sequence), 0) + 1
+                    FROM harness_sandbox_admission_tickets
+                    WHERE workspace_root = ?
+                    """,
+                    (workspace,),
+                )
+                sequence = int((await cursor.fetchone())[0])
+                digest = _sandbox_admission_request_digest(
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                    authority_key=authority,
+                    lane=normalized_lane,
+                    requested_samples=samples,
+                    owner_id=owner,
+                    enqueued_at=timestamp,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_admission_tickets (
+                        workspace_root, ticket_id, authority_key, lane,
+                        requested_samples, owner_id, epoch, state, sequence,
+                        enqueued_at, lease_expires_at, updated_at, terminal_code,
+                        request_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, '', ?)
+                    """,
+                    (
+                        workspace,
+                        ticket,
+                        authority,
+                        normalized_lane,
+                        samples,
+                        owner,
+                        state,
+                        sequence,
+                        timestamp,
+                        expires_at,
+                        timestamp,
+                        digest,
+                    ),
+                )
+                row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                assert row is not None
+                result = await _sandbox_admission_ticket_from_row(
+                    db,
+                    row,
+                    now=timestamp,
+                )
+                await db.commit()
+                return result
+        except (
+            HarnessSandboxAdmissionCapacityError,
+            HarnessSandboxAdmissionPolicyError,
+            HarnessStoreConflictError,
+        ):
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法持久化 Sandbox Batch admission。") from exc
+
+    async def poll_sandbox_admission(
+        self,
+        *,
+        workspace_root: str | Path,
+        ticket_id: str,
+        owner_id: str,
+        epoch: int,
+        now: str,
+        lease_seconds: int,
+    ) -> HarnessSandboxAdmissionTicket:
+        """Renew one ticket and promote the FIFO head when capacity is available."""
+        workspace = _canonical_workspace(workspace_root)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        normalized_epoch = _normalize_sandbox_admission_epoch(epoch)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        _validate_sandbox_admission_lease_seconds(lease_seconds)
+        expires_at = _timestamp_plus_seconds(timestamp, lease_seconds)
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                _require_current_sandbox_admission(
+                    row,
+                    owner_id=owner,
+                    epoch=normalized_epoch,
+                    now=timestamp,
+                )
+                assert row is not None
+                state = str(row["state"])
+                if state == "queued":
+                    policy = await _select_sandbox_admission_policy(
+                        db,
+                        workspace_root=workspace,
+                    )
+                    assert policy is not None
+                    counts = await _sandbox_admission_counts(
+                        db,
+                        workspace_root=workspace,
+                        now=timestamp,
+                    )
+                    cursor = await db.execute(
+                        """
+                        SELECT COUNT(*) FROM harness_sandbox_admission_tickets
+                        WHERE workspace_root = ? AND state = 'queued'
+                          AND lease_expires_at > ? AND sequence < ?
+                        """,
+                        (workspace, timestamp, int(row["sequence"])),
+                    )
+                    earlier = int((await cursor.fetchone())[0])
+                    if counts[0] < int(policy["max_active"]) and earlier == 0:
+                        state = "active"
+                await db.execute(
+                    """
+                    UPDATE harness_sandbox_admission_tickets
+                    SET state = ?, lease_expires_at = ?, updated_at = ?
+                    WHERE workspace_root = ? AND ticket_id = ?
+                      AND owner_id = ? AND epoch = ?
+                    """,
+                    (
+                        state,
+                        expires_at,
+                        timestamp,
+                        workspace,
+                        ticket,
+                        owner,
+                        normalized_epoch,
+                    ),
+                )
+                updated = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                assert updated is not None
+                result = await _sandbox_admission_ticket_from_row(
+                    db,
+                    updated,
+                    now=timestamp,
+                )
+                await db.commit()
+                return result
+        except HarnessSandboxAdmissionFenceError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法续租 Sandbox Batch admission。") from exc
+
+    async def finish_sandbox_admission(
+        self,
+        *,
+        workspace_root: str | Path,
+        ticket_id: str,
+        owner_id: str,
+        epoch: int,
+        state: str,
+        terminal_code: str,
+        now: str,
+    ) -> HarnessSandboxAdmissionTicket:
+        """Fence and persist one terminal admission transition."""
+        workspace = _canonical_workspace(workspace_root)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        owner = _normalize_run_lease_id(owner_id, field="owner_id")
+        normalized_epoch = _normalize_sandbox_admission_epoch(epoch)
+        normalized_state = state.strip() if isinstance(state, str) else ""
+        if normalized_state not in {"completed", "cancelled", "failed"}:
+            raise ValueError("Sandbox admission terminal state 无效。")
+        code = (
+            _normalize_text(terminal_code, field="terminal_code", max_length=128)
+            if terminal_code
+            else ""
+        )
+        timestamp = _normalize_utc_timestamp(now, field="now")
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                if (
+                    row is not None
+                    and str(row["owner_id"]) == owner
+                    and int(row["epoch"]) == normalized_epoch
+                    and str(row["state"]) == normalized_state
+                    and str(row["terminal_code"]) == code
+                ):
+                    result = await _sandbox_admission_ticket_from_row(
+                        db,
+                        row,
+                        now=timestamp,
+                    )
+                    await db.rollback()
+                    return result
+                _require_current_sandbox_admission(
+                    row,
+                    owner_id=owner,
+                    epoch=normalized_epoch,
+                    now=timestamp,
+                )
+                await db.execute(
+                    """
+                    UPDATE harness_sandbox_admission_tickets
+                    SET state = ?, terminal_code = ?, lease_expires_at = ?,
+                        updated_at = ?
+                    WHERE workspace_root = ? AND ticket_id = ?
+                      AND owner_id = ? AND epoch = ?
+                    """,
+                    (
+                        normalized_state,
+                        code,
+                        timestamp,
+                        timestamp,
+                        workspace,
+                        ticket,
+                        owner,
+                        normalized_epoch,
+                    ),
+                )
+                updated = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                assert updated is not None
+                result = await _sandbox_admission_ticket_from_row(
+                    db,
+                    updated,
+                    now=timestamp,
+                )
+                await db.commit()
+                return result
+        except HarnessSandboxAdmissionFenceError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法结束 Sandbox Batch admission。") from exc
+
+    async def sandbox_admission_snapshot(
+        self,
+        *,
+        workspace_root: str | Path,
+        now: str,
+    ) -> HarnessSandboxAdmissionSnapshot | None:
+        """Return an atomic durable capacity snapshot after expiring stale tickets."""
+        workspace = _canonical_workspace(workspace_root)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                policy = await _select_sandbox_admission_policy(
+                    db,
+                    workspace_root=workspace,
+                )
+                if policy is None:
+                    await db.rollback()
+                    return None
+                active, queued = await _sandbox_admission_counts(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                await db.commit()
+                return HarnessSandboxAdmissionSnapshot(
+                    workspace_root=workspace,
+                    max_active=int(policy["max_active"]),
+                    max_queued=int(policy["max_queued"]),
+                    active_count=active,
+                    queued_count=queued,
+                    observed_at=timestamp,
+                )
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法读取 Sandbox Batch admission 状态。") from exc
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -4815,6 +5252,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V14)
                             await db.executescript(_SCHEMA_V15)
                             await _migrate_eval_baseline_purpose_v16(db)
+                            await db.executescript(_SCHEMA_V17)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -5532,6 +5970,289 @@ def _conversation_queue_digest(
         "text": text,
     })
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _normalize_sandbox_admission_ticket_id(value: str) -> str:
+    normalized = value.strip() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_TICKET_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox admission ticket_id 格式无效。")
+    return normalized
+
+
+def _normalize_sandbox_admission_lane(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if normalized not in _SANDBOX_ADMISSION_LANES:
+        raise ValueError("Sandbox admission lane 无效。")
+    return normalized
+
+
+def _normalize_sandbox_admission_samples(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 100:
+        raise ValueError("Sandbox admission requested_samples 必须在 5 到 100 之间。")
+    return value
+
+
+def _normalize_sandbox_admission_epoch(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("Sandbox admission epoch 必须大于或等于 1。")
+    return value
+
+
+def _validate_sandbox_admission_capacity(max_active: int, max_queued: int) -> None:
+    if (
+        isinstance(max_active, bool)
+        or not isinstance(max_active, int)
+        or not 1 <= max_active <= 32
+        or isinstance(max_queued, bool)
+        or not isinstance(max_queued, int)
+        or not 0 <= max_queued <= 10_000
+    ):
+        raise ValueError(
+            "Sandbox admission 容量必须满足 active=1..32、queued=0..10000。"
+        )
+
+
+def _validate_sandbox_admission_lease_seconds(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 3_600:
+        raise ValueError("Sandbox admission lease_seconds 必须在 2 到 3600 之间。")
+
+
+def _sandbox_admission_request_digest(
+    *,
+    workspace_root: str,
+    ticket_id: str,
+    authority_key: str,
+    lane: str,
+    requested_samples: int,
+    owner_id: str,
+    enqueued_at: str,
+) -> str:
+    payload = _json_dumps({
+        "workspace_root": workspace_root,
+        "ticket_id": ticket_id,
+        "authority_key": authority_key,
+        "lane": lane,
+        "requested_samples": requested_samples,
+        "owner_id": owner_id,
+        "enqueued_at": enqueued_at,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _select_sandbox_admission_policy(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_policies
+            WHERE workspace_root = ?
+            """,
+            (workspace_root,),
+        )
+    ).fetchone()
+
+
+async def _ensure_sandbox_admission_policy(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    max_active: int,
+    max_queued: int,
+    now: str,
+) -> None:
+    row = await _select_sandbox_admission_policy(
+        db,
+        workspace_root=workspace_root,
+    )
+    if row is None:
+        await db.execute(
+            """
+            INSERT INTO harness_sandbox_admission_policies (
+                workspace_root, max_active, max_queued, updated_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (workspace_root, max_active, max_queued, now),
+        )
+        return
+    if (
+        int(row["max_active"]) == max_active
+        and int(row["max_queued"]) == max_queued
+    ):
+        return
+    cursor = await db.execute(
+        """
+        SELECT COUNT(*) FROM harness_sandbox_admission_tickets
+        WHERE workspace_root = ? AND state IN ('queued', 'active')
+          AND lease_expires_at > ?
+        """,
+        (workspace_root, now),
+    )
+    if int((await cursor.fetchone())[0]) > 0:
+        raise HarnessSandboxAdmissionPolicyError(
+            "Sandbox admission 容量配置与当前持久化权威不一致；"
+            "请等待现有批次结束后再修改容量。"
+        )
+    await db.execute(
+        """
+        UPDATE harness_sandbox_admission_policies
+        SET max_active = ?, max_queued = ?, updated_at = ?
+        WHERE workspace_root = ?
+        """,
+        (max_active, max_queued, now, workspace_root),
+    )
+
+
+async def _select_sandbox_admission_row(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    ticket_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_tickets
+            WHERE workspace_root = ? AND ticket_id = ?
+            """,
+            (workspace_root, ticket_id),
+        )
+    ).fetchone()
+
+
+async def _reap_expired_sandbox_admissions(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    now: str,
+) -> None:
+    await db.execute(
+        """
+        UPDATE harness_sandbox_admission_tickets
+        SET state = 'expired',
+            terminal_code = 'sandbox_batch_admission_lease_expired',
+            updated_at = ?
+        WHERE workspace_root = ? AND state IN ('queued', 'active')
+          AND lease_expires_at <= ?
+        """,
+        (now, workspace_root, now),
+    )
+
+
+async def _sandbox_admission_counts(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    now: str,
+) -> tuple[int, int]:
+    cursor = await db.execute(
+        """
+        SELECT
+            SUM(CASE WHEN state = 'active' AND lease_expires_at > ? THEN 1 ELSE 0 END),
+            SUM(CASE WHEN state = 'queued' AND lease_expires_at > ? THEN 1 ELSE 0 END)
+        FROM harness_sandbox_admission_tickets
+        WHERE workspace_root = ?
+        """,
+        (now, now, workspace_root),
+    )
+    row = await cursor.fetchone()
+    return int(row[0] or 0), int(row[1] or 0)
+
+
+def _require_current_sandbox_admission(
+    row: aiosqlite.Row | None,
+    *,
+    owner_id: str,
+    epoch: int,
+    now: str,
+) -> None:
+    if row is None:
+        raise HarnessSandboxAdmissionFenceError(
+            "Sandbox admission ticket 不存在，当前执行已失去容量权威。"
+        )
+    if str(row["state"]) not in {"queued", "active"}:
+        raise HarnessSandboxAdmissionFenceError(
+            "Sandbox admission ticket 已终止，当前执行已被 fencing。"
+        )
+    if str(row["owner_id"]) != owner_id or int(row["epoch"]) != epoch:
+        raise HarnessSandboxAdmissionFenceError(
+            "Sandbox admission owner/epoch 不匹配，当前执行已被 fencing。"
+        )
+    if datetime.fromisoformat(str(row["lease_expires_at"])) <= datetime.fromisoformat(
+        now
+    ):
+        raise HarnessSandboxAdmissionFenceError(
+            "Sandbox admission 租约已过期，当前执行已被 fencing。"
+        )
+    if datetime.fromisoformat(now) < datetime.fromisoformat(str(row["updated_at"])):
+        raise HarnessSandboxAdmissionFenceError(
+            "Sandbox admission 时钟发生回退，当前执行已被 fencing。"
+        )
+
+
+async def _sandbox_admission_ticket_from_row(
+    db: aiosqlite.Connection,
+    row: aiosqlite.Row,
+    *,
+    now: str,
+) -> HarnessSandboxAdmissionTicket:
+    workspace = str(row["workspace_root"])
+    policy = await _select_sandbox_admission_policy(
+        db,
+        workspace_root=workspace,
+    )
+    if policy is None:
+        raise HarnessStoreError("Sandbox admission policy 缺失。")
+    expected = _sandbox_admission_request_digest(
+        workspace_root=workspace,
+        ticket_id=str(row["ticket_id"]),
+        authority_key=str(row["authority_key"]),
+        lane=str(row["lane"]),
+        requested_samples=int(row["requested_samples"]),
+        owner_id=str(row["owner_id"]),
+        enqueued_at=str(row["enqueued_at"]),
+    )
+    if not hmac.compare_digest(expected, str(row["request_sha256"])):
+        raise HarnessStoreError("Sandbox admission ticket 摘要不一致。")
+    active, queued = await _sandbox_admission_counts(
+        db,
+        workspace_root=workspace,
+        now=now,
+    )
+    queue_position = 0
+    if str(row["state"]) == "queued":
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*) FROM harness_sandbox_admission_tickets
+            WHERE workspace_root = ? AND state = 'queued'
+              AND lease_expires_at > ? AND sequence <= ?
+            """,
+            (workspace, now, int(row["sequence"])),
+        )
+        queue_position = int((await cursor.fetchone())[0])
+    return HarnessSandboxAdmissionTicket(
+        workspace_root=workspace,
+        ticket_id=str(row["ticket_id"]),
+        authority_key=str(row["authority_key"]),
+        lane=str(row["lane"]),
+        requested_samples=int(row["requested_samples"]),
+        owner_id=str(row["owner_id"]),
+        epoch=int(row["epoch"]),
+        state=str(row["state"]),
+        sequence=int(row["sequence"]),
+        queue_position=queue_position,
+        max_active=int(policy["max_active"]),
+        max_queued=int(policy["max_queued"]),
+        active_count=active,
+        queued_count=queued,
+        enqueued_at=str(row["enqueued_at"]),
+        lease_expires_at=str(row["lease_expires_at"]),
+        updated_at=str(row["updated_at"]),
+        terminal_code=str(row["terminal_code"]),
+        request_sha256=str(row["request_sha256"]),
+    )
 
 
 def _ensure_queue_timestamp_forward(current: str, requested: str) -> None:
@@ -6737,5 +7458,54 @@ CREATE TABLE IF NOT EXISTS harness_conversation_queue_resolutions (
 CREATE INDEX IF NOT EXISTS idx_harness_queue_resolutions_subject
 ON harness_conversation_queue_resolutions (
     workspace_root, session_id, request_id, created_at
+);
+"""
+
+_SCHEMA_V17 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_admission_policies (
+    workspace_root TEXT PRIMARY KEY,
+    max_active INTEGER NOT NULL CHECK (max_active BETWEEN 1 AND 32),
+    max_queued INTEGER NOT NULL CHECK (max_queued BETWEEN 0 AND 10000),
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS harness_sandbox_admission_tickets (
+    workspace_root TEXT NOT NULL,
+    ticket_id TEXT NOT NULL,
+    authority_key TEXT NOT NULL,
+    lane TEXT NOT NULL CHECK (
+        lane IN ('sandbox', 'red', 'green', 'adversarial')
+    ),
+    requested_samples INTEGER NOT NULL CHECK (
+        requested_samples BETWEEN 5 AND 100
+    ),
+    owner_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'queued', 'active', 'completed', 'cancelled', 'failed', 'expired'
+        )
+    ),
+    sequence INTEGER NOT NULL CHECK (sequence >= 1),
+    enqueued_at TEXT NOT NULL,
+    lease_expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    terminal_code TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, ticket_id),
+    UNIQUE (workspace_root, sequence),
+    FOREIGN KEY (workspace_root)
+        REFERENCES harness_sandbox_admission_policies(workspace_root)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_admission_ready
+ON harness_sandbox_admission_tickets (
+    workspace_root, state, sequence, lease_expires_at, ticket_id
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_admission_authority
+ON harness_sandbox_admission_tickets (
+    workspace_root, authority_key, state, sequence
 );
 """

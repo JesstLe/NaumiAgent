@@ -856,6 +856,8 @@ class AgentEngine:
         self.harness_sandbox_batch_admission = HarnessSandboxBatchAdmission(
             max_active=config.safety.max_parallel_sandbox_batches,
             max_queued=config.safety.max_queued_sandbox_batches,
+            store=self._harness_store,
+            workspace_root=paths.workspace_root,
         )
         self.harness_sandbox_eval_kernel = HarnessSandboxEvalExecutionKernel(
             workspace_root=paths.workspace_root,
