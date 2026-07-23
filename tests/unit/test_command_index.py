@@ -51,6 +51,8 @@ def test_new_ui_command_index_is_complete_deterministic_and_unique() -> None:
     assert by_name["/harness"].permission_risk == "tool_execution"
     assert by_name["/goal"].source == "shared_runtime"
     assert by_name["/agents"].source == "new_ui"
+    assert by_name["/agents"].arguments.syntax == "[agent <name>]"
+    assert by_name["/agents"].arguments.required is False
     assert by_name["/write"].arguments.required is True
     assert by_name["/models"].arguments.required is False
     assert by_name["/doctor"].arguments.takes_arguments is False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from textual import on, work
@@ -27,6 +28,7 @@ _TAB_LABELS = {"agents": "Agent", "executions": "执行", "team": "协作"}
 _TERMINAL_EXECUTION_STATUSES = {
     "completed", "error", "failed", "timeout", "max_turns", "cancelled",
 }
+_SAFE_AGENT_DEEP_LINK_ID = re.compile(r"^[^\x00-\x1f\x7f]{1,200}$")
 
 
 def format_agent_control_markdown(
@@ -120,19 +122,32 @@ class AgentControlScreen(Screen[None]):
     }
     """
 
-    def __init__(self, engine: Any) -> None:
+    def __init__(
+        self,
+        engine: Any,
+        *,
+        initial_tab: str = "agents",
+        initial_id: str = "",
+    ) -> None:
         super().__init__()
+        if initial_tab not in AGENT_CONTROL_TABS:
+            raise ValueError(f"未知 Agent Control 标签: {initial_tab}")
+        normalized_initial_id = str(initial_id or "")
+        if normalized_initial_id and not _SAFE_AGENT_DEEP_LINK_ID.fullmatch(
+            normalized_initial_id
+        ):
+            raise ValueError("Agent 初始定位名称必须为 1 到 200 个可显示字符。")
         self.engine = engine
         self.snapshot: AgentControlSnapshot | None = None
-        self.selected_tab = "agents"
-        self.selected_id = ""
+        self.selected_tab = initial_tab
+        self.selected_id = normalized_initial_id
         self.stop_confirmation_task_id = ""
         self.action_pending_task_id = ""
         self._entry_ids: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Static("Agent Control Center · 后端权威 Agent 视图", id="agent-title")
-        with TabbedContent(initial="agents", id="agent-tabs"):
+        with TabbedContent(initial=self.selected_tab, id="agent-tabs"):
             for tab, label in _TAB_LABELS.items():
                 with TabPane(label, id=tab):
                     with Horizontal(classes="agent-body"):
@@ -153,8 +168,10 @@ class AgentControlScreen(Screen[None]):
         tab_id = str(event.pane.id or "agents")
         if tab_id not in AGENT_CONTROL_TABS:
             return
+        changed_tab = tab_id != self.selected_tab
         self.selected_tab = tab_id
-        self.selected_id = ""
+        if changed_tab:
+            self.selected_id = ""
         self.stop_confirmation_task_id = ""
         await self._rebuild_list()
 

@@ -964,6 +964,12 @@ function handleCommandQuickOpenKey(chunk) {
           limit: 200,
           refresh,
         }),
+        agents: () => send("agents/request", {
+          open: true,
+          subscribe: false,
+          known_revision: 0,
+          session_id: String(state.currentSessionId || ""),
+        }),
       },
     );
     return true;

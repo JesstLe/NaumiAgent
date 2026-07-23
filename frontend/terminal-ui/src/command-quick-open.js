@@ -6,6 +6,7 @@ const RESULT_LIMIT = 200;
 const TASK_RESULT_LIMIT = 50;
 const SESSION_RESULT_LIMIT = 100;
 const FILE_RESULT_LIMIT = 200;
+const AGENT_RESULT_LIMIT = 50;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 const TASK_STATUS_ORDER = Object.freeze({
   running: 0,
@@ -16,6 +17,15 @@ const TASK_STATUS_ORDER = Object.freeze({
   completed: 5,
 });
 const TASK_SOURCE_ORDER = Object.freeze({ todo: 0, subagent: 1, background: 2, browser: 3 });
+const AGENT_STATE_ORDER = Object.freeze({
+  running: 0,
+  ready: 1,
+  spawned: 2,
+  idle: 3,
+  uninitialized: 4,
+  destroyed: 5,
+});
+const AGENT_KIND_ORDER = Object.freeze({ dynamic: 0, preset: 1 });
 
 export function openCommandQuickOpen(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
@@ -44,6 +54,14 @@ export function openCommandQuickOpen(state) {
     quickOpen.fileRequestId = "";
     quickOpen.fileMeta = null;
   }
+  if (!quickOpen.agentLoading) {
+    quickOpen.agentItems = [];
+    quickOpen.agentWarnings = [];
+    quickOpen.agentLoaded = false;
+    quickOpen.agentError = "";
+    quickOpen.agentRequestId = "";
+    quickOpen.agentRevision = 0;
+  }
   quickOpen.draftText = String(state.input ?? "");
   quickOpen.draftCursor = state.inputCursor;
   return true;
@@ -52,6 +70,16 @@ export function openCommandQuickOpen(state) {
 export function closeCommandQuickOpen(state) {
   const quickOpen = ensureCommandQuickOpenState(state);
   if (!quickOpen.open) return false;
+  if (quickOpen.agentRequestId) {
+    quickOpen.agentDiscardRequestIds = [
+      ...quickOpen.agentDiscardRequestIds.filter(
+        (requestId) => requestId !== quickOpen.agentRequestId,
+      ),
+      quickOpen.agentRequestId,
+    ].slice(-20);
+    quickOpen.agentLoading = false;
+    quickOpen.agentRequestId = "";
+  }
   quickOpen.open = false;
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
@@ -86,6 +114,8 @@ export function getCommandQuickOpenItems(state) {
       ? searchSessionEntries(quickOpen.sessionItems, quickOpen.query, SESSION_RESULT_LIMIT)
       : quickOpen.provider === "files"
         ? quickOpen.fileItems.slice(0, FILE_RESULT_LIMIT)
+        : quickOpen.provider === "agents"
+          ? searchAgentEntries(quickOpen.agentItems, quickOpen.query, AGENT_RESULT_LIMIT)
     : searchCommandEntries(
       state.slashCommands,
       quickOpen.query,
@@ -109,7 +139,8 @@ export function switchCommandQuickOpenProvider(state, requests = null) {
     commands: "tasks",
     tasks: "sessions",
     sessions: "files",
-    files: "commands",
+    files: "agents",
+    agents: "commands",
   })[quickOpen.provider];
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
@@ -140,6 +171,20 @@ export function switchCommandQuickOpenProvider(state, requests = null) {
   }
   if (quickOpen.provider === "files" && typeof requests?.files === "function") {
     requestCommandQuickOpenFiles(state, requests.files, { refresh: !quickOpen.fileLoaded });
+  }
+  if (
+    quickOpen.provider === "agents"
+    && !quickOpen.agentLoaded
+    && !quickOpen.agentLoading
+    && typeof requests?.agents === "function"
+  ) {
+    quickOpen.agentLoading = true;
+    quickOpen.agentError = "";
+    quickOpen.agentRequestId = String(requests.agents() || "");
+    if (!quickOpen.agentRequestId) {
+      quickOpen.agentLoading = false;
+      quickOpen.agentError = "Agent 权威快照请求未发送。";
+    }
   }
   return quickOpen.provider;
 }
@@ -186,6 +231,60 @@ export function failCommandQuickOpenFileSnapshot(state, requestId, message = "")
     message || "Workspace 文件索引读取失败，请检查目录权限后重试。",
   ).slice(0, 500);
   quickOpen.fileRequestId = "";
+  return true;
+}
+
+export function applyCommandQuickOpenAgentSnapshot(state, requestId, payload) {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  const correlationId = String(requestId || "");
+  if (quickOpen.agentDiscardRequestIds.includes(correlationId)) {
+    quickOpen.agentDiscardRequestIds = quickOpen.agentDiscardRequestIds.filter(
+      (item) => item !== correlationId,
+    );
+    return true;
+  }
+  if (!quickOpen.agentRequestId || quickOpen.agentRequestId !== correlationId) {
+    return false;
+  }
+  if (
+    state.currentSessionId
+    && String(payload?.session_id || "") !== String(state.currentSessionId)
+  ) {
+    quickOpen.agentLoading = false;
+    quickOpen.agentError = "Agent 快照会话与当前会话不一致。";
+    quickOpen.agentRequestId = "";
+    return true;
+  }
+  quickOpen.agentItems = Array.isArray(payload?.agents)
+    ? payload.agents.slice(0, 100) : [];
+  quickOpen.agentWarnings = Array.isArray(payload?.warnings)
+    ? payload.warnings.slice(0, 20) : [];
+  quickOpen.agentLoaded = true;
+  quickOpen.agentLoading = false;
+  quickOpen.agentError = "";
+  quickOpen.agentRequestId = "";
+  quickOpen.agentRevision = Number(payload?.revision) || 0;
+  quickOpen.selectedIndex = 0;
+  return true;
+}
+
+export function failCommandQuickOpenAgentSnapshot(state, requestId, message = "") {
+  const quickOpen = ensureCommandQuickOpenState(state);
+  const correlationId = String(requestId || "");
+  if (quickOpen.agentDiscardRequestIds.includes(correlationId)) {
+    quickOpen.agentDiscardRequestIds = quickOpen.agentDiscardRequestIds.filter(
+      (item) => item !== correlationId,
+    );
+    return true;
+  }
+  if (!quickOpen.agentRequestId || quickOpen.agentRequestId !== correlationId) {
+    return false;
+  }
+  quickOpen.agentLoading = false;
+  quickOpen.agentError = String(
+    message || "Agent 权威快照读取失败，请稍后重试。",
+  ).slice(0, 500);
+  quickOpen.agentRequestId = "";
   return true;
 }
 
@@ -253,6 +352,13 @@ export function resetCommandQuickOpenTaskCache(state) {
   quickOpen.fileError = "";
   quickOpen.fileRequestId = "";
   quickOpen.fileMeta = null;
+  quickOpen.agentItems = [];
+  quickOpen.agentWarnings = [];
+  quickOpen.agentLoaded = false;
+  quickOpen.agentLoading = false;
+  quickOpen.agentError = "";
+  quickOpen.agentRequestId = "";
+  quickOpen.agentRevision = 0;
   quickOpen.provider = "commands";
   quickOpen.selectedIndex = 0;
 }
@@ -275,6 +381,7 @@ export function acceptCommandQuickOpen(state) {
     selected.provider === "tasks" ? taskTemplate(selected)
       : selected.provider === "sessions" ? sessionTemplate(selected)
         : selected.provider === "files" ? fileTemplate(selected)
+          : selected.provider === "agents" ? agentTemplate(selected)
         : commandTemplate(selected),
   );
   closeCommandQuickOpen(state);
@@ -308,6 +415,42 @@ export function fileTemplate(entry) {
     throw new Error("Workspace 文件无法安全填入 QuickOpen。");
   }
   return template;
+}
+
+export function searchAgentEntries(entries, query, limit = AGENT_RESULT_LIMIT) {
+  const boundedLimit = Math.max(
+    1,
+    Math.min(AGENT_RESULT_LIMIT, Math.trunc(Number(limit) || AGENT_RESULT_LIMIT)),
+  );
+  const term = normalizeSearchText(query).slice(0, QUERY_LIMIT);
+  return (Array.isArray(entries) ? entries : []).slice(0, 100)
+    .filter(isSafeAgentEntry)
+    .map((entry) => ({ entry, score: agentSearchScore(entry, term) }))
+    .filter((item) => item.score !== null)
+    .sort((left, right) => left.score - right.score
+      || (AGENT_STATE_ORDER[left.entry.state] ?? 9) - (AGENT_STATE_ORDER[right.entry.state] ?? 9)
+      || (AGENT_KIND_ORDER[left.entry.kind] ?? 9) - (AGENT_KIND_ORDER[right.entry.kind] ?? 9)
+      || String(left.entry.name).localeCompare(String(right.entry.name)))
+    .slice(0, boundedLimit)
+    .map((item) => item.entry);
+}
+
+export function agentTemplate(entry) {
+  if (!isSafeAgentEntry(entry)) {
+    throw new Error("Agent 名称无法安全填入 QuickOpen。");
+  }
+  return `/agents agent ${shellQuote(String(entry.name))}`;
+}
+
+export function parseAgentDeepLink(text) {
+  const parts = splitShellWords(String(text || ""));
+  if (
+    parts.length !== 3
+    || parts[0].toLocaleLowerCase("und") !== "/agents"
+    || parts[1].toLocaleLowerCase("und") !== "agent"
+    || !isSafeAgentName(parts[2])
+  ) return null;
+  return parts[2];
 }
 
 export function searchTaskEntries(entries, query, limit = TASK_RESULT_LIMIT) {
@@ -426,6 +569,93 @@ function taskSearchScore(entry, term) {
   return gap === null ? null : 100_000 + gap;
 }
 
+function agentSearchScore(entry, term) {
+  if (!term) return 0;
+  const name = normalizeSearchText(entry.name);
+  if (term === name) return 0;
+  if (name.startsWith(term)) return 10_000 + name.length - term.length;
+  if (name.includes(term)) return 20_000 + name.indexOf(term);
+  const metadata = normalizeSearchText([
+    entry.description,
+    entry.kind,
+    entry.kind === "dynamic" ? "动态" : "预置",
+    entry.state,
+    ({
+      uninitialized: "未初始化",
+      spawned: "已启动",
+      ready: "就绪",
+      running: "运行中",
+      idle: "空闲",
+      destroyed: "已销毁",
+    })[entry.state],
+    entry.model_tier,
+    entry.permission_level,
+    ...(Array.isArray(entry.capabilities) ? entry.capabilities : []),
+    ...(Array.isArray(entry.tools) ? entry.tools : []),
+  ].join(" "));
+  if (metadata.includes(term)) return 30_000 + metadata.indexOf(term);
+  const gap = subsequenceGap(term, `${name} ${metadata}`);
+  return gap === null ? null : 100_000 + gap;
+}
+
+function isSafeAgentEntry(entry) {
+  return Boolean(
+    entry
+    && typeof entry === "object"
+    && isSafeAgentName(entry.name)
+    && Object.hasOwn(AGENT_STATE_ORDER, String(entry.state || ""))
+    && Object.hasOwn(AGENT_KIND_ORDER, String(entry.kind || ""))
+  );
+}
+
+function isSafeAgentName(value) {
+  const name = String(value || "");
+  return name.length >= 1 && name.length <= 200 && !/[\u0000-\u001f\u007f]/.test(name);
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
+function splitShellWords(value) {
+  const words = [];
+  let word = "";
+  let quote = "";
+  let started = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (character === quote) {
+        quote = "";
+      } else if (quote === "\"" && character === "\\" && index + 1 < value.length) {
+        word += value[index += 1];
+      } else {
+        word += character;
+      }
+      started = true;
+    } else if (character === "'" || character === "\"") {
+      quote = character;
+      started = true;
+    } else if (/\s/.test(character)) {
+      if (started) {
+        words.push(word);
+        word = "";
+        started = false;
+      }
+    } else if (character === "\\" && index + 1 < value.length) {
+      word += value[index += 1];
+      started = true;
+    } else {
+      word += character;
+      started = true;
+    }
+  }
+  if (quote) return [];
+  if (started) words.push(word);
+  return words;
+}
+
 function isSafeTaskEntry(entry) {
   return Boolean(
     entry
@@ -491,6 +721,8 @@ function ensureCommandQuickOpenState(state) {
       sessionError: "", sessionRequestId: "",
       fileItems: [], fileLoaded: false, fileLoading: false, fileError: "",
       fileRequestId: "", fileMeta: null,
+      agentItems: [], agentWarnings: [], agentLoaded: false, agentLoading: false,
+      agentError: "", agentRequestId: "", agentRevision: 0, agentDiscardRequestIds: [],
     };
   }
   if (!Array.isArray(state.commandQuickOpen.recentCommands)) {
@@ -501,7 +733,12 @@ function ensureCommandQuickOpenState(state) {
   if (!Array.isArray(state.commandQuickOpen.sessionItems)) state.commandQuickOpen.sessionItems = [];
   if (!Array.isArray(state.commandQuickOpen.sessionWarnings)) state.commandQuickOpen.sessionWarnings = [];
   if (!Array.isArray(state.commandQuickOpen.fileItems)) state.commandQuickOpen.fileItems = [];
-  if (!["commands", "tasks", "sessions", "files"].includes(state.commandQuickOpen.provider)) {
+  if (!Array.isArray(state.commandQuickOpen.agentItems)) state.commandQuickOpen.agentItems = [];
+  if (!Array.isArray(state.commandQuickOpen.agentWarnings)) state.commandQuickOpen.agentWarnings = [];
+  if (!Array.isArray(state.commandQuickOpen.agentDiscardRequestIds)) {
+    state.commandQuickOpen.agentDiscardRequestIds = [];
+  }
+  if (!["commands", "tasks", "sessions", "files", "agents"].includes(state.commandQuickOpen.provider)) {
     state.commandQuickOpen.provider = "commands";
   }
   return state.commandQuickOpen;

@@ -1,4 +1,4 @@
-"""UI-14.2a/2c Textual command and task QuickOpen interaction tests."""
+"""UI-14.2 Textual multi-provider QuickOpen interaction tests."""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input
 
+from naumi_agent.agent_control import AgentControlSnapshot, AgentDescriptor
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.memory.session import Session
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.tasks.models import Task, TaskStatus
+from naumi_agent.tui.agent_control import AgentControlScreen
 from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.command_quick_open import CommandQuickOpenScreen
 from naumi_agent.ui.workspace_file_index import WorkspaceFileIndex
@@ -28,6 +30,36 @@ class _QuickOpenTaskStore:
                 owner="reviewer",
             )
         ]
+
+
+class _QuickOpenAgentControl:
+    async def snapshot(self) -> AgentControlSnapshot:
+        return AgentControlSnapshot(
+            schema_version=2,
+            session_id="",
+            revision=3,
+            generated_at="2026-07-23T00:00:00+00:00",
+            agents=(
+                AgentDescriptor(
+                    name="Explore Worker",
+                    description="探索项目",
+                    kind="dynamic",
+                    state="running",
+                    task_count=1,
+                    model_tier="fast",
+                    capabilities=("explore",),
+                    tools=("glob",),
+                    permission_level="read_only",
+                ),
+            ),
+        )
+
+
+def test_agent_control_initial_target_rejects_unsafe_or_oversized_names() -> None:
+    with pytest.raises(ValueError, match="可显示字符"):
+        AgentControlScreen(object(), initial_id="bad\nagent")
+    with pytest.raises(ValueError, match="可显示字符"):
+        AgentControlScreen(object(), initial_id="a" * 201)
 
 
 @pytest.mark.asyncio
@@ -185,4 +217,43 @@ async def test_tui_quick_open_searches_workspace_files_and_only_fills_read(
         await pilot.pause()
 
         assert composer.value == "/read 'src/中文 file.py'"
+        assert app._agent_busy is False  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_tui_quick_open_deep_links_authoritative_agent_without_execution() -> None:
+    engine = AgentEngine(AppConfig())
+    engine.agent_control = _QuickOpenAgentControl()
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        composer = app.query_one("#msg-input", Input)
+        await pilot.press("ctrl+p")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandQuickOpenScreen)
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("tab")
+        await pilot.press("tab")
+        for _ in range(20):
+            if screen._results:  # noqa: SLF001
+                break
+            await pilot.pause(0.05)
+
+        assert screen._provider == "agents"  # noqa: SLF001
+        assert screen._results[0].name == "Explore Worker"  # noqa: SLF001
+        await pilot.press("enter")
+        await pilot.pause()
+        assert composer.value == "/agents agent 'Explore Worker'"
+        assert app._agent_busy is False  # noqa: SLF001
+
+        composer.focus()
+        await pilot.press("enter")
+        for _ in range(20):
+            if isinstance(app.screen, AgentControlScreen) and app.screen.snapshot:
+                break
+            await pilot.pause(0.05)
+        assert isinstance(app.screen, AgentControlScreen)
+        assert app.screen.selected_id == "Explore Worker"
         assert app._agent_busy is False  # noqa: SLF001

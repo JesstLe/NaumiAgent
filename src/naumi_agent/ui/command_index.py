@@ -154,7 +154,13 @@ class TerminalCommandIndexEntry(BaseModel):
 _LOCAL_COMMANDS: dict[CommandSurface, tuple[CommandMeta, ...]] = {
     "new_ui": (
         CommandMeta("/chat", "切换为普通对话输入", readonly=False, category="navigation"),
-        CommandMeta("/agents", "打开 Agent 控制中心", category="navigation"),
+        CommandMeta(
+            "/agents",
+            "打开 Agent 控制中心或定位 Agent",
+            takes_arg=True,
+            arg_hint="[agent <name>]",
+            category="navigation",
+        ),
         CommandMeta("/workbench", "刷新 Workbench 权威快照", category="navigation"),
         CommandMeta(
             "/mode",
@@ -210,7 +216,13 @@ _LOCAL_COMMANDS: dict[CommandSurface, tuple[CommandMeta, ...]] = {
         ),
     ),
     "tui": (
-        CommandMeta("/agents", "打开 Agent 控制中心", category="navigation"),
+        CommandMeta(
+            "/agents",
+            "打开 Agent 控制中心或定位 Agent",
+            takes_arg=True,
+            arg_hint="[agent <name>]",
+            category="navigation",
+        ),
         CommandMeta("/workbench", "刷新 Workbench 权威快照", category="navigation"),
         CommandMeta(
             "/send-now",

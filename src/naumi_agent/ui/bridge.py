@@ -3097,6 +3097,7 @@ class JsonlEngineBridge:
     ) -> None:
         """Open, refresh, or close the current session Agent subscription."""
         was_subscribed = self._agents_subscribed
+        subscribe = bool(payload.get("subscribe", True))
         if not bool(payload.get("open", True)):
             self._agents_subscribed = False
             revision = self._agents_snapshot.revision if self._agents_snapshot else 0
@@ -3142,9 +3143,14 @@ class JsonlEngineBridge:
                 request_id=request_id,
             )
             return
-        self._agents_subscribed = True
-        self._agents_snapshot = snapshot
-        if was_subscribed and int(payload.get("known_revision", 0)) == snapshot.revision:
+        if subscribe:
+            self._agents_subscribed = True
+            self._agents_snapshot = snapshot
+        if (
+            subscribe
+            and was_subscribed
+            and int(payload.get("known_revision", 0)) == snapshot.revision
+        ):
             await self.emit(
                 ServerEventType.ACK,
                 {

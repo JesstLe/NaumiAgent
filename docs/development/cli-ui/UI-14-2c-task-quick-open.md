@@ -49,6 +49,6 @@ Todo、子智能体、后台任务与浏览器任务。方向键选择、Enter �
 
 ## 当前边界
 
-- UI-14.2 仍为 partial：workspace 文件、会话、Agent 与页面 provider 尚未实现。
+- UI-14.2d-14.2f 已补齐会话、workspace 文件和 Agent provider；页面 provider 尚未实现，UI-14 仍为 partial。
 - 本切片没有跨启动保存任务结果，也没有把任务 QuickOpen 当成任务面板或全屏详情替代品。
 - 历史后台任务默认不加载；用户仍可通过 `/tasks history` 使用既有历史任务面板。
