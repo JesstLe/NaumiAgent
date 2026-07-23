@@ -119,6 +119,9 @@
 - HAR-08.4g 有界 Sandbox Batch Admission：已实现。一个 Engine 内的 RED/GREEN/adversarial consumer 共用
   active/queued 硬上限；饱和、取消、嵌套自等待和完整 H5a 快速返回均有稳定语义。详见
   `HAR-08-4g-bounded-sandbox-batch-admission.md`。
+- HAR-08.4h Native Sandbox Eval Request Authority：已实现。补齐原生 `sandbox` lane，并从受信 Profile、
+  干净精确 Git revision、ordered checks、batch 与预算编译防篡改 request；执行前可机械拒绝 Profile 漂移。
+  详见 `HAR-08-4h-native-sandbox-eval-request.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。

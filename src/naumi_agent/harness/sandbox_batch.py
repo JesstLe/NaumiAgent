@@ -25,7 +25,10 @@ from naumi_agent.daemons.run_delegation_grants import (
     RunDelegationGrantRequest,
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
-from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalRunAuthority
+from naumi_agent.harness.sandbox_eval import (
+    HarnessSandboxEvalLane,
+    HarnessSandboxEvalRunAuthority,
+)
 from naumi_agent.harness.store import HarnessStore, HarnessStoredEvalResult
 
 logger = logging.getLogger(__name__)
@@ -82,7 +85,7 @@ class HarnessSandboxBatchCheckpoint(_StrictModel):
     checkpoint_id: str = Field(pattern=r"^hsbatch_[0-9a-f]{24}$")
     checkpoint_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     authority_key: str = Field(pattern=r"^[0-9a-f]{64}$")
-    lane: Literal["red", "green", "adversarial"]
+    lane: HarnessSandboxEvalLane
     stage: Literal["recovering", "acquiring", "executing", "completed", "failed"]
     requested_samples: int = Field(ge=5, le=100)
     persisted_samples: int = Field(ge=0, le=100)
@@ -265,7 +268,7 @@ class HarnessSandboxBatchCoordinator:
     async def execute(
         self,
         *,
-        phase: Literal["red", "green", "adversarial"],
+        phase: HarnessSandboxEvalLane,
         authority_key: str,
         parent_receipt_id: str,
         requested_samples: int,
@@ -328,7 +331,7 @@ class HarnessSandboxBatchCoordinator:
     async def _execute_admitted(
         self,
         *,
-        phase: Literal["red", "green", "adversarial"],
+        phase: HarnessSandboxEvalLane,
         authority_key: str,
         parent_receipt_id: str,
         requested_samples: int,
@@ -523,12 +526,19 @@ class HarnessSandboxBatchCoordinator:
         )
         return build_receipt(persisted, receipts)
 
-    def _lane(self, phase: str) -> Literal["red", "green", "adversarial"]:
+    def _lane(self, phase: str) -> HarnessSandboxEvalLane:
         normalized = phase.strip().lower() if isinstance(phase, str) else ""
-        if normalized not in {"red", "green", "adversarial"}:
+        allowed = {"red", "green", "adversarial"}
+        if self.compatibility_scope == "harness":
+            allowed.add("sandbox")
+        if normalized not in allowed:
             raise self._error(
                 "phase_invalid",
-                "Sandbox Batch phase 必须是 RED、GREEN 或 ADVERSARIAL。",
+                (
+                    "Sandbox Batch phase 必须是 SANDBOX、RED、GREEN 或 ADVERSARIAL。"
+                    if self.compatibility_scope == "harness"
+                    else "Evolution cohort phase 必须是 RED、GREEN 或 ADVERSARIAL。"
+                ),
             )
         return normalized  # type: ignore[return-value]
 
@@ -599,7 +609,7 @@ class HarnessSandboxBatchCoordinator:
         callback: BatchProgressCallback | None,
         *,
         authority_key: str,
-        lane: Literal["red", "green", "adversarial"],
+        lane: HarnessSandboxEvalLane,
         stage: Literal["recovering", "acquiring", "executing", "completed", "failed"],
         requested_samples: int,
         records: tuple[HarnessStoredEvalResult, ...],

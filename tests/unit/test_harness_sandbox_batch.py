@@ -84,6 +84,7 @@ def _coordinator(
     *,
     token: str,
     admission: HarnessSandboxBatchAdmission | None = None,
+    compatibility_scope: str = "harness",
 ) -> HarnessSandboxBatchCoordinator:
     return HarnessSandboxBatchCoordinator(
         workspace_root=tmp_path,
@@ -93,6 +94,7 @@ def _coordinator(
         now=lambda: "2026-07-20T00:00:00+00:00",
         token=lambda: token,
         admission=admission,
+        compatibility_scope=compatibility_scope,  # type: ignore[arg-type]
     )
 
 
@@ -220,6 +222,11 @@ async def test_completed_sandbox_batch_bypasses_saturated_admission(
     async def validate_prefix(records):
         return [_SampleReceipt(sample_index=item.sample_index) for item in records]
 
+    checkpoints: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def capture(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        checkpoints.append(checkpoint)
+
     async with admission.admit():
         receipt = await _coordinator(
             tmp_path,
@@ -229,7 +236,7 @@ async def test_completed_sandbox_batch_bypasses_saturated_admission(
             token="c" * 32,
             admission=admission,
         ).execute(
-            phase="red",
+            phase="sandbox",
             authority_key="c" * 64,
             parent_receipt_id="parent",
             requested_samples=5,
@@ -243,9 +250,50 @@ async def test_completed_sandbox_batch_bypasses_saturated_admission(
             build_receipt=lambda records, _receipts: _BatchReceipt(
                 persisted_samples=len(records)
             ),
+            on_progress=capture,
         )
 
     assert receipt.persisted_samples == 5
+    assert not grants.issued
+    assert len(checkpoints) == 1
+    assert checkpoints[0].lane == "sandbox"
+
+
+@pytest.mark.asyncio
+async def test_evolution_compatibility_rejects_native_sandbox_lane_before_io(
+    tmp_path: Path,
+) -> None:
+    store = _Store()
+    permissions = _PermissionStore()
+    grants = _RunGrantAuthority(tmp_path, permissions)
+
+    async def unexpected_io(*_args, **_kwargs):
+        pytest.fail("invalid compatibility lane must fail before IO")
+
+    with pytest.raises(HarnessSandboxBatchError) as captured:
+        await _coordinator(
+            tmp_path,
+            store,
+            permissions,
+            grants,
+            token="e" * 32,
+            compatibility_scope="evolution",
+        ).execute(
+            phase="sandbox",
+            authority_key="e" * 64,
+            parent_receipt_id="parent",
+            requested_samples=5,
+            max_total_duration_seconds=60,
+            load_records=unexpected_io,
+            validate_existing_prefix=unexpected_io,
+            validate_run_evidence=lambda _records: None,
+            execute_sample=unexpected_io,
+            build_receipt=lambda _records, _receipts: pytest.fail(
+                "invalid compatibility lane must not build a receipt"
+            ),
+        )
+
+    assert captured.value.code == "cohort_phase_invalid"
     assert not grants.issued
 
 

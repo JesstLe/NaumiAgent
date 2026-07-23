@@ -43,4 +43,4 @@ Sandbox Eval 页面和 Runtime Inspector 暴露状态保留唯一权威。
 这是单 Runtime 的进程内背压，不是 ARC-06 持久集群队列：重启不会恢复等待者，多进程/多主机仍需数据库
 admission、priority/deadline/fairness 和 durable overload receipt。HAR-08.4 仍为 partial；下一步可以在此
 安全前置上实现通用 Sandbox Eval Service/Tool/UI，并把 gate snapshot 接入真实排队状态，而不是复制一套
-UI 私有计数器。Linux/Windows 隔离 CI 证据仍未完成。
+UI 私有计数器。HAR-08.4h 已补齐 native request authority；Service 仍未接线。Linux/Windows 隔离 CI 证据仍未完成。
