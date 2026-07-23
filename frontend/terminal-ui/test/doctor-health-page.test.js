@@ -26,6 +26,13 @@ function snapshot() {
         responsibility: "product_runtime", detail: "策略已启用；本轮失败；历史失败 1。",
         suggestion: "检查 Harness Store；清理失败不会中断模型执行。",
       },
+      {
+        id: "runtime-worker-authority", domain: "runtime",
+        label: "Worker authority", severity: "ok",
+        responsibility: "unknown",
+        detail: "tool-worker-a tool epoch 3 linux/x86_64 容量占用 1/4、可用 3 心跳健康/3.0s",
+        suggestion: "",
+      },
     ],
   };
 }
@@ -43,6 +50,7 @@ test("doctor health page renders typed local evidence at common widths", () => {
     for (const expected of [
       "环境健康诊断", "本地只读", "Bridge 心跳", "Node.js", "API key", "用户配置",
       "运行时心跳清理", "产品运行时", "清理失败不会中断模型执行", "下一步",
+      "Worker authority", "容量占用 1/4", "可用 3",
     ]) {
       assert(plain.includes(expected));
     }

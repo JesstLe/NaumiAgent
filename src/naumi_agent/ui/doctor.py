@@ -376,7 +376,9 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
     machine = worker.machine if len(worker.machine) <= 32 else worker.machine[:31] + "…"
     return (
         f"{worker_id} {worker.kind} epoch {worker.epoch} "
-        f"{worker.platform}/{machine} 容量 {worker.max_concurrent_jobs} "
+        f"{worker.platform}/{machine} 容量占用 "
+        f"{worker.reserved_jobs}/{worker.max_concurrent_jobs}、"
+        f"可用 {worker.available_jobs} "
         f"心跳{health}{age}"
     )
 

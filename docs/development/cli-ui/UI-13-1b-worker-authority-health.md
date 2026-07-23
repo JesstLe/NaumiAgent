@@ -1,5 +1,8 @@
 # UI-13.1b Worker Authority Health
 
+> UI-13.1d 已在本只读 authority 上增加 Registry v2 reservation 占用/可用槽位；本文件下述
+> “只显示合同最大容量”是 13.1b 交付时的边界。当前行为见 `UI-13-1d-worker-capacity-health.md`。
+
 ## 1. 目标
 
 把 ARC-04.1b 的 durable Worker registration authority 与 HAR-10.2a 的 typed heartbeat 投影到现有
@@ -8,7 +11,7 @@ Doctor Health 模型，让新 UI 与 TUI 都能区分“尚未启动 Worker”�
 
 ## 2. 权威输入与边界
 
-- Worker Registry v1 提供 active incarnation 的合同、epoch、kind、平台和最大并发容量；
+- Worker Registry 在本切片交付时由 v1 提供 active incarnation 的合同、epoch、kind、平台和最大并发容量；
 - Harness Store v16 提供相同 workspace、worker id 与 kind 的最新 heartbeat；
 - 合同摘要和 Registry 索引列必须重新校验，不能只信查询列；
 - heartbeat 必须匹配合同的 `worker_id + kind + instance_id + epoch`，再由 `assess_heartbeat()` 判定
@@ -58,7 +61,8 @@ Worker heartbeat 表示执行实例活性，两者不得合并成一个“在线
 
 - ARC-04.2b/2c 已持久化 immutable ToolJob admission、单调 lifecycle receipt 和 unknown 副作用边界；真实
   daemon transport 与执行 producer 仍未完成，因此本页不能声称 Worker 已可安全执行任务；
-- durable `WorkerHealthReport` 尚不存在，当前无法可信显示 active jobs、accepting jobs、队列深度或资源实耗；
+- durable `WorkerHealthReport` 尚不存在；UI-13.1d 已可显示 reservation authority 的 reserved/available，
+  但仍不能将其冒充 active OS jobs、accepting jobs、队列深度或资源实耗；
 - 只有 latest heartbeat，没有 jitter、丢包率、crash-loop 历史和 SLO；这些属于 ARC-08；
 - 当前真实 producer 仍以 Pursuit 为主，Tool/Browser/Agent daemon heartbeat producer 要随各 daemon 垂直切片接入；
 - 下一步应做能解锁 HAR-08.4 一个真实 Profile check 的 ARC-04.3a non-PTY worker 最小垂直切片。

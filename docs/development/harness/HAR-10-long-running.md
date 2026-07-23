@@ -92,6 +92,9 @@
   - ARC-06.1b 已让生产 ToolJob dispatch/terminal lifecycle 消费该 authority，验证容量耗尽、幂等重试、
     unknown recovery 与终态归还；见
     [设计](../architecture/ARC-06-1b-tool-job-capacity-lifecycle.md)。
+  - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
+    只读、不把 reservation 冒充实际进程负载；见
+    [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。
   - 未完成：Agent/Browser dispatch 接入、capacity waiting queue、workspace 锁、能力路由、亲和/反亲和、
     公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。
