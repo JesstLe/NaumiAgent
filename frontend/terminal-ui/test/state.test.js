@@ -4829,6 +4829,29 @@ test("Harness Sandbox retry transport rejection clears single-flight state", () 
   assert.equal(state.harnessEvalBatch.retryResult.decision, "rejected");
 });
 
+test("Harness Sandbox retry control commands stay on the shared Slash channel", () => {
+  for (const command of [
+    "/harness eval sandbox retries --state open --limit 5",
+    `/harness eval sandbox retry hsacr_${"a".repeat(24)} --sha256 ${"b".repeat(64)}`,
+  ]) {
+    const state = createInitialState();
+    const sent = [];
+
+    handleSubmitText(state, command, (type, payload, options) => {
+      sent.push({ type, payload, options });
+    });
+
+    assert.equal(state.route.name, "conversation");
+    assert.equal(state.harnessEvalBatch.requestId, "");
+    assert.equal(state.harnessEvalBatch.batchId, "");
+    assert.deepEqual(sent, [{
+      type: "submit",
+      payload: { text: command },
+      options: { id: "submit-1" },
+    }]);
+  }
+});
+
 test("Harness Baseline promotion command opens guided typed route and restores origin", () => {
   const state = createInitialState();
   state.scrollOffset = 8;

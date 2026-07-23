@@ -114,6 +114,7 @@ from naumi_agent.harness.sandbox_service import (
     SandboxEvalProgressCallback,
 )
 from naumi_agent.harness.store import (
+    HarnessSandboxRetryCatalogPage,
     HarnessSessionDeleteImpact,
     HarnessStore,
     HarnessStoredEvalComparisonReceipt,
@@ -455,6 +456,28 @@ class HarnessService:
             parent_receipt_id=parent.receipt_id,
             current_profile=current_profile,
             on_progress=on_progress,
+        )
+
+    async def list_sandbox_retry_dispatches(
+        self,
+        *,
+        state_filter: str = "all",
+        limit: int = 20,
+        cursor: str = "",
+        assessed_at: str | None = None,
+    ) -> HarnessSandboxRetryCatalogPage:
+        """Read one bounded durable retry catalog page without resuming work."""
+        if self._store is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_retry_catalog_store_unavailable",
+                "Harness 状态库尚未初始化，无法读取 Sandbox retry catalog。",
+            )
+        return await self._store.list_sandbox_retry_dispatches(
+            workspace_root=self.workspace_root,
+            assessed_at=assessed_at,
+            state_filter=state_filter,
+            limit=limit,
+            cursor=cursor,
         )
 
     async def eval_baseline_status(
@@ -2118,6 +2141,73 @@ def render_harness_check(result: HarnessCheckResult) -> str:
         safe_output = _safe_check_output(result.output)
         fence = safe_markdown_fence(safe_output)
         lines.extend(("", "### 有界输出尾部", "", fence, safe_output, fence))
+    return "\n".join(lines)
+
+
+def render_sandbox_retry_catalog(page: HarnessSandboxRetryCatalogPage) -> str:
+    """Render safe recovery facts without exposing owner or authority secrets."""
+    lines = [
+        "## Sandbox retry dispatch 目录",
+        "",
+        f"- 状态过滤：`{page.state_filter}`",
+        f"- 评估时间：`{page.assessed_at}`",
+        f"- 本页记录：{len(page.items)}",
+    ]
+    if not page.items:
+        lines.extend(("", "当前工作区没有符合条件的 retry dispatch。"))
+    status_labels = {
+        "pending": "等待 claim",
+        "live": "当前 ticket 仍存活",
+        "recovery_required": "租约已过期，需要恢复",
+        "reconcile_required": "ticket 已终态，需先同步 dispatch",
+        "clock_regression": "评估时间早于 ticket 更新，禁止恢复",
+        "terminal": "已终态",
+    }
+    for item in page.items:
+        dispatch = item.dispatch
+        label = status_labels.get(item.recovery_status, item.recovery_status)
+        lines.extend(
+            (
+                "",
+                f"### `{dispatch.dispatch_id}`",
+                "",
+                f"- 状态：**{label}** (`{item.recovery_status}`)",
+                f"- Dispatch：`{dispatch.state}`，epoch `{dispatch.epoch}`",
+                f"- Batch/Suite：`{item.batch_id}` / `{item.suite_id}`",
+                f"- H5a：{item.persisted_samples}/{item.requested_samples}",
+                f"- Retry action：`{dispatch.retry_action_id}`",
+                (
+                    "- Cancel receipt："
+                    f"`{item.cancel_receipt_id}` / `{item.cancel_receipt_sha256}`"
+                ),
+                f"- Source ticket：`{item.source_ticket_id}`",
+                (
+                    "- 当前 ticket："
+                    f"`{dispatch.ticket_id or '-'}` / `{item.ticket_state or '-'}`"
+                    f" / epoch `{dispatch.ticket_epoch}`"
+                ),
+                f"- Ticket lease：`{item.ticket_lease_expires_at or '-'}`",
+                f"- 更新时间：`{dispatch.updated_at}`",
+            )
+        )
+        if item.recovery_status == "recovery_required":
+            lines.append(
+                "- 下一步：当前目录只读；等待 receipt-bound resume 入口，"
+                "不要创建新 action 重复消费 cancel receipt。"
+            )
+    if page.next_cursor:
+        lines.extend(
+            (
+                "",
+                "### 下一页",
+                "",
+                "```text",
+                "/harness eval sandbox retries "
+                f"--state {page.state_filter} --limit {page.limit} "
+                f"--assessed-at {page.assessed_at} --cursor {page.next_cursor}",
+                "```",
+            )
+        )
     return "\n".join(lines)
 
 

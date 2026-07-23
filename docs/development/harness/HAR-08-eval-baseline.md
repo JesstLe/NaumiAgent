@@ -156,6 +156,10 @@
 - HAR-08.4o3c Sandbox Retry UI Action：已实现。共享 protocol/Bridge 仍通过 retry Tool 执行，New UI
   可从 accepted cancel receipt 一键恢复，Textual TUI 复用 Slash 与 typed progress；receipt、dispatch、
   新 ticket 和 H5a 均机械校验。详见 `HAR-08-4o3c-sandbox-retry-ui-action.md`。
+- HAR-08.4o3d Sandbox Retry Dispatch Catalog：已实现。Store v21 提供 workspace/filter/assessment
+  绑定的 opaque cursor 与有界只读目录，逐项校验 retry receipt、Request Manifest、ticket fence 和连续
+  H5a；共享 Tool/Slash 可审查 live/recovery/reconcile/terminal 状态，但不伪造跨进程 resume authority。
+  详见 `HAR-08-4o3d-sandbox-retry-dispatch-catalog.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -165,6 +169,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨主机 Batch admission、retry dispatch catalog/retention，以及 Linux/Windows
+- HAR-08.4 仍为 partial：跨主机 Batch admission、retry dispatch retention/启动恢复，以及 Linux/Windows
   CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
   implemented。

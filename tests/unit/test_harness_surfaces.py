@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -176,6 +176,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         sandbox_retry_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retry"
         )
+        sandbox_retries_tool = engine.tool_registry.get(
+            "harness_eval_sandbox_retries"
+        )
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         compare_tool = engine.tool_registry.get("harness_eval_compare")
         knowledge = engine.tool_registry.get("harness_read_knowledge")
@@ -201,6 +204,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert not sandbox_retry_tool.metadata.read_only
         assert sandbox_retry_tool.metadata.concurrency_safe
         assert sandbox_retry_tool.metadata.delegated_tool_names == ("bash_run",)
+        assert sandbox_retries_tool is not None
+        assert sandbox_retries_tool.metadata.read_only
+        assert sandbox_retries_tool.metadata.concurrency_safe
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -474,6 +480,117 @@ async def test_harness_sandbox_cancel_slash_uses_durable_admission_authority(
         assert "Receipt: hsacr_" in rendered
         assert "SHA-256:" in rendered
         assert current is not None and current.state == "cancelled"
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_retries_slash_uses_read_only_catalog_tool(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                "/harness eval sandbox retries --state open --limit 5",
+            )
+        )
+
+        assert "Sandbox retry dispatch 目录" in rendered
+        assert "状态过滤：open" in rendered
+        assert "没有符合条件" in rendered
+        assert engine.tool_registry.get("harness_eval_sandbox_retries") is not None
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        status = await engine.harness_service.status()
+        assert status.snapshot.profile is not None
+        assert status.profile_digest is not None
+        request = HarnessSandboxEvalRequestBuilder().build(
+            workspace_root=engine.workspace_root,
+            profile=status.snapshot.profile,
+            profile_digest=status.profile_digest,
+            profile_trusted=True,
+            check_ids=("unit",),
+            batch_id="sandbox-retry-catalog-surface",
+            requested_samples=5,
+        )
+        store = engine.harness_service.store
+        assert store is not None
+        started = datetime.now(UTC)
+
+        def stamp(offset: int) -> str:
+            return (started + timedelta(seconds=offset)).isoformat()
+
+        await store.record_sandbox_eval_request(request, created_at=stamp(0))
+        source = await store.enqueue_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            ticket_id=f"hsadm_{'1' * 24}",
+            authority_key=request.request_sha256,
+            lane="sandbox",
+            requested_samples=5,
+            owner_id="catalog-surface-source",
+            now=stamp(1),
+            lease_seconds=30,
+            max_active=engine.harness_sandbox_batch_admission.max_active,
+            max_queued=engine.harness_sandbox_batch_admission.max_queued,
+        )
+        cancel, _ = await store.cancel_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            action_id=f"hsac_{'2' * 24}",
+            ticket_id=source.ticket_id,
+            authority_key=source.authority_key,
+            epoch=source.epoch,
+            expected_state=source.state,
+            actor_id="surface",
+            reason="构造重启恢复目录",
+            now=stamp(2),
+        )
+        retry = await store.authorize_sandbox_admission_retry(
+            workspace_root=engine.workspace_root,
+            action_id=f"hsar_{'3' * 24}",
+            cancel_receipt_id=cancel.receipt_id,
+            cancel_receipt_sha256=cancel.receipt_sha256,
+            actor_id="surface",
+            reason="构造重启恢复目录",
+            authority_token="4" * 32,
+            now=stamp(3),
+        )
+        await store.claim_sandbox_retry_dispatch(
+            workspace_root=engine.workspace_root,
+            retry_action_id=retry.action_id,
+            retry_receipt_id=retry.receipt_id,
+            retry_receipt_sha256=retry.receipt_sha256,
+            ticket_id=f"hsadm_{'5' * 24}",
+            owner_id="catalog-surface-retry",
+            now=stamp(4),
+            lease_seconds=2,
+            max_active=engine.harness_sandbox_batch_admission.max_active,
+            max_queued=engine.harness_sandbox_batch_admission.max_queued,
+        )
+
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    "/harness eval sandbox retries --state open "
+                    f"--assessed-at {stamp(7)}"
+                ),
+            )
+        )
+
+        assert "租约已过期，需要恢复" in rendered
+        assert retry.action_id in rendered
+        assert cancel.receipt_id in rendered
+        assert "当前目录只读" in rendered
     finally:
         await engine.shutdown()
 

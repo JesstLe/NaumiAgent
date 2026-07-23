@@ -116,11 +116,11 @@ HAR-08.4o3b 的真实 Git + 隔离 Worker 场景已经证明 2/5 取消后续跑
 
 仍未实现：
 
-- retry dispatch catalog、历史详情与 retention；
-- Bridge 重启后的 retry control-task 主动恢复；当前 durable dispatch 可由再次显式 action 恢复，但 UI
-  不自动重放不确定请求；
+- HAR-08.4o3d 已补齐 retry dispatch catalog 与共享 Slash；专用历史详情和 retention 仍未完成；
+- Bridge 重启后的 retry control-task 主动恢复；HAR-08.4o3d 已能审查 durable dispatch，但既有 intent
+  仍绑定原 actor/reason，必须新增 receipt-bound resume authority，UI 不自动重放不确定请求；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI 证据。
 
-下一切片应跨查 Harness、ARC-04/06 与 CLI/TUI 文档，优先选择 dispatch catalog/retention 或跨进程恢复所需
-的最小权威，不继续扩展页面装饰。
+HAR-08.4o3d 已选择并交付跨进程恢复所需的最小只读 catalog 权威。下一切片应继续横向比较启动恢复
+snapshot 与 retention preview，不继续扩展页面装饰。

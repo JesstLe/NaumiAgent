@@ -123,7 +123,7 @@ queued/admitted/recovering/executing/completed 状态；不会显示伪造的第
 
 仍未实现：
 
-- retry dispatch catalog、详情与 retention；
+- HAR-08.4o3d 已补齐 retry dispatch catalog；详情与 retention 仍未完成；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI 证据。
 
