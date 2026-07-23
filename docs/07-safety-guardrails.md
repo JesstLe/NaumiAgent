@@ -399,7 +399,8 @@ safety:
   max_output_tokens: null       # null = 不限；例如 50000 = 累计输出上限
   max_turns: 50
   max_parallel_tools: 4         # 工具安全批次，范围 1-16
-  max_parallel_agents: 4        # 子 Agent 集群，范围 1-32；1 为串行排障
+  max_parallel_agents: 4        # 进程内 Agent 活跃数，范围 1-32；1 为串行排障
+  max_queued_agents: 64         # 进程内 Agent 等待数，范围 0-10000；0 为不等待
 
   guardrails:
     input_validation: true

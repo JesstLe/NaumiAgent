@@ -223,6 +223,7 @@ def _build_config(
             "max_turns": DEFAULT_RUNTIME_MAX_TURNS,
             "max_parallel_tools": 4,
             "max_parallel_agents": 4,
+            "max_queued_agents": 64,
         },
         "mcp": {"servers": {}},
         "api": {
