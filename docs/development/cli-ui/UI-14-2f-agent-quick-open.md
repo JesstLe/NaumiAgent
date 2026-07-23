@@ -59,5 +59,6 @@ New UI 与 Textual TUI 的 `Ctrl+P` QuickOpen 现按
 - Agent QuickOpen 当前只索引 Agent descriptor；执行、团队消息和黑板仍由 Agent Control Center 展示，
   不在本 provider 中混合不同 ID namespace。
 - overlay 是一次性快照，不实时刷新；需要实时状态时应提交深链进入 Agent Control Center。
-- 页面 provider、跨启动最近历史、Vim/input mode、typed argument form 与键位冲突诊断仍未实现，
+- UI-14.2g 已补齐 surface-aware 页面 provider；跨启动最近历史、Vim/input mode、typed argument form
+  与键位冲突诊断仍未实现，
   UI-14 保持 partial。

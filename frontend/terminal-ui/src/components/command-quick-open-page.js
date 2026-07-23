@@ -9,6 +9,7 @@ import {
   agentTemplate,
   fileTemplate,
   getCommandQuickOpenItems,
+  pageTemplate,
   sessionTemplate,
   taskTemplate,
 } from "../command-quick-open.js";
@@ -24,13 +25,13 @@ export function renderCommandQuickOpenPage(state, width, height) {
   ));
   const visible = items.slice(start, start + visibleCount);
   const query = String(state.commandQuickOpen?.query || "");
-  const provider = ["tasks", "sessions", "files", "agents"].includes(state.commandQuickOpen?.provider)
+  const provider = ["tasks", "sessions", "files", "agents", "pages"].includes(state.commandQuickOpen?.provider)
     ? state.commandQuickOpen.provider : "commands";
   const taskLoading = Boolean(state.commandQuickOpen?.taskLoading);
   const taskError = String(state.commandQuickOpen?.taskError || "");
   const rows = [
-    `${color(ANSI.cyan, "搜索:")} ${query || color(ANSI.dim, provider === "tasks" ? "输入任务 ID、标题、Owner、来源或状态" : provider === "sessions" ? "输入会话标题、ID、模型或分支" : provider === "files" ? "输入相对路径、文件名或扩展名" : provider === "agents" ? "输入 Agent 名称、说明、状态、能力或工具" : "输入命令、别名、说明、类别或风险")}${color(ANSI.yellow, "█")}`,
-    color(ANSI.dim, `Provider ${{ commands: "命令", tasks: "任务", sessions: "会话", files: "文件", agents: "Agent" }[provider]} · 结果 ${items.length} · 选择只填入输入框`),
+    `${color(ANSI.cyan, "搜索:")} ${query || color(ANSI.dim, provider === "tasks" ? "输入任务 ID、标题、Owner、来源或状态" : provider === "sessions" ? "输入会话标题、ID、模型或分支" : provider === "files" ? "输入相对路径、文件名或扩展名" : provider === "agents" ? "输入 Agent 名称、说明、状态、能力或工具" : provider === "pages" ? "输入页面名称、命令、说明或关键词" : "输入命令、别名、说明、类别或风险")}${color(ANSI.yellow, "█")}`,
+    color(ANSI.dim, `Provider ${{ commands: "命令", tasks: "任务", sessions: "会话", files: "文件", agents: "Agent", pages: "页面" }[provider]} · 结果 ${items.length} · 选择只填入输入框`),
     "",
   ];
   if (!visible.length) {
@@ -54,8 +55,13 @@ export function renderCommandQuickOpenPage(state, width, height) {
       rows.push(color(ANSI.yellow, compactText(state.commandQuickOpen.agentError, 160)));
     } else if (provider === "agents" && state.commandQuickOpen?.agentWarnings?.length) {
       rows.push(color(ANSI.yellow, "没有匹配 Agent。部分 Agent 数据源暂不可用。"));
+    } else if (provider === "pages" && !state.navigationPages?.length) {
+      rows.push(color(
+        ANSI.yellow,
+        "当前 Bridge 未提供页面索引；请升级 Bridge，或切回命令 provider。",
+      ));
     } else {
-      rows.push(color(ANSI.yellow, `没有匹配${{ commands: "命令", tasks: "任务", sessions: "会话", files: "文件", agents: "Agent" }[provider]}。`));
+      rows.push(color(ANSI.yellow, `没有匹配${{ commands: "命令", tasks: "任务", sessions: "会话", files: "文件", agents: "Agent", pages: "页面" }[provider]}。`));
     }
   } else {
     for (const item of visible) {
@@ -75,6 +81,9 @@ export function renderCommandQuickOpenPage(state, width, height) {
         const stateLabel = agentStateLabel(item.state);
         const text = `${marker} ${compactText(item.name, 100)} · ${stateLabel} · ${kind} · 任务 ${item.task_count}${item.model_tier ? ` · ${compactText(item.model_tier, 60)}` : ""}`;
         rows.push(color(agentStateColor(item.state, item.selected), text));
+      } else if (provider === "pages") {
+        const text = `${marker} ${compactText(item.label, 80)} · ${item.command} · ${compactText(item.description, 140)}`;
+        rows.push(color(item.selected ? ANSI.cyan : ANSI.dim, text));
       } else {
         const category = commandCategoryLabel(item.category);
         const risk = commandRiskLabel(item.permission_risk);
@@ -87,7 +96,7 @@ export function renderCommandQuickOpenPage(state, width, height) {
     rows.push("");
     rows.push(color(
       ANSI.dim,
-      `将填入: ${provider === "tasks" ? taskTemplate(selected) : provider === "sessions" ? sessionTemplate(selected) : provider === "files" ? fileTemplate(selected) : provider === "agents" ? agentTemplate(selected) : commandTemplate(selected)} · 不会自动发送或执行`,
+      `将填入: ${provider === "tasks" ? taskTemplate(selected) : provider === "sessions" ? sessionTemplate(selected) : provider === "files" ? fileTemplate(selected) : provider === "agents" ? agentTemplate(selected) : provider === "pages" ? pageTemplate(selected) : commandTemplate(selected)} · 不会自动发送或执行`,
     ));
   }
   if (provider === "files" && state.commandQuickOpen?.fileMeta) {
@@ -103,9 +112,9 @@ export function renderCommandQuickOpenPage(state, width, height) {
       `当前会话权威快照 · revision ${state.commandQuickOpen.agentRevision} · 不订阅后台更新`,
     ));
   }
-  rows.push(color(ANSI.dim, "Tab 切换命令/任务/会话/文件/Agent · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消"));
+  rows.push(color(ANSI.dim, "Tab 切换命令/任务/会话/文件/Agent/页面 · ↑/↓ 选择 · Enter 填入 · Esc/Ctrl+P 取消"));
   const boundedHeight = Math.max(1, height);
-  const output = boxLines({ commands: "命令 QuickOpen", tasks: "任务 QuickOpen", sessions: "会话 QuickOpen", files: "文件 QuickOpen", agents: "Agent QuickOpen" }[provider], rows, width).slice(0, boundedHeight);
+  const output = boxLines({ commands: "命令 QuickOpen", tasks: "任务 QuickOpen", sessions: "会话 QuickOpen", files: "文件 QuickOpen", agents: "Agent QuickOpen", pages: "页面 QuickOpen" }[provider], rows, width).slice(0, boundedHeight);
   while (output.length < boundedHeight) output.push("");
   return output;
 }

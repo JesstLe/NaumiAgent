@@ -7,6 +7,7 @@ const TASK_RESULT_LIMIT = 50;
 const SESSION_RESULT_LIMIT = 100;
 const FILE_RESULT_LIMIT = 200;
 const AGENT_RESULT_LIMIT = 50;
+const PAGE_RESULT_LIMIT = 32;
 const GRAPHEME_SEGMENTER = new Intl.Segmenter("und", { granularity: "grapheme" });
 const TASK_STATUS_ORDER = Object.freeze({
   running: 0,
@@ -116,6 +117,8 @@ export function getCommandQuickOpenItems(state) {
         ? quickOpen.fileItems.slice(0, FILE_RESULT_LIMIT)
         : quickOpen.provider === "agents"
           ? searchAgentEntries(quickOpen.agentItems, quickOpen.query, AGENT_RESULT_LIMIT)
+          : quickOpen.provider === "pages"
+            ? searchPageEntries(state.navigationPages, quickOpen.query, PAGE_RESULT_LIMIT)
     : searchCommandEntries(
       state.slashCommands,
       quickOpen.query,
@@ -140,7 +143,8 @@ export function switchCommandQuickOpenProvider(state, requests = null) {
     tasks: "sessions",
     sessions: "files",
     files: "agents",
-    agents: "commands",
+    agents: "pages",
+    pages: "commands",
   })[quickOpen.provider];
   quickOpen.query = "";
   quickOpen.selectedIndex = 0;
@@ -382,6 +386,7 @@ export function acceptCommandQuickOpen(state) {
       : selected.provider === "sessions" ? sessionTemplate(selected)
         : selected.provider === "files" ? fileTemplate(selected)
           : selected.provider === "agents" ? agentTemplate(selected)
+            : selected.provider === "pages" ? pageTemplate(selected)
         : commandTemplate(selected),
   );
   closeCommandQuickOpen(state);
@@ -440,6 +445,30 @@ export function agentTemplate(entry) {
     throw new Error("Agent 名称无法安全填入 QuickOpen。");
   }
   return `/agents agent ${shellQuote(String(entry.name))}`;
+}
+
+export function searchPageEntries(entries, query, limit = PAGE_RESULT_LIMIT) {
+  const boundedLimit = Math.max(
+    1,
+    Math.min(PAGE_RESULT_LIMIT, Math.trunc(Number(limit) || PAGE_RESULT_LIMIT)),
+  );
+  const term = normalizeSearchText(query).slice(0, QUERY_LIMIT).replace(/^\//, "");
+  return (Array.isArray(entries) ? entries : []).slice(0, PAGE_RESULT_LIMIT)
+    .filter(isSafePageEntry)
+    .map((entry) => ({ entry, score: pageSearchScore(entry, term) }))
+    .filter((item) => item.score !== null)
+    .sort((left, right) => left.score - right.score
+      || left.entry.order - right.entry.order
+      || String(left.entry.page_id).localeCompare(String(right.entry.page_id)))
+    .slice(0, boundedLimit)
+    .map((item) => item.entry);
+}
+
+export function pageTemplate(entry) {
+  if (!isSafePageEntry(entry)) {
+    throw new Error("页面命令无法安全填入 QuickOpen。");
+  }
+  return String(entry.command);
 }
 
 export function parseAgentDeepLink(text) {
@@ -598,6 +627,58 @@ function agentSearchScore(entry, term) {
   return gap === null ? null : 100_000 + gap;
 }
 
+function pageSearchScore(entry, term) {
+  if (!term) return 0;
+  const pageId = normalizeSearchText(entry.page_id);
+  const command = normalizeSearchText(entry.command).replace(/^\//, "");
+  const label = normalizeSearchText(entry.label);
+  if ([pageId, command, label].includes(term)) return 0;
+  if (pageId.startsWith(term) || command.startsWith(term)) return 10_000;
+  if (label.startsWith(term)) return 20_000;
+  if (pageId.includes(term) || command.includes(term)) return 30_000;
+  if (label.includes(term)) return 40_000;
+  const metadata = normalizeSearchText([
+    ...(Array.isArray(entry.keywords) ? entry.keywords : []),
+    entry.description,
+    entry.surface,
+  ].join(" "));
+  if (metadata.includes(term)) return 50_000 + metadata.indexOf(term);
+  const gap = subsequenceGap(term, `${pageId} ${command} ${label} ${metadata}`);
+  return gap === null ? null : 100_000 + gap;
+}
+
+function isSafePageEntry(entry) {
+  return Boolean(
+    entry
+    && typeof entry === "object"
+    && entry.schema_version === 1
+    && /^[a-z][a-z0-9_-]{0,63}$/.test(String(entry.page_id || ""))
+    && /^\/[a-z][a-z0-9_-]{0,63}$/.test(String(entry.command || ""))
+    && isSafePageText(entry.label, 80)
+    && isSafePageText(entry.description, 300)
+    && Array.isArray(entry.keywords)
+    && entry.keywords.length <= 12
+    && entry.keywords.every((keyword) => isSafePageText(keyword, 80))
+    && entry.keywords.length === new Set(entry.keywords).size
+    && entry.keywords.every(
+      (keyword, index) => keyword === [...entry.keywords].sort()[index],
+    )
+    && Number.isInteger(entry.order)
+    && entry.order >= 0
+    && entry.order <= 1_000
+    && entry.surface === "new_ui"
+  );
+}
+
+function isSafePageText(value, limit) {
+  return typeof value === "string"
+    && value.length >= 1
+    && value.length <= limit
+    && value === value.trim()
+    && value === value.normalize("NFKC")
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
 function isSafeAgentEntry(entry) {
   return Boolean(
     entry
@@ -738,7 +819,7 @@ function ensureCommandQuickOpenState(state) {
   if (!Array.isArray(state.commandQuickOpen.agentDiscardRequestIds)) {
     state.commandQuickOpen.agentDiscardRequestIds = [];
   }
-  if (!["commands", "tasks", "sessions", "files", "agents"].includes(state.commandQuickOpen.provider)) {
+  if (!["commands", "tasks", "sessions", "files", "agents", "pages"].includes(state.commandQuickOpen.provider)) {
     state.commandQuickOpen.provider = "commands";
   }
   return state.commandQuickOpen;

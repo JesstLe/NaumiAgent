@@ -733,6 +733,32 @@ function statusPayload(overrides = {}) {
     workspace_root: "/Users/lv/Workspace/NaumiAgent",
     usage: { total_tokens: 0 },
     context: { used: 0, window: 256000, percentage: 0 },
+    navigation_pages: [
+      navigationPage(
+        "conversation",
+        "/chat",
+        "对话",
+        "返回主对话与输入区。",
+        ["chat", "聊天"],
+        0,
+      ),
+      navigationPage(
+        "goals",
+        "/goal",
+        "Goal",
+        "查看持久 Goal、Pursuit 状态与阻塞信息。",
+        ["goal", "pursuit", "目标"],
+        20,
+      ),
+      navigationPage(
+        "permissions",
+        "/permissions",
+        "权限",
+        "查看待确认请求、授权范围与撤销入口。",
+        ["approval", "permission", "权限"],
+        50,
+      ),
+    ],
     budget: {
       enabled: false,
       used_usd: 0,
@@ -747,6 +773,19 @@ function statusPayload(overrides = {}) {
     ui: { show_reasoning: showReasoning },
     git: { branch: "main", dirty: true },
     ...overrides,
+  };
+}
+
+function navigationPage(pageId, command, label, description, keywords, order) {
+  return {
+    schema_version: 1,
+    page_id: pageId,
+    command,
+    label,
+    description,
+    keywords: [...keywords].sort(),
+    order,
+    surface: "new_ui",
   };
 }
 

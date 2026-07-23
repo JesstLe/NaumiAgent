@@ -40,4 +40,4 @@ argument schema 当前用于展示和风险预览，不替代各命令真实 par
 
 UI-14 仍为 partial。UI-14.2a 已在 `UI-14-2a-command-quick-open.md` 交付有界 Command QuickOpen provider，并保证
 选择只把 command+syntax 写入 composer。UI-14.2b-14.2f 已补齐最近排序、任务、会话、文件与 Agent provider；
-页面 provider、跨启动历史和 Vim mode 仍需后续独立切片。
+UI-14.2g 已复用本索引校验页面命令；跨启动历史和 Vim mode 仍需后续独立切片。

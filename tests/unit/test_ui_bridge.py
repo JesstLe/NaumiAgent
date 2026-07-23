@@ -3387,6 +3387,40 @@ def test_bridge_status_payload_exposes_runtime_slash_commands() -> None:
     assert mode["permission_risk"] == "permission_change"
 
 
+def test_bridge_status_payload_exposes_authoritative_navigation_pages() -> None:
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+
+    pages = bridge.status_payload().get("navigation_pages")
+
+    assert isinstance(pages, list)
+    assert [item["page_id"] for item in pages] == [
+        "conversation",
+        "tasks",
+        "goals",
+        "agents",
+        "workbench",
+        "permissions",
+        "doctor",
+        "evolution",
+    ]
+    assert pages[0]["command"] == "/chat"
+    assert all(item["schema_version"] == 1 for item in pages)
+    assert all(item["surface"] == "new_ui" for item in pages)
+    assert all(item["keywords"] == sorted(set(item["keywords"])) for item in pages)
+
+
+def test_bridge_navigation_pages_fail_closed_when_authority_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ui_bridge,
+        "build_terminal_page_index",
+        lambda _surface: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
+
+    assert ui_bridge._navigation_page_payload() == []
+
+
 def test_bridge_fallback_slash_registry_keeps_goal_available() -> None:
     commands = {
         item["command"]: item
@@ -3405,6 +3439,7 @@ def test_bridge_status_payload_can_omit_static_slash_commands() -> None:
     payload = bridge.status_payload(include_slash_commands=False)
 
     assert "slash_commands" not in payload
+    assert "navigation_pages" not in payload
 
 
 @pytest.mark.asyncio

@@ -16,10 +16,12 @@
   增加两端会话 provider，选择只填入 `/load <id>`；UI-14.2e 已增加 Engine-owned、后台、可取消、
   workspace 隔离且最多 100k 文件的索引，两端文件 provider 只填入安全 `/read` 模板；UI-14.2f 已复用
   schema v2 Agent Control one-shot snapshot 增加两端 Agent provider，并通过
-  `/agents agent <name>` 只读深链定位详情。页面 provider 尚未实现。
+  `/agents agent <name>` 只读深链定位详情；UI-14.2g 已增加 surface-aware 权威页面索引，两端页面
+  provider 选择只填入精确导航命令，不自动跳转或执行。
   详见 `UI-14-2a-command-quick-open.md`、`UI-14-2b-recent-command-ranking.md` 与
   `UI-14-2c-task-quick-open.md`、`UI-14-2d-session-quick-open.md` 与
-  `UI-14-2e-workspace-file-quick-open.md`、`UI-14-2f-agent-quick-open.md`。
+  `UI-14-2e-workspace-file-quick-open.md`、`UI-14-2f-agent-quick-open.md` 与
+  `UI-14-2g-page-quick-open.md`。
 - UI-14.3 Input mode：insert/normal/visual，可配置关闭，状态明确可见。
 - UI-14.4 Multiline/history：光标、选择、撤销、搜索、IME、Unicode grapheme。
 - UI-14.5 Key conflict resolver：平台/终端能力、用户 override、冲突诊断。
@@ -35,8 +37,8 @@
 
 ## 当前状态
 
-UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a-14.2f 已提供两端
-命令/任务/会话/文件/Agent QuickOpen、本次启动的隐私安全最近命令排序、实时权威任务/会话快照、
-可取消工作区文件索引与 one-shot Agent snapshot，但尚未实现页面 provider、跨启动历史、
+UI-14.1a 已提供 QuickOpen 的命令事实源并改善现有 slash completion；UI-14.2a-14.2g 已提供两端
+命令/任务/会话/文件/Agent/页面 QuickOpen、本次启动的隐私安全最近命令排序、实时权威任务/会话快照、
+可取消工作区文件索引、one-shot Agent snapshot 与 surface-aware 页面索引，但尚未实现跨启动历史、
 typed argument form、Vim mode、完整 composer grapheme 编辑与键冲突诊断，因此
 UI-14 保持 partial。

@@ -91,6 +91,7 @@ from naumi_agent.ui.harness_protocol import (
     harness_sandbox_cancel_receipt_payload,
 )
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
+from naumi_agent.ui.page_index import build_terminal_page_index
 from naumi_agent.ui.permission_confirmation import (
     normalize_backend_permission_choices,
     public_permission_request_payload,
@@ -522,6 +523,18 @@ def _slash_command_payload() -> list[dict[str, Any]]:
     return _normalize_slash_commands(
         cli_commands if cli_commands else _fallback_slash_command_registry()
     )
+
+
+def _navigation_page_payload() -> list[dict[str, Any]]:
+    """Return fail-closed static navigation metadata for the New UI."""
+    try:
+        return [
+            item.to_public_dict()
+            for item in build_terminal_page_index("new_ui")
+        ]
+    except Exception:
+        logger.warning("Unable to build terminal navigation page index", exc_info=True)
+        return []
 
 
 def _is_exit_command(text: str) -> bool:
@@ -1196,6 +1209,7 @@ class JsonlEngineBridge:
         }
         if include_slash_commands:
             payload["slash_commands"] = _slash_command_payload()
+            payload["navigation_pages"] = _navigation_page_payload()
         return payload
 
     def _evolution_patch_recovery_payload(self) -> dict[str, object]:
