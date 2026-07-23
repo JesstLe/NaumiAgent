@@ -915,6 +915,7 @@ class TestNaumiApp:
         assert "bash_run" not in rendered
         assert "风险：1 项验证失败" in rendered
         assert "下一步：重试失败验证" in rendered
+        assert "操作：`/copy receipt receipt-tui`" in rendered
 
     def test_completed_delete_receipt_is_compact_and_task_focused(self) -> None:
         rendered = format_completion_receipt_markdown(

@@ -27,6 +27,9 @@ bypass/session grant 四选择、模型主动询问和 canonical answer、submit
 Evaluation Lane RED/GREEN、资源证据与强制非最终边界，以及 token 合并、相关错误断流、发送 retry identity 和
 New UI/Textual 生产渲染路径的固定视口 ANSI/text capture；
 TUI 现在也能用 Ctrl+C 取消当前运行，空闲时不会误退出。
+HAR-07.5c1 已让 New UI/TUI/CLI 共享 `/copy receipt [receipt-id|latest]`，从当前 session 的持久
+Completion/Harness authority 生成同一有界、脱敏文本并保存到 `.naumi/exports`；完成卡显示精确入口，
+剪贴板不可用时仍保留文件。
 UI-14.1a 已建立 New UI/TUI 共用的严格 command index，现有补全可以展示参数 syntax、来源、category 和权限风险；
 UI-14.2a 已进一步交付两端 `Ctrl+P` 命令 QuickOpen，支持别名、说明、类别、风险和 fuzzy 搜索，选择只填入 composer；
 UI-14.2b 已增加本次启动内的隐私安全最近命令排序，只记录规范命令名且新启动重置；

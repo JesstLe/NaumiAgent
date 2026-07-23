@@ -1,4 +1,4 @@
-import { ANSI, color, compactText } from "../ansi.js";
+import { ANSI, color, compactText, sanitizeTerminalText } from "../ansi.js";
 import { boxComponent, line, renderComponent } from "./core.js";
 
 export function CompletionReceiptCard({ receipt, harnessReceipt = null }) {
@@ -75,6 +75,13 @@ export function renderCompletionReceiptCard(receipt, ctx, harnessReceipt = null)
   }
   for (const action of actions.slice(0, 3)) {
     rows.push(line(color(ANSI.cyan, `下一步 · ${compactText(action.label || action.kind, 300)}`)));
+  }
+  const receiptId = sanitizeTerminalText(compactText(view.receipt_id || "", 500));
+  if (receiptId) {
+    const command = `/copy receipt ${slashArgument(receiptId)}`;
+    rows.push(line(
+      `${color(ANSI.dim, "操作 · ")}${color(ANSI.cyan, command)}`,
+    ));
   }
   return renderComponent(boxComponent("完成回执", rows), ctx);
 }
@@ -228,4 +235,9 @@ function formatDuration(value) {
 
 function array(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function slashArgument(value) {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }

@@ -30,7 +30,10 @@ def print_help() -> None:
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
         ("/doctor", "运行环境诊断或预览/导出脱敏诊断包"),
-        ("/copy [all|last|error]", "复制/导出完整记录、最近一轮或最近错误 (Ctrl+Y)"),
+        (
+            "/copy [all|last|error|receipt [receipt-id|latest]]",
+            "复制/导出记录或权威完成回执 (Ctrl+Y)",
+        ),
         ("/debug", "显示本次结构化调试日志位置"),
         ("/debug-replay [路径]", "回放 debug-runs 结构化事件"),
         ("/diff [all|worktree|staged]", "查看本轮结构化 git diff"),

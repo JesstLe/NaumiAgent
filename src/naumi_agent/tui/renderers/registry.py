@@ -434,7 +434,7 @@ def _render_completion_receipt(
     status: StatusBarLike,
     todo: TodoBarLike,
 ) -> None:
-    from naumi_agent.tui.completion_receipt import (
+    from naumi_agent.ui.completion_receipt import (
         completion_outcome_label,
         format_completion_receipt_text,
     )

@@ -152,9 +152,20 @@ Evidence、Check 和 Replay 详情，而不是从模型自然语言猜测结果�
   单回执和活动运行拒绝。详细状态机与剩余边界见
   `HAR-07-4b1-idle-bridge-reconnect.md`。
 
+### HAR-07.5c1 已实现：完成回执跨平台复制
+
+- New UI、Textual TUI 与 deprecated CLI 共享 `/copy receipt [receipt-id|latest]`；查询始终绑定当前
+  session，New UI 不再依赖缺失的 frontend adapter。
+- `ChatRunStore` 提供通用回执 authority；同 run 的 Harness Receipt 只有在 workspace/session 双重一致时
+  合并，Harness Store 故障会明确降级为通用回执。
+- 完成卡显示精确复制命令。导出只使用共享有界卡片投影，不包含 reasoning、原始工具输出、
+  Evidence URI 或变更绝对路径；文件唯一保存到 `.naumi/exports`，剪贴板不可用时仍返回路径。
+- macOS/Windows/Linux 分别使用 `pbcopy`、`clip`、`wl-copy|xclip`，后端有 3 秒超时；文件名前缀白名单、
+  独占创建和并发不覆盖已验证。详细边界见 `HAR-07-5c1-completion-receipt-copy.md`。
+
 ### 尚未完成
 
 - HAR-07.4b：ARC-03.3a、HAR-07.4b1 与 ARC-02.5a 已补齐 additive informational 序号安全、
   空闲 Bridge 重启、精确 session resume，以及两类安全回执的稳定持久 cursor；客户端 ACK、
   cursor resend、活动运行恢复和 revision/gap 自动补发仍未完成，不能把当前状态描述为完整断线恢复。
-- HAR-07.5c+：完成卡入口与跨平台复制回执；`e/r` 刷新和 `v` Evidence 焦点已完成。
+- HAR-07.5c2+：完成卡直接进入 Harness Detail；`e/r` 刷新、`v` Evidence 焦点和跨平台复制回执已完成。

@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - backward-compatible fallback path
         ("/harness", "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任", True),
         ("/feedback", "记录隐私安全的用户纠正或缺陷候选", True),
         ("/evolution", "审查 Candidate、签发单 Lane 回执或加入 Workbench 队列", True),
-        ("/copy", "复制/导出完整记录、最近一轮或最近错误", True),
+        ("/copy", "复制/导出记录或权威完成回执", True),
         ("/debug", "显示本次结构化调试日志位置", False),
         ("/debug-replay", "回放 debug-runs 结构化事件", True),
         ("/diff", "查看本轮结构化 git diff", True),

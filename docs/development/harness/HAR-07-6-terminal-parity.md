@@ -45,6 +45,6 @@ Criterion、Finding、Check、Evidence、Replay Difference、Artifact 与 Anomal
 ## 当前不足
 
 - HAR-07.4b 的断线重连 revision/gap 自动补发尚未实现；本模块不把进程内暂存当作持久恢复。
-- HAR-07.5a 已实现 New UI `e/r` 局部刷新，TUI 可重跑共享 `/harness detail` 查询；`v`、复制回执和
-  详情焦点交互尚未实现。
+- HAR-07.5a、5b、5c1 已实现 New UI `e/r` 局部刷新、`v` Evidence 焦点与三端复制回执；
+  完成卡直接进入详情仍未实现。
 - TUI 当前是单前台运行模型；暂存映射用于对齐事件顺序，不宣称支持并发多 run 展示。
