@@ -21,6 +21,8 @@
 - UI-13.2a 已为 Provider 凭据、配置、401/403/404/429/5xx、timeout 与连接失败建立低基数稳定诊断码，
   且不携带 URL、模型、用户或请求身份。ARC-08 后续 metrics/alert/runbook 应复用这些分类，但在真实计数、
   时间窗口与采样合同落地前不得据此宣称 Provider SLO 已实现。
+- ARC-04.5b1 已建立 OS credential-backed Runtime payload key 与 bounded AES-256-GCM envelope，作为
+  durable Agent payload 和未来加密 backup 的共同安全原语；key rotation、迁移与灾难恢复仍未实现。
 
 ## 初始 SLO
 

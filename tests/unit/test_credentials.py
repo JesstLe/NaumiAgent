@@ -5,6 +5,9 @@ import pytest
 from naumi_agent.config.credentials import (
     CredentialStoreError,
     load_model_api_key,
+    load_runtime_payload_key,
+    provision_runtime_payload_key,
+    resolve_runtime_payload_key,
     store_model_api_key,
 )
 
@@ -115,3 +118,68 @@ def test_backend_errors_do_not_expose_secret() -> None:
         store_model_api_key("secret-value", backend=_FailingBackend())
 
     assert "secret-value" not in str(exc_info.value)
+
+
+def test_runtime_payload_key_requires_explicit_provision_and_round_trips() -> None:
+    backend = _MemoryBackend()
+    generated = bytes(range(32))
+    factory_calls: list[int] = []
+
+    assert load_runtime_payload_key(backend=backend) is None
+    key = provision_runtime_payload_key(
+        backend=backend,
+        key_factory=lambda size: factory_calls.append(size) or generated,
+    )
+    replay = provision_runtime_payload_key(
+        backend=backend,
+        key_factory=lambda _size: pytest.fail("must not rotate existing key"),
+    )
+
+    assert key == replay == generated
+    assert factory_calls == [32]
+    assert backend.values[
+        ("NaumiAgent", "runtime.payload_encryption_key.v1")
+    ] != generated.decode("latin1")
+    assert load_runtime_payload_key(backend=backend) == generated
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    ["not-base64", "YQ==", "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE"],
+)
+def test_runtime_payload_key_rejects_malformed_stored_values(encoded: str) -> None:
+    backend = _MemoryBackend()
+    backend.values[
+        ("NaumiAgent", "runtime.payload_encryption_key.v1")
+    ] = encoded
+
+    with pytest.raises(CredentialStoreError, match="Runtime payload"):
+        load_runtime_payload_key(backend=backend)
+
+
+def test_runtime_payload_key_backend_failure_is_sanitized() -> None:
+    with pytest.raises(CredentialStoreError) as exc_info:
+        provision_runtime_payload_key(
+            backend=_FailingBackend(),
+            key_factory=lambda _size: b"private-runtime-payload-key!!",
+        )
+
+    assert "private-runtime-payload-key" not in str(exc_info.value)
+
+
+def test_runtime_payload_key_environment_override_avoids_backend_access() -> None:
+    encoded = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
+    assert resolve_runtime_payload_key(
+        environment={"NAUMI_RUNTIME_PAYLOAD_KEY": encoded},
+        backend=_FailingBackend(),
+    ) == bytes(range(32))
+
+
+def test_runtime_payload_key_missing_fails_closed_without_auto_creation() -> None:
+    backend = _MemoryBackend()
+
+    with pytest.raises(CredentialStoreError, match="尚未配置"):
+        resolve_runtime_payload_key(environment={}, backend=backend)
+
+    assert backend.values == {}

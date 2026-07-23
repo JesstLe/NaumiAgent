@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import base64
+import os
 import re
+import secrets
 import threading
+from collections.abc import Callable, Mapping
 from typing import Protocol
 
 _SERVICE_NAME = "NaumiAgent"
 _MODEL_API_KEY_ACCOUNT = "models.api_key"
+_RUNTIME_PAYLOAD_KEY_ACCOUNT = "runtime.payload_encryption_key.v1"
 _PROVIDER_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _CREDENTIAL_CACHE: dict[tuple[int, str], tuple[object, str | None]] = {}
 _CREDENTIAL_CACHE_LOCK = threading.Lock()
+_RUNTIME_PAYLOAD_PROVISION_LOCK = threading.Lock()
 
 
 class CredentialBackend(Protocol):
@@ -67,6 +73,77 @@ def load_model_api_key(
     return None
 
 
+def load_runtime_payload_key(
+    *,
+    backend: CredentialBackend | None = None,
+) -> bytes | None:
+    """Load the 256-bit Runtime payload key without creating one implicitly."""
+    active_backend = backend or _default_backend()
+    try:
+        encoded = _load_cached_credential(
+            active_backend,
+            _RUNTIME_PAYLOAD_KEY_ACCOUNT,
+        )
+    except Exception as exc:
+        raise CredentialStoreError(
+            "无法读取 Runtime payload 系统密钥。"
+        ) from exc
+    if encoded is None:
+        return None
+    return decode_runtime_payload_key(encoded)
+
+
+def resolve_runtime_payload_key(
+    *,
+    environment: Mapping[str, str] | None = None,
+    backend: CredentialBackend | None = None,
+) -> bytes:
+    """Resolve an explicit environment key or the provisioned system key."""
+    environ = os.environ if environment is None else environment
+    injected = environ.get("NAUMI_RUNTIME_PAYLOAD_KEY", "").strip()
+    if injected:
+        return decode_runtime_payload_key(injected)
+    stored = load_runtime_payload_key(backend=backend)
+    if stored is None:
+        raise CredentialStoreError(
+            "Runtime payload 密钥尚未配置；请先执行显式密钥初始化。"
+        )
+    return stored
+
+
+def provision_runtime_payload_key(
+    *,
+    backend: CredentialBackend | None = None,
+    key_factory: Callable[[int], bytes] = secrets.token_bytes,
+) -> bytes:
+    """Create the Runtime payload key once through an explicit provision step."""
+    active_backend = backend or _default_backend()
+    with _RUNTIME_PAYLOAD_PROVISION_LOCK:
+        existing = load_runtime_payload_key(backend=active_backend)
+        if existing is not None:
+            return existing
+        key = key_factory(32)
+        if not isinstance(key, bytes) or len(key) != 32:
+            raise ValueError("Runtime payload key factory 必须返回 32 bytes。")
+        encoded = base64.b64encode(key).decode("ascii")
+        try:
+            active_backend.set_password(
+                _SERVICE_NAME,
+                _RUNTIME_PAYLOAD_KEY_ACCOUNT,
+                encoded,
+            )
+        except Exception as exc:
+            raise CredentialStoreError(
+                "无法写入 Runtime payload 系统密钥。"
+            ) from exc
+        _cache_credential(
+            active_backend,
+            _RUNTIME_PAYLOAD_KEY_ACCOUNT,
+            encoded,
+        )
+        return key
+
+
 def _model_api_key_account(provider: str | None) -> str:
     if provider is None:
         return _MODEL_API_KEY_ACCOUNT
@@ -76,6 +153,20 @@ def _model_api_key_account(provider: str | None) -> str:
             "provider ID 必须由字母、数字、点、下划线或短横线组成，长度为 1-64。"
         )
     return f"models.providers.{normalized}.api_key"
+
+
+def decode_runtime_payload_key(value: str) -> bytes:
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise CredentialStoreError(
+            "Runtime payload 系统密钥格式无效。"
+        ) from exc
+    if len(decoded) != 32:
+        raise CredentialStoreError("Runtime payload 系统密钥长度无效。")
+    if base64.b64encode(decoded).decode("ascii") != value:
+        raise CredentialStoreError("Runtime payload 系统密钥不是 canonical Base64。")
+    return decoded
 
 
 def _load_cached_credential(
