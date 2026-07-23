@@ -105,3 +105,17 @@ test("doctor health page renders export preview and written receipt", () => {
   assert.match(plain, /已导出 · .*report.zip/);
   assert(lines.every((line) => visibleWidth(line) <= 100));
 });
+
+test("doctor health page distinguishes compatibility downgrade from export failure", () => {
+  const lines = renderDoctorHealthPage({
+    snapshot: snapshot(),
+    heartbeat: { status: "healthy", rttMs: 12 },
+    exportNotice: "当前 Bridge 不支持脱敏诊断包导出，未发送写入请求。",
+    exportError: "状态目录不可写。",
+  }, 100, 30);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert.match(plain, /兼容模式 · 当前 Bridge 不支持/);
+  assert.match(plain, /导出失败 · 状态目录不可写/);
+  assert(lines.every((line) => visibleWidth(line) <= 100));
+});

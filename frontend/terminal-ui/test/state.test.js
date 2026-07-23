@@ -2282,6 +2282,11 @@ test("doctor command opens typed health route refreshes and restores origin", ()
 
 test("doctor export previews before writing and keeps malformed forms local", () => {
   const state = createInitialState();
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["doctor_export", "typed_ui_messages"],
+  };
   const sent = [];
   const send = (type, payload) => {
     sent.push({ type, payload });
@@ -2362,6 +2367,52 @@ test("doctor export previews before writing and keeps malformed forms local", ()
   handleSubmitText(state, "/doctor raw", send);
   assert.equal(sent.length, before);
   assert.match(state.messages.at(-1).content, /用法/);
+});
+
+test("doctor export stays local before negotiation and against an older Bridge", () => {
+  for (const [negotiated, expectedNotice] of [
+    [false, /协议协商尚未完成/],
+    [true, /当前 Bridge 不支持脱敏诊断包导出/],
+  ]) {
+    const state = createInitialState();
+    state.protocolNegotiated = negotiated;
+    state.protocolNegotiation = negotiated
+      ? { selected_version: 1, capabilities: ["typed_ui_messages"] }
+      : null;
+    const sent = [];
+    const send = (type, payload) => {
+      sent.push({ type, payload });
+      return `request-${sent.length}`;
+    };
+
+    handleSubmitText(state, "/doctor export", send);
+    const actions = reduceServerEvent(state, {
+      type: "doctor/health",
+      payload: {
+        schema_version: 1,
+        status: "ok",
+        generated_at: "2026-07-23T10:00:00+00:00",
+        live_probe: false,
+        snapshot_sha256: "d".repeat(64),
+        items: [],
+      },
+    });
+
+    assert.deepEqual(actions, []);
+    assert.deepEqual(sent, [{ type: "doctor", payload: {} }]);
+    assert.match(state.doctorHealth.exportNotice, expectedNotice);
+    assert.equal(state.doctorHealth.exportLoading, false);
+    assert.equal(handleDoctorHealthKey(state, "e", send), true);
+    assert.deepEqual(sent, [{ type: "doctor", payload: {} }]);
+    assert.match(state.doctorHealth.exportNotice, expectedNotice);
+
+    assert.equal(handleDoctorHealthKey(state, "r", send), true);
+    assert.equal(state.doctorHealth.exportAutoPreview, true);
+    assert.deepEqual(sent, [
+      { type: "doctor", payload: {} },
+      { type: "doctor", payload: {} },
+    ]);
+  }
 });
 
 test("local exit commands never enter transport or the outbox", () => {

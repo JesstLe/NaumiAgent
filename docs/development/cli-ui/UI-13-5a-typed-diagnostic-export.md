@@ -146,4 +146,4 @@ JSONL v1 新增：
 - UI-13.4：typed Trace Viewer、筛选、正文默认折叠和稳定事件关联；
 - CC-03：补 source behavior inventory、语义映射、差异日志与同 fixture golden；
 - ARC-07：闭源产物中的本地 support bundle 入口、第三方许可和升级失败诊断；
-- UI-17：增加断连 uncertain、旧 Bridge typed downgrade 与恢复场景的发布 golden。
+- UI-17：旧 Bridge typed downgrade 已由 UI-17.3c 完成；断连 uncertain、恢复场景与发布矩阵仍待实现。

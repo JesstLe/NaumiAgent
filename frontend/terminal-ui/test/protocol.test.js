@@ -616,6 +616,14 @@ test("event capability registry governs typed feature events", () => {
     requiredEventCapability("server", "evolution/evaluation-lane"),
     "evolution_evaluation_lane",
   );
+  assert.equal(
+    requiredEventCapability("client", "doctor/export"),
+    "doctor_export",
+  );
+  assert.equal(
+    requiredEventCapability("server", "doctor/export/result"),
+    "doctor_export",
+  );
   assert.equal(requiredEventCapability("client", "submit"), null);
   assert.throws(() => requiredEventCapability("sideways", "submit"), /未知事件方向/);
 });

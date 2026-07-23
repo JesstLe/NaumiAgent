@@ -6782,6 +6782,68 @@ async def test_bridge_doctor_failure_returns_typed_product_runtime_fallback(
 
 
 @pytest.mark.asyncio
+async def test_bridge_rejects_unnegotiated_doctor_export_before_planning_or_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    state_home = tmp_path / "state"
+    monkeypatch.setenv("NAUMI_STATE_HOME", str(state_home))
+    engine = _FakeEngine()
+    engine.workspace_root = workspace
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-old-ui",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "older-naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+
+    async def fake_run_doctor(*args: Any, **kwargs: Any) -> DoctorReport:
+        return DoctorReport(checks=(
+            DoctorCheck("Node.js", "pass", "v22"),
+        ))
+
+    def fail_export_plan(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("unnegotiated doctor/export reached the export planner")
+
+    monkeypatch.setattr("naumi_agent.ui.doctor.run_doctor", fake_run_doctor)
+    monkeypatch.setattr(
+        "naumi_agent.ui.bridge.build_doctor_export_plan",
+        fail_export_plan,
+    )
+    await bridge.handle_client_record({
+        "id": "doctor-old-ui",
+        "type": ClientEventType.DOCTOR,
+        "payload": {},
+    })
+    await bridge.handle_client_record({
+        "id": "doctor-export-old-ui",
+        "type": ClientEventType.DOCTOR_EXPORT,
+        "payload": {"action": "preview"},
+    })
+
+    records = _records(writer)
+    assert any(record["type"] == "doctor/health" for record in records)
+    rejection = records[-1]
+    assert rejection["type"] == "error"
+    assert rejection["request_id"] == "doctor-export-old-ui"
+    assert rejection["payload"]["code"] == "protocol_capability_not_negotiated"
+    assert not any(record["type"] == "doctor/export/result" for record in records)
+    assert bridge._doctor_export_plan is None
+    assert not (state_home / "diagnostics").exists()
+
+
+@pytest.mark.asyncio
 async def test_bridge_doctor_export_requires_preview_and_writes_private_bundle(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

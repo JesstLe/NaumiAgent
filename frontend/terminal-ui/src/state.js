@@ -427,6 +427,8 @@ export function createInitialState() {
       exportReceipt: null,
       exportRequestId: "",
       exportAutoPreview: false,
+      exportRequested: false,
+      exportNotice: "",
     },
     permissionCenter: {
       loading: false,
@@ -916,8 +918,21 @@ export function reduceServerEvent(state, record) {
       state.doctorHealth.snapshot = payload;
       if (state.doctorHealth.exportAutoPreview) {
         state.doctorHealth.exportAutoPreview = false;
+        const capability = negotiatedEventCapabilityStatus(
+          state,
+          "client",
+          "doctor/export",
+        );
+        if (capability.status !== "available") {
+          state.doctorHealth.exportLoading = false;
+          state.doctorHealth.exportNotice = doctorExportCompatibilityNotice(
+            capability.status,
+          );
+          break;
+        }
         state.doctorHealth.exportLoading = true;
         state.doctorHealth.exportError = "";
+        state.doctorHealth.exportNotice = "";
         return [{ type: "doctor_export_preview" }];
       }
       break;
@@ -930,6 +945,7 @@ export function reduceServerEvent(state, record) {
       }
       state.doctorHealth.exportLoading = false;
       state.doctorHealth.exportError = "";
+      state.doctorHealth.exportNotice = "";
       state.doctorHealth.exportRequestId = "";
       state.doctorHealth.exportPreview = payload;
       state.doctorHealth.exportReceipt = payload.status === "written"
@@ -1170,6 +1186,8 @@ export function reduceServerEvent(state, record) {
         exportReceipt: null,
         exportRequestId: "",
         exportAutoPreview: false,
+        exportRequested: false,
+        exportNotice: "",
       };
       if (
         wasHarnessDetailRoute
@@ -3130,26 +3148,20 @@ export function handleSubmitText(state, text, send) {
   );
   if (evaluationLaneMatch) {
     const comparisonId = evaluationLaneMatch[1];
-    const requiredCapability = requiredEventCapability(
+    const capability = negotiatedEventCapabilityStatus(
+      state,
       "client",
       "evolution/evaluation-lane/request",
     );
-    const negotiatedCapabilities = Array.isArray(
-      state.protocolNegotiation?.capabilities,
-    )
-      ? state.protocolNegotiation.capabilities
-      : [];
-    if (
-      !state.protocolNegotiated
-      || !requiredCapability
-      || !negotiatedCapabilities.includes(requiredCapability)
-    ) {
+    if (capability.status !== "available") {
       pushSystemMessage(
         state,
         "兼容模式",
-        state.protocolNegotiated
-          ? "当前 Bridge 不支持 Evaluation Lane 类型化页面，已改用同一斜杠命令通道。"
-          : "协议协商尚未完成，已通过可排队的斜杠命令通道发送。",
+        capability.status === "pending"
+          ? "协议协商尚未完成，已通过可排队的斜杠命令通道发送。"
+          : capability.status === "unsupported"
+            ? "当前 Bridge 不支持 Evaluation Lane 类型化页面，已改用同一斜杠命令通道。"
+            : "本地协议未注册 Evaluation Lane 类型化能力，已改用同一斜杠命令通道。",
         "warning",
       );
       return submitUserMessage(state, commandText, send);
@@ -3224,6 +3236,8 @@ export function handleSubmitText(state, text, send) {
     state.doctorHealth.exportReceipt = null;
     state.doctorHealth.exportRequestId = "";
     state.doctorHealth.exportAutoPreview = text === "/doctor export";
+    state.doctorHealth.exportRequested = text === "/doctor export";
+    state.doctorHealth.exportNotice = "";
     send("doctor", {});
     return;
   }
@@ -3854,12 +3868,27 @@ export function handleDoctorHealthKey(state, key, send) {
     state.doctorHealth.exportPreview = null;
     state.doctorHealth.exportReceipt = null;
     state.doctorHealth.exportRequestId = "";
-    state.doctorHealth.exportAutoPreview = false;
+    state.doctorHealth.exportAutoPreview = Boolean(state.doctorHealth.exportRequested);
+    state.doctorHealth.exportNotice = "";
     send("doctor", {});
     return true;
   }
   if (key === "e" || key === "E") {
     if (state.doctorHealth.loading || state.doctorHealth.exportLoading) return true;
+    state.doctorHealth.exportRequested = true;
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "doctor/export",
+    );
+    if (capability.status !== "available") {
+      state.doctorHealth.exportLoading = false;
+      state.doctorHealth.exportError = "";
+      state.doctorHealth.exportNotice = doctorExportCompatibilityNotice(
+        capability.status,
+      );
+      return true;
+    }
     const snapshotSha = String(state.doctorHealth.snapshot?.snapshot_sha256 || "");
     if (!snapshotSha) {
       state.doctorHealth.exportError = "当前没有可导出的 typed Health 快照，请先按 r 刷新。";
@@ -3871,6 +3900,7 @@ export function handleDoctorHealthKey(state, key, send) {
       ? "write" : "preview";
     state.doctorHealth.exportLoading = true;
     state.doctorHealth.exportError = "";
+    state.doctorHealth.exportNotice = "";
     state.doctorHealth.exportRequestId = String(send("doctor/export", {
       action,
       ...(action === "write" ? { expected_snapshot_sha256: snapshotSha } : {}),
@@ -3885,6 +3915,37 @@ export function handleDoctorHealthKey(state, key, send) {
   else if ([INPUT_KEYS.home, INPUT_KEYS.homeAlt, INPUT_KEYS.homeSs3].includes(key)) state.doctorHealth.scrollOffset = 0;
   else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) state.doctorHealth.scrollOffset = Number.MAX_SAFE_INTEGER;
   return true;
+}
+
+function negotiatedEventCapabilityStatus(state, direction, eventType) {
+  const requiredCapability = requiredEventCapability(direction, eventType);
+  if (!requiredCapability) {
+    return { status: "unregistered", requiredCapability: null };
+  }
+  if (!state.protocolNegotiated) {
+    return { status: "pending", requiredCapability };
+  }
+  const negotiatedCapabilities = Array.isArray(
+    state.protocolNegotiation?.capabilities,
+  )
+    ? state.protocolNegotiation.capabilities
+    : [];
+  return {
+    status: negotiatedCapabilities.includes(requiredCapability)
+      ? "available"
+      : "unsupported",
+    requiredCapability,
+  };
+}
+
+function doctorExportCompatibilityNotice(status) {
+  if (status === "pending") {
+    return "协议协商尚未完成，未发送诊断导出请求；仍可查看本地 Doctor 状态。";
+  }
+  if (status === "unsupported") {
+    return "当前 Bridge 不支持脱敏诊断包导出，未发送写入请求；请升级 Python Bridge 后重试。";
+  }
+  return "本地协议未注册诊断导出能力，已阻止导出请求；请升级完整的 Naumi 安装。";
 }
 
 function parseHarnessEvalBatchCommand(commandText) {

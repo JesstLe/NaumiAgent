@@ -340,6 +340,47 @@ test("terminal UI downgrades typed Evaluation Lane against an older Bridge", asy
   }
 });
 
+test("terminal UI keeps Doctor Health useful without exporting against an older Bridge", async () => {
+  const app = launchTerminalUi("history-bridge.js");
+  const output = collectOutput(app);
+
+  try {
+    await waitForReadyWelcome(output, 7000);
+    app.stdin.write("/doctor export\n");
+    await waitForLatestScreen(output, "环境健康诊断", 7000);
+    await waitForLatestScreen(
+      output,
+      "当前 Bridge 不支持脱敏诊断包导出，未发送写入请求",
+      7000,
+    );
+
+    let events = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send",
+    );
+    assert(events.some(
+      (record) => record.payload.record.type === "doctor",
+    ));
+    assert(!events.some(
+      (record) => record.payload.record.type === "doctor/export",
+    ));
+    assert(!events.some(
+      (record) => record.payload.record.type === "submit",
+    ));
+
+    app.stdin.write("e");
+    await delay(120);
+    events = readDebugEvents(app.debugLogPath).filter(
+      (record) => record.event === "protocol.send",
+    );
+    assert(!events.some(
+      (record) => record.payload.record.type === "doctor/export",
+    ));
+    assert.equal(await stopTerminalUi(app), 0);
+  } finally {
+    forceKill(app);
+  }
+});
+
 test("terminal UI effort command uses shared Python backend and refreshed status", async () => {
   const app = launchTerminalUi("python-bridge-fixture.py", {
     bridgeCommandJson: [pythonExecutable(), "test/fixtures/python-bridge-fixture.py"],
