@@ -110,7 +110,7 @@ import {
   markTimelineOutput,
   scrollTimeline,
 } from "./timeline-follow.js";
-import { createTrackpadScrollFilter } from "./scroll-input.js";
+import { createTrackpadScrollController } from "./scroll-input.js";
 import {
   createGracefulShutdownController,
   shutdownSignalsForPlatform,
@@ -164,7 +164,14 @@ let quitting = false;
 let viewportWidth = null;
 let viewportHeight = null;
 const inputTokenizer = createInputTokenizerState();
-const trackpadScrollFilter = createTrackpadScrollFilter();
+const trackpadScrollController = createTrackpadScrollController({
+  onStep(direction) {
+    if (quitting) return;
+    scrollTimeline(state, direction === "up" ? 1 : -1);
+    scheduleUiSnapshotPersist();
+    scheduleRedraw();
+  },
+});
 const terminalSession = createTerminalSession({
   stdin: process.stdin,
   stdout: process.stdout,
@@ -576,6 +583,7 @@ function restoreTerminal() {
   clearBridgeRecoveryStabilityTimer();
   heartbeat?.stop();
   workingAnimation.stop();
+  trackpadScrollController.dispose();
   redrawScheduler.cancel();
   protocolEventBatcher.cancel();
   terminalSession.restore();
@@ -1415,10 +1423,7 @@ function handleSingleKeyInput(chunk) {
   }
   if (chunk === INPUT_KEYS.upAlt || chunk === INPUT_KEYS.downAlt) {
     const direction = chunk === INPUT_KEYS.upAlt ? "up" : "down";
-    if (!trackpadScrollFilter.accept(direction)) return;
-    scrollTimeline(state, direction === "up" ? 1 : -1);
-    persistUiSnapshot();
-    scheduleRedraw();
+    trackpadScrollController.push(direction);
     return;
   }
   if (/^[Oo][ABab]$/.test(chunk)) {

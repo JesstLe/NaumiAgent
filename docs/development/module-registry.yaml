@@ -14,7 +14,7 @@ modules:
   - {id: UI-12, status: partial, path: cli-ui/UI-12-permission-center.md, depends_on: []}
   - {id: UI-13, status: partial, path: cli-ui/UI-13-diagnostics.md, depends_on: [], implemented_slices: [UI-13.1a, UI-13.1b, UI-13.1c, UI-13.1d, UI-13.2a]}
   - {id: UI-14, status: partial, path: cli-ui/UI-14-navigation-input.md, depends_on: [], implemented_slices: [UI-14.1a, UI-14.2a, UI-14.2b, UI-14.2c, UI-14.2d, UI-14.2e, UI-14.2f, UI-14.2g]}
-  - {id: UI-15, status: partial, path: cli-ui/UI-15-performance.md, depends_on: [], implemented_slices: [UI-15.2a, UI-15.3a]}
+  - {id: UI-15, status: partial, path: cli-ui/UI-15-performance.md, depends_on: [], implemented_slices: [UI-15.1a, UI-15.2a, UI-15.3a, UI-15.4a, UI-15.5a, UI-15.6a]}
   - {id: UI-16, status: partial, path: cli-ui/UI-16-platform-accessibility.md, depends_on: [], implemented_slices: [UI-16.1a, UI-16.2a, UI-16.3a, UI-16.6a]}
   - {id: UI-17, status: partial, path: cli-ui/UI-17-parity-release.md, depends_on: [UI-10, UI-11, UI-12, UI-13, UI-14, UI-15, UI-16, UI-18], implemented_slices: [UI-17.1, UI-17.2a, UI-17.2b, UI-17.2c, UI-17.2d, UI-17.2e, UI-17.2f, UI-17.3a, UI-17.3b]}
   - {id: UI-18, status: partial, path: cli-ui/UI-18-goal-pursuit.md, depends_on: [ARC-01], implemented_slices: [UI-18.1, UI-18.4a, UI-18.4b, UI-18.4c, UI-18.4d1, UI-18.4d2, UI-18.5a]}
