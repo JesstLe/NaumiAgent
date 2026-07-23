@@ -26,7 +26,8 @@ v1 数据库只允许包含已验证的 admitted contract。迁移会为每个�
 ## 3. Authority 与顺序保证
 
 - `ToolJobAuthority.dispatch()` 在返回给 transport producer 前重新执行 ARC-04.2b authority validation，随后先
-  持久化 `dispatched`；只有首次 transition 返回 `should_send_payload=true`，未落盘或幂等重试不得发送命令；
+  通过 ARC-06.1b 原子 reserve Worker slot，再持久化 `dispatched`；只有首次 transition 返回
+  `should_send_payload=true`，未落盘或幂等重试不得发送命令；
 - `ToolJobLifecycleAuthority` 只接受合同绑定且仍为 Worker Registry active generation 的 Worker incarnation，
   并核对 durable dispatch id；takeover 后旧 Worker 不能提交迟到终态；
 - 状态只允许前进；终态不可改写；相同 transition retry 返回首次 receipt，不同终态或结果冲突拒绝；
@@ -34,6 +35,8 @@ v1 数据库只允许包含已验证的 admitted contract。迁移会为每个�
 - `list_recovery_required()` 只列出进程崩溃后仍为 `dispatched|running` 的任务。恢复方必须先查证 Worker/transport
   事实，再以 latest receipt digest 作为 optimistic fence 写 `unknown`，不能重新 dispatch；Worker takeover 后
   旧 Worker 不能提交终态，但 Runtime 仍可用该 recovery authority 安全关闭歧义任务。
+- 成功、失败、取消或 recovery unknown 终态落盘后释放 capacity；终态重试继续幂等 cleanup。两个 Store
+  不伪装成原子事务，reserve 后 dispatch 失败会保留 TTL 有界占位，避免跨库失败时超卖。
 
 ## 4. 验收证据
 
@@ -44,6 +47,7 @@ v1 数据库只允许包含已验证的 admitted contract。迁移会为每个�
 - dispatch 前取消保持 `side_effect=none` 且幂等；
 - v1 -> v2 真实 SQLite 迁移保留 Job identity 并补齐 genesis receipt；中间事件篡改可被完整链验证发现；
 - Runtime Composition 为 Engine 注入同一个 Store 上的 admission/lifecycle authority。
+- capacity=1 的真实 dispatch 在占满时拒绝，释放后可派发，dispatch retry 不重复计数，终态恢复空位。
 
 ## 5. 诚实边界与下一步
 

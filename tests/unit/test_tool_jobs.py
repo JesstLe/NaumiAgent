@@ -45,7 +45,10 @@ from naumi_agent.daemons.worker_contract import (
     issue_worker_contract,
     issue_worker_health_report,
 )
-from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityExhaustedError,
+    WorkerRegistryStore,
+)
 from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HarnessStore
@@ -82,7 +85,7 @@ def _capabilities() -> tuple[WorkerCapability, ...]:
     )
 
 
-def _contract(epoch: int = 1):
+def _contract(epoch: int = 1, *, max_concurrent_jobs: int = 2):
     return issue_worker_contract(
         worker_id="tool-worker-a",
         instance_id=f"process-{epoch}",
@@ -99,7 +102,7 @@ def _contract(epoch: int = 1):
         ),
         capabilities=_capabilities(),
         resources=WorkerResourceEnvelope(
-            max_concurrent_jobs=2,
+            max_concurrent_jobs=max_concurrent_jobs,
             max_memory_bytes=512 * 1024 * 1024,
             max_cpu_seconds=60,
             max_wall_seconds=120,
@@ -145,7 +148,12 @@ def _health(contract, *, active_jobs: int = 0, accepting_jobs: bool = True):
     )
 
 
-async def _authority(tmp_path: Path, *, arguments=None):
+async def _authority(
+    tmp_path: Path,
+    *,
+    arguments=None,
+    max_concurrent_jobs: int = 2,
+):
     runtime = tmp_path / "runtime"
     workspace = tmp_path / "workspace"
     registry = WorkerRegistryStore(runtime / "worker-registry.db")
@@ -155,7 +163,7 @@ async def _authority(tmp_path: Path, *, arguments=None):
     )
     grant_store = ExecutionGrantStore(runtime / "execution-grants.db")
     job_store = ToolJobStore(runtime / "tool-jobs.db")
-    contract = _contract()
+    contract = _contract(max_concurrent_jobs=max_concurrent_jobs)
     await registry.register(contract, registered_at=T1)
     lease = await harness.acquire_run_lease(
         workspace_root=workspace,
@@ -453,6 +461,147 @@ async def test_dispatch_running_success_receipt_chain_survives_reopen(
             "SELECT COUNT(*) FROM tool_job_lifecycle_events WHERE job_id = ?",
             (admitted.contract.job_id,),
         ).fetchone()[0] == 4
+
+
+@pytest.mark.asyncio
+async def test_dispatch_capacity_is_bounded_replayed_and_released(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path,
+        max_concurrent_jobs=1,
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    await registry.reserve_capacity(
+        reservation_id="capacity-other-job",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id="other-job",
+        reserved_at=T3,
+        ttl_seconds=10,
+    )
+
+    with pytest.raises(WorkerCapacityExhaustedError, match="已耗尽"):
+        await authority.dispatch(
+            job_id=admitted.contract.job_id,
+            request=request,
+            worker_health=_health(contract),
+            requirements=_requirements(),
+            dispatch_id="dispatch-a",
+            now=T4,
+        )
+    blocked = await registry.capacity_snapshot(
+        worker_id=contract.worker_id,
+        assessed_at=T4,
+    )
+    assert blocked is not None
+    assert (blocked.reserved, blocked.available) == (1, 0)
+
+    await registry.release_capacity(
+        reservation_id="capacity-other-job",
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        reason_code="other_job_finished",
+        released_at=T4,
+    )
+    dispatched = await authority.dispatch(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        dispatch_id="dispatch-a",
+        now=T4,
+    )
+    replayed = await authority.dispatch(
+        job_id=admitted.contract.job_id,
+        request=request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        dispatch_id="dispatch-a",
+        now=T5,
+    )
+    reserved = await registry.capacity_snapshot(
+        worker_id=contract.worker_id,
+        assessed_at=T5,
+    )
+
+    assert dispatched.applied
+    assert not replayed.applied
+    assert reserved is not None
+    assert (reserved.reserved, reserved.available) == (1, 0)
+
+    lifecycle = ToolJobLifecycleAuthority(store, registry)
+    await lifecycle.finish(
+        job_id=admitted.contract.job_id,
+        dispatch_id="dispatch-a",
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        state=ToolJobState.SUCCEEDED,
+        side_effect=ToolJobSideEffect.OBSERVED,
+        result_code="exit_zero",
+        now=T6,
+        exit_code=0,
+        output_sha256="e" * 64,
+    )
+    released = await registry.capacity_snapshot(
+        worker_id=contract.worker_id,
+        assessed_at=T7,
+    )
+    assert released is not None
+    assert (released.reserved, released.available) == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_legacy_dispatched_job_can_finish_without_capacity_reservation(
+    tmp_path: Path,
+) -> None:
+    authority, request, store, *_, registry, _, _, contract, _ = await _authority(
+        tmp_path
+    )
+    admitted = await authority.admit(
+        request,
+        worker_health=_health(contract),
+        requirements=_requirements(),
+        now=T3,
+    )
+    await store._transition(
+        job_id=admitted.contract.job_id,
+        target_state=ToolJobState.DISPATCHED,
+        dispatch_id="legacy-dispatch",
+        side_effect=ToolJobSideEffect.POSSIBLE,
+        result_code="dispatch_committed",
+        occurred_at=T4,
+    )
+
+    lifecycle = ToolJobLifecycleAuthority(store, registry)
+    finished = await lifecycle.finish(
+        job_id=admitted.contract.job_id,
+        dispatch_id="legacy-dispatch",
+        worker_id=contract.worker_id,
+        worker_instance_id=contract.instance_id,
+        worker_epoch=contract.epoch,
+        state=ToolJobState.SUCCEEDED,
+        side_effect=ToolJobSideEffect.OBSERVED,
+        result_code="legacy_exit_zero",
+        now=T5,
+        exit_code=0,
+    )
+    snapshot = await registry.capacity_snapshot(
+        worker_id=contract.worker_id,
+        assessed_at=T6,
+    )
+
+    assert finished.state is ToolJobState.SUCCEEDED
+    assert snapshot is not None
+    assert snapshot.reserved == 0
 
 
 @pytest.mark.asyncio

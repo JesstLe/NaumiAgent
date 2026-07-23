@@ -39,6 +39,8 @@ TOOL_JOB_SCHEMA_VERSION = 2
 _MAX_CONTRACT_BYTES = 64 * 1024
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_CAPACITY_DISPATCH_RESULT_CODE = "dispatch_committed_capacity_v1"
+_LEGACY_DISPATCH_RESULT_CODE = "dispatch_committed"
 
 
 class ToolJobState(StrEnum):
@@ -370,6 +372,44 @@ class ToolJobStore:
                 return stored
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise ToolJobError("无法读取 ToolJob。") from exc
+
+    async def _capacity_reservation_for_dispatch(self, job_id: str) -> str | None:
+        """Return the reservation identity only for capacity-aware dispatches."""
+        _require_identifier(job_id, field="job_id")
+        if not _regular_file_exists(self._db_path):
+            raise ToolJobLifecycleConflictError("ToolJob 不存在。")
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    "SELECT * FROM tool_jobs WHERE job_id = ?",
+                    (job_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    raise ToolJobLifecycleConflictError("ToolJob 不存在。")
+                stored = _stored_job_from_row(row)
+                await _validate_event_chain(db, stored)
+                cursor = await db.execute(
+                    "SELECT receipt_json FROM tool_job_lifecycle_events "
+                    "WHERE job_id = ? AND state = ?",
+                    (job_id, ToolJobState.DISPATCHED.value),
+                )
+                rows = await cursor.fetchall()
+                if len(rows) != 1:
+                    raise ToolJobError("ToolJob dispatch lifecycle 事实缺失或重复。")
+                dispatch = _deserialize_lifecycle_receipt(str(rows[0]["receipt_json"]))
+                await db.commit()
+                if dispatch.result_code == _CAPACITY_DISPATCH_RESULT_CODE:
+                    return _capacity_reservation_id(job_id)
+                if dispatch.result_code == _LEGACY_DISPATCH_RESULT_CODE:
+                    return None
+                raise ToolJobError("ToolJob dispatch capacity 版本不受支持。")
+        except (ToolJobError, ToolJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise ToolJobError("无法读取 ToolJob dispatch capacity 事实。") from exc
 
     async def _transition(
         self,
@@ -727,13 +767,53 @@ class ToolJobAuthority:
             raise ToolJobLifecycleConflictError(
                 f"ToolJob dispatch authority 被拒绝：{reasons}"
             )
+        contract = validation.contract
+        assert contract is not None
+        stored = await self._store.get(job_id)
+        if stored is None or stored.state not in {
+            ToolJobState.ADMITTED,
+            ToolJobState.DISPATCHED,
+        }:
+            # Preserve the lifecycle authority's precise conflict and avoid
+            # consuming capacity for a job that is already terminal.
+            return await self._store._transition(
+                job_id=job_id,
+                target_state=ToolJobState.DISPATCHED,
+                dispatch_id=dispatch_id,
+                side_effect=ToolJobSideEffect.POSSIBLE,
+                result_code=_CAPACITY_DISPATCH_RESULT_CODE,
+                occurred_at=validation.checked_at,
+            )
+        active = await self._worker_registry.get_active(contract.worker_id)
+        if active is None:
+            raise ToolJobLifecycleConflictError("ToolJob dispatch Worker 已失去注册。")
+        remaining = max(
+            1,
+            math.ceil(
+                (
+                    datetime.fromisoformat(contract.expires_at)
+                    - datetime.fromisoformat(validation.checked_at)
+                ).total_seconds()
+            ),
+        )
+        ttl_seconds = min(active.contract.resources.max_wall_seconds, remaining)
+        reservation_id = _capacity_reservation_id(contract.job_id)
+        await self._worker_registry.reserve_capacity(
+            reservation_id=reservation_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.worker_instance_id,
+            epoch=contract.worker_epoch,
+            job_id=contract.job_id,
+            reserved_at=validation.checked_at,
+            ttl_seconds=ttl_seconds,
+        )
         return await self._store._transition(
             job_id=job_id,
             target_state=ToolJobState.DISPATCHED,
             dispatch_id=dispatch_id,
             side_effect=ToolJobSideEffect.POSSIBLE,
-            result_code="dispatch_committed",
-            occurred_at=now,
+            result_code=_CAPACITY_DISPATCH_RESULT_CODE,
+            occurred_at=validation.checked_at,
         )
 
 
@@ -824,6 +904,11 @@ class ToolJobLifecycleAuthority:
             output_sha256=output_sha256,
             artifact_manifest_sha256=artifact_manifest_sha256,
         )
+        await self._release_job_capacity(
+            transition.job,
+            now=now,
+            reason_code=f"tool_job_{state.value}",
+        )
         return transition.job
 
     async def cancel_before_dispatch(
@@ -865,7 +950,35 @@ class ToolJobLifecycleAuthority:
             occurred_at=now,
             expected_latest_receipt_sha256=expected_latest_receipt_sha256,
         )
+        await self._release_job_capacity(
+            transition.job,
+            now=now,
+            reason_code="tool_job_unknown",
+        )
         return transition.job
+
+    async def _release_job_capacity(
+        self,
+        stored: StoredToolJob,
+        *,
+        now: str,
+        reason_code: str,
+    ) -> None:
+        contract = stored.contract
+        reservation_id = await self._store._capacity_reservation_for_dispatch(
+            contract.job_id
+        )
+        if reservation_id is None:
+            return
+        await self._worker_registry.release_capacity(
+            reservation_id=reservation_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.worker_instance_id,
+            epoch=contract.worker_epoch,
+            reason_code=reason_code,
+            released_at=now,
+            accept_terminal=True,
+        )
 
     async def _require_dispatch_identity(
         self,
@@ -910,6 +1023,11 @@ def tool_job_requirements_sha256(
 ) -> str:
     _validate_requirements(requirements)
     return _canonical_sha256(asdict(requirements))
+
+
+def _capacity_reservation_id(job_id: str) -> str:
+    _require_identifier(job_id, field="job_id")
+    return f"capacity-{job_id}"
 
 
 def verify_tool_job(contract: ImmutableToolJob) -> bool:

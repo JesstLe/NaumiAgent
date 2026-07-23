@@ -360,7 +360,6 @@ class WorkerRegistryStore:
                         or reservation.instance_id != instance_id
                         or reservation.epoch != epoch
                         or reservation.job_id != job_id
-                        or reservation.expires_at != expires_at
                     ):
                         raise WorkerRegistryConflictError(
                             "Capacity reservation identity 被不同事实复用。"
@@ -406,6 +405,7 @@ class WorkerRegistryStore:
         epoch: int,
         reason_code: str,
         released_at: str,
+        accept_terminal: bool = False,
     ) -> WorkerCapacityReservation:
         """Release only the exact reservation owner; stale workers are fenced."""
         for field, value in (
@@ -415,6 +415,8 @@ class WorkerRegistryStore:
         ):
             _validate_identifier(value, field=field)
         _validate_reason(reason_code)
+        if not isinstance(accept_terminal, bool):
+            raise TypeError("accept_terminal 必须是布尔值。")
         timestamp = normalize_worker_timestamp(released_at, field="released_at")
         await self._ensure_schema()
         try:
@@ -434,6 +436,12 @@ class WorkerRegistryStore:
                 if reservation.state is WorkerCapacityReservationState.RELEASED:
                     if reservation.reason_code != reason_code:
                         raise WorkerRegistryConflictError("Capacity reservation 已由不同原因释放。")
+                    await db.commit()
+                    return reservation
+                if accept_terminal and reservation.state in {
+                    WorkerCapacityReservationState.EXPIRED,
+                    WorkerCapacityReservationState.FENCED,
+                }:
                     await db.commit()
                     return reservation
                 if reservation.state is not WorkerCapacityReservationState.ACTIVE:

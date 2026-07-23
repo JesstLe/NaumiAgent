@@ -30,6 +30,9 @@
   `ARC-04-2b-immutable-tool-job-admission.md`。
 - ARC-04.2c 已完成 ToolJob schema v2 单调 lifecycle receipt、dispatch-before-send、Worker incarnation fencing、
   并发终态幂等、unknown 副作用边界与 v1 migration，详见 `ARC-04-2c-tool-job-lifecycle-receipts.md`。
+- ARC-06.1b 已把 ARC-06.1a capacity authority 接入上述真实 ToolJob dispatch/terminal lifecycle；ToolJob
+  transport 前占位，终态释放，跨 Store 失败由 TTL fail-safe 收敛，详见
+  `ARC-06-1b-tool-job-capacity-lifecycle.md`。
 - ARC-04.3a 已完成认证本地 non-PTY transport、默认断网 OS sandbox、process-tree cancel、资源上限、artifact
   digest，并由 Coordinator 消费 ARC-04.2b/2c 权威链，详见
   `ARC-04-3a-authenticated-non-pty-shell-worker.md`。
