@@ -7,7 +7,11 @@
 
 ## 子模块
 
-- ARC-06.1 Admission control：全局/用户/workspace/provider/tool 多级容量。
+- ARC-06.1 Admission control（partial）：
+  - ARC-06.1a 已在 Runtime Worker Registry v2 交付 incarnation-fenced、TTL 有界、SQLite 原子提交的
+    worker slot reservation；并发调度者不能超卖 `max_concurrent_jobs`。见
+    [设计与验证](ARC-06-1a-worker-capacity-reservations.md)。
+  - 未完成：全局/用户/workspace/provider/tool 多级容量与持久 worker dispatch 接入。
 - ARC-06.2 Scheduler：priority、deadline、fair queue、dependency DAG、affinity。
 - ARC-06.3 Budget reservation：token/cost/time/CPU/memory/browser slots 预留与归还。
 - ARC-06.4 Backpressure：producer pause、bounded queue、drop/coalesce policy、overload response。

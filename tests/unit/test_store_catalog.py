@@ -69,7 +69,7 @@ def test_default_catalog_covers_physical_stores_without_duplicate_paths(
         item for item in definitions if item.store_id == "runtime.worker_registry"
     )
     assert workers.path == (tmp_path / "runtime" / "worker-registry.db").resolve()
-    assert workers.supported_schema_version == WORKER_REGISTRY_SCHEMA_VERSION == 1
+    assert workers.supported_schema_version == WORKER_REGISTRY_SCHEMA_VERSION == 2
     assert workers.retention is RetentionPolicy.AUDIT_LONG_TERM
     grants = next(
         item for item in definitions if item.store_id == "runtime.execution_grants"
