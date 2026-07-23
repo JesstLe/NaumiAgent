@@ -81,7 +81,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 17
+HARNESS_STORE_SCHEMA_VERSION = 18
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -94,6 +94,7 @@ _SANDBOX_ADMISSION_TERMINAL_STATES = frozenset(
 )
 _SANDBOX_ADMISSION_LANES = frozenset({"sandbox", "red", "green", "adversarial"})
 _SANDBOX_ADMISSION_TICKET_RE = re.compile(r"^hsadm_[0-9a-f]{24}$")
+_SANDBOX_ADMISSION_CANCEL_ACTION_RE = re.compile(r"^hsac_[0-9a-f]{24}$")
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
@@ -351,6 +352,25 @@ class HarnessSandboxAdmissionSnapshot:
     active_count: int
     queued_count: int
     observed_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessSandboxAdmissionCancelReceipt:
+    """Tamper-evident result of one exact Sandbox admission cancel action."""
+
+    receipt_id: str
+    action_id: str
+    ticket_id: str
+    authority_key: str
+    presented_epoch: int
+    presented_state: str
+    decision: str
+    observed_state: str
+    code: str
+    actor_id: str
+    reason: str
+    created_at: str
+    receipt_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -5253,6 +5273,212 @@ class HarnessStore:
         except (aiosqlite.Error, OSError) as exc:
             raise HarnessStoreError("无法读取 Sandbox Batch admission ticket。") from exc
 
+    async def cancel_sandbox_admission(
+        self,
+        *,
+        workspace_root: str | Path,
+        action_id: str,
+        ticket_id: str,
+        authority_key: str,
+        epoch: int,
+        expected_state: str,
+        actor_id: str,
+        reason: str,
+        now: str,
+    ) -> tuple[
+        HarnessSandboxAdmissionCancelReceipt,
+        HarnessSandboxAdmissionTicket | None,
+    ]:
+        """Atomically audit and decide one exact, owner-fenced cancel request."""
+        workspace = _canonical_workspace(workspace_root)
+        action = _normalize_sandbox_cancel_action_id(action_id)
+        ticket = _normalize_sandbox_admission_ticket_id(ticket_id)
+        authority = _validate_sha256(authority_key, field="authority_key")
+        presented_epoch = _normalize_sandbox_admission_epoch(epoch)
+        presented_state = (
+            expected_state.strip().lower() if isinstance(expected_state, str) else ""
+        )
+        if presented_state not in {"queued", "active"}:
+            raise ValueError("Sandbox admission expected_state 必须是 queued 或 active。")
+        actor = _normalize_text(actor_id, field="actor_id", max_length=128)
+        normalized_reason = _normalize_text(reason, field="reason", max_length=500)
+        timestamp = _normalize_utc_timestamp(now, field="now")
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                await _reap_expired_sandbox_admissions(
+                    db,
+                    workspace_root=workspace,
+                    now=timestamp,
+                )
+                existing = await _select_sandbox_cancel_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                if existing is not None:
+                    receipt = _sandbox_cancel_receipt_from_row(existing)
+                    expected_digest = _sandbox_cancel_request_digest(
+                        workspace_root=workspace,
+                        action_id=action,
+                        ticket_id=ticket,
+                        authority_key=authority,
+                        epoch=presented_epoch,
+                        expected_state=presented_state,
+                        actor_id=actor,
+                        reason=normalized_reason,
+                    )
+                    if not hmac.compare_digest(
+                        str(existing["request_sha256"]),
+                        expected_digest,
+                    ):
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            f"Sandbox cancel action {action} 已被不同请求占用。"
+                        )
+                    current_row = await _select_sandbox_admission_row(
+                        db,
+                        workspace_root=workspace,
+                        ticket_id=ticket,
+                    )
+                    current = (
+                        await _sandbox_admission_ticket_from_row(
+                            db,
+                            current_row,
+                            now=timestamp,
+                        )
+                        if current_row is not None
+                        else None
+                    )
+                    await db.rollback()
+                    return receipt, current
+
+                row = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                observed_state = str(row["state"]) if row is not None else "missing"
+                decision = "rejected"
+                if row is None:
+                    code = "sandbox_batch_cancel_ticket_not_found"
+                elif not hmac.compare_digest(str(row["authority_key"]), authority):
+                    code = "sandbox_batch_cancel_authority_mismatch"
+                elif int(row["epoch"]) != presented_epoch:
+                    code = "sandbox_batch_cancel_epoch_mismatch"
+                elif datetime.fromisoformat(timestamp) < datetime.fromisoformat(
+                    str(row["updated_at"])
+                ):
+                    code = "sandbox_batch_cancel_clock_rollback"
+                elif observed_state in _SANDBOX_ADMISSION_TERMINAL_STATES:
+                    code = "sandbox_batch_cancel_already_terminal"
+                elif observed_state != presented_state:
+                    code = "sandbox_batch_cancel_state_changed"
+                else:
+                    decision = "accepted"
+                    code = "sandbox_batch_cancelled_by_user"
+                    await db.execute(
+                        """
+                        UPDATE harness_sandbox_admission_tickets
+                        SET state = 'cancelled', terminal_code = ?,
+                            lease_expires_at = ?, updated_at = ?
+                        WHERE workspace_root = ? AND ticket_id = ?
+                          AND authority_key = ? AND epoch = ? AND state = ?
+                        """,
+                        (
+                            code,
+                            timestamp,
+                            timestamp,
+                            workspace,
+                            ticket,
+                            authority,
+                            presented_epoch,
+                            presented_state,
+                        ),
+                    )
+                    observed_state = "cancelled"
+
+                request_sha256 = _sandbox_cancel_request_digest(
+                    workspace_root=workspace,
+                    action_id=action,
+                    ticket_id=ticket,
+                    authority_key=authority,
+                    epoch=presented_epoch,
+                    expected_state=presented_state,
+                    actor_id=actor,
+                    reason=normalized_reason,
+                )
+                receipt_sha256 = _sandbox_cancel_receipt_digest(
+                    action_id=action,
+                    ticket_id=ticket,
+                    authority_key=authority,
+                    epoch=presented_epoch,
+                    expected_state=presented_state,
+                    decision=decision,
+                    observed_state=observed_state,
+                    code=code,
+                    actor_id=actor,
+                    reason=normalized_reason,
+                    created_at=timestamp,
+                )
+                receipt_id = f"hsacr_{receipt_sha256[:24]}"
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_admission_cancel_attempts (
+                        workspace_root, action_id, receipt_id, ticket_id,
+                        authority_key, presented_epoch, presented_state,
+                        decision, observed_state, code, actor_id, reason,
+                        created_at, request_sha256, receipt_sha256
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        action,
+                        receipt_id,
+                        ticket,
+                        authority,
+                        presented_epoch,
+                        presented_state,
+                        decision,
+                        observed_state,
+                        code,
+                        actor,
+                        normalized_reason,
+                        timestamp,
+                        request_sha256,
+                        receipt_sha256,
+                    ),
+                )
+                updated = await _select_sandbox_admission_row(
+                    db,
+                    workspace_root=workspace,
+                    ticket_id=ticket,
+                )
+                current = (
+                    await _sandbox_admission_ticket_from_row(
+                        db,
+                        updated,
+                        now=timestamp,
+                    )
+                    if updated is not None
+                    else None
+                )
+                stored = await _select_sandbox_cancel_attempt(
+                    db,
+                    workspace_root=workspace,
+                    action_id=action,
+                )
+                assert stored is not None
+                receipt = _sandbox_cancel_receipt_from_row(stored)
+                await db.commit()
+                return receipt, current
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError) as exc:
+            raise HarnessStoreError("无法裁决 Sandbox Batch 取消请求。") from exc
+
     async def _ensure_schema(self) -> None:
         if self._schema_ready:
             return
@@ -5291,6 +5517,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V15)
                             await _migrate_eval_baseline_purpose_v16(db)
                             await db.executescript(_SCHEMA_V17)
+                            await db.executescript(_SCHEMA_V18)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -6017,6 +6244,13 @@ def _normalize_sandbox_admission_ticket_id(value: str) -> str:
     return normalized
 
 
+def _normalize_sandbox_cancel_action_id(value: str) -> str:
+    normalized = value.strip().lower() if isinstance(value, str) else ""
+    if _SANDBOX_ADMISSION_CANCEL_ACTION_RE.fullmatch(normalized) is None:
+        raise ValueError("Sandbox cancel action_id 格式无效。")
+    return normalized
+
+
 def _normalize_sandbox_admission_lane(value: str) -> str:
     normalized = value.strip().lower() if isinstance(value, str) else ""
     if normalized not in _SANDBOX_ADMISSION_LANES:
@@ -6075,6 +6309,116 @@ def _sandbox_admission_request_digest(
         "enqueued_at": enqueued_at,
     })
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sandbox_cancel_request_digest(
+    *,
+    workspace_root: str,
+    action_id: str,
+    ticket_id: str,
+    authority_key: str,
+    epoch: int,
+    expected_state: str,
+    actor_id: str,
+    reason: str,
+) -> str:
+    payload = _json_dumps({
+        "workspace_root": workspace_root,
+        "action_id": action_id,
+        "ticket_id": ticket_id,
+        "authority_key": authority_key,
+        "epoch": epoch,
+        "expected_state": expected_state,
+        "actor_id": actor_id,
+        "reason": reason,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _sandbox_cancel_receipt_digest(
+    *,
+    action_id: str,
+    ticket_id: str,
+    authority_key: str,
+    epoch: int,
+    expected_state: str,
+    decision: str,
+    observed_state: str,
+    code: str,
+    actor_id: str,
+    reason: str,
+    created_at: str,
+) -> str:
+    payload = _json_dumps({
+        "schema_version": 1,
+        "action_id": action_id,
+        "ticket_id": ticket_id,
+        "authority_key": authority_key,
+        "presented_epoch": epoch,
+        "presented_state": expected_state,
+        "decision": decision,
+        "observed_state": observed_state,
+        "code": code,
+        "actor_id": actor_id,
+        "reason": reason,
+        "created_at": created_at,
+    })
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _select_sandbox_cancel_attempt(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    action_id: str,
+) -> aiosqlite.Row | None:
+    return await (
+        await db.execute(
+            """
+            SELECT * FROM harness_sandbox_admission_cancel_attempts
+            WHERE workspace_root = ? AND action_id = ?
+            """,
+            (workspace_root, action_id),
+        )
+    ).fetchone()
+
+
+def _sandbox_cancel_receipt_from_row(
+    row: aiosqlite.Row,
+) -> HarnessSandboxAdmissionCancelReceipt:
+    expected = _sandbox_cancel_receipt_digest(
+        action_id=str(row["action_id"]),
+        ticket_id=str(row["ticket_id"]),
+        authority_key=str(row["authority_key"]),
+        epoch=int(row["presented_epoch"]),
+        expected_state=str(row["presented_state"]),
+        decision=str(row["decision"]),
+        observed_state=str(row["observed_state"]),
+        code=str(row["code"]),
+        actor_id=str(row["actor_id"]),
+        reason=str(row["reason"]),
+        created_at=str(row["created_at"]),
+    )
+    if not hmac.compare_digest(expected, str(row["receipt_sha256"])):
+        raise HarnessStoreError("Sandbox cancel receipt 摘要不一致。")
+    receipt_id = f"hsacr_{expected[:24]}"
+    if not hmac.compare_digest(receipt_id, str(row["receipt_id"])):
+        raise HarnessStoreError("Sandbox cancel receipt identity 不一致。")
+    return HarnessSandboxAdmissionCancelReceipt(
+        receipt_id=receipt_id,
+        action_id=str(row["action_id"]),
+        ticket_id=str(row["ticket_id"]),
+        authority_key=str(row["authority_key"]),
+        presented_epoch=int(row["presented_epoch"]),
+        presented_state=str(row["presented_state"]),
+        decision=str(row["decision"]),
+        observed_state=str(row["observed_state"]),
+        code=str(row["code"]),
+        actor_id=str(row["actor_id"]),
+        reason=str(row["reason"]),
+        created_at=str(row["created_at"]),
+        receipt_sha256=expected,
+    )
 
 
 async def _select_sandbox_admission_policy(
@@ -7545,5 +7889,37 @@ ON harness_sandbox_admission_tickets (
 CREATE INDEX IF NOT EXISTS idx_harness_sandbox_admission_authority
 ON harness_sandbox_admission_tickets (
     workspace_root, authority_key, state, sequence
+);
+"""
+
+_SCHEMA_V18 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_admission_cancel_attempts (
+    workspace_root TEXT NOT NULL,
+    action_id TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    ticket_id TEXT NOT NULL,
+    authority_key TEXT NOT NULL,
+    presented_epoch INTEGER NOT NULL CHECK (presented_epoch >= 1),
+    presented_state TEXT NOT NULL CHECK (presented_state IN ('queued', 'active')),
+    decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+    observed_state TEXT NOT NULL CHECK (
+        observed_state IN (
+            'missing', 'queued', 'active', 'completed',
+            'cancelled', 'failed', 'expired'
+        )
+    ),
+    code TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, action_id),
+    UNIQUE (workspace_root, receipt_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_cancel_ticket
+ON harness_sandbox_admission_cancel_attempts (
+    workspace_root, ticket_id, created_at, action_id
 );
 """

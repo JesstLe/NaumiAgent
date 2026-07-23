@@ -14,7 +14,7 @@ from naumi_agent.harness.sandbox_batch import (
     HarnessSandboxBatchCoordinator,
     HarnessSandboxBatchError,
 )
-from naumi_agent.harness.store import HarnessStore
+from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 
 
 class _FrozenModel(BaseModel):
@@ -371,6 +371,302 @@ async def test_durable_admission_fence_loss_cancels_active_body(
         now=datetime.now(UTC).isoformat(),
     )
     await asyncio.wait_for(task, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_cancel_is_exact_audited_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    ticket = await store.enqueue_sandbox_admission(
+        workspace_root=tmp_path,
+        ticket_id=f"hsadm_{'e' * 24}",
+        authority_key="e" * 64,
+        lane="sandbox",
+        requested_samples=5,
+        owner_id="runtime-exact",
+        now=datetime.now(UTC).isoformat(),
+        lease_seconds=30,
+        max_active=1,
+        max_queued=1,
+    )
+
+    rejected, unchanged = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'1' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state="queued",
+        actor_id="ui:test",
+        reason="用户取消",
+        now=datetime.now(UTC).isoformat(),
+    )
+    assert rejected.decision == "rejected"
+    assert rejected.code == "sandbox_batch_cancel_state_changed"
+    assert rejected.observed_state == "active"
+    assert unchanged is not None and unchanged.state == "active"
+
+    wrong_authority, _ = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'6' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key="0" * 64,
+        epoch=ticket.epoch,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="错误 authority",
+        now=datetime.now(UTC).isoformat(),
+    )
+    stale_epoch, _ = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'7' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch + 1,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="错误 epoch",
+        now=datetime.now(UTC).isoformat(),
+    )
+    missing, missing_ticket = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'8' * 24}",
+        ticket_id=f"hsadm_{'0' * 24}",
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="不存在 ticket",
+        now=datetime.now(UTC).isoformat(),
+    )
+    assert wrong_authority.code == "sandbox_batch_cancel_authority_mismatch"
+    assert stale_epoch.code == "sandbox_batch_cancel_epoch_mismatch"
+    assert missing.code == "sandbox_batch_cancel_ticket_not_found"
+    assert missing_ticket is None
+
+    accepted, cancelled = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'2' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="用户取消",
+        now=datetime.now(UTC).isoformat(),
+    )
+    replayed, replayed_ticket = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'2' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="用户取消",
+        now=datetime.now(UTC).isoformat(),
+    )
+    assert accepted.decision == "accepted"
+    assert accepted.code == "sandbox_batch_cancelled_by_user"
+    assert accepted.receipt_sha256 == replayed.receipt_sha256
+    assert cancelled is not None and cancelled.state == "cancelled"
+    assert replayed_ticket is not None and replayed_ticket.state == "cancelled"
+    with pytest.raises(HarnessStoreConflictError, match="不同请求"):
+        await store.cancel_sandbox_admission(
+            workspace_root=tmp_path,
+            action_id=f"hsac_{'2' * 24}",
+            ticket_id=ticket.ticket_id,
+            authority_key=ticket.authority_key,
+            epoch=ticket.epoch,
+            expected_state="active",
+            actor_id="ui:test",
+            reason="复用 action 但修改原因",
+            now=datetime.now(UTC).isoformat(),
+        )
+    terminal, terminal_ticket = await store.cancel_sandbox_admission(
+        workspace_root=tmp_path,
+        action_id=f"hsac_{'9' * 24}",
+        ticket_id=ticket.ticket_id,
+        authority_key=ticket.authority_key,
+        epoch=ticket.epoch,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="终态重复取消",
+        now=datetime.now(UTC).isoformat(),
+    )
+    assert terminal.code == "sandbox_batch_cancel_already_terminal"
+    assert terminal_ticket is not None and terminal_ticket.state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_cancel_interrupts_local_active_owner(
+    tmp_path: Path,
+) -> None:
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=HarnessStore(tmp_path / "harness.db"),
+        workspace_root=tmp_path,
+        owner_id="runtime-local-cancel",
+        lease_seconds=30,
+        token=lambda: "f" * 32,
+    )
+    entered = asyncio.Event()
+    transitions = []
+
+    async def execute() -> None:
+        async def capture(transition) -> None:
+            transitions.append(transition)
+
+        async with admission.admit(
+            authority_key="f" * 64,
+            lane="sandbox",
+            requested_samples=5,
+            on_transition=capture,
+        ):
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(execute())
+    await entered.wait()
+    receipt, ticket = await admission.cancel(
+        action_id=f"hsac_{'3' * 24}",
+        ticket_id=f"hsadm_{'f' * 24}",
+        authority_key="f" * 64,
+        epoch=1,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="停止当前批次",
+    )
+    assert receipt.decision == "accepted"
+    assert ticket is not None and ticket.state == "cancelled"
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+    assert transitions[-1].stage == "cancelled"
+    assert (await admission.snapshot_durable()).active == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_cancel_is_observed_by_another_runtime(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "harness.db"
+    owner = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=HarnessStore(db_path),
+        workspace_root=tmp_path,
+        owner_id="runtime-remote-owner",
+        lease_seconds=3,
+        token=lambda: "7" * 32,
+    )
+    controller = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=HarnessStore(db_path),
+        workspace_root=tmp_path,
+        owner_id="runtime-remote-controller",
+        lease_seconds=3,
+        token=lambda: "8" * 32,
+    )
+    entered = asyncio.Event()
+
+    async def execute() -> None:
+        with pytest.raises(HarnessSandboxBatchError) as captured:
+            async with owner.admit(
+                authority_key="7" * 64,
+                lane="sandbox",
+                requested_samples=5,
+            ):
+                entered.set()
+                await asyncio.Event().wait()
+        assert captured.value.code == "sandbox_batch_admission_fence_lost"
+
+    task = asyncio.create_task(execute())
+    await entered.wait()
+    receipt, _ticket = await controller.cancel(
+        action_id=f"hsac_{'4' * 24}",
+        ticket_id=f"hsadm_{'7' * 24}",
+        authority_key="7" * 64,
+        epoch=1,
+        expected_state="active",
+        actor_id="ui:remote",
+        reason="跨运行时取消",
+    )
+    assert receipt.decision == "accepted"
+    await asyncio.wait_for(task, timeout=1.5)
+    assert (await owner.snapshot_durable()).active == 0
+
+
+@pytest.mark.asyncio
+async def test_active_cancel_revokes_run_grant_and_releases_runtime_lease(
+    tmp_path: Path,
+) -> None:
+    runtime_store = _Store()
+    permissions = _PermissionStore()
+    grants = _RunGrantAuthority(tmp_path, permissions)
+    admission = HarnessSandboxBatchAdmission(
+        max_active=1,
+        max_queued=0,
+        store=HarnessStore(tmp_path / "harness.db"),
+        workspace_root=tmp_path,
+        owner_id="runtime-cleanup",
+        lease_seconds=30,
+        token=lambda: "9" * 32,
+    )
+    executing = asyncio.Event()
+
+    async def load_records():
+        return tuple(runtime_store.records)
+
+    async def validate_prefix(records):
+        return [_SampleReceipt(sample_index=item.sample_index) for item in records]
+
+    async def execute_sample(_index, _authority):
+        executing.set()
+        await asyncio.Event().wait()
+        raise AssertionError("cancelled execution must not resume")
+
+    task = asyncio.create_task(
+        _coordinator(
+            tmp_path,
+            runtime_store,
+            permissions,
+            grants,
+            token="a" * 32,
+            admission=admission,
+        ).execute(
+            phase="sandbox",
+            authority_key="9" * 64,
+            parent_receipt_id="parent",
+            requested_samples=5,
+            max_total_duration_seconds=60,
+            load_records=load_records,
+            validate_existing_prefix=validate_prefix,
+            validate_run_evidence=lambda _records: None,
+            execute_sample=execute_sample,
+            build_receipt=lambda records, _receipts: _BatchReceipt(
+                persisted_samples=len(records)
+            ),
+        )
+    )
+    await asyncio.wait_for(executing.wait(), timeout=2)
+    receipt, _ticket = await admission.cancel(
+        action_id=f"hsac_{'5' * 24}",
+        ticket_id=f"hsadm_{'9' * 24}",
+        authority_key="9" * 64,
+        epoch=1,
+        expected_state="active",
+        actor_id="ui:test",
+        reason="验证执行权威清理",
+    )
+    assert receipt.decision == "accepted"
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+    assert grants.revoked[-1]["reason"] == "sandbox_batch_finished"
+    assert len(runtime_store.released) == 1
+    assert (await admission.snapshot_durable()).active == 0
 
 
 @pytest.mark.asyncio

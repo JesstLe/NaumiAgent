@@ -75,6 +75,7 @@ from naumi_agent.ui.harness_protocol import (
     harness_eval_promotion_payload,
     harness_explain_payload,
     harness_replay_payload,
+    harness_sandbox_cancel_receipt_payload,
 )
 from naumi_agent.ui.messages import EngineEventAdapter, MessageType, SystemNoticeMessage
 from naumi_agent.ui.permission_confirmation import (
@@ -1393,6 +1394,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.HARNESS_EVAL_BATCH_REQUEST:
             await self.start_harness_eval_batch(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL:
+            await self.cancel_harness_eval_sandbox(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.HARNESS_EVAL_PROMOTION_REQUEST:
             await self.start_harness_eval_promotion(payload, request_id=request_id)
             return
@@ -2384,6 +2388,45 @@ class JsonlEngineBridge:
 
         task = asyncio.create_task(run())
         self._harness_eval_batch_tasks[request_id] = task
+
+    async def cancel_harness_eval_sandbox(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Apply one durable exact-ticket cancellation and emit its audit receipt."""
+        authority = getattr(self.engine, "harness_sandbox_batch_admission", None)
+        if authority is None:
+            await self.emit_error(
+                "Sandbox Batch 取消权威尚未初始化。",
+                code="sandbox_batch_cancel_authority_unavailable",
+                request_id=request_id,
+            )
+            return
+        try:
+            receipt, ticket = await authority.cancel(
+                action_id=str(payload["action_id"]),
+                ticket_id=str(payload["ticket_id"]),
+                authority_key=str(payload["authority_key"]),
+                epoch=int(payload["epoch"]),
+                expected_state=str(payload["expected_state"]),
+                actor_id="new-ui",
+                reason=str(payload.get("reason") or "用户请求取消 Sandbox Batch"),
+            )
+        except Exception as exc:
+            self._trace_harness_lookup_failure("eval_sandbox_cancel", exc)
+            await self.emit_error(
+                "Sandbox Batch 取消请求未能安全裁决，请刷新状态后重试。",
+                code=getattr(exc, "code", "sandbox_batch_cancel_unavailable"),
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.HARNESS_EVAL_SANDBOX_CANCEL_RESULT,
+            harness_sandbox_cancel_receipt_payload(receipt, ticket),
+            request_id=request_id,
+        )
 
     async def start_harness_eval_promotion(
         self,

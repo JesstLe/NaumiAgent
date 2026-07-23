@@ -3922,6 +3922,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness eval replay [run-id|latest]\n"
         "      /harness eval sandbox <check-id...> [--samples 5] [--batch <id>]\n"
+        "      /harness eval sandbox cancel <ticket> --authority <sha256> "
+        "--epoch <n> --state <queued|active> [--reason <原因>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
         "      /harness baseline <suite-id>\n"
         "      /harness baseline promote <suite-id> <batch-id> [--reason <原因>]\n"
@@ -4011,6 +4013,65 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness Replay Eval 参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_eval(result)))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 4
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "cancel"
+    ):
+        ticket_id = parts[3]
+        parsed: dict[str, str] = {}
+        index = 4
+        valid = True
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in {"--authority", "--epoch", "--state", "--reason"}
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        admission = getattr(engine, "harness_sandbox_batch_admission", None)
+        try:
+            epoch = int(parsed.get("--epoch", ""))
+        except ValueError:
+            valid = False
+            epoch = 0
+        if (
+            not valid
+            or admission is None
+            or not parsed.get("--authority")
+            or parsed.get("--state") not in {"queued", "active"}
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        try:
+            receipt, current = await admission.cancel(
+                action_id=f"hsac_{uuid.uuid4().hex[:24]}",
+                ticket_id=ticket_id,
+                authority_key=parsed["--authority"],
+                epoch=epoch,
+                expected_state=parsed["--state"],
+                actor_id="tui",
+                reason=parsed.get("--reason") or "用户通过 TUI 请求取消 Sandbox Batch",
+            )
+        except Exception as exc:
+            console.print(f"[red]Sandbox Batch 取消失败：{exc}[/red]")
+            return
+        tone = "green" if receipt.decision == "accepted" else "yellow"
+        current_state = current.state if current is not None else "missing"
+        console.print(
+            f"[{tone}]Sandbox Batch 取消 {receipt.decision}[/"
+            f"{tone}]\n"
+            f"Ticket: {receipt.ticket_id}\n"
+            f"State: {current_state}\n"
+            f"Code: {receipt.code}\n"
+            f"Receipt: {receipt.receipt_id}"
+        )
         return
     if (
         subcommand == "eval"

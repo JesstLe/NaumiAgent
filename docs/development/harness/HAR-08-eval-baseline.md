@@ -137,6 +137,9 @@
 - HAR-08.4m Sandbox Admission Typed Progress：已实现。Store-confirmed queued position、capacity、
   admitted 与 terminal ticket state 经既有 Runtime event/Bridge 同步到 New UI/TUI；最终 completed 在容量
   槽释放后发布。详见 `HAR-08-4m-sandbox-admission-typed-progress.md`。
+- HAR-08.4n Sandbox Admission Owner-fenced Cancel：已实现。exact ticket/authority/epoch/state
+  fencing、durable accepted/rejected receipt、New UI/TUI 同权威与跨进程有界停止。详见
+  `HAR-08-4n-sandbox-admission-cancel.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。

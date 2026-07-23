@@ -16,7 +16,10 @@ import {
   markMessageRenderDirty,
 } from "./render-cache.js";
 import { jumpTimelineToLatest } from "./timeline-follow.js";
-import { requiredEventCapability } from "./protocol.js";
+import {
+  createHarnessSandboxCancelActionId,
+  requiredEventCapability,
+} from "./protocol.js";
 import {
   applyCommandQuickOpenTaskSnapshot,
   applyCommandQuickOpenSessionSnapshot,
@@ -384,6 +387,9 @@ export function createInitialState() {
       suiteId: "",
       scrollOffset: 0,
       originAnchor: null,
+      cancelPending: false,
+      cancelReceipt: null,
+      cancelRequestId: "",
     },
     harnessEvalPromotion: {
       requestId: "",
@@ -837,6 +843,27 @@ export function reduceServerEvent(state, record) {
           : payload.suite_id;
       }
       break;
+    case "harness/eval-sandbox/cancel-result": {
+      state.harnessEvalBatch.cancelPending = false;
+      state.harnessEvalBatch.cancelReceipt = payload;
+      state.harnessEvalBatch.cancelRequestId = "";
+      const selected = state.harnessEvalBatches[state.harnessEvalBatch.batchId];
+      if (
+        selected?.kind === "sandbox"
+        && selected.admission_ticket_id === payload.ticket_id
+        && payload.current
+      ) {
+        selected.admission_epoch = payload.current.epoch;
+        selected.admission_state = payload.current.state;
+        selected.queue_position = payload.current.queue_position;
+        selected.max_active = payload.current.max_active;
+        selected.max_queued = payload.current.max_queued;
+        selected.active_count = payload.current.active_count;
+        selected.queued_count = payload.current.queued_count;
+        selected.updated_at = payload.current.updated_at;
+      }
+      break;
+    }
     case "harness/eval-promotion": {
       const promotionRequestId = String(record.request_id || "");
       if (promotionRequestId) {
@@ -1066,6 +1093,9 @@ export function reduceServerEvent(state, record) {
         suiteId: "",
         scrollOffset: 0,
         originAnchor: null,
+        cancelPending: false,
+        cancelReceipt: null,
+        cancelRequestId: "",
       };
       state.harnessEvalPromotion = {
         requestId: "",
@@ -1175,6 +1205,21 @@ export function reduceServerEvent(state, record) {
         record.request_id,
         payload.message,
       )) break;
+      if (
+        state.harnessEvalBatch.cancelPending
+        && state.harnessEvalBatch.cancelRequestId
+        && state.harnessEvalBatch.cancelRequestId === String(record.request_id || "")
+      ) {
+        state.harnessEvalBatch.cancelPending = false;
+        state.harnessEvalBatch.cancelRequestId = "";
+        state.harnessEvalBatch.cancelReceipt = {
+          receipt_id: "",
+          decision: "rejected",
+          code: String(payload.code || "sandbox_batch_cancel_unavailable"),
+          reason: String(payload.message || "取消请求未能安全裁决。"),
+        };
+        break;
+      }
       dismissWelcome(state);
       if (["evolution_review_failed", "evolution_queue_failed"].includes(payload.code)) {
         state.evolutionReview.loading = false;
@@ -2748,6 +2793,9 @@ export function handleSubmitText(state, text, send) {
       suiteId: "sandbox",
       scrollOffset: 0,
       originAnchor,
+      cancelPending: false,
+      cancelReceipt: null,
+      cancelRequestId: "",
     };
     const message = submitUserMessage(state, commandText, send);
     state.harnessEvalBatch.requestId = String(message?.requestId || "");
@@ -2765,6 +2813,9 @@ export function handleSubmitText(state, text, send) {
       batchId: harnessBatch.batch_id,
       suiteId: harnessBatch.suite_id,
       scrollOffset: 0,
+      cancelPending: false,
+      cancelReceipt: null,
+      cancelRequestId: "",
     };
     state.harnessEvalBatch.requestId = String(send("harness/eval-batch/request", harnessBatch) || "");
     return;
@@ -3606,7 +3657,7 @@ export function handleHarnessEvalBaselineKey(state, key) {
   return true;
 }
 
-export function handleHarnessEvalBatchKey(state, key) {
+export function handleHarnessEvalBatchKey(state, key, send) {
   if (state.route?.name !== "harness_eval_batch") return false;
   if (key === INPUT_KEYS.escape) {
     const anchor = state.route.originAnchor || {};
@@ -3614,6 +3665,28 @@ export function handleHarnessEvalBatchKey(state, key) {
     state.followTail = anchor.followTail !== false;
     state.harnessEvalBatch.originAnchor = null;
     state.route = { name: "conversation", originAnchor: null };
+    return true;
+  }
+  const snapshot = state.harnessEvalBatches[state.harnessEvalBatch.batchId];
+  if (
+    key.toLowerCase() === "c"
+    && snapshot?.kind === "sandbox"
+    && ["queued", "active"].includes(snapshot.admission_state)
+    && snapshot.admission_ticket_id
+    && snapshot.authority_key
+    && Number(snapshot.admission_epoch) >= 1
+    && !state.harnessEvalBatch.cancelPending
+  ) {
+    state.harnessEvalBatch.cancelPending = true;
+    state.harnessEvalBatch.cancelReceipt = null;
+    state.harnessEvalBatch.cancelRequestId = String(send("harness/eval-sandbox/cancel", {
+      action_id: createHarnessSandboxCancelActionId(snapshot.admission_ticket_id),
+      ticket_id: snapshot.admission_ticket_id,
+      authority_key: snapshot.authority_key,
+      epoch: Number(snapshot.admission_epoch),
+      expected_state: snapshot.admission_state,
+      reason: "用户在 Harness Sandbox 页面请求取消",
+    }) || "");
     return true;
   }
   const current = Math.max(0, Number(state.harnessEvalBatch.scrollOffset) || 0);

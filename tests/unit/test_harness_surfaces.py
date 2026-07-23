@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -418,6 +419,52 @@ async def test_harness_sandbox_eval_slash_rejects_incomplete_or_ambiguous_args(
             item.tool_name == "harness_eval_sandbox"
             for item in engine.list_permission_decision_receipts()
         )
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_harness_sandbox_cancel_slash_uses_durable_admission_authority(
+    tmp_path: Path,
+) -> None:
+    engine = _engine(tmp_path)
+    try:
+        admission = engine.harness_sandbox_batch_admission
+        now = datetime.now(UTC).isoformat()
+        ticket = await engine.harness_service.store.enqueue_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            ticket_id=f"hsadm_{'e' * 24}",
+            authority_key="e" * 64,
+            lane="sandbox",
+            requested_samples=5,
+            owner_id="surface-cancel-owner",
+            now=now,
+            lease_seconds=3_600,
+            max_active=admission.max_active,
+            max_queued=admission.max_queued,
+        )
+
+        rendered = _plain(
+            await execute_slash_command(
+                engine,
+                (
+                    f"/harness eval sandbox cancel {ticket.ticket_id} "
+                    f"--authority {ticket.authority_key} "
+                    f"--epoch {ticket.epoch} --state active "
+                    "--reason 用户主动停止"
+                ),
+            )
+        )
+        current = await engine.harness_service.store.get_sandbox_admission(
+            workspace_root=engine.workspace_root,
+            ticket_id=ticket.ticket_id,
+            now=datetime.now(UTC).isoformat(),
+        )
+
+        assert "取消 accepted" in rendered
+        assert "sandbox_batch_cancelled_by_user" in rendered
+        assert "Receipt: hsacr_" in rendered
+        assert current is not None and current.state == "cancelled"
     finally:
         await engine.shutdown()
 

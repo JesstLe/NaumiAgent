@@ -180,6 +180,62 @@ def test_protocol_normalizes_harness_eval_batch_request() -> None:
     }
 
 
+def test_protocol_normalizes_exact_harness_sandbox_cancel_request() -> None:
+    record = normalize_client_record(
+        {
+            "type": ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL,
+            "payload": {
+                "action_id": f"hsac_{'a' * 24}",
+                "ticket_id": f"hsadm_{'b' * 24}",
+                "authority_key": "c" * 64,
+                "epoch": 3,
+                "expected_state": "queued",
+                "reason": "  用户取消  ",
+            },
+        }
+    )
+
+    assert record["payload"] == {
+        "action_id": f"hsac_{'a' * 24}",
+        "ticket_id": f"hsadm_{'b' * 24}",
+        "authority_key": "c" * 64,
+        "epoch": 3,
+        "expected_state": "queued",
+        "reason": "用户取消",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("action_id", "bad"),
+        ("ticket_id", "bad"),
+        ("authority_key", "x" * 64),
+        ("epoch", 0),
+        ("expected_state", "completed"),
+    ],
+)
+def test_protocol_rejects_inexact_harness_sandbox_cancel_request(
+    field: str,
+    value: object,
+) -> None:
+    payload: dict[str, object] = {
+        "action_id": f"hsac_{'a' * 24}",
+        "ticket_id": f"hsadm_{'b' * 24}",
+        "authority_key": "c" * 64,
+        "epoch": 3,
+        "expected_state": "active",
+    }
+    payload[field] = value
+    with pytest.raises(ValueError, match="Sandbox cancel"):
+        normalize_client_record(
+            {
+                "type": ClientEventType.HARNESS_EVAL_SANDBOX_CANCEL,
+                "payload": payload,
+            }
+        )
+
+
 def test_protocol_normalizes_harness_eval_promotion_request() -> None:
     record = normalize_client_record(
         {

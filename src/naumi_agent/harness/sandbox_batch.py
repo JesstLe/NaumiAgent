@@ -30,6 +30,7 @@ from naumi_agent.harness.sandbox_eval import (
     HarnessSandboxEvalRunAuthority,
 )
 from naumi_agent.harness.store import (
+    HarnessSandboxAdmissionCancelReceipt,
     HarnessSandboxAdmissionCapacityError,
     HarnessSandboxAdmissionFenceError,
     HarnessSandboxAdmissionPolicyError,
@@ -318,6 +319,7 @@ class HarnessSandboxBatchAdmission:
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._now = now or (lambda: datetime.now(UTC).isoformat())
         self._token = token or (lambda: uuid4().hex)
+        self._local_ticket_tasks: dict[str, asyncio.Task[object]] = {}
 
     @property
     def durable(self) -> bool:
@@ -355,6 +357,49 @@ class HarnessSandboxBatchAdmission:
             active=snapshot.active_count,
             queued=snapshot.queued_count,
         )
+
+    async def cancel(
+        self,
+        *,
+        action_id: str,
+        ticket_id: str,
+        authority_key: str,
+        epoch: int,
+        expected_state: str,
+        actor_id: str,
+        reason: str,
+    ) -> tuple[
+        HarnessSandboxAdmissionCancelReceipt,
+        HarnessSandboxAdmissionTicket | None,
+    ]:
+        """Cancel one exact durable ticket, then interrupt its local owner task."""
+        if self._store is None or self._workspace_root is None:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_cancel_authority_unavailable",
+                "当前 Sandbox admission 未启用持久化取消权威。",
+            )
+        try:
+            receipt, ticket = await self._store.cancel_sandbox_admission(
+                workspace_root=self._workspace_root,
+                action_id=action_id,
+                ticket_id=ticket_id,
+                authority_key=authority_key,
+                epoch=epoch,
+                expected_state=expected_state,
+                actor_id=actor_id,
+                reason=reason,
+                now=self._timestamp(),
+            )
+        except (ValueError, HarnessStoreError) as exc:
+            raise HarnessSandboxBatchError(
+                "sandbox_batch_cancel_unavailable",
+                f"Sandbox Batch 取消权威不可用：{exc}",
+            ) from exc
+        if receipt.decision == "accepted":
+            owner_task = self._local_ticket_tasks.get(ticket_id)
+            if owner_task is not None and not owner_task.done():
+                owner_task.cancel()
+        return receipt, ticket
 
     @asynccontextmanager
     async def admit(
@@ -523,31 +568,51 @@ class HarnessSandboxBatchAdmission:
                 "sandbox_batch_admission_unavailable",
                 f"Sandbox Batch 持久化容量权威不可用：{exc}",
             ) from exc
+        owner_task = asyncio.current_task()
+        if owner_task is not None:
+            self._local_ticket_tasks[ticket.ticket_id] = owner_task
         last_queue_snapshot: tuple[int, int, int] | None = None
-        if ticket.state == "queued":
-            last_queue_snapshot = (
-                ticket.queue_position,
-                ticket.active_count,
-                ticket.queued_count,
-            )
-            await self._publish_admission_transition(
-                on_transition,
-                stage="queued",
-                ticket=ticket,
-            )
-        elif ticket.state == "active":
-            await self._publish_admission_transition(
-                on_transition,
-                stage="admitted",
-                ticket=ticket,
-            )
+        try:
+            if ticket.state == "queued":
+                last_queue_snapshot = (
+                    ticket.queue_position,
+                    ticket.active_count,
+                    ticket.queued_count,
+                )
+                await self._publish_admission_transition(
+                    on_transition,
+                    stage="queued",
+                    ticket=ticket,
+                )
+            elif ticket.state == "active":
+                await self._publish_admission_transition(
+                    on_transition,
+                    stage="admitted",
+                    ticket=ticket,
+                )
+        except BaseException as exc:
+            if self._local_ticket_tasks.get(ticket.ticket_id) is owner_task:
+                self._local_ticket_tasks.pop(ticket.ticket_id, None)
+            state = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
+            try:
+                await self._store.finish_sandbox_admission(
+                    workspace_root=self._workspace_root,
+                    ticket_id=ticket.ticket_id,
+                    owner_id=ticket.owner_id,
+                    epoch=ticket.epoch,
+                    state=state,
+                    terminal_code="sandbox_batch_admission_observer_failed",
+                    now=self._timestamp(),
+                )
+            except HarnessStoreError:
+                logger.warning("Sandbox Batch initial transition cleanup failed")
+            raise
 
         ownership: _SandboxBatchAdmissionOwnership | None = None
         context_token = None
         renewal_task: asyncio.Task[None] | None = None
         renewal_stop = asyncio.Event()
         lease_failure: list[BaseException] = []
-        owner_task = asyncio.current_task()
         terminal_state = "completed"
         terminal_code = ""
         body_failure: BaseException | None = None
@@ -655,6 +720,8 @@ class HarnessSandboxBatchAdmission:
             terminal_code = _sandbox_admission_failure_code(exc)
             raise
         finally:
+            if self._local_ticket_tasks.get(ticket.ticket_id) is owner_task:
+                self._local_ticket_tasks.pop(ticket.ticket_id, None)
             renewal_stop.set()
             if renewal_task is not None:
                 renewal_task.cancel()
@@ -724,7 +791,7 @@ class HarnessSandboxBatchAdmission:
     ) -> None:
         assert self._store is not None
         assert self._workspace_root is not None
-        interval = self._lease_seconds / 3
+        interval = min(self._lease_seconds / 3, 1.0)
         while True:
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)
