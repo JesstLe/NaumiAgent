@@ -154,14 +154,17 @@ queued/admitted/recovering/executing/completed 状态。
 - live、用户取消、真实失败和完成不会被 crash recovery 偷换语义；
 - New UI 与 TUI 共享 Tool/Slash/进度权威。
 
+HAR-08.4o3f 已实现 Bridge/TUI 启动时的 20 项有界 recovery snapshot，并在 New UI/TUI 建立只发现、
+不自动 claim 的人工恢复队列。
+
 仍未实现：
 
-- Bridge 启动时有界扫描 `pending/recovery_required/reconcile_required` 并建立人工恢复队列；
-- resume 的 New UI 专用 typed action/card；当前可复制命令走共享 Slash；
+- resume 的 New UI 专用 typed action/button；当前可复制命令走共享 Slash；
 - dispatch detail 页面与 retention 的保护集合、preview/prune receipt；
 - 多客户端同一 recovery item 的可视化竞争提示；
 - 跨主机 admission；
 - Linux/Windows 真实隔离 Worker CI。
 
-下一切片应横向比较 HAR-06 retention、HAR-07 Bridge recovery、ARC-02 Runtime lifecycle 与 CLI/TUI 恢复体验，
-优先实现“启动后可发现但不自动执行”的有界 recovery snapshot；不得直接扫描后自动 claim。
+下一切片应横向比较 HAR-06 retention 与 dispatch detail，优先补只读详情和 retention
+保护集合/preview；不得因为启动队列已可见就自动 claim 或删除记录。详见
+`HAR-08-4o3f-sandbox-retry-startup-recovery-snapshot.md`。

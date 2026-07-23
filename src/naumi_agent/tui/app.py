@@ -47,6 +47,12 @@ from naumi_agent.harness.interaction_runtime import (
     DurableInteractionAuthorityClient,
     InteractionClaimError,
 )
+from naumi_agent.harness.sandbox_retry_recovery import (
+    SANDBOX_RETRY_RECOVERY_LIMIT,
+    HarnessSandboxRetryRecoverySnapshot,
+    render_sandbox_retry_recovery_snapshot,
+    unavailable_sandbox_retry_recovery_snapshot,
+)
 from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.runs.models import CompletionReceipt
@@ -1914,7 +1920,10 @@ class NaumiApp(App):
         patch_failed = int(patch_status.get("failed", 0)) if patch_status else 0
         patch_deferred = int(patch_status.get("deferred", 0)) if patch_status else 0
         patch_multi = int(patch_status.get("multi_file_total", 0)) if patch_status else 0
-        if not results and patch_total == 0:
+        sandbox_recovery_summary = (
+            await NaumiApp._surface_sandbox_retry_recovery(self)
+        )
+        if not results and patch_total == 0 and not sandbox_recovery_summary:
             return
         completed = sum(
             result.outcome is ReconciliationCoordinatorOutcome.COMPLETED
@@ -1929,7 +1938,52 @@ class NaumiApp(App):
             )
         if results:
             parts.append(f"会话协调恢复: {completed}/{len(results)} 完成")
+        if sandbox_recovery_summary:
+            parts.append(sandbox_recovery_summary)
         status.status_text = " | ".join(parts)
+
+    async def _surface_sandbox_retry_recovery(self) -> str:
+        """Show bounded restart work without claiming a retry dispatch."""
+        service = getattr(self.engine, "harness_service", None)
+        snapshot_builder = getattr(
+            service,
+            "sandbox_retry_recovery_snapshot",
+            None,
+        )
+        if not callable(snapshot_builder):
+            return ""
+        try:
+            snapshot = await asyncio.wait_for(
+                snapshot_builder(limit=SANDBOX_RETRY_RECOVERY_LIMIT),
+                timeout=2.0,
+            )
+            verified = HarnessSandboxRetryRecoverySnapshot.model_validate(
+                snapshot.model_dump(mode="json")
+            )
+        except Exception as exc:
+            verified = unavailable_sandbox_retry_recovery_snapshot(
+                self.engine.workspace_root,
+                error_code=(
+                    "startup_scan_timeout"
+                    if isinstance(exc, TimeoutError)
+                    else "startup_scan_failed"
+                ),
+            )
+            logger.warning(
+                "TUI Sandbox retry startup discovery failed (%s)",
+                type(exc).__name__,
+            )
+        if verified.status == "ready" and verified.total == 0:
+            return ""
+        message = render_sandbox_retry_recovery_snapshot(verified)
+        with contextlib.suppress(Exception):
+            self.query_one(ChatPanel).mount(Markdown(message, classes="agent-msg"))
+        if verified.status == "unavailable":
+            return "Sandbox retry 恢复发现降级；请运行 /harness eval sandbox retries"
+        return (
+            f"Sandbox retry 恢复队列: {verified.counts.actionable}/"
+            f"{verified.total} 可显式恢复"
+        )
 
     async def confirm_permission(self, payload: dict[str, Any]) -> str:
         """Show a modal confirmation dialog for sensitive tools."""

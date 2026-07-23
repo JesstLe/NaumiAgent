@@ -118,9 +118,10 @@ HAR-08.4o3b 的真实 Git + 隔离 Worker 场景已经证明 2/5 取消后续跑
 
 - HAR-08.4o3d 已补齐 retry dispatch catalog 与共享 Slash；专用历史详情和 retention 仍未完成；
 - Bridge 重启后的 retry control-task 主动恢复；HAR-08.4o3e 已提供 receipt-bound resume Tool/共享
-  Slash，但启动扫描与 New UI 专用恢复队列仍未实现，UI 不自动重放不确定请求；
+  Slash，HAR-08.4o3f 已提供启动有界 snapshot 与 New UI/TUI 人工恢复队列；UI 仍不自动重放
+  不确定请求，专用 typed action/button 尚未实现；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI 证据。
 
-HAR-08.4o3d/4o3e 已交付跨进程恢复所需的 catalog 与显式恢复权威。下一切片应继续横向比较启动恢复
-snapshot 与 retention preview，不继续扩展页面装饰。
+HAR-08.4o3d/4o3e/4o3f 已交付跨进程恢复所需的 catalog、显式恢复权威与启动发现快照。下一切片应
+横向比较只读 dispatch detail 与 retention preview，不继续扩展页面装饰。

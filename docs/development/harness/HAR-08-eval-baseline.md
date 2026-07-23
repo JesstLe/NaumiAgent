@@ -164,6 +164,10 @@
   在同一事务落盘；新的 Permission receipt 精确绑定既有 dispatch/retry receipt/run，Store 只在 pending
   或 expired fence 下创建下一 generation ticket，并通过真实隔离 Worker 恢复原 Request Manifest/H5a，
   不重新消费 cancel receipt。详见 `HAR-08-4o3e-sandbox-retry-receipt-bound-resume.md`。
+- HAR-08.4o3f Sandbox Retry Startup Recovery Snapshot：已实现。Bridge/TUI 启动时复用 open catalog
+  做 20 项有界扫描，tamper-evident snapshot 不暴露 workspace/owner/authority；New UI/TUI 只显示
+  人工恢复队列与精确共享 Slash，不自动 claim、续租或重放。真实 Git + SQLite + 新 Bridge 重启证明
+  pending dispatch 未被改变。详见 `HAR-08-4o3f-sandbox-retry-startup-recovery-snapshot.md`。
 - EVO-03.6e 已证明 Adversarial RED/GREEN 也能复用同一 H5a、H5b2/H5c Store 与 comparator，Evolution
   只保留 lane authority gate，不复制 Harness 评分器；见
   `../self-evolution/EVO-03-6e-adversarial-h5c-comparison.md`。
@@ -173,6 +177,6 @@
 - EVO-03.7a 通过 workspace-scoped comparison ID 重读 H5a/H5c，并只在 Evolution 层生成明确非最终的 Lane
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
-- HAR-08.4 仍为 partial：跨主机 Batch admission、retry dispatch retention/Bridge 启动恢复队列，以及
+- HAR-08.4 仍为 partial：跨主机 Batch admission、retry dispatch detail/retention，以及
   Linux/Windows CI 证据尚未完成。Live 与其余 surface 仍为 planned，当前不得把 HAR-08 整体标记为
   implemented。

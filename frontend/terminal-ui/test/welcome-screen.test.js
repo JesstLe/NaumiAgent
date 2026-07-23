@@ -86,6 +86,20 @@ test("uses semantic ANSI colors including bypass warning", () => {
   assert(rendered.includes(`${ANSI.yellow}bypass`));
 });
 
+test("renders optional Sandbox retry discovery degradation without hiding welcome", () => {
+  const state = readyState();
+  state.sandboxRetryRecovery = {
+    status: "unavailable",
+    error_code: "startup_scan_timeout",
+  };
+
+  const rendered = renderWelcomeScreen(state, 120, 20).join("\n");
+
+  assert(rendered.includes(`${ANSI.yellow}恢复发现降级`));
+  assert.match(stripAnsi(rendered), /Harness 恢复发现降级 · startup_scan_timeout/);
+  assert.equal(shouldRenderWelcome(state), true);
+});
+
 test("welcome visibility is pure and excludes other pages", () => {
   const state = createInitialState();
   assert.equal(shouldRenderWelcome(state), true);

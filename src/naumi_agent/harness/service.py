@@ -106,6 +106,11 @@ from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckStatus,
 )
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequestBuilder
+from naumi_agent.harness.sandbox_retry_recovery import (
+    SANDBOX_RETRY_RECOVERY_LIMIT,
+    HarnessSandboxRetryRecoverySnapshot,
+    build_sandbox_retry_recovery_snapshot,
+)
 from naumi_agent.harness.sandbox_service import (
     HarnessSandboxEvalBatchReceipt,
     HarnessSandboxEvalExecutor,
@@ -540,6 +545,26 @@ class HarnessService:
             limit=limit,
             cursor=cursor,
         )
+
+    async def sandbox_retry_recovery_snapshot(
+        self,
+        *,
+        limit: int = SANDBOX_RETRY_RECOVERY_LIMIT,
+        assessed_at: str | None = None,
+    ) -> HarnessSandboxRetryRecoverySnapshot:
+        """Discover bounded open retry work without claiming or resuming it."""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= SANDBOX_RETRY_RECOVERY_LIMIT
+        ):
+            raise ValueError("Sandbox retry startup recovery limit 必须为 1..20。")
+        page = await self.list_sandbox_retry_dispatches(
+            state_filter="open",
+            limit=limit,
+            assessed_at=assessed_at,
+        )
+        return build_sandbox_retry_recovery_snapshot(page)
 
     async def eval_baseline_status(
         self,

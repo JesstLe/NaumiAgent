@@ -253,6 +253,10 @@ test("welcome becomes ready without creating a timeline message", () => {
   assert.deepEqual(state.welcome, { phase: "booting", dismissed: false });
 
   reduceServerEvent(state, {
+    type: "debug/trace",
+    payload: { events_path: "/tmp/bridge-events.jsonl" },
+  });
+  reduceServerEvent(state, {
     type: "ready",
     payload: {
       version: "0.1.214",
@@ -265,6 +269,7 @@ test("welcome becomes ready without creating a timeline message", () => {
 
   assert.deepEqual(state.welcome, { phase: "ready_empty", dismissed: false });
   assert.equal(state.messages.length, 0);
+  assert.equal(state.debugTrace.events_path, "/tmp/bridge-events.jsonl");
 });
 
 test("ready surfaces durable patch recovery and dismisses empty welcome", () => {
@@ -296,6 +301,80 @@ test("ready surfaces durable patch recovery and dismisses empty welcome", () => 
   assert.match(state.messages[0].content, /多文件事务 1/);
   assert.match(state.messages[0].content, /回滚 1/);
   assert.match(state.messages[0].content, /journal_corrupt/);
+});
+
+test("ready surfaces Sandbox retry queue without auto navigation or dispatch", () => {
+  const state = createInitialState();
+  const initialRoute = structuredClone(state.route);
+  const command = `/harness eval sandbox resume hsar_${"2".repeat(24)}`
+    + ` --dispatch hsard_${"1".repeat(24)}`
+    + ` --receipt hsarr_${"3".repeat(24)}`
+    + ` --sha256 ${"4".repeat(64)}`;
+  const recovery = {
+    status: "ready",
+    total: 1,
+    truncated: false,
+    counts: {
+      pending: 1,
+      live: 0,
+      recovery_required: 0,
+      reconcile_required: 0,
+      clock_regression: 0,
+      actionable: 1,
+    },
+    items: [{
+      recovery_status: "pending",
+      batch_id: "batch-restart",
+      suite_id: "startup-recovery",
+      requested_samples: 5,
+      persisted_samples: 2,
+      can_resume: true,
+      resume_command: command,
+    }],
+  };
+
+  const effects = reduceServerEvent(state, {
+    type: "ready",
+    payload: { sandbox_retry_recovery: recovery },
+  });
+
+  assert.deepEqual(effects, []);
+  assert.equal(state.sandboxRetryRecovery, recovery);
+  assert.deepEqual(state.route, initialRoute);
+  assert.deepEqual(state.welcome, { phase: "dismissed", dismissed: true });
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].title, "Sandbox retry 恢复队列");
+  assert.match(state.messages[0].content, /不会自动 claim/);
+  assert(state.messages[0].content.includes(command));
+});
+
+test("unavailable Sandbox retry discovery keeps a fresh welcome usable", () => {
+  const state = createInitialState();
+  const recovery = {
+    status: "unavailable",
+    total: 0,
+    truncated: false,
+    counts: {
+      pending: 0,
+      live: 0,
+      recovery_required: 0,
+      reconcile_required: 0,
+      clock_regression: 0,
+      actionable: 0,
+    },
+    items: [],
+    error_code: "service_unavailable",
+  };
+
+  const effects = reduceServerEvent(state, {
+    type: "ready",
+    payload: { sandbox_retry_recovery: recovery },
+  });
+
+  assert.deepEqual(effects, []);
+  assert.equal(state.sandboxRetryRecovery, recovery);
+  assert.deepEqual(state.welcome, { phase: "ready_empty", dismissed: false });
+  assert.equal(state.messages.length, 0);
 });
 
 test("working animation frame resets at every run lifecycle boundary", () => {

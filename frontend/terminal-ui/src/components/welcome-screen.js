@@ -65,6 +65,10 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
   const apiFormat = formatApiFormat(status.api_format);
   const upstreamModel = upstreamModelMapping(status);
   const reasoningEffort = fact(status.reasoning_effort?.effective);
+  const sandboxRecovery = state?.sandboxRetryRecovery;
+  const recoveryStatus = sandboxRecovery?.status === "unavailable"
+    ? `${color(ANSI.yellow, "恢复发现降级")} · ${sandboxRecovery.error_code}`
+    : "";
 
   let content;
   if (layout === "minimal") {
@@ -88,6 +92,7 @@ export function renderWelcomeScreen(state, width, bodyHeight, env = {}) {
       `${color(ANSI.dim, "提供方")} ${provider} · ${color(ANSI.dim, "接口")} ${apiFormat}`,
       ...(upstreamModel ? [`${color(ANSI.dim, "上游")} ${upstreamModel}`] : []),
       `${color(ANSI.dim, "模式")} ${renderedMode} · ${color(ANSI.dim, "权限")} ${renderedPermissionMode}`,
+      ...(recoveryStatus ? [`${color(ANSI.dim, "Harness")} ${recoveryStatus}`] : []),
     ];
   }
 

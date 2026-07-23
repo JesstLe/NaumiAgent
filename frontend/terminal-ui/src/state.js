@@ -417,6 +417,7 @@ export function createInitialState() {
       retryResult: null,
       retryRequestId: "",
     },
+    sandboxRetryRecovery: null,
     harnessEvalPromotion: {
       requestId: "",
       suiteId: "",
@@ -677,35 +678,73 @@ export function reduceServerEvent(state, record) {
     case "ready":
       state.bridgeReady = true;
       mergeStatus(state, payload);
-      if (Number(payload.evolution_patch_recovery?.total || 0) > 0) {
-        const recovery = payload.evolution_patch_recovery;
-        const level = recovery.failed > 0
-          ? "error"
-          : (recovery.deferred > 0 ? "warning" : "info");
-        const failures = recovery.failure_codes.length
-          ? ` · 原因 ${recovery.failure_codes.join(", ")}`
-          : "";
-        pushSystemMessage(
-          state,
-          "实验补丁恢复",
-          `完成 ${recovery.completed}/${recovery.total}`
-            + (recovery.multi_file_total
-              ? ` · 多文件事务 ${recovery.multi_file_total}`
-              : "")
-            + ` · 回滚 ${recovery.rolled_back}`
-            + ` · 清理孤儿锁 ${recovery.orphan_lock_removed}`
-            + ` · 失败 ${recovery.failed}`
-            + ` · 延后 ${recovery.deferred}${failures}`,
-          level,
-          { dismissWelcome: true },
-        );
-      } else if (!state.welcome.dismissed) {
-        state.welcome.phase = "ready_empty";
+      {
+        let startupNotice = false;
+        if (Number(payload.evolution_patch_recovery?.total || 0) > 0) {
+          const recovery = payload.evolution_patch_recovery;
+          const level = recovery.failed > 0
+            ? "error"
+            : (recovery.deferred > 0 ? "warning" : "info");
+          const failures = recovery.failure_codes.length
+            ? ` · 原因 ${recovery.failure_codes.join(", ")}`
+            : "";
+          pushSystemMessage(
+            state,
+            "实验补丁恢复",
+            `完成 ${recovery.completed}/${recovery.total}`
+              + (recovery.multi_file_total
+                ? ` · 多文件事务 ${recovery.multi_file_total}`
+                : "")
+              + ` · 回滚 ${recovery.rolled_back}`
+              + ` · 清理孤儿锁 ${recovery.orphan_lock_removed}`
+              + ` · 失败 ${recovery.failed}`
+              + ` · 延后 ${recovery.deferred}${failures}`,
+            level,
+            { dismissWelcome: true },
+          );
+          startupNotice = true;
+        }
+        const sandboxRecovery = payload.sandbox_retry_recovery;
+        if (sandboxRecovery?.status === "ready" && sandboxRecovery.total > 0) {
+          pushSystemMessage(
+            state,
+            "Sandbox retry 恢复队列",
+            formatSandboxRetryRecoveryNotice(sandboxRecovery),
+            (
+              sandboxRecovery.counts.reconcile_required > 0
+              || sandboxRecovery.counts.clock_regression > 0
+            ) ? "warning" : "info",
+            { dismissWelcome: true },
+          );
+          startupNotice = true;
+        } else if (sandboxRecovery?.status === "unavailable") {
+          // Optional discovery failure must not replace a fresh startup with
+          // an empty timeline. The welcome renderer surfaces its stable code.
+          // Preserve a separate notice only when another event already owns
+          // the startup timeline.
+          if (
+            startupNotice
+            || state.welcome.dismissed
+            || state.messages.length > 0
+          ) {
+            pushSystemMessage(
+              state,
+              "Sandbox retry 恢复发现降级",
+              "启动扫描暂不可用，系统没有自动 claim 或重放任务。"
+                + "请运行 /harness eval sandbox retries --state open 重新检查。"
+                + `错误码: ${sandboxRecovery.error_code}`,
+              "warning",
+            );
+            startupNotice = true;
+          }
+        }
+        if (!startupNotice && !state.welcome.dismissed) {
+          state.welcome.phase = "ready_empty";
+        }
       }
       break;
     case "debug/trace":
       state.debugTrace = payload;
-      pushSystemMessage(state, "debug", `调试日志: ${payload.events_path ?? "-"}`, "info");
       break;
     case "runtime/status":
       mergeStatus(state, payload);
@@ -1596,6 +1635,48 @@ export function mergeStatus(state, payload) {
   } else if ("show_reasoning" in payload) {
     state.showReasoning = Boolean(payload.show_reasoning);
   }
+  if (payload.sandbox_retry_recovery) {
+    state.sandboxRetryRecovery = payload.sandbox_retry_recovery;
+  }
+}
+
+function formatSandboxRetryRecoveryNotice(snapshot) {
+  const counts = snapshot.counts;
+  const lines = [
+    "启动时只发现持久 dispatch，不会自动 claim、续租或重放任务。",
+    `发现 ${snapshot.total} 项 · 可显式恢复 ${counts.actionable}`
+      + ` · 存活 ${counts.live}`
+      + ` · 需对账 ${counts.reconcile_required}`
+      + ` · 时钟异常 ${counts.clock_regression}`,
+  ];
+  const labels = {
+    pending: "等待首次 claim",
+    live: "ticket 仍存活",
+    recovery_required: "租约已过期",
+    reconcile_required: "需先对账",
+    clock_regression: "时钟倒退，禁止恢复",
+  };
+  for (const [index, item] of snapshot.items.entries()) {
+    lines.push(
+      `${index + 1}. ${labels[item.recovery_status] || item.recovery_status}`
+        + ` · ${item.batch_id}/${item.suite_id}`
+        + ` · H5a ${item.persisted_samples}/${item.requested_samples}`,
+    );
+    if (item.can_resume) {
+      lines.push(`   ${item.resume_command}`);
+    } else if (item.recovery_status === "live") {
+      lines.push("   当前 lease 尚有效，不提供并发恢复命令。");
+    } else {
+      lines.push("   请运行 /harness eval sandbox retries --state open 查看完整 fence。");
+    }
+  }
+  if (snapshot.truncated) {
+    lines.push(
+      "启动扫描已达到 20 项上限；使用 "
+        + "/harness eval sandbox retries --state open 有界翻页。",
+    );
+  }
+  return lines.join("\n");
 }
 
 function inspectorMatchesCurrentSession(state, payload) {
