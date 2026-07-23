@@ -301,11 +301,17 @@ async def test_service_resumes_continuous_h5a_prefix_with_new_batch_grant(
         )
 
     request = await _request(service)
+    manifest = await HarnessStore(tmp_path / "harness.db").get_sandbox_eval_request(
+        service.workspace_root,
+        request.request_sha256,
+    )
     partial = await store.list_eval_results(
         service.workspace_root,
         "batch-1",
         request.suite_id,
     )
+    assert manifest is not None
+    assert manifest.request == request
     assert len(partial) == 2
     assert len(kernel.calls) == 3
 
@@ -365,6 +371,10 @@ async def test_service_rejects_permission_not_bound_to_exact_batch_arguments(
     assert captured.value.code == "sandbox_eval_service_parent_permission_invalid"
     assert not kernel.calls
     request = await _request(service)
+    assert await store.get_sandbox_eval_request(
+        service.workspace_root,
+        request.request_sha256,
+    ) is None
     assert await store.list_eval_results(
         service.workspace_root,
         "batch-1",

@@ -71,6 +71,7 @@ from naumi_agent.harness.run_lease import (
     HarnessRunLease,
     HarnessRunLeaseState,
 )
+from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequest
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
     ReconciliationFailureStage,
@@ -81,7 +82,7 @@ from naumi_agent.harness.tombstone import (
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 
-HARNESS_STORE_SCHEMA_VERSION = 18
+HARNESS_STORE_SCHEMA_VERSION = 19
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -98,6 +99,7 @@ _SANDBOX_ADMISSION_CANCEL_ACTION_RE = re.compile(r"^hsac_[0-9a-f]{24}$")
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
+_MAX_SANDBOX_EVAL_REQUEST_BYTES = 256 * 1024
 _SECRET_ARG_NAME_RE = re.compile(
     r"(?:token|secret|password|passwd|api[_-]?key|authorization|cookie)",
     re.IGNORECASE,
@@ -371,6 +373,19 @@ class HarnessSandboxAdmissionCancelReceipt:
     reason: str
     created_at: str
     receipt_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessStoredSandboxEvalRequest:
+    """One immutable native Sandbox Eval request manifest."""
+
+    workspace_root: str
+    request_id: str
+    request_sha256: str
+    batch_id: str
+    suite_id: str
+    request: HarnessSandboxEvalRequest
+    created_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -1075,6 +1090,138 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法保存 Harness Eval Result。") from exc
         return stored
+
+    async def record_sandbox_eval_request(
+        self,
+        request: HarnessSandboxEvalRequest,
+        *,
+        created_at: str,
+    ) -> HarnessStoredSandboxEvalRequest:
+        """Persist one immutable request before admission or sample execution."""
+        if not isinstance(request, HarnessSandboxEvalRequest):
+            raise TypeError("request 必须是 HarnessSandboxEvalRequest。")
+        validated = HarnessSandboxEvalRequest.model_validate(
+            request.model_dump(mode="json")
+        )
+        workspace = _canonical_workspace(validated.workspace_root)
+        created = _normalize_timestamp(created_at, field="created_at")
+        request_json = _json_dumps(validated.model_dump(mode="json"))
+        if len(request_json.encode("utf-8")) > _MAX_SANDBOX_EVAL_REQUEST_BYTES:
+            raise ValueError("Sandbox Eval Request 不能超过 256 KiB。")
+        stored = HarnessStoredSandboxEvalRequest(
+            workspace_root=workspace,
+            request_id=validated.request_id,
+            request_sha256=validated.request_sha256,
+            batch_id=validated.batch_id,
+            suite_id=validated.suite_id,
+            request=validated,
+            created_at=created,
+        )
+
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_sandbox_eval_requests
+                    WHERE workspace_root = ? AND (
+                        request_id = ? OR request_sha256 = ? OR batch_id = ?
+                    )
+                    """,
+                    (
+                        workspace,
+                        validated.request_id,
+                        validated.request_sha256,
+                        validated.batch_id,
+                    ),
+                )
+                rows = await cursor.fetchall()
+                if rows:
+                    restored = tuple(
+                        _sandbox_eval_request_from_row(row) for row in rows
+                    )
+                    identical = tuple(
+                        item
+                        for item in restored
+                        if item.request_id == validated.request_id
+                        and item.request_sha256 == validated.request_sha256
+                        and item.batch_id == validated.batch_id
+                        and item.suite_id == validated.suite_id
+                        and item.request == validated
+                    )
+                    if len(restored) != 1 or len(identical) != 1:
+                        await db.rollback()
+                        raise HarnessStoreConflictError(
+                            "Sandbox Eval request identity、digest 或 batch 已被"
+                            "不同不可变请求占用。"
+                        )
+                    await db.rollback()
+                    return identical[0]
+                await db.execute(
+                    """
+                    INSERT INTO harness_sandbox_eval_requests (
+                        workspace_root, request_id, request_sha256, batch_id,
+                        suite_id, request_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        validated.request_id,
+                        validated.request_sha256,
+                        validated.batch_id,
+                        validated.suite_id,
+                        request_json,
+                        created,
+                    ),
+                )
+                await db.commit()
+                return stored
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "无法持久化 Sandbox Eval Request Manifest。"
+            ) from exc
+
+    async def get_sandbox_eval_request(
+        self,
+        workspace_root: str | Path,
+        request_sha256: str,
+    ) -> HarnessStoredSandboxEvalRequest | None:
+        """Load one request by its semantic authority after process restart."""
+        workspace = _canonical_workspace(workspace_root)
+        authority = _validate_sha256(
+            request_sha256,
+            field="request_sha256",
+        )
+        if not self._db_path.is_file():
+            return None
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM harness_sandbox_eval_requests
+                    WHERE workspace_root = ? AND request_sha256 = ?
+                    """,
+                    (workspace, authority),
+                )
+                row = await cursor.fetchone()
+                return (
+                    _sandbox_eval_request_from_row(row)
+                    if row is not None
+                    else None
+                )
+        except aiosqlite.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                return None
+            raise HarnessStoreError(
+                "无法读取 Sandbox Eval Request Manifest。"
+            ) from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError(
+                "Sandbox Eval Request Manifest 损坏或无法读取。"
+            ) from exc
 
     async def get_eval_result(
         self,
@@ -5518,6 +5665,7 @@ class HarnessStore:
                             await _migrate_eval_baseline_purpose_v16(db)
                             await db.executescript(_SCHEMA_V17)
                             await db.executescript(_SCHEMA_V18)
+                            await db.executescript(_SCHEMA_V19)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -5801,6 +5949,37 @@ def _eval_result_from_row(row: aiosqlite.Row) -> HarnessStoredEvalResult:
         identity_sha256=identity_sha256,
         result_sha256=result_sha256,
         result=result,
+        created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
+    )
+
+
+def _sandbox_eval_request_from_row(
+    row: aiosqlite.Row,
+) -> HarnessStoredSandboxEvalRequest:
+    request = HarnessSandboxEvalRequest.model_validate_json(str(row["request_json"]))
+    workspace = _canonical_workspace(str(row["workspace_root"]))
+    request_id = str(row["request_id"])
+    request_sha256 = _validate_sha256(
+        str(row["request_sha256"]),
+        field="request_sha256",
+    )
+    batch_id = _normalize_eval_batch_id(str(row["batch_id"]))
+    suite_id = _normalize_text(str(row["suite_id"]), field="suite_id", max_length=64)
+    if (
+        request.workspace_root != workspace
+        or request.request_id != request_id
+        or request.request_sha256 != request_sha256
+        or request.batch_id != batch_id
+        or request.suite_id != suite_id
+    ):
+        raise ValueError("Sandbox Eval Request Manifest immutable identity 不一致。")
+    return HarnessStoredSandboxEvalRequest(
+        workspace_root=workspace,
+        request_id=request_id,
+        request_sha256=request_sha256,
+        batch_id=batch_id,
+        suite_id=suite_id,
+        request=request,
         created_at=_normalize_timestamp(str(row["created_at"]), field="created_at"),
     )
 
@@ -7921,5 +8100,25 @@ CREATE TABLE IF NOT EXISTS harness_sandbox_admission_cancel_attempts (
 CREATE INDEX IF NOT EXISTS idx_harness_sandbox_cancel_ticket
 ON harness_sandbox_admission_cancel_attempts (
     workspace_root, ticket_id, created_at, action_id
+);
+"""
+
+_SCHEMA_V19 = """
+CREATE TABLE IF NOT EXISTS harness_sandbox_eval_requests (
+    workspace_root TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    suite_id TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, request_id),
+    UNIQUE (workspace_root, request_sha256),
+    UNIQUE (workspace_root, batch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_sandbox_eval_request_suite
+ON harness_sandbox_eval_requests (
+    workspace_root, suite_id, created_at, request_id
 );
 """
