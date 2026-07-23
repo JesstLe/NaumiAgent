@@ -2167,10 +2167,12 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "readability-lxml" },
+    { name = "regex" },
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
     { name = "uvicorn" },
+    { name = "wcwidth" },
     { name = "websockets" },
 ]
 
@@ -2220,11 +2222,13 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "readability-lxml", specifier = ">=0.8" },
+    { name = "regex", specifier = ">=2024.11.6" },
     { name = "rich", specifier = ">=14.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11" },
     { name = "textual", specifier = ">=8.2" },
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.34" },
+    { name = "wcwidth", specifier = ">=0.7.0" },
     { name = "websockets", specifier = ">=14.0" },
 ]
 provides-extras = ["dev", "docker", "e2b", "release"]

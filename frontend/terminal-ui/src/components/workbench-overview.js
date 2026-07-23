@@ -1,10 +1,9 @@
 import {
   ANSI,
-  charWidth,
   color,
   compactText,
   padRight,
-  stripAnsi,
+  truncateAnsi,
   visibleWidth,
   wrapAnsiLine,
 } from "../ansi.js";
@@ -594,15 +593,5 @@ function number(value) {
 
 function fitAnsiWidth(line, width) {
   const safeWidth = Math.max(1, Number(width) || 1);
-  if (visibleWidth(line) <= safeWidth) return line;
-  const target = Math.max(0, safeWidth - 1);
-  let used = 0;
-  let result = "";
-  for (const character of Array.from(stripAnsi(line))) {
-    const next = charWidth(character);
-    if (used + next > target) break;
-    result += character;
-    used += next;
-  }
-  return `${result}…`;
+  return visibleWidth(line) <= safeWidth ? line : truncateAnsi(line, safeWidth);
 }

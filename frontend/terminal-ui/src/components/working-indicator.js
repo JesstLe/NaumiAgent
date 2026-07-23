@@ -1,9 +1,9 @@
 import {
   ANSI,
-  charWidth,
   color,
   compactText,
   sanitizeTerminalText,
+  truncatePlain,
   visibleWidth,
 } from "../ansi.js";
 
@@ -75,7 +75,7 @@ export function renderWorkingIndicator(state, width, options = {}) {
   const ascii = options.ascii === true || String(options.term ?? "").toLowerCase() === "dumb";
   if (ascii) {
     const base = `[o] ${status.label}`;
-    if (visibleWidth(base) >= safeWidth) return [truncateVisiblePlain(base, safeWidth)];
+    if (visibleWidth(base) >= safeWidth) return [truncatePlain(base, safeWidth)];
     const suffix = boundedPhaseSuffix(status, safeWidth - visibleWidth(base));
     return [`${base}${suffix}`];
   }
@@ -86,7 +86,7 @@ export function renderWorkingIndicator(state, width, options = {}) {
   if (safeWidth < 70 || safeBodyHeight < 8) {
     const plainBase = `${frame.core} ${status.label}`;
     if (visibleWidth(plainBase) >= safeWidth) {
-      return [truncateVisiblePlain(plainBase, safeWidth)];
+      return [truncatePlain(plainBase, safeWidth)];
     }
     const suffix = boundedPhaseSuffix(status, safeWidth - visibleWidth(plainBase));
     return [
@@ -113,24 +113,7 @@ function boundedPhaseSuffix(status, maxWidth) {
   const separator = " · ";
   const available = maxWidth - visibleWidth(separator);
   if (available <= 0) return "";
-  return `${separator}${truncateVisiblePlain(status.phaseLabel, available)}`;
-}
-
-function truncateVisiblePlain(value, maxWidth) {
-  const safeWidth = Math.max(0, Number(maxWidth) || 0);
-  const text = String(value ?? "");
-  if (visibleWidth(text) <= safeWidth) return text;
-  if (safeWidth <= 0) return "";
-  if (safeWidth === 1) return "…";
-  let output = "";
-  let width = 0;
-  for (const character of text) {
-    const next = charWidth(character);
-    if (width + next + 1 > safeWidth) break;
-    output += character;
-    width += next;
-  }
-  return `${output}…`;
+  return `${separator}${truncatePlain(status.phaseLabel, available)}`;
 }
 
 function phaseLabelFor(phase) {

@@ -16,6 +16,7 @@ import {
   navigateInputHistory,
   rememberSubmittedInput,
   renderInputWithCursor,
+  renderInputLinesWithCursor,
   setInputText,
   splitInputChunk,
   splitInputStreamChunk,
@@ -218,6 +219,13 @@ test("cursor movement and deletion keep combining graphemes intact", () => {
   assert.equal(backspaceInput(state), true);
   assert.equal(state.input, "x");
   assert.equal(getInputCursor(state), 0);
+});
+
+test("composer width follows dangling ZWJ terminal semantics", () => {
+  const state = createInitialState();
+  setInputText(state, "A\u200dB");
+
+  assert.deepEqual(renderInputLinesWithCursor(state, 2), ["A\u200dB▌"]);
 });
 
 test("bracketed paste is emitted once across arbitrary chunks", () => {

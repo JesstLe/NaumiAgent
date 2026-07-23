@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from rich.cells import cell_len
 from rich.console import Console
 from textual.app import App, ComposeResult
 from textual.containers import Container
@@ -34,6 +33,7 @@ from naumi_agent.tui.app import (
 )
 from naumi_agent.tui.renderers.registry import TUIRenderer
 from naumi_agent.ui.messages.adapter import EngineEventAdapter
+from naumi_agent.ui.terminal_width import display_width
 from naumi_agent.ui.theme import build_ui_style_config
 
 _MANIFEST_SCHEMA = "naumi.terminal-golden-capture.v1"
@@ -242,7 +242,7 @@ async def _capture_tui_frame(
         ansi, text = _render_textual_screen(app, width=width, height=height)
 
     lines = text.splitlines()
-    max_width = max((cell_len(line) for line in lines), default=0)
+    max_width = max((display_width(line) for line in lines), default=0)
     if strip_ansi(ansi) != text:
         raise TerminalCaptureError("TUI ANSI frame 与纯文本 frame 不一致")
     if len(lines) != height or max_width > width:
@@ -382,7 +382,8 @@ def _frame_from_mapping(value: Any) -> TerminalGoldenFrame:
     if (
         strip_ansi(frame.ansi) != frame.text
         or len(lines) != frame.line_count
-        or max((cell_len(line) for line in lines), default=0) != frame.max_visible_width
+        or max((display_width(line) for line in lines), default=0)
+        != frame.max_visible_width
     ):
         raise TerminalCaptureError("终端 frame 内容与元数据不一致")
     actual_missing = tuple(

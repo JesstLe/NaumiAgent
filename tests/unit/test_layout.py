@@ -108,6 +108,12 @@ class TestClipToWidth:
         result = clip_to_width("abc", 1)
         assert len(result) <= 1
 
+    def test_zwj_emoji_is_not_split(self) -> None:
+        assert clip_to_width("A👩‍💻B", 3) == "A… "
+
+    def test_combining_sequence_is_not_split(self) -> None:
+        assert clip_to_width("école", 4) == "éco…"
+
 
 class TestComputeOutputGuardHeight:
     def test_base_height_no_extras(self) -> None:

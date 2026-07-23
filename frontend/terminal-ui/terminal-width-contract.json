@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "unicode_policy": {
+    "ambiguous_width": 1,
+    "control_width": 0,
+    "emoji_presentation_width": 2,
+    "grapheme_atomic": true,
+    "narrow_overflow_replacement": "…"
+  },
+  "measurement_cases": [
+    {"id": "ascii", "text": "Naumi", "width": 5},
+    {"id": "cjk", "text": "你好", "width": 4},
+    {"id": "fullwidth", "text": "ＡＢ", "width": 4},
+    {"id": "combining-accent", "text": "é", "width": 1},
+    {"id": "emoji-presentation", "text": "🙂", "width": 2},
+    {"id": "emoji-zwj", "text": "👩‍💻", "width": 2},
+    {"id": "emoji-family", "text": "👨‍👩‍👧‍👦", "width": 2},
+    {"id": "regional-flag", "text": "🇨🇳", "width": 2},
+    {"id": "keycap", "text": "1️⃣", "width": 2},
+    {"id": "text-heart", "text": "♥", "width": 1},
+    {"id": "emoji-heart", "text": "♥️", "width": 2},
+    {"id": "emoji-zwj-variation", "text": "🏳️‍🌈", "width": 2},
+    {"id": "indic-conjunct", "text": "क्ष", "width": 2},
+    {"id": "invalid-zwj-follows-terminal-join", "text": "A‍B", "width": 1},
+    {"id": "invalid-vs16-is-not-wide", "text": "a️b", "width": 2},
+    {"id": "invalid-keycap-is-not-wide", "text": "x⃣", "width": 1},
+    {"id": "mixed", "text": "A你👩‍💻é", "width": 6}
+  ],
+  "truncation_cases": [
+    {"id": "ascii-tail", "text": "NaumiAgent", "width": 6, "expected": "Naumi…"},
+    {"id": "cjk-tail", "text": "你好吗", "width": 5, "expected": "你好…"},
+    {"id": "zwj-atomic", "text": "A👩‍💻B", "width": 3, "expected": "A…"},
+    {"id": "combining-atomic", "text": "école", "width": 4, "expected": "éco…"},
+    {"id": "single-cell-overflow", "text": "你", "width": 1, "expected": "…"},
+    {"id": "zero-width", "text": "Naumi", "width": 0, "expected": ""}
+  ],
+  "wrap_cases": [
+    {"id": "cjk-wrap", "text": "你A好", "width": 3, "expected": ["你A", "好"]},
+    {"id": "zwj-wrap", "text": "A👩‍💻B", "width": 3, "expected": ["A👩‍💻", "B"]},
+    {"id": "combining-wrap", "text": "AéB", "width": 2, "expected": ["Aé", "B"]},
+    {"id": "narrow-wide-replacement", "text": "你", "width": 1, "expected": ["…"]}
+  ]
+}
