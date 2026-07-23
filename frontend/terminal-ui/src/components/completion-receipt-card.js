@@ -77,6 +77,14 @@ export function renderCompletionReceiptCard(receipt, ctx, harnessReceipt = null)
     rows.push(line(color(ANSI.cyan, `下一步 · ${compactText(action.label || action.kind, 300)}`)));
   }
   const receiptId = sanitizeTerminalText(compactText(view.receipt_id || "", 500));
+  const runId = sanitizeTerminalText(compactText(view.run_id || "", 500));
+  if (hasCorrelatedHarnessReceipt(harnessReceipt, runId)) {
+    const command = `/harness detail ${slashArgument(runId)}`;
+    rows.push(line(
+      `${color(ANSI.dim, "操作 · ")}${color(ANSI.cyan, "Ctrl+O 查看详情")}`
+      + `${color(ANSI.dim, " · ")}${color(ANSI.cyan, command)}`,
+    ));
+  }
   if (receiptId) {
     const command = `/copy receipt ${slashArgument(receiptId)}`;
     rows.push(line(
@@ -84,6 +92,16 @@ export function renderCompletionReceiptCard(receipt, ctx, harnessReceipt = null)
     ));
   }
   return renderComponent(boxComponent("完成回执", rows), ctx);
+}
+
+function hasCorrelatedHarnessReceipt(receipt, runId) {
+  return Boolean(
+    runId
+    && receipt
+    && typeof receipt === "object"
+    && String(receipt.run_id || "").trim() === runId
+    && Number(receipt.revision) >= 1
+  );
 }
 
 function harnessRows(receipt) {

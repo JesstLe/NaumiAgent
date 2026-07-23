@@ -75,6 +75,7 @@ from naumi_agent.ui.command_index import (
 from naumi_agent.ui.completion_receipt import (
     completion_outcome_label,
     format_completion_receipt_text,
+    has_correlated_harness_receipt,
 )
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
 from naumi_agent.ui.doctor_export import (
@@ -100,6 +101,7 @@ from naumi_agent.ui.history_screen import (
 )
 from naumi_agent.ui.keybindings import (
     KEYBINDING_DEFINITIONS,
+    KeybindingAction,
     KeybindingSet,
     build_keybindings,
     render_keybinding_help,
@@ -1744,6 +1746,8 @@ class NaumiApp(App):
         self._run_cancel_pending = False
         self._recent_commands: tuple[str, ...] = ()
         self._pending_harness_receipts: dict[str, dict[str, Any]] = {}
+        self._latest_completion_receipt_run_id = ""
+        self._latest_harness_detail_run_id = ""
         self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
         self._doctor_export_plan: DoctorExportPlan | None = None
         self.engine.set_permission_confirmer(self.confirm_permission)
@@ -2783,6 +2787,7 @@ class NaumiApp(App):
         queue_commit_ok = True
         self._run_cancel_pending = False
         self._pending_harness_receipts.clear()
+        self._latest_completion_receipt_run_id = ""
         if self.debug_trace is not None:
             self.debug_trace.event("tui.agent_run_start", {"task": task})
 
@@ -2882,15 +2887,22 @@ class NaumiApp(App):
                     pass
                 case "completion_receipt":
                     receipt = CompletionReceipt.from_dict(data)
+                    self._latest_completion_receipt_run_id = receipt.run_id
                     harness_receipt = self._pending_harness_receipts.pop(
                         receipt.run_id,
                         None,
                     )
+                    if has_correlated_harness_receipt(receipt, harness_receipt):
+                        self._latest_harness_detail_run_id = receipt.run_id
                     chat.mount(
                         Static(
                             format_completion_receipt_text(
                                 receipt,
                                 harness_receipt,
+                                detail_shortcut=self._keybindings.display_keys_for(
+                                    KeybindingAction.OPEN_LATEST_HARNESS_DETAIL,
+                                    interface="tui",
+                                ),
                             ),
                             classes="agent-msg",
                         )
@@ -2904,6 +2916,16 @@ class NaumiApp(App):
                     run_id = str(data.get("run_id") or "")
                     if run_id:
                         self._pending_harness_receipts[run_id] = dict(data)
+                        if (
+                            run_id == self._latest_completion_receipt_run_id
+                            and data.get("status")
+                            in {
+                                "completed_verified",
+                                "completed_unverified",
+                                "blocked",
+                            }
+                        ):
+                            self._latest_harness_detail_run_id = run_id
                 case "harness_sandbox_eval_progress":
                     await self._slash_frontend.update_harness_sandbox_eval(data)
                 case "tool_prepare_start" | "tool_prepare_snapshot":
@@ -3458,6 +3480,22 @@ class NaumiApp(App):
             on_selected,
         )
 
+    def action_open_latest_harness_detail(self) -> None:
+        if isinstance(self.screen, ModalScreen):
+            self.query_one(StatusBar).status_text = (
+                "请先完成或关闭当前交互，再打开 Harness 详情。"
+            )
+            return
+        run_id = self._latest_harness_detail_run_id
+        if not run_id:
+            message = "当前没有可查看的 Harness 完成回执。"
+            self.query_one(StatusBar).status_text = message
+            self.query_one(ChatPanel).mount(
+                Markdown(f"**Harness 详情**：{message}", classes="agent-msg")
+            )
+            return
+        self._run_cli_slash_command(f"/harness detail {shlex.quote(run_id)}")
+
     def action_cycle_runtime_mode(self) -> None:
         mode = self.engine.cycle_runtime_mode()
         status = self.query_one(StatusBar)
@@ -3536,6 +3574,9 @@ class NaumiApp(App):
         session = self.engine._session
         status.session_text = f"会话:{session.id[:8]}"
         chat.clear()
+        self._pending_harness_receipts.clear()
+        self._latest_completion_receipt_run_id = ""
+        self._latest_harness_detail_run_id = ""
 
         # 回放历史消息 — 用 _full_history（原始未截断数据）展示
         display_messages = self.engine._full_history or session.messages
@@ -3647,6 +3688,9 @@ class NaumiApp(App):
         chat = self.query_one(ChatPanel)
         chat.clear()
         self._clear_runtime_task_panels()
+        self._pending_harness_receipts.clear()
+        self._latest_completion_receipt_run_id = ""
+        self._latest_harness_detail_run_id = ""
         self.engine.reset()
         self._show_startup_status()
 

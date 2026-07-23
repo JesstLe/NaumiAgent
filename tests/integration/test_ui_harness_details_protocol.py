@@ -209,13 +209,22 @@ def _render_compact_card_with_real_node(
 import { stripAnsi, visibleWidth } from "./frontend/terminal-ui/src/ansi.js";
 import { renderMessage } from "./frontend/terminal-ui/src/components/message.js";
 import { normalizeServerRecord } from "./frontend/terminal-ui/src/protocol.js";
-import { createInitialState, reduceServerEvent } from "./frontend/terminal-ui/src/state.js";
+import {
+  createInitialState,
+  openLatestHarnessDetail,
+  reduceServerEvent,
+} from "./frontend/terminal-ui/src/state.js";
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
 const records = input.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 const state = createInitialState();
 for (const record of records) reduceServerEvent(state, normalizeServerRecord(record));
 const receipts = state.messages.filter((message) => message.kind === "completion_receipt");
+const requests = [];
+const opened = openLatestHarnessDetail(
+  state,
+  (type, payload) => requests.push({ type, payload }),
+);
 const widths = {};
 for (const width of [80, 120, 200]) {
   const lines = renderMessage(receipts[0], width, { width, state });
@@ -227,6 +236,8 @@ for (const width of [80, 120, 200]) {
 process.stdout.write(JSON.stringify({
   receiptCount: receipts.length,
   harnessStatus: receipts[0]?.harnessReceipt?.status ?? "",
+  opened,
+  requests,
   widths,
 }));
 """
@@ -391,12 +402,23 @@ async def test_real_bridge_node_reducer_renders_one_combined_completion_card() -
     rendered = _render_compact_card_with_real_node(repo_root, records)
     assert rendered["receiptCount"] == 1
     assert rendered["harnessStatus"] == "completed_unverified"
+    assert rendered["opened"] is True
+    assert [request["type"] for request in rendered["requests"]] == [
+        "harness/explain/request",
+        "harness/replay/request",
+    ]
+    assert all(
+        request["payload"]["run_id"] == run_id
+        for request in rendered["requests"]
+    )
     for width in ("80", "120", "200"):
         snapshot = rendered["widths"][width]  # type: ignore[index]
         assert snapshot["bounded"] is True
         assert "Harness 未验证" in snapshot["text"]
         assert "检查失败 · unit" in snapshot["text"]
         assert "基础设施异常 · integration" in snapshot["text"]
+        assert "Ctrl+O 查看详情" in snapshot["text"]
+        assert f"/harness detail {run_id}" in snapshot["text"]
 
 
 @pytest.mark.asyncio

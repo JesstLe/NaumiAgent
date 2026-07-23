@@ -123,6 +123,8 @@ test("completion receipt renders blocked Harness warnings with bounded detail", 
 
 test("combined completion receipt stays bounded at 80 120 and 200 columns", () => {
   const harnessReceipt = {
+    run_id: "run-bounded-detail",
+    revision: 1,
     status: "completed_unverified",
     checks: [
       { id: "包含中文字符的定向集成测试", status: "infrastructure_error" },
@@ -134,10 +136,12 @@ test("combined completion receipt stays bounded at 80 120 and 200 columns", () =
 
   for (const width of [80, 120, 200]) {
     const rendered = renderReceipt({
+      run_id: "run-bounded-detail",
       summary: "完成回执包含通用运行事实和权威 Harness 结果，窄屏时仍应保持清晰。",
     }, harnessReceipt, width);
     assert(rendered.every((line) => visibleWidth(line) <= width));
     assert.match(rendered.map(stripAnsi).join("\n"), /Harness 未验证/);
+    assert.match(rendered.map(stripAnsi).join("\n"), /Ctrl\+O 查看详情/);
   }
 });
 
@@ -146,6 +150,34 @@ test("generic completion receipt remains compatible without a Harness peer", () 
   assert.doesNotMatch(plain, /Harness/);
   assert.match(plain, /完成回执/);
   assert.match(plain, /操作 · \/copy receipt receipt-test/);
+});
+
+test("paired Harness receipt exposes exact detail command and direct shortcut", () => {
+  const plain = renderReceipt({
+    run_id: "run-detail-1",
+  }, {
+    run_id: "run-detail-1",
+    revision: 2,
+    status: "completed_verified",
+    checks: [],
+    criteria: [],
+  }).map(stripAnsi).join("\n");
+
+  assert.match(plain, /操作 · Ctrl\+O 查看详情 · \/harness detail run-detail-1/);
+  assert.match(plain, /操作 · \/copy receipt receipt-test/);
+});
+
+test("mismatched or unversioned Harness receipt does not advertise detail", () => {
+  for (const harnessReceipt of [
+    { run_id: "other-run", revision: 1, status: "completed_verified" },
+    { run_id: "run-detail-1", revision: 0, status: "completed_verified" },
+  ]) {
+    const plain = renderReceipt(
+      { run_id: "run-detail-1" },
+      harnessReceipt,
+    ).map(stripAnsi).join("\n");
+    assert.doesNotMatch(plain, /Ctrl\+O|\/harness detail/);
+  }
 });
 
 test("completion receipt copy action strips terminal controls from receipt id", () => {

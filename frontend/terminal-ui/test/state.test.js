@@ -28,6 +28,7 @@ import {
   handleSubmitText,
   hasTaskPanelFocus,
   getSlashCommandCompletions,
+  openLatestHarnessDetail,
   pushSystemMessage,
   promoteQueuedUserMessage,
   reduceServerEvent,
@@ -4442,6 +4443,70 @@ test("Harness detail command rejects missing latest run without backend traffic"
   const sent = [];
 
   handleSubmitText(state, "/harness detail latest", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(sent.length, 0);
+  assert(state.messages.at(-1).content.includes("没有可查看的 Harness 完成回执"));
+});
+
+test("completion receipt direct detail opens the latest authoritative Harness peer", () => {
+  const state = createInitialState();
+  const addReceipt = (runId, harnessReceipt) => {
+    state.messages.push({
+      kind: "completion_receipt",
+      id: `message-${runId}`,
+      runId,
+      receipt: { run_id: runId },
+      harnessReceipt,
+    });
+  };
+  addReceipt("paired-old", {
+    run_id: "paired-old",
+    revision: 3,
+    status: "completed_verified",
+  });
+  addReceipt("generic-new", null);
+  const sent = [];
+
+  assert.equal(
+    openLatestHarnessDetail(
+      state,
+      (type, payload) => sent.push({ type, payload }),
+    ),
+    true,
+  );
+
+  assert.equal(state.route.name, "harness_detail");
+  assert.equal(state.harnessDetail.runId, "paired-old");
+  assert.deepEqual(sent.map((item) => item.type), [
+    "harness/explain/request",
+    "harness/replay/request",
+  ]);
+  assert(sent.every((item) => item.payload.run_id === "paired-old"));
+});
+
+test("completion receipt direct detail refuses missing or mismatched Harness peers", () => {
+  const state = createInitialState();
+  state.messages.push({
+    kind: "completion_receipt",
+    id: "generic-only",
+    runId: "generic-only",
+    receipt: { run_id: "generic-only" },
+    harnessReceipt: {
+      run_id: "other-run",
+      revision: 1,
+      status: "completed_verified",
+    },
+  });
+  const sent = [];
+
+  assert.equal(
+    openLatestHarnessDetail(
+      state,
+      (type, payload) => sent.push({ type, payload }),
+    ),
+    false,
+  );
 
   assert.equal(state.route.name, "conversation");
   assert.equal(sent.length, 0);
