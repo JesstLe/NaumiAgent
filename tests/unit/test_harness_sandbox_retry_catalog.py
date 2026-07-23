@@ -72,6 +72,7 @@ async def _create_dispatch(
     lease_seconds: int,
     terminal: str = "",
     persisted_samples: int = 0,
+    claim: bool = True,
 ):
     prefix = f"2026-07-23T01:{minute:02d}"
     request = HarnessSandboxEvalRequestBuilder().build(
@@ -120,6 +121,13 @@ async def _create_dispatch(
         authority_token=retry_token * 32,
         now=f"{prefix}:03+00:00",
     )
+    pending = await store.get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=retry.action_id,
+    )
+    assert pending is not None
+    if not claim:
+        return request, retry, pending
     dispatch, ticket = await store.claim_sandbox_retry_dispatch(
         workspace_root=workspace,
         retry_action_id=retry.action_id,
@@ -167,6 +175,39 @@ async def _create_dispatch(
             now=f"{prefix}:05+00:00",
         )
     return request, retry, dispatch
+
+
+@pytest.mark.asyncio
+async def test_retry_catalog_exposes_atomic_pending_dispatch(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    store = HarnessStore(tmp_path / "harness.db")
+    _request, retry, dispatch = await _create_dispatch(
+        store,
+        workspace,
+        source_token="1",
+        retry_token="a",
+        ticket_token="2",
+        minute=4,
+        lease_seconds=300,
+        claim=False,
+    )
+
+    page = await HarnessStore(store.db_path).list_sandbox_retry_dispatches(
+        workspace_root=workspace,
+        assessed_at=ASSESSED,
+        state_filter="open",
+        limit=5,
+    )
+
+    assert len(page.items) == 1
+    item = page.items[0]
+    assert item.dispatch == dispatch
+    assert item.dispatch.retry_receipt_id == retry.receipt_id
+    assert item.recovery_status == "pending"
+    assert item.ticket_state == ""
+    assert item.ticket_lease_expires_at == ""
 
 
 @pytest.mark.asyncio

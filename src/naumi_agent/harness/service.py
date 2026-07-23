@@ -458,6 +458,67 @@ class HarnessService:
             on_progress=on_progress,
         )
 
+    async def resume_sandbox_retry(
+        self,
+        *,
+        retry_action_id: str,
+        dispatch_id: str,
+        retry_receipt_id: str,
+        retry_receipt_sha256: str,
+        on_progress: SandboxEvalProgressCallback | None = None,
+    ) -> HarnessSandboxEvalBatchReceipt:
+        """Resume an existing durable retry dispatch through fresh call authority."""
+        executor = self._sandbox_eval_executor
+        receipt_provider = self._authorization_receipt_provider
+        if executor is None or receipt_provider is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_unavailable",
+                "当前 Runtime 尚未配置 Sandbox Eval resume 执行基础设施。",
+            )
+        parent = receipt_provider()
+        if parent is None:
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_parent_permission_missing",
+                "Sandbox Eval resume 缺少当前工具调用的持久权限回执。",
+            )
+        status = await self.status()
+        if (
+            status.code is not HarnessStatusCode.TRUSTED
+            or not status.trusted
+            or status.snapshot.profile is None
+            or status.profile_digest is None
+        ):
+            raise HarnessSandboxEvalServiceError(
+                "sandbox_eval_service_profile_untrusted",
+                "Harness Profile 当前未受信任；resume 尚未 claim，请先修复并重新信任。",
+            )
+
+        async def current_profile() -> HarnessSandboxEvalProfileAuthority:
+            current = await self.status()
+            if (
+                not current.trusted
+                or current.snapshot.profile is None
+                or current.profile_digest is None
+            ):
+                raise HarnessSandboxEvalServiceError(
+                    "sandbox_eval_service_profile_trust_revalidation_failed",
+                    "Sandbox Eval resume 执行期间 Harness Profile 信任已失效。",
+                )
+            return HarnessSandboxEvalProfileAuthority(
+                profile=current.snapshot.profile,
+                profile_sha256=current.profile_digest,
+            )
+
+        return await executor.resume_retry(
+            retry_action_id=retry_action_id,
+            dispatch_id=dispatch_id,
+            retry_receipt_id=retry_receipt_id,
+            retry_receipt_sha256=retry_receipt_sha256,
+            parent_receipt_id=parent.receipt_id,
+            current_profile=current_profile,
+            on_progress=on_progress,
+        )
+
     async def list_sandbox_retry_dispatches(
         self,
         *,
@@ -2177,6 +2238,11 @@ def render_sandbox_retry_catalog(page: HarnessSandboxRetryCatalogPage) -> str:
                 f"- H5a：{item.persisted_samples}/{item.requested_samples}",
                 f"- Retry action：`{dispatch.retry_action_id}`",
                 (
+                    "- Retry receipt："
+                    f"`{dispatch.retry_receipt_id}` / "
+                    f"`{dispatch.retry_receipt_sha256}`"
+                ),
+                (
                     "- Cancel receipt："
                     f"`{item.cancel_receipt_id}` / `{item.cancel_receipt_sha256}`"
                 ),
@@ -2190,10 +2256,20 @@ def render_sandbox_retry_catalog(page: HarnessSandboxRetryCatalogPage) -> str:
                 f"- 更新时间：`{dispatch.updated_at}`",
             )
         )
-        if item.recovery_status == "recovery_required":
-            lines.append(
-                "- 下一步：当前目录只读；等待 receipt-bound resume 入口，"
-                "不要创建新 action 重复消费 cancel receipt。"
+        if item.recovery_status in {"pending", "recovery_required"}:
+            lines.extend(
+                (
+                    "- 下一步：当前目录只读；使用既有 receipt-bound resume；"
+                    "不会创建新 action，也不会重复消费 cancel receipt。",
+                    "",
+                    "```text",
+                    "/harness eval sandbox resume "
+                    f"{dispatch.retry_action_id} "
+                    f"--dispatch {dispatch.dispatch_id} "
+                    f"--receipt {dispatch.retry_receipt_id} "
+                    f"--sha256 {dispatch.retry_receipt_sha256}",
+                    "```",
+                )
             )
     if page.next_cursor:
         lines.extend(

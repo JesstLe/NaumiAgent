@@ -337,6 +337,10 @@ async def test_retry_authority_consumes_cancel_once_and_survives_restart(
         workspace_root=workspace,
         action_id=accepted.action_id,
     )
+    pending = await HarnessStore(db_path).get_sandbox_retry_dispatch(
+        workspace_root=workspace,
+        retry_action_id=accepted.action_id,
+    )
     consumed = await store.authorize_sandbox_admission_retry(
         workspace_root=workspace,
         action_id=f"hsar_{'3' * 24}",
@@ -353,9 +357,18 @@ async def test_retry_authority_consumes_cancel_once_and_survives_restart(
     assert accepted.code == "sandbox_batch_retry_authorized"
     assert accepted.eval_request_sha256 == request.request_sha256
     assert accepted.execution_authority_key != request.request_sha256
+    assert pending is not None
+    assert pending.state == "pending"
+    assert pending.retry_receipt_id == accepted.receipt_id
+    assert pending.retry_receipt_sha256 == accepted.receipt_sha256
+    assert pending.created_at == accepted.created_at
     assert consumed.decision == "rejected"
     assert consumed.code == "sandbox_batch_retry_cancel_receipt_consumed"
     assert consumed.execution_authority_key == ""
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM harness_sandbox_retry_dispatches"
+        ).fetchone() == (1,)
     with pytest.raises(HarnessStoreConflictError, match="不同请求"):
         await store.authorize_sandbox_admission_retry(
             workspace_root=workspace,
@@ -903,10 +916,14 @@ async def test_retry_dispatch_capacity_failure_is_atomic(tmp_path: Path) -> None
             max_active=1,
             max_queued=0,
         )
-    assert await store.get_sandbox_retry_dispatch(
+    pending = await store.get_sandbox_retry_dispatch(
         workspace_root=workspace,
         retry_action_id=retry.action_id,
-    ) is None
+    )
+    assert pending is not None
+    assert pending.state == "pending"
+    assert pending.epoch == 0
+    assert pending.ticket_id == ""
 
     await store.finish_sandbox_admission(
         workspace_root=workspace,

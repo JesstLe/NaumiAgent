@@ -19,8 +19,9 @@ authority。它解决 retry 的“谁有权重试、重试哪个不可变请求�
 - 数据库提交后启动 Worker，崩溃会留下已消费 receipt 却没有可恢复 dispatch；
 - 只返回新 ticket，但没有原始 request，会形成空壳重试。
 
-因此 HAR-08.4o2 只提交不可变 retry intent。后续 dispatch 必须以该 intent 为输入建立 durable
-outbox/claim 语义，而不是在本事务中做 best-effort 启动。
+因此 HAR-08.4o2 原始切片只提交不可变 retry intent。HAR-08.4o3e 已让 accepted intent 在同一事务额外
+写入 pending dispatch，但仍不在授权事务启动 Worker；后续 claim 继续以该 durable outbox 为输入，而不是
+best-effort 启动。
 
 ## Store v20
 
@@ -60,7 +61,8 @@ action 再试。
 7. 从 source authority 解析原始 Request Manifest；
 8. 检查 cancel receipt 尚未被另一个 accepted retry 消费；
 9. 由服务端随机 token、cancel authority、request SHA、action 和时间派生全新 execution authority；
-10. 写入 accepted/rejected 的防篡改 receipt。
+10. 写入 accepted/rejected 的防篡改 receipt；
+11. accepted 时在同一事务写入由 receipt identity 派生的 pending dispatch。
 
 调用方不能提交新的 checks、samples、batch、workspace、request SHA 或 execution authority。
 
@@ -144,3 +146,6 @@ HAR-08.4o3a 已实现 retry dispatch authority：消费 accepted `hsarr_` receip
 
 HAR-08.4o3b 已在该 dispatch context 中从 `eval_request_sha256` 恢复原请求，以新 permission receipt、
 Runtime lease 和 Run Grant 真实继续 H5a。详见 `HAR-08-4o3b-sandbox-retry-execution.md`。
+
+HAR-08.4o3e 已补齐 pending dispatch 的原子落盘与 receipt-bound resume。详见
+`HAR-08-4o3e-sandbox-retry-receipt-bound-resume.md`。

@@ -52,6 +52,7 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
         "harness_eval_batch",
         "harness_eval_sandbox",
         "harness_eval_sandbox_retry",
+        "harness_eval_sandbox_resume",
         "harness_eval_sandbox_retries",
         "harness_eval_baseline_promote",
         "harness_eval_compare",

@@ -99,16 +99,18 @@ harness_eval_sandbox_retries(
 ```
 
 Slash 通过 `AgentEngine.execute_tool()` 调用同一个只读 Tool；New UI 与 Textual TUI 不各自读取 Store。
-Renderer 不显示 owner ID 或 execution authority，只显示 dispatch/action、cancel receipt/SHA、batch/suite、
-H5a、ticket fence、lease 和机械分类。`recovery_required` 只提示等待 receipt-bound resume 入口，不生成一个
-看似可用、实际会因 actor/reason 幂等摘要不同而失败的命令。
+Renderer 不显示 owner ID 或 execution authority，只显示 dispatch/action、retry/cancel receipt、batch/suite、
+H5a、ticket fence、lease 和机械分类。HAR-08.4o3e 已补齐 receipt-bound resume 入口；
+`pending/recovery_required` 项会生成绑定既有 dispatch/receipt 的命令，不创建新 action，也不重新消费
+cancel receipt。
 
-New UI 的 Sandbox Eval command parser 明确排除 `cancel/retry/retries` 控制子命令，避免把 `retries` 错当成
+New UI 的 Sandbox Eval command parser 明确排除 `cancel/retry/resume/retries` 控制子命令，避免把控制词错当成
 Profile check ID 并打开错误的 live Batch 页面；这些控制命令保持在共享 Slash channel。
 
 ## 验收证据
 
 - 三个真实 SQLite dispatch 按 live、recovery-required、terminal 稳定排序；
+- HAR-08.4o3e 原子产生的 pending dispatch 可被 catalog 读取且不伪造 ticket/lease；
 - limit=2 跨新 `HarnessStore` 实例继续第二页，无重复；
 - open/terminal filter 只返回对应 durable states；
 - cursor 绑定 workspace、评估时间和 filter，并拒绝篡改；
@@ -135,13 +137,12 @@ Profile check ID 并打开错误的 live Batch 页面；这些控制命令保持
 
 仍未实现：
 
-- receipt-bound resume authority：必须复用既有 retry receipt/dispatch，而不是重新授权受
-  `actor + reason` 摘要约束的 retry intent；
 - Bridge 启动时扫描 `recovery_required/reconcile_required` 并建立人工确认队列；
 - dispatch detail typed protocol 与 New UI 专用历史页；
 - retention policy、保护集合、preview/prune receipt；
 - 跨主机 admission；
 - Linux/Windows 的真实隔离 Worker CI。
 
-下一切片应优先实现 receipt-bound resume authority，再比较 HAR-06 retention、ARC-02 Runtime lifecycle 与
-CLI/TUI 恢复体验；不得重新消费 cancel receipt，也不得直接自动重放 catalog 中的任务。
+HAR-08.4o3e 已实现 receipt-bound resume authority，并补齐 accepted intent 与 pending dispatch 的原子落盘。
+下一切片应比较 HAR-06 retention、HAR-07 Bridge recovery、ARC-02 Runtime lifecycle 与 CLI/TUI 恢复体验；
+不得直接自动重放 catalog 中的任务。

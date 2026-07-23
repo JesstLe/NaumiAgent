@@ -255,6 +255,7 @@ class TestPermissionChecker:
             "harness_eval_batch",
             "harness_eval_sandbox",
             "harness_eval_sandbox_retry",
+            "harness_eval_sandbox_resume",
             "harness_eval_compare",
             "feedback_intake",
             "evolution_proposal_queue",

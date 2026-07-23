@@ -5777,7 +5777,15 @@ class HarnessStore:
                             f"Sandbox retry action {action} 已被不同请求占用。"
                         )
                     receipt = _sandbox_retry_receipt_from_row(existing)
-                    await db.rollback()
+                    if receipt.decision == "accepted":
+                        await _ensure_sandbox_retry_pending_dispatch(
+                            db,
+                            workspace_root=workspace,
+                            receipt=receipt,
+                        )
+                        await db.commit()
+                    else:
+                        await db.rollback()
                     return receipt
 
                 cancel_row = await _select_sandbox_cancel_receipt(
@@ -5925,6 +5933,12 @@ class HarnessStore:
                 )
                 assert stored is not None
                 receipt = _sandbox_retry_receipt_from_row(stored)
+                if receipt.decision == "accepted":
+                    await _ensure_sandbox_retry_pending_dispatch(
+                        db,
+                        workspace_root=workspace,
+                        receipt=receipt,
+                    )
                 await db.commit()
                 return receipt
         except HarnessStoreConflictError:
@@ -6054,7 +6068,7 @@ class HarnessStore:
                         retry_receipt_sha256=receipt_sha256,
                         eval_request_sha256=retry.eval_request_sha256,
                         execution_authority_key=retry.execution_authority_key,
-                        created_at=timestamp,
+                        created_at=retry.created_at,
                     )
                     dispatch_id = f"hsard_{request_sha256[:24]}"
                     await db.execute(
@@ -6076,7 +6090,7 @@ class HarnessStore:
                             receipt_sha256,
                             retry.eval_request_sha256,
                             retry.execution_authority_key,
-                            timestamp,
+                            retry.created_at,
                             timestamp,
                             request_sha256,
                         ),
@@ -7979,6 +7993,87 @@ async def _select_sandbox_retry_dispatch(
             (workspace_root, retry_action_id),
         )
     ).fetchone()
+
+
+async def _ensure_sandbox_retry_pending_dispatch(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    receipt: HarnessSandboxAdmissionRetryReceipt,
+) -> HarnessSandboxRetryDispatch:
+    """Atomically materialize the recoverable dispatch for an accepted intent."""
+    if receipt.decision != "accepted":
+        raise HarnessStoreConflictError(
+            "只有 accepted retry receipt 可以创建 pending dispatch。"
+        )
+    request_sha256 = _sandbox_retry_dispatch_digest(
+        workspace_root=workspace_root,
+        retry_action_id=receipt.action_id,
+        retry_receipt_id=receipt.receipt_id,
+        retry_receipt_sha256=receipt.receipt_sha256,
+        eval_request_sha256=receipt.eval_request_sha256,
+        execution_authority_key=receipt.execution_authority_key,
+        created_at=receipt.created_at,
+    )
+    expected_dispatch_id = f"hsard_{request_sha256[:24]}"
+    row = await _select_sandbox_retry_dispatch(
+        db,
+        workspace_root=workspace_root,
+        retry_action_id=receipt.action_id,
+    )
+    if row is None:
+        await db.execute(
+            """
+            INSERT INTO harness_sandbox_retry_dispatches (
+                workspace_root, dispatch_id, retry_action_id,
+                retry_receipt_id, retry_receipt_sha256,
+                eval_request_sha256, execution_authority_key,
+                state, owner_id, epoch, ticket_id, ticket_epoch,
+                created_at, updated_at, terminal_code, request_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', '', 0, '', 0,
+                      ?, ?, '', ?)
+            """,
+            (
+                workspace_root,
+                expected_dispatch_id,
+                receipt.action_id,
+                receipt.receipt_id,
+                receipt.receipt_sha256,
+                receipt.eval_request_sha256,
+                receipt.execution_authority_key,
+                receipt.created_at,
+                receipt.created_at,
+                request_sha256,
+            ),
+        )
+        row = await _select_sandbox_retry_dispatch(
+            db,
+            workspace_root=workspace_root,
+            retry_action_id=receipt.action_id,
+        )
+        assert row is not None
+    dispatch = _sandbox_retry_dispatch_from_row(row)
+    if (
+        dispatch.dispatch_id != expected_dispatch_id
+        or dispatch.retry_receipt_id != receipt.receipt_id
+        or not hmac.compare_digest(
+            dispatch.retry_receipt_sha256,
+            receipt.receipt_sha256,
+        )
+        or not hmac.compare_digest(
+            dispatch.eval_request_sha256,
+            receipt.eval_request_sha256,
+        )
+        or not hmac.compare_digest(
+            dispatch.execution_authority_key,
+            receipt.execution_authority_key,
+        )
+        or not hmac.compare_digest(dispatch.request_sha256, request_sha256)
+    ):
+        raise HarnessStoreConflictError(
+            "Sandbox retry receipt 与既有 dispatch authority 冲突。"
+        )
+    return dispatch
 
 
 async def _select_rows_for_values(

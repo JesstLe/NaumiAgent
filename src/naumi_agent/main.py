@@ -4007,6 +4007,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "--epoch <n> --state <queued|active> [--reason <原因>]\n"
         "      /harness eval sandbox retry <cancel-receipt> --sha256 <digest> "
         "[--reason <原因>]\n"
+        "      /harness eval sandbox resume <retry-action> --dispatch <dispatch> "
+        "--receipt <retry-receipt> --sha256 <digest>\n"
         "      /harness eval sandbox retries [--state all|open|terminal] "
         "[--limit 1..100] [--cursor <opaque>] [--assessed-at <ISO8601>]\n"
         "      /harness eval <suite-id|相对路径> --repeat 5 [--batch <id>]\n"
@@ -4208,6 +4210,78 @@ async def _run_harness(engine: Any, arg: str) -> None:
                 name="harness_eval_sandbox_retries",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
+        )
+        console.print(Markdown(result.content))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 4
+        and parts[1].lower() == "sandbox"
+        and parts[2].lower() == "resume"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        retry_action_id = parts[3]
+        parsed: dict[str, str] = {}
+        index = 4
+        valid = True
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in {"--dispatch", "--receipt", "--sha256"}
+                or option in parsed
+                or index + 1 >= len(parts)
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        dispatch_id = parsed.get("--dispatch", "")
+        retry_receipt_id = parsed.get("--receipt", "")
+        retry_receipt_sha256 = parsed.get("--sha256", "")
+        if (
+            not valid
+            or re.fullmatch(r"hsar_[0-9a-f]{24}", retry_action_id) is None
+            or re.fullmatch(r"hsard_[0-9a-f]{24}", dispatch_id) is None
+            or re.fullmatch(r"hsarr_[0-9a-f]{24}", retry_receipt_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", retry_receipt_sha256) is None
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        session = await engine.get_or_create_session()
+        run_id = f"manual:{session.id}"
+
+        async def publish_resume_progress(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            if event != "harness_sandbox_eval_progress":
+                return
+            updater = (
+                _active_cli.update_harness_sandbox_eval
+                if _active_cli is not None
+                and hasattr(_active_cli, "update_harness_sandbox_eval")
+                else None
+            )
+            if updater is not None:
+                await updater(data)
+
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-sandbox-resume-{uuid.uuid4().hex}",
+                name="harness_eval_sandbox_resume",
+                arguments=json.dumps(
+                    {
+                        "retry_action_id": retry_action_id,
+                        "dispatch_id": dispatch_id,
+                        "retry_receipt_id": retry_receipt_id,
+                        "retry_receipt_sha256": retry_receipt_sha256,
+                        "run_id": run_id,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+            on_event=publish_resume_progress,
         )
         console.print(Markdown(result.content))
         return

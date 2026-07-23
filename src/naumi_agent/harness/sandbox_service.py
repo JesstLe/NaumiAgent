@@ -243,6 +243,7 @@ class HarnessSandboxEvalExecutor:
             request,
             parent_receipt_id,
             retry_receipt=retry_receipt,
+            retry_context=retry_context,
         )
         await self._current_checks(request, current_profile)
         await self.store.record_sandbox_eval_request(
@@ -439,12 +440,136 @@ class HarnessSandboxEvalExecutor:
             retry_context=retry_context,
         )
 
+    async def resume_retry(
+        self,
+        *,
+        retry_action_id: str,
+        dispatch_id: str,
+        retry_receipt_id: str,
+        retry_receipt_sha256: str,
+        parent_receipt_id: str,
+        current_profile: SandboxEvalProfileAuthorityProvider,
+        on_progress: SandboxEvalProgressCallback | None = None,
+    ) -> HarnessSandboxEvalBatchReceipt:
+        """Resume one existing durable dispatch without recreating retry intent."""
+        normalized_action = (
+            retry_action_id.strip().lower()
+            if isinstance(retry_action_id, str)
+            else ""
+        )
+        normalized_dispatch = (
+            dispatch_id.strip().lower() if isinstance(dispatch_id, str) else ""
+        )
+        normalized_receipt = (
+            retry_receipt_id.strip().lower()
+            if isinstance(retry_receipt_id, str)
+            else ""
+        )
+        normalized_receipt_sha256 = (
+            retry_receipt_sha256.strip().lower()
+            if isinstance(retry_receipt_sha256, str)
+            else ""
+        )
+        if (
+            re.fullmatch(r"hsar_[0-9a-f]{24}", normalized_action) is None
+            or re.fullmatch(r"hsard_[0-9a-f]{24}", normalized_dispatch) is None
+            or re.fullmatch(r"hsarr_[0-9a-f]{24}", normalized_receipt) is None
+            or re.fullmatch(r"[0-9a-f]{64}", normalized_receipt_sha256) is None
+        ):
+            raise self._error(
+                "resume_authority_invalid",
+                "Sandbox Eval resume 的 action、dispatch 或 retry receipt 格式无效。",
+            )
+        parent = await self.permission_store.get(parent_receipt_id)
+        expected_arguments = {
+            "dispatch_id": normalized_dispatch,
+            "retry_action_id": normalized_action,
+            "retry_receipt_id": normalized_receipt,
+            "retry_receipt_sha256": normalized_receipt_sha256,
+            "run_id": parent.run_id if parent is not None else "",
+        }
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or not parent.run_id
+            or parent.tool_name != "harness_eval_sandbox_resume"
+            or "bash_run" not in parent.delegated_tool_names
+            or parent.arguments_sha256
+            != permission_arguments_sha256(expected_arguments)
+        ):
+            raise self._error(
+                "resume_parent_permission_invalid",
+                "Sandbox Eval resume 缺少与 dispatch、retry receipt 精确匹配的执行权限回执。",
+            )
+        retry_receipt = await self.store.get_sandbox_admission_retry(
+            workspace_root=self.workspace_root,
+            action_id=normalized_action,
+        )
+        dispatch = await self.store.get_sandbox_retry_dispatch(
+            workspace_root=self.workspace_root,
+            retry_action_id=normalized_action,
+        )
+        if (
+            retry_receipt is None
+            or retry_receipt.decision != "accepted"
+            or retry_receipt.receipt_id != normalized_receipt
+            or not hmac.compare_digest(
+                retry_receipt.receipt_sha256,
+                normalized_receipt_sha256,
+            )
+            or dispatch is None
+            or dispatch.dispatch_id != normalized_dispatch
+            or dispatch.retry_receipt_id != retry_receipt.receipt_id
+            or not hmac.compare_digest(
+                dispatch.retry_receipt_sha256,
+                retry_receipt.receipt_sha256,
+            )
+            or not hmac.compare_digest(
+                dispatch.eval_request_sha256,
+                retry_receipt.eval_request_sha256,
+            )
+            or not hmac.compare_digest(
+                dispatch.execution_authority_key,
+                retry_receipt.execution_authority_key,
+            )
+        ):
+            raise self._error(
+                "resume_authority_invalid",
+                "Sandbox Eval resume 与既有 retry receipt/dispatch authority 不一致。",
+            )
+        stored = await self.store.get_sandbox_eval_request(
+            self.workspace_root,
+            retry_receipt.eval_request_sha256,
+        )
+        if stored is None:
+            raise self._error(
+                "resume_request_manifest_missing",
+                "Sandbox Eval resume 找不到原始 Request Manifest。",
+            )
+        retry_context = HarnessSandboxBatchRetryContext(
+            authorization_kind="resume",
+            retry_action_id=retry_receipt.action_id,
+            retry_receipt_id=retry_receipt.receipt_id,
+            retry_receipt_sha256=retry_receipt.receipt_sha256,
+            eval_request_sha256=retry_receipt.eval_request_sha256,
+            execution_authority_key=retry_receipt.execution_authority_key,
+            dispatch_id=dispatch.dispatch_id,
+        )
+        return await self.execute(
+            request=stored.request,
+            parent_receipt_id=parent_receipt_id,
+            current_profile=current_profile,
+            on_progress=on_progress,
+            retry_context=retry_context,
+        )
+
     async def _validate_parent(
         self,
         request: HarnessSandboxEvalRequest,
         parent_receipt_id: str,
         *,
         retry_receipt: HarnessSandboxAdmissionRetryReceipt | None,
+        retry_context: HarnessSandboxBatchRetryContext | None,
     ) -> None:
         parent = await self.permission_store.get(parent_receipt_id)
         if retry_receipt is None:
@@ -454,6 +579,18 @@ class HarnessSandboxEvalExecutor:
                 "check_ids": [item.check_id for item in request.checks],
                 "run_id": parent.run_id if parent is not None else "",
                 "samples": request.requested_samples,
+            }
+        elif (
+            retry_context is not None
+            and retry_context.authorization_kind == "resume"
+        ):
+            expected_tool_name = "harness_eval_sandbox_resume"
+            expected_arguments = {
+                "dispatch_id": retry_context.dispatch_id,
+                "retry_action_id": retry_receipt.action_id,
+                "retry_receipt_id": retry_receipt.receipt_id,
+                "retry_receipt_sha256": retry_receipt.receipt_sha256,
+                "run_id": parent.run_id if parent is not None else "",
             }
         else:
             expected_tool_name = "harness_eval_sandbox_retry"
@@ -474,9 +611,14 @@ class HarnessSandboxEvalExecutor:
             != permission_arguments_sha256(expected_arguments)
         ):
             permission_scope = (
-                "action、cancel receipt、reason"
-                if retry_receipt is not None
-                else "checks、samples、batch"
+                "dispatch、retry receipt"
+                if retry_context is not None
+                and retry_context.authorization_kind == "resume"
+                else (
+                    "action、cancel receipt、reason"
+                    if retry_receipt is not None
+                    else "checks、samples、batch"
+                )
             )
             raise self._error(
                 "parent_permission_invalid",
@@ -522,6 +664,32 @@ class HarnessSandboxEvalExecutor:
                 "retry_context_invalid",
                 "Sandbox Eval retry context 与持久 authority chain 不一致。",
             )
+        if retry_context.authorization_kind == "resume":
+            dispatch = await self.store.get_sandbox_retry_dispatch(
+                workspace_root=self.workspace_root,
+                retry_action_id=retry_context.retry_action_id,
+            )
+            if (
+                dispatch is None
+                or dispatch.dispatch_id != retry_context.dispatch_id
+                or dispatch.retry_receipt_id != receipt.receipt_id
+                or not hmac.compare_digest(
+                    dispatch.retry_receipt_sha256,
+                    receipt.receipt_sha256,
+                )
+                or not hmac.compare_digest(
+                    dispatch.eval_request_sha256,
+                    receipt.eval_request_sha256,
+                )
+                or not hmac.compare_digest(
+                    dispatch.execution_authority_key,
+                    receipt.execution_authority_key,
+                )
+            ):
+                raise self._error(
+                    "resume_context_invalid",
+                    "Sandbox Eval resume context 与持久 dispatch fence 不一致。",
+                )
         return receipt
 
     async def _current_checks(

@@ -4088,7 +4088,11 @@ function parseHarnessSandboxEvalCommand(commandText) {
   );
   if (!match) return null;
   const tokens = match[1].trim().split(/\s+/);
-  if (["cancel", "retry", "retries"].includes(String(tokens[0] || "").toLowerCase())) {
+  if (
+    ["cancel", "retry", "resume", "retries"].includes(
+      String(tokens[0] || "").toLowerCase(),
+    )
+  ) {
     return null;
   }
   const checkIds = [];

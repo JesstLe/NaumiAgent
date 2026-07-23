@@ -22,6 +22,7 @@ from naumi_agent.harness.eval_models import EvalRunStatus, HarnessEvalSuiteResul
 from naumi_agent.harness.sandbox_batch import (
     HarnessSandboxBatchAdmission,
     HarnessSandboxBatchCheckpoint,
+    HarnessSandboxBatchError,
 )
 from naumi_agent.harness.sandbox_checks import (
     HarnessSandboxCheckResult,
@@ -98,13 +99,14 @@ class _ExecutionKernel:
         self.pause_reached = asyncio.Event()
         self.pause_release = asyncio.Event()
         self.calls: list[SimpleNamespace] = []
+        self.validation_now = NOW
 
     async def execute(self, **kwargs):
         sample_index = kwargs["sample_index"]
         authority = kwargs["run_authority"]
         validation = await self.run_grant_authority.validate(
             grant_id=authority.grant_id,
-            now=NOW,
+            now=self.validation_now,
         )
         assert validation.allowed
         assert await kwargs["profile_is_current"]()
@@ -680,3 +682,269 @@ async def test_retry_permission_mismatch_is_rejected_before_consuming_intent(
         workspace_root=service.workspace_root,
         action_id=action_id,
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_resume_reuses_existing_retry_receipt_after_dispatch_lease_expires(
+    tmp_path: Path,
+) -> None:
+    service, store, _grant_authority, kernel, _parent = await _runtime(
+        tmp_path,
+        pause_once_at=2,
+        durable_admission=True,
+    )
+    executor = service._sandbox_eval_executor
+    assert executor is not None
+    admission = executor.coordinator.admission
+    checkpoints: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def capture(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        checkpoints.append(checkpoint)
+
+    original_task = asyncio.create_task(
+        service.eval_sandbox(
+            check_ids=("unit",),
+            samples=5,
+            batch_id="batch-1",
+            on_progress=capture,
+        )
+    )
+    await asyncio.wait_for(kernel.pause_reached.wait(), timeout=2)
+    live = checkpoints[-1]
+    cancel_receipt, cancelled_ticket = await admission.cancel(
+        action_id=f"hsac_{'1' * 24}",
+        ticket_id=str(live.admission_ticket_id),
+        authority_key=live.authority_key,
+        epoch=int(live.admission_epoch or 0),
+        expected_state="active",
+        actor_id="test-user",
+        reason="构造 durable retry crash recovery",
+    )
+    assert cancel_receipt.decision == "accepted"
+    assert cancelled_ticket is not None
+    with pytest.raises(asyncio.CancelledError):
+        await original_task
+
+    retry_receipt = await store.authorize_sandbox_admission_retry(
+        workspace_root=service.workspace_root,
+        action_id=f"hsar_{'2' * 24}",
+        cancel_receipt_id=cancel_receipt.receipt_id,
+        cancel_receipt_sha256=cancel_receipt.receipt_sha256,
+        actor_id="original-process",
+        reason="用户首次批准 retry",
+        authority_token="3" * 32,
+        now=NOW,
+    )
+    pending = await store.get_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_receipt.action_id,
+    )
+    assert pending is not None
+    assert pending.state == "pending"
+    claimed, first_ticket = await store.claim_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_receipt.action_id,
+        retry_receipt_id=retry_receipt.receipt_id,
+        retry_receipt_sha256=retry_receipt.receipt_sha256,
+        ticket_id=f"hsadm_{'4' * 24}",
+        owner_id="crashed-process",
+        now=NOW,
+        lease_seconds=2,
+        max_active=admission.max_active,
+        max_queued=admission.max_queued,
+    )
+    assert claimed.epoch == 1
+    assert first_ticket.state == "active"
+
+    live_resume_arguments = {
+        "dispatch_id": claimed.dispatch_id,
+        "retry_action_id": retry_receipt.action_id,
+        "retry_receipt_id": retry_receipt.receipt_id,
+        "retry_receipt_sha256": retry_receipt.receipt_sha256,
+        "run_id": "run-resume-live",
+    }
+    live_resume_parent = await kernel.permission_store.issue(
+        request_id="request-resume-live",
+        session_id="session-live",
+        run_id="run-resume-live",
+        call_id="call-resume-live",
+        agent_name="recovery-operator",
+        tool_name="harness_eval_sandbox_resume",
+        tool_family="harness_eval_execution",
+        arguments=live_resume_arguments,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=NOW,
+    )
+    service._authorization_receipt_provider = lambda: live_resume_parent
+    with pytest.raises(HarnessSandboxBatchError) as live_error:
+        await service.resume_sandbox_retry(
+            retry_action_id=retry_receipt.action_id,
+            dispatch_id=claimed.dispatch_id,
+            retry_receipt_id=retry_receipt.receipt_id,
+            retry_receipt_sha256=retry_receipt.receipt_sha256,
+        )
+    assert live_error.value.code == "sandbox_batch_retry_dispatch_fenced"
+    still_live = await store.get_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_receipt.action_id,
+    )
+    assert still_live == claimed
+
+    resumed_at = "2026-07-23T00:00:03+00:00"
+    admission._now = lambda: resumed_at
+    executor.now = lambda: resumed_at
+    executor.coordinator.now = lambda: resumed_at
+    kernel.validation_now = resumed_at
+    resume_arguments = {
+        "dispatch_id": claimed.dispatch_id,
+        "retry_action_id": retry_receipt.action_id,
+        "retry_receipt_id": retry_receipt.receipt_id,
+        "retry_receipt_sha256": retry_receipt.receipt_sha256,
+        "run_id": "run-resume-1",
+    }
+    resume_parent = await kernel.permission_store.issue(
+        request_id="request-resume-1",
+        session_id="session-2",
+        run_id="run-resume-1",
+        call_id="call-resume-1",
+        agent_name="recovery-operator",
+        tool_name="harness_eval_sandbox_resume",
+        tool_family="harness_eval_execution",
+        arguments=resume_arguments,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=resumed_at,
+    )
+    service._authorization_receipt_provider = lambda: resume_parent
+    progress: list[HarnessSandboxBatchCheckpoint] = []
+
+    async def capture_resume(checkpoint: HarnessSandboxBatchCheckpoint) -> None:
+        progress.append(checkpoint)
+
+    completed = await service.resume_sandbox_retry(
+        retry_action_id=retry_receipt.action_id,
+        dispatch_id=claimed.dispatch_id,
+        retry_receipt_id=retry_receipt.receipt_id,
+        retry_receipt_sha256=retry_receipt.receipt_sha256,
+        on_progress=capture_resume,
+    )
+
+    restored_receipt = await store.get_sandbox_admission_retry(
+        workspace_root=service.workspace_root,
+        action_id=retry_receipt.action_id,
+    )
+    restored_dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_receipt.action_id,
+    )
+    request = await _request(service)
+    records = await store.list_eval_results(
+        service.workspace_root,
+        request.batch_id,
+        request.suite_id,
+    )
+
+    assert restored_receipt == retry_receipt
+    assert restored_dispatch is not None
+    assert restored_dispatch.state == "completed"
+    assert restored_dispatch.epoch == 2
+    assert restored_dispatch.ticket_id != first_ticket.ticket_id
+    assert completed.persisted_samples == 5
+    assert [item.sample_index for item in records] == list(range(5))
+    assert progress[0].stage == "admitted"
+    assert progress[0].persisted_samples == 2
+    assert progress[-1].stage == "completed"
+
+
+@pytest.mark.asyncio
+async def test_retry_terminalizes_pending_dispatch_when_h5a_is_already_complete(
+    tmp_path: Path,
+) -> None:
+    service, store, _grant_authority, kernel, _parent = await _runtime(
+        tmp_path,
+        durable_admission=True,
+    )
+    completed_original = await service.eval_sandbox(
+        check_ids=("unit",),
+        samples=5,
+        batch_id="batch-1",
+    )
+    assert completed_original.persisted_samples == 5
+    assert len(kernel.calls) == 5
+    request = await _request(service)
+    admission = service._sandbox_eval_executor.coordinator.admission
+    source = await store.enqueue_sandbox_admission(
+        workspace_root=service.workspace_root,
+        ticket_id=f"hsadm_{'5' * 24}",
+        authority_key=request.request_sha256,
+        lane="sandbox",
+        requested_samples=5,
+        owner_id="complete-prefix-source",
+        now=NOW,
+        lease_seconds=30,
+        max_active=admission.max_active,
+        max_queued=admission.max_queued,
+    )
+    cancel, _ = await store.cancel_sandbox_admission(
+        workspace_root=service.workspace_root,
+        action_id=f"hsac_{'6' * 24}",
+        ticket_id=source.ticket_id,
+        authority_key=source.authority_key,
+        epoch=source.epoch,
+        expected_state=source.state,
+        actor_id="complete-prefix-user",
+        reason="验证完整 H5a 不重复执行",
+        now=NOW,
+    )
+    retry_arguments = {
+        "cancel_receipt_id": cancel.receipt_id,
+        "cancel_receipt_sha256": cancel.receipt_sha256,
+        "reason": "完整 H5a 仅结束 dispatch",
+        "retry_action_id": f"hsar_{'7' * 24}",
+        "run_id": "run-complete-prefix",
+    }
+    retry_parent = await kernel.permission_store.issue(
+        request_id="request-complete-prefix",
+        session_id="session-complete-prefix",
+        run_id="run-complete-prefix",
+        call_id="call-complete-prefix",
+        agent_name="main",
+        tool_name="harness_eval_sandbox_retry",
+        tool_family="harness_eval_execution",
+        arguments=retry_arguments,
+        outcome=PermissionDecisionOutcome.POLICY_ALLOWED,
+        actor=PermissionDecisionActor.RUNTIME,
+        source=PermissionDecisionSource.POLICY,
+        permission_mode=PermissionMode.BYPASS,
+        risk_level="medium",
+        delegated_tool_names=("bash_run",),
+        decided_at=NOW,
+    )
+    service._authorization_receipt_provider = lambda: retry_parent
+
+    completed_retry = await service.retry_sandbox(
+        retry_action_id=retry_arguments["retry_action_id"],
+        cancel_receipt_id=retry_arguments["cancel_receipt_id"],
+        cancel_receipt_sha256=retry_arguments["cancel_receipt_sha256"],
+        reason=retry_arguments["reason"],
+    )
+    dispatch = await store.get_sandbox_retry_dispatch(
+        workspace_root=service.workspace_root,
+        retry_action_id=retry_arguments["retry_action_id"],
+    )
+
+    assert completed_retry == completed_original
+    assert len(kernel.calls) == 5
+    assert dispatch is not None
+    assert dispatch.state == "completed"
+    assert dispatch.epoch == 1
+    assert dispatch.ticket_id
