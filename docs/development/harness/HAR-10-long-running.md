@@ -143,8 +143,11 @@
   - HAR-10.8b 已实现：Pursuit 主循环使用内容寻址的机械边界裁判统一完成、等待、阻塞、取消和三类预算
     越界；完整决策持久化并由 Goal New UI 与 TUI/CLI fallback 展示。没有持久任务引用的 waiting
     失败关闭；见 [设计](HAR-10-8b-mechanical-terminal-decision.md)。
-  - 未完成：resume/reconcile/checkpoint-error 全分支接入、跨 Store 原子 terminal commit 与 A5
-    故障/soak 验证。
+  - HAR-10.8c 已实现：resume/reconcile/checkpoint-error 生产分支使用 schema 2 恢复事实与同一裁判；
+    durable pending interaction 正确进入 waiting，冲突 authority 失败关闭，同时保持 schema 1
+    哈希、Store 重存和 New UI 读取兼容；见
+    [设计](HAR-10-8c-recovery-boundary-decisions.md)。
+  - 未完成：跨 Store 原子 terminal commit/recovery attempt ledger 与 A5 故障/soak 验证。
 
 ## 与 Pursuit 的合并原则
 

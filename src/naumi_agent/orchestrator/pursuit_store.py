@@ -153,15 +153,22 @@ class PursuitStore:
                 )
                 stored = conn.execute(
                     """
-                    SELECT payload_sha256
+                    SELECT *
                     FROM pursuit_boundary_decisions
                     WHERE run_id = ? AND decision_id = ?
                     """,
                     (run.id, decision.decision_id),
                 ).fetchone()
-                if stored is None or not hmac.compare_digest(
-                    str(stored["payload_sha256"]),
-                    payload_digest,
+                if stored is None:
+                    raise PursuitStoreConflictError(
+                        "boundary decision 写入后缺少持久记录。"
+                    )
+                if (
+                    not hmac.compare_digest(
+                        str(stored["payload_sha256"]),
+                        payload_digest,
+                    )
+                    and _boundary_decision_from_row(stored) != decision
                 ):
                     raise PursuitStoreConflictError(
                         "相同 boundary decision identity 对应不同 payload。"

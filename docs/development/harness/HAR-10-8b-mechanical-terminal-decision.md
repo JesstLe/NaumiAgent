@@ -9,6 +9,9 @@
 本切片承接 HAR-10.8a 的定向验证策略：10.8a 决定哪些验证命令可运行，10.8b 决定这些机械事实
 允许运行进入哪个边界状态。
 
+HAR-10.8c 已在不改变本切片主循环语义的前提下，把恢复事实升级为 schema 2，并保持 schema 1
+读取/重存兼容；见 [恢复裁判](HAR-10-8c-recovery-boundary-decisions.md)。
+
 ## 权威合同
 
 `src/naumi_agent/orchestrator/pursuit_terminal.py` 定义：
@@ -143,9 +146,9 @@ node --test frontend/terminal-ui/test/goal-pursuit-page.test.js
 - 裁判已进入真实 Pursuit 主循环，不是只生成报告的旁路工具。
 - 决策表提供内容完整性和历史读取，但 PursuitRun、checkpoint 与 boundary decision 仍不是跨表单条
   SQL 事务；lease fencing 降低竞态，真正跨 Store 原子提交仍属于 HAR-10.1/10.4 后续。
-- 恢复流程中的 `checkpoint_required`、`reconcile_required` 等历史分支尚未全部改用该裁判；本切片只
-  接入新运行主循环、后台等待和 interaction 生产路径。
+- 本切片交付时尚未迁移的 `checkpoint_required`、`reconcile_required`、interaction recovery 和
+  checkpoint-error 分支，现已由 HAR-10.8c 接入同一裁判。
 - `failed` 仍保留为旧 PursuitRun 兼容状态，但 HAR-10.8b 不生成新的 `failed` 裁判；可恢复失败应
   blocked，不可恢复预算/取消使用各自明确状态。
-- 下一小切片应把 resume/reconcile/checkpoint-error 的阻塞分支接入同一裁判，再建立跨 Store 原子
-  terminal commit；不应直接跳到 24 小时 soak。
+- 下一小切片应建立跨 Store terminal commit/outbox 或 recovery attempt ledger；不应直接跳到
+  24 小时 soak。

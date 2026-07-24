@@ -25,7 +25,7 @@ test("Goal page exposes shared interaction detail command for every state", () =
           failure_count: 0,
           next_action: "等待回答",
           boundary_decision: {
-            schema_version: 1,
+            schema_version: 2,
             decision_id: "a".repeat(64),
             facts_sha256: "b".repeat(64),
             status: "waiting",

@@ -26,7 +26,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from naumi_agent.orchestrator.pursuit_action_ledger import (
     PursuitActionRecord,
@@ -104,6 +104,11 @@ class PursuitInteractionContext:
 _PURSUIT_INTERACTION_CONTEXT: ContextVar[PursuitInteractionContext | None] = (
     ContextVar("naumi_pursuit_interaction_context", default=None)
 )
+
+
+def _boundary_safe_detail(value: object) -> str:
+    """Return one redacted, single-line detail accepted by boundary facts."""
+    return " ".join(checkpoint_safe_text(value, limit=300).split())[:300]
 
 
 def current_pursuit_interaction_context() -> PursuitInteractionContext | None:
@@ -383,6 +388,19 @@ class PursuitBackgroundWait:
     action_id: str
     command: str
     created_at: float
+
+
+InteractionRecoveryDisposition = Literal["none", "waiting", "blocked"]
+
+
+@dataclass(frozen=True)
+class PursuitInteractionRecovery:
+    """Typed result of reconciling one checkpoint interaction authority."""
+
+    checkpoint: PursuitCheckpoint
+    disposition: InteractionRecoveryDisposition
+    detail: str = ""
+    phase: str = "interaction_required"
 
 
 @dataclass
@@ -708,6 +726,7 @@ class GoalPursuitLoop:
         decision = decide_pursuit_boundary(self._run_boundary_facts(
             waiting_kind="interaction",
             waiting_count=1,
+            waiting_detail=f"目标正在等待交互 {interaction_id} 的用户回答。",
         ))
         self._last_stop_decision = decision
         self._apply_boundary_decision(
@@ -907,13 +926,15 @@ class GoalPursuitLoop:
         """Best-effort honest run state when checkpoint durability is lost."""
         if self._run is None:
             return
-        self._run.status = PursuitRunStatus.BLOCKED
-        self._run.phase = "checkpoint_error"
-        self._run.blocked_reason = str(error)
-        self._run.next_action = "审查持久化错误后重新启动目标追踪。"
-        self._run.updated_at = time.time()
+        decision = decide_pursuit_boundary(self._run_boundary_facts(
+            blocker="checkpoint_persistence_error",
+            blocker_detail=(
+                f"checkpoint 持久化失败（{type(error).__name__}）。"
+            ),
+        ))
+        self._last_stop_decision = decision
         try:
-            self._persist_run()
+            self._apply_boundary_decision(decision, phase="checkpoint_error")
         except Exception:
             logger.exception("Failed to persist checkpoint_error PursuitRun state")
 
@@ -1047,54 +1068,60 @@ class GoalPursuitLoop:
     async def _reconcile_persisted_interaction(
         self,
         checkpoint: PursuitCheckpoint,
-    ) -> tuple[PursuitCheckpoint, str, str]:
+    ) -> PursuitInteractionRecovery:
         """Resolve one stable authority reference before any resumed model turn."""
         pending = checkpoint.pending_interaction
         if pending is None:
-            return checkpoint, "", ""
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="none",
+            )
         if not isinstance(pending, CheckpointInteractionRef):
-            return (
-                checkpoint,
-                "旧版 checkpoint 仅保存了交互正文，缺少 durable authority 引用。",
-                "interaction_required",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="blocked",
+                detail="旧版 checkpoint 仅保存了交互正文，缺少 durable authority 引用。",
             )
         if self._interaction_port is None or self._workspace_root is None:
-            return (
-                checkpoint,
-                "持久 interaction authority 未接入，拒绝猜测用户答案。",
-                "interaction_required",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="blocked",
+                detail="持久 interaction authority 未接入，拒绝猜测用户答案。",
             )
         record = await self._interaction_port.get_interaction(
             workspace_root=self._workspace_root,
             interaction_id=pending.interaction_id,
         )
         if record is None:
-            return (
-                checkpoint,
-                "checkpoint 引用的持久 interaction 不存在。",
-                "interaction_required",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="blocked",
+                detail="checkpoint 引用的持久 interaction 不存在。",
             )
         if record.subject_kind != "pursuit" or (
             self._run is None or record.subject_id != self._run.id
         ):
-            return (
-                checkpoint,
-                "interaction subject 与当前 PursuitRun 不一致。",
-                "interaction_required",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="blocked",
+                detail="interaction subject 与当前 PursuitRun 不一致。",
             )
         if record.state == "pending":
-            return (
-                checkpoint,
-                f"目标仍在等待交互 {record.interaction_id} 的用户回答。",
-                "interaction_required",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="waiting",
+                detail=f"目标仍在等待交互 {record.interaction_id} 的用户回答。",
             )
         if record.state in {"expired", "cancelled"}:
             terminal_label = "超时" if record.state == "expired" else "取消"
-            return (
-                checkpoint,
-                f"交互 {record.interaction_id} 已{terminal_label}，"
-                "需要用户重新决定后才能继续。",
-                "interaction_expired",
+            return PursuitInteractionRecovery(
+                checkpoint=checkpoint,
+                disposition="blocked",
+                detail=(
+                    f"交互 {record.interaction_id} 已{terminal_label}，"
+                    "需要用户重新决定后才能继续。"
+                ),
+                phase="interaction_expired",
             )
         if self._store is None or self._run is None:
             raise PursuitCheckpointPersistenceError("Pursuit 持久存储未初始化。")
@@ -1125,7 +1152,10 @@ class GoalPursuitLoop:
         self._store.save_checkpoint(resolved)
         self._checkpoint_sequence = resolved.sequence
         self._pending_interaction = None
-        return resolved, "", ""
+        return PursuitInteractionRecovery(
+            checkpoint=resolved,
+            disposition="none",
+        )
 
     async def _reconcile_inflight_checkpoint(
         self,
@@ -1178,22 +1208,17 @@ class GoalPursuitLoop:
                 for item in decision.waits
             ]
             self._run.waiting_on = list(self._pending_background)
-            self._run.status = PursuitRunStatus.WAITING
-            self._run.phase = "waiting"
-            self._run.blocked_reason = ""
-            self._run.next_action = "等待已核对的后台任务完成后再次恢复。"
-            self._run.updated_at = time.time()
-            self._persist_run()
+            self._record_waiting(
+                kind="background",
+                count=len(self._pending_background),
+            )
             # The resume tail writes the single authoritative waiting checkpoint.
             return checkpoint, ""
 
-        self._run.status = PursuitRunStatus.RUNNING
-        self._run.phase = "action_result"
-        self._run.blocked_reason = ""
-        self._run.next_action = "已核对上轮行动；从最新状态重新评估。"
         self._run.waiting_on = []
-        self._run.updated_at = time.time()
-        self._persist_run()
+        running = decide_pursuit_boundary(self._current_boundary_facts())
+        self._last_stop_decision = running
+        self._apply_boundary_decision(running, phase="action_result")
         return self._persist_reconciled_checkpoint(checkpoint), ""
 
     def _apply_reconcile_action_updates(
@@ -1291,6 +1316,11 @@ class GoalPursuitLoop:
             return f"目标追踪已处于终态 {run.status.value}，无需恢复。"
 
         self._run = run
+        self._current_spec = None
+        self._pending_actions = []
+        self._pending_interaction = None
+        self._checkpoint_sequence = checkpoint.sequence if checkpoint is not None else 0
+        self._last_stop_decision = run.boundary_decision
         self._pending_background = list(run.waiting_on or [])
         interaction_token = _PURSUIT_INTERACTION_CONTEXT.set(
             PursuitInteractionContext(
@@ -1306,54 +1336,113 @@ class GoalPursuitLoop:
                 await self._collect_background_results()
 
             reconcile_blocker = ""
-            interaction_blocker = ""
-            interaction_phase = "interaction_required"
+            interaction_recovery: PursuitInteractionRecovery | None = None
             if checkpoint is not None:
                 checkpoint, reconcile_blocker = (
                     await self._reconcile_inflight_checkpoint(checkpoint)
                 )
-                checkpoint, interaction_blocker, interaction_phase = (
-                    await self._reconcile_persisted_interaction(checkpoint)
+                interaction_recovery = await self._reconcile_persisted_interaction(
+                    checkpoint
                 )
+                checkpoint = interaction_recovery.checkpoint
 
             await self._require_run_lease("resume-commit")
+            if (
+                self._pending_background
+                and interaction_recovery is not None
+                and interaction_recovery.disposition != "none"
+            ):
+                decision = decide_pursuit_boundary(self._run_boundary_facts(
+                    blocker="resume_inconsistent",
+                    blocker_detail=(
+                        "恢复状态同时包含后台等待与交互恢复事实，"
+                        "不能选择单一可恢复边界。"
+                    ),
+                ))
+                await self._record_recovery_boundary_owned(
+                    decision,
+                    phase="reconcile_required",
+                )
+                from naumi_agent.orchestrator.pursuit_store import format_run
+
+                return "目标追踪未继续执行，已安全停在恢复边界。\n\n" + format_run(
+                    self._run
+                )
             if self._pending_background and not reconcile_blocker:
                 self._record_waiting(
                     kind="background",
                     count=len(self._pending_background),
                 )
-            elif checkpoint is None:
-                self._run.status = PursuitRunStatus.BLOCKED
-                self._run.phase = "checkpoint_required"
-                self._run.blocked_reason = (
-                    "后台结果已回收，但当前记录不含可恢复执行 checkpoint，"
-                    "不能伪装成正在运行。"
+            elif (
+                interaction_recovery is not None
+                and interaction_recovery.disposition == "waiting"
+            ):
+                self._pending_interaction = checkpoint.pending_interaction
+                decision = decide_pursuit_boundary(self._run_boundary_facts(
+                    waiting_kind="interaction",
+                    waiting_count=1,
+                    waiting_detail=interaction_recovery.detail,
+                ))
+                self._last_stop_decision = decision
+                self._apply_boundary_decision(
+                    decision,
+                    phase=interaction_recovery.phase,
+                    waiting_reason=True,
                 )
-                self._run.next_action = "等待 HAR-10.4 checkpoint 恢复，或审查证据后重新启动追踪。"
+            elif checkpoint is None:
                 self._run.waiting_on = []
-                self._run.updated_at = time.time()
-                self._persist_run()
+                decision = decide_pursuit_boundary(self._run_boundary_facts(
+                    blocker="checkpoint_required",
+                    blocker_detail=(
+                        "当前运行记录不含可验证的恢复 checkpoint，"
+                        "不能猜测上次执行位置或伪装成正在运行。"
+                    ),
+                ))
+                await self._record_recovery_boundary_owned(
+                    decision,
+                    phase="checkpoint_required",
+                )
             else:
                 blocker = self._checkpoint_resume_blocker(
                     checkpoint,
                     reconcile_blocker=reconcile_blocker,
-                    interaction_blocker=interaction_blocker,
+                    interaction_blocker=(
+                        interaction_recovery.detail
+                        if interaction_recovery is not None
+                        and interaction_recovery.disposition == "blocked"
+                        else ""
+                    ),
                 )
                 if blocker:
-                    self._run.status = PursuitRunStatus.BLOCKED
-                    self._run.phase = (
-                        interaction_phase
-                        if checkpoint.pending_interaction is not None
-                        else "reconcile_required"
+                    if checkpoint.pending_interaction is not None:
+                        blocker_kind: BlockerKind = (
+                            "interaction_terminal"
+                            if interaction_recovery is not None
+                            and interaction_recovery.phase == "interaction_expired"
+                            else "interaction_required"
+                        )
+                        blocker_phase = (
+                            interaction_recovery.phase
+                            if interaction_recovery is not None
+                            else "interaction_required"
+                        )
+                    elif reconcile_blocker or (
+                        self._run.phase == "action_inflight"
+                        or checkpoint.phase in {"action_inflight", "execute"}
+                    ):
+                        blocker_kind = "reconcile_required"
+                        blocker_phase = "reconcile_required"
+                    else:
+                        blocker_kind = "checkpoint_inconsistent"
+                        blocker_phase = "checkpoint_inconsistent"
+                    decision = decide_pursuit_boundary(self._run_boundary_facts(
+                        blocker=blocker_kind,
+                        blocker_detail=_boundary_safe_detail(blocker),
+                    ))
+                    await self._record_recovery_boundary_owned(
+                        decision,
+                        phase=blocker_phase,
                     )
-                    self._run.blocked_reason = blocker
-                    self._run.next_action = (
-                        "等待用户回答后继续。"
-                        if checkpoint.pending_interaction is not None
-                        else "使用 HAR-10.5 核对外部任务状态后再恢复。"
-                    )
-                    self._run.updated_at = time.time()
-                    self._persist_run()
                     from naumi_agent.orchestrator.pursuit_store import format_run
 
                     return "目标追踪未继续执行，已安全停在恢复边界。\n\n" + format_run(
@@ -1361,14 +1450,13 @@ class GoalPursuitLoop:
                     )
 
                 spec = self._restore_checkpoint_state(checkpoint)
-                self._run.status = PursuitRunStatus.RUNNING
-                self._run.phase = "resume"
-                self._run.blocked_reason = ""
-                self._run.next_action = "从 checkpoint 恢复后重新评估当前状态。"
                 self._run.waiting_on = []
-                self._run.updated_at = time.time()
                 self._pending_background = []
-                self._persist_run()
+                running = decide_pursuit_boundary(
+                    self._spec_boundary_facts(spec)
+                )
+                self._last_stop_decision = running
+                self._apply_boundary_decision(running, phase="resume")
                 self._persist_checkpoint(spec, pending_actions=[])
                 resume_epoch = self._lease_session.epoch if self._lease_session else 0
                 self._resume_checkpoint_id = checkpoint.checkpoint_id()
@@ -1461,6 +1549,27 @@ class GoalPursuitLoop:
         )
         self._persist_checkpoint(pending_actions=[])
 
+    async def _record_recovery_boundary_owned(
+        self,
+        decision: PursuitBoundaryDecision,
+        *,
+        phase: str,
+        waiting_reason: bool = False,
+    ) -> None:
+        """Fence a resume decision without rewriting an untrusted checkpoint."""
+        lease_boundary = (
+            f"terminal-{decision.status}"
+            if decision.terminal
+            else f"boundary-{decision.code}"
+        )
+        await self._require_run_lease(lease_boundary)
+        self._last_stop_decision = decision
+        self._apply_boundary_decision(
+            decision,
+            phase=phase,
+            waiting_reason=waiting_reason,
+        )
+
     def _record_waiting(
         self,
         *,
@@ -1534,7 +1643,9 @@ class GoalPursuitLoop:
         budget_breach: BudgetBreach = "none",
         waiting_kind: WaitingKind = "none",
         waiting_count: int = 0,
+        waiting_detail: str = "",
         blocker: BlockerKind = "none",
+        blocker_detail: str = "",
     ) -> PursuitBoundaryFacts:
         """Build bounded facts from the current persisted summary."""
         run = self._run
@@ -1553,19 +1664,34 @@ class GoalPursuitLoop:
                 verified_count,
                 criterion_count,
             ),
+            criteria_state="known" if criterion_count > 0 else "unknown",
             final_verification=final_verification,
             cancel_requested=cancel_requested,
             budget_breach=budget_breach,
             waiting_kind=waiting_kind,
             waiting_count=waiting_count,
+            waiting_detail=waiting_detail,
             blocker=blocker,
+            blocker_detail=blocker_detail,
         )
 
-    def _current_boundary_facts(self) -> PursuitBoundaryFacts:
+    def _current_boundary_facts(
+        self,
+        *,
+        blocker: BlockerKind = "none",
+        blocker_detail: str = "",
+    ) -> PursuitBoundaryFacts:
         """Prefer exact live criteria and otherwise fail closed on persisted evidence."""
         if self._current_spec is not None:
-            return self._spec_boundary_facts(self._current_spec)
-        return self._run_boundary_facts()
+            return self._spec_boundary_facts(
+                self._current_spec,
+                blocker=blocker,
+                blocker_detail=blocker_detail,
+            )
+        return self._run_boundary_facts(
+            blocker=blocker,
+            blocker_detail=blocker_detail,
+        )
 
     def _spec_boundary_facts(
         self,
@@ -1576,7 +1702,9 @@ class GoalPursuitLoop:
         budget_breach: BudgetBreach = "none",
         waiting_kind: WaitingKind = "none",
         waiting_count: int = 0,
+        waiting_detail: str = "",
         blocker: BlockerKind = "none",
+        blocker_detail: str = "",
     ) -> PursuitBoundaryFacts:
         """Build exact criterion facts without trusting model convergence text."""
         verified = sum(
@@ -1597,7 +1725,9 @@ class GoalPursuitLoop:
             budget_breach=budget_breach,
             waiting_kind=waiting_kind,
             waiting_count=waiting_count,
+            waiting_detail=waiting_detail,
             blocker=blocker,
+            blocker_detail=blocker_detail,
         )
 
     def _record_checkpoint_evidence(self, checkpoint: IterationCheckpoint) -> None:
@@ -1761,13 +1891,9 @@ class GoalPursuitLoop:
                 self._last_stop_decision = decision
                 self._apply_boundary_decision(decision, phase="assess")
             else:
-                # Legacy/incomplete snapshots do not contain enough facts for a
-                # new authenticated decision. Resume conservatively without
-                # inventing criterion evidence.
-                self._run.status = PursuitRunStatus.RUNNING
-                self._run.phase = "assess"
-                self._run.blocked_reason = ""
-                self._run.updated_at = time.time()
+                decision = decide_pursuit_boundary(self._run_boundary_facts())
+                self._last_stop_decision = decision
+                self._apply_boundary_decision(decision, phase="assess")
         self._persist_run()
 
     async def _run_background_query_tool(

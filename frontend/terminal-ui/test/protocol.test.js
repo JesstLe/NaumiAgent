@@ -1583,7 +1583,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
     blocked_reason: "",
     next_action: "等待用户选择",
     boundary_decision: {
-      schema_version: 1,
+      schema_version: 2,
       decision_id: "a".repeat(64),
       facts_sha256: "b".repeat(64),
       status: "waiting",
@@ -1728,6 +1728,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
     normalized.goals[0].pursuit.boundary_decision.code,
     "waiting_for_interaction",
   );
+  assert.equal(normalized.goals[0].pursuit.boundary_decision.schema_version, 2);
   assert.equal(
     Object.hasOwn(
       normalized.goals[0].pursuit.boundary_decision,
@@ -1847,6 +1848,64 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /terminal/,
+  );
+  const legacyBoundary = normalizeServerRecord({
+    type: "goals/snapshot",
+    payload: {
+      ...normalized,
+      goals: [{
+        ...goal,
+        pursuit: {
+          ...pursuit,
+          boundary_decision: {
+            ...pursuit.boundary_decision,
+            schema_version: 1,
+          },
+        },
+      }],
+    },
+  }).payload;
+  assert.equal(
+    legacyBoundary.goals[0].pursuit.boundary_decision.schema_version,
+    1,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{
+          ...goal,
+          pursuit: {
+            ...pursuit,
+            boundary_decision: {
+              ...pursuit.boundary_decision,
+              schema_version: 3,
+            },
+          },
+        }],
+      },
+    }),
+    /schema_version/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{
+          ...goal,
+          pursuit: {
+            ...pursuit,
+            boundary_decision: {
+              ...pursuit.boundary_decision,
+              reason: "x".repeat(301),
+            },
+          },
+        }],
+      },
+    }),
+    /长度/,
   );
 });
 
