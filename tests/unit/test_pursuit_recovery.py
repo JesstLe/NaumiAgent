@@ -16,6 +16,7 @@ from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointGoal,
     PursuitCheckpoint,
 )
+from naumi_agent.orchestrator.pursuit_recovery_attempt import new_recovery_attempt
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.ui.pursuit_recovery import build_pursuit_recovery_snapshot
 
@@ -131,6 +132,9 @@ async def test_active_snapshot_combines_real_heartbeat_lease_and_checkpoint(
     assert snapshot.heartbeat.epoch == snapshot.lease.epoch == 1
     assert snapshot.checkpoint.status == "ready"
     assert snapshot.checkpoint.checkpoint_id == checkpoint.checkpoint_id()
+    assert snapshot.resume_action.state == "busy"
+    assert snapshot.resume_action.code == "live_worker"
+    assert snapshot.attempts == ()
     assert snapshot.alerts == ()
 
 
@@ -152,6 +156,8 @@ async def test_running_without_authorities_is_explicitly_orphaned(tmp_path) -> N
     assert snapshot.heartbeat.health == "missing"
     assert snapshot.lease.status == "missing"
     assert snapshot.checkpoint.status == "missing"
+    assert snapshot.resume_action.state == "blocked"
+    assert snapshot.resume_action.code == "checkpoint_required"
     assert any("live lease" in item for item in snapshot.alerts)
 
 
@@ -222,6 +228,8 @@ async def test_reconcile_boundary_and_reason_have_priority(tmp_path) -> None:
     assert snapshot.recovery_state == "reconcile_required"
     assert snapshot.reconcile_required is True
     assert snapshot.reconcile_reason == "stale_preparing"
+    assert snapshot.resume_action.state == "blocked"
+    assert snapshot.resume_action.code == "reconcile_required"
 
 
 @pytest.mark.asyncio
@@ -248,8 +256,82 @@ async def test_checkpoint_error_is_bounded_and_does_not_leak_exception(
 
     assert snapshot.recovery_state == "waiting"
     assert snapshot.checkpoint.status == "error"
+    assert snapshot.resume_action.state == "blocked"
+    assert snapshot.resume_action.code == "checkpoint_invalid"
     assert "private database path" not in str(snapshot.model_dump())
     assert any("Checkpoint 校验失败" in item for item in snapshot.alerts)
+
+
+@pytest.mark.asyncio
+async def test_waiting_checkpoint_projects_resume_action_and_safe_attempt_history(
+    tmp_path,
+) -> None:
+    store = PursuitStore(tmp_path / "pursuit")
+    run = _run(status=PursuitRunStatus.WAITING, phase="waiting")
+    store.save_run(run)
+    store.save_checkpoint(_checkpoint(phase="waiting"))
+    requested, created = store.prepare_recovery_attempt(new_recovery_attempt(
+        run_id=run.id,
+        source_request_id="private-ui-request-id",
+        requested_at=5.0,
+    ))
+    assert created is True
+    resolved = store.resolve_recovery_attempt(
+        requested.attempt_id,
+        resolved_at=6.0,
+        result_code="operation_busy",
+    )
+
+    snapshot = await build_pursuit_recovery_snapshot(
+        run,
+        store,
+        None,
+        workspace_root=tmp_path,
+        now=T4,
+    )
+    payload = snapshot.model_dump(mode="json")
+
+    assert snapshot.schema_version == 2
+    assert snapshot.resume_action.state == "available"
+    assert snapshot.resume_action.code == "resume_ready"
+    assert snapshot.resume_action.command == f"/pursue resume {run.id}"
+    assert len(snapshot.attempts) == 1
+    assert snapshot.attempts[0].attempt_id == resolved.attempt_id
+    assert snapshot.attempts[0].state == "resolved"
+    assert snapshot.attempts[0].result_code == "operation_busy"
+    assert "source_request_sha256" not in str(payload)
+    assert "private-ui-request-id" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_attempt_ledger_failure_blocks_resume_without_leaking_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = PursuitStore(tmp_path / "pursuit")
+    run = _run(status=PursuitRunStatus.WAITING, phase="waiting")
+    store.save_run(run)
+    store.save_checkpoint(_checkpoint(phase="waiting"))
+    monkeypatch.setattr(
+        store,
+        "list_recovery_attempts",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("private attempt payload")
+        ),
+    )
+
+    snapshot = await build_pursuit_recovery_snapshot(
+        run,
+        store,
+        None,
+        workspace_root=tmp_path,
+        now=T4,
+    )
+
+    assert snapshot.resume_action.state == "blocked"
+    assert snapshot.resume_action.code == "attempt_ledger_unavailable"
+    assert snapshot.attempts == ()
+    assert "private attempt payload" not in str(snapshot.model_dump())
 
 
 @pytest.mark.asyncio

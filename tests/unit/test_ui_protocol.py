@@ -584,6 +584,25 @@ def test_protocol_normalizes_workbench_proposal_actions() -> None:
     }
 
 
+def test_protocol_normalizes_pursuit_recovery_resume() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+        "payload": {
+            "run_id": " pursuit-recovery:1 ",
+            "private_field": "drop",
+        },
+    })
+
+    assert record["payload"] == {"run_id": "pursuit-recovery:1"}
+
+    for run_id in ("", "space is invalid", "x" * 129):
+        with pytest.raises(ValueError, match="run_id"):
+            normalize_client_record({
+                "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+                "payload": {"run_id": run_id},
+            })
+
+
 @pytest.mark.parametrize(
     "payload",
     [

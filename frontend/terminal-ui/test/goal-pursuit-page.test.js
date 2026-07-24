@@ -136,3 +136,61 @@ test("Goal page highlights ledger selection and renders typed detail", () => {
   assert.match(lines, /owner 租约已过期/);
   assert.match(lines, /n 下一页/);
 });
+
+test("Goal page renders authority-owned resume action and attempt state", () => {
+  const lines = renderGoalPursuitPage({
+    recoveryActionPending: false,
+    recoveryActionNotice: "恢复请求已准入。",
+    snapshot: {
+      current_goal_id: "goal-1",
+      goals: [{
+        goal_id: "goal-1",
+        objective: "恢复长期任务",
+        status: "active",
+        session_id: "session-1",
+        updated_at: "now",
+        pursuit_link_status: "ready",
+        pursuit: {
+          run_id: "pursuit-1",
+          status: "waiting",
+          phase: "waiting",
+          criteria_verified: 0,
+          criteria_total: 1,
+          iteration: 1,
+          failure_count: 0,
+          next_action: "继续",
+          waits: [],
+          evidence: [],
+          recovery: {
+            recovery_state: "waiting",
+            heartbeat: { health: "missing", instance_id: "", sequence: 0, age_seconds: 0 },
+            lease: { status: "missing", owner_id: "", epoch: 0, expired: false },
+            checkpoint: { status: "ready", sequence: 2, phase: "waiting" },
+            reconcile_required: false,
+            alerts: [],
+            resume_action: {
+              state: "available",
+              code: "resume_ready",
+              reason: "Checkpoint 与恢复边界可验证。",
+              command: "/pursue resume pursuit-1",
+            },
+            attempts: [{
+              attempt_id: `recovery-${"a".repeat(64)}`,
+              state: "admitted",
+              result_code: "",
+              updated_at: "2026-07-24T00:00:00+00:00",
+            }],
+          },
+        },
+      }],
+      interactions: [],
+    },
+  }, 180, 32).map(stripAnsi).join("\n");
+
+  assert.match(lines, /x 恢复当前 Pursuit/);
+  assert.match(lines, /恢复请求已准入/);
+  assert.match(lines, /恢复动作 · 可恢复 · resume_ready/);
+  assert.match(lines, /\/pursue resume pursuit-1/);
+  assert.match(lines, /恢复请求 · 最近 1 项/);
+  assert.match(lines, /已准入/);
+});

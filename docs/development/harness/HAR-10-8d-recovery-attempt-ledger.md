@@ -130,5 +130,7 @@ pytest -q \
 - run 不存在时没有可满足外键的 recovery attempt；调用会在账本创建前返回明确错误。
 - 当前提供最近记录，不提供 cursor、retention 或跨 run catalog；这些应随 UI-18.5 的恢复历史设计推进。
 - 没有执行 A5 24 小时 soak、进程 kill 或跨平台故障矩阵，HAR-10 仍为 partial。
-- 下一切片是 UI-18.5b1：让 New UI/TUI 的受控恢复动作消费此 attempt authority，并显示
-  requested/admitted/terminal 回执；前端不得自行生成结果状态。
+- UI-18.5b1 已消费此 authority：New UI 的 typed resume 重新读取 Python 准入状态、通过
+  ToolExecution 发起并显示 requested/admitted/terminal 回执；TUI fallback 展示同源动作和共享命令。
+  前端不生成结果状态。后续仍需 terminal push/outbox、历史 cursor/retention 和 takeover/cleanup
+  的独立治理。

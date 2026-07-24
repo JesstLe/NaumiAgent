@@ -31,8 +31,11 @@
     [HAR-10.2b](../harness/HAR-10-2b-pursuit-recovery-snapshot.md)。
   - HAR-10.8d 前置已实现：resume 请求具备持久权限身份、幂等 attempt 事件链和 typed 结果码；见
     [HAR-10.8d](../harness/HAR-10-8d-recovery-attempt-ledger.md)。
-  - 未完成：UI-18.5b1 让 New UI/TUI 通过权威 ToolExecution 发起 resume 并消费 attempt 状态；
-    takeover/cleanup 与多 run cursor 历史仍属于后续切片。
+  - UI-18.5b1 已实现：New UI 通过协商后的 typed action 重新读取 Python 准入状态并调用
+    `pursuit_resume` ToolExecution；TUI fallback 展示同源动作、精确共享命令和最近 attempt，结果以
+    持久账本而非工具文案为准；见
+    [UI-18.5b1](UI-18-5b1-pursuit-recovery-action.md)。
+  - 未完成：takeover/cleanup、专用 attempt push stream 与多 run cursor 历史仍属于后续切片。
 - UI-18.6 TUI parity：Textual TUI 消费相同 snapshot/动作协议，以紧凑布局提供核心状态和操作。
 
 ## UI-18.1 已实现边界
@@ -78,12 +81,11 @@ implemented。
 
 ## 当前不足
 
-UI-18.1/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a 已提供类型化 Goal 快照、New UI/TUI durable
+UI-18.1/18.4a/18.4b/18.4c/18.4d1/18.4d2/18.4d3/18.5a/18.5b1 已提供类型化 Goal 快照、New UI/TUI durable
 interaction、显式取消、共享 interaction 详情、宿主绑定手动 takeover、交互账本分页/筛选和只读恢复事实，
-但不包含 Goal/Pursuit 写按钮、可展开完整证据时间线、交互优先级或 recovery action；这些分别属于
-UI-18.2/18.3/后续 Interaction UX/18.5b1。HAR-10.8d 已完成 recovery action 的 durable request
-authority，但尚未被前端动作消费。Pursuit wait/evidence 当前仍按最近有界集合显示。页面读取
-真实 lease、heartbeat、checkpoint，但不会据此自动恢复。UI-18 因此保持 partial。
+以及受控 resume 动作，但不包含 Goal/Pursuit 其余写按钮、可展开完整证据时间线、交互优先级、
+takeover/cleanup 或恢复历史 cursor；这些分别属于 UI-18.2/18.3/后续 Interaction UX/后续 Recovery UX。
+Pursuit wait/evidence 当前仍按最近有界集合显示。页面不会自动恢复。UI-18 因此保持 partial。
 
-HAR-10.2b 已组合并渲染 Pursuit recovery 权威事实；UI-18.5 仍需完成动作闭环，不能把只读观测标记为完整
-Recovery UX。
+HAR-10.2b 已组合并渲染 Pursuit recovery 权威事实，HAR-10.8d/UI-18.5b1 已完成 resume 动作闭环；
+剩余 takeover/cleanup、持续状态推送和历史治理未完成，不能把 UI-18 标记为完整。

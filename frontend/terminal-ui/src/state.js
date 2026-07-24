@@ -456,6 +456,11 @@ export function createInitialState() {
       interactionCursor: "",
       interactionCursorStack: [],
       selectedInteractionIndex: 0,
+      recoveryActionPending: false,
+      recoveryActionRunId: "",
+      recoveryActionRequestId: "",
+      recoveryActionNotice: "",
+      recoveryActionError: "",
     },
     evolutionReview: {
       loading: false,
@@ -890,6 +895,9 @@ export function reduceServerEvent(state, record) {
         Math.max(0, (payload.interactions?.length || 1) - 1),
       );
       break;
+    case "pursuit/recovery/action_result":
+      applyPursuitRecoveryActionResult(state, record, payload);
+      break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
       state.evolutionReview.loading = false;
@@ -1318,6 +1326,15 @@ export function reduceServerEvent(state, record) {
         limit: 20,
         includeFinished: true,
         scrollOffset: 0,
+        interactionFilter: "all",
+        interactionCursor: "",
+        interactionCursorStack: [],
+        selectedInteractionIndex: 0,
+        recoveryActionPending: false,
+        recoveryActionRunId: "",
+        recoveryActionRequestId: "",
+        recoveryActionNotice: "",
+        recoveryActionError: "",
       };
       if (wasGoalRoute) {
         state.route = { name: "conversation", originAnchor: null };
@@ -4312,12 +4329,16 @@ export function handleGoalPanelKey(state, key, send) {
   const lower = String(key || "").toLowerCase();
   if (
     state.goalPanel.loading
-    && ["r", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+    && ["r", "x", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
   ) {
     return true;
   }
   if (lower === "r") {
     requestGoalPanelPage(state, send);
+    return true;
+  }
+  if (lower === "x") {
+    requestCurrentPursuitRecovery(state, send);
     return true;
   }
   const interactions = state.goalPanel.snapshot?.interactions ?? [];
@@ -4389,6 +4410,81 @@ export function handleGoalPanelKey(state, key, send) {
     state.goalPanel.scrollOffset = 0;
   } else if ([INPUT_KEYS.end, INPUT_KEYS.endAlt, INPUT_KEYS.endSs3].includes(key)) {
     state.goalPanel.scrollOffset = Number.MAX_SAFE_INTEGER;
+  }
+  return true;
+}
+
+function requestCurrentPursuitRecovery(state, send) {
+  const goal = (state.goalPanel.snapshot?.goals ?? []).find(
+    (item) => item.goal_id === state.goalPanel.snapshot?.current_goal_id,
+  );
+  const pursuit = goal?.pursuit;
+  const action = pursuit?.recovery?.resume_action;
+  state.goalPanel.recoveryActionNotice = "";
+  state.goalPanel.recoveryActionError = "";
+  if (!pursuit || !action) {
+    state.goalPanel.recoveryActionError = "当前 Goal 没有可操作的 Pursuit 恢复事实。";
+    return false;
+  }
+  if (action.state !== "available") {
+    state.goalPanel.recoveryActionError = String(
+      action.reason || "当前状态不能安全恢复。",
+    );
+    return false;
+  }
+  if (state.goalPanel.recoveryActionPending) return false;
+  const capability = negotiatedEventCapabilityStatus(
+    state,
+    "client",
+    "pursuit/recovery/resume",
+  );
+  if (capability.status !== "available") {
+    state.goalPanel.recoveryActionNotice = (
+      capability.status === "pending"
+        ? "协议协商尚未完成，未发送恢复请求。"
+        : `当前 Bridge 不支持页内恢复；请使用 ${action.command}。`
+    );
+    return false;
+  }
+  const requestId = String(send(
+    "pursuit/recovery/resume",
+    { run_id: pursuit.run_id },
+  ) || "");
+  state.goalPanel.recoveryActionPending = true;
+  state.goalPanel.recoveryActionRunId = pursuit.run_id;
+  state.goalPanel.recoveryActionRequestId = requestId;
+  return true;
+}
+
+function applyPursuitRecoveryActionResult(state, record, payload) {
+  const pendingRunId = String(state.goalPanel.recoveryActionRunId || "");
+  if (pendingRunId && pendingRunId !== String(payload.run_id || "")) return false;
+  const pendingRequestId = String(state.goalPanel.recoveryActionRequestId || "");
+  if (
+    pendingRequestId
+    && String(record.request_id || "")
+    && pendingRequestId !== String(record.request_id)
+  ) return false;
+  state.goalPanel.recoveryActionPending = false;
+  state.goalPanel.recoveryActionRunId = "";
+  state.goalPanel.recoveryActionRequestId = "";
+  const successful = ["requested", "admitted", "resolved"].includes(payload.status);
+  state.goalPanel.recoveryActionNotice = successful ? String(payload.message || "") : "";
+  state.goalPanel.recoveryActionError = successful ? "" : String(payload.message || "恢复动作失败。");
+  const goal = (state.goalPanel.snapshot?.goals ?? []).find(
+    (item) => item.pursuit?.run_id === payload.run_id,
+  );
+  const recovery = goal?.pursuit?.recovery;
+  if (recovery) {
+    if (payload.resume_action) recovery.resume_action = payload.resume_action;
+    if (payload.attempt) {
+      recovery.attempts = [
+        payload.attempt,
+        ...(recovery.attempts ?? []).filter(
+          (item) => item.attempt_id !== payload.attempt.attempt_id,
+        ),
+      ].slice(0, 5);
+    }
   }
   return true;
 }

@@ -675,6 +675,35 @@ def _render_recovery(recovery: dict[str, Any]) -> list[str]:
     alerts = recovery.get("alerts")
     if isinstance(alerts, list | tuple):
         lines.extend(f"- 恢复提醒：{_bounded_text(item, 500)}" for item in alerts[:3])
+    action = recovery.get("resume_action")
+    if isinstance(action, dict):
+        action_state = str(action.get("state") or "unavailable")
+        lines.append(
+            f"- 恢复动作：{_recovery_action_label(action_state)}"
+            f" · `{_bounded_text(action.get('code'), 64)}`"
+            f" · {_bounded_text(action.get('reason'), 300)}"
+        )
+        lines.append(
+            f"- 恢复命令：`{_bounded_text(action.get('command'), 300)}`"
+        )
+    attempts = recovery.get("attempts")
+    if isinstance(attempts, list | tuple) and attempts:
+        lines.append(f"- 恢复请求：最近 {min(len(attempts), 5)} 项")
+        for attempt in attempts[:5]:
+            if not isinstance(attempt, dict):
+                continue
+            result = (
+                f" · `{_bounded_text(attempt.get('result_code'), 64)}`"
+                if attempt.get("result_code")
+                else ""
+            )
+            lines.append(
+                "  - "
+                f"`{_bounded_text(attempt.get('attempt_id'), 73)}`"
+                f" · {_recovery_attempt_label(str(attempt.get('state') or ''))}"
+                f"{result}"
+                f" · {_bounded_text(attempt.get('updated_at'), 64)}"
+            )
     return lines
 
 
@@ -711,6 +740,24 @@ def _checkpoint_label(value: str) -> str:
     return {"ready": "可用", "missing": "缺失", "error": "校验失败"}.get(
         value, value,
     )
+
+
+def _recovery_action_label(value: str) -> str:
+    return {
+        "available": "可恢复",
+        "busy": "处理中",
+        "blocked": "已阻止",
+        "unavailable": "不适用",
+    }.get(value, value)
+
+
+def _recovery_attempt_label(value: str) -> str:
+    return {
+        "requested": "已记录",
+        "admitted": "已准入",
+        "resolved": "已完成",
+        "failed": "失败关闭",
+    }.get(value, value)
 
 
 __all__ = [

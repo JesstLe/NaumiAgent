@@ -18,9 +18,18 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · x 恢复当前 Pursuit · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
+  if (value.recoveryActionPending) {
+    logical.push(color(ANSI.yellow, "正在通过 ToolExecution 校验恢复权限与持久边界…"));
+  }
+  if (value.recoveryActionNotice) {
+    logical.push(color(ANSI.green, compactText(value.recoveryActionNotice, 4_000)));
+  }
+  if (value.recoveryActionError) {
+    logical.push(color(ANSI.red, compactText(value.recoveryActionError, 4_000)));
+  }
   if (value.loading && !snapshot) {
     logical.push(color(ANSI.cyan, "正在读取 Goal / Pursuit 权威状态…"));
   } else if (!snapshot) {
@@ -234,7 +243,57 @@ function renderRecovery(recovery) {
   for (const alert of recovery.alerts || []) {
     lines.push(color(ANSI.yellow, `恢复提醒 · ${compactText(alert, 500)}`));
   }
+  if (recovery.resume_action) {
+    const action = recovery.resume_action;
+    const actionStyle = action.state === "available"
+      ? ANSI.cyan
+      : action.state === "busy"
+        ? ANSI.yellow
+        : action.state === "blocked"
+          ? ANSI.red
+          : ANSI.dim;
+    lines.push(
+      color(
+        actionStyle,
+        `恢复动作 · ${recoveryActionLabel(action.state)} · ${action.code} · ${compactText(action.reason, 300)}`,
+      ),
+      color(ANSI.dim, `  ${action.command}`),
+    );
+  }
+  if (recovery.attempts?.length) {
+    lines.push(color(ANSI.cyan, `恢复请求 · 最近 ${recovery.attempts.length} 项`));
+    for (const attempt of recovery.attempts) {
+      const attemptStyle = attempt.state === "resolved"
+        ? ANSI.green
+        : attempt.state === "failed"
+          ? ANSI.red
+          : ANSI.yellow;
+      const result = attempt.result_code ? ` · ${attempt.result_code}` : "";
+      lines.push(color(
+        attemptStyle,
+        `  ${attempt.attempt_id.slice(0, 20)}… · ${recoveryAttemptLabel(attempt.state)}${result} · ${attempt.updated_at}`,
+      ));
+    }
+  }
   return lines;
+}
+
+function recoveryActionLabel(state) {
+  return {
+    available: "可恢复",
+    busy: "处理中",
+    blocked: "已阻止",
+    unavailable: "不适用",
+  }[state] || state;
+}
+
+function recoveryAttemptLabel(state) {
+  return {
+    requested: "已记录",
+    admitted: "已准入",
+    resolved: "已完成",
+    failed: "失败关闭",
+  }[state] || state;
 }
 
 function recoveryColor(state) {

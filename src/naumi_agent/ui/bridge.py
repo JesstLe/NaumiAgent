@@ -65,6 +65,9 @@ from naumi_agent.harness.store import (
 )
 from naumi_agent.inspector import RuntimeInspectorSnapshot
 from naumi_agent.log_setup import setup_logging
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    pursuit_recovery_attempt_id,
+)
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runtime.terminal_events import (
     REPLAY_SAFE_TERMINAL_EVENTS,
@@ -577,6 +580,13 @@ def _git_snapshot(cwd: Path) -> dict[str, Any]:
     return result
 
 
+def _bounded_action_message(value: object) -> str:
+    """Return one terminal-safe action summary without raw control sequences."""
+    text = strip_ansi(str(value or ""))
+    text = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "", text).strip()
+    return text[:4_000] or "恢复动作没有返回可展示结果。"
+
+
 class JsonlEngineBridge:
     """Owns one AgentEngine and exposes it over a small JSONL control plane."""
 
@@ -612,6 +622,7 @@ class JsonlEngineBridge:
         self._harness_eval_batch_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_retry_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
+        self._pursuit_recovery_tasks: dict[str, asyncio.Task[None]] = {}
         self._workspace_file_search_task: asyncio.Task[None] | None = None
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._queue_owner_id = f"queue-bridge-{uuid4().hex}"
@@ -1638,6 +1649,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.WORKBENCH_PROPOSAL_ACTION:
             await self.govern_workbench_proposal(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
+            await self.start_pursuit_recovery(payload, request_id=request_id)
             return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
@@ -4300,6 +4314,241 @@ class JsonlEngineBridge:
             )
         await self.emit(ServerEventType.STATUS, self.status_payload())
 
+    async def start_pursuit_recovery(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Run one controlled Pursuit resume without blocking UI confirmations."""
+        run_id = str(payload.get("run_id") or "")
+        if request_id in self._pursuit_recovery_tasks:
+            await self._emit_pursuit_recovery_action_result(
+                run_id=run_id,
+                request_id=request_id,
+                status="blocked",
+                code="duplicate_request",
+                message="该恢复请求正在处理中，请等待当前结果。",
+            )
+            return
+        if len(self._pursuit_recovery_tasks) >= 4:
+            await self._emit_pursuit_recovery_action_result(
+                run_id=run_id,
+                request_id=request_id,
+                status="blocked",
+                code="recovery_capacity_reached",
+                message="当前恢复控制通道已满，请稍后重试。",
+            )
+            return
+        recovery = await self._pursuit_recovery_snapshot_for_run(run_id)
+        if recovery is None:
+            await self._emit_pursuit_recovery_action_result(
+                run_id=run_id,
+                request_id=request_id,
+                status="blocked",
+                code="run_not_found",
+                message="未找到该 Pursuit，未发起恢复。",
+            )
+            return
+        if recovery.resume_action.state != "available":
+            await self._emit_pursuit_recovery_action_result(
+                run_id=run_id,
+                request_id=request_id,
+                status="blocked",
+                code=recovery.resume_action.code,
+                message=recovery.resume_action.reason,
+                recovery=recovery,
+            )
+            return
+
+        async def publish_tool_event(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            await self.handle_engine_event(event, dict(data))
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call_id = f"new-ui-pursuit-resume-{uuid4().hex}"
+            attempt_id = pursuit_recovery_attempt_id(
+                run_id=run_id,
+                source_request_id=tool_call_id,
+            )
+            try:
+                await self.engine.get_or_create_session()
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=tool_call_id,
+                        name="pursuit_resume",
+                        arguments=json.dumps(
+                            {"run_id": run_id},
+                            ensure_ascii=False,
+                        ),
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                refreshed = await self._pursuit_recovery_snapshot_for_run(run_id)
+                attempt = next(
+                    (
+                        item
+                        for item in (refreshed.attempts if refreshed is not None else ())
+                        if item.attempt_id == attempt_id
+                    ),
+                    None,
+                )
+                if attempt is None:
+                    status = "blocked" if result.status == "error" else "error"
+                    code = (
+                        "tool_execution_rejected"
+                        if result.status == "error"
+                        else "attempt_authority_missing"
+                    )
+                else:
+                    status = attempt.state
+                    code = attempt.result_code or attempt.state
+                await self._emit_pursuit_recovery_action_result(
+                    run_id=run_id,
+                    request_id=request_id,
+                    status=status,
+                    code=code,
+                    message=_bounded_action_message(result.content),
+                    attempt=(
+                        attempt.model_dump(mode="json")
+                        if attempt is not None
+                        else None
+                    ),
+                    recovery=refreshed,
+                )
+                await self.show_goal_panel({}, request_id=request_id)
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                refreshed, attempt = await self._pursuit_recovery_attempt_for_run(
+                    run_id,
+                    attempt_id,
+                )
+                await self._emit_pursuit_recovery_action_result(
+                    run_id=run_id,
+                    request_id=request_id,
+                    status=attempt.state if attempt is not None else "error",
+                    code=(
+                        attempt.result_code or attempt.state
+                        if attempt is not None
+                        else "cancelled"
+                    ),
+                    message="恢复请求已取消，请刷新 Goal 页面确认持久账本。",
+                    attempt=(
+                        attempt.model_dump(mode="json")
+                        if attempt is not None
+                        else None
+                    ),
+                    recovery=refreshed,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Pursuit recovery UI action failed (%s)",
+                    type(exc).__name__,
+                )
+                refreshed, attempt = await self._pursuit_recovery_attempt_for_run(
+                    run_id,
+                    attempt_id,
+                )
+                await self._emit_pursuit_recovery_action_result(
+                    run_id=run_id,
+                    request_id=request_id,
+                    status=attempt.state if attempt is not None else "error",
+                    code=(
+                        attempt.result_code or attempt.state
+                        if attempt is not None
+                        else "internal_error"
+                    ),
+                    message="恢复动作未能安全完成，请刷新状态或运行 `/doctor`。",
+                    attempt=(
+                        attempt.model_dump(mode="json")
+                        if attempt is not None
+                        else None
+                    ),
+                    recovery=refreshed,
+                )
+            finally:
+                self._pursuit_recovery_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(
+            run(),
+            name=f"pursuit-recovery-{request_id}",
+        )
+        self._pursuit_recovery_tasks[request_id] = task
+
+    async def _pursuit_recovery_snapshot_for_run(self, run_id: str) -> Any | None:
+        from naumi_agent.ui.pursuit_recovery import (
+            build_pursuit_recovery_snapshot,
+        )
+
+        pursuit_store = getattr(self.engine, "pursuit_store", None)
+        if pursuit_store is None:
+            return None
+        run = pursuit_store.get_run(run_id)
+        if run is None:
+            return None
+        harness_service = getattr(self.engine, "harness_service", None)
+        return await build_pursuit_recovery_snapshot(
+            run,
+            pursuit_store,
+            getattr(harness_service, "store", None),
+            workspace_root=self.engine.workspace_root,
+        )
+
+    async def _pursuit_recovery_attempt_for_run(
+        self,
+        run_id: str,
+        attempt_id: str,
+    ) -> tuple[Any | None, Any | None]:
+        """Best-effort public attempt lookup for exceptional action exits."""
+        try:
+            recovery = await self._pursuit_recovery_snapshot_for_run(run_id)
+        except Exception:
+            return None, None
+        attempt = next(
+            (
+                item
+                for item in (recovery.attempts if recovery is not None else ())
+                if item.attempt_id == attempt_id
+            ),
+            None,
+        )
+        return recovery, attempt
+
+    async def _emit_pursuit_recovery_action_result(
+        self,
+        *,
+        run_id: str,
+        request_id: str,
+        status: str,
+        code: str,
+        message: str,
+        attempt: dict[str, Any] | None = None,
+        recovery: Any | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.PURSUIT_RECOVERY_ACTION_RESULT,
+            {
+                "schema_version": 1,
+                "run_id": run_id,
+                "status": status,
+                "code": code,
+                "message": _bounded_action_message(message),
+                "attempt": attempt,
+                "resume_action": (
+                    recovery.resume_action.model_dump(mode="json")
+                    if recovery is not None
+                    else None
+                ),
+            },
+            request_id=request_id,
+        )
+
     async def cancel_task(
         self,
         payload: dict[str, Any],
@@ -5417,6 +5666,12 @@ class JsonlEngineBridge:
         if promotion_tasks:
             await asyncio.gather(*promotion_tasks, return_exceptions=True)
         self._harness_eval_promotion_tasks.clear()
+        pursuit_recovery_tasks = tuple(self._pursuit_recovery_tasks.values())
+        for task in pursuit_recovery_tasks:
+            task.cancel()
+        if pursuit_recovery_tasks:
+            await asyncio.gather(*pursuit_recovery_tasks, return_exceptions=True)
+        self._pursuit_recovery_tasks.clear()
         workspace_file_task = self._workspace_file_search_task
         self._workspace_file_search_task = None
         if workspace_file_task is not None and not workspace_file_task.done():
