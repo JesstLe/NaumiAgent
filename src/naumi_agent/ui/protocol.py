@@ -24,6 +24,7 @@ PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
     "doctor_export",
+    "doctor_live_probe",
     "evolution_evaluation_lane",
     "goal_snapshot",
     "heartbeat",
@@ -94,6 +95,8 @@ class ClientEventType(StrEnum):
     PERMISSIONS_PANEL = "permissions_panel"
     DOCTOR = "doctor"
     DOCTOR_EXPORT = "doctor/export"
+    DOCTOR_PROBE = "doctor/probe"
+    DOCTOR_PROBE_CANCEL = "doctor/probe/cancel"
     PING = "ping"
     SHUTDOWN = "shutdown"
 
@@ -128,6 +131,7 @@ class ServerEventType(StrEnum):
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     DOCTOR_HEALTH = "doctor/health"
     DOCTOR_EXPORT_RESULT = "doctor/export/result"
+    DOCTOR_PROBE_RESULT = "doctor/probe/result"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"
     INSPECTOR_UPDATE = "inspector/update"
     AGENTS_SNAPSHOT = "agents/snapshot"
@@ -386,6 +390,28 @@ def _normalize_client_payload(
             "action": action,
             "expected_snapshot_sha256": expected_snapshot_sha256,
         }
+
+    if event_type == ClientEventType.DOCTOR_PROBE:
+        from naumi_agent.ui.doctor_probe import (
+            DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+            normalize_doctor_live_probe_timeout,
+        )
+
+        if set(payload) - {"timeout_ms"}:
+            raise ValueError("Doctor 在线探测 payload 包含未知字段。")
+        return {
+            "timeout_ms": normalize_doctor_live_probe_timeout(
+                payload.get("timeout_ms", DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS)
+            )
+        }
+
+    if event_type == ClientEventType.DOCTOR_PROBE_CANCEL:
+        if set(payload) - {"target_request_id"}:
+            raise ValueError("Doctor 在线探测取消 payload 包含未知字段。")
+        target_request_id = str(payload.get("target_request_id") or "").strip()
+        if not target_request_id or len(target_request_id) > 200:
+            raise ValueError("Doctor 在线探测取消需要有效 target_request_id。")
+        return {"target_request_id": target_request_id}
 
     if event_type in {
         ClientEventType.HARNESS_EXPLAIN_REQUEST,

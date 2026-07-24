@@ -579,7 +579,7 @@ async def _check_live_model(
 ) -> DoctorCheck:
     started = time.monotonic()
     try:
-        response = await (probe or _default_live_probe)(config)
+        response = await (probe or default_live_model_probe)(config)
     except Exception as exc:
         return _classify_live_model_error(exc)
     duration_ms = max(0, round((time.monotonic() - started) * 1000))
@@ -591,7 +591,8 @@ async def _check_live_model(
     )
 
 
-async def _default_live_probe(config: AppConfig) -> ModelResponse:
+async def default_live_model_probe(config: AppConfig) -> ModelResponse:
+    """Send exactly one minimal provider request for an explicit Doctor probe."""
     from naumi_agent.model.router import ModelRouter, ModelTier
 
     probe_config = config.models.model_copy(update={"max_tokens": 8})

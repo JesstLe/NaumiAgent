@@ -52,6 +52,7 @@ function hasPendingControlOperation(state) {
     || state.agents?.actionPendingTaskId
     || state.workbench?.proposal_action?.phase === "loading"
     || state.doctorHealth?.exportLoading
+    || state.doctorHealth?.probeLoading
     || (
       state.evolutionReview?.loading
       && state.evolutionReview?.request?.action === "enqueue"

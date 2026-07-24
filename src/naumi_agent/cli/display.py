@@ -29,7 +29,7 @@ def print_help() -> None:
         ("/help", "显示帮助"),
         ("/keybindings", "显示当前快捷键配置"),
         ("/style", "显示当前主题和输出风格"),
-        ("/doctor", "运行环境诊断或预览/导出脱敏诊断包"),
+        ("/doctor", "本地诊断、受控在线探测或脱敏诊断包"),
         (
             "/copy [all|last|error|receipt [receipt-id|latest]]",
             "复制/导出记录或权威完成回执 (Ctrl+Y)",

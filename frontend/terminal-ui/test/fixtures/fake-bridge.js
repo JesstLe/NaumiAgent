@@ -25,7 +25,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         selected_version: 1,
         server_minimum_version: 1,
         server_maximum_version: 1,
-        capabilities: ["doctor_export", "goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+        capabilities: ["doctor_export", "doctor_live_probe", "goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
       },
     }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);
@@ -653,6 +653,41 @@ attachJsonlLineReader(process.stdin, (line) => {
       };
     }
     emit("doctor/export/result", base, record.id);
+    return;
+  }
+
+  if (record.type === "doctor/probe") {
+    const probeSnapshotSha = "f".repeat(64);
+    emit("doctor/health", {
+      schema_version: 1,
+      status: "ok",
+      generated_at: "2026-07-24T10:00:00+00:00",
+      live_probe: true,
+      snapshot_sha256: probeSnapshotSha,
+      items: [{
+        id: "provider-live-fixture",
+        domain: "provider",
+        label: "模型实时连接",
+        severity: "ok",
+        responsibility: "unknown",
+        detail: "连接成功：fixture-model，耗时 25 ms",
+        suggestion: "",
+        diagnostic_code: "",
+      }],
+    }, record.id);
+    emit("doctor/probe/result", {
+      schema_version: 1,
+      status: "passed",
+      diagnostic_code: "",
+      message: "连接成功：fixture-model，耗时 25 ms",
+      suggestion: "",
+      request_count: 1,
+      request_limit: 1,
+      max_output_tokens: 8,
+      duration_ms: 25,
+      timeout_ms: payload.timeout_ms,
+      snapshot_sha256: probeSnapshotSha,
+    }, record.id);
     return;
   }
 

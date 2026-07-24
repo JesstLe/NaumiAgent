@@ -339,6 +339,53 @@ class TestNaumiApp:
         ]
         assert "用法" in status.status_text
 
+    def test_tui_doctor_probe_is_explicit_bounded_and_cancellable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from naumi_agent.tui import app as tui_module
+
+        monkeypatch.setattr(tui_module, "Markdown", lambda content, **_: content)
+        calls: list[dict[str, object]] = []
+        messages: list[str] = []
+        status = SimpleNamespace(status_text="")
+
+        class FakeWorker:
+            is_finished = False
+            cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+                self.is_finished = True
+
+        worker = FakeWorker()
+
+        class FakeApp:
+            debug_trace = None
+            _doctor_probe_worker = None
+
+            def _run_doctor(self, **kwargs):
+                calls.append(kwargs)
+                return worker
+
+            def query_one(self, widget_type):
+                if widget_type is StatusBar:
+                    return status
+                return SimpleNamespace(mount=lambda value: messages.append(str(value)))
+
+        app = FakeApp()
+        NaumiApp._handle_slash_command(app, "/doctor probe 12000")
+
+        assert calls == [{"live_probe": True, "timeout_ms": 12_000}]
+        assert app._doctor_probe_worker is worker
+        assert "最多" in messages[-1]
+        assert "8 个输出 token" in messages[-1]
+
+        NaumiApp._handle_slash_command(app, "/doctor probe cancel")
+        assert worker.cancelled is True
+        assert app._doctor_probe_worker is None
+        assert status.status_text == "在线探测已取消"
+
     def test_tui_does_not_construct_terminal_runtime_components(self) -> None:
         source = inspect.getsource(NaumiApp)
         assert "RuntimeHeartbeatProducer(" not in source

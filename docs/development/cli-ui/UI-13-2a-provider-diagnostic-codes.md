@@ -50,7 +50,8 @@ Doctor 已能把常见 Provider 失败翻译为中文，但调用方只能解析
 
 ## 明确保留边界
 
-- UI-13.3 的显式 live probe 页面、取消、超时与预算 UI 尚未实现；本切片不改变 `/doctor` 默认只读行为。
+- UI-13.3a 已在本诊断码之上实现显式 live probe、取消、超时与预算 UI；`/doctor` 默认仍保持本地只读。
+  详见 `UI-13-3a-bounded-provider-live-probe.md`。
 - 尚未实现 provider 请求级 trace、聚合计数、SLO、自动重试或修复动作；ARC-08 后续只能消费这些低基数
   code，不能从这里推断可用率。
 - 不把异常消息、response body 或完整 URL 加入 code/detail；需要深入排障时仍应查看脱敏 DebugTrace。

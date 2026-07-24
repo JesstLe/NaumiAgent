@@ -2576,6 +2576,88 @@ test("doctor command opens typed health route refreshes and restores origin", ()
   assert.equal(state.followTail, false);
 });
 
+test("doctor live probe is explicit bounded cancellable and correlated", () => {
+  const state = createInitialState();
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["doctor_live_probe", "typed_ui_messages"],
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return `request-${sent.length}`;
+  };
+
+  handleSubmitText(state, "/doctor probe 12000", send);
+  assert.equal(state.route.name, "doctor_health");
+  assert.equal(state.doctorHealth.probeLoading, true);
+  assert.deepEqual(sent, [{
+    type: "doctor/probe",
+    payload: { timeout_ms: 12_000 },
+  }]);
+
+  assert.equal(handleDoctorHealthKey(state, "c", send), true);
+  assert.deepEqual(sent.at(-1), {
+    type: "doctor/probe/cancel",
+    payload: { target_request_id: "request-1" },
+  });
+  assert.match(state.doctorHealth.probeNotice, /等待终态回执/);
+
+  reduceServerEvent(state, {
+    type: "doctor/probe/result",
+    request_id: "request-1",
+    payload: {
+      schema_version: 1,
+      status: "cancelled",
+      diagnostic_code: "provider_probe_cancelled",
+      message: "在线探测已取消；不会自动重试。",
+      suggestion: "需要时再次显式运行。",
+      request_count: 1,
+      request_limit: 1,
+      max_output_tokens: 8,
+      duration_ms: 0,
+      timeout_ms: 12_000,
+      snapshot_sha256: "",
+    },
+  });
+  assert.equal(state.doctorHealth.probeLoading, false);
+  assert.equal(state.doctorHealth.probeResult.status, "cancelled");
+
+  assert.equal(handleDoctorHealthKey(state, "p", send), true);
+  assert.deepEqual(sent.at(-1), {
+    type: "doctor/probe",
+    payload: { timeout_ms: 12_000 },
+  });
+  assert.equal(state.doctorHealth.probeLoading, true);
+  assert.equal(handleDoctorHealthKey(state, "r", send), true);
+  assert.equal(sent.filter((item) => item.type === "doctor").length, 0);
+});
+
+test("doctor live probe does not send before capability negotiation", () => {
+  for (const negotiated of [false, true]) {
+    const state = createInitialState();
+    state.protocolNegotiated = negotiated;
+    state.protocolNegotiation = negotiated
+      ? { selected_version: 1, capabilities: ["typed_ui_messages"] }
+      : null;
+    const sent = [];
+
+    handleSubmitText(
+      state,
+      "/doctor probe",
+      (type, payload) => sent.push({ type, payload }),
+    );
+
+    assert.deepEqual(sent, []);
+    assert.equal(state.doctorHealth.probeLoading, false);
+    assert.match(
+      state.doctorHealth.probeNotice,
+      negotiated ? /不支持受控在线探测/ : /协议协商尚未完成/,
+    );
+  }
+});
+
 test("doctor export previews before writing and keeps malformed forms local", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;

@@ -3,6 +3,7 @@
   "transport": "jsonl",
   "compatibility": {
     "previous_registry_sha256": [
+      "3b9955be08c4f1247c981459c58436d48dafd0ef2ba4850df67656cf8068a07d",
       "c696a74ece9d8db6b40fed37d4a6c0ad7960d60052fa0b026ad2a5558d59226f",
       "b013b4e5df1d767a220d676d8443347ea9291d2decca063cecdec4b8574864a4",
       "69aaabb584c1f1c364e969ca7b66352684fc938765f63bd5829bae8d3a5516d2"
@@ -15,6 +16,7 @@
     "capabilities": [
       "evolution_evaluation_lane",
       "doctor_export",
+      "doctor_live_probe",
       "goal_snapshot",
       "heartbeat",
       "pursuit_recovery_actions",
@@ -35,6 +37,10 @@
     "doctor_export": {
       "client_events": ["doctor/export"],
       "server_events": ["doctor/export/result"]
+    },
+    "doctor_live_probe": {
+      "client_events": ["doctor/probe", "doctor/probe/cancel"],
+      "server_events": ["doctor/probe/result"]
     },
     "evolution_evaluation_lane": {
       "client_events": ["evolution/evaluation-lane/request"],
@@ -92,6 +98,8 @@
     "permissions_panel",
     "doctor",
     "doctor/export",
+    "doctor/probe",
+    "doctor/probe/cancel",
     "ping",
     "shutdown"
   ],
@@ -115,6 +123,7 @@
     "harness/eval-promotion",
     "doctor/health",
     "doctor/export/result",
+    "doctor/probe/result",
     "inspector/snapshot",
     "inspector/update",
     "agents/snapshot",
@@ -194,6 +203,8 @@
       "permissions_panel": {"owner":"safety","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "doctor": {"owner":"diagnostics","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "doctor/export": {"owner":"diagnostics","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
+      "doctor/probe": {"owner":"diagnostics","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
+      "doctor/probe/cancel": {"owner":"diagnostics","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "ping": {"owner":"protocol","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "shutdown": {"owner":"protocol","stability":"stable","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"}
     },
@@ -217,6 +228,7 @@
       "harness/eval-promotion": {"owner":"harness","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.promotion_reason"],"redaction":"required"},
       "doctor/health": {"owner":"diagnostics","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items.detail","payload.items.suggestion"],"redaction":"required"},
       "doctor/export/result": {"owner":"diagnostics","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":["payload.receipt.output_path"],"redaction":"required"},
+      "doctor/probe/result": {"owner":"diagnostics","stability":"experimental","criticality":"terminal","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "inspector/snapshot": {"owner":"inspector","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "inspector/update": {"owner":"inspector","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},
       "agents/snapshot": {"owner":"agents","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},

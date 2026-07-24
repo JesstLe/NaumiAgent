@@ -91,6 +91,12 @@ from naumi_agent.ui.doctor_export import (
     write_doctor_export,
 )
 from naumi_agent.ui.doctor_health import DoctorHealthSnapshot
+from naumi_agent.ui.doctor_probe import (
+    DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+    cancelled_doctor_live_probe_payload,
+    doctor_live_probe_payload,
+    run_bounded_doctor_live_probe,
+)
 from naumi_agent.ui.evaluation_lane_receipt import evaluation_lane_receipt_payload
 from naumi_agent.ui.harness_protocol import (
     harness_eval_baseline_payload,
@@ -641,6 +647,10 @@ class JsonlEngineBridge:
         self._agents_snapshot: AgentControlSnapshot | None = None
         self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
         self._doctor_export_plan: DoctorExportPlan | None = None
+        self._doctor_probe_task: asyncio.Task[None] | None = None
+        self._doctor_probe_request_id = ""
+        self._doctor_probe_timeout_ms = DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS
+        self._doctor_probe_request_started = False
         self._cli_supported_commands = _load_cli_slash_commands_with_alias()
         self._pending_permissions: dict[str, PendingPermission] = {}
         self._pending_interactions: dict[str, PendingInteraction] = {}
@@ -1692,6 +1702,12 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.DOCTOR_EXPORT:
             await self.export_doctor_report(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.DOCTOR_PROBE:
+            await self.start_doctor_live_probe(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.DOCTOR_PROBE_CANCEL:
+            await self.cancel_doctor_live_probe(payload, request_id=request_id)
             return
 
         if event_type == ClientEventType.SHUTDOWN:
@@ -4777,29 +4793,15 @@ class JsonlEngineBridge:
         from naumi_agent.ui.doctor_health import (
             build_doctor_health_snapshot,
             doctor_health_payload,
-            pursuit_recovery_health_item,
-            runtime_heartbeat_retention_health_item,
         )
 
         config = getattr(self.engine, "_config", AppConfig())
-        additional_items = [
-            runtime_heartbeat_retention_health_item(
-                self._runtime_heartbeat_retention_status_payload()
-            )
-        ]
-        try:
-            recovery = await self._current_pursuit_recovery_snapshot()
-            if recovery is not None:
-                additional_items.append(pursuit_recovery_health_item(recovery))
-        except Exception as exc:
-            logger.warning("Pursuit recovery health lookup failed (%s)", type(exc).__name__)
-            if self.debug_trace is not None:
-                self.debug_trace.exception("ui_bridge.pursuit_recovery", exc)
+        additional_items = await self._doctor_additional_health_items()
         try:
             report = await run_doctor(
                 config,
                 workspace_root=self.engine.workspace_root,
-                mcp_manager=getattr(self.engine, "mcp_manager", None),
+                mcp_manager=getattr(self.engine, "_mcp_manager", None),
                 model_router=self.engine.router,
             )
             health_snapshot = build_doctor_health_snapshot(
@@ -4844,6 +4846,160 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def start_doctor_live_probe(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Start one explicit bounded provider request without blocking control input."""
+        active = self._doctor_probe_task
+        if active is not None and not active.done():
+            await self.emit_error(
+                "已有在线探测正在运行；可先取消当前探测。",
+                code="doctor_probe_busy",
+                request_id=request_id,
+                details={"target_request_id": self._doctor_probe_request_id},
+            )
+            return
+        timeout_ms = int(payload["timeout_ms"])
+        self._doctor_probe_request_id = request_id
+        self._doctor_probe_timeout_ms = timeout_ms
+        self._doctor_probe_request_started = False
+        self._doctor_probe_task = asyncio.create_task(
+            self._run_doctor_live_probe(
+                request_id=request_id,
+                timeout_ms=timeout_ms,
+            ),
+            name=f"doctor-live-probe:{request_id}",
+        )
+
+    async def cancel_doctor_live_probe(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Cancel only the caller-selected live probe and acknowledge the control."""
+        target_request_id = str(payload["target_request_id"])
+        task = self._doctor_probe_task
+        if (
+            task is None
+            or task.done()
+            or target_request_id != self._doctor_probe_request_id
+        ):
+            await self.emit_error(
+                "目标在线探测不存在或已结束。",
+                code="doctor_probe_not_running",
+                request_id=request_id,
+            )
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await self.emit(
+            ServerEventType.ACK,
+            {
+                "event": str(ClientEventType.DOCTOR_PROBE_CANCEL),
+                "target_request_id": target_request_id,
+            },
+            request_id=request_id,
+        )
+
+    async def _run_doctor_live_probe(
+        self,
+        *,
+        request_id: str,
+        timeout_ms: int,
+    ) -> None:
+        from naumi_agent.ui.doctor_health import (
+            build_doctor_health_snapshot,
+            doctor_health_payload,
+        )
+
+        current_task = asyncio.current_task()
+        try:
+            result = await run_bounded_doctor_live_probe(
+                getattr(self.engine, "_config", AppConfig()),
+                workspace_root=self.engine.workspace_root,
+                timeout_ms=timeout_ms,
+                mcp_manager=getattr(self.engine, "mcp_manager", None),
+                model_router=self.engine.router,
+                on_request_start=self._mark_doctor_probe_request_started,
+            )
+            snapshot = build_doctor_health_snapshot(
+                result.report,
+                live_probe=True,
+                additional_items=tuple(
+                    await self._doctor_additional_health_items()
+                ),
+            )
+            self._doctor_health_snapshot = snapshot
+            self._doctor_export_plan = None
+            await self.emit(
+                ServerEventType.DOCTOR_HEALTH,
+                doctor_health_payload(snapshot),
+                request_id=request_id,
+            )
+            await self.emit(
+                ServerEventType.DOCTOR_PROBE_RESULT,
+                doctor_live_probe_payload(
+                    result,
+                    snapshot_sha256=snapshot.snapshot_sha256,
+                ),
+                request_id=request_id,
+            )
+        except asyncio.CancelledError:
+            if not self._closed:
+                await self.emit(
+                    ServerEventType.DOCTOR_PROBE_RESULT,
+                    cancelled_doctor_live_probe_payload(
+                        timeout_ms=timeout_ms,
+                        request_count=int(self._doctor_probe_request_started),
+                    ),
+                    request_id=request_id,
+                )
+            raise
+        except Exception as exc:
+            logger.warning("Doctor live probe failed (%s)", type(exc).__name__)
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.doctor_probe", exc)
+            if not self._closed:
+                await self.emit_error(
+                    "在线探测运行时失败；不会自动重试。请查看 /debug。",
+                    code="doctor_probe_failed",
+                    request_id=request_id,
+                )
+        finally:
+            if self._doctor_probe_task is current_task:
+                self._doctor_probe_task = None
+                self._doctor_probe_request_id = ""
+                self._doctor_probe_request_started = False
+
+    def _mark_doctor_probe_request_started(self) -> None:
+        self._doctor_probe_request_started = True
+
+    async def _doctor_additional_health_items(self) -> list[Any]:
+        """Collect shared runtime-only Doctor items without provider traffic."""
+        from naumi_agent.ui.doctor_health import (
+            pursuit_recovery_health_item,
+            runtime_heartbeat_retention_health_item,
+        )
+
+        additional_items = [
+            runtime_heartbeat_retention_health_item(
+                self._runtime_heartbeat_retention_status_payload()
+            )
+        ]
+        try:
+            recovery = await self._current_pursuit_recovery_snapshot()
+            if recovery is not None:
+                additional_items.append(pursuit_recovery_health_item(recovery))
+        except Exception as exc:
+            logger.warning("Pursuit recovery health lookup failed (%s)", type(exc).__name__)
+            if self.debug_trace is not None:
+                self.debug_trace.exception("ui_bridge.pursuit_recovery", exc)
+        return additional_items
 
     async def export_doctor_report(
         self,
@@ -5648,6 +5804,13 @@ class JsonlEngineBridge:
                 await self._run_task
             except asyncio.CancelledError:
                 pass
+        doctor_probe_task = self._doctor_probe_task
+        self._doctor_probe_task = None
+        self._doctor_probe_request_id = ""
+        self._doctor_probe_request_started = False
+        if doctor_probe_task is not None and not doctor_probe_task.done():
+            doctor_probe_task.cancel()
+            await asyncio.gather(doctor_probe_task, return_exceptions=True)
         batch_tasks = tuple(self._harness_eval_batch_tasks.values())
         for task in batch_tasks:
             task.cancel()

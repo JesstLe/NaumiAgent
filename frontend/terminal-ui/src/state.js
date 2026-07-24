@@ -75,7 +75,7 @@ export const DEFAULT_SLASH_COMMAND_CANDIDATES = [
   { command: "/permissions", description: "显示待确认权限面板" },
   { command: "/evolution", description: "审阅 Candidate，并显式加入 Workbench 队列" },
   { command: "/agents", description: "打开 Agent 控制中心" },
-  { command: "/doctor", description: "运行环境诊断或预览脱敏诊断包" },
+  { command: "/doctor", description: "本地诊断、受控在线探测或脱敏诊断包" },
   { command: "/harness", description: "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任" },
   { command: "/mode", description: "切换 runtime 模式 default / plan / bypass" },
   { command: "/reasoning", description: "显示/切换思考文本" },
@@ -437,6 +437,13 @@ export function createInitialState() {
       exportAutoPreview: false,
       exportRequested: false,
       exportNotice: "",
+      probeLoading: false,
+      probeRequestId: "",
+      probeCancelRequestId: "",
+      probeResult: null,
+      probeError: "",
+      probeNotice: "",
+      probeTimeoutMs: 15_000,
     },
     permissionCenter: {
       loading: false,
@@ -1056,6 +1063,20 @@ export function reduceServerEvent(state, record) {
       state.doctorHealth.exportReceipt = payload.status === "written"
         ? payload.receipt : null;
       break;
+    case "doctor/probe/result":
+      if (
+        !state.doctorHealth.probeRequestId
+        || String(record.request_id || "") !== state.doctorHealth.probeRequestId
+      ) {
+        break;
+      }
+      state.doctorHealth.probeLoading = false;
+      state.doctorHealth.probeRequestId = "";
+      state.doctorHealth.probeCancelRequestId = "";
+      state.doctorHealth.probeError = "";
+      state.doctorHealth.probeNotice = "";
+      state.doctorHealth.probeResult = payload;
+      break;
     case "inspector/snapshot":
       if (!inspectorMatchesCurrentSession(state, payload)) break;
       if (
@@ -1299,6 +1320,13 @@ export function reduceServerEvent(state, record) {
         exportAutoPreview: false,
         exportRequested: false,
         exportNotice: "",
+        probeLoading: false,
+        probeRequestId: "",
+        probeCancelRequestId: "",
+        probeResult: null,
+        probeError: "",
+        probeNotice: "",
+        probeTimeoutMs: 15_000,
       };
       if (
         wasHarnessDetailRoute
@@ -1473,6 +1501,21 @@ export function reduceServerEvent(state, record) {
           state.doctorHealth.exportPreview = null;
           state.doctorHealth.exportReceipt = null;
         }
+        break;
+      }
+      if (String(payload.code || "").startsWith("doctor_probe_")) {
+        const responseRequestId = String(record.request_id || "");
+        if (
+          responseRequestId !== state.doctorHealth.probeRequestId
+          && responseRequestId !== state.doctorHealth.probeCancelRequestId
+        ) {
+          break;
+        }
+        state.doctorHealth.probeLoading = false;
+        state.doctorHealth.probeError = payload.message
+          ?? "模型提供商在线探测失败；不会自动重试。";
+        state.doctorHealth.probeRequestId = "";
+        state.doctorHealth.probeCancelRequestId = "";
         break;
       }
       if (payload.code === "workbench_review_failed") {
@@ -3451,14 +3494,59 @@ export function handleSubmitText(state, text, send) {
     state.doctorHealth.exportAutoPreview = text === "/doctor export";
     state.doctorHealth.exportRequested = text === "/doctor export";
     state.doctorHealth.exportNotice = "";
+    state.doctorHealth.probeLoading = false;
+    state.doctorHealth.probeRequestId = "";
+    state.doctorHealth.probeCancelRequestId = "";
+    state.doctorHealth.probeResult = null;
+    state.doctorHealth.probeError = "";
+    state.doctorHealth.probeNotice = "";
     send("doctor", {});
+    return;
+  }
+  const doctorProbeMatch = text.match(/^\/doctor\s+probe(?:\s+(\d+))?$/iu);
+  if (doctorProbeMatch) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    const timeoutMs = doctorProbeMatch[1] ? Number(doctorProbeMatch[1]) : 15_000;
+    state.route = { name: "doctor_health", originAnchor };
+    state.doctorHealth.loading = false;
+    state.doctorHealth.error = "";
+    state.doctorHealth.scrollOffset = 0;
+    state.doctorHealth.probeResult = null;
+    state.doctorHealth.probeError = "";
+    state.doctorHealth.probeNotice = "";
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 60_000) {
+      state.doctorHealth.probeLoading = false;
+      state.doctorHealth.probeError = "在线探测超时必须在 1000..60000 ms。";
+      return;
+    }
+    state.doctorHealth.probeTimeoutMs = timeoutMs;
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "doctor/probe",
+    );
+    if (capability.status !== "available") {
+      state.doctorHealth.probeLoading = false;
+      state.doctorHealth.probeNotice = doctorProbeCompatibilityNotice(
+        capability.status,
+      );
+      return;
+    }
+    state.doctorHealth.probeLoading = true;
+    state.doctorHealth.probeRequestId = String(send("doctor/probe", {
+      timeout_ms: timeoutMs,
+    }) || "");
     return;
   }
   if (text.toLocaleLowerCase("und").startsWith("/doctor ")) {
     pushSystemMessage(
       state,
       "Doctor",
-      "用法：/doctor 或 /doctor export；导出前会显示脱敏清单。",
+      "用法：/doctor、/doctor probe [timeout-ms] 或 /doctor export；"
+        + "在线探测最多 1 请求/8 输出 token，且不会自动重试。",
       "warning",
     );
     return;
@@ -4104,6 +4192,7 @@ export function handleDoctorHealthKey(state, key, send) {
     return true;
   }
   if (key === "r" || key === "R") {
+    if (state.doctorHealth.probeLoading) return true;
     state.doctorHealth.loading = true;
     state.doctorHealth.error = "";
     state.doctorHealth.exportLoading = false;
@@ -4117,7 +4206,11 @@ export function handleDoctorHealthKey(state, key, send) {
     return true;
   }
   if (key === "e" || key === "E") {
-    if (state.doctorHealth.loading || state.doctorHealth.exportLoading) return true;
+    if (
+      state.doctorHealth.loading
+      || state.doctorHealth.exportLoading
+      || state.doctorHealth.probeLoading
+    ) return true;
     state.doctorHealth.exportRequested = true;
     const capability = negotiatedEventCapabilityStatus(
       state,
@@ -4148,6 +4241,49 @@ export function handleDoctorHealthKey(state, key, send) {
       action,
       ...(action === "write" ? { expected_snapshot_sha256: snapshotSha } : {}),
     }) || "");
+    return true;
+  }
+  if (key === "p" || key === "P") {
+    if (
+      state.doctorHealth.loading
+      || state.doctorHealth.exportLoading
+      || state.doctorHealth.probeLoading
+    ) return true;
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "doctor/probe",
+    );
+    if (capability.status !== "available") {
+      state.doctorHealth.probeError = "";
+      state.doctorHealth.probeNotice = doctorProbeCompatibilityNotice(
+        capability.status,
+      );
+      return true;
+    }
+    const timeoutMs = Math.min(
+      60_000,
+      Math.max(1_000, Number(state.doctorHealth.probeTimeoutMs) || 15_000),
+    );
+    state.doctorHealth.probeLoading = true;
+    state.doctorHealth.probeError = "";
+    state.doctorHealth.probeNotice = "";
+    state.doctorHealth.probeResult = null;
+    state.doctorHealth.probeRequestId = String(send("doctor/probe", {
+      timeout_ms: timeoutMs,
+    }) || "");
+    return true;
+  }
+  if (key === "c" || key === "C") {
+    if (!state.doctorHealth.probeLoading || !state.doctorHealth.probeRequestId) {
+      state.doctorHealth.probeNotice = "当前没有可取消的在线探测。";
+      return true;
+    }
+    if (state.doctorHealth.probeCancelRequestId) return true;
+    state.doctorHealth.probeCancelRequestId = String(send("doctor/probe/cancel", {
+      target_request_id: state.doctorHealth.probeRequestId,
+    }) || "");
+    state.doctorHealth.probeNotice = "取消请求已发送；等待终态回执。";
     return true;
   }
   const current = Math.max(0, Number(state.doctorHealth.scrollOffset) || 0);
@@ -4189,6 +4325,16 @@ function doctorExportCompatibilityNotice(status) {
     return "当前 Bridge 不支持脱敏诊断包导出，未发送写入请求；请升级 Python Bridge 后重试。";
   }
   return "本地协议未注册诊断导出能力，已阻止导出请求；请升级完整的 Naumi 安装。";
+}
+
+function doctorProbeCompatibilityNotice(status) {
+  if (status === "pending") {
+    return "协议协商尚未完成，未发送任何模型请求。";
+  }
+  if (status === "unsupported") {
+    return "当前 Bridge 不支持受控在线探测；可使用 `naumi doctor --live`。";
+  }
+  return "在线探测协议未注册，未发送任何模型请求。";
 }
 
 function parseHarnessEvalBatchCommand(commandText) {
