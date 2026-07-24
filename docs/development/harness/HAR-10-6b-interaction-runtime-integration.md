@@ -42,6 +42,11 @@ Pursuit checkpoint 只保存稳定 `ask-*` 引用，不重复保存问题正文�
 - replay-only Future 在界面关闭时取消，不制造未消费异常；回答仍先写 authority；
 - Pursuit resume 对 pending/expired/cancelled 都不调用模型；answered 会先补证据并清除引用，然后才允许继续。
 
+HAR-10.8c 进一步统一恢复状态：pending durable authority 进入
+`waiting_for_interaction/waiting`；expired/cancelled 进入 `interaction_terminal/blocked`；
+authority 缺失、legacy 正文或 subject 不一致进入 `interaction_required/blocked`。多个等待 authority
+冲突时使用 `resume_inconsistent` 失败关闭。
+
 ## 跨 Store 故障语义
 
 Harness interaction authority 与 PursuitStore 目前不是同一个事务域。本切片通过顺序和恢复规则收敛，而不宣称

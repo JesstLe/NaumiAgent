@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import time
 from unittest.mock import AsyncMock, MagicMock
@@ -20,6 +21,7 @@ from naumi_agent.orchestrator.pursuit import (
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, PursuitStoreError
 from naumi_agent.orchestrator.pursuit_terminal import (
+    PursuitBoundaryDecision,
     PursuitBoundaryFacts,
     decide_pursuit_boundary,
 )
@@ -74,6 +76,46 @@ def _decision_evidence(loop: GoalPursuitLoop):
     ]
 
 
+def _legacy_boundary_decision() -> tuple[PursuitBoundaryDecision, str]:
+    facts = {
+        "criterion_count": 1,
+        "verified_count": 0,
+        "hard_evidence_count": 0,
+        "final_verification": "not_run",
+        "cancel_requested": False,
+        "budget_breach": "none",
+        "waiting_kind": "none",
+        "waiting_count": 0,
+        "blocker": "planner_empty",
+    }
+
+    def digest(value: object) -> str:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    values = {
+        "schema_version": 1,
+        "facts": facts,
+        "facts_sha256": digest(facts),
+        "status": "blocked",
+        "code": "planner_empty",
+        "reason": "规划器没有给出下一步可执行行动。",
+        "next_action": "审查目标、约束与现有证据后重新规划。",
+        "terminal": True,
+        "resumable": True,
+    }
+    payload = {"decision_id": digest(values), **values}
+    return (
+        PursuitBoundaryDecision.model_validate(payload),
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+    )
+
+
 def test_boundary_decision_survives_restart_and_rejects_store_tampering(
     tmp_path,
 ) -> None:
@@ -116,6 +158,49 @@ def test_boundary_decision_survives_restart_and_rejects_store_tampering(
 
     with pytest.raises(PursuitStoreError, match="digest"):
         PursuitStore(tmp_path / "pursuit").get_run(run.id)
+
+
+def test_store_resaves_legacy_decision_without_false_identity_conflict(
+    tmp_path,
+) -> None:
+    store = PursuitStore(tmp_path / "pursuit")
+    decision, legacy_payload = _legacy_boundary_decision()
+    now = time.time()
+    run = PursuitRun(
+        id="pursuit_legacy_resave",
+        goal="重存旧版机械裁判",
+        status=PursuitRunStatus.BLOCKED,
+        phase="blocked",
+        started_at=now,
+        updated_at=now,
+        criteria_total=1,
+        boundary_decision=decision,
+    )
+    store.save_run(run)
+    with sqlite3.connect(store.db_path) as connection:
+        connection.execute(
+            """
+            UPDATE pursuit_boundary_decisions
+            SET payload_json = ?, payload_sha256 = ?
+            WHERE run_id = ? AND decision_id = ?
+            """,
+            (
+                legacy_payload,
+                hashlib.sha256(legacy_payload.encode("utf-8")).hexdigest(),
+                run.id,
+                decision.decision_id,
+            ),
+        )
+
+    restored = PursuitStore(tmp_path / "pursuit").get_run(run.id)
+    assert restored is not None
+    assert restored.boundary_decision == decision
+    restored.updated_at = now + 1
+    store.save_run(restored)
+
+    reread = PursuitStore(tmp_path / "pursuit").get_run(run.id)
+    assert reread is not None
+    assert reread.boundary_decision == decision
 
 
 def test_current_boundary_pointer_handles_repeated_decision_identity(tmp_path) -> None:
@@ -251,6 +336,32 @@ def test_store_migrates_legacy_run_and_backfills_boundary_pointer(tmp_path) -> N
             (restored.id,),
         ).fetchone()
     assert pointer == (decision.decision_id,)
+
+
+def test_checkpoint_persistence_error_uses_redacted_mechanical_boundary() -> None:
+    loop = _loop()
+    now = time.time()
+    loop._run = PursuitRun(
+        id="pursuit_checkpoint_error",
+        goal="安全记录 checkpoint 故障",
+        status=PursuitRunStatus.RUNNING,
+        phase="assess",
+        started_at=now,
+        updated_at=now,
+        criteria_total=1,
+    )
+
+    loop._mark_checkpoint_error(
+        RuntimeError("private database path /secret/token"),
+    )
+
+    assert loop._run.status is PursuitRunStatus.BLOCKED
+    assert loop._run.phase == "checkpoint_error"
+    assert loop._run.boundary_decision is not None
+    assert loop._run.boundary_decision.code == "checkpoint_persistence_error"
+    assert "RuntimeError" in loop._run.blocked_reason
+    assert "private database path" not in loop._run.blocked_reason
+    assert "/secret/token" not in loop._run.blocked_reason
 
 
 @pytest.mark.asyncio

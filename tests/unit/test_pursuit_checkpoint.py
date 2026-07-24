@@ -21,6 +21,7 @@ from naumi_agent.orchestrator.pursuit import (
     GoalPursuitLoop,
     GoalSpec,
     IterationCheckpoint,
+    PursuitBackgroundWait,
     PursuitConfig,
     PursuitRun,
     PursuitRunStatus,
@@ -454,6 +455,37 @@ async def test_resume_rejects_stale_checkpoint_after_checkpoint_write_error(
 
 
 @pytest.mark.asyncio
+async def test_resume_rejects_checkpoint_goal_mismatch_with_typed_boundary(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint()
+    mismatched_goal = checkpoint.goal.model_copy(update={
+        "original_goal": "另一个目标",
+    })
+    checkpoint = checkpoint.model_copy(update={"goal": mismatched_goal})
+    store.save_checkpoint(checkpoint)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.phase == "checkpoint_inconsistent"
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "checkpoint_inconsistent"
+    assert "目标与运行摘要不一致" in restored.blocked_reason
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_resume_blocks_inflight_action_without_replaying_tools(tmp_path) -> None:
     store = _store_with_run(tmp_path)
     run = store.get_run("pursuit_checkpoint")
@@ -479,6 +511,8 @@ async def test_resume_blocks_inflight_action_without_replaying_tools(tmp_path) -
     assert restored is not None
     assert restored.phase == "reconcile_required"
     assert "没有行动账本" in restored.blocked_reason
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "reconcile_required"
     loop._assess.assert_not_awaited()
     assert store.get_checkpoint(checkpoint.run_id) == checkpoint
 
@@ -508,6 +542,10 @@ async def test_resume_abandons_prepared_action_and_continues_from_new_checkpoint
     assert reconciled is not None
     assert reconciled.sequence > checkpoint.sequence
     assert reconciled.phase != "action_inflight"
+    decision_codes = {
+        item.code for item in store.list_boundary_decisions(checkpoint.run_id)
+    }
+    assert "criteria_incomplete" in decision_codes
     loop._assess.assert_awaited_once()
 
 
@@ -577,6 +615,8 @@ async def test_resume_reconstructs_wait_from_live_background_receipt(tmp_path) -
         assert "仍在等待后台任务" in result or "持久状态已安全检查" in result
         assert restored is not None
         assert restored.status is PursuitRunStatus.WAITING
+        assert restored.boundary_decision is not None
+        assert restored.boundary_decision.code == "waiting_for_background"
         assert restored.waiting_on is not None
         assert restored.waiting_on[0].task_id == background_task.id
         assert reconciled is not None
@@ -618,6 +658,8 @@ async def test_resume_blocks_stale_preparing_background_reservation(tmp_path) ->
     assert restored is not None
     assert restored.phase == "reconcile_required"
     assert "没有 PID" in restored.blocked_reason
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "reconcile_required"
     loop._assess.assert_not_awaited()
 
 
@@ -648,6 +690,8 @@ async def test_resume_waiting_for_interaction_consumes_no_model_turn(tmp_path) -
     assert "安全停在恢复边界" in result
     assert restored is not None
     assert restored.phase == "interaction_required"
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "interaction_required"
     loop._assess.assert_not_awaited()
 
 
@@ -715,10 +759,76 @@ async def test_resume_pending_durable_interaction_consumes_no_model_turn(
     result = await loop.resume_persisted(checkpoint.run_id)
     restored = store.get_run(checkpoint.run_id)
 
-    assert "安全停在恢复边界" in result
+    assert "持久状态已安全检查" in result
     assert restored is not None
+    assert restored.status is PursuitRunStatus.WAITING
     assert restored.phase == "interaction_required"
     assert record.interaction_id in restored.blocked_reason
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "waiting_for_interaction"
+    assert restored.boundary_decision.resumable is True
+    loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_blocks_conflicting_background_and_interaction_waits(
+    tmp_path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    authority = HarnessStore(tmp_path / "harness.db")
+    record = _durable_interaction_record(
+        interaction_id="ask-pursuit-conflict",
+        created_at="2026-07-18T00:00:00+00:00",
+    )
+    await authority.create_interaction(workspace_root=workspace, record=record)
+    store = _store_with_run(tmp_path)
+    run = store.get_run("pursuit_checkpoint")
+    assert run is not None
+    run.status = PursuitRunStatus.WAITING
+    run.phase = "waiting"
+    run.waiting_on = [
+        PursuitBackgroundWait(
+            task_id="bg-conflict",
+            action_id="a-conflict",
+            command="pytest tests/unit/test_target.py -q",
+            created_at=1.0,
+        )
+    ]
+    store.save_run(run)
+    checkpoint = _checkpoint().model_copy(update={
+        "pending_interaction": CheckpointInteractionRef(
+            interaction_id=record.interaction_id,
+        ),
+    })
+    store.save_checkpoint(checkpoint)
+    status = MagicMock()
+    status.execute = AsyncMock(return_value="后台任务运行中")
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+        lease_port=authority,
+        workspace_root=workspace,
+        interaction_port=authority,
+    )
+    loop._tools = MagicMock()
+    loop._tools.get = MagicMock(
+        side_effect=lambda name: status if name == "background_status" else None
+    )
+    loop._assess = AsyncMock()  # type: ignore[method-assign]
+
+    result = await loop.resume_persisted(checkpoint.run_id)
+    restored = store.get_run(checkpoint.run_id)
+
+    assert "安全停在恢复边界" in result
+    assert restored is not None
+    assert restored.status is PursuitRunStatus.BLOCKED
+    assert restored.phase == "reconcile_required"
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "resume_inconsistent"
+    assert "后台等待与交互恢复事实" in restored.blocked_reason
     loop._assess.assert_not_awaited()
 
 
@@ -766,6 +876,8 @@ async def test_resume_expired_durable_interaction_consumes_no_model_turn(
     assert restored is not None
     assert restored.phase == "interaction_expired"
     assert "已超时" in restored.blocked_reason
+    assert restored.boundary_decision is not None
+    assert restored.boundary_decision.code == "interaction_terminal"
     loop._assess.assert_not_awaited()
 
 

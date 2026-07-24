@@ -34,6 +34,11 @@ Goal parser 不会再次调用，已经消耗的 token、成本、轮次和活�
 任何不一致都不会调用模型或工具。交互等待进入 `interaction_required`；可能有副作用的行动进入
 `reconcile_required`，下一步明确指向 HAR-10.5。
 
+HAR-10.8c 已把这些 phase 收口到机械边界裁判：有真实 pending authority 的交互为
+`waiting_for_interaction/waiting`；缺失 authority 的交互为 `interaction_required/blocked`；
+副作用未知为 `reconcile_required/blocked`，checkpoint 摘要矛盾为
+`checkpoint_inconsistent/blocked`。
+
 ## 安全阶段协议
 
 新 planner 行动的 durable phase 顺序固定为：

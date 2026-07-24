@@ -14,6 +14,8 @@ background reconcile 已实现。resume 支持新 lease epoch continuation，在
 HAR-10.8a 已把 Pursuit 每轮验证限制为目标文件/测试节点，移除 assessment 的隐式全量测试和 lint。
 HAR-10.8b 已进一步把完成、等待、阻塞、取消和预算越界收口为内容寻址机械裁判，完整决策在
 PursuitStore 持久化，并由 Goal New UI 与 TUI/CLI fallback 展示；无持久引用的 waiting 失败关闭。
+HAR-10.8c 已把 checkpoint/reconcile/interaction 恢复分支接入同一裁判，升级 schema 2 并保持
+schema 1 兼容；durable pending interaction 现在是可恢复 waiting，冲突恢复 authority 明确 blocked。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
 HAR-10.2c-10.2h 已进一步交付默认 New UI runtime producer、安全 retention authority、typed worker catalog、

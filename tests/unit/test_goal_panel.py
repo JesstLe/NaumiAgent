@@ -118,6 +118,7 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
     assert item["pursuit_link_status"] == "ready"
     assert item["pursuit"]["run_id"] == run.id
     assert item["pursuit"]["status"] == "waiting"
+    assert item["pursuit"]["boundary_decision"]["schema_version"] == 2
     assert item["pursuit"]["boundary_decision"]["code"] == "waiting_for_interaction"
     assert len(item["pursuit"]["waits"]) == 20
     assert len(item["pursuit"]["evidence"]) == 20

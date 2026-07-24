@@ -1547,6 +1547,8 @@ class TestPursuitExecutionStrategy:
 
         assert loop._pending_background == []
         assert loop._run.status == PursuitRunStatus.RUNNING
+        assert loop._run.boundary_decision is not None
+        assert loop._run.boundary_decision.code == "criteria_state_unknown"
         assert any(
             evidence.kind == "background" and evidence.is_hard
             for evidence in loop._run.evidence
@@ -1614,6 +1616,8 @@ class TestPursuitExecutionStrategy:
 
         assert loop._pending_background == []
         assert loop._run.status == PursuitRunStatus.RUNNING
+        assert loop._run.boundary_decision is not None
+        assert loop._run.boundary_decision.code == "criteria_state_unknown"
         status.execute.assert_not_awaited()
         output.execute.assert_not_awaited()
         tool_calls = executor.await_args_list
@@ -1727,7 +1731,9 @@ class TestPursuitPersistence:
         assert restored is not None
         assert restored.status == PursuitRunStatus.BLOCKED
         assert restored.phase == "checkpoint_required"
-        assert "不能伪装成正在运行" in restored.blocked_reason
+        assert "不能猜测上次执行位置" in restored.blocked_reason
+        assert restored.boundary_decision is not None
+        assert restored.boundary_decision.code == "checkpoint_required"
         assert restored.waiting_on == []
         assert any(item.kind == "background" and item.is_hard for item in restored.evidence)
 

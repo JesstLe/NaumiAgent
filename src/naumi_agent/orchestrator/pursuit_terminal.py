@@ -7,7 +7,7 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 
 PursuitBoundaryStatus = Literal[
     "running",
@@ -26,10 +26,26 @@ BlockerKind = Literal[
     "stagnation",
     "stagnation_no_recovery",
     "waiting_without_authority",
+    "checkpoint_persistence_error",
+    "checkpoint_required",
+    "checkpoint_inconsistent",
+    "reconcile_required",
+    "interaction_required",
+    "interaction_terminal",
+    "resume_inconsistent",
 ]
 FinalVerification = Literal["not_run", "passed", "failed"]
+CriteriaState = Literal["known", "unknown"]
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SCHEMA_ONE_BLOCKERS = {
+    "none",
+    "no_success_criteria",
+    "planner_empty",
+    "stagnation",
+    "stagnation_no_recovery",
+    "waiting_without_authority",
+}
 
 
 class _StrictModel(BaseModel):
@@ -42,12 +58,15 @@ class PursuitBoundaryFacts(_StrictModel):
     criterion_count: int = Field(ge=0, le=1_000)
     verified_count: int = Field(ge=0, le=1_000)
     hard_evidence_count: int = Field(ge=0, le=1_000)
+    criteria_state: CriteriaState = "known"
     final_verification: FinalVerification = "not_run"
     cancel_requested: bool = False
     budget_breach: BudgetBreach = "none"
     waiting_kind: WaitingKind = "none"
     waiting_count: int = Field(default=0, ge=0, le=10_000)
+    waiting_detail: str = Field(default="", max_length=300)
     blocker: BlockerKind = "none"
+    blocker_detail: str = Field(default="", max_length=300)
 
     @model_validator(mode="after")
     def _integrity(self) -> PursuitBoundaryFacts:
@@ -55,8 +74,27 @@ class PursuitBoundaryFacts(_StrictModel):
             raise ValueError("verified_count 不得超过 criterion_count。")
         if self.hard_evidence_count > self.verified_count:
             raise ValueError("hard_evidence_count 不得超过 verified_count。")
+        if self.criteria_state == "unknown" and (
+            self.criterion_count != 0
+            or self.verified_count != 0
+            or self.hard_evidence_count != 0
+            or self.final_verification != "not_run"
+        ):
+            raise ValueError("未知 criterion 状态不得携带计数或最终验证。")
         if (self.waiting_kind == "none") != (self.waiting_count == 0):
             raise ValueError("waiting_kind 与 waiting_count 必须一致。")
+        if self.waiting_detail != self.waiting_detail.strip():
+            raise ValueError("waiting_detail 不得包含首尾空白。")
+        if any(ord(char) < 32 or ord(char) == 127 for char in self.waiting_detail):
+            raise ValueError("waiting_detail 不得包含控制字符。")
+        if self.waiting_kind == "none" and self.waiting_detail:
+            raise ValueError("没有 waiting 时不得携带 waiting_detail。")
+        if self.blocker_detail != self.blocker_detail.strip():
+            raise ValueError("blocker_detail 不得包含首尾空白。")
+        if any(ord(char) < 32 or ord(char) == 127 for char in self.blocker_detail):
+            raise ValueError("blocker_detail 不得包含控制字符。")
+        if self.blocker == "none" and self.blocker_detail:
+            raise ValueError("没有 blocker 时不得携带 blocker_detail。")
         if self.waiting_kind == "interaction" and self.waiting_count != 1:
             raise ValueError("一次 Pursuit 边界只能等待一个用户交互。")
         if (
@@ -91,7 +129,7 @@ class PursuitBoundaryFacts(_StrictModel):
 class PursuitBoundaryDecision(_StrictModel):
     """Authenticated-by-content decision consumed by Pursuit runtime and UI."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     decision_id: str
     facts: PursuitBoundaryFacts
     facts_sha256: str
@@ -103,7 +141,7 @@ class PursuitBoundaryDecision(_StrictModel):
     resumable: bool
 
     @model_validator(mode="after")
-    def _integrity(self) -> PursuitBoundaryDecision:
+    def _integrity(self, info: ValidationInfo) -> PursuitBoundaryDecision:
         if not _SHA256_RE.fullmatch(self.decision_id):
             raise ValueError("decision_id 必须是完整小写 SHA-256。")
         if not _SHA256_RE.fullmatch(self.facts_sha256):
@@ -115,8 +153,18 @@ class PursuitBoundaryDecision(_StrictModel):
             raise ValueError("decision code 格式无效。")
         if self.reason != self.reason.strip() or self.next_action != self.next_action.strip():
             raise ValueError("decision 文案不得包含首尾空白。")
-        if self.facts_sha256 != _sha256_json(self.facts.model_dump(mode="json")):
+        if self.facts_sha256 != _facts_sha256(
+            self.facts,
+            schema_version=self.schema_version,
+        ):
             raise ValueError("facts_sha256 与机械事实不一致。")
+        if self.schema_version == 1 and (
+            self.facts.criteria_state != "known"
+            or self.facts.waiting_detail
+            or self.facts.blocker_detail
+            or self.facts.blocker not in _SCHEMA_ONE_BLOCKERS
+        ):
+            raise ValueError("schema 1 不支持 HAR-10.8c 恢复事实。")
         expected_terminal = self.status in {
             "blocked",
             "completed",
@@ -128,6 +176,22 @@ class PursuitBoundaryDecision(_StrictModel):
             raise ValueError("decision terminal/resumable 与 status 不一致。")
         if self.decision_id != pursuit_boundary_decision_sha256(self):
             raise ValueError("decision_id 与决策内容不一致。")
+        if not (info.context or {}).get("skip_semantic_derivation"):
+            expected = decide_pursuit_boundary(self.facts)
+            semantic_fields = (
+                "facts",
+                "status",
+                "code",
+                "reason",
+                "next_action",
+                "terminal",
+                "resumable",
+            )
+            if any(
+                getattr(self, field) != getattr(expected, field)
+                for field in semantic_fields
+            ):
+                raise ValueError("decision 与机械事实的确定性裁决不一致。")
         return self
 
 
@@ -156,15 +220,16 @@ def decide_pursuit_boundary(facts: PursuitBoundaryFacts) -> PursuitBoundaryDecis
         )
     elif facts.waiting_kind != "none":
         interaction = facts.waiting_kind == "interaction"
+        default_reason = (
+            "目标追踪正在等待用户回答。"
+            if interaction
+            else f"目标追踪正在等待 {facts.waiting_count} 个后台任务。"
+        )
         values = _decision_values(
             facts,
             status="waiting",
             code="waiting_for_interaction" if interaction else "waiting_for_background",
-            reason=(
-                "目标追踪正在等待用户回答。"
-                if interaction
-                else f"目标追踪正在等待 {facts.waiting_count} 个后台任务。"
-            ),
+            reason=facts.waiting_detail or default_reason,
             next_action=(
                 "回答当前交互后，从持久 checkpoint 继续。"
                 if interaction
@@ -172,7 +237,7 @@ def decide_pursuit_boundary(facts: PursuitBoundaryFacts) -> PursuitBoundaryDecis
             ),
         )
     elif facts.blocker != "none":
-        code, reason, next_action = {
+        code, default_reason, next_action = {
             "no_success_criteria": (
                 "no_success_criteria",
                 "目标没有可机械验证的成功标准。",
@@ -198,13 +263,56 @@ def decide_pursuit_boundary(facts: PursuitBoundaryFacts) -> PursuitBoundaryDecis
                 "行动报告等待，但没有可恢复的后台任务引用。",
                 "核对行动账本和外部状态后，再决定重试或取消。",
             ),
+            "checkpoint_persistence_error": (
+                "checkpoint_persistence_error",
+                "checkpoint 持久化失败，旧快照不足以安全续跑。",
+                "审查持久化故障和最近证据后，显式创建后续运行。",
+            ),
+            "checkpoint_required": (
+                "checkpoint_required",
+                "当前运行没有可验证的恢复 checkpoint。",
+                "补全或审查持久 checkpoint 后，再显式恢复运行。",
+            ),
+            "checkpoint_inconsistent": (
+                "checkpoint_inconsistent",
+                "checkpoint 与运行摘要不一致，恢复已拒绝。",
+                "审查 checkpoint、运行摘要和工作区事实后再恢复。",
+            ),
+            "reconcile_required": (
+                "reconcile_required",
+                "上次行动的外部副作用尚未完成机械核对。",
+                "使用行动账本和外部任务回执完成 reconcile 后再恢复。",
+            ),
+            "interaction_required": (
+                "interaction_required",
+                "checkpoint 的用户交互引用无法安全恢复。",
+                "核对持久交互 authority 后重新回答或取消。",
+            ),
+            "interaction_terminal": (
+                "interaction_terminal",
+                "checkpoint 引用的用户交互已经超时或取消。",
+                "由用户创建新的受治理交互决定后续动作。",
+            ),
+            "resume_inconsistent": (
+                "resume_inconsistent",
+                "恢复状态同时包含互相冲突的运行事实。",
+                "人工核对 checkpoint、等待引用和行动账本后再恢复。",
+            ),
         }[facts.blocker]
         values = _decision_values(
             facts,
             status="blocked",
             code=code,
-            reason=reason,
+            reason=facts.blocker_detail or default_reason,
             next_action=next_action,
+        )
+    elif facts.criteria_state == "unknown":
+        values = _decision_values(
+            facts,
+            status="running",
+            code="criteria_state_unknown",
+            reason="恢复记录不含可复核的成功标准快照。",
+            next_action="加载并验证 checkpoint 后，再裁决完成或继续执行。",
         )
     elif facts.criterion_count == 0:
         return decide_pursuit_boundary(
@@ -246,15 +354,22 @@ def decide_pursuit_boundary(facts: PursuitBoundaryFacts) -> PursuitBoundaryDecis
             reason="仍有成功标准未通过强证据验证。",
             next_action="继续处理未验证标准并收集机械证据。",
         )
-    return PursuitBoundaryDecision(
-        decision_id=_sha256_json(values),
-        **values,
+    return PursuitBoundaryDecision.model_validate(
+        {
+            "decision_id": _sha256_json(values),
+            **values,
+        },
+        context={"skip_semantic_derivation": True},
     )
 
 
 def pursuit_boundary_decision_sha256(decision: PursuitBoundaryDecision) -> str:
     payload = decision.model_dump(mode="json")
     payload.pop("decision_id", None)
+    if decision.schema_version == 1:
+        facts = payload["facts"]
+        for field in ("criteria_state", "waiting_detail", "blocker_detail"):
+            facts.pop(field, None)
     return _sha256_json(payload)
 
 
@@ -268,7 +383,7 @@ def _decision_values(
 ) -> dict[str, object]:
     facts_payload = facts.model_dump(mode="json")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "facts": facts_payload,
         "facts_sha256": _sha256_json(facts_payload),
         "status": status,
@@ -293,6 +408,18 @@ def _sha256_json(payload: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _facts_sha256(
+    facts: PursuitBoundaryFacts,
+    *,
+    schema_version: int,
+) -> str:
+    payload = facts.model_dump(mode="json")
+    if schema_version == 1:
+        for field in ("criteria_state", "waiting_detail", "blocker_detail"):
+            payload.pop(field, None)
+    return _sha256_json(payload)
 
 
 __all__ = [

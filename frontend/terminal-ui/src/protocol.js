@@ -4653,16 +4653,19 @@ function normalizePursuitItem(value) {
 
 function normalizePursuitBoundaryDecision(value) {
   const item = harnessObject(value, "goals/snapshot pursuit.boundary_decision");
-  if (Number(item.schema_version) !== 1) {
+  const schemaVersion = Number(item.schema_version);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error("goals/snapshot boundary decision schema_version 不兼容");
   }
-  const decisionId = harnessText(
+  const decisionId = pursuitBoundaryText(
     item.decision_id,
     "goals/snapshot boundary decision.decision_id",
+    64,
   );
-  const factsSha256 = harnessText(
+  const factsSha256 = pursuitBoundaryText(
     item.facts_sha256,
     "goals/snapshot boundary decision.facts_sha256",
+    64,
   );
   if (!/^[0-9a-f]{64}$/.test(decisionId) || !/^[0-9a-f]{64}$/.test(factsSha256)) {
     throw new Error("goals/snapshot boundary decision digest 无效");
@@ -4686,24 +4689,46 @@ function normalizePursuitBoundaryDecision(value) {
   if (resumable !== ["waiting", "blocked"].includes(status)) {
     throw new Error("goals/snapshot boundary decision resumable 与 status 不一致");
   }
-  const code = harnessText(item.code, "goals/snapshot boundary decision.code");
+  const code = pursuitBoundaryText(
+    item.code,
+    "goals/snapshot boundary decision.code",
+    64,
+  );
   if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
     throw new Error("goals/snapshot boundary decision code 无效");
   }
   return {
-    schema_version: 1,
+    schema_version: schemaVersion,
     decision_id: decisionId,
     facts_sha256: factsSha256,
     status,
     code,
-    reason: harnessText(item.reason, "goals/snapshot boundary decision.reason"),
-    next_action: harnessText(
+    reason: pursuitBoundaryText(
+      item.reason,
+      "goals/snapshot boundary decision.reason",
+      300,
+    ),
+    next_action: pursuitBoundaryText(
       item.next_action,
       "goals/snapshot boundary decision.next_action",
+      300,
     ),
     terminal,
     resumable,
   };
+}
+
+function pursuitBoundaryText(value, name, maxLength) {
+  if (typeof value !== "string") throw new Error(`${name} 必须是字符串`);
+  if (
+    value.length < 1
+    || value.length > maxLength
+    || value !== value.trim()
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    throw new Error(`${name} 长度、空白或控制字符无效`);
+  }
+  return value;
 }
 
 function normalizePursuitRecovery(value, runId) {
