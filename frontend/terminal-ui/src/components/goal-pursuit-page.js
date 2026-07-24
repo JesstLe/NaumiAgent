@@ -179,6 +179,16 @@ function renderPursuit(run) {
   if (run.blocked_reason) {
     lines.push(color(ANSI.red, `阻塞 · ${compactText(run.blocked_reason, 2_000)}`));
   }
+  if (run.boundary_decision) {
+    const decision = run.boundary_decision;
+    lines.push(
+      color(
+        pursuitColor(decision.status),
+        `最近裁判 · ${decision.code} · ${decision.status} · ${decision.decision_id.slice(0, 12)}`,
+      ),
+      color(ANSI.dim, `  ${compactText(decision.reason, 300)}`),
+    );
+  }
   if (run.recovery) {
     lines.push(...renderRecovery(run.recovery));
   }

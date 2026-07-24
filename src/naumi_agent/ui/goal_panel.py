@@ -290,6 +290,13 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
                     f"- 下一步：{pursuit['next_action'] or '暂无'}",
                     f"- 等待任务：{len(pursuit['waits'])} · 证据：{len(pursuit['evidence'])}",
                 ])
+                boundary = pursuit.get("boundary_decision")
+                if isinstance(boundary, dict):
+                    lines.extend([
+                        f"- 最近裁判：`{boundary['code']}` · "
+                        f"{boundary['status']} · `{boundary['decision_id'][:12]}`",
+                        f"- 裁判原因：{boundary['reason']}",
+                    ])
                 recovery = pursuit.get("recovery")
                 if isinstance(recovery, dict):
                     lines.extend(_render_recovery(recovery))
@@ -557,6 +564,7 @@ def _goal_projection(
 
 
 def _pursuit_projection(run: PursuitRun) -> dict[str, Any]:
+    boundary = run.boundary_decision
     return {
         "run_id": _bounded_text(run.id, 128),
         "goal": _bounded_text(run.goal, 4_000),
@@ -570,6 +578,21 @@ def _pursuit_projection(run: PursuitRun) -> dict[str, Any]:
         "failure_count": max(0, int(run.failure_count)),
         "blocked_reason": _bounded_text(run.blocked_reason, 2_000),
         "next_action": _bounded_text(run.next_action, 2_000),
+        "boundary_decision": (
+            {
+                "schema_version": boundary.schema_version,
+                "decision_id": boundary.decision_id,
+                "facts_sha256": boundary.facts_sha256,
+                "status": boundary.status,
+                "code": boundary.code,
+                "reason": _bounded_text(boundary.reason, 300),
+                "next_action": _bounded_text(boundary.next_action, 300),
+                "terminal": boundary.terminal,
+                "resumable": boundary.resumable,
+            }
+            if boundary is not None
+            else None
+        ),
         "worktree_name": _bounded_text(run.worktree_name, 256),
         "worktree_path": _bounded_text(run.worktree_path, 2_048),
         "waits": [

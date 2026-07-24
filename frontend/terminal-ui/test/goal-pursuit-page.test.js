@@ -24,6 +24,17 @@ test("Goal page exposes shared interaction detail command for every state", () =
           iteration: 1,
           failure_count: 0,
           next_action: "等待回答",
+          boundary_decision: {
+            schema_version: 1,
+            decision_id: "a".repeat(64),
+            facts_sha256: "b".repeat(64),
+            status: "waiting",
+            code: "waiting_for_interaction",
+            reason: "目标追踪正在等待用户回答。",
+            next_action: "回答当前交互后继续。",
+            terminal: false,
+            resumable: true,
+          },
           waits: [],
           evidence: [],
         },
@@ -55,6 +66,8 @@ test("Goal page exposes shared interaction detail command for every state", () =
   assert.match(lines, /\/goal interaction detail ask-answered/);
   assert.match(lines, /\/goal interaction cancel ask-pending/);
   assert.match(lines, /\/goal interaction takeover ask-pending/);
+  assert.match(lines, /最近裁判 · waiting_for_interaction · waiting · a{12}/);
+  assert.match(lines, /目标追踪正在等待用户回答/);
   assert.doesNotMatch(lines, /\/goal interaction cancel ask-answered/);
   assert.doesNotMatch(lines, /\/goal interaction takeover ask-answered/);
 });

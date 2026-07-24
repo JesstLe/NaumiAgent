@@ -16,6 +16,10 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRunStatus,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal import (
+    PursuitBoundaryFacts,
+    decide_pursuit_boundary,
+)
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot,
     build_goal_pursuit_snapshot_with_recovery,
@@ -71,6 +75,13 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
         criteria_total=4,
         criteria_verified=2,
         next_action="等待用户选择",
+        boundary_decision=decide_pursuit_boundary(PursuitBoundaryFacts(
+            criterion_count=4,
+            verified_count=2,
+            hard_evidence_count=2,
+            waiting_kind="interaction",
+            waiting_count=1,
+        )),
         waiting_on=[
             PursuitBackgroundWait(
                 task_id=f"bg_{index}",
@@ -107,11 +118,17 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
     assert item["pursuit_link_status"] == "ready"
     assert item["pursuit"]["run_id"] == run.id
     assert item["pursuit"]["status"] == "waiting"
+    assert item["pursuit"]["boundary_decision"]["code"] == "waiting_for_interaction"
     assert len(item["pursuit"]["waits"]) == 20
     assert len(item["pursuit"]["evidence"]) == 20
     assert item["pursuit"]["evidence"][0]["source"] == "case:5"
     assert "\x1b" not in str(payload)
     assert "private" not in str(payload)
+    rendered = render_goal_pursuit_snapshot(
+        build_goal_pursuit_snapshot(goal_store, pursuit_store)
+    )
+    assert "最近裁判" in rendered
+    assert "waiting_for_interaction" in rendered
 
 
 @pytest.mark.asyncio
