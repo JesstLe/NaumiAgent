@@ -43,5 +43,5 @@ authority 状态。
   以及 replay 一次性绑定到新 owner。
 - 本切片提供的是命令驱动详情 surface，还不是 Goal 页内的独立可展开详情页。
 - interaction 列表仍是最近 50 项；cursor/筛选与优先级应与 HAR-10.3 durable queue 协调设计。
-- “宿主绑定 takeover-and-display”已由 UI-18.4d2 实现；下一边界是页内展开详情与 cursor，
-  不得回退为单独的 Store owner 写入。
+- “宿主绑定 takeover-and-display”已由 UI-18.4d2 实现；页内展开详情与 cursor 已由 UI-18.4d3
+  复用同一 authority 完成，不得回退为单独的 Store owner 写入。

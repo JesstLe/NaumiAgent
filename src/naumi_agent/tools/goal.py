@@ -181,12 +181,36 @@ class GoalListTool(Tool):
                     "type": "boolean",
                     "description": "是否包含已完成和已取消目标",
                     "default": True,
-                }
+                },
+                "interaction_filter": {
+                    "type": "string",
+                    "enum": ["all", "pending", "answered", "expired", "cancelled"],
+                    "description": "持久用户交互状态筛选",
+                    "default": "all",
+                },
+                "interaction_cursor": {
+                    "type": "string",
+                    "description": "上一页返回的不透明交互 cursor",
+                    "default": "",
+                },
+                "selected_interaction_id": {
+                    "type": "string",
+                    "description": "可选的页内交互详情 ID",
+                    "default": "",
+                },
             },
             "required": [],
         }
 
-    async def execute(self, *, include_finished: bool = True, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        *,
+        include_finished: bool = True,
+        interaction_filter: str = "all",
+        interaction_cursor: str = "",
+        selected_interaction_id: str = "",
+        **kwargs: Any,
+    ) -> str:
         return render_goal_pursuit_snapshot(
             await build_goal_pursuit_snapshot_with_recovery(
                 self._store,
@@ -195,6 +219,10 @@ class GoalListTool(Tool):
                 workspace_root=self._workspace_root,
                 limit=50,
                 include_finished=include_finished,
+                interaction_limit=10,
+                interaction_filter=interaction_filter,
+                interaction_cursor=interaction_cursor,
+                selected_interaction_id=selected_interaction_id,
             )
         )
 

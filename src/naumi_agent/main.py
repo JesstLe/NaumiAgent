@@ -5720,40 +5720,65 @@ async def _run_goal(engine: Any, arg: str) -> None:
         tool_name = "goal_pursue"
         kwargs = {}
     elif subcommand == "interaction":
-        action, _, interaction_id = remainder.partition(" ")
+        action, _, interaction_args = remainder.partition(" ")
         action = action.lower()
-        if action not in {"detail", "cancel", "takeover"} or not re.fullmatch(
-            r"ask-[A-Za-z0-9._:-]{1,128}", interaction_id.strip()
-        ):
-            console.print(
-                "[yellow]用法: /goal interaction [detail|cancel|takeover] "
-                "<interaction-id>[/yellow]"
-            )
-            return
-        if action == "takeover":
-            if _active_cli is None or not hasattr(
-                _active_cli,
-                "takeover_goal_interaction",
+        if action == "list":
+            parts = interaction_args.split()
+            state_filter = parts[0].lower() if parts else "all"
+            cursor = parts[1] if len(parts) == 2 else ""
+            if (
+                state_filter not in {
+                    "all", "pending", "answered", "expired", "cancelled",
+                }
+                or len(parts) > 2
+                or len(cursor) > 1_024
             ):
                 console.print(
-                    "[yellow]当前界面无法承接交互；请在 New UI 或 "
-                    "Textual TUI 中执行接管。[/yellow]"
+                    "[yellow]用法: /goal interaction list "
+                    "[all|pending|answered|expired|cancelled] [cursor][/yellow]"
                 )
                 return
-            result = await _active_cli.takeover_goal_interaction(
-                interaction_id.strip()
-            )
-            console.print(
-                Panel(
-                    Markdown(result),
-                    title="[bold cyan]持久交互[/bold cyan]",
-                    border_style="cyan",
-                    padding=(1, 2),
+            tool_name = "goal_list"
+            kwargs = {
+                "include_finished": True,
+                "interaction_filter": state_filter,
+                "interaction_cursor": cursor,
+            }
+        elif action in {"detail", "cancel", "takeover"} and re.fullmatch(
+            r"ask-[A-Za-z0-9._:-]{1,128}", interaction_args.strip()
+        ):
+            interaction_id = interaction_args.strip()
+            if action == "takeover":
+                if _active_cli is None or not hasattr(
+                    _active_cli,
+                    "takeover_goal_interaction",
+                ):
+                    console.print(
+                        "[yellow]当前界面无法承接交互；请在 New UI 或 "
+                        "Textual TUI 中执行接管。[/yellow]"
+                    )
+                    return
+                result = await _active_cli.takeover_goal_interaction(
+                    interaction_id
                 )
+                console.print(
+                    Panel(
+                        Markdown(result),
+                        title="[bold cyan]持久交互[/bold cyan]",
+                        border_style="cyan",
+                        padding=(1, 2),
+                    )
+                )
+                return
+            tool_name = f"goal_interaction_{action}"
+            kwargs = {"interaction_id": interaction_id}
+        else:
+            console.print(
+                "[yellow]用法: /goal interaction "
+                "[list [state] [cursor]|detail|cancel|takeover] "
+                "[interaction-id][/yellow]"
             )
             return
-        tool_name = f"goal_interaction_{action}"
-        kwargs = {"interaction_id": interaction_id.strip()}
     else:
         tool_name = "goal_create"
         kwargs = {"objective": normalized}

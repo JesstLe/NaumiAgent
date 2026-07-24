@@ -16,7 +16,10 @@ export function renderGoalPursuitPage(view, width, height) {
     : null;
   const logical = [
     color(ANSI.cyan, "Goal / Pursuit"),
-    color(ANSI.dim, "r 刷新 · ↑/↓ 滚动 · Esc 返回 · /goal interaction detail <id> 查看详情"),
+    color(
+      ANSI.dim,
+      "r 刷新 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+    ),
   ];
   if (value.loading && !snapshot) {
     logical.push(color(ANSI.cyan, "正在读取 Goal / Pursuit 权威状态…"));
@@ -33,7 +36,14 @@ export function renderGoalPursuitPage(view, width, height) {
     );
   } else {
     for (const goal of snapshot.goals) {
-      logical.push(...renderGoal(goal, snapshot.current_goal_id, snapshot.interactions ?? []));
+      logical.push(...renderGoal(goal, snapshot.current_goal_id));
+    }
+    logical.push(...renderInteractionLedger(
+      snapshot,
+      Math.max(0, Number(value.selectedInteractionIndex) || 0),
+    ));
+    if (snapshot.selected_interaction) {
+      logical.push(...renderInteractionDetail(snapshot.selected_interaction));
     }
     if (snapshot.truncated) {
       logical.push(color(ANSI.yellow, "目标历史已按当前视图上限截断。"));
@@ -53,7 +63,7 @@ export function renderGoalPursuitPage(view, width, height) {
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
 }
 
-function renderGoal(goal, currentGoalId, interactions) {
+function renderGoal(goal, currentGoalId) {
   const current = goal.goal_id === currentGoalId;
   const lines = [
     color(
@@ -69,9 +79,6 @@ function renderGoal(goal, currentGoalId, interactions) {
   if (goal.note) lines.push(color(ANSI.dim, `说明 · ${compactText(goal.note, 2_000)}`));
   if (goal.pursuit) {
     lines.push(...renderPursuit(goal.pursuit));
-    lines.push(...renderInteractions(
-      interactions.filter((item) => item.pursuit_run_id === goal.pursuit.run_id),
-    ));
   } else if (goal.pursuit_link_status === "missing") {
     lines.push(color(ANSI.red, `Pursuit ${goal.pursuit_run_id} · 追踪记录不可用`));
   } else {
@@ -80,10 +87,21 @@ function renderGoal(goal, currentGoalId, interactions) {
   return lines;
 }
 
-function renderInteractions(interactions) {
+function renderInteractionLedger(snapshot, selectedIndex) {
+  const interactions = snapshot.interactions ?? [];
   if (!interactions.length) return [];
-  const lines = [color(ANSI.cyan, `用户交互 · ${interactions.length}`)];
-  for (const item of interactions) {
+  const filterLabel = {
+    all: "全部", pending: "等待回答", answered: "已回答",
+    expired: "已超时", cancelled: "已取消",
+  }[snapshot.interaction_filter] || snapshot.interaction_filter || "全部";
+  const page = snapshot.interaction_cursor ? "后续页" : "第 1 页";
+  const lines = [
+    color(
+      ANSI.cyan,
+      `── 用户交互账本 · ${filterLabel} · ${page} · ${interactions.length} 项`,
+    ),
+  ];
+  for (const [index, item] of interactions.entries()) {
     const style = item.state === "pending"
       ? ANSI.yellow
       : item.state === "answered"
@@ -92,10 +110,10 @@ function renderInteractions(interactions) {
     const label = {
       pending: "等待回答", answered: "已回答", expired: "已超时", cancelled: "已取消",
     }[item.state] || item.state;
-    lines.push(color(
-      style,
-      `  ${item.interaction_id} · ${label} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`,
-    ));
+    const marker = index === selectedIndex ? "›" : " ";
+    const row = `${marker} ${item.interaction_id} · ${label} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`;
+    lines.push(color(index === selectedIndex ? ANSI.cyan : style, row));
+    lines.push(color(ANSI.dim, `    Pursuit · ${item.pursuit_run_id}`));
     lines.push(color(ANSI.dim, `    详情 · /goal interaction detail ${item.interaction_id}`));
     if (item.can_cancel) {
       lines.push(color(ANSI.dim, `    取消 · /goal interaction cancel ${item.interaction_id}`));
@@ -104,6 +122,48 @@ function renderInteractions(interactions) {
       lines.push(color(ANSI.cyan, `    接管 · /goal interaction takeover ${item.interaction_id}`));
     }
   }
+  lines.push(color(
+    ANSI.dim,
+    `${snapshot.interaction_cursor ? "p 上一页" : "p 上一页（不可用）"} · ${
+      snapshot.interaction_has_more ? "n 下一页" : "n 下一页（已到底）"
+    }`,
+  ));
+  return lines;
+}
+
+function renderInteractionDetail(item) {
+  const lines = [
+    color(ANSI.cyan, `── 交互详情 · ${item.interaction_id}`),
+    color(
+      item.state === "pending" ? ANSI.yellow : item.state === "answered" ? ANSI.green : ANSI.dim,
+      `${item.state} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`,
+    ),
+  ];
+  for (const [index, option] of (item.options ?? []).entries()) {
+    const description = option.description ? ` · ${compactText(option.description, 300)}` : "";
+    lines.push(`  ${index + 1}. ${option.label} (${option.value})${description}`);
+  }
+  if (item.allow_custom) {
+    lines.push(color(ANSI.dim, `  自定义 · ${item.custom_label || "自定义回答"}`));
+  }
+  if (item.state === "answered") {
+    const answer = item.answer_kind === "custom"
+      ? item.custom_text
+      : `${item.answer_label} (${item.answer_value})`;
+    lines.push(color(ANSI.green, `回答 · ${compactText(answer || "-", 4_000)}`));
+  } else {
+    lines.push(color(ANSI.dim, item.state === "pending" ? "回答 · 尚未提交" : "回答 · 无"));
+  }
+  lines.push(
+    color(ANSI.dim, `Fencing · sequence ${item.sequence} · owner epoch ${item.owner_epoch}`),
+    color(
+      item.question_expired ? ANSI.red : item.lease_expired ? ANSI.yellow : ANSI.dim,
+      `期限 · ${item.question_expired ? "问题已到期" : "问题有效"} · ${
+        item.lease_expired ? "owner 租约已过期" : "owner 租约生效"
+      }`,
+    ),
+    color(ANSI.dim, "Esc 关闭详情"),
+  );
   return lines;
 }
 

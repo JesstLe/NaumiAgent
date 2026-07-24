@@ -4333,7 +4333,8 @@ function sessionText(value, name, maxChars) {
 }
 
 function normalizeGoalSnapshot(payload) {
-  if (Number(payload.schema_version) !== 1) {
+  const schemaVersion = Number(payload.schema_version);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error(`goals/snapshot schema_version 不兼容: ${payload.schema_version}`);
   }
   const goals = harnessObjectArray(payload.goals, "goals/snapshot goals", 50)
@@ -4360,8 +4361,36 @@ function normalizeGoalSnapshot(payload) {
   if (interactions.some((item) => !visibleRunIds.has(item.pursuit_run_id))) {
     throw new Error("goals/snapshot interaction 必须关联当前快照中的 Pursuit");
   }
+  const interactionFilter = schemaVersion >= 2
+    ? harnessChoice(
+      payload.interaction_filter,
+      "goals/snapshot interaction_filter",
+      new Set([...INTERACTION_STATES, "all"]),
+    )
+    : "all";
+  const interactionCursor = schemaVersion >= 2
+    ? goalCursor(payload.interaction_cursor, "goals/snapshot interaction_cursor")
+    : "";
+  const interactionNextCursor = schemaVersion >= 2
+    ? goalCursor(payload.interaction_next_cursor, "goals/snapshot interaction_next_cursor")
+    : "";
+  const interactionHasMore = schemaVersion >= 2
+    ? harnessBoolean(payload.interaction_has_more, "goals/snapshot interaction_has_more")
+    : false;
+  if (interactionHasMore !== Boolean(interactionNextCursor)) {
+    throw new Error("goals/snapshot interaction_has_more 与 next cursor 不一致");
+  }
+  const selectedInteraction = schemaVersion >= 2 && payload.selected_interaction != null
+    ? normalizeGoalInteractionDetail(payload.selected_interaction)
+    : null;
+  if (
+    selectedInteraction
+    && !visibleRunIds.has(selectedInteraction.pursuit_run_id)
+  ) {
+    throw new Error("goals/snapshot 所选 interaction 不属于当前 Goal");
+  }
   return {
-    schema_version: 1,
+    schema_version: schemaVersion,
     generated_at: harnessText(payload.generated_at, "goals/snapshot generated_at"),
     full: harnessBoolean(payload.full, "goals/snapshot full"),
     current_goal_id: currentGoalId,
@@ -4373,7 +4402,18 @@ function normalizeGoalSnapshot(payload) {
       "goals/snapshot include_finished",
     ),
     interactions,
+    interaction_filter: interactionFilter,
+    interaction_cursor: interactionCursor,
+    interaction_next_cursor: interactionNextCursor,
+    interaction_has_more: interactionHasMore,
+    selected_interaction: selectedInteraction,
   };
+}
+
+function goalCursor(value, name) {
+  const cursor = harnessText(value, name);
+  if (cursor.length > 1_024) throw new Error(`${name} 不能超过 1024 个字符`);
+  return cursor;
 }
 
 function normalizeGoalInteraction(item) {
@@ -4425,6 +4465,91 @@ function normalizeGoalInteraction(item) {
     updated_at: harnessText(item.updated_at, "goals/snapshot interaction.updated_at"),
     can_cancel: canCancel,
     can_takeover: canTakeover,
+  };
+}
+
+function normalizeGoalInteractionDetail(item) {
+  const summary = normalizeGoalInteraction(item);
+  const options = harnessObjectArray(
+    item.options,
+    "goals/snapshot selected_interaction.options",
+    20,
+  ).map((option) => ({
+    value: harnessText(option.value, "goals/snapshot selected_interaction.option.value"),
+    label: harnessText(option.label, "goals/snapshot selected_interaction.option.label"),
+    description: harnessText(
+      option.description,
+      "goals/snapshot selected_interaction.option.description",
+    ),
+  }));
+  const ownerEpoch = harnessNonnegativeInteger(
+    item.owner_epoch,
+    "goals/snapshot selected_interaction.owner_epoch",
+  );
+  if (ownerEpoch < 1) {
+    throw new Error("goals/snapshot selected_interaction.owner_epoch 必须大于 0");
+  }
+  const answerKind = harnessChoice(
+    item.answer_kind,
+    "goals/snapshot selected_interaction.answer_kind",
+    new Set(["", "option", "custom"]),
+  );
+  const answerValue = harnessText(
+    item.answer_value,
+    "goals/snapshot selected_interaction.answer_value",
+  );
+  const answerLabel = harnessText(
+    item.answer_label,
+    "goals/snapshot selected_interaction.answer_label",
+  );
+  const customText = harnessText(
+    item.custom_text,
+    "goals/snapshot selected_interaction.custom_text",
+  );
+  const answeredAt = harnessText(
+    item.answered_at,
+    "goals/snapshot selected_interaction.answered_at",
+  );
+  if (summary.state === "answered" && !["option", "custom"].includes(answerKind)) {
+    throw new Error("goals/snapshot answered interaction 必须包含答案类型");
+  }
+  if (summary.state !== "answered" && (answerKind || answeredAt)) {
+    throw new Error("goals/snapshot 非 answered interaction 不得包含答案");
+  }
+  if (answerKind === "option" && (!answerValue || !answerLabel || customText)) {
+    throw new Error("goals/snapshot option answer 字段不完整");
+  }
+  if (answerKind === "custom" && (!customText || answerValue || answerLabel)) {
+    throw new Error("goals/snapshot custom answer 字段不完整");
+  }
+  if (answerKind && !answeredAt) {
+    throw new Error("goals/snapshot answered_at 不能为空");
+  }
+  return {
+    ...summary,
+    options,
+    allow_custom: harnessBoolean(
+      item.allow_custom,
+      "goals/snapshot selected_interaction.allow_custom",
+    ),
+    custom_label: harnessText(
+      item.custom_label,
+      "goals/snapshot selected_interaction.custom_label",
+    ),
+    answer_kind: answerKind,
+    answer_value: answerValue,
+    answer_label: answerLabel,
+    custom_text: customText,
+    answered_at: answeredAt,
+    owner_epoch: ownerEpoch,
+    question_expired: harnessBoolean(
+      item.question_expired,
+      "goals/snapshot selected_interaction.question_expired",
+    ),
+    lease_expired: harnessBoolean(
+      item.lease_expired,
+      "goals/snapshot selected_interaction.lease_expired",
+    ),
   };
 }
 

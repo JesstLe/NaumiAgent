@@ -137,6 +137,7 @@ _SANDBOX_RETRY_PRUNE_EXECUTION_CODES = frozenset(
 )
 _MAX_DURABLE_CONVERSATION_QUEUE_ITEMS = 20
 _MAX_RUNTIME_HEARTBEAT_CURSOR_LENGTH = 1024
+_MAX_INTERACTION_CURSOR_LENGTH = 1024
 _MAX_SANDBOX_RETRY_CATALOG_CURSOR_LENGTH = 1024
 _MAX_EVAL_RESULT_BYTES = 4 * 1024 * 1024
 _MAX_SANDBOX_EVAL_REQUEST_BYTES = 256 * 1024
@@ -178,6 +179,19 @@ class HarnessSandboxAdmissionCapacityError(HarnessStoreError):
 
 class HarnessSandboxAdmissionFenceError(HarnessStoreError):
     """Raised when a Sandbox admission owner no longer owns its ticket epoch."""
+
+
+@dataclass(frozen=True, slots=True)
+class HarnessInteractionCatalogPage:
+    """One bounded, stable page of workspace-scoped interaction history."""
+
+    items: tuple[HarnessInteractionRecord, ...]
+    state_filter: str
+    next_cursor: str
+
+    @property
+    def has_more(self) -> bool:
+        return bool(self.next_cursor)
 
 
 class HarnessSandboxRetryDispatchFenceError(HarnessStoreError):
@@ -3938,6 +3952,98 @@ class HarnessStore:
             raise
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法列出持久用户交互历史。") from exc
+
+    async def list_interactions_page(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_kind: HarnessRunKind | str | None = None,
+        subject_ids: Sequence[str] = (),
+        state_filter: str = "all",
+        limit: int = 20,
+        cursor: str = "",
+    ) -> HarnessInteractionCatalogPage:
+        """Return a stable newest-first page with an opaque filter-bound cursor."""
+        workspace = _canonical_workspace(workspace_root)
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+            raise ValueError("interaction page limit 必须在 1..50 之间。")
+        kind = _coerce_run_kind(subject_kind) if subject_kind is not None else None
+        if len(subject_ids) > 50:
+            raise ValueError("interaction subject_ids 最多 50 项。")
+        subjects = tuple(sorted(dict.fromkeys(
+            _normalize_run_lease_id(value, field="subject_id")
+            for value in subject_ids
+        )))
+        if subjects and kind is None:
+            raise ValueError("按 subject_ids 查询时必须同时提供 subject_kind。")
+        normalized_state = str(state_filter or "all").strip().lower()
+        if normalized_state not in {
+            "all", "pending", "answered", "expired", "cancelled",
+        }:
+            raise ValueError("interaction state_filter 无效。")
+        position = (
+            _decode_interaction_cursor(
+                cursor,
+                workspace_root=workspace,
+                subject_kind=kind.value if kind is not None else "",
+                subject_ids=subjects,
+                state_filter=normalized_state,
+            )
+            if cursor else None
+        )
+        if not self._db_path.is_file():
+            return HarnessInteractionCatalogPage((), normalized_state, "")
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                query = (
+                    "SELECT rowid, interaction_id FROM harness_interactions "
+                    "WHERE workspace_root = ?"
+                )
+                params: list[object] = [workspace]
+                if kind is not None:
+                    query += " AND subject_kind = ?"
+                    params.append(kind.value)
+                if subjects:
+                    query += f" AND subject_id IN ({','.join('?' for _ in subjects)})"
+                    params.extend(subjects)
+                if normalized_state != "all":
+                    query += " AND state = ?"
+                    params.append(normalized_state)
+                if position is not None:
+                    query += " AND rowid < ?"
+                    params.append(position)
+                query += " ORDER BY rowid DESC LIMIT ?"
+                params.append(limit + 1)
+                rows = await (await db.execute(query, tuple(params))).fetchall()
+                has_more = len(rows) > limit
+                page_rows = rows[:limit]
+                records: list[HarnessInteractionRecord] = []
+                for row in page_rows:
+                    record = await self._get_interaction_with_connection(
+                        db, workspace, str(row["interaction_id"]),
+                    )
+                    if record is not None:
+                        records.append(record)
+                next_cursor = ""
+                if has_more and page_rows:
+                    next_cursor = _encode_interaction_cursor(
+                        workspace_root=workspace,
+                        subject_kind=kind.value if kind is not None else "",
+                        subject_ids=subjects,
+                        state_filter=normalized_state,
+                        rowid=int(page_rows[-1]["rowid"]),
+                    )
+                return HarnessInteractionCatalogPage(
+                    items=tuple(records),
+                    state_filter=normalized_state,
+                    next_cursor=next_cursor,
+                )
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise HarnessStoreError("无法分页读取持久用户交互历史。") from exc
 
     async def takeover_interaction(
         self,
@@ -10687,6 +10793,95 @@ def _encode_runtime_heartbeat_cursor(
         sort_keys=True,
     ).encode("utf-8")
     return base64.urlsafe_b64encode(envelope).decode("ascii").rstrip("=")
+
+
+def _encode_interaction_cursor(
+    *,
+    workspace_root: str,
+    subject_kind: str,
+    subject_ids: Sequence[str],
+    state_filter: str,
+    rowid: int,
+) -> str:
+    payload = {
+        "f": state_filter,
+        "k": subject_kind,
+        "r": rowid,
+        "s": hashlib.sha256(
+            "\x00".join(subject_ids).encode("utf-8")
+        ).hexdigest(),
+        "v": 1,
+        "w": hashlib.sha256(workspace_root.encode("utf-8")).hexdigest(),
+    }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    envelope = json.dumps(
+        {"d": hashlib.sha256(canonical).hexdigest(), "p": payload},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(envelope).decode("ascii").rstrip("=")
+
+
+def _decode_interaction_cursor(
+    value: str,
+    *,
+    workspace_root: str,
+    subject_kind: str,
+    subject_ids: Sequence[str],
+    state_filter: str,
+) -> int:
+    token = value.strip() if isinstance(value, str) else ""
+    if not token or len(token) > _MAX_INTERACTION_CURSOR_LENGTH:
+        raise ValueError("interaction cursor 为空或过长。")
+    try:
+        padding = "=" * (-len(token) % 4)
+        decoded = base64.b64decode(
+            token + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        envelope = json.loads(decoded.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("interaction cursor 格式无效。") from exc
+    if not isinstance(envelope, dict) or set(envelope) != {"d", "p"}:
+        raise ValueError("interaction cursor envelope 无效。")
+    payload = envelope.get("p")
+    digest = envelope.get("d")
+    if not isinstance(payload, dict) or set(payload) != {"f", "k", "r", "s", "v", "w"}:
+        raise ValueError("interaction cursor payload 无效。")
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    expected_digest = hashlib.sha256(canonical).hexdigest()
+    if not isinstance(digest, str) or not hmac.compare_digest(digest, expected_digest):
+        raise ValueError("interaction cursor 摘要校验失败。")
+    expected = {
+        "f": state_filter,
+        "k": subject_kind,
+        "s": hashlib.sha256(
+            "\x00".join(subject_ids).encode("utf-8")
+        ).hexdigest(),
+        "w": hashlib.sha256(workspace_root.encode("utf-8")).hexdigest(),
+    }
+    if payload.get("v") != 1:
+        raise ValueError("interaction cursor 版本不兼容。")
+    for key, expected_value in expected.items():
+        actual = payload.get(key)
+        if not isinstance(actual, str) or not hmac.compare_digest(actual, expected_value):
+            raise ValueError("interaction cursor 与当前查询不匹配。")
+    rowid = payload.get("r")
+    if isinstance(rowid, bool) or not isinstance(rowid, int) or rowid < 1:
+        raise ValueError("interaction cursor 位置无效。")
+    return rowid
 
 
 def _decode_runtime_heartbeat_cursor(

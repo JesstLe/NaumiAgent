@@ -88,7 +88,9 @@
     takeover 资格，且不暴露 owner ID；
   - UI-18.4d2 已交付 exact manual takeover，成功后必须绑定当前 Bridge/TUI 宿主展示、续租和
     回答提交，并拒绝 live owner、deadline 超时与并发重复卡片；
-  - 未完成：页内展开详情、cursor/优先级与跨 Store 原子提交。
+  - UI-18.4d3 已交付 workspace/subject/filter-bound opaque cursor、New UI 页内选择/详情/前后翻页，
+    以及 TUI 共享 Tool 的状态筛选和命令式后续页；
+  - 未完成：交互优先级、跨 Goal 搜索与跨 Store 原子提交。
 - HAR-10.7 Cluster scheduling（partial）：
   - HAR-10.7a 已让所有公开 Agent `delegate()` 与批量/DAG 入口共用 `max_parallel_agents` semaphore，
     直接委派等待也进入 Runtime queue 计数；取消会清理计数，饱和嵌套委派 fail closed 而不自锁。见

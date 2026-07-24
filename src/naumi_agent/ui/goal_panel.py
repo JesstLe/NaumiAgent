@@ -17,7 +17,7 @@ from naumi_agent.ui.pursuit_recovery import (
     build_pursuit_recovery_snapshot,
 )
 
-GOAL_PANEL_SCHEMA_VERSION = 1
+GOAL_PANEL_SCHEMA_VERSION = 2
 MAX_GOAL_PANEL_ITEMS = 50
 MAX_GOAL_PANEL_EVIDENCE = 20
 MAX_GOAL_PANEL_WAITS = 20
@@ -35,6 +35,10 @@ class GoalPursuitSnapshot:
     truncated: bool = False
     include_finished: bool = True
     interactions: tuple[dict[str, Any], ...] = ()
+    interaction_filter: str = "all"
+    interaction_cursor: str = ""
+    interaction_next_cursor: str = ""
+    selected_interaction: dict[str, Any] | None = None
 
     def to_protocol_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +53,15 @@ class GoalPursuitSnapshot:
             "interactions": [
                 dict(item) for item in self.interactions[:MAX_GOAL_PANEL_INTERACTIONS]
             ],
+            "interaction_filter": self.interaction_filter,
+            "interaction_cursor": self.interaction_cursor,
+            "interaction_next_cursor": self.interaction_next_cursor,
+            "interaction_has_more": bool(self.interaction_next_cursor),
+            "selected_interaction": (
+                dict(self.selected_interaction)
+                if self.selected_interaction is not None
+                else None
+            ),
         }
 
 
@@ -120,6 +133,10 @@ async def build_goal_pursuit_snapshot_with_recovery(
     workspace_root: str | Path,
     limit: int = 20,
     include_finished: bool = True,
+    interaction_limit: int = 10,
+    interaction_filter: str = "all",
+    interaction_cursor: str = "",
+    selected_interaction_id: str = "",
 ) -> GoalPursuitSnapshot:
     """Add typed recovery facts while preserving the bounded base projection."""
     base = build_goal_pursuit_snapshot(
@@ -152,8 +169,41 @@ async def build_goal_pursuit_snapshot_with_recovery(
             projected["pursuit"] = pursuit
         items.append(projected)
     interactions: tuple[dict[str, Any], ...] = ()
+    next_cursor = ""
+    selected_interaction: dict[str, Any] | None = None
+    normalized_filter = str(interaction_filter or "all").strip().lower()
+    if normalized_filter not in {
+        "all", "pending", "answered", "expired", "cancelled",
+    }:
+        normalized_filter = "all"
+        warnings.append("交互状态筛选无效，已回退为全部。")
+    visible_run_ids = {
+        str(item.get("pursuit_run_id") or "")
+        for item in items
+        if item.get("pursuit_run_id")
+    }
+    list_page = getattr(authority, "list_interactions_page", None)
     list_interactions = getattr(authority, "list_interactions", None)
-    if callable(list_interactions):
+    if callable(list_page) and visible_run_ids:
+        try:
+            page = await list_page(
+                workspace_root=workspace_root,
+                subject_kind="pursuit",
+                subject_ids=tuple(sorted(visible_run_ids)),
+                state_filter=normalized_filter,
+                limit=max(1, min(int(interaction_limit), 50)),
+                cursor=interaction_cursor,
+            )
+            interactions = tuple(
+                _interaction_projection(record)
+                for record in page.items
+                if record.subject_kind == "pursuit"
+                and record.subject_id in visible_run_ids
+            )
+            next_cursor = page.next_cursor
+        except Exception:
+            warnings.append("Goal 用户交互分页读取失败，请刷新页面。")
+    elif callable(list_interactions) and visible_run_ids:
         visible_run_ids = {
             str(item.get("pursuit_run_id") or "")
             for item in items
@@ -174,6 +224,24 @@ async def build_goal_pursuit_snapshot_with_recovery(
             )
         except Exception:
             warnings.append("Goal 用户交互历史读取失败，请运行 `/doctor`。")
+    if selected_interaction_id:
+        get_interaction = getattr(authority, "get_interaction", None)
+        if callable(get_interaction):
+            try:
+                record = await get_interaction(
+                    workspace_root=workspace_root,
+                    interaction_id=selected_interaction_id,
+                )
+                if (
+                    record is None
+                    or record.subject_kind != "pursuit"
+                    or record.subject_id not in visible_run_ids
+                ):
+                    warnings.append("所选用户交互不属于当前 Goal 页面。")
+                else:
+                    selected_interaction = _interaction_detail_projection(record)
+            except Exception:
+                warnings.append("Goal 用户交互详情读取失败，请刷新页面。")
     return GoalPursuitSnapshot(
         current_goal_id=base.current_goal_id,
         goals=tuple(items),
@@ -181,6 +249,10 @@ async def build_goal_pursuit_snapshot_with_recovery(
         truncated=base.truncated,
         include_finished=base.include_finished,
         interactions=interactions,
+        interaction_filter=normalized_filter,
+        interaction_cursor=_bounded_text(interaction_cursor, 1_024),
+        interaction_next_cursor=_bounded_text(next_cursor, 1_024),
+        selected_interaction=selected_interaction,
     )
 
 
@@ -232,8 +304,17 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
         lines.append("> 目标记录较多，当前视图已按上限截断。")
     if snapshot.warnings:
         lines.extend(["", "#### 警告", *[f"- {item}" for item in snapshot.warnings]])
-    if snapshot.interactions:
-        lines.extend(["", "#### 用户交互"])
+    if (
+        snapshot.interactions
+        or snapshot.interaction_filter != "all"
+        or bool(snapshot.interaction_cursor)
+    ):
+        lines.extend([
+            "",
+            f"#### 用户交互 · {_interaction_filter_label(snapshot.interaction_filter)}",
+        ])
+        if not snapshot.interactions:
+            lines.append("- 当前筛选没有交互记录。")
         for item in snapshot.interactions:
             lines.append(
                 f"- `{item['interaction_id']}` · {_interaction_status_label(item['state'])} · "
@@ -250,6 +331,16 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
                 lines.append(
                     f"  - 接管：`/goal interaction takeover {item['interaction_id']}`"
                 )
+        if snapshot.interaction_next_cursor:
+            lines.append(
+                "- 下一页：`/goal interaction list "
+                f"{snapshot.interaction_filter} {snapshot.interaction_next_cursor}`"
+            )
+    if snapshot.selected_interaction:
+        lines.extend([
+            "",
+            _render_interaction_detail_projection(snapshot.selected_interaction),
+        ])
     return "\n".join(lines).rstrip()
 
 
@@ -360,6 +451,80 @@ def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
         "can_cancel": record.state == "pending",
         "can_takeover": can_takeover,
     }
+
+
+def _interaction_detail_projection(
+    record: HarnessInteractionRecord,
+    *,
+    assessed_at: str | None = None,
+) -> dict[str, Any]:
+    now = _parse_aware(assessed_at or datetime.now(UTC).isoformat())
+    deadline = _parse_aware(record.expires_at) if record.expires_at else None
+    owner_lease = _parse_aware(record.owner_lease_expires_at)
+    question_expired = deadline is not None and now >= deadline
+    lease_expired = now >= owner_lease
+    return {
+        **_interaction_projection(record),
+        "options": [
+            {
+                "value": _bounded_text(option.value, 80),
+                "label": _bounded_text(option.label, 80),
+                "description": _bounded_text(option.description, 300),
+            }
+            for option in record.options
+        ],
+        "allow_custom": bool(record.allow_custom),
+        "custom_label": _bounded_text(record.custom_label, 80),
+        "answer_kind": _bounded_text(record.answer_kind, 16),
+        "answer_value": _bounded_text(record.answer_value, 80),
+        "answer_label": _bounded_text(record.answer_label, 80),
+        "custom_text": _bounded_text(record.custom_text, 4_000),
+        "answered_at": _bounded_text(record.answered_at, 64),
+        "owner_epoch": max(1, int(record.owner_epoch)),
+        "question_expired": question_expired,
+        "lease_expired": lease_expired,
+    }
+
+
+def _render_interaction_detail_projection(item: dict[str, Any]) -> str:
+    lines = [
+        "#### 所选用户交互详情",
+        f"- 交互 ID：`{item['interaction_id']}`",
+        f"- 状态：{_interaction_status_label(str(item['state']))}",
+        f"- 问题：{item['header']} · {item['question']}",
+        "- 选项：",
+    ]
+    for index, option in enumerate(item.get("options") or (), start=1):
+        suffix = f" — {option['description']}" if option.get("description") else ""
+        lines.append(
+            f"  {index}. {option['label']} (`{option['value']}`){suffix}"
+        )
+    if item.get("allow_custom"):
+        lines.append(f"  - 自定义：{item.get('custom_label') or '自定义回答'}")
+    if item["state"] == "answered":
+        if item.get("answer_kind") == "custom":
+            lines.append(f"- 回答：自定义 · {item.get('custom_text') or '-'}")
+        else:
+            lines.append(
+                f"- 回答：{item.get('answer_label') or '-'} "
+                f"(`{item.get('answer_value') or '-'}`)"
+            )
+    else:
+        lines.append("- 回答：尚未提交" if item["state"] == "pending" else "- 回答：无")
+    lines.append(
+        f"- Fencing：sequence {item['sequence']} · owner epoch {item['owner_epoch']}"
+    )
+    return "\n".join(lines)
+
+
+def _interaction_filter_label(value: str) -> str:
+    return {
+        "all": "全部",
+        "pending": "等待回答",
+        "answered": "已回答",
+        "expired": "已超时",
+        "cancelled": "已取消",
+    }.get(value, value)
 
 
 def _interaction_status_label(state: str) -> str:

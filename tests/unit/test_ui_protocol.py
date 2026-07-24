@@ -687,14 +687,35 @@ def test_protocol_rejects_invalid_evaluation_lane_comparison_id(
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
-        ({}, {"limit": 20, "include_finished": True}),
+        ({}, {
+            "limit": 20,
+            "include_finished": True,
+            "interaction_limit": 10,
+            "interaction_filter": "all",
+            "interaction_cursor": "",
+            "selected_interaction_id": "",
+        }),
         (
             {"limit": 500, "include_finished": False},
-            {"limit": 50, "include_finished": False},
+            {
+                "limit": 50,
+                "include_finished": False,
+                "interaction_limit": 10,
+                "interaction_filter": "all",
+                "interaction_cursor": "",
+                "selected_interaction_id": "",
+            },
         ),
         (
             {"limit": "7", "include_finished": "false"},
-            {"limit": 7, "include_finished": False},
+            {
+                "limit": 7,
+                "include_finished": False,
+                "interaction_limit": 10,
+                "interaction_filter": "all",
+                "interaction_cursor": "",
+                "selected_interaction_id": "",
+            },
         ),
     ],
 )
@@ -704,6 +725,21 @@ def test_protocol_normalizes_goal_panel_request(payload, expected) -> None:
     )
 
     assert record["payload"] == expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"interaction_filter": "unknown"},
+        {"interaction_cursor": "x" * 1_025},
+        {"selected_interaction_id": "../ask-other"},
+    ],
+)
+def test_protocol_rejects_invalid_goal_interaction_navigation(payload) -> None:
+    with pytest.raises(ValueError, match="Goal"):
+        normalize_client_record(
+            {"type": ClientEventType.GOAL_PANEL, "payload": payload}
+        )
 
 
 @pytest.mark.parametrize("suite_id", ["", "Upper", "../other", "x" * 65])
