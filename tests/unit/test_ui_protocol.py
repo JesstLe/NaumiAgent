@@ -79,6 +79,41 @@ def test_protocol_exposes_typed_harness_receipt_event() -> None:
     assert ServerEventType.HARNESS_RECEIPT == "harness/receipt"
 
 
+def test_protocol_normalizes_bounded_doctor_probe_and_cancel() -> None:
+    start = normalize_client_record({
+        "type": ClientEventType.DOCTOR_PROBE,
+        "payload": {"timeout_ms": 12_345},
+    })
+    cancel = normalize_client_record({
+        "type": ClientEventType.DOCTOR_PROBE_CANCEL,
+        "payload": {"target_request_id": " probe-1 "},
+    })
+
+    assert start["payload"] == {"timeout_ms": 12_345}
+    assert cancel["payload"] == {"target_request_id": "probe-1"}
+    assert ServerEventType.DOCTOR_PROBE_RESULT == "doctor/probe/result"
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"type": ClientEventType.DOCTOR_PROBE, "payload": {"timeout_ms": 999}},
+        {"type": ClientEventType.DOCTOR_PROBE, "payload": {"timeout_ms": True}},
+        {"type": ClientEventType.DOCTOR_PROBE, "payload": {"private": "drop"}},
+        {"type": ClientEventType.DOCTOR_PROBE_CANCEL, "payload": {}},
+        {
+            "type": ClientEventType.DOCTOR_PROBE_CANCEL,
+            "payload": {"target_request_id": "probe-1", "extra": 1},
+        },
+    ],
+)
+def test_protocol_rejects_unbounded_or_ambiguous_doctor_probe(
+    record: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="Doctor 在线探测"):
+        normalize_client_record(record)
+
+
 def test_protocol_normalizes_terminal_event_resume_and_ack() -> None:
     resume = normalize_client_record({
         "type": ClientEventType.RESUME,

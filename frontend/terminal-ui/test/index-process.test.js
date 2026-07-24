@@ -444,11 +444,13 @@ test("terminal UI welcome consumes identity from the real Python JSONL Bridge", 
       selected_version: 1,
       server_minimum_version: 1,
       server_maximum_version: 1,
-      capabilities: [
-        "doctor_export",
-        "evolution_evaluation_lane",
-        "goal_snapshot",
-        "heartbeat",
+        capabilities: [
+          "doctor_export",
+          "doctor_live_probe",
+          "evolution_evaluation_lane",
+          "goal_snapshot",
+          "heartbeat",
+          "pursuit_recovery_actions",
         "sequence_integrity",
         "session_list",
         "task_snapshot",
@@ -1642,6 +1644,35 @@ test("terminal UI process opens doctor diagnostics through bridge protocol", asy
           && record.payload.record.type === "doctor",
       ),
     );
+  } finally {
+    forceKill(app);
+  }
+});
+
+test("terminal UI process runs one explicit bounded doctor live probe", async () => {
+  const app = launchTerminalUi();
+  const output = collectOutput(app);
+
+  try {
+    await waitForLatestScreen(output, "chat >", 7000);
+    app.stdin.write("/doctor probe 12000\n");
+    await waitForLatestScreen(output, "在线探测回执 · 通过", 7000);
+    await waitForLatestScreen(
+      output,
+      "请求 1/1 · 最大输出 8 tokens · 超时 12000ms",
+      7000,
+    );
+
+    const probeSends = readDebugEvents(app.debugLogPath).filter(
+      (record) =>
+        record.event === "protocol.send"
+        && record.payload.record.type === "doctor/probe",
+    );
+    assert.equal(probeSends.length, 1);
+    assert.deepEqual(probeSends[0].payload.record.payload, {
+      timeout_ms: 12_000,
+    });
+    assert.equal(await stopTerminalUi(app), 0);
   } finally {
     forceKill(app);
   }

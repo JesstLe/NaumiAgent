@@ -55,7 +55,9 @@ def test_new_ui_command_index_is_complete_deterministic_and_unique() -> None:
     assert by_name["/agents"].arguments.required is False
     assert by_name["/write"].arguments.required is True
     assert by_name["/models"].arguments.required is False
-    assert by_name["/doctor"].arguments.syntax == "[export [snapshot-sha256]]"
+    assert by_name["/doctor"].arguments.syntax == (
+        "[probe [timeout-ms|cancel]|export [snapshot-sha256]]"
+    )
     assert by_name["/doctor"].arguments.required is False
     assert by_name["/doctor"].permission_risk == "tool_execution"
 

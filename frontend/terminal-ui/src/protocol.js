@@ -834,6 +834,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "doctor/export/result") {
     return normalizeDoctorExportResult(payload);
   }
+  if (type === "doctor/probe/result") {
+    return normalizeDoctorProbeResult(payload);
+  }
   if (type === "permissions/snapshot") {
     return normalizePermissionSnapshot(payload);
   }
@@ -3653,6 +3656,78 @@ function normalizeDoctorExportResult(payload) {
     throw new Error("doctor/export preview 不能包含 receipt");
   }
   return normalized;
+}
+
+function normalizeDoctorProbeResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`doctor/probe schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const status = harnessChoice(
+    payload.status,
+    "doctor/probe status",
+    new Set(["passed", "failed", "blocked", "cancelled"]),
+  );
+  const diagnosticCode = harnessText(
+    payload.diagnostic_code ?? "",
+    "doctor/probe diagnostic_code",
+  );
+  if (diagnosticCode && !/^[a-z][a-z0-9_]{0,63}$/.test(diagnosticCode)) {
+    throw new Error("doctor/probe diagnostic_code 无效");
+  }
+  const message = harnessText(payload.message, "doctor/probe message");
+  const suggestion = harnessText(payload.suggestion ?? "", "doctor/probe suggestion");
+  if (!message || message.length > 500 || suggestion.length > 500) {
+    throw new Error("doctor/probe 文案必须是受限非空文本");
+  }
+  const requestCount = doctorExportInteger(
+    payload.request_count,
+    "doctor/probe request_count",
+    0,
+    1,
+  );
+  if (payload.request_limit !== 1 || payload.max_output_tokens !== 8) {
+    throw new Error("doctor/probe 请求或 token 预算不受支持");
+  }
+  const durationMs = doctorExportInteger(
+    payload.duration_ms,
+    "doctor/probe duration_ms",
+    0,
+    120_000,
+  );
+  const timeoutMs = doctorExportInteger(
+    payload.timeout_ms,
+    "doctor/probe timeout_ms",
+    1_000,
+    60_000,
+  );
+  const snapshotSha256 = harnessText(
+    payload.snapshot_sha256 ?? "",
+    "doctor/probe snapshot_sha256",
+  );
+  if (status === "cancelled") {
+    if (snapshotSha256) throw new Error("已取消的 doctor/probe 不得伪造 Health 快照");
+  } else if (!/^[0-9a-f]{64}$/.test(snapshotSha256)) {
+    throw new Error("doctor/probe snapshot_sha256 必须是 SHA-256");
+  }
+  if (status === "passed" && requestCount !== 1) {
+    throw new Error("通过的 doctor/probe 必须实际发送 1 个请求");
+  }
+  if (status === "blocked" && requestCount !== 0) {
+    throw new Error("被前置检查阻止的 doctor/probe 不得发送请求");
+  }
+  return {
+    schema_version: 1,
+    status,
+    diagnostic_code: diagnosticCode,
+    message,
+    suggestion,
+    request_count: requestCount,
+    request_limit: 1,
+    max_output_tokens: 8,
+    duration_ms: durationMs,
+    timeout_ms: timeoutMs,
+    snapshot_sha256: snapshotSha256,
+  };
 }
 
 function doctorExportInteger(value, field, minimum, maximum) {

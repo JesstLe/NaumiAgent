@@ -79,6 +79,38 @@ test("doctor health page distinguishes stale and unknown heartbeat", () => {
   assert(starting.includes("等待首次心跳证据"));
 });
 
+test("doctor health page renders exact live probe budget and terminal receipt", () => {
+  const lines = renderDoctorHealthPage({
+    snapshot: { ...snapshot(), live_probe: true },
+    heartbeat: { status: "healthy", rttMs: 12 },
+    probeLoading: false,
+    probeTimeoutMs: 12_000,
+    probeResult: {
+      schema_version: 1,
+      status: "failed",
+      diagnostic_code: "provider_timeout",
+      message: "连接超时",
+      suggestion: "检查网络、代理和 API Base。",
+      request_count: 1,
+      request_limit: 1,
+      max_output_tokens: 8,
+      duration_ms: 12_001,
+      timeout_ms: 12_000,
+      snapshot_sha256: "f".repeat(64),
+    },
+  }, 100, 40);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert.match(plain, /p 在线/);
+  assert.match(plain, /最多 1 请求/);
+  assert.match(plain, /最多 8 输出 token/);
+  assert.match(plain, /不自动重试/);
+  assert.match(plain, /包含显式在线探测证据/);
+  assert.match(plain, /在线探测回执 · 失败/);
+  assert.match(plain, /请求 1\/1/);
+  assert.match(plain, /provider_timeout/);
+});
+
 test("doctor health page renders export preview and written receipt", () => {
   const preview = {
     schema_version: 1,

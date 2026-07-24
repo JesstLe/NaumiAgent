@@ -322,6 +322,30 @@ async def test_doctor_tool_is_registered_and_uses_shared_report(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_doctor_live_probe_tool_is_registered_with_exact_budget(
+    tmp_path,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    try:
+        tool = engine.tool_registry.get("doctor_live_probe")
+        assert tool is not None
+        assert tool.metadata.read_only is False
+        assert tool.metadata.requires_confirmation is False
+        assert tool.parameters_schema["properties"]["timeout_ms"] == {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 60000,
+            "default": 15000,
+            "description": "单次模型请求超时，范围 1000..60000 毫秒。",
+        }
+        assert "1 个请求" in tool.description
+        assert "8 个输出 token" in tool.description
+        assert "不会自动重试" in tool.description
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_doctor_export_tool_previews_then_writes_platform_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

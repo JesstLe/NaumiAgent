@@ -17,7 +17,10 @@ class _FakeTool:
 
 class _EngineToolCallFake:
     def __init__(self) -> None:
-        self.tool_registry = {"doctor_export_diagnostics": _FakeTool()}
+        self.tool_registry = {
+            "doctor_export_diagnostics": _FakeTool(),
+            "doctor_live_probe": _FakeTool(),
+        }
         self.executed: list[tuple[ToolCall, str | None]] = []
 
     async def execute_tool(
@@ -78,3 +81,22 @@ async def test_run_doctor_export_rejects_unpreviewed_or_ambiguous_syntax(
     assert engine.executed == []
     output = recorded.export_text()
     assert output.count("用法: /doctor") == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arg", "timeout_ms"),
+    [("probe", 15_000), ("probe 12000", 12_000)],
+)
+async def test_run_doctor_probe_routes_through_engine_policy(
+    arg: str,
+    timeout_ms: int,
+) -> None:
+    engine = _EngineToolCallFake()
+
+    await _run_doctor_command(engine, arg)
+
+    tool_call, agent_name = engine.executed[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "doctor_live_probe"
+    assert json.loads(tool_call.arguments) == {"timeout_ms": timeout_ms}

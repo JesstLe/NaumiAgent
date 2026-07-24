@@ -1011,6 +1011,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         ],
         requires_confirmation=False,
     ),
+    "doctor_live_probe": PermissionRule(
+        tool_name="doctor_live_probe",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="diagnostics",
+        allow_session_grant=True,
+    ),
     "doctor_export_diagnostics": PermissionRule(
         tool_name="doctor_export_diagnostics",
         allowed_modes=[

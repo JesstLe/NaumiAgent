@@ -14,6 +14,13 @@ from naumi_agent.ui.doctor_export import (
     write_doctor_export,
 )
 from naumi_agent.ui.doctor_health import build_doctor_health_snapshot
+from naumi_agent.ui.doctor_probe import (
+    DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+    DOCTOR_LIVE_PROBE_MAX_TIMEOUT_MS,
+    DOCTOR_LIVE_PROBE_MIN_TIMEOUT_MS,
+    render_doctor_live_probe_result,
+    run_bounded_doctor_live_probe,
+)
 
 
 class DoctorDiagnosticsTool(Tool):
@@ -148,3 +155,65 @@ class DoctorExportTool(Tool):
         previewed_plan = self._previewed_plan
         self._previewed_plan = None
         return render_doctor_export_receipt(write_doctor_export(previewed_plan))
+
+
+class DoctorLiveProbeTool(Tool):
+    """Run one explicit, bounded provider connectivity request."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "doctor_live_probe"
+
+    @property
+    def description(self) -> str:
+        return (
+            "显式验证模型提供商连接：最多发送 1 个请求、最多生成 8 个输出 token、"
+            "默认 15 秒超时且不会自动重试。仅在确实需要真实连通性证据时调用。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=False,
+            requires_confirmation=False,
+            user_facing_name="模型提供商在线探测",
+            search_hint=(
+                "doctor live provider probe connectivity authentication endpoint "
+                "timeout bounded request"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "timeout_ms": {
+                    "type": "integer",
+                    "minimum": DOCTOR_LIVE_PROBE_MIN_TIMEOUT_MS,
+                    "maximum": DOCTOR_LIVE_PROBE_MAX_TIMEOUT_MS,
+                    "default": DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+                    "description": "单次模型请求超时，范围 1000..60000 毫秒。",
+                }
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        timeout_ms: int = DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+        **kwargs: Any,
+    ) -> str:
+        result = await run_bounded_doctor_live_probe(
+            self._engine._config,
+            workspace_root=self._engine.workspace_root,
+            timeout_ms=timeout_ms,
+            mcp_manager=getattr(self._engine, "_mcp_manager", None),
+            model_router=self._engine.router,
+        )
+        return render_doctor_live_probe_result(result)

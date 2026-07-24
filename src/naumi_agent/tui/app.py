@@ -97,6 +97,13 @@ from naumi_agent.ui.doctor_health import (
     render_doctor_health_item_markdown,
     runtime_heartbeat_retention_health_item,
 )
+from naumi_agent.ui.doctor_probe import (
+    DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+    DOCTOR_LIVE_PROBE_MAX_TIMEOUT_MS,
+    DOCTOR_LIVE_PROBE_MIN_TIMEOUT_MS,
+    render_doctor_live_probe_result,
+    run_bounded_doctor_live_probe,
+)
 from naumi_agent.ui.history_screen import (
     build_history_snapshot,
     render_history_preview,
@@ -1758,6 +1765,7 @@ class NaumiApp(App):
         self._latest_harness_detail_run_id = ""
         self._doctor_health_snapshot: DoctorHealthSnapshot | None = None
         self._doctor_export_plan: DoctorExportPlan | None = None
+        self._doctor_probe_worker: Any | None = None
         self.engine.set_permission_confirmer(self.confirm_permission)
         self.engine.set_user_interaction_handler(self.request_user_interaction)
 
@@ -2695,8 +2703,57 @@ class NaumiApp(App):
                 r"export(?:\s+([0-9a-fA-F]{64}))?",
                 arg.strip(),
             )
+            probe_match = re.fullmatch(
+                r"probe(?:\s+(\d+))?",
+                arg.strip(),
+            )
             if not arg:
                 self._run_doctor()
+            elif arg.strip().lower() == "probe cancel":
+                worker = self._doctor_probe_worker
+                if worker is None or bool(getattr(worker, "is_finished", False)):
+                    self.query_one(StatusBar).status_text = "当前没有在线探测"
+                else:
+                    worker.cancel()
+                    self._doctor_probe_worker = None
+                    self.query_one(StatusBar).status_text = "在线探测已取消"
+                    self.query_one(ChatPanel).mount(
+                        Markdown(
+                            "在线探测已取消；不会自动重试。",
+                            classes="agent-msg",
+                        )
+                    )
+            elif probe_match is not None:
+                timeout_ms = int(
+                    probe_match.group(1) or DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS
+                )
+                if not (
+                    DOCTOR_LIVE_PROBE_MIN_TIMEOUT_MS
+                    <= timeout_ms
+                    <= DOCTOR_LIVE_PROBE_MAX_TIMEOUT_MS
+                ):
+                    self.query_one(StatusBar).status_text = (
+                        "在线探测超时必须在 1000..60000 ms"
+                    )
+                    return
+                worker = self._doctor_probe_worker
+                if worker is not None and not bool(
+                    getattr(worker, "is_finished", False)
+                ):
+                    self.query_one(StatusBar).status_text = "在线探测已在运行"
+                    return
+                self.query_one(ChatPanel).mount(
+                    Markdown(
+                        "即将显式探测模型提供商：最多 **1 个请求**、"
+                        f"最多 **8 个输出 token**、超时 **{timeout_ms} ms**，"
+                        "不会自动重试。运行 `/doctor probe cancel` 可取消。",
+                        classes="agent-msg",
+                    )
+                )
+                self._doctor_probe_worker = self._run_doctor(
+                    live_probe=True,
+                    timeout_ms=timeout_ms,
+                )
             elif export_match is not None:
                 digest = str(export_match.group(1) or "").lower()
                 self._run_doctor(
@@ -2705,11 +2762,13 @@ class NaumiApp(App):
                 )
             else:
                 self.query_one(StatusBar).status_text = (
-                    "用法：/doctor 或 /doctor export [snapshot-sha256]"
+                    "用法：/doctor、/doctor probe [timeout-ms|cancel] "
+                    "或 /doctor export [snapshot-sha256]"
                 )
                 self.query_one(ChatPanel).mount(
                     Markdown(
-                        "Doctor 用法：`/doctor` 或 "
+                        "Doctor 用法：`/doctor`、"
+                        "`/doctor probe [timeout-ms|cancel]` 或 "
                         "`/doctor export [snapshot-sha256]`。",
                         classes="agent-msg",
                     )
@@ -3936,6 +3995,8 @@ class NaumiApp(App):
         *,
         export_action: str = "",
         expected_snapshot_sha256: str = "",
+        live_probe: bool = False,
+        timeout_ms: int = DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
     ) -> None:
         chat = self.query_one(ChatPanel)
         status = self.query_one(StatusBar)
@@ -3980,24 +4041,46 @@ class NaumiApp(App):
             status.status_text = "诊断包已保存到本机状态目录"
             return
 
-        status.status_text = "环境诊断中"
-        report = await run_doctor(
-            self.engine._config,
-            workspace_root=getattr(self.engine, "workspace_root", Path.cwd()),
-            mcp_manager=getattr(self.engine, "_mcp_manager", None),
-            model_router=self.engine.router,
-        )
+        status.status_text = "模型提供商在线探测中" if live_probe else "环境诊断中"
+        if live_probe:
+            try:
+                probe_result = await run_bounded_doctor_live_probe(
+                    self.engine._config,
+                    workspace_root=getattr(
+                        self.engine,
+                        "workspace_root",
+                        Path.cwd(),
+                    ),
+                    timeout_ms=timeout_ms,
+                    mcp_manager=getattr(self.engine, "_mcp_manager", None),
+                    model_router=self.engine.router,
+                )
+            finally:
+                self._doctor_probe_worker = None
+            report = probe_result.report
+        else:
+            report = await run_doctor(
+                self.engine._config,
+                workspace_root=getattr(self.engine, "workspace_root", Path.cwd()),
+                mcp_manager=getattr(self.engine, "_mcp_manager", None),
+                model_router=self.engine.router,
+            )
         retention_item = runtime_heartbeat_retention_health_item(
             self._runtime_heartbeat_retention_status_payload()
         )
         snapshot = build_doctor_health_snapshot(
             report,
+            live_probe=live_probe,
             additional_items=(retention_item,),
         )
         self._doctor_health_snapshot = snapshot
         self._doctor_export_plan = None
         content = (
-            render_doctor_report(report)
+            (
+                render_doctor_live_probe_result(probe_result)
+                if live_probe
+                else render_doctor_report(report)
+            )
             + "\n\n"
             + render_doctor_health_item_markdown(retention_item)
         )

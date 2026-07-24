@@ -370,6 +370,23 @@ function doctorExportPayload(status = "preview") {
   return payload;
 }
 
+function doctorProbePayload(status = "passed") {
+  return {
+    schema_version: 1,
+    status,
+    diagnostic_code: status === "passed" ? "" : "provider_timeout",
+    message: status === "passed" ? "连接成功：test-model" : "连接超时",
+    suggestion: status === "passed" ? "" : "检查网络。",
+    request_count: status === "blocked" ? 0 : 1,
+    request_limit: 1,
+    max_output_tokens: 8,
+    duration_ms: 25,
+    timeout_ms: 15_000,
+    snapshot_sha256: status === "cancelled" ? "" : "f".repeat(64),
+    private_payload: "must-drop",
+  };
+}
+
 test("normalizes nullable budget without inventing zero", () => {
   assert.deepEqual(
     normalizeBudgetStatus({
@@ -604,6 +621,7 @@ test("protocol contract drives client and server event validation", () => {
     maximum_version: 1,
     capabilities: [
       "doctor_export",
+      "doctor_live_probe",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -646,6 +664,9 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.server_events.includes("harness/eval-promotion"));
   assert(PROTOCOL_CONTRACT.server_events.includes("evolution/evaluation-lane"));
   assert(PROTOCOL_CONTRACT.server_events.includes("doctor/health"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("doctor/probe"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("doctor/probe/cancel"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("doctor/probe/result"));
   assert(PROTOCOL_CONTRACT.server_events.includes("tasks/snapshot"));
   assert.deepEqual(PROTOCOL_CONTRACT.harness_receipt.statuses, [
     "completed_verified",
@@ -730,6 +751,14 @@ test("event capability registry governs typed feature events", () => {
     requiredEventCapability("server", "doctor/export/result"),
     "doctor_export",
   );
+  assert.equal(
+    requiredEventCapability("client", "doctor/probe"),
+    "doctor_live_probe",
+  );
+  assert.equal(
+    requiredEventCapability("server", "doctor/probe/result"),
+    "doctor_live_probe",
+  );
   assert.equal(requiredEventCapability("client", "submit"), null);
   assert.throws(() => requiredEventCapability("sideways", "submit"), /未知事件方向/);
 });
@@ -787,6 +816,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     maximum_version: 1,
     capabilities: [
       "doctor_export",
+      "doctor_live_probe",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -1320,6 +1350,37 @@ test("doctor export response validates preview and exact written receipt", () =>
     () => normalizeServerRecord({ type: "doctor/export/result", payload: duplicate }),
     /必须唯一/,
   );
+});
+
+test("doctor probe response enforces exact request and token budgets", () => {
+  const passed = normalizeServerRecord({
+    type: "doctor/probe/result",
+    payload: doctorProbePayload(),
+  }).payload;
+  const cancelled = normalizeServerRecord({
+    type: "doctor/probe/result",
+    payload: doctorProbePayload("cancelled"),
+  }).payload;
+
+  assert.equal(passed.status, "passed");
+  assert.equal(passed.request_count, 1);
+  assert.equal(passed.max_output_tokens, 8);
+  assert.equal(Object.hasOwn(passed, "private_payload"), false);
+  assert.equal(cancelled.snapshot_sha256, "");
+
+  for (const mutate of [
+    (payload) => { payload.request_limit = 2; },
+    (payload) => { payload.max_output_tokens = 64; },
+    (payload) => { payload.request_count = 0; },
+    (payload) => { payload.timeout_ms = 60_001; },
+  ]) {
+    const invalid = doctorProbePayload();
+    mutate(invalid);
+    assert.throws(
+      () => normalizeServerRecord({ type: "doctor/probe/result", payload: invalid }),
+      /doctor\/probe/,
+    );
+  }
 });
 
 test("harness detail responses reject malformed authoritative state", () => {

@@ -36,6 +36,12 @@ from naumi_agent.ui.code_excerpt import (
     excerpt_markdown_code_blocks,
 )
 from naumi_agent.ui.doctor import render_doctor_report, run_doctor
+from naumi_agent.ui.doctor_probe import (
+    DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+    normalize_doctor_live_probe_timeout,
+    render_doctor_live_probe_result,
+    run_bounded_doctor_live_probe,
+)
 from naumi_agent.ui.keybindings import build_keybindings, render_keybinding_help
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 from naumi_agent.workbench.export import export_audit_events
@@ -519,7 +525,7 @@ def doctor_command(
     live: bool = typer.Option(
         False,
         "--live",
-        help="执行一次最小真实模型请求，会产生少量 token 用量",
+        help="显式执行 1 个真实请求（最多 8 输出 token、15 秒超时、不自动重试）",
     ),
 ) -> None:
     """诊断本机环境，并可显式验证模型连接."""
@@ -539,16 +545,28 @@ def doctor_command(
         model_router = ModelRouter(app_config.models, catalog=catalog)
     except Exception as exc:
         model_router_error = str(exc)
-    report = asyncio.run(
-        run_doctor(
-            app_config,
-            workspace_root=app_config.resolve_workspace_root(),
-            live=live,
-            model_router=model_router,
-            model_router_error=model_router_error,
+    if live:
+        result = asyncio.run(
+            run_bounded_doctor_live_probe(
+                app_config,
+                workspace_root=app_config.resolve_workspace_root(),
+                timeout_ms=DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS,
+                model_router=model_router,
+                model_router_error=model_router_error,
+            )
         )
-    )
-    console.print(Markdown(render_doctor_report(report)))
+        report = result.report
+        console.print(Markdown(render_doctor_live_probe_result(result)))
+    else:
+        report = asyncio.run(
+            run_doctor(
+                app_config,
+                workspace_root=app_config.resolve_workspace_root(),
+                model_router=model_router,
+                model_router_error=model_router_error,
+            )
+        )
+        console.print(Markdown(render_doctor_report(report)))
     if report.status == "error":
         raise typer.Exit(1)
 
@@ -2149,6 +2167,30 @@ async def _run_doctor_command(engine: Any, arg: str) -> None:
         tokens = shlex.split(normalized)
     except ValueError:
         tokens = []
+    if tokens and tokens[0] == "probe":
+        if len(tokens) == 1:
+            timeout_ms = DOCTOR_LIVE_PROBE_DEFAULT_TIMEOUT_MS
+        elif len(tokens) == 2 and tokens[1].isdigit():
+            timeout_ms = int(tokens[1])
+        else:
+            console.print(
+                "[yellow]用法: /doctor probe [timeout-ms]；"
+                "范围 1000..60000，最多 1 请求/8 输出 token。[/yellow]"
+            )
+            return
+        try:
+            timeout_ms = normalize_doctor_live_probe_timeout(timeout_ms)
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            return
+        await _run_tool_slash_command(
+            engine,
+            slash_command="/doctor",
+            tool_name="doctor_live_probe",
+            parse_args=lambda _arg: {"timeout_ms": timeout_ms},
+            arg="",
+        )
+        return
     expected_snapshot_sha256 = ""
     if tokens == ["export"]:
         action = "preview"
@@ -2161,7 +2203,7 @@ async def _run_doctor_command(engine: Any, arg: str) -> None:
         expected_snapshot_sha256 = tokens[1].lower()
     else:
         console.print(
-            "[yellow]用法: /doctor 或 /doctor export "
+            "[yellow]用法: /doctor、/doctor probe [timeout-ms] 或 /doctor export "
             "[preview 返回的 snapshot-sha256][/yellow]"
         )
         return

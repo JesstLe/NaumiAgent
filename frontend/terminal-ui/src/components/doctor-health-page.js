@@ -24,6 +24,7 @@ export function renderDoctorHealthPage(view, width, height) {
   const items = [heartbeat, ...array(snapshot.items)];
   const exportPreview = object(value.exportPreview);
   const exportReceipt = object(value.exportReceipt);
+  const probeResult = object(value.probeResult);
   const counts = items.reduce((result, item) => {
     const key = SEVERITY[item.severity] ? item.severity : "unknown";
     result[key] += 1;
@@ -33,12 +34,16 @@ export function renderDoctorHealthPage(view, width, height) {
     color(ANSI.cyan, "环境健康诊断"),
     color(
       ANSI.dim,
-      "本地只读检查 · 不会探测付费模型 · r 刷新 · e 预览/导出 · Esc 返回",
+      "r 本地只读零网络 · p 在线（最多 1 请求/最多 8 输出 token/15000ms/不自动重试）"
+        + " · e 导出 · Esc 返回",
     ),
     value.loading && !snapshot.schema_version
       ? color(ANSI.cyan, "正在检查本机环境…")
       : `正常 ${counts.ok} · 受限 ${counts.degraded} · 错误 ${counts.error} · 未知 ${counts.unknown}`,
     ...(snapshot.generated_at ? [color(ANSI.dim, `生成时间 · ${text(snapshot.generated_at)}`)] : []),
+    ...(snapshot.live_probe
+      ? [color(ANSI.cyan, "此快照包含显式在线探测证据。")]
+      : []),
     ...items.flatMap(renderItem),
     ...(snapshot.snapshot_sha256
       ? [color(ANSI.dim, `Snapshot · ${text(snapshot.snapshot_sha256).slice(0, 12)}`)]
@@ -49,6 +54,19 @@ export function renderDoctorHealthPage(view, width, height) {
       : []),
     ...(value.exportError ? [color(ANSI.red, `导出失败 · ${text(value.exportError)}`)] : []),
     ...renderExportPreview(exportPreview, exportReceipt),
+    ...(value.probeLoading
+      ? [color(
+        ANSI.cyan,
+        `模型提供商在线探测中 · 超时 ${Number(value.probeTimeoutMs) || 15000}ms · c 取消`,
+      )]
+      : []),
+    ...(value.probeNotice
+      ? [color(ANSI.yellow, `在线探测 · ${text(value.probeNotice)}`)]
+      : []),
+    ...(value.probeError
+      ? [color(ANSI.red, `在线探测失败 · ${text(value.probeError)}`)]
+      : []),
+    ...renderProbeResult(probeResult),
   ];
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const offset = Math.min(
@@ -58,6 +76,31 @@ export function renderDoctorHealthPage(view, width, height) {
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function renderProbeResult(result) {
+  if (!result.schema_version) return [];
+  const labels = {
+    passed: [ANSI.green, "通过"],
+    failed: [ANSI.red, "失败"],
+    blocked: [ANSI.yellow, "已阻止"],
+    cancelled: [ANSI.yellow, "已取消"],
+  };
+  const [tone, label] = labels[result.status] || [ANSI.dim, "未知"];
+  return [
+    color(tone, `在线探测回执 · ${label}`),
+    `  ${text(result.message)}`,
+    `  请求 ${Number(result.request_count) || 0}/${Number(result.request_limit) || 1}`
+      + ` · 最大输出 ${Number(result.max_output_tokens) || 8} tokens`
+      + ` · 超时 ${Number(result.timeout_ms) || 15000}ms`
+      + ` · 耗时 ${Number(result.duration_ms) || 0}ms`,
+    ...(result.diagnostic_code
+      ? [color(ANSI.magenta, `  诊断码 · ${text(result.diagnostic_code)}`)]
+      : []),
+    ...(result.suggestion
+      ? [color(ANSI.cyan, `  下一步 · ${text(result.suggestion)}`)]
+      : []),
+  ];
 }
 
 function renderExportPreview(preview, receipt) {

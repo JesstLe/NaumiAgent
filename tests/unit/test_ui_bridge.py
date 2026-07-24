@@ -97,6 +97,7 @@ from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.ui import bridge as ui_bridge
 from naumi_agent.ui.bridge import JsonlEngineBridge, resolve_config_path
 from naumi_agent.ui.doctor import DoctorCheck, DoctorReport
+from naumi_agent.ui.doctor_probe import DoctorLiveProbeResult
 from naumi_agent.ui.messages.events import (
     AssistantStreamMessage,
     PermissionBubbleMessage,
@@ -7740,6 +7741,148 @@ async def test_bridge_doctor_failure_returns_typed_product_runtime_fallback(
     assert item["responsibility"] == "product_runtime"
     assert "诊断流程自身失败" in item["detail"]
     assert "private doctor failure" not in json.dumps(health, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_probe_emits_typed_health_and_terminal_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-doctor-probe",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["doctor_live_probe", "typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+
+    async def fake_probe(*args: Any, **kwargs: Any) -> DoctorLiveProbeResult:
+        assert kwargs["timeout_ms"] == 12_000
+        kwargs["on_request_start"]()
+        return DoctorLiveProbeResult(
+            report=DoctorReport((
+                DoctorCheck("模型实时连接", "pass", "连接成功：test-model"),
+            )),
+            status="passed",
+            diagnostic_code="",
+            message="连接成功：test-model",
+            suggestion="",
+            request_count=1,
+            duration_ms=25,
+            timeout_ms=12_000,
+        )
+
+    monkeypatch.setattr(
+        "naumi_agent.ui.bridge.run_bounded_doctor_live_probe",
+        fake_probe,
+    )
+    await bridge.handle_client_record({
+        "id": "doctor-probe-1",
+        "type": ClientEventType.DOCTOR_PROBE,
+        "payload": {"timeout_ms": 12_000},
+    })
+    await asyncio.sleep(0)
+
+    records = _records(writer)
+    health = next(record for record in records if record["type"] == "doctor/health")
+    receipt = next(
+        record for record in records if record["type"] == "doctor/probe/result"
+    )
+    assert health["request_id"] == "doctor-probe-1"
+    assert health["payload"]["live_probe"] is True
+    assert receipt["request_id"] == "doctor-probe-1"
+    assert receipt["payload"]["status"] == "passed"
+    assert receipt["payload"]["request_count"] == 1
+    assert receipt["payload"]["max_output_tokens"] == 8
+    assert receipt["payload"]["snapshot_sha256"] == health["payload"]["snapshot_sha256"]
+    assert bridge._doctor_probe_task is None
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_probe_stays_responsive_and_can_cancel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-doctor-probe-cancel",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["doctor_live_probe", "typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocking_probe(*args: Any, **kwargs: Any) -> DoctorLiveProbeResult:
+        kwargs["on_request_start"]()
+        started.set()
+        await release.wait()
+        raise AssertionError("cancelled probe continued")
+
+    monkeypatch.setattr(
+        "naumi_agent.ui.bridge.run_bounded_doctor_live_probe",
+        blocking_probe,
+    )
+    await bridge.handle_client_record({
+        "id": "doctor-probe-active",
+        "type": ClientEventType.DOCTOR_PROBE,
+        "payload": {"timeout_ms": 15_000},
+    })
+    await started.wait()
+    await bridge.handle_client_record({
+        "id": "doctor-probe-busy",
+        "type": ClientEventType.DOCTOR_PROBE,
+        "payload": {"timeout_ms": 15_000},
+    })
+    await bridge.handle_client_record({
+        "id": "doctor-probe-cancel",
+        "type": ClientEventType.DOCTOR_PROBE_CANCEL,
+        "payload": {"target_request_id": "doctor-probe-active"},
+    })
+
+    records = _records(writer)
+    busy = next(
+        record
+        for record in records
+        if record["request_id"] == "doctor-probe-busy"
+    )
+    cancelled = next(
+        record
+        for record in records
+        if record["type"] == "doctor/probe/result"
+    )
+    cancel_ack = next(
+        record
+        for record in records
+        if record["type"] == "ack"
+        and record["request_id"] == "doctor-probe-cancel"
+    )
+    assert busy["payload"]["code"] == "doctor_probe_busy"
+    assert cancelled["request_id"] == "doctor-probe-active"
+    assert cancelled["payload"]["status"] == "cancelled"
+    assert cancelled["payload"]["request_count"] == 1
+    assert cancel_ack["payload"]["target_request_id"] == "doctor-probe-active"
+    assert bridge._doctor_probe_task is None
 
 
 @pytest.mark.asyncio
