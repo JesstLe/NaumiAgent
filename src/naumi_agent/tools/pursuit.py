@@ -6,10 +6,16 @@ import asyncio
 import contextlib
 import logging
 import re
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from naumi_agent.daemons.permission_context import current_permission_receipt
 from naumi_agent.orchestrator.pursuit import GoalPursuitLoop, PursuitConfig, ToolExecutor
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    format_recovery_attempts,
+    pursuit_recovery_attempt_id,
+)
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -280,7 +286,8 @@ class PursuitStatusTool(Tool):
         run = loop.get_persisted_run(normalized_run_id)
         if run is None:
             return f"错误：目标追踪运行不存在：{normalized_run_id}"
-        return format_run(run)
+        attempts = loop.list_recovery_attempts(normalized_run_id, limit=5)
+        return format_run(run) + "\n\n" + format_recovery_attempts(attempts)
 
 
 class PursuitResumeTool(Tool):
@@ -302,6 +309,7 @@ class PursuitResumeTool(Tool):
         return ToolMetadata(
             destructive=True,
             requires_confirmation=True,
+            requires_persistent_authorization=True,
             user_facing_name="恢复目标追踪",
             search_hint="pursuit resume persisted run background evidence",
         )
@@ -324,8 +332,21 @@ class PursuitResumeTool(Tool):
         if loop is None:
             return "⚠️ 目标追踪工具尚未初始化。"
         loop.prepare_resume_admission()
+        permission_receipt = current_permission_receipt()
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        recovery_attempt_id = pursuit_recovery_attempt_id(
+            run_id=normalized_run_id,
+            source_request_id=source_request_id,
+        )
         task = asyncio.create_task(
-            loop.resume_persisted(normalized_run_id),
+            loop.resume_persisted(
+                normalized_run_id,
+                source_request_id=source_request_id,
+            ),
             name=f"naumi-pursuit-resume-{normalized_run_id}",
         )
         admission = asyncio.create_task(
@@ -343,7 +364,11 @@ class PursuitResumeTool(Tool):
             admission.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await admission
-            return task.result()
+            return _with_persisted_recovery_attempt(
+                task.result(),
+                loop=loop,
+                attempt_id=recovery_attempt_id,
+            )
 
         admission_error = admission.result()
         if admission_error:
@@ -351,14 +376,43 @@ class PursuitResumeTool(Tool):
                 task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            return f"⚠️ {admission_error}"
-        return (
-            "✅ 目标追踪已恢复并在后台继续，当前对话不会等待长循环完成。\n\n"
-            f"- run_id: `{normalized_run_id}`\n"
-            f"- checkpoint: `{loop._resume_checkpoint_id}`\n"
-            f"- lease epoch: {loop._resume_epoch}\n"
-            f"- 查看状态: `/pursue status {normalized_run_id}`"
+            return _with_persisted_recovery_attempt(
+                f"⚠️ {admission_error}",
+                loop=loop,
+                attempt_id=recovery_attempt_id,
+            )
+        return _with_persisted_recovery_attempt(
+            (
+                "✅ 目标追踪已恢复并在后台继续，当前对话不会等待长循环完成。\n\n"
+                f"- run_id: `{normalized_run_id}`\n"
+                f"- checkpoint: `{loop._resume_checkpoint_id}`\n"
+                f"- lease epoch: {loop._resume_epoch}\n"
+                f"- 查看状态: `/pursue status {normalized_run_id}`"
+            ),
+            loop=loop,
+            attempt_id=recovery_attempt_id,
         )
+
+
+def _with_persisted_recovery_attempt(
+    result: str,
+    *,
+    loop: GoalPursuitLoop,
+    attempt_id: str,
+) -> str:
+    if not attempt_id or attempt_id in result:
+        return result
+    try:
+        persisted = loop.get_recovery_attempt(attempt_id)
+    except Exception:
+        logger.exception(
+            "Failed to verify Pursuit recovery attempt [%s]",
+            attempt_id,
+        )
+        return result
+    if persisted is None:
+        return result
+    return result.rstrip() + f"\n\n- recovery attempt: `{attempt_id}`"
 
 
 def create_pursuit_tool() -> list[Tool]:

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig
-from naumi_agent.orchestrator.engine import AgentEngine
+from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
 from naumi_agent.orchestrator.pursuit import (
     CriterionStatus,
     GoalPursuitLoop,
@@ -23,9 +23,12 @@ from naumi_agent.orchestrator.pursuit import (
     SuccessCriterion,
     _verification_scope_error,
 )
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    pursuit_recovery_attempt_id,
+)
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
-from naumi_agent.tools.base import ToolResult
+from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tools.pursuit import (
     PursueTool,
     PursuitListTool,
@@ -1808,6 +1811,7 @@ class TestPursueToolRegistration:
         assert PursuitListTool().metadata.concurrency_safe is True
         assert PursuitStatusTool().metadata.read_only is True
         assert PursuitResumeTool().metadata.requires_confirmation is True
+        assert PursuitResumeTool().metadata.requires_persistent_authorization is True
         assert PursuitResumeTool().metadata.destructive is True
 
     @pytest.mark.asyncio
@@ -1881,7 +1885,11 @@ class TestPursueToolRegistration:
         pursuit_mod._global_pursuit_loop = loop
         release = asyncio.Event()
 
-        async def fake_resume(run_id: str) -> str:
+        async def fake_resume(
+            run_id: str,
+            *,
+            source_request_id: str = "",
+        ) -> str:
             loop._resume_checkpoint_id = "pchk_admitted"
             loop._resume_epoch = 3
             loop._resume_admitted_event.set()
@@ -1914,14 +1922,113 @@ class TestPursueToolRegistration:
         )
         pursuit_mod._global_pursuit_loop = loop
 
-        async def fake_resume(_: str) -> str:
+        async def fake_resume(
+            _: str,
+            *,
+            source_request_id: str = "",
+        ) -> str:
             return "目标追踪未继续执行：需要 reconcile"
 
         monkeypatch.setattr(loop, "resume_persisted", fake_resume)
 
         result = await PursuitResumeTool().execute(run_id="pursuit_bg")
 
-        assert result == "目标追踪未继续执行：需要 reconcile"
+        assert result.startswith("目标追踪未继续执行：需要 reconcile")
+        assert "recovery attempt:" not in result
+
+    @pytest.mark.asyncio
+    async def test_resume_tool_only_displays_store_verified_attempt(
+        self,
+        tmp_path,
+    ) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        store = PursuitStore(tmp_path / "pursuit")
+        now = time.time()
+        store.save_run(PursuitRun(
+            id="pursuit_tool_verified_attempt",
+            goal="验证工具恢复回执",
+            status=PursuitRunStatus.WAITING,
+            phase="waiting",
+            started_at=now,
+            updated_at=now,
+        ))
+        pursuit_mod._global_pursuit_loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+            store=store,
+        )
+
+        result = await PursuitResumeTool().execute(
+            run_id="pursuit_tool_verified_attempt",
+        )
+
+        assert "持久状态已安全检查" in result
+        assert "recovery attempt: `recovery-" in result
+        attempts = store.list_recovery_attempts(
+            "pursuit_tool_verified_attempt",
+        )
+        assert len(attempts) == 1
+        assert attempts[0].attempt_id in result
+
+    @pytest.mark.asyncio
+    async def test_engine_bypass_binds_tool_call_as_recovery_request_identity(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        engine = AgentEngine(AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        ))
+        loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+        )
+        pursuit_mod._global_pursuit_loop = loop
+        observed_request_ids: list[str] = []
+
+        async def fake_resume(
+            run_id: str,
+            *,
+            source_request_id: str = "",
+        ) -> str:
+            observed_request_ids.append(source_request_id)
+            return f"未准入 {run_id}"
+
+        monkeypatch.setattr(loop, "resume_persisted", fake_resume)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        call_id = "pursuit-resume-request-identity"
+
+        try:
+            await engine.get_or_create_session()
+            result = await engine._execute_tool(ToolCall(
+                id=call_id,
+                name="pursuit_resume",
+                arguments=json.dumps({"run_id": "pursuit_bg"}),
+            ))
+        finally:
+            await engine.shutdown()
+
+        assert result.status == "success"
+        assert observed_request_ids == [call_id]
+        receipts = engine.list_permission_decision_receipts()
+        assert len(receipts) == 1
+        assert receipts[0].call_id == call_id
+        assert receipts[0].run_id == "pursuit_bg"
+        expected_attempt_id = pursuit_recovery_attempt_id(
+            run_id="pursuit_bg",
+            source_request_id=call_id,
+        )
+        assert expected_attempt_id not in result.content
 
     @pytest.mark.asyncio
     async def test_run_id_tools_reject_invalid_run_id(self) -> None:

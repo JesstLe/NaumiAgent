@@ -65,6 +65,8 @@ HAR-10.8b 已让 Goal/Pursuit 的最近机械边界裁判进入共享 typed proj
 fallback 显示相同 code、status、短 decision id 和原因；前端只校验并渲染，不重算终态。
 HAR-10.8c 将恢复裁判升级为 schema 2；New UI 同时严格读取 schema 1/2，TUI/CLI 继续消费同一
 Python projection。durable pending interaction 显示为 waiting，缺失 authority 才显示 blocked。
+HAR-10.8d 又为恢复动作建立持久、幂等的 attempt 账本；当前状态命令可以查看最近请求，
+UI-18.5b1 将让 New UI/TUI 动作消费同一 authority，前端不得自行猜测准入或完成。
 
 ## 未来顺序
 
