@@ -2111,7 +2111,14 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
   assert.equal(handleGoalPanelKey(state, "r", send), true);
   assert.deepEqual(sent[3], {
     type: "goal_panel",
-    payload: { limit: 20, include_finished: true },
+    payload: {
+      limit: 20,
+      include_finished: true,
+      interaction_limit: 10,
+      interaction_filter: "all",
+      interaction_cursor: "",
+      selected_interaction_id: "",
+    },
   });
   assert.equal(handleGoalPanelKey(state, INPUT_KEYS.escape, send), true);
   assert.equal(state.route.name, "conversation");
@@ -2120,6 +2127,49 @@ test("goal command opens typed Goal/Pursuit route while writes stay on submit", 
 
   handleSubmitText(state, "/goal create 新目标", send);
   assert.deepEqual(sent[4], { type: "submit", payload: { text: "/goal create 新目标" } });
+});
+
+test("Goal interaction ledger navigates filters pages and opens typed detail", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.goalPanel.snapshot = {
+    interactions: [
+      { interaction_id: "ask-first" },
+      { interaction_id: "ask-second" },
+    ],
+    interaction_next_cursor: "opaque-next",
+    selected_interaction: null,
+  };
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleGoalPanelKey(state, "j", send), true);
+  assert.equal(state.goalPanel.selectedInteractionIndex, 1);
+  assert.equal(handleGoalPanelKey(state, "\r", send), true);
+  assert.equal(sent[0].payload.selected_interaction_id, "ask-second");
+
+  state.goalPanel.loading = false;
+  assert.equal(handleGoalPanelKey(state, "f", send), true);
+  assert.equal(state.goalPanel.interactionFilter, "pending");
+  assert.equal(sent[1].payload.interaction_filter, "pending");
+
+  state.goalPanel.loading = false;
+  state.goalPanel.snapshot.interaction_next_cursor = "opaque-next";
+  assert.equal(handleGoalPanelKey(state, "n", send), true);
+  assert.equal(state.goalPanel.interactionCursor, "opaque-next");
+  assert.deepEqual(state.goalPanel.interactionCursorStack, [""]);
+  assert.equal(sent[2].payload.interaction_cursor, "opaque-next");
+
+  state.goalPanel.loading = false;
+  assert.equal(handleGoalPanelKey(state, "p", send), true);
+  assert.equal(state.goalPanel.interactionCursor, "");
+  assert.deepEqual(state.goalPanel.interactionCursorStack, []);
+  assert.equal(sent[3].payload.interaction_cursor, "");
+
+  state.goalPanel.snapshot.selected_interaction = { interaction_id: "ask-second" };
+  assert.equal(handleGoalPanelKey(state, INPUT_KEYS.escape, send), true);
+  assert.equal(state.route.name, "goals");
+  assert.equal(state.goalPanel.snapshot.selected_interaction, null);
 });
 
 test("evolution command opens typed review route and navigates to detail", () => {

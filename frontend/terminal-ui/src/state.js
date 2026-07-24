@@ -452,6 +452,10 @@ export function createInitialState() {
       limit: 20,
       includeFinished: true,
       scrollOffset: 0,
+      interactionFilter: "all",
+      interactionCursor: "",
+      interactionCursorStack: [],
+      selectedInteractionIndex: 0,
     },
     evolutionReview: {
       loading: false,
@@ -829,6 +833,12 @@ export function reduceServerEvent(state, record) {
         );
         if (historical) historical.can_takeover = false;
       }
+      if (
+        state.goalPanel.snapshot?.selected_interaction?.interaction_id
+        === String(payload.request_id ?? "")
+      ) {
+        state.goalPanel.snapshot.selected_interaction.can_takeover = false;
+      }
       break;
     case "interaction/resolved":
       handleInteractionResolved(state, payload);
@@ -841,6 +851,16 @@ export function reduceServerEvent(state, record) {
           historical.can_cancel = false;
           historical.can_takeover = false;
         }
+      }
+      if (
+        state.goalPanel.snapshot?.selected_interaction?.interaction_id
+        === String(payload.request_id ?? "")
+      ) {
+        state.goalPanel.snapshot.selected_interaction.state = String(
+          payload.status ?? state.goalPanel.snapshot.selected_interaction.state,
+        );
+        state.goalPanel.snapshot.selected_interaction.can_cancel = false;
+        state.goalPanel.snapshot.selected_interaction.can_takeover = false;
       }
       if (payload.status === "cancelled") {
         pushSystemMessage(state, "Goal 交互", payload.reason || "用户交互已取消。", "info");
@@ -863,6 +883,12 @@ export function reduceServerEvent(state, record) {
       state.goalPanel.snapshot = payload;
       state.goalPanel.loading = false;
       state.goalPanel.error = "";
+      state.goalPanel.interactionFilter = payload.interaction_filter || "all";
+      state.goalPanel.interactionCursor = payload.interaction_cursor || "";
+      state.goalPanel.selectedInteractionIndex = Math.min(
+        Math.max(0, Number(state.goalPanel.selectedInteractionIndex) || 0),
+        Math.max(0, (payload.interactions?.length || 1) - 1),
+      );
       break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
@@ -3275,6 +3301,10 @@ export function handleSubmitText(state, text, send) {
     state.goalPanel.limit = goalPanelRequest.limit;
     state.goalPanel.includeFinished = goalPanelRequest.include_finished;
     state.goalPanel.scrollOffset = 0;
+    state.goalPanel.interactionFilter = "all";
+    state.goalPanel.interactionCursor = "";
+    state.goalPanel.interactionCursorStack = [];
+    state.goalPanel.selectedInteractionIndex = 0;
     send("goal_panel", goalPanelRequest);
     return;
   }
@@ -4269,19 +4299,81 @@ export function handlePermissionCenterKey(state, key, send) {
 export function handleGoalPanelKey(state, key, send) {
   if (state.route?.name !== "goals") return false;
   if (key === INPUT_KEYS.escape) {
+    if (state.goalPanel.snapshot?.selected_interaction) {
+      state.goalPanel.snapshot.selected_interaction = null;
+      return true;
+    }
     const anchor = state.route.originAnchor || {};
     state.scrollOffset = Math.max(0, Number(anchor.scrollOffset) || 0);
     state.followTail = anchor.followTail !== false;
     state.route = { name: "conversation", originAnchor: null };
     return true;
   }
-  if (String(key || "").toLowerCase() === "r") {
-    state.goalPanel.loading = true;
-    state.goalPanel.error = "";
-    send("goal_panel", {
-      limit: state.goalPanel.limit,
-      include_finished: state.goalPanel.includeFinished,
+  const lower = String(key || "").toLowerCase();
+  if (
+    state.goalPanel.loading
+    && ["r", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+  ) {
+    return true;
+  }
+  if (lower === "r") {
+    requestGoalPanelPage(state, send);
+    return true;
+  }
+  const interactions = state.goalPanel.snapshot?.interactions ?? [];
+  if (lower === "j" && interactions.length) {
+    state.goalPanel.selectedInteractionIndex = Math.min(
+      interactions.length - 1,
+      state.goalPanel.selectedInteractionIndex + 1,
+    );
+    return true;
+  }
+  if (lower === "k" && interactions.length) {
+    state.goalPanel.selectedInteractionIndex = Math.max(
+      0,
+      state.goalPanel.selectedInteractionIndex - 1,
+    );
+    return true;
+  }
+  if ((key === "\r" || key === "\n") && interactions.length) {
+    const selected = interactions[state.goalPanel.selectedInteractionIndex];
+    requestGoalPanelPage(state, send, {
+      selected_interaction_id: selected?.interaction_id || "",
     });
+    return true;
+  }
+  if (lower === "f") {
+    const filters = ["all", "pending", "answered", "expired", "cancelled"];
+    const currentFilter = state.goalPanel.interactionFilter || "all";
+    state.goalPanel.interactionFilter = filters[
+      (filters.indexOf(currentFilter) + 1) % filters.length
+    ];
+    state.goalPanel.interactionCursor = "";
+    state.goalPanel.interactionCursorStack = [];
+    state.goalPanel.selectedInteractionIndex = 0;
+    requestGoalPanelPage(state, send);
+    return true;
+  }
+  if (lower === "n") {
+    const nextCursor = state.goalPanel.snapshot?.interaction_next_cursor || "";
+    if (nextCursor) {
+      state.goalPanel.interactionCursorStack.push(
+        state.goalPanel.interactionCursor || "",
+      );
+      state.goalPanel.interactionCursor = nextCursor;
+      state.goalPanel.selectedInteractionIndex = 0;
+      requestGoalPanelPage(state, send);
+    }
+    return true;
+  }
+  if (lower === "p") {
+    if (state.goalPanel.interactionCursorStack.length) {
+      state.goalPanel.interactionCursor = (
+        state.goalPanel.interactionCursorStack.pop() || ""
+      );
+      state.goalPanel.selectedInteractionIndex = 0;
+      requestGoalPanelPage(state, send);
+    }
     return true;
   }
   const current = Math.max(0, Number(state.goalPanel.scrollOffset) || 0);
@@ -4299,6 +4391,20 @@ export function handleGoalPanelKey(state, key, send) {
     state.goalPanel.scrollOffset = Number.MAX_SAFE_INTEGER;
   }
   return true;
+}
+
+function requestGoalPanelPage(state, send, extra = {}) {
+  state.goalPanel.loading = true;
+  state.goalPanel.error = "";
+  send("goal_panel", {
+    limit: state.goalPanel.limit,
+    include_finished: state.goalPanel.includeFinished,
+    interaction_limit: 10,
+    interaction_filter: state.goalPanel.interactionFilter || "all",
+    interaction_cursor: state.goalPanel.interactionCursor || "",
+    selected_interaction_id: "",
+    ...extra,
+  });
 }
 
 export function handleEvolutionReviewKey(state, key, send) {

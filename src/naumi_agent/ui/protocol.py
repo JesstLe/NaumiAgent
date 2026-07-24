@@ -758,6 +758,23 @@ def _normalize_client_payload(
         }
 
     if event_type == ClientEventType.GOAL_PANEL:
+        interaction_filter = str(
+            payload.get("interaction_filter") or "all"
+        ).strip().lower()
+        if interaction_filter not in {
+            "all", "pending", "answered", "expired", "cancelled",
+        }:
+            raise ValueError("Goal 交互状态筛选无效。")
+        interaction_cursor = str(payload.get("interaction_cursor") or "").strip()
+        if len(interaction_cursor) > 1_024:
+            raise ValueError("Goal 交互 cursor 过长。")
+        selected_interaction_id = str(
+            payload.get("selected_interaction_id") or ""
+        ).strip()
+        if selected_interaction_id and not re.fullmatch(
+            r"ask-[A-Za-z0-9._:-]{1,128}", selected_interaction_id
+        ):
+            raise ValueError("Goal 所选 interaction_id 格式无效。")
         return {
             "limit": _bounded_int(
                 payload.get("limit"),
@@ -768,6 +785,12 @@ def _normalize_client_payload(
             "include_finished": _to_bool(
                 payload.get("include_finished", True)
             ),
+            "interaction_limit": _bounded_int(
+                payload.get("interaction_limit"), 10, lower=1, upper=50
+            ),
+            "interaction_filter": interaction_filter,
+            "interaction_cursor": interaction_cursor,
+            "selected_interaction_id": selected_interaction_id,
         }
 
     if event_type == ClientEventType.TASK_PANEL:

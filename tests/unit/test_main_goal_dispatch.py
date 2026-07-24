@@ -73,6 +73,24 @@ class _EngineFake:
             "goal_interaction_cancel",
             {"interaction_id": "ask-goal-1"},
         ),
+        (
+            "interaction list",
+            "goal_list",
+            {
+                "include_finished": True,
+                "interaction_filter": "all",
+                "interaction_cursor": "",
+            },
+        ),
+        (
+            "interaction list answered opaque-cursor",
+            "goal_list",
+            {
+                "include_finished": True,
+                "interaction_filter": "answered",
+                "interaction_cursor": "opaque-cursor",
+            },
+        ),
     ],
 )
 async def test_run_goal_routes_all_operations_through_engine_executor(
@@ -102,6 +120,8 @@ async def test_run_goal_routes_all_operations_through_engine_executor(
         "interaction detail bad",
         "interaction cancel bad",
         "interaction takeover bad",
+        "interaction list unknown",
+        "interaction list pending cursor extra",
         "unknown later",
     ],
 )

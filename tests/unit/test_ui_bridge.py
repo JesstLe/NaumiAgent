@@ -7108,6 +7108,10 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "workspace_root": engine.workspace_root,
         "limit": 7,
         "include_finished": False,
+        "interaction_limit": 10,
+        "interaction_filter": "all",
+        "interaction_cursor": "",
+        "selected_interaction_id": "",
     }]
 
     writer.seek(0)
@@ -7132,6 +7136,10 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "workspace_root": engine.workspace_root,
         "limit": 20,
         "include_finished": True,
+        "interaction_limit": 10,
+        "interaction_filter": "all",
+        "interaction_cursor": "",
+        "selected_interaction_id": "",
     }
 
 

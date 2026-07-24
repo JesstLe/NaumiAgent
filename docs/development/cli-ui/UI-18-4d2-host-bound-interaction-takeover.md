@@ -72,6 +72,7 @@
 ## 保留边界
 
 - 手动 takeover 不能抢占 live owner；本切片不增加“强制踢掉活跃界面”超级权限。
-- Goal 页仍为命令驱动动作，页内选中/展开详情与按键操作属于后续 UI-18.4d3。
-- interaction 历史仍是最近 50 项，cursor/筛选/优先级未完成。
+- Goal 页的页内选中/展开详情、筛选与按键翻页已由 UI-18.4d3 完成；cancel/takeover 写动作仍走
+  既有命令/Bridge 权威路径。
+- interaction 账本已有 cursor/筛选；优先级未完成。
 - 回答已提交但 Pursuit checkpoint 未消费时，仍由既有 reconcile 要求显式 resume。

@@ -1643,7 +1643,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   const normalized = normalizeServerRecord({
     type: "goals/snapshot",
     payload: {
-      schema_version: 1,
+      schema_version: 2,
       generated_at: "2026-07-18T00:00:01+00:00",
       full: true,
       current_goal_id: "goal_1",
@@ -1671,6 +1671,40 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         can_takeover: true,
         owner_id: "private-owner",
       }],
+      interaction_filter: "pending",
+      interaction_cursor: "",
+      interaction_next_cursor: "opaque-next",
+      interaction_has_more: true,
+      selected_interaction: {
+        interaction_id: "ask-goal-1",
+        pursuit_run_id: "pursuit_1",
+        state: "pending",
+        sequence: 2,
+        header: "继续方式",
+        question: "是否继续执行？",
+        created_at: "2026-07-18T00:00:00+00:00",
+        expires_at: "2026-07-18T01:00:00+00:00",
+        updated_at: "2026-07-18T00:00:01+00:00",
+        can_cancel: true,
+        can_takeover: true,
+        options: [{
+          value: "continue",
+          label: "继续",
+          description: "继续执行",
+          private_payload: "drop",
+        }],
+        allow_custom: true,
+        custom_label: "其他",
+        answer_kind: "",
+        answer_value: "",
+        answer_label: "",
+        custom_text: "",
+        answered_at: "",
+        owner_epoch: 1,
+        question_expired: false,
+        lease_expired: true,
+        owner_id: "private-owner",
+      },
     },
   }).payload;
 
@@ -1689,6 +1723,15 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.interactions[0].can_cancel, true);
   assert.equal(normalized.interactions[0].can_takeover, true);
   assert.equal(Object.hasOwn(normalized.interactions[0], "owner_id"), false);
+  assert.equal(normalized.schema_version, 2);
+  assert.equal(normalized.interaction_filter, "pending");
+  assert.equal(normalized.interaction_has_more, true);
+  assert.equal(normalized.selected_interaction.options[0].label, "继续");
+  assert.equal(Object.hasOwn(normalized.selected_interaction, "owner_id"), false);
+  assert.equal(
+    Object.hasOwn(normalized.selected_interaction.options[0], "private_payload"),
+    false,
+  );
   assert.throws(
     () => normalizeServerRecord({
       type: "goals/snapshot",

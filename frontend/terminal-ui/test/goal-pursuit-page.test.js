@@ -58,3 +58,68 @@ test("Goal page exposes shared interaction detail command for every state", () =
   assert.doesNotMatch(lines, /\/goal interaction cancel ask-answered/);
   assert.doesNotMatch(lines, /\/goal interaction takeover ask-answered/);
 });
+
+test("Goal page highlights ledger selection and renders typed detail", () => {
+  const lines = renderGoalPursuitPage({
+    selectedInteractionIndex: 0,
+    snapshot: {
+      current_goal_id: "goal-1",
+      goals: [{
+        goal_id: "goal-1",
+        objective: "查看详情",
+        status: "active",
+        session_id: "session-1",
+        updated_at: "now",
+        pursuit_link_status: "ready",
+        pursuit: {
+          run_id: "pursuit-1",
+          status: "waiting",
+          phase: "waiting",
+          criteria_verified: 0,
+          criteria_total: 1,
+          iteration: 1,
+          failure_count: 0,
+          next_action: "等待",
+          waits: [],
+          evidence: [],
+        },
+      }],
+      interaction_filter: "pending",
+      interaction_cursor: "",
+      interaction_has_more: true,
+      interactions: [{
+        interaction_id: "ask-selected",
+        pursuit_run_id: "pursuit-1",
+        state: "pending",
+        header: "测试方式",
+        question: "请选择。",
+        can_cancel: true,
+        can_takeover: false,
+      }],
+      selected_interaction: {
+        interaction_id: "ask-selected",
+        pursuit_run_id: "pursuit-1",
+        state: "pending",
+        header: "测试方式",
+        question: "请选择。",
+        options: [{
+          value: "focused",
+          label: "小模块测试",
+          description: "只跑定向测试",
+        }],
+        allow_custom: true,
+        custom_label: "其他",
+        sequence: 2,
+        owner_epoch: 1,
+        question_expired: false,
+        lease_expired: true,
+      },
+    },
+  }, 160, 40).map(stripAnsi).join("\n");
+
+  assert.match(lines, /› ask-selected · 等待回答/);
+  assert.match(lines, /用户交互账本 · 等待回答 · 第 1 页/);
+  assert.match(lines, /小模块测试 \(focused\) · 只跑定向测试/);
+  assert.match(lines, /owner 租约已过期/);
+  assert.match(lines, /n 下一页/);
+});

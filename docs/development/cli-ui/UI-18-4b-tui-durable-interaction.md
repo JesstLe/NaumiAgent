@@ -58,15 +58,14 @@ TUI mount 后启动非阻塞 recovery worker：
 ## 当前不足
 
 - Goal 页面已由 UI-18.4c/18.4d1 汇总有界 interaction 历史并提供显式 cancel/共享只读详情；
-  UI-18.4d2 已补齐宿主绑定 takeover，页内可展开详情仍未完成；
+  UI-18.4d2 已补齐宿主绑定 takeover，UI-18.4d3 已补齐页内详情与分页筛选；
 - TUI recovered answer 不自动执行 `/pursue resume`，这是避免隐藏 owner 竞争的刻意边界；
-- interaction pending recovery 仍是 50 项有界批次，没有 cursor 或优先级；HAR-10.3a 的普通对话
+- interaction pending recovery 仍是 50 项有界批次，账本已有 cursor，但 recovery 没有优先级；HAR-10.3a 的普通对话
   `/send-now` 不改变 interaction authority 的排序；
 - TUI Modal 只显示问题 deadline 结果，尚未显示倒计时；跨平台窄终端布局由 UI-16 继续验证。
 
-UI-18.4 仍保持 partial。HAR-10.3a、UI-18.4c、UI-18.4d1 与 UI-18.4d2 已交付；下一步应在
-UI-18.4d3 页内详情/cursor、
-`HAR-10.3b durable queue authority` 与其他路线之间按用户价值和依赖选择一个最小切片。
+UI-18.4 仍保持 partial。HAR-10.3a、UI-18.4c、UI-18.4d1、UI-18.4d2 与 UI-18.4d3 已交付；
+下一步应在交互优先级、HAR-10.7 独立 Worker、CC-03 行为对齐与其他路线间选择最小切片。
 
 ## UI-17.2b parity 补充
 

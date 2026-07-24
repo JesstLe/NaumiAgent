@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -106,6 +107,68 @@ async def test_goal_status_uses_shared_typed_projection_for_pursuit(tmp_path) ->
     assert "pursuit_tool_view" in output
     assert "成功标准：3/5" in output
     assert "等待验证" in output
+
+
+@pytest.mark.asyncio
+async def test_goal_list_pages_interactions_for_tui_fallback(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    goal = goal_store.create("在 TUI 分页查看交互")
+    run = PursuitRun(
+        id="pursuit_tui_page",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=time.time(),
+        updated_at=time.time(),
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    request = normalize_interaction_request({
+        "header": "继续方式",
+        "question": "是否继续？",
+        "options": [
+            {"value": "yes", "label": "继续"},
+            {"value": "no", "label": "停止"},
+        ],
+    })
+    for index in range(11):
+        await harness_store.create_interaction(
+            workspace_root=tmp_path,
+            record=new_interaction_record(
+                request=request,
+                subject_kind="pursuit",
+                subject_id=run.id,
+                session_id="session-1",
+                agent_name="main",
+                owner_id="tui-a",
+                created_at=f"2026-07-18T00:00:{index:02d}+00:00",
+                owner_lease_seconds=30,
+                interaction_id=f"ask-tui-page-{index}",
+            ),
+        )
+    tool = _tool_map(
+        goal_store,
+        pursuit_store=pursuit_store,
+        interaction_authority=harness_store,
+        workspace_root=tmp_path,
+    )["goal_list"]
+
+    first = await tool.execute(interaction_filter="pending")
+    match = re.search(
+        r"/goal interaction list pending ([A-Za-z0-9_-]+)",
+        first,
+    )
+
+    assert "ask-tui-page-10" in first
+    assert "ask-tui-page-0" not in first
+    assert match is not None
+    second = await tool.execute(
+        interaction_filter="pending",
+        interaction_cursor=match.group(1),
+    )
+    assert "ask-tui-page-0" in second
 
 
 @pytest.mark.asyncio

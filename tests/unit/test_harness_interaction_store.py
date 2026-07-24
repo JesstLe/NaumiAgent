@@ -387,6 +387,81 @@ async def test_cancel_is_sequence_fenced_and_visible_in_bounded_history(
 
 
 @pytest.mark.asyncio
+async def test_interaction_history_cursor_is_stable_filter_bound_and_opaque(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    records = []
+    for index in range(4):
+        records.append(await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(interaction_id=f"ask-page-{index}"),
+        ))
+    cancelled = await store.cancel_interaction(
+        workspace_root=workspace,
+        interaction_id=records[1].interaction_id,
+        expected_sequence=records[1].sequence,
+        now=T4,
+    )
+
+    first = await store.list_interactions_page(
+        workspace_root=workspace,
+        subject_kind="pursuit",
+        subject_ids=("pursuit-1",),
+        limit=2,
+    )
+    assert [item.interaction_id for item in first.items] == [
+        "ask-page-3", "ask-page-2",
+    ]
+    assert first.has_more
+    assert "ask-page" not in first.next_cursor
+
+    await store.create_interaction(
+        workspace_root=workspace,
+        record=_record(interaction_id="ask-page-new"),
+    )
+    second = await store.list_interactions_page(
+        workspace_root=workspace,
+        subject_kind="pursuit",
+        subject_ids=("pursuit-1",),
+        limit=2,
+        cursor=first.next_cursor,
+    )
+    assert second.items == (cancelled, records[0])
+    assert not second.has_more
+
+    cancelled_page = await store.list_interactions_page(
+        workspace_root=workspace,
+        subject_kind="pursuit",
+        subject_ids=("pursuit-1",),
+        state_filter="cancelled",
+        limit=2,
+    )
+    assert cancelled_page.items == (cancelled,)
+    with pytest.raises(ValueError, match="当前查询"):
+        await store.list_interactions_page(
+            workspace_root=workspace,
+            subject_kind="pursuit",
+            subject_ids=("pursuit-1",),
+            state_filter="pending",
+            limit=2,
+            cursor=first.next_cursor,
+        )
+    other_workspace = tmp_path / "other-workspace"
+    other_workspace.mkdir()
+    with pytest.raises(ValueError, match="当前查询"):
+        await store.list_interactions_page(
+            workspace_root=other_workspace,
+            subject_kind="pursuit",
+            subject_ids=("pursuit-1",),
+            limit=2,
+            cursor=first.next_cursor,
+        )
+
+
+@pytest.mark.asyncio
 async def test_tampered_event_chain_is_rejected_without_payload_leak(
     tmp_path: Path,
 ) -> None:

@@ -38,6 +38,23 @@ def test_empty_snapshot_does_not_create_missing_databases(tmp_path) -> None:
     assert not pursuit_store.base_dir.exists()
 
 
+@pytest.mark.asyncio
+async def test_empty_goal_snapshot_does_not_scan_workspace_interactions(tmp_path) -> None:
+    class _FailingAuthority:
+        async def list_interactions_page(self, **kwargs):
+            raise AssertionError("没有可见 Pursuit 时不应扫描 interaction authority")
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        GoalStore(tmp_path / "goals"),
+        PursuitStore(tmp_path / "pursuit"),
+        _FailingAuthority(),
+        workspace_root=tmp_path,
+    )
+
+    assert snapshot.interactions == ()
+    assert snapshot.warnings == ()
+
+
 def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> None:
     goal_store = GoalStore(tmp_path / "goals")
     pursuit_store = PursuitStore(tmp_path / "pursuit")
@@ -82,7 +99,7 @@ def test_snapshot_preserves_stable_link_and_bounds_public_details(tmp_path) -> N
         pursuit_store,
     ).to_protocol_dict()
 
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["current_goal_id"] == goal.id
     assert len(payload["goals"]) == 1
     item = payload["goals"][0]
@@ -204,6 +221,83 @@ async def test_goal_snapshot_projects_only_linked_interaction_public_state(tmp_p
     assert "ask-goal-linked" in rendered
     assert "/goal interaction detail ask-goal-linked" in rendered
     assert "/goal interaction cancel ask-goal-linked" in rendered
+
+
+@pytest.mark.asyncio
+async def test_goal_snapshot_pages_filters_and_projects_selected_detail(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    harness_store = HarnessStore(tmp_path / "harness.db")
+    goal = goal_store.create("分页查看用户交互")
+    run = PursuitRun(
+        id="pursuit_interaction_page",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    request = normalize_interaction_request({
+        "header": "验收方式",
+        "question": "请选择验收方式。",
+        "options": [
+            {"value": "focused", "label": "小模块测试", "description": "仅跑定向测试"},
+            {"value": "skip", "label": "跳过", "description": ""},
+        ],
+        "allow_custom": True,
+        "custom_label": "其他方式",
+    })
+    for index in range(3):
+        await harness_store.create_interaction(
+            workspace_root=tmp_path,
+            record=new_interaction_record(
+                request=request,
+                subject_kind="pursuit",
+                subject_id=run.id,
+                session_id="session-1",
+                agent_name="main",
+                owner_id="bridge-a",
+                created_at=f"2026-07-18T00:00:0{index}+00:00",
+                owner_lease_seconds=30,
+                interaction_id=f"ask-goal-page-{index}",
+            ),
+        )
+
+    first = await build_goal_pursuit_snapshot_with_recovery(
+        goal_store,
+        pursuit_store,
+        harness_store,
+        workspace_root=tmp_path,
+        interaction_limit=2,
+        selected_interaction_id="ask-goal-page-2",
+    )
+    payload = first.to_protocol_dict()
+
+    assert [item["interaction_id"] for item in payload["interactions"]] == [
+        "ask-goal-page-2", "ask-goal-page-1",
+    ]
+    assert payload["interaction_has_more"] is True
+    assert payload["selected_interaction"]["options"][0] == {
+        "value": "focused",
+        "label": "小模块测试",
+        "description": "仅跑定向测试",
+    }
+    assert payload["selected_interaction"]["owner_epoch"] == 1
+    assert "owner_id" not in str(payload["selected_interaction"])
+
+    second = await build_goal_pursuit_snapshot_with_recovery(
+        goal_store,
+        pursuit_store,
+        harness_store,
+        workspace_root=tmp_path,
+        interaction_limit=2,
+        interaction_cursor=payload["interaction_next_cursor"],
+    )
+    assert [item["interaction_id"] for item in second.interactions] == [
+        "ask-goal-page-0",
+    ]
 
 
 def test_interaction_detail_distinguishes_takeover_eligibility_and_deadline() -> None:
