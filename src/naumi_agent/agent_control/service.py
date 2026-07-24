@@ -17,6 +17,7 @@ from naumi_agent.agent_control.models import (
     AgentControlSnapshot,
     AgentControlSummary,
     AgentDescriptor,
+    AgentResultDescriptor,
     BlackboardDescriptor,
     ExecutionDescriptor,
     TeamMessageDescriptor,
@@ -80,10 +81,12 @@ class AgentControlService:
         warnings: list[str] = []
         agents: tuple[AgentDescriptor, ...] = ()
         executions: tuple[ExecutionDescriptor, ...] = ()
+        results: tuple[AgentResultDescriptor, ...] = ()
         team_messages: tuple[TeamMessageDescriptor, ...] = ()
         blackboard: tuple[BlackboardDescriptor, ...] = ()
         pending_messages = 0
         capacity = None
+        publication_backlog = None
         manager = getattr(self._engine, "subagent_manager", None)
 
         try:
@@ -150,6 +153,68 @@ class AgentControlService:
                 f"Agent capacity 读取失败：{type(exc).__name__}: {exc}"
             )
 
+        try:
+            if manager is not None:
+                inbox = await manager.list_result_inbox(session_id, limit=50)
+                result_items: list[AgentResultDescriptor] = []
+                for entry in inbox:
+                    content = entry.content
+                    delivery = entry.delivery
+                    task_excerpt, task_truncated = _public_excerpt(
+                        content.payload.task
+                    )
+                    response_excerpt, response_truncated = _public_excerpt(
+                        content.terminal_payload.response
+                    )
+                    error_excerpt, error_truncated = _public_excerpt(
+                        content.terminal_payload.error
+                    )
+                    result_items.append(AgentResultDescriptor(
+                        delivery_id=_public(delivery.delivery_id),
+                        publication_id=_public(delivery.publication_id),
+                        job_id=_public(delivery.job_id),
+                        task_id=_public(content.payload.task_id),
+                        agent_name=_public(content.request.agent_name),
+                        status=str(content.result.status),
+                        delivered_at=_public(delivery.delivered_at),
+                        result_sha256=delivery.result_sha256,
+                        delivery_sha256=delivery.delivery_sha256,
+                        task_excerpt=task_excerpt,
+                        response_excerpt=response_excerpt,
+                        error_excerpt=error_excerpt,
+                        content_truncated=(
+                            task_truncated
+                            or response_truncated
+                            or error_truncated
+                        ),
+                        response_bytes=content.result.response_bytes,
+                        total_tokens=content.result.total_tokens,
+                        total_cost_usd=(
+                            content.result.total_cost_microusd / 1_000_000
+                        ),
+                        turns=content.result.turns,
+                        reason_code=_public(content.result.reason_code),
+                    ))
+                results = tuple(result_items)
+        except Exception as exc:
+            warnings.append(
+                f"Agent 结果收件箱读取失败：{type(exc).__name__}: {exc}"
+            )
+
+        try:
+            if manager is not None:
+                publication_backlog = await manager.publication_backlog()
+                if publication_backlog.expired_claims:
+                    warnings.append(
+                        "Agent publication 中有 "
+                        f"{publication_backlog.expired_claims} 个过期 claim "
+                        "等待恢复。"
+                    )
+        except Exception as exc:
+            warnings.append(
+                f"Agent publication backlog 读取失败：{type(exc).__name__}: {exc}"
+            )
+
         active_agents = sum(item.state in _ACTIVE_AGENT_STATES for item in agents)
         attention_agents = len({
             item.agent_name
@@ -175,6 +240,16 @@ class AgentControlService:
             durable_recovery_required_jobs=(
                 capacity.recovery_required_jobs if capacity else 0
             ),
+            durable_results_visible=len(results),
+            durable_publications_pending=(
+                publication_backlog.pending if publication_backlog else 0
+            ),
+            durable_publications_claimed=(
+                publication_backlog.live_claimed if publication_backlog else 0
+            ),
+            durable_publications_expired=(
+                publication_backlog.expired_claims if publication_backlog else 0
+            ),
         )
         return AgentControlSnapshot(
             schema_version=AGENT_CONTROL_SCHEMA_VERSION,
@@ -184,6 +259,7 @@ class AgentControlService:
             summary=summary,
             agents=agents,
             executions=executions,
+            results=results,
             team_messages=team_messages,
             blackboard=blackboard,
             warnings=tuple(dict.fromkeys(warnings))[:20],
@@ -279,6 +355,13 @@ def _value_summary(value: Any) -> str:
 
 def _public(value: Any) -> str:
     return OutputGuardrail.redact(str(value or "")).strip()[:2000]
+
+
+def _public_excerpt(value: Any) -> tuple[str, bool]:
+    raw = str(value or "")
+    redacted = OutputGuardrail.redact(raw)
+    normalized = redacted.strip()
+    return normalized[:2000], redacted != raw or len(normalized) > 2000
 
 
 def _nonnegative_int(value: Any) -> int:

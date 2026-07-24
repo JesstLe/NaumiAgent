@@ -924,7 +924,7 @@ function inspectorSnapshot(revision) {
 function agentControlSnapshot(revision) {
   const stopped = revision > 1;
   return {
-    schema_version: 2,
+    schema_version: 3,
     session_id: sessionId,
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -934,6 +934,7 @@ function agentControlSnapshot(revision) {
       attention_agents: 0,
       stoppable_executions: stopped ? 0 : 1,
       pending_messages: 1,
+      durable_results_visible: 0,
     },
     agents: [{
       name: "coder",
@@ -948,6 +949,7 @@ function agentControlSnapshot(revision) {
       age_ms: 500,
       heartbeat_age_ms: 100,
     }],
+    results: [],
     executions: [{
       task_id: "task-agent-1",
       session_id: sessionId,

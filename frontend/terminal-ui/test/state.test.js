@@ -612,7 +612,7 @@ test("only explicit infrastructure notices dismiss welcome", () => {
 
 function agentSnapshot(revision = 1) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     session_id: "session-agents",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -622,6 +622,7 @@ function agentSnapshot(revision = 1) {
       attention_agents: 0,
       stoppable_executions: 1,
       pending_messages: 1,
+      durable_results_visible: 1,
     },
     agents: [{
       name: "coder",
@@ -635,6 +636,12 @@ function agentSnapshot(revision = 1) {
       permission_level: "moderate",
       age_ms: 500,
       heartbeat_age_ms: 100,
+    }],
+    results: [{
+      delivery_id: "delivery-1",
+      task_id: "result-task",
+      agent_name: "coder",
+      status: "completed",
     }],
     executions: [{
       task_id: "task-1",
@@ -799,7 +806,12 @@ test("agent control keyboard uses stable tabs and confirms one authoritative sto
   assert.equal(state.agents.actionPendingTaskId, "");
 
   handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  assert.equal(state.agents.selectedTab, "results");
+  assert.equal(state.agents.selectedByTab.results, "delivery-1");
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
   assert.equal(state.agents.selectedTab, "team");
+  handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
+  assert.equal(state.agents.selectedTab, "results");
   handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
   assert.equal(state.agents.selectedTab, "executions");
 

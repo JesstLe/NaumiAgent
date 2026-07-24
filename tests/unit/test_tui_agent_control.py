@@ -39,6 +39,7 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
 
     agents = format_agent_control_markdown(snapshot, "agents", "coder")
     executions = format_agent_control_markdown(snapshot, "executions", "task-1")
+    results = format_agent_control_markdown(snapshot, "results", "delivery-1")
     team = format_agent_control_markdown(snapshot, "team", "blackboard:team/review")
 
     assert "Agent Control Center · Agent" in agents
@@ -55,6 +56,9 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "epoch 3" in executions
     assert "共享 Agent capacity" in executions
     assert "1/4" in executions
+    assert "持久结果" in results
+    assert "结果正文" in results
+    assert "已经脱敏或截断" in results
     assert "team/review" in team
     assert "ready" in team
 
@@ -64,6 +68,7 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
         **_snapshot().to_dict(),
         "agents": [],
         "executions": [],
+        "results": [],
         "team_messages": [],
         "blackboard": [],
         "warnings": ["消息总线暂时不可用。"],
@@ -71,6 +76,7 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
 
     assert "暂无 Agent" in format_agent_control_markdown(snapshot, "agents", "")
     assert "暂无执行记录" in format_agent_control_markdown(snapshot, "executions", "")
+    assert "暂无持久结果" in format_agent_control_markdown(snapshot, "results", "")
     team = format_agent_control_markdown(snapshot, "team", "")
     assert "暂无团队消息或黑板记录" in team
     assert "消息总线暂时不可用" in team
@@ -130,6 +136,12 @@ async def test_textual_agent_control_loads_switches_and_confirms_stop() -> None:
         )
         assert "cancelled" in screen.query_one(
             "#agent-content-executions", Markdown
+        )._markdown
+        await pilot.press("]")
+        await pilot.pause(0.05)
+        assert screen.query_one(TabbedContent).active == "results"
+        assert "结果正文" in screen.query_one(
+            "#agent-content-results", Markdown
         )._markdown
 
 
@@ -231,7 +243,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 2,
+        "schema_version": 3,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -248,6 +260,10 @@ def _snapshot() -> AgentControlSnapshot:
             "durable_max_waiters": 64,
             "durable_reclaimable_jobs": 0,
             "durable_recovery_required_jobs": 0,
+            "durable_results_visible": 1,
+            "durable_publications_pending": 0,
+            "durable_publications_claimed": 0,
+            "durable_publications_expired": 0,
         },
         "agents": [{
             "name": "coder",
@@ -261,6 +277,26 @@ def _snapshot() -> AgentControlSnapshot:
             "permission_level": "moderate",
             "age_ms": 500,
             "heartbeat_age_ms": 100,
+        }],
+        "results": [{
+            "delivery_id": "delivery-1",
+            "publication_id": "publication-1",
+            "job_id": "agent-job-1",
+            "task_id": "result-task",
+            "agent_name": "coder",
+            "status": "completed",
+            "delivered_at": "2026-07-13T00:00:01+00:00",
+            "result_sha256": "b" * 64,
+            "delivery_sha256": "c" * 64,
+            "task_excerpt": "验证结果收件箱",
+            "response_excerpt": "结果正文",
+            "error_excerpt": "",
+            "content_truncated": True,
+            "response_bytes": 12,
+            "total_tokens": 8,
+            "total_cost_usd": 0.001,
+            "turns": 1,
+            "reason_code": "agent_completed",
         }],
         "executions": [{
             "task_id": "task-1",

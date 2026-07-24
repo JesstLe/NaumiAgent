@@ -1470,10 +1470,41 @@ async def test_publication_delivery_is_atomic_restart_safe_and_routable(
     assert not replay.applied
     assert replay.delivery == delivered.delivery
 
+    clock.advance(seconds=1)
+    second_admitted, _second_result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-delivery-newest",
+        response="更新的持久结果",
+    )
+    second_publication = await store.get_job_publication(second_admitted.job_id)
+    assert second_publication is not None
+    second_claimed = await store.claim_publication(
+        second_publication.publication_id,
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    second_delivered = await store.deliver_publication_to_inbox(
+        second_publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=second_claimed.publication.claim_epoch,
+    )
+
     reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
     assert await reopened.list_result_inbox("other-session") == ()
     inbox = await reopened.list_result_inbox("session-1")
-    assert inbox == (delivered.delivery,)
+    assert inbox == (delivered.delivery, second_delivered.delivery)
+    latest = await reopened.list_result_inbox(
+        "session-1",
+        limit=1,
+        newest_first=True,
+    )
+    assert latest == (second_delivered.delivery,)
+    with pytest.raises(TypeError, match="newest_first"):
+        await reopened.list_result_inbox(
+            "session-1",
+            newest_first=1,  # type: ignore[arg-type]
+        )
     recovered = await reopened.recover_delivered_result(
         delivered.delivery.delivery_id,
         expected_delivery_sha256=delivered.delivery.delivery_sha256,

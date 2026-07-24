@@ -23,8 +23,13 @@ from textual.widgets import (
 
 from naumi_agent.agent_control import AgentControlSnapshot
 
-AGENT_CONTROL_TABS = ("agents", "executions", "team")
-_TAB_LABELS = {"agents": "Agent", "executions": "执行", "team": "协作"}
+AGENT_CONTROL_TABS = ("agents", "executions", "results", "team")
+_TAB_LABELS = {
+    "agents": "Agent",
+    "executions": "执行",
+    "results": "结果",
+    "team": "协作",
+}
 _TERMINAL_EXECUTION_STATUSES = {
     "completed", "error", "failed", "timeout", "max_turns", "cancelled",
 }
@@ -48,7 +53,17 @@ def format_agent_control_markdown(
         (
             f"revision {snapshot.revision} · Agent {summary.total_agents} · "
             f"运行 {summary.active_agents} · 需注意 {summary.attention_agents} · "
-            f"可停止 {summary.stoppable_executions} · 消息 {summary.pending_messages}"
+            f"可停止 {summary.stoppable_executions} · 消息 {summary.pending_messages} · "
+            f"结果 {summary.durable_results_visible}"
+        ),
+        *(
+            [_durable_publication_line(summary)]
+            if (
+                summary.durable_publications_pending
+                or summary.durable_publications_claimed
+                or summary.durable_publications_expired
+            )
+            else []
         ),
         *(
             [_durable_capacity_line(summary)]
@@ -61,6 +76,8 @@ def format_agent_control_markdown(
         lines.extend(_format_agent(snapshot, selected_id))
     elif tab == "executions":
         lines.extend(_format_execution(snapshot, selected_id))
+    elif tab == "results":
+        lines.extend(_format_result(snapshot, selected_id))
     else:
         lines.extend(_format_team(snapshot, selected_id))
     for warning in snapshot.warnings[:5]:
@@ -87,6 +104,19 @@ def _durable_capacity_line(summary: Any) -> str:
         status = "🟢 正常"
     return (
         f"**共享 Agent capacity**：`{active}` · 等待 `{waiting}` · {status}"
+    )
+
+
+def _durable_publication_line(summary: Any) -> str:
+    status = (
+        f"🔴 过期 claim {summary.durable_publications_expired}"
+        if summary.durable_publications_expired
+        else "🟡 等待投递"
+    )
+    return (
+        "**Agent publication**："
+        f"待处理 `{summary.durable_publications_pending}` · "
+        f"已认领 `{summary.durable_publications_claimed}` · {status}"
     )
 
 
@@ -276,6 +306,15 @@ class AgentControlScreen(Screen[None]):
                 )
                 for item in self.snapshot.executions
             ]
+        if self.selected_tab == "results":
+            return [
+                (
+                    item.delivery_id,
+                    f"{item.task_id} · {item.status} · {item.agent_name}"
+                    + (" · 已脱敏/截断" if item.content_truncated else ""),
+                )
+                for item in self.snapshot.results
+            ]
         return [
             *(
                 (
@@ -450,6 +489,42 @@ def _short_digest(value: str) -> str:
     return value[:12] if value else "待生成"
 
 
+def _format_result(snapshot: AgentControlSnapshot, selected_id: str) -> list[str]:
+    if not snapshot.results:
+        return ["", "当前会话暂无持久结果"]
+    item = next(
+        (value for value in snapshot.results if value.delivery_id == selected_id),
+        None,
+    )
+    if item is None:
+        item = snapshot.results[0]
+    return [
+        "",
+        f"### 持久结果 `{_code(item.task_id)}`",
+        f"- Agent：`{_code(item.agent_name)}`",
+        f"- 状态：{item.status} · 原因：`{_code(item.reason_code or '-')}`",
+        f"- 投递时间：{_plain(item.delivered_at)}",
+        (
+            f"- Token：{item.total_tokens} · ${item.total_cost_usd:.4f} · "
+            f"{item.turns} 轮 · {item.response_bytes} bytes"
+        ),
+        f"- 结果摘要：`{_code(_short_digest(item.result_sha256))}`",
+        f"- 投递摘要：`{_code(_short_digest(item.delivery_sha256))}`",
+        *(
+            ["- ⚠️ 展示内容已经脱敏或截断；原始结果仍保留在加密持久层。"]
+            if item.content_truncated
+            else []
+        ),
+        f"- 任务摘录：{_long_plain(item.task_excerpt) or '-'}",
+        f"- 回复摘录：{_long_plain(item.response_excerpt) or '-'}",
+        *(
+            [f"- 错误摘录：{_long_plain(item.error_excerpt)}"]
+            if item.error_excerpt
+            else []
+        ),
+    ]
+
+
 def _tool_scope_summary(values: tuple[str, ...]) -> str:
     if not values:
         return "-"
@@ -505,6 +580,10 @@ def _format_team(snapshot: AgentControlSnapshot, selected_id: str) -> list[str]:
 
 def _plain(value: Any) -> str:
     return str(value or "").replace("\n", " ").strip()[:500]
+
+
+def _long_plain(value: Any) -> str:
+    return str(value or "").replace("\r", " ").replace("\n", " ").strip()[:2000]
 
 
 def _code(value: Any) -> str:

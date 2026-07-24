@@ -11,6 +11,7 @@ import {
 const TABS = [
   { id: "agents", label: "Agent" },
   { id: "executions", label: "执行" },
+  { id: "results", label: "结果" },
   { id: "team", label: "协作" },
 ];
 
@@ -55,9 +56,30 @@ function renderSummary(view, snapshot) {
     `需注意 ${number(summary.attention_agents)}`,
     `可停止 ${number(summary.stoppable_executions)}`,
     `消息 ${number(summary.pending_messages)}`,
+    `结果 ${number(summary.durable_results_visible)}`,
     durable,
+    durablePublicationSummary(summary),
     snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
+}
+
+function durablePublicationSummary(summary) {
+  const pending = number(summary.durable_publications_pending);
+  const claimed = number(summary.durable_publications_claimed);
+  const expired = number(summary.durable_publications_expired);
+  if (expired > 0) {
+    return color(
+      ANSI.red,
+      `发布待处理 ${pending} · 已认领 ${claimed} · 过期 ${expired}`,
+    );
+  }
+  if (pending > 0 || claimed > 0) {
+    return color(
+      ANSI.yellow,
+      `发布待处理 ${pending} · 已认领 ${claimed}`,
+    );
+  }
+  return "";
 }
 
 function durableCapacitySummary(summary) {
@@ -129,6 +151,15 @@ function renderList(view, snapshot, width, maxLines = 100) {
       return `${marker} ${executionStatus(item.status)} ${compactText(item.task_id, 120)} · ${compactText(item.agent_name, 80)}${stop}`;
     }).flatMap((line) => wrapAnsiLine(line, Math.max(1, width))).slice(0, maxLines);
   }
+  if (view?.selectedTab === "results") {
+    const items = array(snapshot.results);
+    if (!items.length) return [color(ANSI.dim, "当前会话暂无持久结果")];
+    return visibleListItems(view, items, maxLines).map((item) => {
+      const marker = item.delivery_id === selected ? color(ANSI.cyan, "›") : " ";
+      const truncated = item.content_truncated ? color(ANSI.yellow, " · 已脱敏/截断") : "";
+      return `${marker} ${executionStatus(item.status)} ${compactText(item.task_id, 120)} · ${compactText(item.agent_name, 80)}${truncated}`;
+    }).flatMap((line) => wrapAnsiLine(line, Math.max(1, width))).slice(0, maxLines);
+  }
   if (view?.selectedTab === "team") {
     const messages = array(snapshot.team_messages).map((item) => ({
       id: `message:${item.timestamp}:${item.sender}:${item.topic}`,
@@ -192,6 +223,31 @@ function renderDetail(view, snapshot, width) {
       `描述 · ${item.description || "-"}`,
       item.error ? color(ANSI.red, `错误 · ${item.error}`) : "",
       item.stop_supported ? color(ANSI.yellow, "按 x 请求停止") : color(ANSI.dim, "当前不可停止"),
+    ].filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+  }
+  if (view?.selectedTab === "results") {
+    const item = array(snapshot.results).find((entry) => entry.delivery_id === id);
+    if (!item) return [color(ANSI.dim, "选择一条持久结果查看详情")];
+    return [
+      color(ANSI.cyan, "持久结果详情"),
+      `任务 · ${item.task_id}`,
+      `Agent · ${item.agent_name}`,
+      `状态 · ${item.status} · ${item.reason_code || "-"}`,
+      `投递时间 · ${item.delivered_at}`,
+      `Token · ${number(item.total_tokens)} · $${Number(item.total_cost_usd || 0).toFixed(4)} · ${number(item.turns)} 轮`,
+      `响应大小 · ${number(item.response_bytes)} bytes`,
+      `结果摘要 · ${shortDigest(item.result_sha256)}`,
+      `投递摘要 · ${shortDigest(item.delivery_sha256)}`,
+      item.content_truncated
+        ? color(ANSI.yellow, "展示内容已经脱敏或截断；原始结果仍保留在加密持久层。")
+        : "",
+      color(ANSI.blue, `任务摘录 · ${compactText(item.task_excerpt || "-", 2000)}`),
+      item.response_excerpt
+        ? color(ANSI.green, `回复摘录 · ${compactText(item.response_excerpt, 2000)}`)
+        : color(ANSI.dim, "回复摘录 · -"),
+      item.error_excerpt
+        ? color(ANSI.red, `错误摘录 · ${compactText(item.error_excerpt, 2000)}`)
+        : "",
     ].filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
   }
   if (view?.selectedTab === "team") {

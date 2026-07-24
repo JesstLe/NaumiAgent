@@ -179,7 +179,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   state.agents.detailId = "task-1";
   state.agents.revision = 3;
   state.agents.snapshot = {
-    schema_version: 2,
+    schema_version: 3,
     session_id: "session-agents",
     revision: 3,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -196,9 +196,14 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
       durable_max_waiters: 64,
       durable_reclaimable_jobs: 0,
       durable_recovery_required_jobs: 0,
+      durable_results_visible: 1,
+      durable_publications_pending: 0,
+      durable_publications_claimed: 0,
+      durable_publications_expired: 0,
     },
     agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
     executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, heartbeat_subject_id: "agent-execution-test", heartbeat_phase: "running", heartbeat_failure_code: "", worker_request_sha256: "a".repeat(64), worker_result_sha256: "", worker_tool_scope: ["file_read"], worker_contract_failure_code: "", worker_job_id: "agent-job-1234567890", worker_job_state: "running", worker_claim_epoch: 2, worker_job_failure_code: "", current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
+    results: [{ delivery_id: "delivery-1", publication_id: "publication-1", job_id: "agent-job-result", task_id: "result-task", agent_name: "coder", status: "completed", delivered_at: "2026-07-13T00:00:01+00:00", result_sha256: "b".repeat(64), delivery_sha256: "c".repeat(64), task_excerpt: "验证结果投影", response_excerpt: "结果正文", error_excerpt: "", content_truncated: false, response_bytes: 12, total_tokens: 8, total_cost_usd: 0.001, turns: 1, reason_code: "agent_completed" }],
     team_messages: [],
     blackboard: [],
     warnings: [],
@@ -218,6 +223,17 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   assert.equal(narrow.length, 16);
   assert(renderAgentControlPage(state.agents, 120, 20).every((line) => visibleWidth(line) <= 120));
   assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
+
+  state.agents.selectedTab = "results";
+  state.agents.selectedByTab.results = "delivery-1";
+  state.agents.detailId = "delivery-1";
+  const resultWide = renderAgentControlPage(state.agents, 120, 20).map(stripAnsi);
+  const resultNarrow = renderAgentControlPage(state.agents, 72, 16).map(stripAnsi);
+  assert(resultWide.some((line) => line.includes("持久结果详情")));
+  assert(resultWide.some((line) => line.includes("结果正文")));
+  assert(resultWide.some((line) => line.includes("投递摘要 · cccccccccccc")));
+  assert(resultNarrow.some((line) => line.includes("持久结果详情")));
+  assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
 });
 
 test("agent control page distinguishes loading empty stale and error states", () => {
@@ -227,7 +243,7 @@ test("agent control page distinguishes loading empty stale and error states", ()
   assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("正在加载"));
 
   state.agents.loading = false;
-  state.agents.snapshot = { summary: {}, agents: [], executions: [], team_messages: [], blackboard: [], warnings: [], revision: 1, generated_at: "now" };
+  state.agents.snapshot = { summary: {}, agents: [], executions: [], results: [], team_messages: [], blackboard: [], warnings: [], revision: 1, generated_at: "now" };
   assert(renderAgentControlPage(state.agents, 80, 10).map(stripAnsi).join("\n").includes("暂无 Agent"));
 
   state.agents.stale = true;
