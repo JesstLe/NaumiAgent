@@ -251,7 +251,7 @@
     }
   },
   "agent_control": {
-    "schema_version": 2,
+    "schema_version": 3,
     "summary_capacity_fields": [
       "durable_capacity_configured",
       "durable_active_jobs",
@@ -259,7 +259,38 @@
       "durable_waiting_jobs",
       "durable_max_waiters",
       "durable_reclaimable_jobs",
-      "durable_recovery_required_jobs"
+      "durable_recovery_required_jobs",
+      "durable_results_visible",
+      "durable_publications_pending",
+      "durable_publications_claimed",
+      "durable_publications_expired"
+    ],
+    "result_fields": [
+      "delivery_id",
+      "publication_id",
+      "job_id",
+      "task_id",
+      "agent_name",
+      "status",
+      "delivered_at",
+      "result_sha256",
+      "delivery_sha256",
+      "task_excerpt",
+      "response_excerpt",
+      "error_excerpt",
+      "content_truncated",
+      "response_bytes",
+      "total_tokens",
+      "total_cost_usd",
+      "turns",
+      "reason_code"
+    ],
+    "result_statuses": [
+      "completed",
+      "error",
+      "timeout",
+      "max_turns",
+      "cancelled"
     ],
     "execution_phases": [
       "starting",

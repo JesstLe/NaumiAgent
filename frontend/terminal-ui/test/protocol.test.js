@@ -1930,11 +1930,14 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.summary.durable_capacity_configured, true);
   assert.equal(normalized.summary.durable_active_jobs, 1);
   assert.equal(normalized.summary.durable_waiting_jobs, 2);
+  assert.equal(normalized.summary.durable_results_visible, 1);
+  assert.equal(normalized.results[0].task_id, "result-task");
+  assert.equal(normalized.results[0].delivery_sha256, "c".repeat(64));
 
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 2,
+      schema_version: 3,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -2039,6 +2042,26 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     /worker_claim_epoch.*非负整数/,
   );
 
+  const invalidResultDigest = agentControlSnapshotFixture(1);
+  invalidResultDigest.results[0].delivery_sha256 = "not-a-digest";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: invalidResultDigest,
+    }),
+    /delivery_sha256.*SHA-256/,
+  );
+
+  const oversizedResults = agentControlSnapshotFixture(1);
+  oversizedResults.results = Array(51).fill(oversizedResults.results[0]);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: oversizedResults,
+    }),
+    /results.*最多 50 项/,
+  );
+
   const missingSection = agentControlSnapshotFixture(1);
   delete missingSection.blackboard;
   assert.throws(
@@ -2051,7 +2074,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     () => normalizeServerRecord({
       type: "agents/update",
       payload: {
-        schema_version: 2,
+        schema_version: 3,
         session_id: "session-1",
         revision: 2,
         generated_at: "now",
@@ -2064,7 +2087,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 2,
+    schema_version: 3,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -2081,6 +2104,10 @@ function agentControlSnapshotFixture(revision) {
       durable_max_waiters: 64,
       durable_reclaimable_jobs: 0,
       durable_recovery_required_jobs: 0,
+      durable_results_visible: 1,
+      durable_publications_pending: 0,
+      durable_publications_claimed: 0,
+      durable_publications_expired: 0,
     },
     agents: [{
       name: "coder",
@@ -2094,6 +2121,26 @@ function agentControlSnapshotFixture(revision) {
       permission_level: "moderate",
       age_ms: 10,
       heartbeat_age_ms: 2,
+    }],
+    results: [{
+      delivery_id: "delivery-1",
+      publication_id: "publication-1",
+      job_id: "agent-job-result",
+      task_id: "result-task",
+      agent_name: "coder",
+      status: "completed",
+      delivered_at: "2026-07-13T00:00:01+00:00",
+      result_sha256: "b".repeat(64),
+      delivery_sha256: "c".repeat(64),
+      task_excerpt: "验证结果投影",
+      response_excerpt: "结果正文",
+      error_excerpt: "",
+      content_truncated: false,
+      response_bytes: 12,
+      total_tokens: 8,
+      total_cost_usd: 0.001,
+      turns: 1,
+      reason_code: "agent_completed",
     }],
     executions: [{
       task_id: "task-1",

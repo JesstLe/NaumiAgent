@@ -41,7 +41,8 @@ admission、排队计数与取消清理，并拒绝容量饱和时会自锁的�
 模型调用前签发请求合同、终态签发低敏结果回执；ARC-04.5b2/5c 又接入加密 durable Agent Job、
 claim renewal、终态发布屏障和双端 job state/epoch 证据。HAR-10.7c/ARC-06.2c 进一步让多个 Runtime
 共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数。独立 Worker、跨 workspace/provider
-fairness、自动恢复与可展示 response 恢复仍未完成。
+fairness 和自动恢复仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session 的认证、脱敏
+response 摘录，但分页、read/ack 与完整结果导出仍未完成。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request

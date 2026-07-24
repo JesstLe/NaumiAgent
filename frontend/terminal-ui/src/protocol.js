@@ -15,10 +15,11 @@ const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
 const INSPECTOR_TAB_NAMES = ["plan", "tools", "context", "changes", "tests"];
 const INSPECTOR_STATES = new Set(["ready", "empty", "loading", "stale", "error"]);
-const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "team_messages", "blackboard", "warnings"];
+const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "results", "team_messages", "blackboard", "warnings"];
 const AGENT_KINDS = new Set(["preset", "dynamic"]);
 const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "idle", "destroyed"]);
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
+const AGENT_RESULT_STATUSES = new Set(["completed", "error", "timeout", "max_turns", "cancelled"]);
 const EXECUTION_PHASES = new Set(["starting", "waiting_capacity", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
 const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
 const WORKER_JOB_STATES = new Set(["admitted", "claimed", "running", "completed", "error", "timeout", "max_turns", "cancelled", "unknown"]);
@@ -5031,6 +5032,7 @@ function normalizeAgentControlSnapshot(payload) {
     summary: normalizeAgentSummary(payload.summary),
     agents: agentObjectArray(payload.agents, "agents", 100).map(normalizeAgentDescriptor),
     executions: agentObjectArray(payload.executions, "executions", 100).map(normalizeExecutionDescriptor),
+    results: agentObjectArray(payload.results, "results", 50).map(normalizeAgentResultDescriptor),
     team_messages: agentObjectArray(payload.team_messages, "team_messages", 100).map(normalizeTeamMessage),
     blackboard: agentObjectArray(payload.blackboard, "blackboard", 100).map(normalizeBlackboard),
     warnings: agentTextArray(payload.warnings, "warnings", 20),
@@ -5048,6 +5050,7 @@ function normalizeAgentControlUpdate(payload) {
     if (section === "summary") changedSections.summary = normalizeAgentSummary(value);
     else if (section === "agents") changedSections.agents = agentObjectArray(value, "agents", 100).map(normalizeAgentDescriptor);
     else if (section === "executions") changedSections.executions = agentObjectArray(value, "executions", 100).map(normalizeExecutionDescriptor);
+    else if (section === "results") changedSections.results = agentObjectArray(value, "results", 50).map(normalizeAgentResultDescriptor);
     else if (section === "team_messages") changedSections.team_messages = agentObjectArray(value, "team_messages", 100).map(normalizeTeamMessage);
     else if (section === "blackboard") changedSections.blackboard = agentObjectArray(value, "blackboard", 100).map(normalizeBlackboard);
     else changedSections.warnings = agentTextArray(value, "warnings", 20);
@@ -5059,11 +5062,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 2) {
+  if (payload.schema_version !== 3) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 2,
+    schema_version: 3,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -5105,6 +5108,22 @@ function normalizeAgentSummary(value) {
     durable_recovery_required_jobs: strictAgentNonnegativeInteger(
       summary.durable_recovery_required_jobs ?? 0,
       "summary.durable_recovery_required_jobs",
+    ),
+    durable_results_visible: strictAgentNonnegativeInteger(
+      summary.durable_results_visible ?? 0,
+      "summary.durable_results_visible",
+    ),
+    durable_publications_pending: strictAgentNonnegativeInteger(
+      summary.durable_publications_pending ?? 0,
+      "summary.durable_publications_pending",
+    ),
+    durable_publications_claimed: strictAgentNonnegativeInteger(
+      summary.durable_publications_claimed ?? 0,
+      "summary.durable_publications_claimed",
+    ),
+    durable_publications_expired: strictAgentNonnegativeInteger(
+      summary.durable_publications_expired ?? 0,
+      "summary.durable_publications_expired",
     ),
   };
 }
@@ -5173,12 +5192,59 @@ function normalizeExecutionDescriptor(item) {
   };
 }
 
+function normalizeAgentResultDescriptor(item) {
+  return {
+    delivery_id: requiredAgentText(item.delivery_id, "result.delivery_id"),
+    publication_id: requiredAgentText(
+      item.publication_id,
+      "result.publication_id",
+    ),
+    job_id: requiredAgentText(item.job_id, "result.job_id"),
+    task_id: requiredAgentText(item.task_id, "result.task_id"),
+    agent_name: requiredAgentText(item.agent_name, "result.agent_name"),
+    status: strictChoice(item.status, "result.status", AGENT_RESULT_STATUSES),
+    delivered_at: requiredAgentText(item.delivered_at, "result.delivered_at"),
+    result_sha256: requiredSha256(item.result_sha256, "result.result_sha256"),
+    delivery_sha256: requiredSha256(
+      item.delivery_sha256,
+      "result.delivery_sha256",
+    ),
+    task_excerpt: agentText(item.task_excerpt),
+    response_excerpt: agentText(item.response_excerpt),
+    error_excerpt: agentText(item.error_excerpt),
+    content_truncated: strictBoolean(
+      item.content_truncated,
+      "result.content_truncated",
+    ),
+    response_bytes: strictAgentNonnegativeInteger(
+      item.response_bytes ?? 0,
+      "result.response_bytes",
+    ),
+    total_tokens: strictAgentNonnegativeInteger(
+      item.total_tokens ?? 0,
+      "result.total_tokens",
+    ),
+    total_cost_usd: strictNonnegativeNumber(
+      item.total_cost_usd ?? 0,
+      "result.total_cost_usd",
+    ),
+    turns: strictAgentNonnegativeInteger(item.turns ?? 0, "result.turns"),
+    reason_code: agentText(item.reason_code),
+  };
+}
+
 function optionalSha256(value, field) {
   const result = agentText(value);
   if (!result) return "";
   if (!/^[0-9a-f]{64}$/.test(result)) {
     throw new Error(`${field} 必须是小写 SHA-256`);
   }
+  return result;
+}
+
+function requiredSha256(value, field) {
+  const result = optionalSha256(value, field);
+  if (!result) throw new Error(`${field} 不能为空`);
   return result;
 }
 

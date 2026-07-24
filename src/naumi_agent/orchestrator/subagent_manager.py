@@ -30,6 +30,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobError,
     AgentJobKeyUnavailableError,
     AgentJobPayload,
+    AgentJobPublicationBacklog,
     AgentJobPublicationContent,
     AgentJobPublicationDeliveryTransition,
     AgentJobState,
@@ -37,6 +38,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobTerminalPayload,
     AgentJobTransitionResult,
     StoredAgentJob,
+    StoredAgentJobPublicationDelivery,
 )
 from naumi_agent.daemons.agent_worker_contract import (
     AgentWorkerRequest,
@@ -186,6 +188,14 @@ class AgentPublicationRecoverySummary:
     notification_failures: int = 0
     failed: int = 0
     failure_codes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AgentPublicationInboxEntry:
+    """Authenticated durable result content paired with its delivery fence."""
+
+    delivery: StoredAgentJobPublicationDelivery
+    content: AgentJobPublicationContent
 
 
 @dataclass
@@ -529,6 +539,34 @@ class SubAgentManager:
     async def capacity_snapshot(self) -> AgentJobCapacitySnapshot | None:
         """Expose the durable embedded capacity authority without raw jobs."""
         return await self._agent_job_store.capacity_snapshot()
+
+    async def list_result_inbox(
+        self,
+        session_id: str,
+        *,
+        limit: int = 50,
+    ) -> tuple[AgentPublicationInboxEntry, ...]:
+        """Recover a bounded session inbox through authenticated delivery fences."""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit 必须是整数。")
+        safe_limit = max(1, min(limit, 50))
+        deliveries = await self._agent_job_store.list_result_inbox(
+            session_id,
+            limit=safe_limit,
+            newest_first=True,
+        )
+        entries: list[AgentPublicationInboxEntry] = []
+        for delivery in deliveries:
+            content = await self._agent_job_store.recover_delivered_result(
+                delivery.delivery_id,
+                expected_delivery_sha256=delivery.delivery_sha256,
+            )
+            entries.append(AgentPublicationInboxEntry(delivery, content))
+        return tuple(entries)
+
+    async def publication_backlog(self) -> AgentJobPublicationBacklog:
+        """Expose content-free durable publication backlog counters."""
+        return await self._agent_job_store.publication_backlog()
 
     def publication_recovery_status(self) -> dict[str, object]:
         """Expose only bounded counters and stable failure codes."""

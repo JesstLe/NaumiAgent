@@ -81,9 +81,12 @@
   Bus 只作通知，不声称外部 exactly-once。详见
   `ARC-04-5d2a-agent-result-publication-outbox.md` 与
   `ARC-04-5d2b-agent-result-publication-consumption.md`。
+- ARC-04.5d2c 已让 `SubAgentManager` 通过精确 delivery fence 认证读取当前 session 的 result inbox，
+  并以 Agent Control schema v3 的有界脱敏 projection 同步 New UI/TUI“结果”标签；两端不读取
+  SQLite 或解密原文。详见 `ARC-04-5d2c-agent-result-inbox-projection.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费与
-  startup recovery，但周期 retry、UI read/ack、retention 和外部 sink 仍未完成。
+  startup recovery 和只读 UI projection，但周期 retry、UI read/ack、retention 和外部 sink 仍未完成。
   因此 ARC-04 保持 partial。
 
 ## 验收标准
@@ -122,4 +125,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b)。
+4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c)。

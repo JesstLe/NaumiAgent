@@ -6,11 +6,12 @@ import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 2
+AGENT_CONTROL_SCHEMA_VERSION = 3
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
     "executions",
+    "results",
     "team_messages",
     "blackboard",
     "warnings",
@@ -38,6 +39,9 @@ _HEARTBEAT_PHASES = frozenset({
 _WORKER_JOB_STATES = frozenset({
     "admitted", "claimed", "running", "completed", "error", "timeout",
     "max_turns", "cancelled", "unknown",
+})
+_RESULT_STATUSES = frozenset({
+    "completed", "error", "timeout", "max_turns", "cancelled",
 })
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -132,6 +136,10 @@ class AgentControlSummary:
     durable_max_waiters: int = 0
     durable_reclaimable_jobs: int = 0
     durable_recovery_required_jobs: int = 0
+    durable_results_visible: int = 0
+    durable_publications_pending: int = 0
+    durable_publications_claimed: int = 0
+    durable_publications_expired: int = 0
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentControlSummary:
@@ -143,6 +151,8 @@ class AgentControlSummary:
             "durable_max_active_jobs", "durable_waiting_jobs",
             "durable_max_waiters", "durable_reclaimable_jobs",
             "durable_recovery_required_jobs",
+            "durable_results_visible", "durable_publications_pending",
+            "durable_publications_claimed", "durable_publications_expired",
         }, "summary")
         return cls(
             total_agents=_integer(data.get("total_agents", 0), "summary.total_agents"),
@@ -183,6 +193,22 @@ class AgentControlSummary:
             durable_recovery_required_jobs=_integer(
                 data.get("durable_recovery_required_jobs", 0),
                 "summary.durable_recovery_required_jobs",
+            ),
+            durable_results_visible=_integer(
+                data.get("durable_results_visible", 0),
+                "summary.durable_results_visible",
+            ),
+            durable_publications_pending=_integer(
+                data.get("durable_publications_pending", 0),
+                "summary.durable_publications_pending",
+            ),
+            durable_publications_claimed=_integer(
+                data.get("durable_publications_claimed", 0),
+                "summary.durable_publications_claimed",
+            ),
+            durable_publications_expired=_integer(
+                data.get("durable_publications_expired", 0),
+                "summary.durable_publications_expired",
             ),
         )
 
@@ -360,6 +386,83 @@ class ExecutionDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentResultDescriptor:
+    delivery_id: str
+    publication_id: str
+    job_id: str
+    task_id: str
+    agent_name: str
+    status: str
+    delivered_at: str
+    result_sha256: str
+    delivery_sha256: str
+    task_excerpt: str = ""
+    response_excerpt: str = ""
+    error_excerpt: str = ""
+    content_truncated: bool = False
+    response_bytes: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    turns: int = 0
+    reason_code: str = ""
+
+    @classmethod
+    def from_dict(cls, value: Any) -> AgentResultDescriptor:
+        data = _mapping(value, "result")
+        _only(data, {
+            "delivery_id", "publication_id", "job_id", "task_id", "agent_name",
+            "status", "delivered_at", "result_sha256", "delivery_sha256",
+            "task_excerpt", "response_excerpt", "error_excerpt",
+            "content_truncated", "response_bytes", "total_tokens",
+            "total_cost_usd", "turns", "reason_code",
+        }, "result")
+        return cls(
+            delivery_id=_text(
+                data.get("delivery_id"), "result.delivery_id", required=True
+            ),
+            publication_id=_text(
+                data.get("publication_id"), "result.publication_id", required=True
+            ),
+            job_id=_text(data.get("job_id"), "result.job_id", required=True),
+            task_id=_text(data.get("task_id"), "result.task_id", required=True),
+            agent_name=_text(
+                data.get("agent_name"), "result.agent_name", required=True
+            ),
+            status=_choice(data.get("status"), "result.status", _RESULT_STATUSES),
+            delivered_at=_text(
+                data.get("delivered_at"), "result.delivered_at", required=True
+            ),
+            result_sha256=_sha256(
+                data.get("result_sha256"), "result.result_sha256", optional=False
+            ),
+            delivery_sha256=_sha256(
+                data.get("delivery_sha256"),
+                "result.delivery_sha256",
+                optional=False,
+            ),
+            task_excerpt=_text(data.get("task_excerpt"), "result.task_excerpt"),
+            response_excerpt=_text(
+                data.get("response_excerpt"), "result.response_excerpt"
+            ),
+            error_excerpt=_text(data.get("error_excerpt"), "result.error_excerpt"),
+            content_truncated=_boolean(
+                data.get("content_truncated", False), "result.content_truncated"
+            ),
+            response_bytes=_integer(
+                data.get("response_bytes", 0), "result.response_bytes"
+            ),
+            total_tokens=_integer(
+                data.get("total_tokens", 0), "result.total_tokens"
+            ),
+            total_cost_usd=_number(
+                data.get("total_cost_usd", 0), "result.total_cost_usd"
+            ),
+            turns=_integer(data.get("turns", 0), "result.turns"),
+            reason_code=_text(data.get("reason_code"), "result.reason_code"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TeamMessageDescriptor:
     sender: str
     recipient: str
@@ -416,6 +519,7 @@ class AgentControlSnapshot:
     summary: AgentControlSummary = field(default_factory=AgentControlSummary)
     agents: tuple[AgentDescriptor, ...] = ()
     executions: tuple[ExecutionDescriptor, ...] = ()
+    results: tuple[AgentResultDescriptor, ...] = ()
     team_messages: tuple[TeamMessageDescriptor, ...] = ()
     blackboard: tuple[BlackboardDescriptor, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -435,7 +539,8 @@ class AgentControlSnapshot:
         data = _mapping(value, "agent_control")
         _only(data, {
             "schema_version", "session_id", "revision", "generated_at", "summary",
-            "agents", "executions", "team_messages", "blackboard", "warnings",
+            "agents", "executions", "results", "team_messages", "blackboard",
+            "warnings",
         }, "agent_control")
         if data.get("schema_version") != AGENT_CONTROL_SCHEMA_VERSION:
             raise ValueError(
@@ -456,6 +561,10 @@ class AgentControlSnapshot:
                 ExecutionDescriptor.from_dict(item)
                 for item in _sequence(data.get("executions"), "executions")
             ),
+            results=tuple(
+                AgentResultDescriptor.from_dict(item)
+                for item in _sequence(data.get("results"), "results", _MAX_SMALL_ITEMS)
+            ),
             team_messages=tuple(
                 TeamMessageDescriptor.from_dict(item)
                 for item in _sequence(data.get("team_messages"), "team_messages")
@@ -474,6 +583,7 @@ __all__ = [
     "AgentControlSnapshot",
     "AgentControlSummary",
     "AgentDescriptor",
+    "AgentResultDescriptor",
     "BlackboardDescriptor",
     "ExecutionDescriptor",
     "TeamMessageDescriptor",

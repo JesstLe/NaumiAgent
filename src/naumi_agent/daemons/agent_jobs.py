@@ -1318,6 +1318,7 @@ class AgentJobStore:
         session_id: str,
         *,
         limit: int = 100,
+        newest_first: bool = False,
     ) -> tuple[StoredAgentJobPublicationDelivery, ...]:
         _require_text(
             session_id,
@@ -1326,6 +1327,8 @@ class AgentJobStore:
             allow_empty=True,
         )
         _require_bounded_limit(limit, maximum=1000)
+        if not isinstance(newest_first, bool):
+            raise TypeError("newest_first 必须是布尔值。")
         if not _regular_file_exists(self._db_path):
             return ()
         key = self._runtime_key()
@@ -1337,14 +1340,26 @@ class AgentJobStore:
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN")
-                cursor = await db.execute(
+                query = (
+                    """
+                    SELECT delivery_id
+                    FROM agent_job_publication_deliveries
+                    WHERE session_routing_hmac = ? AND sink = ?
+                    ORDER BY delivered_at DESC, delivery_id DESC
+                    LIMIT ?
+                    """
+                    if newest_first
+                    else
                     """
                     SELECT delivery_id
                     FROM agent_job_publication_deliveries
                     WHERE session_routing_hmac = ? AND sink = ?
                     ORDER BY delivered_at, delivery_id
                     LIMIT ?
-                    """,
+                    """
+                )
+                cursor = await db.execute(
+                    query,
                     (
                         routing_hmac,
                         AgentJobDeliverySink.RESULT_INBOX.value,

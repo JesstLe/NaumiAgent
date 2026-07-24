@@ -182,11 +182,12 @@ startup one-shot 冒充完成。
 
 - 周期 retry/backoff、最大 attempt、quarantine/dead-letter；
 - publication/inbox retention、GC、备份 root 与删除检测；
-- New UI/TUI 统一 inbox projection、未读数、详情恢复、人工重试/隔离；
+- 未读数、详情分页/导出、人工重试/隔离；统一只读 inbox projection 已由
+  `ARC-04.5d2c-agent-result-inbox-projection.md` 完成；
 - 多 session durable cursor、read/ack 或用户删除语义；
 - 独立 Agent worker、Supervisor 与跨进程 shutdown/drain；
 - 跨平台打包后的 crash-point/kill -9/disk-full/lock contention soak；
 - 外部 sink adapter 与它自己的 idempotency receipt。
 
-下一步不继续线性扩张完整 ARC-04。应重新审计 Harness、UI 与 Supervisor 依赖，优先选择一个能直接消费
-durable inbox 的最小用户切片；如果选择 UI，必须先建立只读 shared projection，再同时接 New UI/TUI。
+下一步不继续线性扩张完整 ARC-04。`ARC-04.5d2c` 已按上述依赖结论建立只读 shared projection 并同步
+New UI/TUI；其后仍应重新审计 Harness、UI 与 Supervisor 依赖。

@@ -151,7 +151,7 @@ class FakeAgentControl:
         stopped = self._engine.agent_stopped
         return AgentControlSnapshot.from_dict(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "session_id": "session-python",
                 "revision": 2 if stopped else 1,
                 "generated_at": "2026-07-13T00:00:01+00:00",
@@ -206,6 +206,7 @@ class FakeAgentControl:
                         "stop_requested": stopped,
                     }
                 ],
+                "results": [],
                 "team_messages": [],
                 "blackboard": [],
                 "warnings": [],
@@ -223,6 +224,7 @@ class FakeAgentControl:
                 "summary",
                 "agents",
                 "executions",
+                "results",
                 "team_messages",
                 "blackboard",
                 "warnings",

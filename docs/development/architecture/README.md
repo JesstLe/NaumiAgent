@@ -32,6 +32,7 @@ ARC-04.5b2 已建立 durable Agent Job Store 与 fenced lifecycle，ARC-04.5c �
 active 上限、有界 FIFO 与等待取消。ARC-04.5d1 又将 response/error 加密原子提交，并要求生产发布前
 从 Store 重新认证恢复；ARC-04.5d2a 又建立 terminal transaction 原子创建的 durable publication
 outbox、lease/epoch fencing、恢复目录与 HMAC receipt chain；ARC-04.5d2b 进一步建立 schema v5
-幂等 result inbox、生产 manager 在线消费和有界 startup recovery。Agent 仍不是 daemon，周期
+幂等 result inbox、生产 manager 在线消费和有界 startup recovery；ARC-04.5d2c 又通过 Agent Control
+schema v3 将当前 session 的认证、脱敏、有界结果同步到 New UI/TUI。Agent 仍不是 daemon，周期
 publication retry、Agent/Browser 持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

@@ -35,7 +35,7 @@ class _QuickOpenTaskStore:
 class _QuickOpenAgentControl:
     async def snapshot(self) -> AgentControlSnapshot:
         return AgentControlSnapshot(
-            schema_version=2,
+            schema_version=3,
             session_id="",
             revision=3,
             generated_at="2026-07-23T00:00:00+00:00",
