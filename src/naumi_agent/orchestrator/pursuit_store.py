@@ -23,6 +23,10 @@ from naumi_agent.orchestrator.pursuit_action_ledger import (
     digest_result,
 )
 from naumi_agent.orchestrator.pursuit_checkpoint import PursuitCheckpoint
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    PursuitRecoveryAttempt,
+    PursuitRecoveryAttemptState,
+)
 from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
 
 
@@ -235,6 +239,180 @@ class PursuitStore:
                 (run_id, safe_limit),
             ).fetchall()
         return [_boundary_decision_from_row(row) for row in rows]
+
+    def prepare_recovery_attempt(
+        self,
+        attempt: PursuitRecoveryAttempt,
+    ) -> tuple[PursuitRecoveryAttempt, bool]:
+        """Persist one idempotent recovery request before lease acquisition."""
+        if (
+            attempt.state is not PursuitRecoveryAttemptState.REQUESTED
+            or attempt.sequence != 1
+        ):
+            raise ValueError("新 recovery attempt 必须从 requested/sequence=1 开始。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = self._get_recovery_attempt_with_connection(
+                    conn,
+                    attempt.attempt_id,
+                )
+                if existing is not None:
+                    immutable = (
+                        "run_id",
+                        "source_request_sha256",
+                    )
+                    if all(
+                        getattr(existing, field) == getattr(attempt, field)
+                        for field in immutable
+                    ):
+                        return existing, False
+                    raise PursuitStoreConflictError(
+                        "recovery attempt identity 已绑定不同请求事实。"
+                    )
+                if conn.execute(
+                    "SELECT 1 FROM pursuit_runs WHERE id = ?",
+                    (attempt.run_id,),
+                ).fetchone() is None:
+                    raise PursuitStoreConflictError(
+                        f"recovery attempt 对应的 PursuitRun 不存在：{attempt.run_id}"
+                    )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_recovery_attempts (
+                        attempt_id, run_id, latest_sequence, state,
+                        payload_json, payload_sha256, requested_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        attempt.attempt_id,
+                        attempt.run_id,
+                        attempt.sequence,
+                        attempt.state.value,
+                        attempt.canonical_json(),
+                        attempt.digest(),
+                        attempt.requested_at,
+                        attempt.updated_at,
+                    ),
+                )
+                self._append_recovery_attempt_event(
+                    conn,
+                    attempt,
+                    previous_digest="",
+                )
+                return attempt, True
+        except PursuitStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"准备 recovery attempt 失败：{exc}") from exc
+
+    def mark_recovery_attempt_admitted(
+        self,
+        attempt_id: str,
+        *,
+        admitted_at: float,
+        lease_epoch: int,
+        checkpoint_id: str,
+    ) -> PursuitRecoveryAttempt:
+        return self._transition_recovery_attempt(
+            attempt_id,
+            target=PursuitRecoveryAttemptState.ADMITTED,
+            updated_at=admitted_at,
+            admitted_at=admitted_at,
+            lease_epoch=lease_epoch,
+            checkpoint_id=checkpoint_id,
+        )
+
+    def resolve_recovery_attempt(
+        self,
+        attempt_id: str,
+        *,
+        resolved_at: float,
+        result_code: str,
+        boundary_decision_id: str = "",
+    ) -> PursuitRecoveryAttempt:
+        return self._transition_recovery_attempt(
+            attempt_id,
+            target=PursuitRecoveryAttemptState.RESOLVED,
+            updated_at=resolved_at,
+            resolved_at=resolved_at,
+            result_code=result_code,
+            boundary_decision_id=boundary_decision_id,
+        )
+
+    def fail_recovery_attempt(
+        self,
+        attempt_id: str,
+        *,
+        failed_at: float,
+        result_code: str,
+    ) -> PursuitRecoveryAttempt:
+        return self._transition_recovery_attempt(
+            attempt_id,
+            target=PursuitRecoveryAttemptState.FAILED,
+            updated_at=failed_at,
+            resolved_at=failed_at,
+            result_code=result_code,
+        )
+
+    def get_recovery_attempt(
+        self,
+        attempt_id: str,
+    ) -> PursuitRecoveryAttempt | None:
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._get_recovery_attempt_with_connection(conn, attempt_id)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"recovery attempt 结构校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取 recovery attempt 失败：{exc}") from exc
+
+    def list_recovery_attempts(
+        self,
+        run_id: str,
+        *,
+        limit: int = 20,
+    ) -> list[PursuitRecoveryAttempt]:
+        safe_limit = max(1, min(int(limit), 200))
+        if not self._db_path.exists():
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT attempt_id
+                    FROM pursuit_recovery_attempts
+                    WHERE run_id = ?
+                    ORDER BY requested_at DESC, attempt_id DESC
+                    LIMIT ?
+                    """,
+                    (run_id, safe_limit),
+                ).fetchall()
+                return [
+                    attempt
+                    for row in rows
+                    if (
+                        attempt := self._get_recovery_attempt_with_connection(
+                            conn,
+                            str(row["attempt_id"]),
+                        )
+                    )
+                    is not None
+                ]
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"recovery attempt 列表校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取 recovery attempt 列表失败：{exc}") from exc
 
     def list_runs(self, *, include_finished: bool = True) -> list[PursuitRun]:
         query = "SELECT * FROM pursuit_runs"
@@ -713,6 +891,237 @@ class PursuitStore:
             raise PursuitStoreError("行动快照与事件链末端不一致，拒绝读取。")
         return latest
 
+    def _transition_recovery_attempt(
+        self,
+        attempt_id: str,
+        *,
+        target: PursuitRecoveryAttemptState,
+        updated_at: float,
+        admitted_at: float = 0,
+        resolved_at: float = 0,
+        lease_epoch: int = 0,
+        checkpoint_id: str = "",
+        result_code: str = "",
+        boundary_decision_id: str = "",
+    ) -> PursuitRecoveryAttempt:
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                current = self._get_recovery_attempt_with_connection(
+                    conn,
+                    attempt_id,
+                )
+                if current is None:
+                    raise PursuitStoreConflictError(
+                        f"recovery attempt 不存在：{attempt_id}"
+                    )
+                if current.state in {
+                    PursuitRecoveryAttemptState.RESOLVED,
+                    PursuitRecoveryAttemptState.FAILED,
+                }:
+                    if (
+                        current.state is target
+                        and current.updated_at == updated_at
+                        and current.result_code == result_code
+                        and current.boundary_decision_id == boundary_decision_id
+                    ):
+                        return current
+                    raise PursuitStoreConflictError(
+                        "terminal recovery attempt 不得再次迁移。"
+                    )
+                if target is PursuitRecoveryAttemptState.ADMITTED:
+                    if current.state is not PursuitRecoveryAttemptState.REQUESTED:
+                        if (
+                            current.state is PursuitRecoveryAttemptState.ADMITTED
+                            and current.admitted_at == admitted_at
+                            and current.lease_epoch == lease_epoch
+                            and current.checkpoint_id == checkpoint_id
+                        ):
+                            return current
+                        raise PursuitStoreConflictError(
+                            "recovery attempt admission 发生冲突。"
+                        )
+                    candidate = current.model_copy(update={
+                        "sequence": 2,
+                        "state": target,
+                        "updated_at": updated_at,
+                        "admitted_at": admitted_at,
+                        "lease_epoch": lease_epoch,
+                        "checkpoint_id": checkpoint_id,
+                    })
+                elif target in {
+                    PursuitRecoveryAttemptState.RESOLVED,
+                    PursuitRecoveryAttemptState.FAILED,
+                }:
+                    if current.state not in {
+                        PursuitRecoveryAttemptState.REQUESTED,
+                        PursuitRecoveryAttemptState.ADMITTED,
+                    }:
+                        raise PursuitStoreConflictError(
+                            "recovery attempt 不能从当前状态进入终态。"
+                        )
+                    candidate = current.model_copy(update={
+                        "sequence": current.sequence + 1,
+                        "state": target,
+                        "updated_at": updated_at,
+                        "resolved_at": resolved_at,
+                        "result_code": result_code,
+                        "boundary_decision_id": boundary_decision_id,
+                    })
+                else:
+                    raise ValueError("不支持的 recovery attempt 迁移。")
+                candidate = PursuitRecoveryAttempt.model_validate(
+                    candidate.model_dump(mode="json")
+                )
+                self._append_recovery_attempt_event(
+                    conn,
+                    candidate,
+                    previous_digest=current.digest(),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE pursuit_recovery_attempts
+                    SET latest_sequence = ?, state = ?, payload_json = ?,
+                        payload_sha256 = ?, updated_at = ?
+                    WHERE attempt_id = ? AND latest_sequence = ?
+                    """,
+                    (
+                        candidate.sequence,
+                        candidate.state.value,
+                        candidate.canonical_json(),
+                        candidate.digest(),
+                        candidate.updated_at,
+                        attempt_id,
+                        current.sequence,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PursuitStoreConflictError(
+                        "recovery attempt 被并发更新，拒绝覆盖。"
+                    )
+                return candidate
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"更新 recovery attempt 失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"更新 recovery attempt 失败：{exc}"
+            ) from exc
+
+    def _get_recovery_attempt_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> PursuitRecoveryAttempt | None:
+        row = conn.execute(
+            "SELECT * FROM pursuit_recovery_attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        events = self._verify_recovery_attempt_events(conn, attempt_id)
+        if not events:
+            raise PursuitStoreError(
+                "recovery attempt 快照存在但事件链为空，拒绝读取。"
+            )
+        payload = str(row["payload_json"])
+        actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+            raise PursuitStoreError(
+                "recovery attempt 快照摘要校验失败，拒绝读取。"
+            )
+        snapshot = PursuitRecoveryAttempt.model_validate_json(payload)
+        latest = events[-1]
+        if (
+            snapshot != latest
+            or str(row["attempt_id"]) != latest.attempt_id
+            or str(row["run_id"]) != latest.run_id
+            or int(row["latest_sequence"]) != latest.sequence
+            or str(row["state"]) != latest.state.value
+        ):
+            raise PursuitStoreError(
+                "recovery attempt 快照与事件链末端不一致，拒绝读取。"
+            )
+        return latest
+
+    @staticmethod
+    def _append_recovery_attempt_event(
+        conn: sqlite3.Connection,
+        attempt: PursuitRecoveryAttempt,
+        *,
+        previous_digest: str,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO pursuit_recovery_attempt_events (
+                attempt_id, sequence, state, payload_json, payload_sha256,
+                previous_payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt.attempt_id,
+                attempt.sequence,
+                attempt.state.value,
+                attempt.canonical_json(),
+                attempt.digest(),
+                previous_digest,
+                attempt.updated_at,
+            ),
+        )
+
+    @staticmethod
+    def _verify_recovery_attempt_events(
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> list[PursuitRecoveryAttempt]:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM pursuit_recovery_attempt_events
+            WHERE attempt_id = ?
+            ORDER BY sequence ASC
+            """,
+            (attempt_id,),
+        ).fetchall()
+        records: list[PursuitRecoveryAttempt] = []
+        previous_digest = ""
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = str(row["payload_json"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(row["sequence"]) != expected_sequence:
+                raise PursuitStoreError(
+                    "recovery attempt 事件序号不连续，拒绝读取。"
+                )
+            if not hmac.compare_digest(
+                actual_digest,
+                str(row["payload_sha256"]),
+            ):
+                raise PursuitStoreError(
+                    "recovery attempt 事件摘要校验失败，拒绝读取。"
+                )
+            if not hmac.compare_digest(
+                previous_digest,
+                str(row["previous_payload_sha256"]),
+            ):
+                raise PursuitStoreError(
+                    "recovery attempt 事件哈希链断裂，拒绝读取。"
+                )
+            record = PursuitRecoveryAttempt.model_validate_json(payload)
+            if (
+                record.attempt_id != attempt_id
+                or record.sequence != expected_sequence
+                or record.state.value != str(row["state"])
+            ):
+                raise PursuitStoreError(
+                    "recovery attempt 事件元数据与 payload 不一致。"
+                )
+            records.append(record)
+            previous_digest = actual_digest
+        return records
+
     @staticmethod
     def _verify_action_events(
         conn: sqlite3.Connection,
@@ -902,6 +1311,54 @@ class PursuitStore:
                         created_at REAL NOT NULL,
                         PRIMARY KEY(action_key, sequence),
                         FOREIGN KEY(action_key) REFERENCES pursuit_actions(action_key)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_recovery_attempts (
+                        attempt_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL,
+                        latest_sequence INTEGER NOT NULL
+                            CHECK(latest_sequence BETWEEN 1 AND 3),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'requested', 'admitted', 'resolved', 'failed'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        requested_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_pursuit_recovery_attempts_run_requested
+                    ON pursuit_recovery_attempts(
+                        run_id, requested_at DESC, attempt_id DESC
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_recovery_attempt_events (
+                        attempt_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL
+                            CHECK(sequence BETWEEN 1 AND 3),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'requested', 'admitted', 'resolved', 'failed'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        previous_payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(attempt_id, sequence),
+                        FOREIGN KEY(attempt_id)
+                            REFERENCES pursuit_recovery_attempts(attempt_id)
                             ON DELETE CASCADE
                     )
                     """

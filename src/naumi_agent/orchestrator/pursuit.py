@@ -59,6 +59,11 @@ from naumi_agent.orchestrator.pursuit_reconcile import (
     ReconcileDisposition,
     decide_background_reconcile,
 )
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    PursuitRecoveryAttempt,
+    PursuitRecoveryAttemptState,
+    new_recovery_attempt,
+)
 from naumi_agent.orchestrator.pursuit_terminal import (
     BlockerKind,
     BudgetBreach,
@@ -101,6 +106,15 @@ class PursuitInteractionContext:
     resolve: Callable[[str, dict[str, str]], Awaitable[None]]
 
 
+@dataclass(frozen=True, slots=True)
+class PursuitRecoveryExecutionResult:
+    """Typed recovery outcome; audit semantics never depend on display text."""
+
+    message: str
+    result_code: str
+    boundary_decision_id: str = ""
+
+
 _PURSUIT_INTERACTION_CONTEXT: ContextVar[PursuitInteractionContext | None] = (
     ContextVar("naumi_pursuit_interaction_context", default=None)
 )
@@ -109,6 +123,23 @@ _PURSUIT_INTERACTION_CONTEXT: ContextVar[PursuitInteractionContext | None] = (
 def _boundary_safe_detail(value: object) -> str:
     """Return one redacted, single-line detail accepted by boundary facts."""
     return " ".join(checkpoint_safe_text(value, limit=300).split())[:300]
+
+
+def _format_existing_recovery_attempt(
+    attempt: PursuitRecoveryAttempt,
+) -> str:
+    label = {
+        PursuitRecoveryAttemptState.REQUESTED: "已记录，尚未确认准入",
+        PursuitRecoveryAttemptState.ADMITTED: "已准入，正在执行",
+        PursuitRecoveryAttemptState.RESOLVED: "已完成",
+        PursuitRecoveryAttemptState.FAILED: "已失败关闭",
+    }[attempt.state]
+    result = f" · {attempt.result_code}" if attempt.result_code else ""
+    return (
+        "该恢复请求已存在，不会重复启动。\n\n"
+        f"- attempt：`{attempt.attempt_id}`\n"
+        f"- 状态：{label}{result}"
+    )
 
 
 def current_pursuit_interaction_context() -> PursuitInteractionContext | None:
@@ -1278,33 +1309,125 @@ class GoalPursuitLoop:
             return None
         return self._store.get_run(run_id)
 
-    async def resume_persisted(self, run_id: str) -> str:
-        """Safely collect persisted async results under an exclusive run lease."""
-        if self._operation_lock.locked():
-            return "目标追踪正在处理另一个运行，请稍后重试。"
-        async with self._operation_lock:
-            return await self._resume_persisted_locked(run_id)
+    def list_recovery_attempts(
+        self,
+        run_id: str,
+        *,
+        limit: int = 5,
+    ) -> list[PursuitRecoveryAttempt]:
+        if self._store is None:
+            return []
+        return self._store.list_recovery_attempts(run_id, limit=limit)
 
-    async def _resume_persisted_locked(self, run_id: str) -> str:
-        """Continue one persisted run from a verified safe checkpoint."""
+    def get_recovery_attempt(
+        self,
+        attempt_id: str,
+    ) -> PursuitRecoveryAttempt | None:
+        if self._store is None:
+            return None
+        return self._store.get_recovery_attempt(attempt_id)
+
+    async def resume_persisted(
+        self,
+        run_id: str,
+        *,
+        source_request_id: str = "",
+    ) -> str:
+        """Audit and safely collect persisted results under one run lease."""
         if self._store is None:
             return "错误：目标追踪持久化存储未初始化。"
         run = self._store.get_run(run_id)
         if run is None:
             return f"错误：目标追踪运行不存在：{run_id}"
+        attempt = new_recovery_attempt(
+            run_id=run_id,
+            source_request_id=source_request_id or f"local-{uuid.uuid4()}",
+            requested_at=time.time(),
+        )
+        try:
+            attempt, created = self._store.prepare_recovery_attempt(attempt)
+        except Exception as exc:
+            logger.exception("Failed to prepare Pursuit recovery attempt")
+            return (
+                "目标追踪恢复未启动：恢复请求账本写入失败（"
+                f"{type(exc).__name__}）。"
+            )
+        if not created:
+            return _format_existing_recovery_attempt(attempt)
+        if self._operation_lock.locked():
+            self._resolve_recovery_attempt(
+                attempt,
+                result_code="operation_busy",
+            )
+            return (
+                "目标追踪正在处理另一个运行，本次恢复请求已记录但未执行。"
+            )
+        async with self._operation_lock:
+            try:
+                result = await self._resume_persisted_locked(
+                    run_id,
+                    recovery_attempt_id=attempt.attempt_id,
+                )
+            except asyncio.CancelledError:
+                self._fail_recovery_attempt(
+                    attempt,
+                    result_code="cancelled",
+                )
+                raise
+            except Exception as exc:
+                self._fail_recovery_attempt(
+                    attempt,
+                    result_code="internal_error",
+                )
+                logger.exception("Pursuit recovery attempt failed")
+                return (
+                    "目标追踪恢复已停止：恢复执行异常（"
+                    f"{type(exc).__name__}）。"
+                )
+            self._resolve_recovery_attempt(
+                attempt,
+                result_code=result.result_code,
+                boundary_decision_id=result.boundary_decision_id,
+            )
+            return result.message
+
+    async def _resume_persisted_locked(
+        self,
+        run_id: str,
+        *,
+        recovery_attempt_id: str,
+    ) -> PursuitRecoveryExecutionResult:
+        """Continue one persisted run from a verified safe checkpoint."""
+        if self._store is None:
+            return PursuitRecoveryExecutionResult(
+                message="错误：目标追踪持久化存储未初始化。",
+                result_code="store_unavailable",
+            )
+        run = self._store.get_run(run_id)
+        if run is None:
+            return PursuitRecoveryExecutionResult(
+                message=f"错误：目标追踪运行不存在：{run_id}",
+                result_code="run_missing",
+            )
         try:
             checkpoint = self._store.get_checkpoint(run_id)
         except Exception as exc:
-            return (
-                "目标追踪恢复已拒绝：checkpoint 校验失败（"
-                f"{type(exc).__name__}）。请先审查或修复持久状态。"
+            return PursuitRecoveryExecutionResult(
+                message=(
+                    "目标追踪恢复已拒绝：checkpoint 校验失败（"
+                    f"{type(exc).__name__}）。请先审查或修复持久状态。"
+                ),
+                result_code="checkpoint_invalid",
             )
         if run.phase == "checkpoint_error":
             from naumi_agent.orchestrator.pursuit_store import format_run
 
-            return (
-                "目标追踪恢复已拒绝：上次 checkpoint 写入失败，"
-                "旧 checkpoint 不足以安全续跑。\n\n" + format_run(run)
+            return PursuitRecoveryExecutionResult(
+                message=(
+                    "目标追踪恢复已拒绝：上次 checkpoint 写入失败，"
+                    "旧 checkpoint 不足以安全续跑。\n\n" + format_run(run)
+                ),
+                result_code="checkpoint_persistence_error",
             )
         terminal = {
             PursuitRunStatus.COMPLETED,
@@ -1313,7 +1436,10 @@ class GoalPursuitLoop:
             PursuitRunStatus.BUDGET_EXCEEDED,
         }
         if run.status in terminal:
-            return f"目标追踪已处于终态 {run.status.value}，无需恢复。"
+            return PursuitRecoveryExecutionResult(
+                message=f"目标追踪已处于终态 {run.status.value}，无需恢复。",
+                result_code="already_terminal",
+            )
 
         self._run = run
         self._current_spec = None
@@ -1365,8 +1491,13 @@ class GoalPursuitLoop:
                 )
                 from naumi_agent.orchestrator.pursuit_store import format_run
 
-                return "目标追踪未继续执行，已安全停在恢复边界。\n\n" + format_run(
-                    self._run
+                return PursuitRecoveryExecutionResult(
+                    message=(
+                        "目标追踪未继续执行，已安全停在恢复边界。\n\n"
+                        + format_run(self._run)
+                    ),
+                    result_code=decision.code,
+                    boundary_decision_id=decision.decision_id,
                 )
             if self._pending_background and not reconcile_blocker:
                 self._record_waiting(
@@ -1445,8 +1576,13 @@ class GoalPursuitLoop:
                     )
                     from naumi_agent.orchestrator.pursuit_store import format_run
 
-                    return "目标追踪未继续执行，已安全停在恢复边界。\n\n" + format_run(
-                        self._run
+                    return PursuitRecoveryExecutionResult(
+                        message=(
+                            "目标追踪未继续执行，已安全停在恢复边界。\n\n"
+                            + format_run(self._run)
+                        ),
+                        result_code=decision.code,
+                        boundary_decision_id=decision.decision_id,
                     )
 
                 spec = self._restore_checkpoint_state(checkpoint)
@@ -1461,15 +1597,30 @@ class GoalPursuitLoop:
                 resume_epoch = self._lease_session.epoch if self._lease_session else 0
                 self._resume_checkpoint_id = checkpoint.checkpoint_id()
                 self._resume_epoch = resume_epoch
+                self._store.mark_recovery_attempt_admitted(
+                    recovery_attempt_id,
+                    admitted_at=time.time(),
+                    lease_epoch=resume_epoch,
+                    checkpoint_id=self._resume_checkpoint_id,
+                )
                 self._resume_admitted_event.set()
                 report = await self._pursue_under_lease(
                     checkpoint.goal.original_goal,
                     restored_spec=spec,
                     resume_iteration=checkpoint.iteration,
                 )
-                return (
-                    f"目标追踪已从 checkpoint {checkpoint.checkpoint_id()} "
-                    f"恢复执行（lease epoch {resume_epoch}）。\n\n{report}"
+                boundary = self._run.boundary_decision
+                return PursuitRecoveryExecutionResult(
+                    message=(
+                        f"目标追踪已从 checkpoint {checkpoint.checkpoint_id()} "
+                        f"恢复执行（lease epoch {resume_epoch}）。\n\n{report}"
+                    ),
+                    result_code=(
+                        boundary.code if boundary is not None else "resume_checked"
+                    ),
+                    boundary_decision_id=(
+                        boundary.decision_id if boundary is not None else ""
+                    ),
                 )
 
             if checkpoint is not None and self._pending_background:
@@ -1482,19 +1633,98 @@ class GoalPursuitLoop:
 
             from naumi_agent.orchestrator.pursuit_store import format_run
 
-            return "目标追踪持久状态已安全检查。\n\n" + format_run(self._run)
+            boundary = self._run.boundary_decision
+            return PursuitRecoveryExecutionResult(
+                message=(
+                    "目标追踪持久状态已安全检查。\n\n" + format_run(self._run)
+                ),
+                result_code=(
+                    boundary.code if boundary is not None else "resume_checked"
+                ),
+                boundary_decision_id=(
+                    boundary.decision_id if boundary is not None else ""
+                ),
+            )
         except PursuitLeaseUnavailableError as exc:
-            return f"目标追踪暂不能恢复：{exc}"
+            return PursuitRecoveryExecutionResult(
+                message=f"目标追踪暂不能恢复：{exc}",
+                result_code="lease_unavailable",
+            )
         except PursuitLeaseLostError as exc:
-            return f"目标追踪恢复已停止：{exc}"
+            return PursuitRecoveryExecutionResult(
+                message=f"目标追踪恢复已停止：{exc}",
+                result_code="lease_lost",
+            )
         except PursuitCheckpointPersistenceError as exc:
             self._mark_checkpoint_error(exc)
-            return f"目标追踪恢复已安全停止：{exc}"
+            return PursuitRecoveryExecutionResult(
+                message=f"目标追踪恢复已安全停止：{exc}",
+                result_code="checkpoint_persistence_error",
+            )
         finally:
             try:
                 await self._close_run_lease()
             finally:
                 _PURSUIT_INTERACTION_CONTEXT.reset(interaction_token)
+
+    def _resolve_recovery_attempt(
+        self,
+        attempt: PursuitRecoveryAttempt,
+        *,
+        result_code: str,
+        boundary_decision_id: str = "",
+    ) -> None:
+        if self._store is None:
+            return
+        try:
+            current = self._store.get_recovery_attempt(attempt.attempt_id)
+            if current is None:
+                raise RuntimeError(
+                    "recovery attempt disappeared before resolution"
+                )
+            run = self._store.get_run(attempt.run_id)
+            verified_boundary_id = (
+                boundary_decision_id
+                if (
+                    run is not None
+                    and run.boundary_decision is not None
+                    and run.boundary_decision.code == result_code
+                    and run.boundary_decision.decision_id
+                    == boundary_decision_id
+                )
+                else ""
+            )
+            self._store.resolve_recovery_attempt(
+                attempt.attempt_id,
+                resolved_at=time.time(),
+                result_code=result_code,
+                boundary_decision_id=verified_boundary_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to resolve Pursuit recovery attempt [%s]",
+                attempt.attempt_id,
+            )
+
+    def _fail_recovery_attempt(
+        self,
+        attempt: PursuitRecoveryAttempt,
+        *,
+        result_code: str,
+    ) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.fail_recovery_attempt(
+                attempt.attempt_id,
+                failed_at=time.time(),
+                result_code=result_code,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to fail Pursuit recovery attempt [%s]",
+                attempt.attempt_id,
+            )
 
     def _update_run(
         self,

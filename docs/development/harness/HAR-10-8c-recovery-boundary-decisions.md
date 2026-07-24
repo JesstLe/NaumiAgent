@@ -117,7 +117,7 @@ node --test frontend/terminal-ui/test/goal-pursuit-page.test.js
 - 决策是确定性代码合同，不调用模型，也不是 prompt 包装。
 - PursuitStore 内的 run/current-decision/evidence 写入共享 SQLite 事务，但 PursuitStore、
   Harness lease/interaction authority 和 BackgroundTaskStore 仍不是一个事务域。
-- checkpoint 读取本身损坏时，恢复请求在获得 lease 前直接拒绝，不改写原运行；该拒绝回执尚未成为独立
-  durable attempt event。
-- 下一切片应实现跨 Store terminal commit/outbox 或 recovery attempt ledger；在此之前不应声称
-  exactly-once，也不应直接跳到 24 小时 soak。
+- HAR-10.8d 已让 checkpoint 损坏、缺失和其他恢复结果在获得 lease 前进入独立、内容寻址的 durable
+  recovery attempt 事件链；生产 ToolCall identity 来自持久权限回执，重复请求不会重启恢复。
+- 跨 Store terminal commit/outbox 仍未实现；在此之前不应声称 exactly-once，也不应直接跳到
+  24 小时 soak。详见 [HAR-10.8d](HAR-10-8d-recovery-attempt-ledger.md)。

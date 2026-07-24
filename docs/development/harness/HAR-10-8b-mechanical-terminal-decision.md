@@ -150,5 +150,5 @@ node --test frontend/terminal-ui/test/goal-pursuit-page.test.js
   checkpoint-error 分支，现已由 HAR-10.8c 接入同一裁判。
 - `failed` 仍保留为旧 PursuitRun 兼容状态，但 HAR-10.8b 不生成新的 `failed` 裁判；可恢复失败应
   blocked，不可恢复预算/取消使用各自明确状态。
-- 下一小切片应建立跨 Store terminal commit/outbox 或 recovery attempt ledger；不应直接跳到
-  24 小时 soak。
+- HAR-10.8d 已建立 recovery attempt ledger；剩余下一步是跨 Store terminal commit/outbox 与
+  admitted attempt reconciliation，在此之前不应直接跳到 24 小时 soak。

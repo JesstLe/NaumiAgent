@@ -38,6 +38,8 @@ HAR-10.8c 已把这些 phase 收口到机械边界裁判：有真实 pending aut
 `waiting_for_interaction/waiting`；缺失 authority 的交互为 `interaction_required/blocked`；
 副作用未知为 `reconcile_required/blocked`，checkpoint 摘要矛盾为
 `checkpoint_inconsistent/blocked`。
+HAR-10.8d 又在 resume 入口前置持久 recovery attempt，并在 verified checkpoint 后、模型循环前
+记录 admitted；重复 ToolCall 只返回既有 attempt，不重新执行本节恢复协议。
 
 ## 安全阶段协议
 

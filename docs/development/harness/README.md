@@ -16,6 +16,8 @@ HAR-10.8b 已进一步把完成、等待、阻塞、取消和预算越界收口�
 PursuitStore 持久化，并由 Goal New UI 与 TUI/CLI fallback 展示；无持久引用的 waiting 失败关闭。
 HAR-10.8c 已把 checkpoint/reconcile/interaction 恢复分支接入同一裁判，升级 schema 2 并保持
 schema 1 兼容；durable pending interaction 现在是可恢复 waiting，冲突恢复 authority 明确 blocked。
+HAR-10.8d 已增加内容寻址、哈希链保护的 recovery attempt 账本；生产 `/pursue resume` 在 policy/bypass
+下都先绑定持久权限回执，重复 ToolCall 不会重复恢复，requested/admitted/terminal 事实可在重开后复验。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；
 HAR-10.2b 已把 heartbeat/lease/checkpoint/reconcile 聚合到 Goal 新 UI、CLI/TUI fallback 与 Doctor health；
 HAR-10.2c-10.2h 已进一步交付默认 New UI runtime producer、安全 retention authority、typed worker catalog、

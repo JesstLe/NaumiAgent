@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -42,6 +43,10 @@ from naumi_agent.orchestrator.pursuit_checkpoint import (
     CheckpointIteration,
     PursuitCheckpoint,
     checkpoint_safe_text,
+)
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    PursuitRecoveryAttemptState,
+    pursuit_recovery_attempt_id,
 )
 from naumi_agent.orchestrator.pursuit_store import (
     PursuitStore,
@@ -972,6 +977,205 @@ async def test_resume_enforces_cumulative_budget_before_new_assessment(tmp_path)
     assert restored is not None
     assert restored.status is PursuitRunStatus.BUDGET_EXCEEDED
     loop._assess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_missing_checkpoint_records_one_idempotent_attempt(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    request_id = "resume-request-missing-checkpoint"
+    attempt_id = pursuit_recovery_attempt_id(
+        run_id="pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+
+    first = await loop.resume_persisted(
+        "pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+    duplicate = await loop.resume_persisted(
+        "pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+    attempt = store.get_recovery_attempt(attempt_id)
+
+    assert "持久状态已安全检查" in first
+    assert "不会重复启动" in duplicate
+    assert attempt is not None
+    assert attempt.state is PursuitRecoveryAttemptState.RESOLVED
+    assert attempt.sequence == 2
+    assert attempt.result_code == "checkpoint_required"
+    assert attempt.boundary_decision_id
+    assert len(store.list_recovery_attempts("pursuit_checkpoint")) == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_operation_busy_closes_request_without_admission(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    request_id = "resume-request-operation-busy"
+    attempt_id = pursuit_recovery_attempt_id(
+        run_id="pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+    await loop._operation_lock.acquire()
+    try:
+        result = await loop.resume_persisted(
+            "pursuit_checkpoint",
+            source_request_id=request_id,
+        )
+    finally:
+        loop._operation_lock.release()
+    attempt = store.get_recovery_attempt(attempt_id)
+
+    assert "正在处理另一个运行" in result
+    assert attempt is not None
+    assert attempt.state is PursuitRecoveryAttemptState.RESOLVED
+    assert attempt.sequence == 2
+    assert attempt.result_code == "operation_busy"
+    assert not attempt.boundary_decision_id
+
+
+@pytest.mark.asyncio
+async def test_resume_unexpected_error_fails_request_without_boundary(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _store_with_run(tmp_path)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    request_id = "resume-request-internal-error"
+    attempt_id = pursuit_recovery_attempt_id(
+        run_id="pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+
+    async def fail_resume(*args, **kwargs):
+        raise RuntimeError("private failure detail")
+
+    monkeypatch.setattr(loop, "_resume_persisted_locked", fail_resume)
+    result = await loop.resume_persisted(
+        "pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+    attempt = store.get_recovery_attempt(attempt_id)
+
+    assert "恢复执行异常（RuntimeError）" in result
+    assert "private failure detail" not in result
+    assert attempt is not None
+    assert attempt.state is PursuitRecoveryAttemptState.FAILED
+    assert attempt.sequence == 2
+    assert attempt.result_code == "internal_error"
+    assert not attempt.boundary_decision_id
+
+
+@pytest.mark.asyncio
+async def test_resume_cancellation_fails_request_and_propagates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _store_with_run(tmp_path)
+    loop = GoalPursuitLoop(
+        router=MagicMock(),
+        tool_registry=MagicMock(),
+        subagent_manager=MagicMock(),
+        store=store,
+    )
+    request_id = "resume-request-cancelled"
+    attempt_id = pursuit_recovery_attempt_id(
+        run_id="pursuit_checkpoint",
+        source_request_id=request_id,
+    )
+    entered = asyncio.Event()
+
+    async def wait_forever(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "_resume_persisted_locked", wait_forever)
+    task = asyncio.create_task(loop.resume_persisted(
+        "pursuit_checkpoint",
+        source_request_id=request_id,
+    ))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    attempt = store.get_recovery_attempt(attempt_id)
+
+    assert attempt is not None
+    assert attempt.state is PursuitRecoveryAttemptState.FAILED
+    assert attempt.sequence == 2
+    assert attempt.result_code == "cancelled"
+    assert not attempt.boundary_decision_id
+
+
+@pytest.mark.asyncio
+async def test_resume_attempt_is_admitted_before_model_loop_and_then_resolved(
+    tmp_path,
+) -> None:
+    store = _store_with_run(tmp_path)
+    checkpoint = _checkpoint()
+    store.save_checkpoint(checkpoint)
+    loop = _resume_loop(store)
+    release = asyncio.Event()
+
+    async def wait_in_resumed_loop(*args, **kwargs) -> str:
+        await release.wait()
+        return "恢复循环结束"
+
+    loop._pursue_under_lease = wait_in_resumed_loop  # type: ignore[method-assign]
+    request_id = "resume-request-admitted"
+    attempt_id = pursuit_recovery_attempt_id(
+        run_id=checkpoint.run_id,
+        source_request_id=request_id,
+    )
+    task = asyncio.create_task(loop.resume_persisted(
+        checkpoint.run_id,
+        source_request_id=request_id,
+    ))
+
+    assert await loop.wait_until_resume_admitted() == ""
+    admitted = store.get_recovery_attempt(attempt_id)
+    assert admitted is not None
+    assert admitted.state is PursuitRecoveryAttemptState.ADMITTED
+    assert admitted.sequence == 2
+    assert admitted.checkpoint_id == checkpoint.checkpoint_id()
+    assert admitted.lease_epoch == 0
+
+    duplicate = await loop.resume_persisted(
+        checkpoint.run_id,
+        source_request_id=request_id,
+    )
+    assert "已准入，正在执行" in duplicate
+    release.set()
+    result = await task
+    resolved = store.get_recovery_attempt(attempt_id)
+
+    assert "恢复循环结束" in result
+    assert resolved is not None
+    assert resolved.state is PursuitRecoveryAttemptState.RESOLVED
+    assert resolved.sequence == 3
+    assert resolved.result_code == "criteria_incomplete"
+    assert resolved.boundary_decision_id
 
 
 @pytest.mark.asyncio

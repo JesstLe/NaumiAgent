@@ -147,7 +147,11 @@
     durable pending interaction 正确进入 waiting，冲突 authority 失败关闭，同时保持 schema 1
     哈希、Store 重存和 New UI 读取兼容；见
     [设计](HAR-10-8c-recovery-boundary-decisions.md)。
-  - 未完成：跨 Store 原子 terminal commit/recovery attempt ledger 与 A5 故障/soak 验证。
+  - HAR-10.8d 已实现：持久权限回执绑定恢复请求身份、内容寻址 attempt ID、requested/admitted/terminal
+    哈希事件链、并发幂等、机械裁判引用复验和最近恢复记录投影；见
+    [设计](HAR-10-8d-recovery-attempt-ledger.md)。
+  - 未完成：跨 Store 原子 terminal commit/outbox、attempt terminal reconciliation 与 A5
+    故障/soak 验证。
 
 ## 与 Pursuit 的合并原则
 
@@ -178,7 +182,8 @@ authority 与 New UI/Pursuit 接入，UI-18.4b 已补齐 TUI durable runtime par
 当前事务的 New UI 队列提升，HAR-10.3b1/3b2/3b3 已交付 durable queue Store、New UI Runtime 接入与
 历史 claim 人工处置；HAR-10.2f1/2 已交付 runtime retention 周期核心与默认 Bridge 生命周期，HAR-10.2g 已交付
 Agent 委派 heartbeat producer，HAR-10.2h 已交付 browser producer；同步 shell/runtime 逐域接入、browser lease/reconcile、Goal interaction actions、跨进程/跨 Store 原子性、heartbeat 多域
-接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。
+接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。HAR-10.8d 已让每次生产恢复动作先进入
+可去重的审计账本，为 UI-18.5b1 动作闭环提供最小权威前置。
 
 ## 验收标准
 
