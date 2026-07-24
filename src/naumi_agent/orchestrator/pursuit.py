@@ -59,6 +59,15 @@ from naumi_agent.orchestrator.pursuit_reconcile import (
     ReconcileDisposition,
     decide_background_reconcile,
 )
+from naumi_agent.orchestrator.pursuit_terminal import (
+    BlockerKind,
+    BudgetBreach,
+    FinalVerification,
+    PursuitBoundaryDecision,
+    PursuitBoundaryFacts,
+    WaitingKind,
+    decide_pursuit_boundary,
+)
 from naumi_agent.runtime.shell import pid_exists
 from naumi_agent.tools.base import ToolCall, ToolResult
 
@@ -377,15 +386,6 @@ class PursuitBackgroundWait:
 
 
 @dataclass
-class PursuitStopDecision:
-    """Programmatic stop decision for a pursuit run."""
-
-    status: PursuitRunStatus
-    reason: str
-    evidence: list[PursuitEvidence]
-
-
-@dataclass
 class PursuitRun:
     """Live state snapshot for a pursuit execution."""
 
@@ -405,6 +405,7 @@ class PursuitRun:
     worktree_path: str = ""
     waiting_on: list[PursuitBackgroundWait] | None = None
     evidence: list[PursuitEvidence] | None = None
+    boundary_decision: PursuitBoundaryDecision | None = None
 
     def add_evidence(self, item: PursuitEvidence) -> None:
         if self.evidence is None:
@@ -601,7 +602,7 @@ class GoalPursuitLoop:
         self._total_cost = 0.0
         self._cancelled = False
         self._run: PursuitRun | None = None
-        self._last_stop_decision: PursuitStopDecision | None = None
+        self._last_stop_decision: PursuitBoundaryDecision | None = None
         self._pending_background: list[PursuitBackgroundWait] = []
         self._current_spec: GoalSpec | None = None
         self._checkpoint_sequence = 0
@@ -704,11 +705,17 @@ class GoalPursuitLoop:
         self._pending_interaction = CheckpointInteractionRef(
             interaction_id=interaction_id,
         )
-        self._run.status = PursuitRunStatus.WAITING
-        self._run.phase = "interaction_required"
-        self._run.blocked_reason = "目标追踪正在等待用户回答。"
+        decision = decide_pursuit_boundary(self._run_boundary_facts(
+            waiting_kind="interaction",
+            waiting_count=1,
+        ))
+        self._last_stop_decision = decision
+        self._apply_boundary_decision(
+            decision,
+            phase="interaction_required",
+            waiting_reason=True,
+        )
         self._run.next_action = f"回答交互 {interaction_id} 后继续。"
-        self._run.updated_at = time.time()
         self._persist_run()
         self._persist_checkpoint()
 
@@ -738,11 +745,10 @@ class GoalPursuitLoop:
             timestamp=time.time(),
         ))
         self._pending_interaction = None
-        self._run.status = PursuitRunStatus.RUNNING
-        self._run.phase = "action_inflight"
-        self._run.blocked_reason = ""
+        decision = decide_pursuit_boundary(self._current_boundary_facts())
+        self._last_stop_decision = decision
+        self._apply_boundary_decision(decision, phase="action_inflight")
         self._run.next_action = "用户已回答，继续当前行动。"
-        self._run.updated_at = time.time()
         self._persist_run()
         self._persist_checkpoint()
 
@@ -1312,7 +1318,10 @@ class GoalPursuitLoop:
 
             await self._require_run_lease("resume-commit")
             if self._pending_background and not reconcile_blocker:
-                self._record_waiting("目标追踪仍在等待后台任务完成。")
+                self._record_waiting(
+                    kind="background",
+                    count=len(self._pending_background),
+                )
             elif checkpoint is None:
                 self._run.status = PursuitRunStatus.BLOCKED
                 self._run.phase = "checkpoint_required"
@@ -1428,63 +1437,168 @@ class GoalPursuitLoop:
             self._run.next_action = next_action
         self._persist_run()
 
-    def _record_stop(
+    async def _record_boundary_owned(
         self,
-        status: PursuitRunStatus,
-        reason: str,
+        decision: PursuitBoundaryDecision,
         evidence: list[PursuitEvidence] | None = None,
+        *,
+        phase: str = "",
+        waiting_reason: bool = False,
     ) -> None:
-        """Persist a stop decision into the live run snapshot."""
-        decision = PursuitStopDecision(
-            status=status,
-            reason=reason,
-            evidence=evidence or [],
+        """Fence one mechanical boundary decision before it reaches PursuitStore."""
+        lease_boundary = (
+            f"terminal-{decision.status}"
+            if decision.terminal
+            else f"boundary-{decision.code}"
         )
+        await self._require_run_lease(lease_boundary)
         self._last_stop_decision = decision
-        self._apply_stop_decision(decision)
-
-    async def _record_stop_owned(
-        self,
-        status: PursuitRunStatus,
-        reason: str,
-        evidence: list[PursuitEvidence] | None = None,
-    ) -> None:
-        """Fence a terminal transition before it reaches PursuitStore."""
-        await self._require_run_lease(f"terminal-{status.value}")
-        self._record_stop(status, reason, evidence)
+        self._apply_boundary_decision(
+            decision,
+            evidence=evidence,
+            phase=phase,
+            waiting_reason=waiting_reason,
+        )
         self._persist_checkpoint(pending_actions=[])
 
-    def _record_waiting(self, reason: str) -> None:
-        """Mark the run as waiting for asynchronous work."""
+    def _record_waiting(
+        self,
+        *,
+        kind: WaitingKind,
+        count: int,
+        phase: str = "waiting",
+    ) -> None:
+        """Mark a mechanically proven waiting boundary."""
         if self._run is None:
             return
-        self._run.status = PursuitRunStatus.WAITING
-        self._run.phase = "waiting"
-        self._run.blocked_reason = ""
-        self._run.waiting_on = list(self._pending_background)
-        self._run.updated_at = time.time()
-        self._run.add_evidence(PursuitEvidence(
-            kind="waiting",
-            source="background",
-            summary=reason,
-            is_hard=False,
-            timestamp=time.time(),
+        decision = decide_pursuit_boundary(self._run_boundary_facts(
+            waiting_kind=kind,
+            waiting_count=count,
         ))
-        self._persist_run()
+        self._run.waiting_on = list(self._pending_background)
+        self._last_stop_decision = decision
+        self._apply_boundary_decision(
+            decision,
+            phase=phase,
+            waiting_reason=kind == "interaction",
+        )
 
-    def _apply_stop_decision(self, decision: PursuitStopDecision) -> None:
+    def _apply_boundary_decision(
+        self,
+        decision: PursuitBoundaryDecision,
+        *,
+        evidence: list[PursuitEvidence] | None = None,
+        phase: str = "",
+        waiting_reason: bool = False,
+    ) -> None:
         if self._run is None:
             return
-        self._run.status = decision.status
+        self._run.status = PursuitRunStatus(decision.status)
+        self._run.boundary_decision = decision
+        if phase:
+            self._run.phase = phase
+        elif decision.status in {
+            "blocked",
+            "completed",
+            "cancelled",
+            "budget_exceeded",
+        }:
+            self._run.phase = decision.status
         self._run.blocked_reason = (
             decision.reason
-            if decision.status == PursuitRunStatus.BLOCKED
+            if decision.status == "blocked" or waiting_reason
             else ""
         )
+        self._run.next_action = decision.next_action
         self._run.updated_at = time.time()
-        for item in decision.evidence:
+        if not any(
+            item.kind == "boundary_decision" and item.source == decision.decision_id
+            for item in (self._run.evidence or [])
+        ):
+            self._run.add_evidence(PursuitEvidence(
+                kind="boundary_decision",
+                source=decision.decision_id,
+                summary=f"{decision.code}: {decision.reason}",
+                is_hard=True,
+                timestamp=time.time(),
+            ))
+        for item in evidence or []:
             self._run.add_evidence(item)
         self._persist_run()
+
+    def _run_boundary_facts(
+        self,
+        *,
+        final_verification: FinalVerification = "not_run",
+        cancel_requested: bool = False,
+        budget_breach: BudgetBreach = "none",
+        waiting_kind: WaitingKind = "none",
+        waiting_count: int = 0,
+        blocker: BlockerKind = "none",
+    ) -> PursuitBoundaryFacts:
+        """Build bounded facts from the current persisted summary."""
+        run = self._run
+        criterion_count = max(0, run.criteria_total if run is not None else 0)
+        verified_count = max(0, run.criteria_verified if run is not None else 0)
+        hard_sources = {
+            item.source
+            for item in (run.evidence or [] if run is not None else [])
+            if item.kind == "criterion" and item.is_hard
+        }
+        return PursuitBoundaryFacts(
+            criterion_count=criterion_count,
+            verified_count=min(verified_count, criterion_count),
+            hard_evidence_count=min(
+                len(hard_sources),
+                verified_count,
+                criterion_count,
+            ),
+            final_verification=final_verification,
+            cancel_requested=cancel_requested,
+            budget_breach=budget_breach,
+            waiting_kind=waiting_kind,
+            waiting_count=waiting_count,
+            blocker=blocker,
+        )
+
+    def _current_boundary_facts(self) -> PursuitBoundaryFacts:
+        """Prefer exact live criteria and otherwise fail closed on persisted evidence."""
+        if self._current_spec is not None:
+            return self._spec_boundary_facts(self._current_spec)
+        return self._run_boundary_facts()
+
+    def _spec_boundary_facts(
+        self,
+        spec: GoalSpec,
+        *,
+        final_verification: FinalVerification = "not_run",
+        cancel_requested: bool = False,
+        budget_breach: BudgetBreach = "none",
+        waiting_kind: WaitingKind = "none",
+        waiting_count: int = 0,
+        blocker: BlockerKind = "none",
+    ) -> PursuitBoundaryFacts:
+        """Build exact criterion facts without trusting model convergence text."""
+        verified = sum(
+            item.status == CriterionStatus.VERIFIED
+            for item in spec.success_criteria
+        )
+        hard = sum(
+            item.status == CriterionStatus.VERIFIED
+            and self._criterion_has_hard_evidence(item)
+            for item in spec.success_criteria
+        )
+        return PursuitBoundaryFacts(
+            criterion_count=len(spec.success_criteria),
+            verified_count=verified,
+            hard_evidence_count=hard,
+            final_verification=final_verification,
+            cancel_requested=cancel_requested,
+            budget_breach=budget_breach,
+            waiting_kind=waiting_kind,
+            waiting_count=waiting_count,
+            blocker=blocker,
+        )
 
     def _record_checkpoint_evidence(self, checkpoint: IterationCheckpoint) -> None:
         """Record concrete assessment facts in the live state."""
@@ -1642,8 +1756,18 @@ class GoalPursuitLoop:
         self._pending_background = still_waiting
         self._run.waiting_on = list(still_waiting)
         if not still_waiting and self._run.status == PursuitRunStatus.WAITING:
-            self._run.status = PursuitRunStatus.RUNNING
-            self._run.phase = "assess"
+            if self._current_spec is not None or self._run.criteria_total > 0:
+                decision = decide_pursuit_boundary(self._current_boundary_facts())
+                self._last_stop_decision = decision
+                self._apply_boundary_decision(decision, phase="assess")
+            else:
+                # Legacy/incomplete snapshots do not contain enough facts for a
+                # new authenticated decision. Resume conservatively without
+                # inventing criterion evidence.
+                self._run.status = PursuitRunStatus.RUNNING
+                self._run.phase = "assess"
+                self._run.blocked_reason = ""
+                self._run.updated_at = time.time()
         self._persist_run()
 
     async def _run_background_query_tool(
@@ -1670,27 +1794,18 @@ class GoalPursuitLoop:
             return ""
         return str(await tool.execute(task_id=task_id))
 
-    async def _completion_decision(self, spec: GoalSpec) -> PursuitStopDecision:
-        """Decide whether the goal is objectively complete."""
-        hard_evidence = self._collect_hard_evidence(spec)
-        all_verified = all(
-            c.status == CriterionStatus.VERIFIED
-            for c in spec.success_criteria
-        )
-        all_hard = all(
-            self._criterion_has_hard_evidence(c)
-            for c in spec.success_criteria
-        )
-        if all_verified and all_hard:
-            return PursuitStopDecision(
-                status=PursuitRunStatus.COMPLETED,
-                reason="所有成功标准都有强证据",
-                evidence=hard_evidence,
+    async def _completion_decision(
+        self,
+        spec: GoalSpec,
+        *,
+        final_verification: FinalVerification = "not_run",
+    ) -> PursuitBoundaryDecision:
+        """Decide completion from criterion state and mechanical evidence only."""
+        return decide_pursuit_boundary(
+            self._spec_boundary_facts(
+                spec,
+                final_verification=final_verification,
             )
-        return PursuitStopDecision(
-            status=PursuitRunStatus.RUNNING,
-            reason="仍有成功标准未通过强证据验证",
-            evidence=hard_evidence,
         )
 
     def _collect_hard_evidence(self, spec: GoalSpec) -> list[PursuitEvidence]:
@@ -1842,34 +1957,49 @@ class GoalPursuitLoop:
             # Safety checks
             if self._cancelled:
                 status = GoalStatus.CANCELLED
-                await self._record_stop_owned(
-                    PursuitRunStatus.CANCELLED,
-                    "用户取消了目标追踪",
+                await self._record_boundary_owned(
+                    decide_pursuit_boundary(self._spec_boundary_facts(
+                        spec,
+                        cancel_requested=True,
+                    ))
                 )
                 break
 
             elapsed = time.time() - self._start_time
             if elapsed > self._config.max_time_seconds:
                 status = GoalStatus.BUDGET_EXCEEDED
-                await self._record_stop_owned(
-                    PursuitRunStatus.BUDGET_EXCEEDED,
-                    "目标追踪超过最大运行时间",
+                await self._record_boundary_owned(
+                    decide_pursuit_boundary(self._spec_boundary_facts(
+                        spec,
+                        budget_breach="time",
+                    ))
                 )
                 break
 
             if self._total_cost >= self._config.max_budget_usd:
                 status = GoalStatus.BUDGET_EXCEEDED
-                await self._record_stop_owned(
-                    PursuitRunStatus.BUDGET_EXCEEDED,
-                    "目标追踪超过预算上限",
+                await self._record_boundary_owned(
+                    decide_pursuit_boundary(self._spec_boundary_facts(
+                        spec,
+                        budget_breach="cost",
+                    ))
                 )
                 break
 
             if iteration > self._config.max_iterations:
                 status = GoalStatus.BUDGET_EXCEEDED
-                await self._record_stop_owned(
-                    PursuitRunStatus.BUDGET_EXCEEDED,
-                    "目标追踪超过最大迭代次数",
+                await self._record_boundary_owned(
+                    decide_pursuit_boundary(self._spec_boundary_facts(
+                        spec,
+                        budget_breach="iterations",
+                    ))
+                )
+                break
+
+            if not spec.success_criteria:
+                status = GoalStatus.STUCK
+                await self._record_boundary_owned(
+                    await self._completion_decision(spec)
                 )
                 break
 
@@ -1892,16 +2022,28 @@ class GoalPursuitLoop:
 
             # Check if all criteria are verified with hard evidence.
             stop_decision = await self._completion_decision(spec)
-            if stop_decision.status == PursuitRunStatus.COMPLETED:
+            if stop_decision.status == "blocked":
+                status = GoalStatus.STUCK
+                await self._record_boundary_owned(stop_decision)
+                break
+            if stop_decision.code == "final_verification_required":
                 await self._require_run_lease(
                     f"iteration-{iteration}-final-verification"
                 )
-                if await self._final_verification(spec):
-                    await self._record_stop_owned(
-                        PursuitRunStatus.COMPLETED,
-                        "所有成功标准已通过强制验证",
-                        self._collect_hard_evidence(spec),
-                    )
+                final_passed = await self._final_verification(spec)
+                final_decision = await self._completion_decision(
+                    spec,
+                    final_verification="passed" if final_passed else "failed",
+                )
+                await self._record_boundary_owned(
+                    final_decision,
+                    (
+                        self._collect_hard_evidence(spec)
+                        if final_decision.status == "completed"
+                        else None
+                    ),
+                )
+                if final_decision.status == "completed":
                     status = GoalStatus.ACHIEVED
                     break
 
@@ -1925,9 +2067,11 @@ class GoalPursuitLoop:
                     )
                     if not recovery:
                         status = GoalStatus.STUCK
-                        await self._record_stop_owned(
-                            PursuitRunStatus.BLOCKED,
-                            "检测到停滞，但没有生成可执行的恢复行动",
+                        await self._record_boundary_owned(
+                            decide_pursuit_boundary(self._spec_boundary_facts(
+                                spec,
+                                blocker="stagnation_no_recovery",
+                            ))
                         )
                         break
                     self._persist_checkpoint(
@@ -1962,9 +2106,11 @@ class GoalPursuitLoop:
                     continue
                 else:
                     status = GoalStatus.STUCK
-                    await self._record_stop_owned(
-                        PursuitRunStatus.BLOCKED,
-                        "连续多轮没有可观测进展",
+                    await self._record_boundary_owned(
+                        decide_pursuit_boundary(self._spec_boundary_facts(
+                            spec,
+                            blocker="stagnation",
+                        ))
                     )
                     break
 
@@ -1974,9 +2120,11 @@ class GoalPursuitLoop:
             await self._require_run_lease(f"iteration-{iteration}-plan-result")
             if not actions:
                 status = GoalStatus.STUCK
-                await self._record_stop_owned(
-                    PursuitRunStatus.BLOCKED,
-                    "规划器没有给出下一步可执行行动",
+                await self._record_boundary_owned(
+                    decide_pursuit_boundary(self._spec_boundary_facts(
+                        spec,
+                        blocker="planner_empty",
+                    ))
                 )
                 break
 
@@ -2020,10 +2168,22 @@ class GoalPursuitLoop:
             )
             self._persist_checkpoint(spec, pending_actions=[])
             if any(result.get("status") == "waiting" for result in results):
-                status = GoalStatus.WAITING
                 await self._require_run_lease(f"iteration-{iteration}-waiting")
-                self._record_waiting("后台任务仍在运行，已安排后续复查")
-                self._persist_checkpoint(spec, pending_actions=[])
+                if self._pending_background:
+                    status = GoalStatus.WAITING
+                    self._record_waiting(
+                        kind="background",
+                        count=len(self._pending_background),
+                    )
+                    self._persist_checkpoint(spec, pending_actions=[])
+                else:
+                    status = GoalStatus.STUCK
+                    await self._record_boundary_owned(
+                        decide_pursuit_boundary(self._spec_boundary_facts(
+                            spec,
+                            blocker="waiting_without_authority",
+                        ))
+                    )
                 break
 
             # Phase 4: Verify (if interval matches)

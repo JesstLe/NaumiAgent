@@ -1582,6 +1582,18 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
     failure_count: 0,
     blocked_reason: "",
     next_action: "等待用户选择",
+    boundary_decision: {
+      schema_version: 1,
+      decision_id: "a".repeat(64),
+      facts_sha256: "b".repeat(64),
+      status: "waiting",
+      code: "waiting_for_interaction",
+      reason: "目标追踪正在等待用户回答。",
+      next_action: "回答当前交互后，从持久 checkpoint 继续。",
+      terminal: false,
+      resumable: true,
+      private_payload: "drop",
+    },
     worktree_name: "",
     worktree_path: "",
     waits: Array.from({ length: 25 }, (_, index) => ({
@@ -1712,6 +1724,17 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.goals[0].pursuit.run_id, "pursuit_1");
   assert.equal(normalized.goals[0].pursuit.waits.length, 20);
   assert.equal(normalized.goals[0].pursuit.evidence.length, 20);
+  assert.equal(
+    normalized.goals[0].pursuit.boundary_decision.code,
+    "waiting_for_interaction",
+  );
+  assert.equal(
+    Object.hasOwn(
+      normalized.goals[0].pursuit.boundary_decision,
+      "private_payload",
+    ),
+    false,
+  );
   assert.equal(normalized.goals[0].pursuit.recovery.recovery_state, "reconcile_required");
   assert.equal(normalized.goals[0].pursuit.recovery.heartbeat.health, "stale");
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.recovery, "private_reasoning"), false);
@@ -1805,6 +1828,25 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /timeout/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        goals: [{
+          ...goal,
+          pursuit: {
+            ...pursuit,
+            boundary_decision: {
+              ...pursuit.boundary_decision,
+              terminal: true,
+            },
+          },
+        }],
+      },
+    }),
+    /terminal/,
   );
 });
 

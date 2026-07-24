@@ -23,6 +23,7 @@ from naumi_agent.orchestrator.pursuit_action_ledger import (
     digest_result,
 )
 from naumi_agent.orchestrator.pursuit_checkpoint import PursuitCheckpoint
+from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
 
 
 class PursuitStoreError(RuntimeError):
@@ -57,8 +58,9 @@ class PursuitStore:
                 INSERT INTO pursuit_runs (
                     id, goal, status, phase, started_at, updated_at, iteration,
                     criteria_total, criteria_verified, failure_count,
-                    blocked_reason, next_action, worktree_name, worktree_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    blocked_reason, next_action, worktree_name, worktree_path,
+                    boundary_decision_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     goal=excluded.goal,
                     status=excluded.status,
@@ -71,7 +73,8 @@ class PursuitStore:
                     blocked_reason=excluded.blocked_reason,
                     next_action=excluded.next_action,
                     worktree_name=excluded.worktree_name,
-                    worktree_path=excluded.worktree_path
+                    worktree_path=excluded.worktree_path,
+                    boundary_decision_id=excluded.boundary_decision_id
                 """,
                 (
                     run.id,
@@ -88,6 +91,11 @@ class PursuitStore:
                     run.next_action,
                     run.worktree_name,
                     run.worktree_path,
+                    (
+                        run.boundary_decision.decision_id
+                        if run.boundary_decision is not None
+                        else ""
+                    ),
                 ),
             )
             conn.execute("DELETE FROM pursuit_evidence WHERE run_id = ?", (run.id,))
@@ -124,6 +132,40 @@ class PursuitStore:
                         wait.created_at,
                     ),
                 )
+            if run.boundary_decision is not None:
+                decision = run.boundary_decision
+                payload = decision.model_dump_json()
+                payload_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO pursuit_boundary_decisions (
+                        run_id, decision_id, payload_json, payload_sha256,
+                        recorded_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run.id,
+                        decision.decision_id,
+                        payload,
+                        payload_digest,
+                        run.updated_at,
+                    ),
+                )
+                stored = conn.execute(
+                    """
+                    SELECT payload_sha256
+                    FROM pursuit_boundary_decisions
+                    WHERE run_id = ? AND decision_id = ?
+                    """,
+                    (run.id, decision.decision_id),
+                ).fetchone()
+                if stored is None or not hmac.compare_digest(
+                    str(stored["payload_sha256"]),
+                    payload_digest,
+                ):
+                    raise PursuitStoreConflictError(
+                        "相同 boundary decision identity 对应不同 payload。"
+                    )
 
     def get_run(self, run_id: str) -> PursuitRun | None:
         with self._connect() as conn:
@@ -149,7 +191,43 @@ class PursuitStore:
                 """,
                 (run_id,),
             ).fetchall()
-        return _run_from_rows(row, evidence_rows, wait_rows)
+            boundary_id = str(row["boundary_decision_id"])
+            boundary_row = (
+                conn.execute(
+                    """
+                    SELECT * FROM pursuit_boundary_decisions
+                    WHERE run_id = ? AND decision_id = ?
+                    """,
+                    (run_id, boundary_id),
+                ).fetchone()
+                if boundary_id
+                else None
+            )
+            if boundary_id and boundary_row is None:
+                raise PursuitStoreError(
+                    "PursuitRun 当前 boundary decision 指针缺少对应记录。"
+                )
+        return _run_from_rows(row, evidence_rows, wait_rows, boundary_row)
+
+    def list_boundary_decisions(
+        self,
+        run_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[PursuitBoundaryDecision]:
+        """Return bounded, content-verified boundary decision history."""
+        safe_limit = max(1, min(int(limit), 200))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM pursuit_boundary_decisions
+                WHERE run_id = ?
+                ORDER BY recorded_at DESC, decision_id DESC
+                LIMIT ?
+                """,
+                (run_id, safe_limit),
+            ).fetchall()
+        return [_boundary_decision_from_row(row) for row in rows]
 
     def list_runs(self, *, include_finished: bool = True) -> list[PursuitRun]:
         query = "SELECT * FROM pursuit_runs"
@@ -696,7 +774,8 @@ class PursuitStore:
                         blocked_reason TEXT NOT NULL DEFAULT '',
                         next_action TEXT NOT NULL DEFAULT '',
                         worktree_name TEXT NOT NULL DEFAULT '',
-                        worktree_path TEXT NOT NULL DEFAULT ''
+                        worktree_path TEXT NOT NULL DEFAULT '',
+                        boundary_decision_id TEXT NOT NULL DEFAULT ''
                     )
                     """
                 )
@@ -743,6 +822,42 @@ class PursuitStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_boundary_decisions (
+                        run_id TEXT NOT NULL,
+                        decision_id TEXT NOT NULL,
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        recorded_at REAL NOT NULL,
+                        PRIMARY KEY(run_id, decision_id),
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                run_columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(pursuit_runs)")
+                }
+                if "boundary_decision_id" not in run_columns:
+                    conn.execute(
+                        "ALTER TABLE pursuit_runs ADD COLUMN "
+                        "boundary_decision_id TEXT NOT NULL DEFAULT ''"
+                    )
+                    conn.execute(
+                        """
+                        UPDATE pursuit_runs
+                        SET boundary_decision_id = COALESCE((
+                            SELECT decision_id
+                            FROM pursuit_boundary_decisions
+                            WHERE run_id = pursuit_runs.id
+                            ORDER BY recorded_at DESC, decision_id DESC
+                            LIMIT 1
+                        ), '')
+                        WHERE boundary_decision_id = ''
+                        """
+                    )
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS pursuit_actions (
@@ -805,6 +920,14 @@ def format_run(run: PursuitRun) -> str:
         if run.worktree_name or run.worktree_path
         else ""
     )
+    boundary = (
+        f"\n- 最近裁判：`{run.boundary_decision.code}` · "
+        f"{run.boundary_decision.status} · "
+        f"`{run.boundary_decision.decision_id[:12]}`\n"
+        f"- 裁判原因：{run.boundary_decision.reason}"
+        if run.boundary_decision is not None
+        else ""
+    )
     return (
         f"### PursuitRun {run.id}\n"
         f"- 状态：{_status_label(run.status)}\n"
@@ -814,7 +937,7 @@ def format_run(run: PursuitRun) -> str:
         f"- 成功标准：{run.criteria_verified}/{run.criteria_total}\n"
         f"- 失败计数：{run.failure_count}\n"
         f"- 下一步：{run.next_action or '无'}"
-        f"{worktree}{blocked}\n"
+        f"{worktree}{blocked}{boundary}\n"
         f"- 等待任务：\n{wait_lines}\n"
         f"- 最近证据：\n{evidence_lines}"
     )
@@ -830,6 +953,7 @@ def _run_from_rows(
     row: sqlite3.Row,
     evidence_rows: list[sqlite3.Row],
     wait_rows: list[sqlite3.Row],
+    boundary_row: sqlite3.Row | None = None,
 ) -> PursuitRun:
     return PursuitRun(
         id=row["id"],
@@ -865,7 +989,24 @@ def _run_from_rows(
             )
             for item in evidence_rows
         ],
+        boundary_decision=(
+            _boundary_decision_from_row(boundary_row)
+            if boundary_row is not None
+            else None
+        ),
     )
+
+
+def _boundary_decision_from_row(row: sqlite3.Row) -> PursuitBoundaryDecision:
+    payload = str(row["payload_json"])
+    expected = str(row["payload_sha256"])
+    actual = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(actual, expected):
+        raise PursuitStoreError("boundary decision payload digest 不一致。")
+    decision = PursuitBoundaryDecision.model_validate_json(payload)
+    if decision.decision_id != str(row["decision_id"]):
+        raise PursuitStoreError("boundary decision identity 与 payload 不一致。")
+    return decision
 
 
 def _status_label(status: PursuitRunStatus) -> str:

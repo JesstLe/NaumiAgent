@@ -140,6 +140,11 @@
   - HAR-10.8a 已实现：assessment 去除隐式全量探针，criterion 与模型 action 共用定向验证策略，广域
     pytest/ruff/tox/nox 及主流语言测试入口 fail closed；见
     [设计](HAR-10-8a-scoped-verification-policy.md)。
+  - HAR-10.8b 已实现：Pursuit 主循环使用内容寻址的机械边界裁判统一完成、等待、阻塞、取消和三类预算
+    越界；完整决策持久化并由 Goal New UI 与 TUI/CLI fallback 展示。没有持久任务引用的 waiting
+    失败关闭；见 [设计](HAR-10-8b-mechanical-terminal-decision.md)。
+  - 未完成：resume/reconcile/checkpoint-error 全分支接入、跨 Store 原子 terminal commit 与 A5
+    故障/soak 验证。
 
 ## 与 Pursuit 的合并原则
 

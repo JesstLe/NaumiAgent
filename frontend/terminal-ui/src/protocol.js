@@ -143,6 +143,9 @@ const GOAL_STATUSES = new Set(["active", "paused", "blocked", "completed", "canc
 const PURSUIT_STATUSES = new Set([
   "running", "waiting", "blocked", "completed", "failed", "cancelled", "budget_exceeded",
 ]);
+const PURSUIT_BOUNDARY_STATUSES = new Set([
+  "running", "waiting", "blocked", "completed", "cancelled", "budget_exceeded",
+]);
 const PURSUIT_LINK_STATUSES = new Set(["not_linked", "ready", "missing"]);
 const PURSUIT_RECOVERY_STATES = new Set([
   "active", "waiting", "blocked", "reconcile_required", "orphaned",
@@ -4609,6 +4612,9 @@ function normalizePursuitItem(value) {
   const runId = harnessText(item.run_id, "goals/snapshot pursuit.run_id");
   validateGoalId(runId, "goals/snapshot pursuit.run_id");
   const recovery = item.recovery == null ? null : normalizePursuitRecovery(item.recovery, runId);
+  const boundaryDecision = item.boundary_decision == null
+    ? null
+    : normalizePursuitBoundaryDecision(item.boundary_decision);
   return {
     run_id: runId,
     goal: harnessText(item.goal, "goals/snapshot pursuit.goal"),
@@ -4628,6 +4634,7 @@ function normalizePursuitItem(value) {
       "goals/snapshot pursuit.blocked_reason",
     ),
     next_action: harnessText(item.next_action, "goals/snapshot pursuit.next_action"),
+    boundary_decision: boundaryDecision,
     worktree_name: harnessText(
       item.worktree_name,
       "goals/snapshot pursuit.worktree_name",
@@ -4641,6 +4648,61 @@ function normalizePursuitItem(value) {
     evidence: harnessObjectArray(item.evidence, "goals/snapshot pursuit.evidence", 20)
       .map(normalizePursuitEvidence),
     recovery,
+  };
+}
+
+function normalizePursuitBoundaryDecision(value) {
+  const item = harnessObject(value, "goals/snapshot pursuit.boundary_decision");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("goals/snapshot boundary decision schema_version 不兼容");
+  }
+  const decisionId = harnessText(
+    item.decision_id,
+    "goals/snapshot boundary decision.decision_id",
+  );
+  const factsSha256 = harnessText(
+    item.facts_sha256,
+    "goals/snapshot boundary decision.facts_sha256",
+  );
+  if (!/^[0-9a-f]{64}$/.test(decisionId) || !/^[0-9a-f]{64}$/.test(factsSha256)) {
+    throw new Error("goals/snapshot boundary decision digest 无效");
+  }
+  const status = harnessChoice(
+    item.status,
+    "goals/snapshot boundary decision.status",
+    PURSUIT_BOUNDARY_STATUSES,
+  );
+  const terminal = harnessBoolean(
+    item.terminal,
+    "goals/snapshot boundary decision.terminal",
+  );
+  const resumable = harnessBoolean(
+    item.resumable,
+    "goals/snapshot boundary decision.resumable",
+  );
+  if (terminal !== ["blocked", "completed", "cancelled", "budget_exceeded"].includes(status)) {
+    throw new Error("goals/snapshot boundary decision terminal 与 status 不一致");
+  }
+  if (resumable !== ["waiting", "blocked"].includes(status)) {
+    throw new Error("goals/snapshot boundary decision resumable 与 status 不一致");
+  }
+  const code = harnessText(item.code, "goals/snapshot boundary decision.code");
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error("goals/snapshot boundary decision code 无效");
+  }
+  return {
+    schema_version: 1,
+    decision_id: decisionId,
+    facts_sha256: factsSha256,
+    status,
+    code,
+    reason: harnessText(item.reason, "goals/snapshot boundary decision.reason"),
+    next_action: harnessText(
+      item.next_action,
+      "goals/snapshot boundary decision.next_action",
+    ),
+    terminal,
+    resumable,
   };
 }
 

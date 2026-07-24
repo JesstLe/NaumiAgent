@@ -61,6 +61,9 @@ UI-14.2g 已增加 surface-aware 权威页面索引，两端页面 provider 只�
 两端不再依赖各自的临时排队状态。
 后续模块不得绕开这些路径重建新状态层。
 
+HAR-10.8b 已让 Goal/Pursuit 的最近机械边界裁判进入共享 typed projection：New UI 与 TUI/CLI
+fallback 显示相同 code、status、短 decision id 和原因；前端只校验并渲染，不重算终态。
+
 ## 未来顺序
 
 UI-10/11/12/13 可按顺序独立交付；UI-14/15/16 可并行；UI-18 按 Goal/Pursuit 后端依赖分段推进；
