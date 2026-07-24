@@ -30,5 +30,11 @@ UI-13.5a 已完成 Doctor export 的 Naumi 侧产品合同：固定 bounded 文�
 code/domain/responsibility/export view model，不得解析中文错误文本、重新构造 ZIP，或把原始 Provider
 异常带入组件。
 
-这仍只是 CC-03 的前置，不是 source alignment 本身。完整 source behavior inventory、source→target
-语义映射、divergence log 与同 fixture golden scenarios 尚未实现，CC-03 状态继续保持 `planned`。
+CC-03.1a 已建立首批机器可校验的核心行为清单：固定 source identity 与 license scope，只以
+`reimplement` 模式读取声明符号，并把 Task、Permission、Doctor 的三条 aligned 行为和三条
+Naumi extension 追踪到目标实现与目标测试。详见
+`CC-03-1a-core-behavior-inventory.md`。
+
+因此 CC-03 现为 `partial`，但只完成 CC-03.1 的核心子集。完整键位、焦点、loading、empty、error、
+detail、cancel 矩阵、CC-03.2 protocol 字段语义映射、CC-03.4 完整 divergence log 与 CC-03.5
+同 fixture golden scenarios 仍未实现。

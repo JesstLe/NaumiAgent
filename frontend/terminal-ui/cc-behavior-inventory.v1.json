@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "manifest_kind": "claude_code_behavior_inventory",
+  "source_name": "local-claude-code",
+  "source_commit": "b9c3fb6c2e15476d77f28557e70f2f6dd48bee65",
+  "source_identity_sha256": "75d73b2b352c13417759f3353b6a6775ac6ea3606f2d6190606ec9559cf356cc",
+  "license_scope_sha256": "63bc14544432956af7be489d8e7bf6f58e29617095e02f419f4cdacbb235f886",
+  "intake_mode": "reimplement",
+  "scope": "cc_03_1a_core_flows",
+  "behaviors": [
+    {
+      "behavior_id": "doctor.diagnostics_loading",
+      "area": "doctor",
+      "category": "loading",
+      "decision": "aligned",
+      "source_evidence": [
+        {
+          "path": "src/screens/Doctor.tsx",
+          "symbol": "Doctor"
+        }
+      ],
+      "target_evidence": [
+        {
+          "path": "frontend/terminal-ui/src/components/doctor-health-page.js",
+          "symbol": "renderDoctorHealthPage"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "frontend/terminal-ui/test/doctor-health-page.test.js",
+          "test_name": "doctor health page renders typed local evidence at common widths"
+        }
+      ],
+      "divergence": ""
+    },
+    {
+      "behavior_id": "doctor.export_bundle",
+      "area": "doctor",
+      "category": "detail",
+      "decision": "naumi_extension",
+      "source_evidence": [],
+      "target_evidence": [
+        {
+          "path": "frontend/terminal-ui/src/components/doctor-health-page.js",
+          "symbol": "renderExportPreview"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "frontend/terminal-ui/test/doctor-health-page.test.js",
+          "test_name": "doctor health page renders export preview and written receipt"
+        }
+      ],
+      "divergence": "Naumi 额外提供固定有界、脱敏、先预览后写入的本地诊断包。"
+    },
+    {
+      "behavior_id": "permission.policy_explanation",
+      "area": "permission",
+      "category": "detail",
+      "decision": "aligned",
+      "source_evidence": [
+        {
+          "path": "src/components/permissions/PermissionRuleExplanation.tsx",
+          "symbol": "PermissionRuleExplanation"
+        },
+        {
+          "path": "src/components/permissions/PermissionRuleExplanation.tsx",
+          "symbol": "stringsForDecisionReason"
+        }
+      ],
+      "target_evidence": [
+        {
+          "path": "src/naumi_agent/ui/permission_panel.py",
+          "symbol": "build_permission_panel_snapshot"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "tests/unit/test_permission_panel.py",
+          "test_name": "test_permission_panel_renders_real_policy_metadata_for_pending_tool"
+        }
+      ],
+      "divergence": ""
+    },
+    {
+      "behavior_id": "permission.snapshot_states",
+      "area": "permission",
+      "category": "empty",
+      "decision": "naumi_extension",
+      "source_evidence": [],
+      "target_evidence": [
+        {
+          "path": "frontend/terminal-ui/src/components/permission-center-page.js",
+          "symbol": "renderPermissionCenterPage"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "frontend/terminal-ui/test/permission-center-page.test.js",
+          "test_name": "permission center distinguishes loading and unavailable state"
+        }
+      ],
+      "divergence": "Naumi 权限中心展示 Python 权威快照，并明确区分加载、空数据和不可用状态。"
+    },
+    {
+      "behavior_id": "task.detail_cancel",
+      "area": "task",
+      "category": "cancel",
+      "decision": "naumi_extension",
+      "source_evidence": [],
+      "target_evidence": [
+        {
+          "path": "frontend/terminal-ui/src/state.js",
+          "symbol": "cancelTaskPanelItem"
+        },
+        {
+          "path": "frontend/terminal-ui/src/state.js",
+          "symbol": "openSelectedTaskPanelItem"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "frontend/terminal-ui/test/index-process.test.js",
+          "test_name": "terminal UI process opens selected task detail with keyboard"
+        },
+        {
+          "path": "frontend/terminal-ui/test/index-process.test.js",
+          "test_name": "terminal UI process sends task cancel through bridge protocol"
+        }
+      ],
+      "divergence": "Naumi 将 todo、子智能体、后台与浏览器任务统一成可导航详情，并只通过 Bridge 请求取消。"
+    },
+    {
+      "behavior_id": "task.status_presentation",
+      "area": "task",
+      "category": "presentation",
+      "decision": "aligned",
+      "source_evidence": [
+        {
+          "path": "src/components/TaskListV2.tsx",
+          "symbol": "RECENT_COMPLETED_TTL_MS"
+        },
+        {
+          "path": "src/components/TaskListV2.tsx",
+          "symbol": "TaskListV2"
+        }
+      ],
+      "target_evidence": [
+        {
+          "path": "frontend/terminal-ui/src/components/task-panel.js",
+          "symbol": "taskStatusColor"
+        }
+      ],
+      "target_tests": [
+        {
+          "path": "frontend/terminal-ui/test/components.test.js",
+          "test_name": "typed task snapshot renders source, owner, status, and dependencies"
+        }
+      ],
+      "divergence": ""
+    }
+  ]
+}
