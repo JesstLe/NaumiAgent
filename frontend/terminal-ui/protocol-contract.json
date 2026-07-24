@@ -3,6 +3,7 @@
   "transport": "jsonl",
   "compatibility": {
     "previous_registry_sha256": [
+      "c696a74ece9d8db6b40fed37d4a6c0ad7960d60052fa0b026ad2a5558d59226f",
       "b013b4e5df1d767a220d676d8443347ea9291d2decca063cecdec4b8574864a4",
       "69aaabb584c1f1c364e969ca7b66352684fc938765f63bd5829bae8d3a5516d2"
     ],
@@ -16,6 +17,7 @@
       "doctor_export",
       "goal_snapshot",
       "heartbeat",
+      "pursuit_recovery_actions",
       "session_list",
       "sequence_integrity",
       "task_snapshot",
@@ -37,6 +39,10 @@
     "evolution_evaluation_lane": {
       "client_events": ["evolution/evaluation-lane/request"],
       "server_events": ["evolution/evaluation-lane"]
+    },
+    "pursuit_recovery_actions": {
+      "client_events": ["pursuit/recovery/resume"],
+      "server_events": ["pursuit/recovery/action_result"]
     },
     "terminal_event_recovery": {
       "client_events": ["terminal_events/ack"],
@@ -64,6 +70,7 @@
     "workbench/request",
     "workbench/review/request",
     "workbench/proposal/action",
+    "pursuit/recovery/resume",
     "evolution/review/request",
     "evolution/evaluation-lane/request",
     "set_mode",
@@ -138,6 +145,7 @@
     "workbench/event",
     "workbench/review",
     "workbench/proposal/action_result",
+    "pursuit/recovery/action_result",
     "evolution/review",
     "evolution/evaluation-lane",
     "shutdown"
@@ -164,6 +172,7 @@
       "workbench/request": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/review/request": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "workbench/proposal/action": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.decision_note"],"redaction":"required"},
+      "pursuit/recovery/resume": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
       "evolution/review/request": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "evolution/evaluation-lane/request": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"never","sensitive_fields":[],"redaction":"none"},
       "set_mode": {"owner":"runtime","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":[],"redaction":"none"},
@@ -237,6 +246,7 @@
       "workbench/snapshot": {"owner":"workbench","stability":"stable","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.tasks","payload.events"],"redaction":"required"},
       "workbench/review": {"owner":"workbench","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.evidence.diff_hunks","payload.evidence.agent_notes","payload.evidence.events"],"redaction":"required"},
       "workbench/proposal/action_result": {"owner":"workbench","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message","payload.proposal"],"redaction":"required"},
+      "pursuit/recovery/action_result": {"owner":"runtime","stability":"experimental","criticality":"control","persistence":"audit","sensitive_fields":["payload.message"],"redaction":"required"},
       "workbench/event": {"owner":"workbench","stability":"stable","criticality":"control","persistence":"audit","sensitive_fields":["payload.payload"],"redaction":"required"},
       "evolution/review": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":["payload.items","payload.selected"],"redaction":"required"},
       "evolution/evaluation-lane": {"owner":"evolution","stability":"experimental","criticality":"informational","persistence":"snapshot","sensitive_fields":[],"redaction":"none"},

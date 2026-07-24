@@ -157,6 +157,8 @@ const PURSUIT_HEARTBEAT_HEALTH = new Set([
 ]);
 const PURSUIT_LEASE_STATUSES = new Set(["active", "released", "missing", "error"]);
 const PURSUIT_CHECKPOINT_STATUSES = new Set(["ready", "missing", "error"]);
+const PURSUIT_RECOVERY_ACTION_STATES = new Set(["available", "busy", "blocked", "unavailable"]);
+const PURSUIT_RECOVERY_ATTEMPT_STATES = new Set(["requested", "admitted", "resolved", "failed"]);
 const INTERACTION_STATES = new Set(["pending", "answered", "expired", "cancelled"]);
 
 export function parseArgs(argv) {
@@ -850,6 +852,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "workbench/proposal/action_result") {
     return normalizeWorkbenchProposalActionResult(payload);
   }
+  if (type === "pursuit/recovery/action_result") {
+    return normalizePursuitRecoveryActionResult(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -1253,6 +1258,47 @@ function normalizeWorkbenchProposalActionResult(payload) {
     workbench_snapshot: payload.workbench_snapshot == null
       ? null
       : normalizeServerPayload("workbench/snapshot", payload.workbench_snapshot),
+  };
+}
+
+function normalizePursuitRecoveryActionResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`pursuit/recovery/action_result schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const runId = harnessText(payload.run_id, "pursuit/recovery/action_result run_id");
+  validateGoalId(runId, "pursuit/recovery/action_result run_id");
+  const status = harnessChoice(
+    payload.status,
+    "pursuit/recovery/action_result status",
+    new Set(["requested", "admitted", "resolved", "failed", "blocked", "error"]),
+  );
+  const code = pursuitRecoveryCode(
+    payload.code,
+    "pursuit/recovery/action_result code",
+  );
+  const attempt = payload.attempt == null
+    ? null
+    : normalizePursuitRecoveryAttempt(payload.attempt);
+  if (
+    (PURSUIT_RECOVERY_ATTEMPT_STATES.has(status) && attempt == null)
+    || (attempt != null && attempt.state !== status)
+  ) {
+    throw new Error("pursuit/recovery/action_result attempt 与状态不一致");
+  }
+  return {
+    schema_version: 1,
+    run_id: runId,
+    status,
+    code,
+    message: workbenchText(
+      payload.message,
+      "pursuit/recovery/action_result message",
+      4_000,
+    ),
+    attempt,
+    resume_action: payload.resume_action == null
+      ? null
+      : normalizePursuitRecoveryResumeAction(payload.resume_action, runId),
   };
 }
 
@@ -4733,7 +4779,8 @@ function pursuitBoundaryText(value, name, maxLength) {
 
 function normalizePursuitRecovery(value, runId) {
   const item = harnessObject(value, "goals/snapshot pursuit.recovery");
-  if (Number(item.schema_version) !== 1) {
+  const schemaVersion = Number(item.schema_version);
+  if (![1, 2].includes(schemaVersion)) {
     throw new Error("goals/snapshot pursuit.recovery schema_version 不兼容");
   }
   const recoveryRunId = harnessText(item.run_id, "goals/snapshot recovery.run_id");
@@ -4805,8 +4852,15 @@ function normalizePursuitRecovery(value, runId) {
   }
   const generatedAt = harnessText(item.generated_at, "goals/snapshot recovery.generated_at");
   if (!generatedAt) throw new Error("goals/snapshot recovery.generated_at 不能为空");
+  const attempts = schemaVersion >= 2
+    ? harnessObjectArray(item.attempts, "goals/snapshot recovery.attempts", 5)
+      .map(normalizePursuitRecoveryAttempt)
+    : [];
+  if (new Set(attempts.map((attempt) => attempt.attempt_id)).size !== attempts.length) {
+    throw new Error("goals/snapshot recovery attempt_id 不得重复");
+  }
   return {
-    schema_version: 1,
+    schema_version: schemaVersion,
     run_id: recoveryRunId,
     generated_at: generatedAt,
     recovery_state: harnessChoice(
@@ -4823,7 +4877,187 @@ function normalizePursuitRecovery(value, runId) {
     ),
     reconcile_reason: harnessText(item.reconcile_reason, "goals/snapshot recovery.reconcile_reason"),
     alerts: harnessTextArray(item.alerts, "goals/snapshot recovery.alerts", 8),
+    resume_action: schemaVersion >= 2
+      ? normalizePursuitRecoveryResumeAction(item.resume_action, runId)
+      : null,
+    attempts,
   };
+}
+
+function normalizePursuitRecoveryResumeAction(value, runId) {
+  const item = harnessObject(value, "Pursuit recovery resume_action");
+  if (Number(item.schema_version) !== 1 || item.action !== "resume") {
+    throw new Error("Pursuit recovery resume_action schema 或 action 无效");
+  }
+  const command = pursuitRecoveryText(
+    item.command,
+    "Pursuit recovery resume_action.command",
+    300,
+    true,
+  );
+  if (command !== `/pursue resume ${runId}`) {
+    throw new Error("Pursuit recovery resume_action command 与 run_id 不一致");
+  }
+  return {
+    schema_version: 1,
+    action: "resume",
+    state: harnessChoice(
+      item.state,
+      "Pursuit recovery resume_action.state",
+      PURSUIT_RECOVERY_ACTION_STATES,
+    ),
+    code: pursuitRecoveryCode(item.code, "Pursuit recovery resume_action.code"),
+    reason: pursuitRecoveryText(
+      item.reason,
+      "Pursuit recovery resume_action.reason",
+      300,
+      true,
+    ),
+    command,
+  };
+}
+
+function normalizePursuitRecoveryAttempt(value) {
+  const item = harnessObject(value, "Pursuit recovery attempt");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("Pursuit recovery attempt schema_version 不兼容");
+  }
+  const attemptId = pursuitRecoveryText(
+    item.attempt_id,
+    "Pursuit recovery attempt.attempt_id",
+    73,
+    true,
+  );
+  if (!/^recovery-[0-9a-f]{64}$/.test(attemptId)) {
+    throw new Error("Pursuit recovery attempt_id 格式无效");
+  }
+  const state = harnessChoice(
+    item.state,
+    "Pursuit recovery attempt.state",
+    PURSUIT_RECOVERY_ATTEMPT_STATES,
+  );
+  const requestedAt = pursuitRecoveryTimestamp(
+    item.requested_at,
+    "Pursuit recovery attempt.requested_at",
+    true,
+  );
+  const updatedAt = pursuitRecoveryTimestamp(
+    item.updated_at,
+    "Pursuit recovery attempt.updated_at",
+    true,
+  );
+  const admittedAt = pursuitRecoveryTimestamp(
+    item.admitted_at,
+    "Pursuit recovery attempt.admitted_at",
+    false,
+  );
+  const resolvedAt = pursuitRecoveryTimestamp(
+    item.resolved_at,
+    "Pursuit recovery attempt.resolved_at",
+    false,
+  );
+  const leaseEpoch = harnessNonnegativeInteger(
+    item.lease_epoch,
+    "Pursuit recovery attempt.lease_epoch",
+  );
+  const resultCode = harnessText(
+    item.result_code,
+    "Pursuit recovery attempt.result_code",
+  );
+  if (resultCode && !/^[a-z][a-z0-9_]{0,63}$/.test(resultCode)) {
+    throw new Error("Pursuit recovery result_code 格式无效");
+  }
+  if (["resolved", "failed"].includes(state) !== Boolean(resultCode)) {
+    throw new Error("Pursuit recovery result_code 与 attempt 状态不一致");
+  }
+  const checkpointId = harnessText(
+    item.checkpoint_id,
+    "Pursuit recovery attempt.checkpoint_id",
+  );
+  if (
+    checkpointId.length > 128
+    || /[\u0000-\u001f\u007f]/.test(checkpointId)
+  ) {
+    throw new Error("Pursuit recovery checkpoint_id 格式无效");
+  }
+  const boundaryDecisionId = harnessText(
+    item.boundary_decision_id,
+    "Pursuit recovery attempt.boundary_decision_id",
+  );
+  if (boundaryDecisionId && !/^[0-9a-f]{64}$/.test(boundaryDecisionId)) {
+    throw new Error("Pursuit recovery boundary_decision_id 格式无效");
+  }
+  if (state === "requested" && (
+    admittedAt
+    || resolvedAt
+    || leaseEpoch
+    || checkpointId
+    || resultCode
+    || boundaryDecisionId
+  )) {
+    throw new Error("requested Pursuit recovery attempt 携带了后续阶段事实");
+  }
+  if (state === "admitted" && (
+    !admittedAt
+    || resolvedAt
+    || !checkpointId
+    || resultCode
+    || boundaryDecisionId
+  )) {
+    throw new Error("admitted Pursuit recovery attempt 事实不完整");
+  }
+  if (["resolved", "failed"].includes(state)) {
+    if (!resolvedAt || !resultCode) {
+      throw new Error("terminal Pursuit recovery attempt 事实不完整");
+    }
+    if (admittedAt ? !checkpointId : Boolean(leaseEpoch || checkpointId)) {
+      throw new Error("terminal Pursuit recovery attempt 准入事实不一致");
+    }
+    if (state === "failed" && boundaryDecisionId) {
+      throw new Error("failed Pursuit recovery attempt 不得携带边界裁判");
+    }
+  }
+  return {
+    schema_version: 1,
+    attempt_id: attemptId,
+    state,
+    requested_at: requestedAt,
+    updated_at: updatedAt,
+    admitted_at: admittedAt,
+    resolved_at: resolvedAt,
+    lease_epoch: leaseEpoch,
+    checkpoint_id: checkpointId,
+    result_code: resultCode,
+    boundary_decision_id: boundaryDecisionId,
+  };
+}
+
+function pursuitRecoveryTimestamp(value, name, required) {
+  const timestamp = pursuitRecoveryText(value, name, 64, required);
+  if (timestamp && !Number.isFinite(Date.parse(timestamp))) {
+    throw new Error(`${name} 格式无效`);
+  }
+  return timestamp;
+}
+
+function pursuitRecoveryText(value, name, maxLength, required) {
+  const text = harnessText(value, name);
+  if (
+    text.length > maxLength
+    || (required && !text)
+    || /[\u0000-\u001f\u007f]/.test(text)
+  ) {
+    throw new Error(`${name} 格式无效`);
+  }
+  return text;
+}
+
+function pursuitRecoveryCode(value, name) {
+  const code = harnessText(value, name);
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error(`${name} 格式无效`);
+  }
+  return code;
 }
 
 function validateGoalId(value, name, optional = false) {

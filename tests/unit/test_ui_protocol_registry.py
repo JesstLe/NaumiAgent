@@ -39,6 +39,12 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert registry.required_capability(
         "server", "evolution/evaluation-lane"
     ) == "evolution_evaluation_lane"
+    assert registry.required_capability(
+        "client", "pursuit/recovery/resume"
+    ) == "pursuit_recovery_actions"
+    assert registry.required_capability(
+        "server", "pursuit/recovery/action_result"
+    ) == "pursuit_recovery_actions"
     assert registry.required_capability("client", "submit") is None
     with pytest.raises(TypeError):
         registry.client["future/event"] = registry.policy("client", "ping")  # type: ignore[index]

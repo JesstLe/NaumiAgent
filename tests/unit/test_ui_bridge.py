@@ -68,6 +68,15 @@ from naumi_agent.orchestrator.engine import AgentEngine, AgentResult, AgentRunti
 from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.planner import Complexity, ExecutionMode, Plan, Step
 from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
+from naumi_agent.orchestrator.pursuit_checkpoint import (
+    CheckpointBudget,
+    CheckpointCriterion,
+    CheckpointGoal,
+    PursuitCheckpoint,
+)
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    new_recovery_attempt,
+)
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runs.models import CompletionReceipt
@@ -7204,6 +7213,321 @@ async def test_bridge_goal_snapshot_contains_real_recovery_authorities(tmp_path)
     assert recovery["lease"]["owner_id"] == "worker-a"
     assert recovery["heartbeat"]["health"] == "healthy"
     assert recovery["heartbeat"]["instance_id"] == "worker-a"
+
+
+def _bridge_recovery_checkpoint(run_id: str) -> PursuitCheckpoint:
+    return PursuitCheckpoint(
+        run_id=run_id,
+        sequence=1,
+        created_at=1.0,
+        status="waiting",
+        phase="waiting",
+        iteration=1,
+        goal=CheckpointGoal(
+            original_goal="恢复持久 Pursuit",
+            description="验证 New UI 恢复控制链路",
+            criteria=(
+                CheckpointCriterion(
+                    id="bridge-recovery",
+                    description="恢复动作写入持久账本",
+                    verification_command=(
+                        "pytest -q tests/unit/test_ui_bridge.py "
+                        "-k pursuit_recovery"
+                    ),
+                    status="in_progress",
+                    evidence="",
+                    last_checked=0.0,
+                ),
+            ),
+            constraints=(),
+            estimated_complexity="S",
+        ),
+        pending_actions=(),
+        next_action="通过 ToolExecution 恢复",
+        budget=CheckpointBudget(
+            tokens_used=0,
+            cost_usd=0.0,
+            elapsed_seconds=1.0,
+            max_iterations=50,
+        ),
+        evidence_cursor=0,
+        waiting_on=(),
+        pending_interaction=None,
+        recent_history=(),
+        worktree_name="",
+        worktree_path="",
+    )
+
+
+@pytest.mark.asyncio
+async def test_bridge_pursuit_recovery_uses_tool_execution_and_persisted_attempt(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.goal_store = GoalStore(tmp_path / "goals")
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.harness_service = SimpleNamespace(store=HarnessStore(tmp_path / "harness.db"))
+    goal = engine.goal_store.create("恢复持久 Pursuit")
+    run = PursuitRun(
+        id="pursuit-ui-resume",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    engine.pursuit_store.save_checkpoint(_bridge_recovery_checkpoint(run.id))
+    engine.goal_store.attach_pursuit(goal.id, run.id)
+    engine.get_or_create_session = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(id="session-pursuit-recovery"),
+    )
+    tool_calls: list[ToolCall] = []
+
+    async def execute_tool(
+        tool_call: ToolCall,
+        **kwargs: Any,
+    ) -> ToolResult:
+        assert kwargs["agent_name"] == "new-ui"
+        assert callable(kwargs["on_event"])
+        assert tool_call.name == "pursuit_resume"
+        assert json.loads(tool_call.arguments) == {"run_id": run.id}
+        tool_calls.append(tool_call)
+        attempt, created = engine.pursuit_store.prepare_recovery_attempt(
+            new_recovery_attempt(
+                run_id=run.id,
+                source_request_id=tool_call.id,
+                requested_at=3.0,
+            )
+        )
+        assert created is True
+        engine.pursuit_store.resolve_recovery_attempt(
+            attempt.attempt_id,
+            resolved_at=4.0,
+            result_code="operation_busy",
+        )
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content="\x1b[32m工具文案声称成功，但账本才是权威。\x1b[0m",
+        )
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {
+        "goal_snapshot",
+        "pursuit_recovery_actions",
+        "typed_ui_messages",
+    }
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record({
+        "id": "resume-request",
+        "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+        "payload": {"run_id": run.id},
+    })
+    tasks = tuple(bridge._pursuit_recovery_tasks.values())
+    assert len(tasks) == 1
+    await asyncio.gather(*tasks)
+
+    records = _records(writer)
+    result = next(
+        item
+        for item in records
+        if item["type"] == "pursuit/recovery/action_result"
+    )
+    assert result["request_id"] == "resume-request"
+    assert result["payload"]["status"] == "resolved"
+    assert result["payload"]["code"] == "operation_busy"
+    assert result["payload"]["attempt"]["state"] == "resolved"
+    assert "source_request_sha256" not in str(result["payload"])
+    assert "\x1b" not in result["payload"]["message"]
+    assert tool_calls[0].id.startswith("new-ui-pursuit-resume-")
+    refreshed = [
+        item for item in records if item["type"] == "goals/snapshot"
+    ][-1]["payload"]["goals"][0]["pursuit"]["recovery"]
+    assert refreshed["attempts"][0]["state"] == "resolved"
+    assert refreshed["resume_action"]["state"] == "available"
+    assert bridge._pursuit_recovery_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_pursuit_recovery_blocks_before_tool_without_checkpoint(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.harness_service = SimpleNamespace(store=HarnessStore(tmp_path / "harness.db"))
+    run = PursuitRun(
+        id="pursuit-ui-no-checkpoint",
+        goal="不得绕过恢复边界",
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    engine.execute_tool = AsyncMock()  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"pursuit_recovery_actions"}
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record({
+        "id": "resume-blocked",
+        "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+        "payload": {"run_id": run.id},
+    })
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "pursuit/recovery/action_result"
+    )
+    assert result["request_id"] == "resume-blocked"
+    assert result["payload"]["status"] == "blocked"
+    assert result["payload"]["code"] == "checkpoint_required"
+    assert result["payload"]["resume_action"]["command"] == (
+        f"/pursue resume {run.id}"
+    )
+    engine.execute_tool.assert_not_awaited()
+    assert bridge._pursuit_recovery_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_pursuit_recovery_exception_preserves_failed_attempt(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.workspace_root = tmp_path
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.harness_service = SimpleNamespace(store=HarnessStore(tmp_path / "harness.db"))
+    run = PursuitRun(
+        id="pursuit-ui-runtime-error",
+        goal="异常回执仍需服从账本",
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    engine.pursuit_store.save_checkpoint(_bridge_recovery_checkpoint(run.id))
+    engine.get_or_create_session = AsyncMock(  # type: ignore[attr-defined]
+        return_value=SimpleNamespace(id="session-pursuit-error"),
+    )
+
+    async def execute_tool(tool_call: ToolCall, **_kwargs: Any) -> ToolResult:
+        attempt, _ = engine.pursuit_store.prepare_recovery_attempt(
+            new_recovery_attempt(
+                run_id=run.id,
+                source_request_id=tool_call.id,
+                requested_at=3.0,
+            )
+        )
+        engine.pursuit_store.fail_recovery_attempt(
+            attempt.attempt_id,
+            failed_at=4.0,
+            result_code="runtime_exception",
+        )
+        raise RuntimeError("private runtime detail")
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"pursuit_recovery_actions"}
+    bridge._protocol_negotiated = True
+
+    await bridge.handle_client_record({
+        "id": "resume-runtime-error",
+        "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+        "payload": {"run_id": run.id},
+    })
+    tasks = tuple(bridge._pursuit_recovery_tasks.values())
+    await asyncio.gather(*tasks)
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "pursuit/recovery/action_result"
+    )
+    assert result["payload"]["status"] == "failed"
+    assert result["payload"]["code"] == "runtime_exception"
+    assert result["payload"]["attempt"]["state"] == "failed"
+    assert "private runtime detail" not in str(result["payload"])
+
+
+@pytest.mark.asyncio
+async def test_bridge_pursuit_recovery_real_engine_stops_at_checkpoint_boundary(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+    goal = engine.goal_store.create("真实恢复边界")
+    run = PursuitRun(
+        id="pursuit-ui-real-boundary",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    engine.pursuit_store.save_run(run)
+    checkpoint = _bridge_recovery_checkpoint(run.id).model_copy(update={
+        "goal": _bridge_recovery_checkpoint(run.id).goal.model_copy(
+            update={"original_goal": "故意不匹配的 checkpoint 目标"},
+        ),
+    })
+    engine.pursuit_store.save_checkpoint(checkpoint)
+    engine.goal_store.attach_pursuit(goal.id, run.id)
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {
+        "goal_snapshot",
+        "pursuit_recovery_actions",
+        "typed_ui_messages",
+    }
+    bridge._protocol_negotiated = True
+
+    try:
+        await bridge.handle_client_record({
+            "id": "resume-real-boundary",
+            "type": ClientEventType.PURSUIT_RECOVERY_RESUME,
+            "payload": {"run_id": run.id},
+        })
+        tasks = tuple(bridge._pursuit_recovery_tasks.values())
+        assert len(tasks) == 1
+        await asyncio.gather(*tasks)
+
+        result = next(
+            item
+            for item in _records(writer)
+            if item["type"] == "pursuit/recovery/action_result"
+        )
+        persisted = engine.pursuit_store.list_recovery_attempts(run.id, limit=5)
+        assert result["payload"]["status"] == "resolved"
+        assert result["payload"]["code"] == "checkpoint_inconsistent"
+        assert persisted[0].state.value == "resolved"
+        assert persisted[0].result_code == "checkpoint_inconsistent"
+        permission_receipt = engine.list_permission_decision_receipts()[0]
+        assert permission_receipt.outcome.value == "bypass_enabled"
+        assert permission_receipt.source.value == "bypass"
+        assert "故意不匹配" not in str(result["payload"])
+    finally:
+        await bridge.shutdown()
 
 
 @pytest.mark.asyncio

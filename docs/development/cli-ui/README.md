@@ -66,7 +66,8 @@ fallback 显示相同 code、status、短 decision id 和原因；前端只校�
 HAR-10.8c 将恢复裁判升级为 schema 2；New UI 同时严格读取 schema 1/2，TUI/CLI 继续消费同一
 Python projection。durable pending interaction 显示为 waiting，缺失 authority 才显示 blocked。
 HAR-10.8d 又为恢复动作建立持久、幂等的 attempt 账本；当前状态命令可以查看最近请求，
-UI-18.5b1 将让 New UI/TUI 动作消费同一 authority，前端不得自行猜测准入或完成。
+UI-18.5b1 已让 New UI 通过 typed ToolExecution 发起受控 resume，并让 TUI fallback 显示同源动作、
+共享命令和最近 attempt；两端均不得自行猜测准入或完成。takeover/cleanup 与历史 cursor 尚未实现。
 
 ## 未来顺序
 

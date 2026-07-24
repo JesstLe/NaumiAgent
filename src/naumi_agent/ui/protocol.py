@@ -27,6 +27,7 @@ PROTOCOL_CAPABILITIES = (
     "evolution_evaluation_lane",
     "goal_snapshot",
     "heartbeat",
+    "pursuit_recovery_actions",
     "session_list",
     "sequence_integrity",
     "task_snapshot",
@@ -71,6 +72,7 @@ class ClientEventType(StrEnum):
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
+    PURSUIT_RECOVERY_RESUME = "pursuit/recovery/resume"
     EVOLUTION_REVIEW_REQUEST = "evolution/review/request"
     EVOLUTION_EVALUATION_LANE_REQUEST = "evolution/evaluation-lane/request"
     SET_MODE = "set_mode"
@@ -156,6 +158,7 @@ class ServerEventType(StrEnum):
     WORKBENCH_EVENT = "workbench/event"
     WORKBENCH_REVIEW = "workbench/review"
     WORKBENCH_PROPOSAL_ACTION_RESULT = "workbench/proposal/action_result"
+    PURSUIT_RECOVERY_ACTION_RESULT = "pursuit/recovery/action_result"
     EVOLUTION_REVIEW = "evolution/review"
     EVOLUTION_EVALUATION_LANE = "evolution/evaluation-lane"
     SHUTDOWN = "shutdown"
@@ -586,6 +589,11 @@ def _normalize_client_payload(
             "action": action,
             "decision_note": decision_note,
             "confirmed": confirmed,
+        }
+
+    if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
+        return {
+            "run_id": validate_run_id(str(payload.get("run_id") or "")),
         }
 
     if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:

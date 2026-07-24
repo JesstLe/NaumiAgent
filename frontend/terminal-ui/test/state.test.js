@@ -2172,6 +2172,137 @@ test("Goal interaction ledger navigates filters pages and opens typed detail", (
   assert.equal(state.goalPanel.snapshot.selected_interaction, null);
 });
 
+test("Goal page resumes current Pursuit through typed ToolExecution action", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["pursuit_recovery_actions"] };
+  state.goalPanel.snapshot = {
+    current_goal_id: "goal-1",
+    goals: [{
+      goal_id: "goal-1",
+      pursuit: {
+        run_id: "pursuit-1",
+        recovery: {
+          resume_action: {
+            schema_version: 1,
+            action: "resume",
+            state: "available",
+            code: "resume_ready",
+            reason: "可安全恢复。",
+            command: "/pursue resume pursuit-1",
+          },
+          attempts: [],
+        },
+      },
+    }],
+    interactions: [],
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "resume-request-1";
+  };
+
+  assert.equal(handleGoalPanelKey(state, "x", send), true);
+  assert.deepEqual(sent[0], {
+    type: "pursuit/recovery/resume",
+    payload: { run_id: "pursuit-1" },
+  });
+  assert.equal(state.goalPanel.recoveryActionPending, true);
+
+  const attempt = {
+    schema_version: 1,
+    attempt_id: `recovery-${"a".repeat(64)}`,
+    state: "admitted",
+    requested_at: "now",
+    updated_at: "now",
+    admitted_at: "now",
+    resolved_at: "",
+    lease_epoch: 1,
+    checkpoint_id: "checkpoint-1",
+    result_code: "",
+    boundary_decision_id: "",
+  };
+  reduceServerEvent(state, {
+    type: "pursuit/recovery/action_result",
+    request_id: "resume-request-1",
+    payload: {
+      schema_version: 1,
+      run_id: "pursuit-1",
+      status: "admitted",
+      code: "admitted",
+      message: "目标追踪已恢复并在后台继续。",
+      attempt,
+      resume_action: {
+        schema_version: 1,
+        action: "resume",
+        state: "busy",
+        code: "recovery_attempt_active",
+        reason: "已有恢复请求正在执行。",
+        command: "/pursue resume pursuit-1",
+      },
+    },
+  });
+
+  assert.equal(state.goalPanel.recoveryActionPending, false);
+  assert.match(state.goalPanel.recoveryActionNotice, /后台继续/);
+  assert.equal(
+    state.goalPanel.snapshot.goals[0].pursuit.recovery.attempts[0].attempt_id,
+    attempt.attempt_id,
+  );
+  assert.equal(
+    state.goalPanel.snapshot.goals[0].pursuit.recovery.resume_action.state,
+    "busy",
+  );
+  state.goalPanel.recoveryActionPending = true;
+  state.goalPanel.recoveryActionRunId = "pursuit-stale";
+  state.goalPanel.recoveryActionRequestId = "request-stale";
+  reduceServerEvent(state, {
+    type: "session/replayed",
+    payload: { session_id: "session-new", title: "新会话", clear: true },
+  });
+  assert.equal(state.goalPanel.recoveryActionPending, false);
+  assert.equal(state.goalPanel.recoveryActionRunId, "");
+  assert.equal(state.goalPanel.recoveryActionRequestId, "");
+});
+
+test("Goal recovery key fails locally when authority blocks or capability is absent", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.goalPanel.snapshot = {
+    current_goal_id: "goal-1",
+    goals: [{
+      goal_id: "goal-1",
+      pursuit: {
+        run_id: "pursuit-1",
+        recovery: {
+          resume_action: {
+            state: "blocked",
+            reason: "存在未核对副作用。",
+            command: "/pursue resume pursuit-1",
+          },
+        },
+      },
+    }],
+  };
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  assert.equal(handleGoalPanelKey(state, "x", send), true);
+  assert.match(state.goalPanel.recoveryActionError, /未核对副作用/);
+  assert.equal(sent.length, 0);
+
+  state.goalPanel.snapshot.goals[0].pursuit.recovery.resume_action = {
+    state: "available",
+    reason: "可恢复。",
+    command: "/pursue resume pursuit-1",
+  };
+  assert.equal(handleGoalPanelKey(state, "x", send), true);
+  assert.match(state.goalPanel.recoveryActionNotice, /协议协商尚未完成/);
+  assert.equal(sent.length, 0);
+});
+
 test("evolution command opens typed review route and navigates to detail", () => {
   const state = createInitialState();
   const sent = [];

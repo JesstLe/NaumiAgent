@@ -607,6 +607,7 @@ test("protocol contract drives client and server event validation", () => {
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
+      "pursuit_recovery_actions",
       "sequence_integrity",
       "session_list",
       "task_snapshot",
@@ -628,6 +629,8 @@ test("protocol contract drives client and server event validation", () => {
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-batch/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("harness/eval-promotion/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("evolution/evaluation-lane/request"));
+  assert(PROTOCOL_CONTRACT.client_events.includes("pursuit/recovery/resume"));
+  assert(PROTOCOL_CONTRACT.server_events.includes("pursuit/recovery/action_result"));
   assert(PROTOCOL_CONTRACT.client_events.includes("inspector/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/request"));
   assert(PROTOCOL_CONTRACT.client_events.includes("agents/stop"));
@@ -787,6 +790,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
+      "pursuit_recovery_actions",
       "sequence_integrity",
       "session_list",
       "task_snapshot",
@@ -1612,7 +1616,7 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       private_payload: "drop",
     })),
     recovery: {
-      schema_version: 1,
+      schema_version: 2,
       run_id: "pursuit_1",
       generated_at: "2026-07-18T00:00:01+00:00",
       recovery_state: "reconcile_required",
@@ -1635,6 +1639,28 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       reconcile_required: true,
       reconcile_reason: "stale_preparing",
       alerts: ["需要核对后台任务"],
+      resume_action: {
+        schema_version: 1,
+        action: "resume",
+        state: "blocked",
+        code: "reconcile_required",
+        reason: "存在未核对副作用，必须先完成人工核对。",
+        command: "/pursue resume pursuit_1",
+      },
+      attempts: [{
+        schema_version: 1,
+        attempt_id: `recovery-${"c".repeat(64)}`,
+        state: "resolved",
+        requested_at: "2026-07-18T00:00:00+00:00",
+        updated_at: "2026-07-18T00:00:01+00:00",
+        admitted_at: "",
+        resolved_at: "2026-07-18T00:00:01+00:00",
+        lease_epoch: 0,
+        checkpoint_id: "",
+        result_code: "operation_busy",
+        boundary_decision_id: "",
+        source_request_sha256: "private-digest",
+      }],
       private_reasoning: "drop",
     },
     private_reasoning: "drop",
@@ -1738,6 +1764,13 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   );
   assert.equal(normalized.goals[0].pursuit.recovery.recovery_state, "reconcile_required");
   assert.equal(normalized.goals[0].pursuit.recovery.heartbeat.health, "stale");
+  assert.equal(normalized.goals[0].pursuit.recovery.schema_version, 2);
+  assert.equal(normalized.goals[0].pursuit.recovery.resume_action.state, "blocked");
+  assert.equal(normalized.goals[0].pursuit.recovery.attempts[0].result_code, "operation_busy");
+  assert.equal(
+    Object.hasOwn(normalized.goals[0].pursuit.recovery.attempts[0], "source_request_sha256"),
+    false,
+  );
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.recovery, "private_reasoning"), false);
   assert.equal(Object.hasOwn(normalized.goals[0].pursuit.recovery.heartbeat, "private_payload"), false);
   assert.equal(Object.hasOwn(normalized.goals[0], "private_payload"), false);
@@ -1906,6 +1939,97 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
       },
     }),
     /长度/,
+  );
+});
+
+test("Pursuit recovery action result is typed and attempt-bound", () => {
+  const attempt = {
+    schema_version: 1,
+    attempt_id: `recovery-${"d".repeat(64)}`,
+    state: "admitted",
+    requested_at: "2026-07-18T00:00:00+00:00",
+    updated_at: "2026-07-18T00:00:01+00:00",
+    admitted_at: "2026-07-18T00:00:01+00:00",
+    resolved_at: "",
+    lease_epoch: 3,
+    checkpoint_id: "checkpoint-1",
+    result_code: "",
+    boundary_decision_id: "",
+    source_request_sha256: "drop-private-digest",
+  };
+  const normalized = normalizeServerRecord({
+    type: "pursuit/recovery/action_result",
+    payload: {
+      schema_version: 1,
+      run_id: "pursuit_1",
+      status: "admitted",
+      code: "admitted",
+      message: "已准入并在后台继续。",
+      attempt,
+      resume_action: {
+        schema_version: 1,
+        action: "resume",
+        state: "busy",
+        code: "recovery_attempt_active",
+        reason: "已有恢复请求正在执行。",
+        command: "/pursue resume pursuit_1",
+      },
+    },
+  }).payload;
+
+  assert.equal(normalized.attempt.state, "admitted");
+  assert.equal(normalized.resume_action.state, "busy");
+  assert.equal(Object.hasOwn(normalized.attempt, "source_request_sha256"), false);
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/recovery/action_result",
+      payload: { ...normalized, status: "resolved" },
+    }),
+    /attempt 与状态不一致/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/recovery/action_result",
+      payload: {
+        ...normalized,
+        resume_action: {
+          ...normalized.resume_action,
+          command: "/pursue resume pursuit_other",
+        },
+      },
+    }),
+    /command 与 run_id 不一致/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/recovery/action_result",
+      payload: {
+        ...normalized,
+        status: "requested",
+        attempt: {
+          ...attempt,
+          state: "requested",
+        },
+      },
+    }),
+    /requested Pursuit recovery attempt 携带了后续阶段事实/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "pursuit/recovery/action_result",
+      payload: {
+        ...normalized,
+        status: "failed",
+        attempt: {
+          ...attempt,
+          state: "failed",
+          resolved_at: "2026-07-18T00:00:02+00:00",
+          result_code: "runtime_exception",
+          boundary_decision_id: "e".repeat(64),
+        },
+      },
+    }),
+    /failed Pursuit recovery attempt 不得携带边界裁判/,
   );
 });
 
