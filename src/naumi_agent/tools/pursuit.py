@@ -16,6 +16,9 @@ from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     format_recovery_attempts,
     pursuit_recovery_attempt_id,
 )
+from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
+    format_pursuit_reconcile_result,
+)
 from naumi_agent.orchestrator.pursuit_store import format_run, format_run_list
 from naumi_agent.tools.base import Tool, ToolMetadata
 
@@ -31,6 +34,7 @@ _global_pursuit_loop: GoalPursuitLoop | None = None
 _background_pursuit_tasks: set[asyncio.Task[str]] = set()
 MAX_PURSUIT_GOAL_CHARS = 8_000
 PURSUIT_RUN_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
+PURSUIT_RECOVERY_ATTEMPT_ID_RE = re.compile(r"^recovery-[0-9a-f]{64}$")
 
 
 def set_pursuit_dependencies(
@@ -74,6 +78,17 @@ def _normalize_run_id(run_id: Any) -> str:
         raise ValueError("run_id 不能为空。")
     if not PURSUIT_RUN_ID_RE.fullmatch(text):
         raise ValueError("run_id 只能包含字母、数字、下划线、点、冒号或连字符。")
+    return text
+
+
+def _normalize_recovery_attempt_id(attempt_id: Any) -> str:
+    text = str(attempt_id or "").strip()
+    if not text:
+        raise ValueError("recovery attempt_id 不能为空。")
+    if not PURSUIT_RECOVERY_ATTEMPT_ID_RE.fullmatch(text):
+        raise ValueError(
+            "recovery attempt_id 必须是 `recovery-` 加 64 位小写十六进制摘要。"
+        )
     return text
 
 
@@ -394,6 +409,58 @@ class PursuitResumeTool(Tool):
         )
 
 
+class PursuitReconcileTool(Tool):
+    """对因进程中断停留在 admitted 的恢复请求进行机械收口."""
+
+    @property
+    def name(self) -> str:
+        return "pursuit_reconcile"
+
+    @property
+    def description(self) -> str:
+        return (
+            "对账一个持久恢复请求：先以更高 RunLease epoch 栅栏旧执行者，"
+            "再复验准入后的 checkpoint、机械裁判与运行终态；证据不足时不修改。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            requires_persistent_authorization=True,
+            user_facing_name="对账目标追踪恢复请求",
+            search_hint=(
+                "pursuit reconcile admitted recovery attempt fence checkpoint"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "attempt_id": {
+                    "type": "string",
+                    "description": "recovery- 开头的恢复请求 ID",
+                    "pattern": r"^recovery-[0-9a-f]{64}$",
+                },
+            },
+            "required": ["attempt_id"],
+        }
+
+    async def execute(self, *, attempt_id: str, **kwargs: Any) -> str:
+        try:
+            normalized_attempt_id = _normalize_recovery_attempt_id(attempt_id)
+        except ValueError as exc:
+            return f"错误：{exc}"
+        loop = _global_pursuit_loop
+        if loop is None:
+            return "⚠️ 目标追踪工具尚未初始化。"
+        result = await loop.reconcile_recovery_attempt(normalized_attempt_id)
+        return format_pursuit_reconcile_result(result)
+
+
 def _with_persisted_recovery_attempt(
     result: str,
     *,
@@ -416,4 +483,10 @@ def _with_persisted_recovery_attempt(
 
 
 def create_pursuit_tool() -> list[Tool]:
-    return [PursueTool(), PursuitListTool(), PursuitStatusTool(), PursuitResumeTool()]
+    return [
+        PursueTool(),
+        PursuitListTool(),
+        PursuitStatusTool(),
+        PursuitResumeTool(),
+        PursuitReconcileTool(),
+    ]

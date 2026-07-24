@@ -4196,7 +4196,7 @@ class NaumiApp(App):
         status = self.query_one(StatusBar)
 
         parts = goal.strip().split(maxsplit=1)
-        if parts and parts[0] in {"list", "status", "resume"}:
+        if parts and parts[0] in {"list", "status", "resume", "reconcile"}:
             await self._run_pursue_meta(parts[0], parts[1] if len(parts) > 1 else "")
             return
 
@@ -4262,22 +4262,25 @@ class NaumiApp(App):
             "list": "pursuit_list",
             "status": "pursuit_status",
             "resume": "pursuit_resume",
+            "reconcile": "pursuit_reconcile",
         }
         tool_name = tool_map[subcommand]
         tool = self.engine.tool_registry.get(tool_name)
         if tool is None:
             chat.mount(Markdown(f"**工具未注册**: `{tool_name}`", classes="agent-msg"))
             return
-        if subcommand in {"status", "resume"} and not arg:
-            status.status_text = f"用法: /pursue {subcommand} <运行ID>"
+        if subcommand in {"status", "resume", "reconcile"} and not arg:
+            identifier = "恢复请求ID" if subcommand == "reconcile" else "运行ID"
+            status.status_text = f"用法: /pursue {subcommand} <{identifier}>"
             return
         status.status_text = "目标追踪状态处理中..."
         try:
-            arguments = (
-                {"active_only": "--active" in arg.split()}
-                if subcommand == "list"
-                else {"run_id": arg.strip()}
-            )
+            if subcommand == "list":
+                arguments = {"active_only": "--active" in arg.split()}
+            elif subcommand == "reconcile":
+                arguments = {"attempt_id": arg.strip()}
+            else:
+                arguments = {"run_id": arg.strip()}
             tool_result = await self._execute_registered_tool(tool_name, **arguments)
             if tool_result.status != "success":
                 chat.mount(

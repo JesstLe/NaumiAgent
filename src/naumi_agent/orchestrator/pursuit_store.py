@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import sqlite3
 import threading
 from pathlib import Path
@@ -26,6 +27,11 @@ from naumi_agent.orchestrator.pursuit_checkpoint import PursuitCheckpoint
 from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     PursuitRecoveryAttempt,
     PursuitRecoveryAttemptState,
+)
+from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
+    PursuitRecoveryReconcileError,
+    PursuitRecoveryReconciliationReceipt,
+    new_pursuit_reconciliation_receipt,
 )
 from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
 
@@ -414,6 +420,273 @@ class PursuitStore:
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"读取 recovery attempt 列表失败：{exc}") from exc
 
+    def get_recovery_reconciliation(
+        self,
+        attempt_id: str,
+    ) -> PursuitRecoveryReconciliationReceipt | None:
+        """Read and authenticate one immutable recovery reconciliation receipt."""
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._get_recovery_reconciliation_with_connection(
+                    conn,
+                    attempt_id,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"恢复对账回执结构校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取恢复对账回执失败：{exc}") from exc
+
+    def reconcile_admitted_recovery_attempt(
+        self,
+        attempt_id: str,
+        *,
+        reconciled_at: float,
+        minimum_admitted_age_seconds: float,
+        fence_epoch: int,
+        fence_operation_id: str,
+    ) -> PursuitRecoveryReconciliationReceipt:
+        """Atomically close an admitted attempt from post-admission terminal facts."""
+        if (
+            not math.isfinite(reconciled_at)
+            or not math.isfinite(minimum_admitted_age_seconds)
+            or not 1 <= minimum_admitted_age_seconds <= 86_400
+            or isinstance(fence_epoch, bool)
+            or not isinstance(fence_epoch, int)
+            or fence_epoch <= 0
+        ):
+            raise ValueError("恢复请求对账时间、宽限期或 fence epoch 无效。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = self._get_recovery_reconciliation_with_connection(
+                    conn,
+                    attempt_id,
+                )
+                if existing is not None:
+                    return existing
+                current = self._get_recovery_attempt_with_connection(
+                    conn,
+                    attempt_id,
+                )
+                if current is None:
+                    raise PursuitRecoveryReconcileError(
+                        "attempt_not_found",
+                        "没有找到该恢复请求。",
+                    )
+                if current.state in {
+                    PursuitRecoveryAttemptState.RESOLVED,
+                    PursuitRecoveryAttemptState.FAILED,
+                }:
+                    raise PursuitRecoveryReconcileError(
+                        "already_terminal",
+                        "该恢复请求已经处于终态，不需要对账。",
+                    )
+                if current.state is not PursuitRecoveryAttemptState.ADMITTED:
+                    raise PursuitRecoveryReconcileError(
+                        "request_not_admitted",
+                        "该恢复请求尚未取得执行准入，不能按已执行结果收口。",
+                    )
+                if current.lease_epoch <= 0:
+                    raise PursuitRecoveryReconcileError(
+                        "embedded_authority_unsupported",
+                        "该请求没有持久 RunLease epoch，需要人工审查。",
+                    )
+                if fence_epoch <= current.lease_epoch:
+                    raise PursuitRecoveryReconcileError(
+                        "fence_not_advanced",
+                        "Fencing epoch 没有推进，拒绝收口恢复请求。",
+                    )
+                if reconciled_at < (
+                    current.admitted_at + minimum_admitted_age_seconds
+                ):
+                    raise PursuitRecoveryReconcileError(
+                        "grace_period_active",
+                        "恢复请求仍处于安全宽限期，拒绝收口。",
+                    )
+
+                run_row = conn.execute(
+                    "SELECT * FROM pursuit_runs WHERE id = ?",
+                    (current.run_id,),
+                ).fetchone()
+                if run_row is None:
+                    raise PursuitRecoveryReconcileError(
+                        "run_missing",
+                        "恢复请求对应的 PursuitRun 不存在。",
+                    )
+                boundary_id = str(run_row["boundary_decision_id"])
+                if not boundary_id:
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_missing",
+                        "PursuitRun 没有可验证的后置机械裁判。",
+                    )
+                boundary_row = conn.execute(
+                    """
+                    SELECT * FROM pursuit_boundary_decisions
+                    WHERE run_id = ? AND decision_id = ?
+                    """,
+                    (current.run_id, boundary_id),
+                ).fetchone()
+                if boundary_row is None:
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_missing",
+                        "PursuitRun 的机械裁判指针缺少对应记录。",
+                    )
+                boundary = _boundary_decision_from_row(boundary_row)
+                boundary_recorded_at = float(boundary_row["recorded_at"])
+                if boundary_recorded_at <= current.admitted_at:
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_not_post_admission",
+                        "机械裁判并非恢复准入后的新事实。",
+                    )
+                if boundary.status == "running":
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_incomplete",
+                        "恢复后的机械裁判仍为 running，不能收口。",
+                    )
+
+                checkpoint = self._get_checkpoint_with_connection(
+                    conn,
+                    current.run_id,
+                )
+                if checkpoint is None:
+                    raise PursuitRecoveryReconcileError(
+                        "checkpoint_missing",
+                        "没有找到恢复准入后的 checkpoint。",
+                    )
+                checkpoint_id = checkpoint.checkpoint_id()
+                if (
+                    checkpoint.created_at <= current.admitted_at
+                    or checkpoint_id == current.checkpoint_id
+                ):
+                    raise PursuitRecoveryReconcileError(
+                        "checkpoint_not_post_admission",
+                        "最新 checkpoint 不是恢复准入后的新事实。",
+                    )
+                if (
+                    boundary_recorded_at > reconciled_at
+                    or checkpoint.created_at > reconciled_at
+                    or float(run_row["updated_at"]) > reconciled_at
+                ):
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_from_future",
+                        "终态证据时间晚于本次对账，可能存在时钟回退。",
+                    )
+
+                expected_statuses = {
+                    "waiting": PursuitRunStatus.WAITING.value,
+                    "blocked": PursuitRunStatus.BLOCKED.value,
+                    "completed": PursuitRunStatus.COMPLETED.value,
+                    "cancelled": PursuitRunStatus.CANCELLED.value,
+                    "budget_exceeded": PursuitRunStatus.BUDGET_EXCEEDED.value,
+                }
+                expected = expected_statuses.get(boundary.status)
+                if expected is None:
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_status_unsupported",
+                        "该机械裁判状态不能用于自动收口。",
+                    )
+                if (
+                    str(run_row["status"]) != expected
+                    or checkpoint.status != expected
+                ):
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_inconsistent",
+                        "PursuitRun、checkpoint 与机械裁判状态不一致。",
+                    )
+                if (
+                    float(run_row["updated_at"]) < boundary_recorded_at
+                    or checkpoint.created_at < boundary_recorded_at
+                ):
+                    raise PursuitRecoveryReconcileError(
+                        "terminal_evidence_inconsistent",
+                        "PursuitRun 或 checkpoint 的终态写入顺序不一致。",
+                    )
+
+                resolved = current.model_copy(update={
+                    "sequence": current.sequence + 1,
+                    "state": PursuitRecoveryAttemptState.RESOLVED,
+                    "updated_at": reconciled_at,
+                    "resolved_at": reconciled_at,
+                    "result_code": boundary.code,
+                    "boundary_decision_id": boundary.decision_id,
+                })
+                resolved = PursuitRecoveryAttempt.model_validate(
+                    resolved.model_dump(mode="json")
+                )
+                self._append_recovery_attempt_event(
+                    conn,
+                    resolved,
+                    previous_digest=current.digest(),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE pursuit_recovery_attempts
+                    SET latest_sequence = ?, state = ?, payload_json = ?,
+                        payload_sha256 = ?, updated_at = ?
+                    WHERE attempt_id = ? AND latest_sequence = ? AND state = ?
+                    """,
+                    (
+                        resolved.sequence,
+                        resolved.state.value,
+                        resolved.canonical_json(),
+                        resolved.digest(),
+                        resolved.updated_at,
+                        attempt_id,
+                        current.sequence,
+                        current.state.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PursuitStoreConflictError(
+                        "recovery attempt 被并发更新，拒绝对账覆盖。"
+                    )
+                receipt = new_pursuit_reconciliation_receipt(
+                    attempt_id=current.attempt_id,
+                    run_id=current.run_id,
+                    attempt_before_sha256=current.digest(),
+                    attempt_after_sha256=resolved.digest(),
+                    admitted_at=current.admitted_at,
+                    reconciled_at=reconciled_at,
+                    admitted_lease_epoch=current.lease_epoch,
+                    fence_epoch=fence_epoch,
+                    fence_operation_id=fence_operation_id,
+                    checkpoint_id=checkpoint_id,
+                    checkpoint_created_at=checkpoint.created_at,
+                    boundary_decision_id=boundary.decision_id,
+                    boundary_recorded_at=boundary_recorded_at,
+                    result_code=boundary.code,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO pursuit_recovery_reconciliations (
+                        attempt_id, receipt_id, payload_json, payload_sha256,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.attempt_id,
+                        receipt.receipt_id,
+                        receipt.canonical_json(),
+                        receipt.digest(),
+                        receipt.reconciled_at,
+                    ),
+                )
+                return receipt
+        except PursuitRecoveryReconcileError:
+            raise
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"恢复请求对账失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"恢复请求对账失败：{exc}") from exc
+
     def list_runs(self, *, include_finished: bool = True) -> list[PursuitRun]:
         query = "SELECT * FROM pursuit_runs"
         params: tuple[str, ...] = ()
@@ -499,35 +772,42 @@ class PursuitStore:
             return None
         try:
             with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT * FROM pursuit_checkpoints WHERE run_id = ?",
-                    (run_id,),
-                ).fetchone()
-            if row is None:
-                return None
-            payload = str(row["payload_json"])
-            expected_digest = str(row["payload_sha256"])
-            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-            if not hmac.compare_digest(expected_digest, actual_digest):
-                raise PursuitStoreError("checkpoint 内容摘要校验失败，拒绝恢复。")
-            checkpoint = PursuitCheckpoint.model_validate_json(payload)
-            if checkpoint.run_id != run_id:
-                raise PursuitStoreError("checkpoint run_id 与存储键不一致。")
-            if checkpoint.sequence != int(row["sequence"]):
-                raise PursuitStoreError("checkpoint 序号与存储元数据不一致。")
-            if checkpoint.schema_version != int(row["schema_version"]):
-                raise PursuitStoreError("checkpoint schema 版本与存储元数据不一致。")
-            if not hmac.compare_digest(
-                checkpoint.checkpoint_id(), str(row["checkpoint_id"])
-            ):
-                raise PursuitStoreError("checkpoint ID 校验失败，拒绝恢复。")
-            return checkpoint
+                return self._get_checkpoint_with_connection(conn, run_id)
         except PursuitStoreError:
             raise
         except (ValidationError, TypeError, ValueError) as exc:
             raise PursuitStoreError(f"checkpoint 结构校验失败：{exc}") from exc
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"读取 checkpoint 失败：{exc}") from exc
+
+    @staticmethod
+    def _get_checkpoint_with_connection(
+        conn: sqlite3.Connection,
+        run_id: str,
+    ) -> PursuitCheckpoint | None:
+        row = conn.execute(
+            "SELECT * FROM pursuit_checkpoints WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = str(row["payload_json"])
+        expected_digest = str(row["payload_sha256"])
+        actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(expected_digest, actual_digest):
+            raise PursuitStoreError("checkpoint 内容摘要校验失败，拒绝恢复。")
+        checkpoint = PursuitCheckpoint.model_validate_json(payload)
+        if checkpoint.run_id != run_id:
+            raise PursuitStoreError("checkpoint run_id 与存储键不一致。")
+        if checkpoint.sequence != int(row["sequence"]):
+            raise PursuitStoreError("checkpoint 序号与存储元数据不一致。")
+        if checkpoint.schema_version != int(row["schema_version"]):
+            raise PursuitStoreError("checkpoint schema 版本与存储元数据不一致。")
+        if not hmac.compare_digest(
+            checkpoint.checkpoint_id(), str(row["checkpoint_id"])
+        ):
+            raise PursuitStoreError("checkpoint ID 校验失败，拒绝恢复。")
+        return checkpoint
 
     def prepare_action(self, record: PursuitActionRecord) -> PursuitActionRecord:
         """Persist one immutable action identity before any external dispatch."""
@@ -1047,6 +1327,90 @@ class PursuitStore:
             )
         return latest
 
+    def _get_recovery_reconciliation_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        attempt_id: str,
+    ) -> PursuitRecoveryReconciliationReceipt | None:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM pursuit_recovery_reconciliations
+            WHERE attempt_id = ?
+            """,
+            (attempt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = str(row["payload_json"])
+        actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(
+            actual_digest,
+            str(row["payload_sha256"]),
+        ):
+            raise PursuitStoreError(
+                "恢复对账回执摘要校验失败，拒绝读取。"
+            )
+        receipt = PursuitRecoveryReconciliationReceipt.model_validate_json(
+            payload
+        )
+        if (
+            receipt.attempt_id != attempt_id
+            or receipt.receipt_id != str(row["receipt_id"])
+            or receipt.reconciled_at != float(row["created_at"])
+        ):
+            raise PursuitStoreError(
+                "恢复对账回执元数据与 payload 不一致。"
+            )
+        attempt = self._get_recovery_attempt_with_connection(
+            conn,
+            attempt_id,
+        )
+        events = self._verify_recovery_attempt_events(conn, attempt_id)
+        if (
+            attempt is None
+            or attempt.state is not PursuitRecoveryAttemptState.RESOLVED
+            or receipt.run_id != attempt.run_id
+            or attempt.digest() != receipt.attempt_after_sha256
+            or attempt.boundary_decision_id != receipt.boundary_decision_id
+            or attempt.result_code != receipt.result_code
+            or len(events) != 3
+            or events[-2].state is not PursuitRecoveryAttemptState.ADMITTED
+            or events[-2].digest() != receipt.attempt_before_sha256
+            or events[-2].admitted_at != receipt.admitted_at
+            or events[-2].lease_epoch != receipt.admitted_lease_epoch
+        ):
+            raise PursuitStoreError(
+                "恢复对账回执与 recovery attempt 终态不一致。"
+            )
+        boundary_row = conn.execute(
+            """
+            SELECT * FROM pursuit_boundary_decisions
+            WHERE run_id = ? AND decision_id = ?
+            """,
+            (receipt.run_id, receipt.boundary_decision_id),
+        ).fetchone()
+        if boundary_row is None:
+            raise PursuitStoreError("恢复对账回执引用的机械裁判不存在。")
+        boundary = _boundary_decision_from_row(boundary_row)
+        if (
+            boundary.code != receipt.result_code
+            or float(boundary_row["recorded_at"])
+            != receipt.boundary_recorded_at
+        ):
+            raise PursuitStoreError("恢复对账回执与机械裁判不一致。")
+        checkpoint = self._get_checkpoint_with_connection(
+            conn,
+            receipt.run_id,
+        )
+        if (
+            checkpoint is None
+            or checkpoint.checkpoint_id() != receipt.checkpoint_id
+            or checkpoint.created_at != receipt.checkpoint_created_at
+        ):
+            raise PursuitStoreError("恢复对账回执与后置 checkpoint 不一致。")
+        return receipt
+
     @staticmethod
     def _append_recovery_attempt_event(
         conn: sqlite3.Connection,
@@ -1357,6 +1721,20 @@ class PursuitStore:
                         previous_payload_sha256 TEXT NOT NULL,
                         created_at REAL NOT NULL,
                         PRIMARY KEY(attempt_id, sequence),
+                        FOREIGN KEY(attempt_id)
+                            REFERENCES pursuit_recovery_attempts(attempt_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_recovery_reconciliations (
+                        attempt_id TEXT PRIMARY KEY,
+                        receipt_id TEXT NOT NULL UNIQUE,
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
                         FOREIGN KEY(attempt_id)
                             REFERENCES pursuit_recovery_attempts(attempt_id)
                             ON DELETE CASCADE

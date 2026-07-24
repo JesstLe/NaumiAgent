@@ -31,11 +31,15 @@
     [HAR-10.2b](../harness/HAR-10-2b-pursuit-recovery-snapshot.md)。
   - HAR-10.8d 前置已实现：resume 请求具备持久权限身份、幂等 attempt 事件链和 typed 结果码；见
     [HAR-10.8d](../harness/HAR-10-8d-recovery-attempt-ledger.md)。
+  - HAR-10.8e 已实现：`/pursue reconcile <attempt-id>` 使用更高 RunLease epoch fencing 和同库后置
+    机械证据收口 admitted attempt；New UI/TUI 均展示共享命令；见
+    [HAR-10.8e](../harness/HAR-10-8e-recovery-attempt-reconciliation.md)。
   - UI-18.5b1 已实现：New UI 通过协商后的 typed action 重新读取 Python 准入状态并调用
     `pursuit_resume` ToolExecution；TUI fallback 展示同源动作、精确共享命令和最近 attempt，结果以
     持久账本而非工具文案为准；见
     [UI-18.5b1](UI-18-5b1-pursuit-recovery-action.md)。
-  - 未完成：takeover/cleanup、专用 attempt push stream 与多 run cursor 历史仍属于后续切片。
+  - 未完成：自动 terminal outbox、takeover/cleanup、专用 attempt push stream 与多 run cursor
+    历史仍属于后续切片。
 - UI-18.6 TUI parity：Textual TUI 消费相同 snapshot/动作协议，以紧凑布局提供核心状态和操作。
 
 ## UI-18.1 已实现边界

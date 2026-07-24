@@ -26,12 +26,16 @@ from naumi_agent.orchestrator.pursuit import (
 from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     pursuit_recovery_attempt_id,
 )
+from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
+    PursuitRecoveryReconcileResult,
+)
 from naumi_agent.orchestrator.pursuit_store import PursuitStore, format_run
 from naumi_agent.orchestrator.subagent_manager import SubAgentManager
 from naumi_agent.tools.base import ToolCall, ToolResult
 from naumi_agent.tools.pursuit import (
     PursueTool,
     PursuitListTool,
+    PursuitReconcileTool,
     PursuitResumeTool,
     PursuitStatusTool,
 )
@@ -1798,6 +1802,7 @@ class TestPursueToolRegistration:
         assert engine.tool_registry.get("pursuit_list") is not None
         assert engine.tool_registry.get("pursuit_status") is not None
         assert engine.tool_registry.get("pursuit_resume") is not None
+        assert engine.tool_registry.get("pursuit_reconcile") is not None
         assert hasattr(engine, "pursuit_store")
         assert pursuit_mod._global_pursuit_loop is not None
         assert pursuit_mod._global_pursuit_loop._execute_tool_call == engine.execute_tool
@@ -1813,6 +1818,12 @@ class TestPursueToolRegistration:
         assert PursuitResumeTool().metadata.requires_confirmation is True
         assert PursuitResumeTool().metadata.requires_persistent_authorization is True
         assert PursuitResumeTool().metadata.destructive is True
+        assert PursuitReconcileTool().metadata.requires_confirmation is True
+        assert (
+            PursuitReconcileTool().metadata.requires_persistent_authorization
+            is True
+        )
+        assert PursuitReconcileTool().metadata.destructive is True
 
     @pytest.mark.asyncio
     async def test_tool_execute_without_init(self) -> None:
@@ -2037,6 +2048,87 @@ class TestPursueToolRegistration:
 
         assert "run_id 只能包含" in status
         assert "run_id 只能包含" in resume
+
+    @pytest.mark.asyncio
+    async def test_reconcile_tool_uses_typed_loop_result(
+        self,
+        monkeypatch,
+    ) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        loop = GoalPursuitLoop(
+            router=MagicMock(),
+            tool_registry=MagicMock(),
+            subagent_manager=MagicMock(),
+        )
+        pursuit_mod._global_pursuit_loop = loop
+        attempt_id = "recovery-" + "a" * 64
+        reconcile = AsyncMock(return_value=PursuitRecoveryReconcileResult(
+            status="blocked",
+            code="live_lease",
+            message="原执行者仍持有租约。",
+            attempt_id=attempt_id,
+        ))
+        monkeypatch.setattr(loop, "reconcile_recovery_attempt", reconcile)
+
+        result = await PursuitReconcileTool().execute(attempt_id=attempt_id)
+
+        reconcile.assert_awaited_once_with(attempt_id)
+        assert "live_lease" in result
+        assert "原执行者仍持有租约" in result
+
+    @pytest.mark.asyncio
+    async def test_reconcile_tool_rejects_invalid_attempt_id(self) -> None:
+        result = await PursuitReconcileTool().execute(attempt_id="recovery-bad")
+        assert "64 位小写十六进制" in result
+
+    @pytest.mark.asyncio
+    async def test_engine_bypass_persists_reconcile_permission_receipt(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        import naumi_agent.tools.pursuit as pursuit_mod
+
+        engine = AgentEngine(AppConfig(
+            workspace_root=str(tmp_path),
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "vectors"),
+                long_term_enabled=False,
+            ),
+        ))
+        loop = pursuit_mod._global_pursuit_loop
+        assert loop is not None
+        attempt_id = "recovery-" + "b" * 64
+        reconcile = AsyncMock(return_value=PursuitRecoveryReconcileResult(
+            status="blocked",
+            code="live_lease",
+            message="原执行者仍持有租约。",
+            attempt_id=attempt_id,
+        ))
+        monkeypatch.setattr(loop, "reconcile_recovery_attempt", reconcile)
+        engine.set_runtime_mode(AgentRuntimeMode.BYPASS)
+        call_id = "pursuit-reconcile-bypass-audit"
+
+        try:
+            await engine.get_or_create_session()
+            result = await engine._execute_tool(ToolCall(
+                id=call_id,
+                name="pursuit_reconcile",
+                arguments=json.dumps({"attempt_id": attempt_id}),
+            ))
+        finally:
+            await engine.shutdown()
+
+        assert result.status == "success"
+        reconcile.assert_awaited_once_with(attempt_id)
+        receipts = [
+            item for item in engine.list_permission_decision_receipts()
+            if item.call_id == call_id
+        ]
+        assert len(receipts) == 1
+        assert receipts[0].outcome == "bypass_enabled"
 
     @pytest.mark.asyncio
     async def test_pursuit_status_tool_reads_store(self, tmp_path) -> None:

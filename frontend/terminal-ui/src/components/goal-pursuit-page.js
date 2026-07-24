@@ -273,6 +273,12 @@ function renderRecovery(recovery) {
         attemptStyle,
         `  ${attempt.attempt_id.slice(0, 20)}… · ${recoveryAttemptLabel(attempt.state)}${result} · ${attempt.updated_at}`,
       ));
+      if (attempt.state === "admitted") {
+        lines.push(color(
+          ANSI.cyan,
+          `    对账 · /pursue reconcile ${attempt.attempt_id}`,
+        ));
+      }
     }
   }
   return lines;

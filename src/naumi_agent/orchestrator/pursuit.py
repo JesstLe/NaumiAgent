@@ -24,9 +24,10 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from naumi_agent.orchestrator.pursuit_action_ledger import (
     PursuitActionRecord,
@@ -63,6 +64,11 @@ from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     PursuitRecoveryAttempt,
     PursuitRecoveryAttemptState,
     new_recovery_attempt,
+)
+from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
+    PursuitRecoveryReconcileAuthority,
+    PursuitRecoveryReconcileResult,
+    reconcile_pursuit_recovery_attempt,
 )
 from naumi_agent.orchestrator.pursuit_terminal import (
     BlockerKind,
@@ -1326,6 +1332,28 @@ class GoalPursuitLoop:
         if self._store is None:
             return None
         return self._store.get_recovery_attempt(attempt_id)
+
+    async def reconcile_recovery_attempt(
+        self,
+        attempt_id: str,
+    ) -> PursuitRecoveryReconcileResult:
+        """Fence a former owner and close only mechanically proven terminal work."""
+        if self._store is None:
+            return PursuitRecoveryReconcileResult(
+                status="error",
+                code="store_unavailable",
+                message="目标追踪持久化存储未初始化。",
+            )
+        return await reconcile_pursuit_recovery_attempt(
+            store=self._store,
+            authority=cast(
+                PursuitRecoveryReconcileAuthority | None,
+                self._lease_port,
+            ),
+            workspace_root=self._workspace_root,
+            attempt_id=attempt_id,
+            now=datetime.now(UTC).isoformat(),
+        )
 
     async def resume_persisted(
         self,

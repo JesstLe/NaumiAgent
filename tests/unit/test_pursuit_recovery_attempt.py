@@ -136,6 +136,22 @@ def test_public_formatter_localizes_result_without_exposing_source_digest() -> N
     assert "tool-call-private-request" not in rendered
 
 
+def test_public_formatter_exposes_shared_reconcile_command_for_admitted() -> None:
+    attempt = _attempt()
+    admitted = attempt.model_copy(update={
+        "sequence": 2,
+        "state": PursuitRecoveryAttemptState.ADMITTED,
+        "updated_at": 11.0,
+        "admitted_at": 11.0,
+        "lease_epoch": 2,
+        "checkpoint_id": "pchk_safe",
+    })
+
+    rendered = format_recovery_attempts([admitted])
+
+    assert f"/pursue reconcile {attempt.attempt_id}" in rendered
+
+
 def test_duplicate_request_is_idempotent_even_with_later_observed_time(tmp_path) -> None:
     store = _store_with_run(tmp_path)
     first, created = store.prepare_recovery_attempt(_attempt(requested_at=10.0))
