@@ -30,6 +30,8 @@ ARC-04.5a 又为真实 Agent 委派增加模型调用前 request contract、终�
 ARC-04.5b2 已建立 durable Agent Job Store 与 fenced lifecycle，ARC-04.5c 已让 embedded Agent
 消费 admit/claim/run/renew/finish 链并建立终态发布屏障；ARC-06.2c 又建立跨 Runtime embedded Agent
 active 上限、有界 FIFO 与等待取消。ARC-04.5d1 又将 response/error 加密原子提交，并要求生产发布前
-从 Store 重新认证恢复。Agent 仍不是 daemon，自动 recovery scheduler、publication outbox、
-Agent/Browser 持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
+从 Store 重新认证恢复；ARC-04.5d2a 又建立 terminal transaction 原子创建的 durable publication
+outbox、lease/epoch fencing、恢复目录与 HMAC receipt chain。Agent 仍不是 daemon，自动 recovery
+scheduler、outbox production consumer、Agent/Browser 持久 Worker、priority/公平调度与跨主机
+topology 尚未实现，因此
 ARC-06 保持 partial。

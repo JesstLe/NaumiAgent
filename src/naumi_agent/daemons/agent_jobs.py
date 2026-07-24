@@ -34,7 +34,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 3
+AGENT_JOB_SCHEMA_VERSION = 4
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
@@ -70,6 +70,12 @@ class AgentJobState(StrEnum):
     UNKNOWN = "unknown"
 
 
+class AgentJobPublicationState(StrEnum):
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    PUBLISHED = "published"
+
+
 TERMINAL_AGENT_JOB_STATES = frozenset(
     {
         AgentJobState.COMPLETED,
@@ -100,6 +106,114 @@ class AgentJobLifecycleConflictError(AgentJobError):
 
 class AgentJobCapacityExhaustedError(AgentJobError):
     """Raised when durable Agent active or waiting capacity is exhausted."""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationReceipt:
+    schema_version: int
+    publication_id: str
+    job_id: str
+    sequence: int
+    request_sha256: str
+    result_sha256: str
+    state: AgentJobPublicationState
+    owner_id: str | None
+    claim_epoch: int
+    claim_expires_at: str | None
+    attempt_count: int
+    delivery_sha256: str | None
+    published_at: str | None
+    reason_code: str
+    occurred_at: str
+    previous_receipt_sha256: str | None
+    receipt_sha256: str
+    authentication_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("AgentJob publication schema_version 必须为 1。")
+        _require_identifier(self.publication_id, field="publication_id")
+        _require_identifier(self.job_id, field="job_id")
+        _require_positive_int(self.sequence, field="sequence")
+        _require_sha256(self.request_sha256, field="request_sha256")
+        _require_sha256(self.result_sha256, field="result_sha256")
+        if not isinstance(self.state, AgentJobPublicationState):
+            raise TypeError("AgentJob publication state 类型无效。")
+        if self.owner_id is not None:
+            _require_identifier(self.owner_id, field="owner_id")
+        if (
+            isinstance(self.claim_epoch, bool)
+            or not isinstance(self.claim_epoch, int)
+            or self.claim_epoch < 0
+        ):
+            raise ValueError("AgentJob publication claim_epoch 必须是非负整数。")
+        if self.claim_expires_at is not None:
+            _aware_time(self.claim_expires_at, field="claim_expires_at")
+        if (
+            isinstance(self.attempt_count, bool)
+            or not isinstance(self.attempt_count, int)
+            or self.attempt_count < 0
+        ):
+            raise ValueError("AgentJob publication attempt_count 必须是非负整数。")
+        if self.delivery_sha256 is not None:
+            _require_sha256(self.delivery_sha256, field="delivery_sha256")
+        if self.published_at is not None:
+            _aware_time(self.published_at, field="published_at")
+        _require_identifier(self.reason_code, field="reason_code")
+        _aware_time(self.occurred_at, field="occurred_at")
+        if self.previous_receipt_sha256 is not None:
+            _require_sha256(
+                self.previous_receipt_sha256,
+                field="previous_receipt_sha256",
+            )
+        _require_sha256(self.receipt_sha256, field="receipt_sha256")
+        _require_sha256(
+            self.authentication_sha256,
+            field="authentication_sha256",
+        )
+        if not hmac.compare_digest(
+            self.receipt_sha256,
+            _digest(_publication_receipt_payload(self)),
+        ):
+            raise ValueError("AgentJob publication receipt 摘要校验失败。")
+        _validate_publication_receipt_semantics(self)
+
+
+@dataclass(frozen=True, slots=True)
+class StoredAgentJobPublication:
+    publication_id: str
+    job_id: str
+    request_sha256: str
+    result_sha256: str
+    state: AgentJobPublicationState
+    owner_id: str | None
+    claim_epoch: int
+    claim_expires_at: str | None
+    attempt_count: int
+    created_at: str
+    published_at: str | None
+    latest_receipt: AgentJobPublicationReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationTransition:
+    publication: StoredAgentJobPublication
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationBacklog:
+    pending: int
+    live_claimed: int
+    expired_claims: int
+    assessed_at: str
+
+    def __post_init__(self) -> None:
+        for name in ("pending", "live_claimed", "expired_claims"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} 必须是非负整数。")
+        _aware_time(self.assessed_at, field="assessed_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -808,6 +922,386 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法恢复 AgentJob terminal payload。") from exc
 
+    async def get_publication(
+        self,
+        publication_id: str,
+    ) -> StoredAgentJobPublication | None:
+        _require_identifier(publication_id, field="publication_id")
+        if not _regular_file_exists(self._db_path):
+            return None
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                publication = await _find_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if publication is not None:
+                    job = await _require_stored(
+                        db,
+                        publication.job_id,
+                        key=key,
+                    )
+                    _validate_publication_job_binding(publication, job)
+                await db.commit()
+                return publication
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取 AgentJob publication。") from exc
+
+    async def claim_next_publication(
+        self,
+        *,
+        owner_id: str,
+        lease_seconds: int,
+    ) -> AgentJobPublicationTransition | None:
+        _require_identifier(owner_id, field="owner_id")
+        _require_lease_seconds(lease_seconds)
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    SELECT publication_id
+                    FROM agent_job_publications
+                    WHERE state = ?
+                       OR (
+                           state = ?
+                           AND (
+                               claim_expires_at IS NULL
+                               OR claim_expires_at <= ?
+                           )
+                       )
+                    ORDER BY created_at, publication_id
+                    LIMIT 1
+                    """,
+                    (
+                        AgentJobPublicationState.PENDING.value,
+                        AgentJobPublicationState.CLAIMED.value,
+                        now.isoformat(),
+                    ),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await db.commit()
+                    return None
+                publication = await _require_publication(
+                    db,
+                    str(row["publication_id"]),
+                    key=key,
+                )
+                job = await _require_stored(db, publication.job_id, key=key)
+                _validate_publication_job_binding(publication, job)
+                transition = await _claim_publication_locked(
+                    db,
+                    publication=publication,
+                    owner_id=owner_id,
+                    lease_seconds=lease_seconds,
+                    now=now,
+                    key=key,
+                )
+                await db.commit()
+                return transition
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法 claim AgentJob publication。") from exc
+
+    async def renew_publication_claim(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        lease_seconds: int,
+    ) -> AgentJobPublicationTransition:
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        _require_lease_seconds(lease_seconds)
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                _require_live_publication_owner(
+                    publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                )
+                transition = await _append_publication_transition(
+                    db,
+                    publication=publication,
+                    state=AgentJobPublicationState.CLAIMED,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    claim_expires_at=(
+                        max(
+                            now,
+                            _required_publication_expiry(publication),
+                        )
+                        + timedelta(seconds=lease_seconds)
+                    ).isoformat(),
+                    attempt_count=publication.attempt_count,
+                    delivery_sha256=None,
+                    published_at=None,
+                    reason_code="agent_publication_claim_renewed",
+                    occurred_at=now.isoformat(),
+                    key=key,
+                )
+                await db.commit()
+                return transition
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法续期 AgentJob publication claim。") from exc
+
+    async def release_publication_claim(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+    ) -> AgentJobPublicationTransition:
+        return await self._publication_owner_transition(
+            publication_id,
+            owner_id=owner_id,
+            claim_epoch=claim_epoch,
+            target_state=AgentJobPublicationState.PENDING,
+            delivery_sha256=None,
+            reason_code="agent_publication_released",
+        )
+
+    async def acknowledge_publication(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        delivery_sha256: str,
+    ) -> AgentJobPublicationTransition:
+        _require_sha256(delivery_sha256, field="delivery_sha256")
+        return await self._publication_owner_transition(
+            publication_id,
+            owner_id=owner_id,
+            claim_epoch=claim_epoch,
+            target_state=AgentJobPublicationState.PUBLISHED,
+            delivery_sha256=delivery_sha256,
+            reason_code="agent_publication_published",
+        )
+
+    async def list_publication_recovery(
+        self,
+        *,
+        limit: int = 100,
+    ) -> tuple[StoredAgentJobPublication, ...]:
+        _require_bounded_limit(limit, maximum=1000)
+        if not _regular_file_exists(self._db_path):
+            return ()
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    """
+                    SELECT publication_id
+                    FROM agent_job_publications
+                    WHERE state = ?
+                       OR (
+                           state = ?
+                           AND (
+                               claim_expires_at IS NULL
+                               OR claim_expires_at <= ?
+                           )
+                       )
+                    ORDER BY created_at, publication_id
+                    LIMIT ?
+                    """,
+                    (
+                        AgentJobPublicationState.PENDING.value,
+                        AgentJobPublicationState.CLAIMED.value,
+                        now.isoformat(),
+                        limit,
+                    ),
+                )
+                publications: list[StoredAgentJobPublication] = []
+                for row in await cursor.fetchall():
+                    publication = await _require_publication(
+                        db,
+                        str(row["publication_id"]),
+                        key=key,
+                    )
+                    job = await _require_stored(
+                        db,
+                        publication.job_id,
+                        key=key,
+                    )
+                    _validate_publication_job_binding(publication, job)
+                    publications.append(publication)
+                await db.commit()
+                return tuple(publications)
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取 AgentJob publication 恢复目录。") from exc
+
+    async def publication_backlog(self) -> AgentJobPublicationBacklog:
+        if not _regular_file_exists(self._db_path):
+            return AgentJobPublicationBacklog(
+                pending=0,
+                live_claimed=0,
+                expired_claims=0,
+                assessed_at=self._now().isoformat(),
+            )
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    """
+                    SELECT publication_id
+                    FROM agent_job_publications
+                    WHERE state IN (?, ?)
+                    ORDER BY created_at, publication_id
+                    LIMIT 10001
+                    """,
+                    (
+                        AgentJobPublicationState.PENDING.value,
+                        AgentJobPublicationState.CLAIMED.value,
+                    ),
+                )
+                rows = await cursor.fetchall()
+                if len(rows) > 10000:
+                    raise AgentJobError(
+                        "AgentJob publication backlog 超过 10000 项安全上限。"
+                    )
+                pending = 0
+                live_claimed = 0
+                expired_claims = 0
+                for row in rows:
+                    publication = await _require_publication(
+                        db,
+                        str(row["publication_id"]),
+                        key=key,
+                    )
+                    job = await _require_stored(
+                        db,
+                        publication.job_id,
+                        key=key,
+                    )
+                    _validate_publication_job_binding(publication, job)
+                    if publication.state is AgentJobPublicationState.PENDING:
+                        pending += 1
+                    elif _required_publication_expiry(publication) <= now:
+                        expired_claims += 1
+                    else:
+                        live_claimed += 1
+                await db.commit()
+                return AgentJobPublicationBacklog(
+                    pending=pending,
+                    live_claimed=live_claimed,
+                    expired_claims=expired_claims,
+                    assessed_at=now.isoformat(),
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取 AgentJob publication backlog。") from exc
+
+    async def _publication_owner_transition(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        target_state: AgentJobPublicationState,
+        delivery_sha256: str | None,
+        reason_code: str,
+    ) -> AgentJobPublicationTransition:
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if publication.state is target_state:
+                    if target_state is AgentJobPublicationState.PUBLISHED:
+                        if (
+                            publication.owner_id != owner_id
+                            or publication.claim_epoch != claim_epoch
+                            or publication.latest_receipt.delivery_sha256
+                            != delivery_sha256
+                        ):
+                            raise AgentJobLifecycleConflictError(
+                                "AgentJob publication ack 幂等事实不一致。"
+                            )
+                        await db.commit()
+                        return AgentJobPublicationTransition(
+                            publication,
+                            False,
+                        )
+                _require_live_publication_owner(
+                    publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                )
+                published_at = (
+                    now.isoformat()
+                    if target_state is AgentJobPublicationState.PUBLISHED
+                    else None
+                )
+                transition = await _append_publication_transition(
+                    db,
+                    publication=publication,
+                    state=target_state,
+                    owner_id=(
+                        owner_id
+                        if target_state is AgentJobPublicationState.PUBLISHED
+                        else None
+                    ),
+                    claim_epoch=claim_epoch,
+                    claim_expires_at=None,
+                    attempt_count=publication.attempt_count,
+                    delivery_sha256=delivery_sha256,
+                    published_at=published_at,
+                    reason_code=reason_code,
+                    occurred_at=now.isoformat(),
+                    key=key,
+                )
+                await db.commit()
+                return transition
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法更新 AgentJob publication。") from exc
+
     async def cancel_before_claim(self, job_id: str) -> AgentJobTransitionResult:
         _require_identifier(job_id, field="job_id")
         key = self._runtime_key()
@@ -1066,6 +1560,12 @@ class AgentJobStore:
                                 raise AgentJobLifecycleConflictError(
                                     "AgentJob terminal payload 幂等重放不一致。"
                                 )
+                            await _ensure_publication_locked(
+                                db,
+                                job=stored,
+                                occurred_at=now.isoformat(),
+                                key=key,
+                            )
                         await db.commit()
                         return AgentJobTransitionResult(stored, False)
                 _require_live_owner(
@@ -1114,6 +1614,13 @@ class AgentJobStore:
                     key=key,
                     terminal_payload_envelope=terminal_payload_envelope,
                 )
+                if result is not None:
+                    await _ensure_publication_locked(
+                        db,
+                        job=transition.job,
+                        occurred_at=now.isoformat(),
+                        key=key,
+                    )
                 await db.commit()
                 return transition
         except (AgentJobError, AgentJobLifecycleConflictError):
@@ -1210,6 +1717,8 @@ class AgentJobStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V3:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V4:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -1217,11 +1726,18 @@ class AgentJobStore:
                         for statement in _SCHEMA_V2:
                             await db.execute(statement)
                         await _apply_schema_v3(db)
+                        await _apply_schema_v4(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 2:
                         await _apply_schema_v3(db)
+                        await _apply_schema_v4(db, allow_create=True)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 3:
+                        await _apply_schema_v4(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -1230,6 +1746,8 @@ class AgentJobStore:
                             f"AgentJob schema v{version} 不受支持；"
                             f"当前仅支持 v{AGENT_JOB_SCHEMA_VERSION}。"
                         )
+                    else:
+                        await _apply_schema_v4(db, allow_create=False)
                     await db.commit()
                 if not existed and os.name != "nt":
                     self._db_path.chmod(0o600)
@@ -1410,6 +1928,549 @@ def _open_terminal_payload(
         raise AgentJobError(
             "AgentJob terminal payload 无法认证或恢复。"
         ) from exc
+
+
+async def _ensure_publication_locked(
+    db: aiosqlite.Connection,
+    *,
+    job: StoredAgentJob,
+    occurred_at: str,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublication:
+    if job.result is None or job.terminal_payload_envelope is None:
+        raise AgentJobError(
+            "AgentJob terminal publication 缺少 result 或加密 payload。"
+        )
+    publication_id = _publication_id(job.job_id, job.result.result_sha256)
+    existing = await _find_publication(db, publication_id, key=key)
+    if existing is not None:
+        _validate_publication_job_binding(existing, job)
+        return existing
+    receipt = _issue_publication_receipt(
+        publication_id=publication_id,
+        job_id=job.job_id,
+        sequence=1,
+        request_sha256=job.request_sha256,
+        result_sha256=job.result.result_sha256,
+        state=AgentJobPublicationState.PENDING,
+        owner_id=None,
+        claim_epoch=0,
+        claim_expires_at=None,
+        attempt_count=0,
+        delivery_sha256=None,
+        published_at=None,
+        reason_code="agent_publication_pending",
+        occurred_at=occurred_at,
+        previous_receipt_sha256=None,
+        key=key.key_bytes,
+    )
+    await db.execute(
+        """
+        INSERT INTO agent_job_publications (
+            publication_id, job_id, request_sha256, result_sha256,
+            state, owner_id, claim_epoch, claim_expires_at,
+            attempt_count, created_at, published_at,
+            latest_sequence, latest_receipt_sha256, latest_receipt_json
+        ) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, 0, ?, NULL, 1, ?, ?)
+        """,
+        (
+            publication_id,
+            job.job_id,
+            job.request_sha256,
+            job.result.result_sha256,
+            AgentJobPublicationState.PENDING.value,
+            occurred_at,
+            receipt.receipt_sha256,
+            _serialize_publication_receipt(receipt),
+        ),
+    )
+    await _insert_publication_receipt(db, receipt)
+    return StoredAgentJobPublication(
+        publication_id=publication_id,
+        job_id=job.job_id,
+        request_sha256=job.request_sha256,
+        result_sha256=job.result.result_sha256,
+        state=AgentJobPublicationState.PENDING,
+        owner_id=None,
+        claim_epoch=0,
+        claim_expires_at=None,
+        attempt_count=0,
+        created_at=occurred_at,
+        published_at=None,
+        latest_receipt=receipt,
+    )
+
+
+async def _find_publication(
+    db: aiosqlite.Connection,
+    publication_id: str,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublication | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM agent_job_publications
+        WHERE publication_id = ?
+        """,
+        (publication_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return await _stored_publication_from_row(db, row, key=key)
+
+
+async def _require_publication(
+    db: aiosqlite.Connection,
+    publication_id: str,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublication:
+    publication = await _find_publication(db, publication_id, key=key)
+    if publication is None:
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication 不存在。"
+        )
+    return publication
+
+
+async def _stored_publication_from_row(
+    db: aiosqlite.Connection,
+    row: aiosqlite.Row,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublication:
+    try:
+        latest = _deserialize_publication_receipt(
+            str(row["latest_receipt_json"])
+        )
+        publication = StoredAgentJobPublication(
+            publication_id=str(row["publication_id"]),
+            job_id=str(row["job_id"]),
+            request_sha256=str(row["request_sha256"]),
+            result_sha256=str(row["result_sha256"]),
+            state=AgentJobPublicationState(str(row["state"])),
+            owner_id=(
+                str(row["owner_id"])
+                if row["owner_id"] is not None
+                else None
+            ),
+            claim_epoch=int(row["claim_epoch"]),
+            claim_expires_at=(
+                str(row["claim_expires_at"])
+                if row["claim_expires_at"] is not None
+                else None
+            ),
+            attempt_count=int(row["attempt_count"]),
+            created_at=str(row["created_at"]),
+            published_at=(
+                str(row["published_at"])
+                if row["published_at"] is not None
+                else None
+            ),
+            latest_receipt=latest,
+        )
+        _validate_stored_publication(publication, row)
+        await _validate_publication_event_chain(db, publication, key=key)
+        return publication
+    except AgentJobError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentJobError(
+            "AgentJob publication 持久记录无效。"
+        ) from exc
+
+
+def _validate_stored_publication(
+    publication: StoredAgentJobPublication,
+    row: aiosqlite.Row,
+) -> None:
+    _require_identifier(publication.publication_id, field="publication_id")
+    _require_identifier(publication.job_id, field="job_id")
+    _require_sha256(publication.request_sha256, field="request_sha256")
+    _require_sha256(publication.result_sha256, field="result_sha256")
+    _aware_time(publication.created_at, field="created_at")
+    if publication.published_at is not None:
+        _aware_time(publication.published_at, field="published_at")
+    if int(row["latest_sequence"]) != publication.latest_receipt.sequence:
+        raise AgentJobError("AgentJob publication latest sequence 不一致。")
+    if str(row["latest_receipt_sha256"]) != (
+        publication.latest_receipt.receipt_sha256
+    ):
+        raise AgentJobError("AgentJob publication latest receipt 不一致。")
+    receipt = publication.latest_receipt
+    comparisons = (
+        (receipt.publication_id, publication.publication_id, "publication_id"),
+        (receipt.job_id, publication.job_id, "job_id"),
+        (receipt.request_sha256, publication.request_sha256, "request"),
+        (receipt.result_sha256, publication.result_sha256, "result"),
+        (receipt.state, publication.state, "state"),
+        (receipt.owner_id, publication.owner_id, "owner"),
+        (receipt.claim_epoch, publication.claim_epoch, "claim epoch"),
+        (receipt.claim_expires_at, publication.claim_expires_at, "claim expiry"),
+        (receipt.attempt_count, publication.attempt_count, "attempt count"),
+        (receipt.published_at, publication.published_at, "published time"),
+    )
+    for receipt_value, stored_value, name in comparisons:
+        if receipt_value != stored_value:
+            raise AgentJobError(f"AgentJob publication {name} 不一致。")
+
+
+async def _validate_publication_event_chain(
+    db: aiosqlite.Connection,
+    publication: StoredAgentJobPublication,
+    *,
+    key: RuntimePayloadKey,
+) -> None:
+    cursor = await db.execute(
+        """
+        SELECT sequence, receipt_sha256, occurred_at, state, receipt_json
+        FROM agent_job_publication_events
+        WHERE publication_id = ?
+        ORDER BY sequence
+        """,
+        (publication.publication_id,),
+    )
+    rows = await cursor.fetchall()
+    if len(rows) != publication.latest_receipt.sequence:
+        raise AgentJobError("AgentJob publication event 数量不一致。")
+    previous: AgentJobPublicationReceipt | None = None
+    for index, row in enumerate(rows, start=1):
+        receipt = _deserialize_publication_receipt(str(row["receipt_json"]))
+        _verify_publication_receipt_authentication(receipt, key=key.key_bytes)
+        if int(row["sequence"]) != index or receipt.sequence != index:
+            raise AgentJobError("AgentJob publication sequence 不连续。")
+        if (
+            str(row["receipt_sha256"]) != receipt.receipt_sha256
+            or str(row["occurred_at"]) != receipt.occurred_at
+            or str(row["state"]) != receipt.state.value
+        ):
+            raise AgentJobError(
+                "AgentJob publication event 投影与 receipt 不一致。"
+            )
+        if receipt.publication_id != publication.publication_id:
+            raise AgentJobError("AgentJob publication event identity 不一致。")
+        if previous is None:
+            if receipt.previous_receipt_sha256 is not None:
+                raise AgentJobError("AgentJob publication 首事件链接无效。")
+            if publication.created_at != receipt.occurred_at:
+                raise AgentJobError(
+                    "AgentJob publication created time 不一致。"
+                )
+        else:
+            if receipt.previous_receipt_sha256 != previous.receipt_sha256:
+                raise AgentJobError("AgentJob publication receipt chain 断裂。")
+            _validate_publication_transition(previous, receipt)
+        if (
+            receipt.job_id != publication.job_id
+            or receipt.request_sha256 != publication.request_sha256
+            or receipt.result_sha256 != publication.result_sha256
+        ):
+            raise AgentJobError("AgentJob publication event 绑定发生漂移。")
+        previous = receipt
+    if previous != publication.latest_receipt:
+        raise AgentJobError("AgentJob publication latest event 不一致。")
+
+
+def _validate_publication_transition(
+    previous: AgentJobPublicationReceipt,
+    current: AgentJobPublicationReceipt,
+) -> None:
+    previous_time = _aware_time(
+        previous.occurred_at,
+        field="previous occurred_at",
+    )
+    current_time = _aware_time(current.occurred_at, field="occurred_at")
+    if current_time < previous_time:
+        raise AgentJobError(
+            "AgentJob publication occurred time 发生倒退。"
+        )
+    transition = (
+        previous.state,
+        current.state,
+        current.reason_code,
+    )
+    if transition == (
+        AgentJobPublicationState.PENDING,
+        AgentJobPublicationState.CLAIMED,
+        "agent_publication_claimed",
+    ):
+        valid = (
+            current.claim_epoch == previous.claim_epoch + 1
+            and current.attempt_count == previous.attempt_count + 1
+        )
+    elif transition == (
+        AgentJobPublicationState.CLAIMED,
+        AgentJobPublicationState.CLAIMED,
+        "agent_publication_claim_renewed",
+    ):
+        valid = (
+            current.owner_id == previous.owner_id
+            and current.claim_epoch == previous.claim_epoch
+            and current.attempt_count == previous.attempt_count
+            and _required_receipt_claim_expiry(current)
+            > _required_receipt_claim_expiry(previous)
+        )
+    elif transition == (
+        AgentJobPublicationState.CLAIMED,
+        AgentJobPublicationState.CLAIMED,
+        "agent_publication_claim_taken_over",
+    ):
+        previous_expiry = _aware_time(
+            previous.claim_expires_at or "",
+            field="previous claim_expires_at",
+        )
+        valid = (
+            current_time >= previous_expiry
+            and current.claim_epoch == previous.claim_epoch + 1
+            and current.attempt_count == previous.attempt_count + 1
+        )
+    elif transition == (
+        AgentJobPublicationState.CLAIMED,
+        AgentJobPublicationState.PENDING,
+        "agent_publication_released",
+    ):
+        valid = (
+            current.claim_epoch == previous.claim_epoch
+            and current.attempt_count == previous.attempt_count
+            and current_time < _required_receipt_claim_expiry(previous)
+        )
+    elif transition == (
+        AgentJobPublicationState.CLAIMED,
+        AgentJobPublicationState.PUBLISHED,
+        "agent_publication_published",
+    ):
+        valid = (
+            current.owner_id == previous.owner_id
+            and current.claim_epoch == previous.claim_epoch
+            and current.attempt_count == previous.attempt_count
+            and current_time < _required_receipt_claim_expiry(previous)
+        )
+    else:
+        valid = False
+    if not valid:
+        raise AgentJobError("AgentJob publication 状态转换无效。")
+
+
+def _required_receipt_claim_expiry(
+    receipt: AgentJobPublicationReceipt,
+) -> datetime:
+    if receipt.claim_expires_at is None:
+        raise AgentJobError(
+            "AgentJob publication receipt claim expiry 缺失。"
+        )
+    return _aware_time(
+        receipt.claim_expires_at,
+        field="receipt claim_expires_at",
+    )
+
+
+def _validate_publication_job_binding(
+    publication: StoredAgentJobPublication,
+    job: StoredAgentJob,
+) -> None:
+    if publication.job_id != job.job_id:
+        raise AgentJobError("AgentJob publication job 绑定不一致。")
+    if not hmac.compare_digest(
+        publication.request_sha256,
+        job.request_sha256,
+    ):
+        raise AgentJobError("AgentJob publication request 绑定不一致。")
+    if (
+        job.result is None
+        or job.terminal_payload_envelope is None
+        or not hmac.compare_digest(
+            publication.result_sha256,
+            job.result.result_sha256,
+        )
+    ):
+        raise AgentJobError("AgentJob publication result 绑定不一致。")
+    if publication.publication_id != _publication_id(
+        job.job_id,
+        job.result.result_sha256,
+    ):
+        raise AgentJobError("AgentJob publication identity 不一致。")
+
+
+async def _claim_publication_locked(
+    db: aiosqlite.Connection,
+    *,
+    publication: StoredAgentJobPublication,
+    owner_id: str,
+    lease_seconds: int,
+    now: datetime,
+    key: RuntimePayloadKey,
+) -> AgentJobPublicationTransition:
+    if publication.state is AgentJobPublicationState.CLAIMED:
+        if _required_publication_expiry(publication) > now:
+            if publication.owner_id == owner_id:
+                return AgentJobPublicationTransition(publication, False)
+            raise AgentJobLifecycleConflictError(
+                "AgentJob publication 已由其他 live owner claim。"
+            )
+    elif publication.state is not AgentJobPublicationState.PENDING:
+        raise AgentJobLifecycleConflictError(
+            f"AgentJob publication 状态 {publication.state.value} 不允许 claim。"
+        )
+    return await _append_publication_transition(
+        db,
+        publication=publication,
+        state=AgentJobPublicationState.CLAIMED,
+        owner_id=owner_id,
+        claim_epoch=publication.claim_epoch + 1,
+        claim_expires_at=(
+            now + timedelta(seconds=lease_seconds)
+        ).isoformat(),
+        attempt_count=publication.attempt_count + 1,
+        delivery_sha256=None,
+        published_at=None,
+        reason_code=(
+            "agent_publication_claimed"
+            if publication.state is AgentJobPublicationState.PENDING
+            else "agent_publication_claim_taken_over"
+        ),
+        occurred_at=now.isoformat(),
+        key=key,
+    )
+
+
+def _require_live_publication_owner(
+    publication: StoredAgentJobPublication,
+    *,
+    owner_id: str,
+    claim_epoch: int,
+    now: datetime,
+) -> None:
+    if publication.state is not AgentJobPublicationState.CLAIMED:
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication 不处于 claimed 状态。"
+        )
+    if (
+        publication.owner_id != owner_id
+        or publication.claim_epoch != claim_epoch
+    ):
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication owner 或 epoch 已变化。"
+        )
+    if _required_publication_expiry(publication) <= now:
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication claim 已过期。"
+        )
+
+
+def _required_publication_expiry(
+    publication: StoredAgentJobPublication,
+) -> datetime:
+    if publication.claim_expires_at is None:
+        raise AgentJobError("AgentJob publication claim expiry 缺失。")
+    return _aware_time(
+        publication.claim_expires_at,
+        field="claim_expires_at",
+    )
+
+
+async def _append_publication_transition(
+    db: aiosqlite.Connection,
+    *,
+    publication: StoredAgentJobPublication,
+    state: AgentJobPublicationState,
+    owner_id: str | None,
+    claim_epoch: int,
+    claim_expires_at: str | None,
+    attempt_count: int,
+    delivery_sha256: str | None,
+    published_at: str | None,
+    reason_code: str,
+    occurred_at: str,
+    key: RuntimePayloadKey,
+) -> AgentJobPublicationTransition:
+    receipt = _issue_publication_receipt(
+        publication_id=publication.publication_id,
+        job_id=publication.job_id,
+        sequence=publication.latest_receipt.sequence + 1,
+        request_sha256=publication.request_sha256,
+        result_sha256=publication.result_sha256,
+        state=state,
+        owner_id=owner_id,
+        claim_epoch=claim_epoch,
+        claim_expires_at=claim_expires_at,
+        attempt_count=attempt_count,
+        delivery_sha256=delivery_sha256,
+        published_at=published_at,
+        reason_code=reason_code,
+        occurred_at=occurred_at,
+        previous_receipt_sha256=(
+            publication.latest_receipt.receipt_sha256
+        ),
+        key=key.key_bytes,
+    )
+    await _insert_publication_receipt(db, receipt)
+    cursor = await db.execute(
+        """
+        UPDATE agent_job_publications
+        SET state = ?, owner_id = ?, claim_epoch = ?,
+            claim_expires_at = ?, attempt_count = ?, published_at = ?,
+            latest_sequence = ?, latest_receipt_sha256 = ?,
+            latest_receipt_json = ?
+        WHERE publication_id = ? AND latest_sequence = ?
+        """,
+        (
+            state.value,
+            owner_id,
+            claim_epoch,
+            claim_expires_at,
+            attempt_count,
+            published_at,
+            receipt.sequence,
+            receipt.receipt_sha256,
+            _serialize_publication_receipt(receipt),
+            publication.publication_id,
+            publication.latest_receipt.sequence,
+        ),
+    )
+    if cursor.rowcount != 1:
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication 被并发修改。"
+        )
+    return AgentJobPublicationTransition(
+        publication=StoredAgentJobPublication(
+            publication_id=publication.publication_id,
+            job_id=publication.job_id,
+            request_sha256=publication.request_sha256,
+            result_sha256=publication.result_sha256,
+            state=state,
+            owner_id=owner_id,
+            claim_epoch=claim_epoch,
+            claim_expires_at=claim_expires_at,
+            attempt_count=attempt_count,
+            created_at=publication.created_at,
+            published_at=published_at,
+            latest_receipt=receipt,
+        ),
+        applied=True,
+    )
+
+
+async def _insert_publication_receipt(
+    db: aiosqlite.Connection,
+    receipt: AgentJobPublicationReceipt,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO agent_job_publication_events (
+            publication_id, sequence, receipt_sha256,
+            occurred_at, state, receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            receipt.publication_id,
+            receipt.sequence,
+            receipt.receipt_sha256,
+            receipt.occurred_at,
+            receipt.state.value,
+            _serialize_publication_receipt(receipt),
+        ),
+    )
 
 
 async def _capacity_policy_locked(
@@ -2234,6 +3295,181 @@ def _receipt_authentication(
     ).hexdigest()
 
 
+def _issue_publication_receipt(
+    *,
+    publication_id: str,
+    job_id: str,
+    sequence: int,
+    request_sha256: str,
+    result_sha256: str,
+    state: AgentJobPublicationState,
+    owner_id: str | None,
+    claim_epoch: int,
+    claim_expires_at: str | None,
+    attempt_count: int,
+    delivery_sha256: str | None,
+    published_at: str | None,
+    reason_code: str,
+    occurred_at: str,
+    previous_receipt_sha256: str | None,
+    key: bytes,
+) -> AgentJobPublicationReceipt:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "publication_id": publication_id,
+        "job_id": job_id,
+        "sequence": sequence,
+        "request_sha256": request_sha256,
+        "result_sha256": result_sha256,
+        "state": state,
+        "owner_id": owner_id,
+        "claim_epoch": claim_epoch,
+        "claim_expires_at": claim_expires_at,
+        "attempt_count": attempt_count,
+        "delivery_sha256": delivery_sha256,
+        "published_at": published_at,
+        "reason_code": reason_code,
+        "occurred_at": occurred_at,
+        "previous_receipt_sha256": previous_receipt_sha256,
+    }
+    receipt_sha256 = _digest(payload)
+    return AgentJobPublicationReceipt(
+        **payload,
+        receipt_sha256=receipt_sha256,
+        authentication_sha256=_publication_receipt_authentication(
+            payload,
+            receipt_sha256=receipt_sha256,
+            key=key,
+        ),
+    )
+
+
+def _validate_publication_receipt_semantics(
+    receipt: AgentJobPublicationReceipt,
+) -> None:
+    if receipt.sequence == 1:
+        if (
+            receipt.state is not AgentJobPublicationState.PENDING
+            or receipt.owner_id is not None
+            or receipt.claim_epoch != 0
+            or receipt.claim_expires_at is not None
+            or receipt.attempt_count != 0
+            or receipt.delivery_sha256 is not None
+            or receipt.published_at is not None
+            or receipt.reason_code != "agent_publication_pending"
+            or receipt.previous_receipt_sha256 is not None
+        ):
+            raise ValueError("AgentJob publication initial receipt 语义无效。")
+        return
+    if receipt.previous_receipt_sha256 is None:
+        raise ValueError("AgentJob publication previous receipt 缺失。")
+    if receipt.state is AgentJobPublicationState.CLAIMED:
+        if (
+            receipt.owner_id is None
+            or receipt.claim_epoch < 1
+            or receipt.claim_expires_at is None
+            or _aware_time(
+                receipt.claim_expires_at,
+                field="claim_expires_at",
+            )
+            <= _aware_time(receipt.occurred_at, field="occurred_at")
+            or receipt.attempt_count < 1
+            or receipt.delivery_sha256 is not None
+            or receipt.published_at is not None
+            or receipt.reason_code not in {
+                "agent_publication_claimed",
+                "agent_publication_claim_taken_over",
+                "agent_publication_claim_renewed",
+            }
+        ):
+            raise ValueError("AgentJob publication claimed receipt 语义无效。")
+        return
+    if receipt.state is AgentJobPublicationState.PENDING:
+        if (
+            receipt.owner_id is not None
+            or receipt.claim_epoch < 1
+            or receipt.claim_expires_at is not None
+            or receipt.attempt_count < 1
+            or receipt.delivery_sha256 is not None
+            or receipt.published_at is not None
+            or receipt.reason_code != "agent_publication_released"
+        ):
+            raise ValueError("AgentJob publication release receipt 语义无效。")
+        return
+    if (
+        receipt.state is not AgentJobPublicationState.PUBLISHED
+        or receipt.owner_id is None
+        or receipt.claim_epoch < 1
+        or receipt.claim_expires_at is not None
+        or receipt.attempt_count < 1
+        or receipt.delivery_sha256 is None
+        or receipt.published_at is None
+        or receipt.published_at != receipt.occurred_at
+        or receipt.reason_code != "agent_publication_published"
+    ):
+        raise ValueError("AgentJob publication published receipt 语义无效。")
+
+
+def _publication_receipt_payload(
+    receipt: AgentJobPublicationReceipt,
+) -> dict[str, Any]:
+    return {
+        "schema_version": receipt.schema_version,
+        "publication_id": receipt.publication_id,
+        "job_id": receipt.job_id,
+        "sequence": receipt.sequence,
+        "request_sha256": receipt.request_sha256,
+        "result_sha256": receipt.result_sha256,
+        "state": receipt.state,
+        "owner_id": receipt.owner_id,
+        "claim_epoch": receipt.claim_epoch,
+        "claim_expires_at": receipt.claim_expires_at,
+        "attempt_count": receipt.attempt_count,
+        "delivery_sha256": receipt.delivery_sha256,
+        "published_at": receipt.published_at,
+        "reason_code": receipt.reason_code,
+        "occurred_at": receipt.occurred_at,
+        "previous_receipt_sha256": receipt.previous_receipt_sha256,
+    }
+
+
+def _verify_publication_receipt_authentication(
+    receipt: AgentJobPublicationReceipt,
+    *,
+    key: bytes,
+) -> None:
+    expected = _publication_receipt_authentication(
+        _publication_receipt_payload(receipt),
+        receipt_sha256=receipt.receipt_sha256,
+        key=key,
+    )
+    if not hmac.compare_digest(receipt.authentication_sha256, expected):
+        raise AgentJobError(
+            "AgentJob publication receipt authentication 无效。"
+        )
+
+
+def _publication_receipt_authentication(
+    payload: Mapping[str, Any],
+    *,
+    receipt_sha256: str,
+    key: bytes,
+) -> str:
+    derived = hmac.new(
+        key,
+        b"naumi-agent-job-publication-authentication-v1",
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        derived,
+        _canonical_json({
+            **payload,
+            "receipt_sha256": receipt_sha256,
+        }).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def _serialize_request(request: AgentWorkerRequest) -> str:
     return _canonical_json(asdict(request))
 
@@ -2275,6 +3511,23 @@ def _deserialize_receipt(value: str) -> AgentJobLifecycleReceipt:
     return AgentJobLifecycleReceipt(**payload)
 
 
+def _serialize_publication_receipt(
+    receipt: AgentJobPublicationReceipt,
+) -> str:
+    return _canonical_json(asdict(receipt))
+
+
+def _deserialize_publication_receipt(
+    value: str,
+) -> AgentJobPublicationReceipt:
+    payload = _load_json_object(value)
+    expected = set(AgentJobPublicationReceipt.__dataclass_fields__)
+    if set(payload) != expected:
+        raise ValueError("AgentJob publication receipt 字段集合无效。")
+    payload["state"] = AgentJobPublicationState(payload["state"])
+    return AgentJobPublicationReceipt(**payload)
+
+
 def _load_json_object(value: str) -> dict[str, Any]:
     decoded = json.loads(value)
     if not isinstance(decoded, dict):
@@ -2304,6 +3557,15 @@ def _job_id(request_sha256: str) -> str:
     return f"agent-job-{request_sha256}"
 
 
+def _publication_id(job_id: str, result_sha256: str) -> str:
+    _require_identifier(job_id, field="job_id")
+    _require_sha256(result_sha256, field="result_sha256")
+    identity = hashlib.sha256(
+        f"{job_id}:{result_sha256}".encode("ascii")
+    ).hexdigest()
+    return f"agent-publication-{identity}"
+
+
 def _require_identifier(value: str, *, field: str) -> None:
     if not isinstance(value, str) or not _IDENTIFIER_RE.fullmatch(value):
         raise ValueError(f"{field} 标识格式无效。")
@@ -2317,6 +3579,15 @@ def _require_sha256(value: str, *, field: str) -> None:
 def _require_positive_int(value: int, *, field: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise ValueError(f"{field} 必须是正整数。")
+
+
+def _require_bounded_limit(value: int, *, maximum: int) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= maximum
+    ):
+        raise ValueError(f"limit 必须是 1 到 {maximum} 之间的整数。")
 
 
 def _require_capacity_limit(
@@ -2413,7 +3684,63 @@ async def _apply_schema_v3(db: aiosqlite.Connection) -> None:
         await db.execute(statement)
 
 
+async def _apply_schema_v4(
+    db: aiosqlite.Connection,
+    *,
+    allow_create: bool,
+) -> None:
+    expected = {
+        "agent_job_publications": {
+            "publication_id", "job_id", "request_sha256", "result_sha256",
+            "state", "owner_id", "claim_epoch", "claim_expires_at",
+            "attempt_count", "created_at", "published_at",
+            "latest_sequence", "latest_receipt_sha256",
+            "latest_receipt_json",
+        },
+        "agent_job_publication_events": {
+            "publication_id", "sequence", "receipt_sha256",
+            "occurred_at", "state", "receipt_json",
+        },
+    }
+    tables = set(await _user_tables(db))
+    present = set(expected) & tables
+    if not present:
+        if not allow_create:
+            raise AgentJobError(
+                "AgentJob schema v4 publication 表缺失。"
+            )
+        for statement in _SCHEMA_V4:
+            await db.execute(statement)
+        return
+    if present != set(expected):
+        raise AgentJobError(
+            "AgentJob schema v4 publication 表处于不完整状态。"
+        )
+    for table, expected_columns in expected.items():
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        actual_columns = {str(row[1]) for row in await cursor.fetchall()}
+        if actual_columns != expected_columns:
+            raise AgentJobError(
+                f"AgentJob schema v4 {table} 列定义无效。"
+            )
+    cursor = await db.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'index'
+          AND name = 'agent_job_publications_recoverable'
+          AND tbl_name = 'agent_job_publications'
+        """
+    )
+    if await cursor.fetchone() is None:
+        raise AgentJobError(
+            "AgentJob schema v4 publication 恢复索引缺失。"
+        )
+
+
 _STATE_VALUES = ", ".join(f"'{state.value}'" for state in AgentJobState)
+_PUBLICATION_STATE_VALUES = ", ".join(
+    f"'{state.value}'" for state in AgentJobPublicationState
+)
 _SCHEMA_V1 = (
     f"""
     CREATE TABLE agent_jobs (
@@ -2472,6 +3799,44 @@ _SCHEMA_V3 = (
     """,
 )
 
+_SCHEMA_V4 = (
+    f"""
+    CREATE TABLE agent_job_publications (
+        publication_id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_jobs(job_id) ON DELETE RESTRICT,
+        request_sha256 TEXT NOT NULL,
+        result_sha256 TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL CHECK (state IN ({_PUBLICATION_STATE_VALUES})),
+        owner_id TEXT,
+        claim_epoch INTEGER NOT NULL CHECK (claim_epoch >= 0),
+        claim_expires_at TEXT,
+        attempt_count INTEGER NOT NULL CHECK (attempt_count >= 0),
+        created_at TEXT NOT NULL,
+        published_at TEXT,
+        latest_sequence INTEGER NOT NULL CHECK (latest_sequence >= 1),
+        latest_receipt_sha256 TEXT NOT NULL,
+        latest_receipt_json TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX agent_job_publications_recoverable
+    ON agent_job_publications (state, claim_expires_at, created_at, publication_id)
+    """,
+    f"""
+    CREATE TABLE agent_job_publication_events (
+        publication_id TEXT NOT NULL
+            REFERENCES agent_job_publications(publication_id) ON DELETE RESTRICT,
+        sequence INTEGER NOT NULL CHECK (sequence >= 1),
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        occurred_at TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ({_PUBLICATION_STATE_VALUES})),
+        receipt_json TEXT NOT NULL,
+        PRIMARY KEY (publication_id, sequence)
+    )
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
@@ -2484,10 +3849,15 @@ __all__ = [
     "AgentJobLifecycleConflictError",
     "AgentJobLifecycleReceipt",
     "AgentJobPayload",
+    "AgentJobPublicationBacklog",
+    "AgentJobPublicationReceipt",
+    "AgentJobPublicationState",
+    "AgentJobPublicationTransition",
     "AgentJobState",
     "AgentJobStore",
     "AgentJobTerminalPayload",
     "AgentJobTransitionResult",
     "StoredAgentJob",
+    "StoredAgentJobPublication",
     "TERMINAL_AGENT_JOB_STATES",
 ]

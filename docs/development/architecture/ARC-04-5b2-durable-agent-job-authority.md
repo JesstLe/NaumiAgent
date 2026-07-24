@@ -7,7 +7,8 @@ envelope。本切片建立独立 `AgentJobStore`，让 scheduler 可以在进程
 同时不把 task、context、session ID 或 message topic 以明文写入 SQLite。
 
 它交付 durable authority，不等于 Agent daemon 已完成。ARC-04.5c 已让 `SubAgentManager` 切换到该
-Store；模型原始 response 仍未作为可恢复的加密 terminal payload 持久化。
+Store；ARC-04.5d1 后续已补齐加密 terminal payload，ARC-04.5d2a 又补齐 durable publication outbox
+authority。
 
 ## 2. 不可变请求与加密 payload
 
@@ -98,10 +99,11 @@ key 也不能伪造 receipt authentication；事件或主表任一处被修改�
 
 ARC-04.5c 已完成 admit → claim → recover → running → renew → finish 生产链，并建立 terminal
 publication barrier；ARC-04.5d1 又把 response/error 加密绑定到 terminal result 并在生产发布前
-重新认证恢复。仍未完成：
+重新认证恢复；ARC-04.5d2a 已建立 outbox 状态机、lease/epoch、恢复目录和 HMAC receipt chain。
+仍未完成：
 
 - 没有自动 scheduler loop、claim-owner heartbeat 或 capacity reservation；
-- publication outbox、父进程崩溃后的自动结果重放与幂等消费回执；
+- production publication consumer、父进程崩溃后的自动结果重放与幂等 sink 回执；
 - `unknown` 只有证据化收口，没有 Provider request ID 对账或人工恢复动作；
 - key rotation、reencrypt、retention/GC、backup restore 和跨平台打包矩阵未完成。
 

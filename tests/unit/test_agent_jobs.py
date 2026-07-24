@@ -17,6 +17,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobError,
     AgentJobLifecycleConflictError,
     AgentJobPayload,
+    AgentJobPublicationState,
     AgentJobState,
     AgentJobStore,
     AgentJobTerminalPayload,
@@ -67,6 +68,48 @@ def _facts(
         issued_at=clock().isoformat(),
     )
     return request, payload
+
+
+async def _complete_job(
+    store: AgentJobStore,
+    clock: _Clock,
+    *,
+    task_id: str,
+    response: str = "durable publication result",
+) -> tuple[object, object]:
+    request, payload = _facts(clock, task_id=task_id)
+    admitted = await store.admit(request=request, payload=payload)
+    claimed = await store.claim(
+        admitted.job_id,
+        owner_id="worker-a",
+        lease_seconds=30,
+    )
+    await store.mark_running(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+    )
+    result = issue_agent_worker_result(
+        request=request,
+        status="completed",
+        response=response,
+        error=None,
+        total_tokens=3,
+        total_cost_usd=0.0,
+        turns=1,
+        completed_at=clock().isoformat(),
+    )
+    await store.finish(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=claimed.job.claim_epoch,
+        result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response=response,
+            error="",
+        ),
+    )
+    return admitted, result
 
 
 @pytest.mark.asyncio
@@ -1102,7 +1145,7 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 3
+    assert version == AGENT_JOB_SCHEMA_VERSION == 4
     assert table == ("agent_job_capacity_policy",)
 
 
@@ -1133,5 +1176,338 @@ async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
             row[1]
             for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 3
+    assert version == AGENT_JOB_SCHEMA_VERSION == 4
     assert "terminal_payload_envelope_json" in columns
+
+
+@pytest.mark.asyncio
+async def test_publication_outbox_claim_renew_ack_and_restart(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-lifecycle",
+    )
+
+    backlog = await store.publication_backlog()
+    assert (backlog.pending, backlog.live_claimed, backlog.expired_claims) == (
+        1,
+        0,
+        0,
+    )
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    recovery = await reopened.list_publication_recovery()
+    assert len(recovery) == 1
+    pending = recovery[0]
+    assert pending.job_id == admitted.job_id
+    assert pending.state is AgentJobPublicationState.PENDING
+    assert pending.latest_receipt.sequence == 1
+    with pytest.raises(AgentJobLifecycleConflictError, match="claimed"):
+        await reopened.release_publication_claim(
+            pending.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=1,
+        )
+
+    claimed = await reopened.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=10,
+    )
+    assert claimed is not None and claimed.applied
+    assert claimed.publication.state is AgentJobPublicationState.CLAIMED
+    assert claimed.publication.claim_epoch == 1
+    assert claimed.publication.attempt_count == 1
+    clock.advance(seconds=5)
+    renewed = await reopened.renew_publication_claim(
+        claimed.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=1,
+        lease_seconds=30,
+    )
+    assert renewed.publication.latest_receipt.sequence == 3
+    delivery_sha256 = hashlib.sha256(b"terminal-event-and-message").hexdigest()
+    published = await reopened.acknowledge_publication(
+        claimed.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=1,
+        delivery_sha256=delivery_sha256,
+    )
+    assert published.publication.state is AgentJobPublicationState.PUBLISHED
+    assert published.publication.latest_receipt.delivery_sha256 == delivery_sha256
+    replay = await reopened.acknowledge_publication(
+        claimed.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=1,
+        delivery_sha256=delivery_sha256,
+    )
+    assert not replay.applied
+    with pytest.raises(AgentJobLifecycleConflictError, match="幂等"):
+        await reopened.acknowledge_publication(
+            claimed.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=1,
+            delivery_sha256="0" * 64,
+        )
+    assert await reopened.list_publication_recovery() == ()
+    assert await reopened.claim_next_publication(
+        owner_id="publisher-b",
+        lease_seconds=10,
+    ) is None
+    backlog = await reopened.publication_backlog()
+    assert (backlog.pending, backlog.live_claimed, backlog.expired_claims) == (
+        0,
+        0,
+        0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_publication_expiry_takeover_release_and_old_owner_fence(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    first_store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    second_store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(
+        first_store,
+        clock,
+        task_id="publication-takeover",
+    )
+    first = await first_store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=10,
+    )
+    assert first is not None
+    clock.advance(seconds=11)
+    backlog = await second_store.publication_backlog()
+    assert backlog.expired_claims == 1
+    takeover = await second_store.claim_next_publication(
+        owner_id="publisher-b",
+        lease_seconds=20,
+    )
+    assert takeover is not None
+    assert takeover.publication.claim_epoch == 2
+    assert takeover.publication.attempt_count == 2
+    with pytest.raises(AgentJobLifecycleConflictError, match="owner"):
+        await first_store.release_publication_claim(
+            first.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=1,
+        )
+    released = await second_store.release_publication_claim(
+        takeover.publication.publication_id,
+        owner_id="publisher-b",
+        claim_epoch=2,
+    )
+    assert released.publication.state is AgentJobPublicationState.PENDING
+    assert released.publication.owner_id is None
+    third = await first_store.claim_next_publication(
+        owner_id="publisher-c",
+        lease_seconds=20,
+    )
+    assert third is not None
+    assert third.publication.claim_epoch == 3
+    assert third.publication.attempt_count == 3
+
+
+@pytest.mark.asyncio
+async def test_publication_receipt_tampering_fails_hmac_validation(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(store, clock, task_id="publication-tamper")
+    claimed = await store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    assert claimed is not None
+    publication_id = claimed.publication.publication_id
+
+    with sqlite3.connect(path) as db:
+        receipt = json.loads(
+            db.execute(
+                """
+                SELECT latest_receipt_json
+                FROM agent_job_publications
+                WHERE publication_id = ?
+                """,
+                (publication_id,),
+            ).fetchone()[0]
+        )
+        receipt["attempt_count"] = 2
+        public = {
+            name: value
+            for name, value in receipt.items()
+            if name not in {"receipt_sha256", "authentication_sha256"}
+        }
+        receipt["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                public,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        serialized = json.dumps(
+            receipt,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        db.execute(
+            """
+            UPDATE agent_job_publications
+            SET attempt_count = 2, latest_receipt_sha256 = ?,
+                latest_receipt_json = ?
+            WHERE publication_id = ?
+            """,
+            (receipt["receipt_sha256"], serialized, publication_id),
+        )
+        db.execute(
+            """
+            UPDATE agent_job_publication_events
+            SET receipt_sha256 = ?, receipt_json = ?
+            WHERE publication_id = ? AND sequence = 2
+            """,
+            (
+                receipt["receipt_sha256"],
+                serialized,
+                publication_id,
+            ),
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="authentication"):
+        await reopened.get_publication(publication_id)
+
+
+@pytest.mark.asyncio
+async def test_publication_event_projection_tampering_fails_closed(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(store, clock, task_id="publication-event-projection")
+    pending = (await store.list_publication_recovery())[0]
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """
+            UPDATE agent_job_publication_events
+            SET state = ?
+            WHERE publication_id = ? AND sequence = 1
+            """,
+            (
+                AgentJobPublicationState.CLAIMED.value,
+                pending.publication_id,
+            ),
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="投影与 receipt 不一致"):
+        await reopened.get_publication(pending.publication_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-migration",
+        response="legacy v3 terminal response",
+    )
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_events")
+        db.execute("DROP TABLE agent_job_publications")
+        db.execute("PRAGMA user_version = 3")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    restored = await reopened.get(admitted.job_id)
+    assert restored is not None
+    assert restored.result == result
+    assert await reopened.list_publication_recovery() == ()
+    replay = await reopened.finish(
+        admitted.job_id,
+        owner_id="worker-a",
+        claim_epoch=1,
+        result=result,
+        terminal_payload=AgentJobTerminalPayload(
+            response="legacy v3 terminal response",
+            error="",
+        ),
+    )
+    assert not replay.applied
+    recovery = await reopened.list_publication_recovery()
+    assert len(recovery) == 1
+    assert recovery[0].job_id == admitted.job_id
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        tables = {
+            row[0]
+            for row in db.execute(
+                """
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                """
+            ).fetchall()
+        }
+    assert version == AGENT_JOB_SCHEMA_VERSION == 4
+    assert {
+        "agent_job_publications",
+        "agent_job_publication_events",
+    } <= tables
+
+
+@pytest.mark.asyncio
+async def test_schema_v4_rejects_missing_publication_recovery_index(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="publication-index-integrity")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP INDEX agent_job_publications_recoverable")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="恢复索引缺失"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v4_rejects_missing_publication_tables(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="publication-table-integrity")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_events")
+        db.execute("DROP TABLE agent_job_publications")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="publication 表缺失"):
+        await reopened.get(admitted.job_id)
