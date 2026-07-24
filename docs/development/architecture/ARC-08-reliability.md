@@ -25,7 +25,8 @@
   durable Agent payload 和未来加密 backup 的共同安全原语；key rotation、迁移与灾难恢复仍未实现。
 - ARC-04.5b2 已让 Agent request payload 进入加密 schema v1 Store，并区分 pre-start takeover 与
   running unknown recovery；ARC-04.5c 已把 embedded Agent 接入 lease renewal 与 terminal
-  publication barrier。Provider 对账、response recovery、retention 和告警仍未实现。
+  publication barrier；ARC-04.5d1 已补齐加密 terminal response recovery，ARC-04.5d2a 已补齐
+  durable publication outbox authority。生产 outbox consumer、Provider 对账、retention 和告警仍未实现。
 
 ## 初始 SLO
 

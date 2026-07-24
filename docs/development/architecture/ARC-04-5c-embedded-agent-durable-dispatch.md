@@ -85,8 +85,9 @@ embedded owner 使用 90 秒 claim lease，并每 30 秒续期。renewal 与模�
 - Runtime 在 running terminal commit 前崩溃：ARC-04.5b2 将其列为 recovery required，禁止自动重跑。
 
 ARC-04.5d1 已补上与 result receipt 强绑定的加密 terminal payload，并让生产 manager 只发布从 Store
-重新认证恢复的 response/error。当前仍没有自动恢复 claimed job 的 scheduler、publication outbox 或
-跨 Runtime 结果重放。
+重新认证恢复的 response/error。ARC-04.5d2a 又建立了与 terminal transaction 原子创建的 publication
+outbox、lease/epoch fencing 和恢复目录。当前仍没有自动恢复 claimed job 的 scheduler、生产 outbox
+consumer 或跨 Runtime 结果重放。
 
 ## 6. Agent Control / New UI / TUI 共享证据
 
@@ -128,7 +129,8 @@ Textual formatter 都只消费该 authority：
 - 独立 Agent worker 进程、Worker Registry incarnation 与 Supervisor；
 - 跨进程 capacity reservation、durable waiting fairness、priority/affinity；
 - claimed job 的自动 scheduler、重启接管和显式人工恢复动作；
-- publication outbox lease、父进程崩溃后的自动结果重放与幂等消费；
+- publication outbox authority 已完成，但生产消费、父进程崩溃后的自动结果重放与幂等 sink receipt
+  尚未完成；
 - Provider request ID 对账、unknown 人工裁决；
 - key rotation/reencrypt、Agent Job retention/GC、备份恢复；
 - Windows/macOS/Linux 独立打包后的 credential/SQLite/崩溃矩阵。
@@ -139,9 +141,11 @@ Textual formatter 都只消费该 authority：
 1. `HAR-10.7c / ARC-06.2c Agent Capacity Admission`：已让跨 Runtime Agent 等待消费共享 durable
    capacity，见 [设计与验证](ARC-06-2c-durable-embedded-agent-capacity.md)；
 2. `ARC-04.5d1 Durable Agent Terminal Payload`：已解决可恢复原文的加密 source 与生产读取屏障，
-   见 [设计与验证](ARC-04-5d1-durable-agent-terminal-payload.md)；下一小切片是带 lease/epoch 的
-   publication outbox；
-3. Agent recovery UI：只读列出 claimed/running/unknown 并提供精确人工动作。
+   见 [设计与验证](ARC-04-5d1-durable-agent-terminal-payload.md)；
+3. `ARC-04.5d2a Agent Result Publication Outbox Authority`：已建立带 lease/epoch、恢复目录和
+   HMAC receipt chain 的 durable outbox；下一小切片是 production manager/sink 消费，见
+   [设计与验证](ARC-04-5d2a-agent-result-publication-outbox.md)；
+4. Agent recovery UI：只读列出 claimed/running/unknown 与 publication backlog，并提供精确人工动作。
 
 选择前必须检查三者与当前 Harness durable queue、Agent Control 和 Supervisor 文档的依赖，不默认沿
 ARC 编号继续。
