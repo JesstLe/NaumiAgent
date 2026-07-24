@@ -80,7 +80,8 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 
 - ARC-04.5c 已让 embedded 路径消费加密 Agent Job authority，request/context 可在 live claim 下恢复；
 - ARC-04.5d1 已将 response/error 加密绑定到 terminal result，并要求生产发布前重新认证恢复；
-- ARC-04.5d2a 已建立 durable publication outbox authority；生产消费与父进程崩溃后的自动重放仍未完成；
+- ARC-04.5d2a 已建立 durable publication outbox authority；ARC-04.5d2b 已补齐幂等 result inbox、
+  生产在线消费与 startup recovery，周期 retry/UI read-ack 仍未完成；
 - Agent 仍由 embedded Runtime 直接调用模型，不是注册到 Worker Registry 的持久 incarnation；
 - 尚未消费 Worker capacity reservation/FIFO、claim owner lease 或 workspace/provider fairness；
 - message bus 仍是 session-scoped 内存实现；

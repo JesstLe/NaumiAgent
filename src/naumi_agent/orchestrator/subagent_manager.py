@@ -22,7 +22,7 @@ from naumi_agent.agents.base import (
     resolve_agent_tool_names,
 )
 from naumi_agent.agents.factory import DynamicAgentFactory
-from naumi_agent.agents.message_bus import AgentMessageBus
+from naumi_agent.agents.message_bus import AgentMessage, AgentMessageBus
 from naumi_agent.agents.presets import ALL_AGENT_CONFIGS
 from naumi_agent.daemons.agent_jobs import (
     AgentJobCapacityExhaustedError,
@@ -30,6 +30,8 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobError,
     AgentJobKeyUnavailableError,
     AgentJobPayload,
+    AgentJobPublicationContent,
+    AgentJobPublicationDeliveryTransition,
     AgentJobState,
     AgentJobStore,
     AgentJobTerminalPayload,
@@ -58,6 +60,8 @@ _IDLE_TIMEOUT_SECONDS = 300  # 5 minutes
 _REAPER_INTERVAL_SECONDS = 30
 _AGENT_JOB_LEASE_SECONDS = 90
 _AGENT_JOB_RENEW_INTERVAL_SECONDS = 30
+_AGENT_PUBLICATION_LEASE_SECONDS = 60
+_AGENT_PUBLICATION_RECOVERY_LIMIT = 100
 _AGENT_JOB_CAPACITY_POLL_MIN_SECONDS = 0.05
 _AGENT_JOB_CAPACITY_POLL_MAX_SECONDS = 0.5
 _AGENT_ADMISSION_STACK: ContextVar[tuple[int, ...]] = ContextVar(
@@ -173,6 +177,17 @@ class StopExecutionResult:
     message: str
 
 
+@dataclass(frozen=True)
+class AgentPublicationRecoverySummary:
+    """Content-free summary of one bounded durable publication recovery pass."""
+
+    scanned: int = 0
+    delivered: int = 0
+    notification_failures: int = 0
+    failed: int = 0
+    failure_codes: tuple[str, ...] = ()
+
+
 @dataclass
 class _ActiveExecution:
     task_id: str
@@ -231,6 +246,10 @@ class SubAgentManager:
             raise TypeError("agent_job_store 必须是 AgentJobStore。")
         self._agent_job_store = resolved_agent_job_store
         self._agent_job_owner_id = f"embedded-agent-{uuid4().hex}"
+        self._agent_publication_owner_id = (
+            f"embedded-agent-publisher-{uuid4().hex}"
+        )
+        self._last_publication_recovery = AgentPublicationRecoverySummary()
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
@@ -510,6 +529,89 @@ class SubAgentManager:
     async def capacity_snapshot(self) -> AgentJobCapacitySnapshot | None:
         """Expose the durable embedded capacity authority without raw jobs."""
         return await self._agent_job_store.capacity_snapshot()
+
+    def publication_recovery_status(self) -> dict[str, object]:
+        """Expose only bounded counters and stable failure codes."""
+        summary = self._last_publication_recovery
+        return {
+            "scanned": summary.scanned,
+            "delivered": summary.delivered,
+            "notification_failures": summary.notification_failures,
+            "failed": summary.failed,
+            "failure_codes": list(summary.failure_codes),
+        }
+
+    async def recover_pending_publications(
+        self,
+        *,
+        limit: int = _AGENT_PUBLICATION_RECOVERY_LIMIT,
+    ) -> AgentPublicationRecoverySummary:
+        """Deliver a bounded FIFO prefix of terminal publications after restart."""
+        safe_limit = max(1, min(int(limit), 1000))
+        scanned = 0
+        delivered = 0
+        notification_failures = 0
+        failure_codes: list[str] = []
+        for _ in range(safe_limit):
+            try:
+                claimed = await self._agent_job_store.claim_next_publication(
+                    owner_id=self._agent_publication_owner_id,
+                    lease_seconds=_AGENT_PUBLICATION_LEASE_SECONDS,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Agent publication recovery claim failed: %s",
+                    type(exc).__name__,
+                )
+                failure_codes.append("agent_publication_recovery_claim_failed")
+                break
+            if claimed is None:
+                break
+            scanned += 1
+            publication = claimed.publication
+            try:
+                content = await self._agent_job_store.recover_publication_content(
+                    publication.publication_id,
+                    owner_id=self._agent_publication_owner_id,
+                    claim_epoch=publication.claim_epoch,
+                )
+                transition = (
+                    await self._agent_job_store.deliver_publication_to_inbox(
+                        publication.publication_id,
+                        owner_id=self._agent_publication_owner_id,
+                        claim_epoch=publication.claim_epoch,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Agent publication recovery delivery failed [%s]: %s",
+                    publication.publication_id,
+                    type(exc).__name__,
+                )
+                failure_codes.append(
+                    "agent_publication_recovery_delivery_failed"
+                )
+                await self._release_publication_after_failure(
+                    publication.publication_id,
+                    claim_epoch=publication.claim_epoch,
+                )
+                break
+            delivered += 1
+            if not await self._publish_publication_notification(
+                content,
+                transition,
+            ):
+                notification_failures += 1
+
+        summary = AgentPublicationRecoverySummary(
+            scanned=scanned,
+            delivered=delivered,
+            notification_failures=notification_failures,
+            failed=len(failure_codes),
+            failure_codes=tuple(sorted(set(failure_codes))),
+        )
+        self._last_publication_recovery = summary
+        return summary
 
     async def stop_execution(
         self,
@@ -1019,6 +1121,19 @@ class SubAgentManager:
                             turns=effective_result.turns,
                             error=recovered_payload.error or None,
                         )
+                        try:
+                            await self._deliver_execution_publication(
+                                execution,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "AgentJob publication delivery failed [%s]: %s",
+                                task_id,
+                                type(exc).__name__,
+                            )
+                            execution.worker_job_failure_code = (
+                                "agent_job_publication_delivery_failed"
+                            )
 
         lifecycle = execution.heartbeat_lifecycle
         if lifecycle is not None:
@@ -1586,23 +1701,97 @@ class SubAgentManager:
             agent_name=agent_name,
         ))
 
-        # Auto-publish completed results to the bus
-        if result.status == "completed" and result.response:
-            from naumi_agent.agents.message_bus import AgentMessage
-
-            bus_msg = AgentMessage(
-                sender=agent_name,
-                topic=f"task.{task.id}.completed",
-                content=result.response[:2000],
-                metadata={
-                    "task_id": task.id,
-                    "tokens": result.total_tokens,
-                    "cost": result.total_cost_usd,
-                },
-            )
-            await self.message_bus.publish(bus_msg)
-
         return result
+
+    async def _deliver_execution_publication(
+        self,
+        execution: _ActiveExecution,
+    ) -> AgentJobPublicationDeliveryTransition:
+        publication = await self._agent_job_store.get_job_publication(
+            execution.worker_job_id,
+        )
+        if publication is None:
+            raise AgentJobError("AgentJob terminal publication 不存在。")
+        claimed = await self._agent_job_store.claim_publication(
+            publication.publication_id,
+            owner_id=self._agent_publication_owner_id,
+            lease_seconds=_AGENT_PUBLICATION_LEASE_SECONDS,
+        )
+        try:
+            content = await self._agent_job_store.recover_publication_content(
+                publication.publication_id,
+                owner_id=self._agent_publication_owner_id,
+                claim_epoch=claimed.publication.claim_epoch,
+            )
+            _validate_execution_publication(execution, content)
+            transition = (
+                await self._agent_job_store.deliver_publication_to_inbox(
+                    publication.publication_id,
+                    owner_id=self._agent_publication_owner_id,
+                    claim_epoch=claimed.publication.claim_epoch,
+                )
+            )
+        except Exception:
+            await self._release_publication_after_failure(
+                publication.publication_id,
+                claim_epoch=claimed.publication.claim_epoch,
+            )
+            raise
+        await self._publish_publication_notification(content, transition)
+        return transition
+
+    async def _release_publication_after_failure(
+        self,
+        publication_id: str,
+        *,
+        claim_epoch: int,
+    ) -> None:
+        try:
+            await self._agent_job_store.release_publication_claim(
+                publication_id,
+                owner_id=self._agent_publication_owner_id,
+                claim_epoch=claim_epoch,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Agent publication claim release failed [%s]: %s",
+                publication_id,
+                type(exc).__name__,
+            )
+
+    async def _publish_publication_notification(
+        self,
+        content: AgentJobPublicationContent,
+        transition: AgentJobPublicationDeliveryTransition,
+    ) -> bool:
+        """Best-effort wake-up only; the durable inbox is the ACK boundary."""
+        result = content.result
+        delivery = transition.delivery
+        try:
+            await self.message_bus.publish(AgentMessage(
+                sender=content.request.agent_name,
+                topic=content.payload.message_topic,
+                content=content.terminal_payload.response[:2000],
+                metadata={
+                    "task_id": content.payload.task_id,
+                    "status": result.status.value,
+                    "tokens": result.total_tokens,
+                    "cost": result.total_cost_microusd / 1_000_000,
+                    "publication_id": delivery.publication_id,
+                    "delivery_id": delivery.delivery_id,
+                    "delivery_sha256": delivery.delivery_sha256,
+                    "result_sha256": delivery.result_sha256,
+                    "durable_inbox": True,
+                },
+            ))
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Agent publication notification failed [%s]: %s",
+                delivery.publication_id,
+                type(exc).__name__,
+            )
+            return False
 
     async def _emit_subagent_event(
         self,
@@ -1911,6 +2100,30 @@ def _isolated_agent_terminal_payload_result(
             "为避免展示不可信内容，已安全隔离。"
         ),
     )
+
+
+def _validate_execution_publication(
+    execution: _ActiveExecution,
+    content: AgentJobPublicationContent,
+) -> None:
+    if content.request != execution.worker_request:
+        raise AgentJobError(
+            "AgentJob publication request 与当前执行不一致。"
+        )
+    if execution.worker_result is None or content.result != execution.worker_result:
+        raise AgentJobError(
+            "AgentJob publication result 与当前执行不一致。"
+        )
+    if (
+        content.payload.task_id != execution.task_id
+        or content.payload.session_id != execution.session_id
+        or content.request.agent_name != execution.agent_name
+        or content.payload.message_topic
+        != f"task.{execution.task_id}.completed"
+    ):
+        raise AgentJobError(
+            "AgentJob publication routing 与当前执行不一致。"
+        )
 
 
 def _execution_record(

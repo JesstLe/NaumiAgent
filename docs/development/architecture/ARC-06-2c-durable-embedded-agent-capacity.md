@@ -40,6 +40,8 @@ local bounded admission
 
 ARC-04.5d1 后续把 Store 升级到 schema v3 并新增加密 terminal payload 列；ARC-04.5d2a 又升级到
 schema v4，新增 publication outbox 和 event chain。本节的 capacity policy、计数与迁移语义保持不变。
+ARC-04.5d2b 又把 Store 升级到 schema v5，新增幂等 result inbox；同样不改变本节 capacity
+policy 与 FIFO 语义。
 
 policy 不保存 workspace 路径、Prompt、模型结果、owner ID 或密钥。Store 仍使用原有显式 Runtime key 管理
 加密 job payload 和认证 lifecycle receipt。
@@ -134,15 +136,15 @@ expired running 不能因为 lease 到期就自动释放容量。模型或外部
 - 独立 Agent Worker 注册、认证 transport、Supervisor、drain/upgrade；
 - Worker Registry 物理 slot reservation；未来独立 Worker dispatch 仍必须叠加 ARC-06.1 authority；
 - 自动接管 expired claimed Job；当前仅计数并允许 exact owner/caller takeover；
-- running recovery UI 动作、自动 unknown 裁决，以及 result publication outbox 的生产消费；
+- running recovery UI 动作、自动 unknown 裁决，以及 result inbox 的 UI read/ack、周期 retry；
 - priority、aging、跨 workspace/user/provider 公平、token/cost reservation；
 - 多主机共识、leader lease、24h soak 与 1k job 压测。
 
 下一步不应直接扩张完整 scheduler。应重新比较：
 
 1. `ARC-04.5d1 Durable Agent Terminal Payload` 已完成加密原文 source 与生产恢复屏障，
-   `ARC-04.5d2a` 已完成 publication outbox authority；下一步是 `ARC-04.5d2b` production
-   consumption，修复 terminal commit 后发布前崩溃的自动重放缺口；
+   `ARC-04.5d2a` 已完成 publication outbox authority，`ARC-04.5d2b` 已完成 production
+   manager 在线消费、幂等 inbox 与 startup recovery；下一步应比较 recovery UI 与 Supervisor 依赖。
 2. Agent recovery UI，为 reclaimable/recovery-required 提供精确人工动作；
 3. `ARC-06.3 Provider Budget Reservation`，让模型并发同时受 provider/token/cost 预算约束。
 

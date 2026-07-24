@@ -6,7 +6,12 @@ import pytest
 
 from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.config.settings import AppConfig, SafetyConfig
-from naumi_agent.daemons.agent_jobs import AgentJobError, AgentJobState, AgentJobStore
+from naumi_agent.daemons.agent_jobs import (
+    AgentJobError,
+    AgentJobPublicationState,
+    AgentJobState,
+    AgentJobStore,
+)
 from naumi_agent.orchestrator.engine import AgentEngine
 from naumi_agent.orchestrator.subagent_manager import (
     AgentState,
@@ -845,12 +850,113 @@ class TestSubAgentManager:
         )
         assert terminal_payload.response == "durable-private-result-6bfa"
         assert terminal_payload.error == ""
+        publication = await manager._agent_job_store.get_job_publication(
+            record.worker_job_id,
+        )
+        assert publication is not None
+        assert publication.state is AgentJobPublicationState.PUBLISHED
+        inbox = await manager._agent_job_store.list_result_inbox("")
+        delivery = next(
+            item for item in inbox
+            if item.publication_id == publication.publication_id
+        )
+        recovered = await manager._agent_job_store.recover_delivered_result(
+            delivery.delivery_id,
+            expected_delivery_sha256=delivery.delivery_sha256,
+        )
+        assert recovered.terminal_payload.response == (
+            "durable-private-result-6bfa"
+        )
         raw_store = manager._agent_job_store.db_path.read_bytes()
         assert b"durable-private-task-8cd1" not in raw_store
         assert b"durable-private-result-6bfa" not in raw_store
         stopped = await manager.stop_execution("finished")
         assert stopped.accepted is False
         assert stopped.code == "already_finished"
+
+    @pytest.mark.asyncio
+    async def test_restart_recovers_publication_after_live_delivery_gap(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        path = tmp_path / "restart-publication.db"
+        first = SubAgentManager(
+            AgentEngine(AppConfig()),
+            agent_job_store=AgentJobStore(path),
+        )
+        agent = first.get_agent("coder")
+        assert agent is not None
+
+        async def execute(**_: object) -> AgentResult:
+            return AgentResult(
+                status="completed",
+                response="restart-safe-result",
+                total_tokens=12,
+                total_cost_usd=0.002,
+                turns=2,
+            )
+
+        async def fail_live_delivery(_: object) -> object:
+            raise AgentJobError("injected post-commit gap")
+
+        monkeypatch.setattr(agent, "execute", execute)
+        monkeypatch.setattr(
+            first,
+            "_deliver_execution_publication",
+            fail_live_delivery,
+        )
+        result = await first.delegate(
+            SubTask("restart-publication", "work", "coder")
+        )
+        assert result.status == "completed"
+        first_record = next(
+            item for item in first.list_executions()
+            if item.task_id == "restart-publication"
+        )
+        assert first_record.worker_job_failure_code == (
+            "agent_job_publication_delivery_failed"
+        )
+        pending = await first._agent_job_store.get_job_publication(
+            first_record.worker_job_id,
+        )
+        assert pending is not None
+        assert pending.state is AgentJobPublicationState.PENDING
+
+        restarted = SubAgentManager(
+            AgentEngine(AppConfig()),
+            agent_job_store=AgentJobStore(path),
+        )
+        summary = await restarted.recover_pending_publications()
+
+        assert summary.scanned == 1
+        assert summary.delivered == 1
+        assert summary.failed == 0
+        assert summary.notification_failures == 0
+        assert restarted.publication_recovery_status() == {
+            "scanned": 1,
+            "delivered": 1,
+            "notification_failures": 0,
+            "failed": 0,
+            "failure_codes": [],
+        }
+        delivered = await restarted._agent_job_store.get_publication(
+            pending.publication_id,
+        )
+        assert delivered is not None
+        assert delivered.state is AgentJobPublicationState.PUBLISHED
+        inbox = await restarted._agent_job_store.list_result_inbox("")
+        assert len(inbox) == 1
+        content = await restarted._agent_job_store.recover_delivered_result(
+            inbox[0].delivery_id,
+            expected_delivery_sha256=inbox[0].delivery_sha256,
+        )
+        assert content.terminal_payload.response == "restart-safe-result"
+        history = restarted.message_bus.get_history(
+            topic="task.restart-publication.completed",
+        )
+        assert len(history) == 1
+        assert history[0].metadata["delivery_id"] == inbox[0].delivery_id
 
     @pytest.mark.asyncio
     async def test_two_runtime_managers_share_durable_capacity_fifo(

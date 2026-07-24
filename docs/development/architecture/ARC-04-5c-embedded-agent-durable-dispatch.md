@@ -129,8 +129,8 @@ Textual formatter 都只消费该 authority：
 - 独立 Agent worker 进程、Worker Registry incarnation 与 Supervisor；
 - 跨进程 capacity reservation、durable waiting fairness、priority/affinity；
 - claimed job 的自动 scheduler、重启接管和显式人工恢复动作；
-- publication outbox authority 已完成，但生产消费、父进程崩溃后的自动结果重放与幂等 sink receipt
-  尚未完成；
+- publication outbox、幂等 durable result inbox、生产在线消费与 startup recovery 已完成；周期
+  retry、UI read/ack、retention 与外部 sink receipt 尚未完成；
 - Provider request ID 对账、unknown 人工裁决；
 - key rotation/reencrypt、Agent Job retention/GC、备份恢复；
 - Windows/macOS/Linux 独立打包后的 credential/SQLite/崩溃矩阵。
@@ -143,9 +143,13 @@ Textual formatter 都只消费该 authority：
 2. `ARC-04.5d1 Durable Agent Terminal Payload`：已解决可恢复原文的加密 source 与生产读取屏障，
    见 [设计与验证](ARC-04-5d1-durable-agent-terminal-payload.md)；
 3. `ARC-04.5d2a Agent Result Publication Outbox Authority`：已建立带 lease/epoch、恢复目录和
-   HMAC receipt chain 的 durable outbox；下一小切片是 production manager/sink 消费，见
+   HMAC receipt chain 的 durable outbox，见
    [设计与验证](ARC-04-5d2a-agent-result-publication-outbox.md)；
-4. Agent recovery UI：只读列出 claimed/running/unknown 与 publication backlog，并提供精确人工动作。
+4. `ARC-04.5d2b Agent Result Publication Consumption`：已建立幂等 durable inbox、在线消费和
+   startup recovery，见
+   [设计与验证](ARC-04-5d2b-agent-result-publication-consumption.md)；
+5. Agent recovery UI：只读列出 claimed/running/unknown、publication backlog 与 inbox，并提供精确
+   人工动作。
 
 选择前必须检查三者与当前 Harness durable queue、Agent Control 和 Supervisor 文档的依赖，不默认沿
 ARC 编号继续。
