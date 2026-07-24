@@ -85,6 +85,10 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         order.append("recover")
         return ()
 
+    async def recover_publications():
+        order.append("publications")
+        return SimpleNamespace()
+
     def start() -> bool:
         order.append("start")
         return True
@@ -92,6 +96,9 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
     engine.evolution_patch_recovery.recover_pending = recover_patches  # type: ignore[method-assign]
     engine.evolution_patch_set_recovery.recover_pending = recover_patch_sets  # type: ignore[method-assign]
     engine.recover_session_reconciliations = recover  # type: ignore[method-assign]
+    engine.subagent_manager.recover_pending_publications = (  # type: ignore[method-assign]
+        recover_publications
+    )
     engine.start_session_retention_worker = start  # type: ignore[method-assign]
     try:
         recovered = await engine.start_long_running_services()
@@ -99,7 +106,13 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         await engine.shutdown()
 
     assert recovered == ()
-    assert order == ["patch_set", "patch", "recover", "start"]
+    assert order == [
+        "patch_set",
+        "patch",
+        "recover",
+        "publications",
+        "start",
+    ]
 
 
 @pytest.mark.asyncio
@@ -115,6 +128,25 @@ async def test_long_running_startup_does_not_start_worker_after_recovery_failure
     )
     try:
         with pytest.raises(RuntimeError, match="broken recovery"):
+            await engine.start_long_running_services()
+        engine.start_session_retention_worker.assert_not_called()
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_long_running_startup_does_not_start_worker_after_publication_failure(
+    tmp_path,
+) -> None:
+    engine = _engine(tmp_path, enabled=True)
+    engine.subagent_manager.recover_pending_publications = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("broken publication recovery")
+    )
+    engine.start_session_retention_worker = MagicMock(  # type: ignore[method-assign]
+        return_value=True
+    )
+    try:
+        with pytest.raises(RuntimeError, match="broken publication recovery"):
             await engine.start_long_running_services()
         engine.start_session_retention_worker.assert_not_called()
     finally:

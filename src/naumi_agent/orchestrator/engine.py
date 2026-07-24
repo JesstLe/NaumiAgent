@@ -2630,6 +2630,7 @@ class AgentEngine:
             await self.evolution_patch_recovery.recover_pending()
         )
         recovered = await self.recover_session_reconciliations()
+        await self.subagent_manager.recover_pending_publications()
         self.start_session_retention_worker()
         return recovered
 

@@ -15,6 +15,17 @@ from naumi_agent.agents.message_bus import (
 pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_agent_job_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(
+        "NAUMI_MEMORY__SESSION_DB_PATH",
+        str(tmp_path / ".naumi" / "sessions.db"),
+    )
+
+
 @pytest.fixture
 def bus() -> AgentMessageBus:
     return AgentMessageBus()
@@ -407,11 +418,15 @@ class TestIntegrationWithSubAgentManager:
         assert manager.message_bus is not None
 
     @pytest.mark.asyncio
-    async def test_delegate_auto_publishes_to_bus(self) -> None:
+    async def test_delegate_notifies_bus_after_durable_inbox_delivery(
+        self,
+        tmp_path,
+    ) -> None:
         from unittest.mock import AsyncMock, MagicMock
 
         from naumi_agent.agents.base import AgentResult
         from naumi_agent.config.settings import AppConfig
+        from naumi_agent.daemons.agent_jobs import AgentJobStore
         from naumi_agent.orchestrator.engine import AgentEngine
         from naumi_agent.orchestrator.subagent_manager import (
             SubAgentManager,
@@ -419,7 +434,12 @@ class TestIntegrationWithSubAgentManager:
         )
 
         engine = AgentEngine(AppConfig())
-        manager = SubAgentManager(engine)
+        manager = SubAgentManager(
+            engine,
+            agent_job_store=AgentJobStore(
+                tmp_path / "agent-publication-notification.db"
+            ),
+        )
 
         # Mock the agent's execute to return a completed result
         mock_agent = MagicMock()
@@ -455,6 +475,76 @@ class TestIntegrationWithSubAgentManager:
         )
         assert len(history) == 1
         assert history[0].content == "analysis complete"
+        assert history[0].metadata["durable_inbox"] is True
+        assert history[0].metadata["task_id"] == "test_task"
+        assert len(history[0].metadata["publication_id"]) > 20
+        assert len(history[0].metadata["delivery_id"]) > 20
+        assert len(history[0].metadata["delivery_sha256"]) == 64
+        inbox = await manager._agent_job_store.list_result_inbox("")
+        assert len(inbox) == 1
+        assert inbox[0].delivery_id == history[0].metadata["delivery_id"]
+
+    @pytest.mark.asyncio
+    async def test_bus_failure_does_not_roll_back_durable_inbox(
+        self,
+        tmp_path,
+    ) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from naumi_agent.agents.base import AgentResult
+        from naumi_agent.config.settings import AppConfig
+        from naumi_agent.daemons.agent_jobs import (
+            AgentJobPublicationState,
+            AgentJobStore,
+        )
+        from naumi_agent.orchestrator.engine import AgentEngine
+        from naumi_agent.orchestrator.subagent_manager import (
+            SubAgentManager,
+            SubTask,
+        )
+
+        manager = SubAgentManager(
+            AgentEngine(AppConfig()),
+            agent_job_store=AgentJobStore(
+                tmp_path / "agent-publication-bus-failure.db"
+            ),
+        )
+        mock_agent = MagicMock()
+        mock_agent.tool_names = ()
+        mock_agent.config = SimpleNamespace(
+            permission_level="moderate",
+            model_tier="capable",
+            max_turns=50,
+            max_budget_usd=None,
+        )
+        mock_agent.execute = AsyncMock(return_value=AgentResult(
+            status="completed",
+            response="durable despite bus failure",
+        ))
+        manager._agents["test_expert"] = mock_agent
+        manager.message_bus.publish = AsyncMock(  # type: ignore[method-assign]
+            side_effect=RuntimeError("injected bus failure")
+        )
+
+        result = await manager.delegate(SubTask(
+            "bus-failure",
+            "analyze this",
+            "test_expert",
+        ))
+
+        assert result.status == "completed"
+        record = next(
+            item for item in manager.list_executions()
+            if item.task_id == "bus-failure"
+        )
+        assert record.worker_job_failure_code == ""
+        publication = await manager._agent_job_store.get_job_publication(
+            record.worker_job_id,
+        )
+        assert publication is not None
+        assert publication.state is AgentJobPublicationState.PUBLISHED
+        inbox = await manager._agent_job_store.list_result_inbox("")
+        assert len(inbox) == 1
 
     @pytest.mark.asyncio
     async def test_delegate_injects_blackboard_into_context(self) -> None:

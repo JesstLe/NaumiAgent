@@ -76,11 +76,14 @@
   详见 `ARC-04-5d1-durable-agent-terminal-payload.md`。
 - ARC-04.5d2a 已将 AgentJob authority 升级到 schema v4：每个带 result 的 terminal commit 在同一
   事务原子创建 `pending` publication，提供 FIFO claim、lease/epoch fencing、renew/release/ack、
-  HMAC receipt chain、重启恢复目录与 backlog 聚合。它尚未接入生产 manager/sink，不声称自动重放或
-  exactly-once。详见 `ARC-04-5d2a-agent-result-publication-outbox.md`。
+  HMAC receipt chain、重启恢复目录与 backlog 聚合。ARC-04.5d2b 又升级到 schema v5，用同一事务
+  原子写入幂等 result inbox 与 published receipt，接入生产 manager 在线消费及有界 startup recovery；
+  Bus 只作通知，不声称外部 exactly-once。详见
+  `ARC-04-5d2a-agent-result-publication-outbox.md` 与
+  `ARC-04-5d2b-agent-result-publication-consumption.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
-  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon，结果 outbox 的生产消费与
-  自动重放也未完成。
+  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费与
+  startup recovery，但周期 retry、UI read/ack、retention 和外部 sink 仍未完成。
   因此 ARC-04 保持 partial。
 
 ## 验收标准
@@ -119,4 +122,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a)。
+4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b)。

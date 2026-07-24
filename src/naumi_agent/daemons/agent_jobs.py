@@ -34,7 +34,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 4
+AGENT_JOB_SCHEMA_VERSION = 5
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
@@ -74,6 +74,10 @@ class AgentJobPublicationState(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     PUBLISHED = "published"
+
+
+class AgentJobDeliverySink(StrEnum):
+    RESULT_INBOX = "agent_result_inbox"
 
 
 TERMINAL_AGENT_JOB_STATES = frozenset(
@@ -214,6 +218,83 @@ class AgentJobPublicationBacklog:
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} 必须是非负整数。")
         _aware_time(self.assessed_at, field="assessed_at")
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationDeliveryReceipt:
+    schema_version: int
+    delivery_id: str
+    publication_id: str
+    job_id: str
+    request_sha256: str
+    result_sha256: str
+    sink: AgentJobDeliverySink
+    session_routing_hmac: str
+    delivery_sha256: str
+    delivered_at: str
+    receipt_sha256: str
+    authentication_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError(
+                "AgentJob publication delivery schema_version 必须为 1。"
+            )
+        _require_identifier(self.delivery_id, field="delivery_id")
+        _require_identifier(self.publication_id, field="publication_id")
+        _require_identifier(self.job_id, field="job_id")
+        _require_sha256(self.request_sha256, field="request_sha256")
+        _require_sha256(self.result_sha256, field="result_sha256")
+        if not isinstance(self.sink, AgentJobDeliverySink):
+            raise TypeError("AgentJob publication delivery sink 类型无效。")
+        _require_sha256(
+            self.session_routing_hmac,
+            field="session_routing_hmac",
+        )
+        _require_sha256(self.delivery_sha256, field="delivery_sha256")
+        _aware_time(self.delivered_at, field="delivered_at")
+        _require_sha256(self.receipt_sha256, field="receipt_sha256")
+        _require_sha256(
+            self.authentication_sha256,
+            field="authentication_sha256",
+        )
+        if not hmac.compare_digest(
+            self.receipt_sha256,
+            _digest(_publication_delivery_receipt_payload(self)),
+        ):
+            raise ValueError(
+                "AgentJob publication delivery receipt 摘要校验失败。"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class StoredAgentJobPublicationDelivery:
+    delivery_id: str
+    publication_id: str
+    job_id: str
+    request_sha256: str
+    result_sha256: str
+    sink: AgentJobDeliverySink
+    session_routing_hmac: str
+    delivery_sha256: str
+    delivered_at: str
+    receipt: AgentJobPublicationDeliveryReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationDeliveryTransition:
+    publication: StoredAgentJobPublication
+    delivery: StoredAgentJobPublicationDelivery
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationContent:
+    publication: StoredAgentJobPublication
+    request: AgentWorkerRequest
+    payload: AgentJobPayload
+    result: AgentWorkerResult
+    terminal_payload: AgentJobTerminalPayload
 
 
 @dataclass(frozen=True, slots=True)
@@ -953,6 +1034,90 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法读取 AgentJob publication。") from exc
 
+    async def get_job_publication(
+        self,
+        job_id: str,
+    ) -> StoredAgentJobPublication | None:
+        _require_identifier(job_id, field="job_id")
+        if not _regular_file_exists(self._db_path):
+            return None
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    """
+                    SELECT publication_id
+                    FROM agent_job_publications
+                    WHERE job_id = ?
+                    """,
+                    (job_id,),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await db.commit()
+                    return None
+                publication = await _require_publication(
+                    db,
+                    str(row["publication_id"]),
+                    key=key,
+                )
+                job = await _require_stored(db, job_id, key=key)
+                _validate_publication_job_binding(publication, job)
+                await db.commit()
+                return publication
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法按 Job 读取 AgentJob publication。"
+            ) from exc
+
+    async def claim_publication(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        lease_seconds: int,
+    ) -> AgentJobPublicationTransition:
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_lease_seconds(lease_seconds)
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                job = await _require_stored(
+                    db,
+                    publication.job_id,
+                    key=key,
+                )
+                _validate_publication_job_binding(publication, job)
+                transition = await _claim_publication_locked(
+                    db,
+                    publication=publication,
+                    owner_id=owner_id,
+                    lease_seconds=lease_seconds,
+                    now=now,
+                    key=key,
+                )
+                await db.commit()
+                return transition
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法按 identity claim AgentJob publication。"
+            ) from exc
+
     async def claim_next_publication(
         self,
         *,
@@ -1013,6 +1178,251 @@ class AgentJobStore:
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法 claim AgentJob publication。") from exc
+
+    async def recover_publication_content(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+    ) -> AgentJobPublicationContent:
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                _require_live_publication_owner(
+                    publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                )
+                job = await _require_stored(
+                    db,
+                    publication.job_id,
+                    key=key,
+                )
+                content = _publication_content(
+                    publication,
+                    job=job,
+                    key=key,
+                )
+                await db.commit()
+                return content
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法恢复 AgentJob publication 内容。"
+            ) from exc
+
+    async def deliver_publication_to_inbox(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+    ) -> AgentJobPublicationDeliveryTransition:
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                existing = await _find_publication_delivery(
+                    db,
+                    publication_id=publication_id,
+                    key=key,
+                )
+                if existing is not None:
+                    _validate_publication_delivery_replay(
+                        publication,
+                        existing,
+                        owner_id=owner_id,
+                        claim_epoch=claim_epoch,
+                    )
+                    await db.commit()
+                    return AgentJobPublicationDeliveryTransition(
+                        publication=publication,
+                        delivery=existing,
+                        applied=False,
+                    )
+                _require_live_publication_owner(
+                    publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                )
+                job = await _require_stored(
+                    db,
+                    publication.job_id,
+                    key=key,
+                )
+                content = _publication_content(
+                    publication,
+                    job=job,
+                    key=key,
+                )
+                delivery = _issue_publication_delivery(
+                    content,
+                    delivered_at=now.isoformat(),
+                    key=key,
+                )
+                await _insert_publication_delivery(db, delivery)
+                transition = await _append_publication_transition(
+                    db,
+                    publication=publication,
+                    state=AgentJobPublicationState.PUBLISHED,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    claim_expires_at=None,
+                    attempt_count=publication.attempt_count,
+                    delivery_sha256=delivery.delivery_sha256,
+                    published_at=now.isoformat(),
+                    reason_code="agent_publication_published",
+                    occurred_at=now.isoformat(),
+                    key=key,
+                )
+                await db.commit()
+                return AgentJobPublicationDeliveryTransition(
+                    publication=transition.publication,
+                    delivery=delivery,
+                    applied=True,
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法将 AgentJob publication 投递到结果收件箱。"
+            ) from exc
+
+    async def list_result_inbox(
+        self,
+        session_id: str,
+        *,
+        limit: int = 100,
+    ) -> tuple[StoredAgentJobPublicationDelivery, ...]:
+        _require_text(
+            session_id,
+            field="session_id",
+            maximum=_MAX_SESSION_ID_BYTES,
+            allow_empty=True,
+        )
+        _require_bounded_limit(limit, maximum=1000)
+        if not _regular_file_exists(self._db_path):
+            return ()
+        key = self._runtime_key()
+        await self._ensure_schema()
+        routing_hmac = _session_routing_hmac(
+            session_id,
+            key=key.key_bytes,
+        )
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    """
+                    SELECT delivery_id
+                    FROM agent_job_publication_deliveries
+                    WHERE session_routing_hmac = ? AND sink = ?
+                    ORDER BY delivered_at, delivery_id
+                    LIMIT ?
+                    """,
+                    (
+                        routing_hmac,
+                        AgentJobDeliverySink.RESULT_INBOX.value,
+                        limit,
+                    ),
+                )
+                deliveries: list[StoredAgentJobPublicationDelivery] = []
+                for row in await cursor.fetchall():
+                    delivery = await _require_publication_delivery(
+                        db,
+                        str(row["delivery_id"]),
+                        key=key,
+                    )
+                    await _validate_delivery_binding(
+                        db,
+                        delivery,
+                        key=key,
+                    )
+                    deliveries.append(delivery)
+                await db.commit()
+                return tuple(deliveries)
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法读取 AgentJob result inbox。"
+            ) from exc
+
+    async def recover_delivered_result(
+        self,
+        delivery_id: str,
+        *,
+        expected_delivery_sha256: str,
+    ) -> AgentJobPublicationContent:
+        _require_identifier(delivery_id, field="delivery_id")
+        _require_sha256(
+            expected_delivery_sha256,
+            field="expected_delivery_sha256",
+        )
+        if not _regular_file_exists(self._db_path):
+            raise AgentJobLifecycleConflictError(
+                "AgentJob publication delivery 不存在。"
+            )
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                delivery = await _require_publication_delivery(
+                    db,
+                    delivery_id,
+                    key=key,
+                )
+                if not hmac.compare_digest(
+                    delivery.delivery_sha256,
+                    expected_delivery_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob publication delivery fence 已变化。"
+                    )
+                publication, job = await _validate_delivery_binding(
+                    db,
+                    delivery,
+                    key=key,
+                )
+                content = _publication_content(
+                    publication,
+                    job=job,
+                    key=key,
+                )
+                await db.commit()
+                return content
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法恢复 AgentJob result inbox 内容。"
+            ) from exc
 
     async def renew_publication_claim(
         self,
@@ -1719,6 +2129,8 @@ class AgentJobStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V4:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V5:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -1727,17 +2139,26 @@ class AgentJobStore:
                             await db.execute(statement)
                         await _apply_schema_v3(db)
                         await _apply_schema_v4(db, allow_create=True)
+                        await _apply_schema_v5(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 2:
                         await _apply_schema_v3(db)
                         await _apply_schema_v4(db, allow_create=True)
+                        await _apply_schema_v5(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 3:
                         await _apply_schema_v4(db, allow_create=True)
+                        await _apply_schema_v5(db, allow_create=True)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 4:
+                        await _apply_schema_v4(db, allow_create=False)
+                        await _apply_schema_v5(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -1748,6 +2169,7 @@ class AgentJobStore:
                         )
                     else:
                         await _apply_schema_v4(db, allow_create=False)
+                        await _apply_schema_v5(db, allow_create=False)
                     await db.commit()
                 if not existed and os.name != "nt":
                     self._db_path.chmod(0o600)
@@ -1999,6 +2421,316 @@ async def _ensure_publication_locked(
         published_at=None,
         latest_receipt=receipt,
     )
+
+
+def _publication_content(
+    publication: StoredAgentJobPublication,
+    *,
+    job: StoredAgentJob,
+    key: RuntimePayloadKey,
+) -> AgentJobPublicationContent:
+    _validate_publication_job_binding(publication, job)
+    if job.result is None:
+        raise AgentJobError(
+            "AgentJob publication 缺少 terminal result。"
+        )
+    payload = _open_stored_payload(job, key=key)
+    terminal_payload = _open_terminal_payload(job, key=key)
+    return AgentJobPublicationContent(
+        publication=publication,
+        request=job.request,
+        payload=payload,
+        result=job.result,
+        terminal_payload=terminal_payload,
+    )
+
+
+def _issue_publication_delivery(
+    content: AgentJobPublicationContent,
+    *,
+    delivered_at: str,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublicationDelivery:
+    if not isinstance(content, AgentJobPublicationContent):
+        raise TypeError("content 必须是 AgentJobPublicationContent。")
+    _aware_time(delivered_at, field="delivered_at")
+    publication = content.publication
+    sink = AgentJobDeliverySink.RESULT_INBOX
+    delivery_id = _publication_delivery_id(
+        publication.publication_id,
+        sink=sink,
+    )
+    session_routing_hmac = _session_routing_hmac(
+        content.payload.session_id,
+        key=key.key_bytes,
+    )
+    delivery_identity: dict[str, Any] = {
+        "schema_version": 1,
+        "delivery_id": delivery_id,
+        "publication_id": publication.publication_id,
+        "job_id": publication.job_id,
+        "request_sha256": publication.request_sha256,
+        "result_sha256": publication.result_sha256,
+        "sink": sink,
+        "session_routing_hmac": session_routing_hmac,
+    }
+    delivery_sha256 = _digest(delivery_identity)
+    receipt_payload = {
+        **delivery_identity,
+        "delivery_sha256": delivery_sha256,
+        "delivered_at": delivered_at,
+    }
+    receipt_sha256 = _digest(receipt_payload)
+    receipt = AgentJobPublicationDeliveryReceipt(
+        **receipt_payload,
+        receipt_sha256=receipt_sha256,
+        authentication_sha256=_publication_delivery_authentication(
+            receipt_payload,
+            receipt_sha256=receipt_sha256,
+            key=key.key_bytes,
+        ),
+    )
+    return StoredAgentJobPublicationDelivery(
+        delivery_id=delivery_id,
+        publication_id=publication.publication_id,
+        job_id=publication.job_id,
+        request_sha256=publication.request_sha256,
+        result_sha256=publication.result_sha256,
+        sink=sink,
+        session_routing_hmac=session_routing_hmac,
+        delivery_sha256=delivery_sha256,
+        delivered_at=delivered_at,
+        receipt=receipt,
+    )
+
+
+async def _insert_publication_delivery(
+    db: aiosqlite.Connection,
+    delivery: StoredAgentJobPublicationDelivery,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO agent_job_publication_deliveries (
+            delivery_id, publication_id, job_id, request_sha256,
+            result_sha256, sink, session_routing_hmac,
+            delivery_sha256, delivered_at,
+            receipt_sha256, receipt_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            delivery.delivery_id,
+            delivery.publication_id,
+            delivery.job_id,
+            delivery.request_sha256,
+            delivery.result_sha256,
+            delivery.sink.value,
+            delivery.session_routing_hmac,
+            delivery.delivery_sha256,
+            delivery.delivered_at,
+            delivery.receipt.receipt_sha256,
+            _serialize_publication_delivery_receipt(delivery.receipt),
+        ),
+    )
+
+
+async def _find_publication_delivery(
+    db: aiosqlite.Connection,
+    *,
+    publication_id: str,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublicationDelivery | None:
+    cursor = await db.execute(
+        """
+        SELECT *
+        FROM agent_job_publication_deliveries
+        WHERE publication_id = ?
+        """,
+        (publication_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _stored_publication_delivery_from_row(row, key=key)
+
+
+async def _require_publication_delivery(
+    db: aiosqlite.Connection,
+    delivery_id: str,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublicationDelivery:
+    cursor = await db.execute(
+        """
+        SELECT *
+        FROM agent_job_publication_deliveries
+        WHERE delivery_id = ?
+        """,
+        (delivery_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication delivery 不存在。"
+        )
+    return _stored_publication_delivery_from_row(row, key=key)
+
+
+def _stored_publication_delivery_from_row(
+    row: aiosqlite.Row,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublicationDelivery:
+    try:
+        receipt = _deserialize_publication_delivery_receipt(
+            str(row["receipt_json"])
+        )
+        _verify_publication_delivery_authentication(
+            receipt,
+            key=key.key_bytes,
+        )
+        delivery = StoredAgentJobPublicationDelivery(
+            delivery_id=str(row["delivery_id"]),
+            publication_id=str(row["publication_id"]),
+            job_id=str(row["job_id"]),
+            request_sha256=str(row["request_sha256"]),
+            result_sha256=str(row["result_sha256"]),
+            sink=AgentJobDeliverySink(str(row["sink"])),
+            session_routing_hmac=str(row["session_routing_hmac"]),
+            delivery_sha256=str(row["delivery_sha256"]),
+            delivered_at=str(row["delivered_at"]),
+            receipt=receipt,
+        )
+        comparisons = (
+            (delivery.delivery_id, receipt.delivery_id, "delivery_id"),
+            (
+                delivery.publication_id,
+                receipt.publication_id,
+                "publication_id",
+            ),
+            (delivery.job_id, receipt.job_id, "job_id"),
+            (
+                delivery.request_sha256,
+                receipt.request_sha256,
+                "request",
+            ),
+            (delivery.result_sha256, receipt.result_sha256, "result"),
+            (delivery.sink, receipt.sink, "sink"),
+            (
+                delivery.session_routing_hmac,
+                receipt.session_routing_hmac,
+                "session routing",
+            ),
+            (
+                delivery.delivery_sha256,
+                receipt.delivery_sha256,
+                "delivery",
+            ),
+            (delivery.delivered_at, receipt.delivered_at, "delivered time"),
+            (
+                str(row["receipt_sha256"]),
+                receipt.receipt_sha256,
+                "receipt",
+            ),
+        )
+        for stored_value, receipt_value, field_name in comparisons:
+            if stored_value != receipt_value:
+                raise AgentJobError(
+                    f"AgentJob publication delivery {field_name} 不一致。"
+                )
+        expected_delivery_id = _publication_delivery_id(
+            delivery.publication_id,
+            sink=delivery.sink,
+        )
+        if delivery.delivery_id != expected_delivery_id:
+            raise AgentJobError(
+                "AgentJob publication delivery identity 不一致。"
+            )
+        expected_delivery_sha256 = _digest({
+            "schema_version": 1,
+            "delivery_id": delivery.delivery_id,
+            "publication_id": delivery.publication_id,
+            "job_id": delivery.job_id,
+            "request_sha256": delivery.request_sha256,
+            "result_sha256": delivery.result_sha256,
+            "sink": delivery.sink,
+            "session_routing_hmac": delivery.session_routing_hmac,
+        })
+        if not hmac.compare_digest(
+            delivery.delivery_sha256,
+            expected_delivery_sha256,
+        ):
+            raise AgentJobError(
+                "AgentJob publication delivery digest 不一致。"
+            )
+        return delivery
+    except AgentJobError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentJobError(
+            "AgentJob publication delivery 持久记录无效。"
+        ) from exc
+
+
+async def _validate_delivery_binding(
+    db: aiosqlite.Connection,
+    delivery: StoredAgentJobPublicationDelivery,
+    *,
+    key: RuntimePayloadKey,
+) -> tuple[StoredAgentJobPublication, StoredAgentJob]:
+    publication = await _require_publication(
+        db,
+        delivery.publication_id,
+        key=key,
+    )
+    job = await _require_stored(db, delivery.job_id, key=key)
+    _validate_publication_job_binding(publication, job)
+    if (
+        publication.state is not AgentJobPublicationState.PUBLISHED
+        or publication.latest_receipt.delivery_sha256
+        != delivery.delivery_sha256
+        or publication.published_at != delivery.delivered_at
+        or delivery.job_id != publication.job_id
+        or delivery.request_sha256 != publication.request_sha256
+        or delivery.result_sha256 != publication.result_sha256
+    ):
+        raise AgentJobError(
+            "AgentJob publication delivery 与 published receipt 不一致。"
+        )
+    payload = _open_stored_payload(job, key=key)
+    expected_routing = _session_routing_hmac(
+        payload.session_id,
+        key=key.key_bytes,
+    )
+    if not hmac.compare_digest(
+        delivery.session_routing_hmac,
+        expected_routing,
+    ):
+        raise AgentJobError(
+            "AgentJob publication delivery session routing 不一致。"
+        )
+    return publication, job
+
+
+def _validate_publication_delivery_replay(
+    publication: StoredAgentJobPublication,
+    delivery: StoredAgentJobPublicationDelivery,
+    *,
+    owner_id: str,
+    claim_epoch: int,
+) -> None:
+    if (
+        publication.state is not AgentJobPublicationState.PUBLISHED
+        or publication.owner_id != owner_id
+        or publication.claim_epoch != claim_epoch
+        or publication.latest_receipt.delivery_sha256
+        != delivery.delivery_sha256
+        or publication.job_id != delivery.job_id
+        or publication.request_sha256 != delivery.request_sha256
+        or publication.result_sha256 != delivery.result_sha256
+    ):
+        raise AgentJobLifecycleConflictError(
+            "AgentJob publication delivery 幂等事实不一致。"
+        )
 
 
 async def _find_publication(
@@ -3410,6 +4142,63 @@ def _validate_publication_receipt_semantics(
         raise ValueError("AgentJob publication published receipt 语义无效。")
 
 
+def _publication_delivery_receipt_payload(
+    receipt: AgentJobPublicationDeliveryReceipt,
+) -> dict[str, Any]:
+    return {
+        "schema_version": receipt.schema_version,
+        "delivery_id": receipt.delivery_id,
+        "publication_id": receipt.publication_id,
+        "job_id": receipt.job_id,
+        "request_sha256": receipt.request_sha256,
+        "result_sha256": receipt.result_sha256,
+        "sink": receipt.sink,
+        "session_routing_hmac": receipt.session_routing_hmac,
+        "delivery_sha256": receipt.delivery_sha256,
+        "delivered_at": receipt.delivered_at,
+    }
+
+
+def _verify_publication_delivery_authentication(
+    receipt: AgentJobPublicationDeliveryReceipt,
+    *,
+    key: bytes,
+) -> None:
+    expected = _publication_delivery_authentication(
+        _publication_delivery_receipt_payload(receipt),
+        receipt_sha256=receipt.receipt_sha256,
+        key=key,
+    )
+    if not hmac.compare_digest(
+        receipt.authentication_sha256,
+        expected,
+    ):
+        raise AgentJobError(
+            "AgentJob publication delivery authentication 无效。"
+        )
+
+
+def _publication_delivery_authentication(
+    payload: Mapping[str, Any],
+    *,
+    receipt_sha256: str,
+    key: bytes,
+) -> str:
+    derived = hmac.new(
+        key,
+        b"naumi-agent-job-publication-delivery-authentication-v1",
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        derived,
+        _canonical_json({
+            **payload,
+            "receipt_sha256": receipt_sha256,
+        }).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def _publication_receipt_payload(
     receipt: AgentJobPublicationReceipt,
 ) -> dict[str, Any]:
@@ -3517,6 +4306,12 @@ def _serialize_publication_receipt(
     return _canonical_json(asdict(receipt))
 
 
+def _serialize_publication_delivery_receipt(
+    receipt: AgentJobPublicationDeliveryReceipt,
+) -> str:
+    return _canonical_json(asdict(receipt))
+
+
 def _deserialize_publication_receipt(
     value: str,
 ) -> AgentJobPublicationReceipt:
@@ -3526,6 +4321,21 @@ def _deserialize_publication_receipt(
         raise ValueError("AgentJob publication receipt 字段集合无效。")
     payload["state"] = AgentJobPublicationState(payload["state"])
     return AgentJobPublicationReceipt(**payload)
+
+
+def _deserialize_publication_delivery_receipt(
+    value: str,
+) -> AgentJobPublicationDeliveryReceipt:
+    payload = _load_json_object(value)
+    expected = set(
+        AgentJobPublicationDeliveryReceipt.__dataclass_fields__
+    )
+    if set(payload) != expected:
+        raise ValueError(
+            "AgentJob publication delivery receipt 字段集合无效。"
+        )
+    payload["sink"] = AgentJobDeliverySink(payload["sink"])
+    return AgentJobPublicationDeliveryReceipt(**payload)
 
 
 def _load_json_object(value: str) -> dict[str, Any]:
@@ -3564,6 +4374,43 @@ def _publication_id(job_id: str, result_sha256: str) -> str:
         f"{job_id}:{result_sha256}".encode("ascii")
     ).hexdigest()
     return f"agent-publication-{identity}"
+
+
+def _publication_delivery_id(
+    publication_id: str,
+    *,
+    sink: AgentJobDeliverySink,
+) -> str:
+    _require_identifier(publication_id, field="publication_id")
+    if not isinstance(sink, AgentJobDeliverySink):
+        raise TypeError("sink 必须是 AgentJobDeliverySink。")
+    identity = hashlib.sha256(
+        f"{publication_id}:{sink.value}".encode("ascii")
+    ).hexdigest()
+    return f"agent-delivery-{identity}"
+
+
+def _session_routing_hmac(
+    session_id: str,
+    *,
+    key: bytes,
+) -> str:
+    _require_text(
+        session_id,
+        field="session_id",
+        maximum=_MAX_SESSION_ID_BYTES,
+        allow_empty=True,
+    )
+    derived = hmac.new(
+        key,
+        b"naumi-agent-result-inbox-session-routing-v1",
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        derived,
+        session_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _require_identifier(value: str, *, field: str) -> None:
@@ -3737,9 +4584,123 @@ async def _apply_schema_v4(
         )
 
 
+async def _apply_schema_v5(
+    db: aiosqlite.Connection,
+    *,
+    allow_create: bool,
+) -> None:
+    table = "agent_job_publication_deliveries"
+    expected_columns = {
+        "delivery_id": ("TEXT", 0, 1),
+        "publication_id": ("TEXT", 1, 0),
+        "job_id": ("TEXT", 1, 0),
+        "request_sha256": ("TEXT", 1, 0),
+        "result_sha256": ("TEXT", 1, 0),
+        "sink": ("TEXT", 1, 0),
+        "session_routing_hmac": ("TEXT", 1, 0),
+        "delivery_sha256": ("TEXT", 1, 0),
+        "delivered_at": ("TEXT", 1, 0),
+        "receipt_sha256": ("TEXT", 1, 0),
+        "receipt_json": ("TEXT", 1, 0),
+    }
+    tables = set(await _user_tables(db))
+    if table not in tables:
+        if not allow_create:
+            raise AgentJobError(
+                "AgentJob schema v5 publication delivery 表缺失。"
+            )
+        for statement in _SCHEMA_V5:
+            await db.execute(statement)
+        return
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    actual_columns = {
+        str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
+        for row in await cursor.fetchall()
+    }
+    if actual_columns != expected_columns:
+        raise AgentJobError(
+            "AgentJob schema v5 publication delivery 列定义无效。"
+        )
+    cursor = await db.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'index'
+          AND name = 'agent_job_publication_deliveries_inbox'
+          AND tbl_name = 'agent_job_publication_deliveries'
+        """
+    )
+    if await cursor.fetchone() is None:
+        raise AgentJobError(
+            "AgentJob schema v5 result inbox 索引缺失。"
+        )
+    cursor = await db.execute(
+        "PRAGMA index_info(agent_job_publication_deliveries_inbox)"
+    )
+    inbox_columns = tuple(
+        str(row[2]) for row in await cursor.fetchall()
+    )
+    if inbox_columns != (
+        "session_routing_hmac",
+        "delivered_at",
+        "delivery_id",
+    ):
+        raise AgentJobError(
+            "AgentJob schema v5 result inbox 索引列无效。"
+        )
+    cursor = await db.execute(f"PRAGMA index_list({table})")
+    unique_indexes: set[tuple[str, ...]] = set()
+    for row in await cursor.fetchall():
+        if int(row[2]) != 1:
+            continue
+        index_cursor = await db.execute(
+            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+            (str(row[1]),),
+        )
+        unique_indexes.add(
+            tuple(str(item[0]) for item in await index_cursor.fetchall())
+        )
+    expected_unique_indexes = {
+        ("delivery_id",),
+        ("publication_id",),
+        ("job_id",),
+        ("result_sha256",),
+        ("delivery_sha256",),
+        ("receipt_sha256",),
+    }
+    if unique_indexes != expected_unique_indexes:
+        raise AgentJobError(
+            "AgentJob schema v5 publication delivery 唯一约束无效。"
+        )
+    cursor = await db.execute(f"PRAGMA foreign_key_list({table})")
+    foreign_keys = {
+        (
+            str(row[2]),
+            str(row[3]),
+            str(row[4]),
+            str(row[6]).upper(),
+        )
+        for row in await cursor.fetchall()
+    }
+    if foreign_keys != {
+        (
+            "agent_job_publications",
+            "publication_id",
+            "publication_id",
+            "RESTRICT",
+        ),
+        ("agent_jobs", "job_id", "job_id", "RESTRICT"),
+    }:
+        raise AgentJobError(
+            "AgentJob schema v5 publication delivery 外键约束无效。"
+        )
+
+
 _STATE_VALUES = ", ".join(f"'{state.value}'" for state in AgentJobState)
 _PUBLICATION_STATE_VALUES = ", ".join(
     f"'{state.value}'" for state in AgentJobPublicationState
+)
+_DELIVERY_SINK_VALUES = ", ".join(
+    f"'{sink.value}'" for sink in AgentJobDeliverySink
 )
 _SCHEMA_V1 = (
     f"""
@@ -3837,6 +4798,33 @@ _SCHEMA_V4 = (
     """,
 )
 
+_SCHEMA_V5 = (
+    f"""
+    CREATE TABLE agent_job_publication_deliveries (
+        delivery_id TEXT PRIMARY KEY,
+        publication_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_job_publications(publication_id)
+            ON DELETE RESTRICT,
+        job_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_jobs(job_id) ON DELETE RESTRICT,
+        request_sha256 TEXT NOT NULL,
+        result_sha256 TEXT NOT NULL UNIQUE,
+        sink TEXT NOT NULL CHECK (sink IN ({_DELIVERY_SINK_VALUES})),
+        session_routing_hmac TEXT NOT NULL,
+        delivery_sha256 TEXT NOT NULL UNIQUE,
+        delivered_at TEXT NOT NULL,
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        receipt_json TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX agent_job_publication_deliveries_inbox
+    ON agent_job_publication_deliveries (
+        session_routing_hmac, delivered_at, delivery_id
+    )
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
@@ -3844,12 +4832,16 @@ __all__ = [
     "AgentJobCapacityPolicy",
     "AgentJobCapacitySnapshot",
     "AgentJobConflictError",
+    "AgentJobDeliverySink",
     "AgentJobError",
     "AgentJobKeyUnavailableError",
     "AgentJobLifecycleConflictError",
     "AgentJobLifecycleReceipt",
     "AgentJobPayload",
     "AgentJobPublicationBacklog",
+    "AgentJobPublicationContent",
+    "AgentJobPublicationDeliveryReceipt",
+    "AgentJobPublicationDeliveryTransition",
     "AgentJobPublicationReceipt",
     "AgentJobPublicationState",
     "AgentJobPublicationTransition",
@@ -3859,5 +4851,6 @@ __all__ = [
     "AgentJobTransitionResult",
     "StoredAgentJob",
     "StoredAgentJobPublication",
+    "StoredAgentJobPublicationDelivery",
     "TERMINAL_AGENT_JOB_STATES",
 ]

@@ -19,8 +19,8 @@ model result
 ```
 
 本切片交付时不包含 publication outbox lease、跨 Runtime 自动重放、已读游标或恢复 UI。
-ARC-04.5d2a 后续已补齐 outbox authority，但生产消费与自动重放仍未完成，因此 ARC-04.5d 与 ARC-04
-继续保持 partial。
+ARC-04.5d2a 后续已补齐 outbox authority，ARC-04.5d2b 又补齐幂等 inbox、生产在线消费与 startup
+recovery；周期 retry/UI read-ack/retention 仍未完成，因此 ARC-04.5d 与 ARC-04 继续保持 partial。
 
 ## 2. AgentJob schema v3
 
@@ -102,15 +102,14 @@ payload 的重放返回幂等 no-op；相同 result 搭配不同原文会 fail c
 ## 7. 自我审视与后续依赖
 
 本切片解决“结果原文没有 durable source”这一根因。ARC-04.5d2a 已进一步完成
-`pending/claimed/published`、publication lease/epoch、恢复目录和 HMAC receipt chain，但完整可靠发布
-仍未证明：
+`pending/claimed/published`、publication lease/epoch、恢复目录和 HMAC receipt chain；ARC-04.5d2b
+又完成内置 durable inbox、生产在线消费与 startup recovery。仍未证明：
 
-- production manager 尚未 claim/consume outbox，Runtime 崩溃后不会自动重放到父会话/UI；
-- message bus 仍是进程内发布，尚无幂等 consumer receipt；
-- 已有 Store 级恢复目录，但没有共享 UI projection、人工发布动作、已读状态或 retention/GC；
+- 周期 retry/backoff 与 dead-letter；
+- message bus 仍是进程内通知，不是 durable consumer receipt；
+- 已有 Store 级 inbox，但没有共享 UI projection、人工发布动作、已读状态或 retention/GC；
 - key rotation/reencrypt、跨平台打包崩溃矩阵和大结果 artifact 分层尚未完成。
 
-下一步应实现 `ARC-04.5d2b Agent Result Publication Consumption`，让 production manager 以稳定
-publication ID 执行 claim → recover → deliver → acknowledge，并显式定义 at-least-once 与 sink
-幂等边界；不要让 UI 直接扫描密文或自行推断“是否已发布”。详见
-`ARC-04-5d2a-agent-result-publication-outbox.md`。
+下一步应重新审计 Harness/UI/Supervisor 依赖，选择消费 durable inbox 的最小用户切片；不要让 UI
+直接扫描密文或自行推断“是否已发布”。详见
+`ARC-04-5d2b-agent-result-publication-consumption.md`。

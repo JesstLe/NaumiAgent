@@ -1145,7 +1145,7 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 4
+    assert version == AGENT_JOB_SCHEMA_VERSION == 5
     assert table == ("agent_job_capacity_policy",)
 
 
@@ -1176,7 +1176,7 @@ async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
             row[1]
             for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 4
+    assert version == AGENT_JOB_SCHEMA_VERSION == 5
     assert "terminal_payload_envelope_json" in columns
 
 
@@ -1421,6 +1421,202 @@ async def test_publication_event_projection_tampering_fails_closed(
 
 
 @pytest.mark.asyncio
+async def test_publication_delivery_is_atomic_restart_safe_and_routable(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-delivery",
+        response="跨重启可恢复的结果",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    content = await store.recover_publication_content(
+        publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    assert content.payload.task_id == "publication-delivery"
+    assert content.request.agent_name == "coder"
+    assert content.result == result
+    assert content.terminal_payload.response == "跨重启可恢复的结果"
+
+    delivered = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    assert delivered.applied
+    assert delivered.publication.state is AgentJobPublicationState.PUBLISHED
+    assert (
+        delivered.publication.latest_receipt.delivery_sha256
+        == delivered.delivery.delivery_sha256
+    )
+    replay = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    assert not replay.applied
+    assert replay.delivery == delivered.delivery
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    assert await reopened.list_result_inbox("other-session") == ()
+    inbox = await reopened.list_result_inbox("session-1")
+    assert inbox == (delivered.delivery,)
+    recovered = await reopened.recover_delivered_result(
+        delivered.delivery.delivery_id,
+        expected_delivery_sha256=delivered.delivery.delivery_sha256,
+    )
+    assert recovered.payload.task_id == "publication-delivery"
+    assert recovered.terminal_payload.response == "跨重启可恢复的结果"
+    with pytest.raises(AgentJobLifecycleConflictError, match="fence"):
+        await reopened.recover_delivered_result(
+            delivered.delivery.delivery_id,
+            expected_delivery_sha256="0" * 64,
+        )
+    raw_store = path.read_bytes()
+    assert b"session-1" not in raw_store
+    assert "跨重启可恢复的结果".encode() not in raw_store
+
+
+@pytest.mark.asyncio
+async def test_publication_delivery_rolls_back_inbox_when_publish_fails(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-delivery-rollback",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """
+            CREATE TRIGGER fail_publication_publish
+            BEFORE UPDATE OF state ON agent_job_publications
+            WHEN NEW.state = 'published'
+            BEGIN
+                SELECT RAISE(ABORT, 'injected publication failure');
+            END
+            """
+        )
+
+    with pytest.raises(AgentJobError, match="结果收件箱"):
+        await store.deliver_publication_to_inbox(
+            publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=claimed.publication.claim_epoch,
+        )
+    with sqlite3.connect(path) as db:
+        delivery_count = db.execute(
+            "SELECT COUNT(*) FROM agent_job_publication_deliveries"
+        ).fetchone()[0]
+        db.execute("DROP TRIGGER fail_publication_publish")
+    assert delivery_count == 0
+    persisted = await store.get_publication(publication.publication_id)
+    assert persisted is not None
+    assert persisted.state is AgentJobPublicationState.CLAIMED
+
+
+@pytest.mark.asyncio
+async def test_publication_delivery_receipt_tampering_fails_authentication(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="publication-delivery-tamper",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    claimed = await store.claim_publication(
+        publication.publication_id,
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    delivered = await store.deliver_publication_to_inbox(
+        publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=claimed.publication.claim_epoch,
+    )
+    with sqlite3.connect(path) as db:
+        receipt = json.loads(
+            db.execute(
+                """
+                SELECT receipt_json
+                FROM agent_job_publication_deliveries
+                WHERE delivery_id = ?
+                """,
+                (delivered.delivery.delivery_id,),
+            ).fetchone()[0]
+        )
+        receipt["session_routing_hmac"] = "0" * 64
+        public = {
+            name: value
+            for name, value in receipt.items()
+            if name not in {"receipt_sha256", "authentication_sha256"}
+        }
+        receipt["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                public,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        db.execute(
+            """
+            UPDATE agent_job_publication_deliveries
+            SET session_routing_hmac = ?, receipt_sha256 = ?, receipt_json = ?
+            WHERE delivery_id = ?
+            """,
+            (
+                receipt["session_routing_hmac"],
+                receipt["receipt_sha256"],
+                json.dumps(
+                    receipt,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                delivered.delivery.delivery_id,
+            ),
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="authentication"):
+        await reopened.recover_delivered_result(
+            delivered.delivery.delivery_id,
+            expected_delivery_sha256=delivered.delivery.delivery_sha256,
+        )
+
+
+@pytest.mark.asyncio
 async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
     tmp_path,
 ) -> None:
@@ -1469,7 +1665,7 @@ async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
                 """
             ).fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 4
+    assert version == AGENT_JOB_SCHEMA_VERSION == 5
     assert {
         "agent_job_publications",
         "agent_job_publication_events",
@@ -1510,4 +1706,101 @@ async def test_schema_v4_rejects_missing_publication_tables(
 
     reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
     with pytest.raises(AgentJobError, match="publication 表缺失"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v4_adds_result_inbox_without_losing_publication(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="delivery-schema-migration",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_deliveries")
+        db.execute("PRAGMA user_version = 4")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    restored = await reopened.get_publication(publication.publication_id)
+    assert restored == publication
+    assert await reopened.list_result_inbox("session-1") == ()
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        table = db.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'agent_job_publication_deliveries'
+            """
+        ).fetchone()
+    assert version == AGENT_JOB_SCHEMA_VERSION == 5
+    assert table == ("agent_job_publication_deliveries",)
+
+
+@pytest.mark.asyncio
+async def test_schema_v5_rejects_missing_result_inbox_table(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="delivery-schema-integrity")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_deliveries")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="delivery 表缺失"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v5_rejects_weakened_delivery_constraints(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="delivery-schema-constraints")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_deliveries")
+        db.execute(
+            """
+            CREATE TABLE agent_job_publication_deliveries (
+                delivery_id TEXT PRIMARY KEY,
+                publication_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                request_sha256 TEXT NOT NULL,
+                result_sha256 TEXT NOT NULL,
+                sink TEXT NOT NULL,
+                session_routing_hmac TEXT NOT NULL,
+                delivery_sha256 TEXT NOT NULL,
+                delivered_at TEXT NOT NULL,
+                receipt_sha256 TEXT NOT NULL,
+                receipt_json TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX agent_job_publication_deliveries_inbox
+            ON agent_job_publication_deliveries (
+                session_routing_hmac, delivered_at, delivery_id
+            )
+            """
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="唯一约束无效"):
         await reopened.get(admitted.job_id)

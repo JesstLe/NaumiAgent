@@ -43,8 +43,9 @@
     ARC-04.5b2 已建立 durable Agent Job Store、FIFO claim、epoch/lease fencing、pre-start takeover
     与 running recovery fence；ARC-04.5c 已让 embedded Agent 消费 admit/claim/run/renew/finish
     并阻断未认证终态发布；ARC-04.5d1/5d2a 又补齐加密 terminal payload 与 durable publication
-    outbox authority。ARC-06.2c 已补齐 embedded 多 Runtime 的共享 active 上限与 durable FIFO；
-    独立 Worker reservation、自动 recovery/publication consumer 和跨 workspace 公平仍未完成。见
+    outbox authority；ARC-04.5d2b 已补齐幂等 result inbox、在线消费与 startup recovery。
+    ARC-06.2c 已补齐 embedded 多 Runtime 的共享 active 上限与 durable FIFO；独立 Worker
+    reservation、周期 publication retry 和跨 workspace 公平仍未完成。见
     [设计与验证](ARC-04-5c-embedded-agent-durable-dispatch.md)。
   - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
     公平、dependency DAG、affinity、cursor 与 starvation 指标。

@@ -26,7 +26,8 @@
 - ARC-04.5b2 已让 Agent request payload 进入加密 schema v1 Store，并区分 pre-start takeover 与
   running unknown recovery；ARC-04.5c 已把 embedded Agent 接入 lease renewal 与 terminal
   publication barrier；ARC-04.5d1 已补齐加密 terminal response recovery，ARC-04.5d2a 已补齐
-  durable publication outbox authority。生产 outbox consumer、Provider 对账、retention 和告警仍未实现。
+  durable publication outbox authority；ARC-04.5d2b 已补齐幂等 result inbox、生产在线消费与有界
+  startup recovery。周期 retry/dead-letter、Provider 对账、retention 和告警仍未实现。
 
 ## 初始 SLO
 
