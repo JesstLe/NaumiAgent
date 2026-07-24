@@ -193,4 +193,5 @@ test("Goal page renders authority-owned resume action and attempt state", () => 
   assert.match(lines, /\/pursue resume pursuit-1/);
   assert.match(lines, /恢复请求 · 最近 1 项/);
   assert.match(lines, /已准入/);
+  assert.match(lines, new RegExp(`/pursue reconcile recovery-${"a".repeat(64)}`));
 });

@@ -130,6 +130,7 @@ src/naumi_agent/
 | `/supervisor <目标>` | Erlang 守护者树 — Let-it-crash 双子星架构 | ✅ |
 | `/autopsy <目标>` | 执行迹切片与爆炸半径隔离 (DTS-CHE) | ✅ |
 | `/pursue <目标>` | 目标追踪 — 自主循环执行直至真正达成 | ✅ |
+| `/pursue reconcile <attempt-id>` | 恢复对账 — fencing 旧执行者并按机械终态证据收口 | ✅ |
 | `/feedback <类别> <scope> <topic> <摘要>` | 可信反馈 — 脱敏形成不可执行改进候选 | ✅ |
 | `/evolution <子命令>` | 审查 Candidate、签发评测/决策证据、持久化升级选择或加入 Workbench 队列 | ✅ |
 | `/history` | 历史会话列表 | ✅ |

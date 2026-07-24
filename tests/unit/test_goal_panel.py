@@ -15,6 +15,9 @@ from naumi_agent.orchestrator.pursuit import (
     PursuitRun,
     PursuitRunStatus,
 )
+from naumi_agent.orchestrator.pursuit_recovery_attempt import (
+    new_recovery_attempt,
+)
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.pursuit_terminal import (
     PursuitBoundaryFacts,
@@ -146,6 +149,19 @@ async def test_recovery_projection_is_shared_by_typed_and_text_views(tmp_path) -
         updated_at=2.0,
     )
     pursuit_store.save_run(run)
+    requested, _ = pursuit_store.prepare_recovery_attempt(
+        new_recovery_attempt(
+            run_id=run.id,
+            source_request_id="goal-panel-reconcile",
+            requested_at=1.0,
+        )
+    )
+    pursuit_store.mark_recovery_attempt_admitted(
+        requested.attempt_id,
+        admitted_at=1.5,
+        lease_epoch=1,
+        checkpoint_id="pchk_original",
+    )
     goal_store.attach_pursuit(goal.id, run.id)
 
     snapshot = await build_goal_pursuit_snapshot_with_recovery(
@@ -162,6 +178,7 @@ async def test_recovery_projection_is_shared_by_typed_and_text_views(tmp_path) -
     rendered = render_goal_pursuit_snapshot(snapshot)
     assert "恢复健康：安全等待" in rendered
     assert "心跳 缺失" in rendered
+    assert f"/pursue reconcile {requested.attempt_id}" in rendered
 
 
 @pytest.mark.asyncio

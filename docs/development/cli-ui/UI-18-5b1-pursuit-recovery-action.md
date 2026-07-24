@@ -128,7 +128,8 @@ Bridge 在创建后台 ToolExecution 前重新读取一次恢复 snapshot：
 - ToolExecution 已返回 typed action result，但长循环后续终态仍依赖 Goal snapshot 刷新；尚未新增专用
   attempt push stream。
 - recovery attempt 与 Pursuit checkpoint 同库，Harness lease/heartbeat 属于另一事务域，仍不宣称
-  exactly-once。
+  exactly-once；HAR-10.8e 已用更高 RunLease epoch fencing 和同库不可变回执补齐显式 admitted
+  terminal reconciliation，但自动 bounded outbox 仍未实现。
 - 未执行 24 小时 soak、进程 kill 和跨平台故障矩阵，UI-18 与 HAR-10 继续保持 `partial`。
 
 下一步应回到跨文档依赖图选择最小用户可见切片，不线性扩张 UI-18.5。候选优先级由 Harness、UI-13、

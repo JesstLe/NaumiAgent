@@ -45,7 +45,7 @@ async def run_pursue(engine: Any, goal: str) -> None:
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
     parts = goal.strip().split(maxsplit=1)
-    if parts and parts[0] in {"list", "status", "resume"}:
+    if parts and parts[0] in {"list", "status", "resume", "reconcile"}:
         await _run_pursue_meta(engine, parts[0], parts[1] if len(parts) > 1 else "")
         return
 
@@ -99,14 +99,18 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         "list": "pursuit_list",
         "status": "pursuit_status",
         "resume": "pursuit_resume",
+        "reconcile": "pursuit_reconcile",
     }
     tool_name = tool_map[subcommand]
     tool = engine.tool_registry.get(tool_name)
     if not tool:
         console.print(f"[red]工具未注册: {tool_name}[/red]")
         return
-    if subcommand in {"status", "resume"} and not arg:
-        console.print(f"[yellow]用法: /pursue {subcommand} <运行ID>[/yellow]")
+    if subcommand in {"status", "resume", "reconcile"} and not arg:
+        identifier = "恢复请求ID" if subcommand == "reconcile" else "运行ID"
+        console.print(
+            f"[yellow]用法: /pursue {subcommand} <{identifier}>[/yellow]"
+        )
         return
     if subcommand == "list":
         result = _successful_tool_content(
@@ -116,6 +120,15 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
                 {"active_only": "--active" in arg.split()},
             ),
             "读取目标追踪状态",
+        )
+    elif subcommand == "reconcile":
+        result = _successful_tool_content(
+            await _execute_tool_result(
+                engine,
+                tool_name,
+                {"attempt_id": arg.strip()},
+            ),
+            "对账目标追踪恢复请求",
         )
     else:
         result = _successful_tool_content(

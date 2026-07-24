@@ -18,6 +18,8 @@ HAR-10.8c 已把 checkpoint/reconcile/interaction 恢复分支接入同一裁判
 schema 1 兼容；durable pending interaction 现在是可恢复 waiting，冲突恢复 authority 明确 blocked。
 HAR-10.8d 已增加内容寻址、哈希链保护的 recovery attempt 账本；生产 `/pursue resume` 在 policy/bypass
 下都先绑定持久权限回执，重复 ToolCall 不会重复恢复，requested/admitted/terminal 事实可在重开后复验。
+HAR-10.8e 已补齐显式 terminal reconciliation：健康 heartbeat/有效 lease 失败关闭，只有取得更高
+RunLease epoch 并复验准入后的 checkpoint、机械裁判与 run 状态后，才原子收口 attempt 并保存不可变回执。
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 消费该账本，并让 TUI fallback 显示同源动作、共享命令
 和最近 attempt；前端不解析工具文案生成结果状态。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；

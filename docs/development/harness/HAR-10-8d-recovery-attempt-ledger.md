@@ -125,8 +125,9 @@ pytest -q \
 - recovery attempt 与 PursuitRun/checkpoint/boundary decision 位于同一个 `PursuitStore` SQLite，但
   Harness lease、heartbeat、interaction 和 BackgroundTask 仍属于其他事务域；本切片不宣称跨 Store
   exactly-once。
-- 外部副作用完成后若 terminal attempt 写入本身失败，记录可能停留在 admitted。当前会明确记录日志，
-  后续需要 outbox/reconciliation authority 将其确定性收口，不能由 UI 猜测完成。
+- 外部副作用完成后若 terminal attempt 写入本身失败，记录可能停留在 admitted。HAR-10.8e 已提供
+  显式、fenced 的单 attempt reconciliation authority：先推进 Harness RunLease epoch，再按同库
+  后置 checkpoint/机械裁判收口并保存不可变回执；后续仍需 bounded outbox worker。
 - run 不存在时没有可满足外键的 recovery attempt；调用会在账本创建前返回明确错误。
 - 当前提供最近记录，不提供 cursor、retention 或跨 run catalog；这些应随 UI-18.5 的恢复历史设计推进。
 - 没有执行 A5 24 小时 soak、进程 kill 或跨平台故障矩阵，HAR-10 仍为 partial。

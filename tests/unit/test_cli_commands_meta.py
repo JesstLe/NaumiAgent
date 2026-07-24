@@ -90,6 +90,28 @@ async def test_shared_meta_command_stops_after_engine_tool_failure(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_reconcile_routes_attempt_identity(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="恢复请求已完成机械对账。")
+    engine.tool_registry = {"pursuit_reconcile": engine.tool}
+    attempt_id = "recovery-" + "a" * 64
+
+    await commands_meta.run_pursue(
+        engine,
+        f"reconcile {attempt_id}",
+    )
+
+    assert engine.tool.calls == []
+    assert len(engine.calls) == 1
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_reconcile"
+    assert json.loads(tool_call.arguments) == {"attempt_id": attempt_id}
+    assert "恢复请求已完成机械对账" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

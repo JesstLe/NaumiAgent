@@ -1099,6 +1099,7 @@ class TestPermissionChecker:
             "pursuit_list",
             "pursuit_status",
             "pursuit_resume",
+            "pursuit_reconcile",
             "yaml_validate",
         ]:
             result = checker.check(tool_name, {})

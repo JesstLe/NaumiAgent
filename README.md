@@ -241,7 +241,7 @@ NAUMI_SHOW_STARTUP_WARNINGS=1 naumi chat
 | 运行态 | `/runtime [分区]` `/team` `/background` `/schedule` | 查看运行态、团队协议、后台任务和调度提醒 |
 | 浏览器 | `/browse` `/autobrowse` `/browser-state` `/bdaemon` | 浏览器操作、本地浏览器 daemon 和 SoM 调试 |
 | 分析 | `/chaos` `/scale` `/state` `/graph` `/self-review` | 架构、扩展性、状态、图谱和源码自审查 |
-| 持续目标 | `/goal [目标|子命令]` `/goal pursue` `/pursue <目标>` | 跨轮次保持目标；按需启动自主追踪循环 |
+| 持续目标 | `/goal [目标|子命令]` `/goal pursue` `/pursue <目标>` `/pursue status\|resume\|reconcile …` | 跨轮次保持目标；按需启动、恢复并机械对账自主追踪循环 |
 | 自进化 | `/evolve <描述>` `/evolve-history` `/forge` | 现有自我修改、进化历史和工具锻造能力 |
 
 命令补全来自 `src/naumi_agent/cli/completer.py`。输入 `/` 可查看全部命令，输入关键词可模糊匹配，例如 `hs` 可匹配 `/history`。`/histroy` 也会被容错映射到 `/history`。

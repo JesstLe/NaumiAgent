@@ -704,6 +704,12 @@ def _render_recovery(recovery: dict[str, Any]) -> list[str]:
                 f"{result}"
                 f" · {_bounded_text(attempt.get('updated_at'), 64)}"
             )
+            if attempt.get("state") == "admitted":
+                lines.append(
+                    "    - 对账命令："
+                    f"`/pursue reconcile "
+                    f"{_bounded_text(attempt.get('attempt_id'), 73)}`"
+                )
     return lines
 
 

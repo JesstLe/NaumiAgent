@@ -261,6 +261,11 @@ def format_recovery_attempts(
                 f"  - 准入：{lease} · checkpoint "
                 f"`{attempt.checkpoint_id[:16]}`"
             )
+            if attempt.state is PursuitRecoveryAttemptState.ADMITTED:
+                lines.append(
+                    "  - 对账："
+                    f"`/pursue reconcile {attempt.attempt_id}`"
+                )
         if attempt.boundary_decision_id:
             lines.append(
                 "  - 机械裁判："
