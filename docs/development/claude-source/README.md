@@ -18,8 +18,9 @@
 
 CC-01 治理先行；CC-02 是 Ink 决策实验，CC-02.4a 已让实验 renderer 复用多 namespace 行高索引做
 有界 presentation projection，但性能门仍为 `defer`；CC-03/04 按产品优先级迁入；CC-05.1 已提供只读批准
-基线 observation，CC-05.2a 已提供 Git tree 与 mapped path 结构差异；后续符号/行为差异仍不得
-绕过 source refresh approval。CC-03 的 Naumi Doctor export 产品合同已由 UI-13.5a 提供；
+基线 observation，CC-05.2a 已提供 Git tree 与 mapped path 结构差异，CC-05.2b 又提供 export/component/
+event/keybinding 的 typed 符号差异；后续行为 fixture、影响路由与采纳报告仍不得绕过 source refresh
+approval。CC-03 的 Naumi Doctor export 产品合同已由 UI-13.5a 提供；
 CC-03.1a 已增加绑定 source identity、license scope、source symbol、target symbol 与 target test 的
 核心行为清单，因此 CC-03 可标记为 `partial`。完整行为矩阵、语义迁移和 golden 对齐仍未完成，
 不得把 CC-03 标记为 implemented。
