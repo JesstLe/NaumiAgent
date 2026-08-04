@@ -15,7 +15,10 @@ from naumi_agent.daemons.shell_worker import (
     detect_shell_sandbox_backend,
 )
 from naumi_agent.orchestrator.engine import AgentEngine, AgentRuntimeMode
-from naumi_agent.orchestrator.subagent_manager import StopExecutionResult
+from naumi_agent.orchestrator.subagent_manager import (
+    AgentRecoveryActionResult,
+    StopExecutionResult,
+)
 from naumi_agent.safety.permissions import PermissionMode
 from naumi_agent.tools.base import ToolCall
 from naumi_agent.tui.agent_control import (
@@ -66,7 +69,8 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "已经脱敏或截断" in results
     assert "running Job 需要恢复裁决" in recovery
     assert "agent-job-recovery" in recovery
-    assert "当前目录只读" in recovery
+    assert "按 `u`" in recovery
+    assert "不会自动重放模型" in recovery
     assert "team/review" in team
     assert "ready" in team
 
@@ -155,6 +159,70 @@ async def test_textual_agent_control_loads_switches_and_confirms_stop() -> None:
         assert "结果正文" in screen.query_one(
             "#agent-content-results", Markdown
         )._markdown
+
+
+@pytest.mark.asyncio
+async def test_textual_agent_control_resolves_exact_recovery_without_second_confirm() -> None:
+    engine = AgentEngine(AppConfig())
+    session = await engine.get_or_create_session(title="Agent Recovery TUI")
+    running = _snapshot()
+    recovery_item = running.to_dict()["recovery_catalog"]["items"][0]
+    resolved = AgentControlSnapshot.from_dict({
+        **running.to_dict(),
+        "revision": 2,
+        "recovery_catalog": {
+            "assessed_at": "2026-07-13T00:00:03+00:00",
+            "items": [{
+                **recovery_item,
+                "job_state": "unknown",
+                "recovery_state": "outcome_unknown",
+                "claim_expires_at": "2026-07-13T00:00:01+00:00",
+                "receipt_sha256": "f" * 64,
+                "reason_code": "agent_job_recovery_unknown",
+            }],
+            "truncated": False,
+        },
+    })
+    engine.agent_control.snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[running, resolved]
+    )
+    engine.subagent_manager.resolve_recovery_unknown = AsyncMock(  # type: ignore[method-assign]
+        return_value=AgentRecoveryActionResult(
+            action="resolve_unknown",
+            job_id="agent-job-recovery",
+            accepted=True,
+            applied=True,
+            code="recovery_resolved_unknown",
+            message="已将过期 running Agent Job 收口为 unknown。",
+            job_state="unknown",
+            claim_epoch=4,
+            receipt_sha256="f" * 64,
+        )
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(110, 34)) as pilot:
+        await pilot.press("ctrl+g")
+        await pilot.pause(0.1)
+        screen = app.screen
+        assert isinstance(screen, AgentControlScreen)
+        await pilot.press("]", "]", "]")
+        await pilot.pause(0.05)
+        assert screen.selected_tab == "recovery"
+        await pilot.press("u")
+        await pilot.pause(0.15)
+
+        engine.subagent_manager.resolve_recovery_unknown.assert_awaited_once_with(
+            session_id=session.id,
+            job_id="agent-job-recovery",
+            expected_request_sha256="d" * 64,
+            expected_claim_epoch=4,
+            expected_latest_receipt_sha256="e" * 64,
+        )
+        assert "执行结果未知" in screen.query_one(
+            "#agent-content-recovery", Markdown
+        )._markdown
+        assert "unknown" in str(screen.query_one("#agent-error", Static).render())
 
 
 @pytest.mark.asyncio

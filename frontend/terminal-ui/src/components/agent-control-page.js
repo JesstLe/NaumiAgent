@@ -131,16 +131,22 @@ function renderPageState(view) {
   if (view?.actionPendingTaskId) {
     return color(ANSI.yellow, view.actionMessage || "正在请求停止…");
   }
+  if (view?.recoveryActionPendingId) {
+    return color(ANSI.yellow, view.actionMessage || "正在提交精确恢复裁决…");
+  }
   if (view?.stale) {
     return color(ANSI.yellow, `状态 · 已过期${view.error ? ` · ${compactText(view.error, 300)}` : ""}`);
   }
   if (view?.error && !view?.snapshot) return color(ANSI.red, `状态 · 加载失败 · ${compactText(view.error, 300)}`);
   if (view?.loading) return color(ANSI.cyan, "状态 · 正在加载");
+  if (view?.actionMessage) {
+    return color(ANSI.cyan, compactText(view.actionMessage, 500));
+  }
   if (array(view?.snapshot?.warnings).length) {
     return color(ANSI.yellow, `警告 · ${compactText(view.snapshot.warnings[0], 300)}`);
   }
   if (view?.selectedTab === "recovery") {
-    return color(ANSI.dim, "只读恢复目录 · ↑/↓ 选择 · Enter 详情 · r 刷新 · Esc 返回");
+    return color(ANSI.dim, "恢复目录 · ↑/↓ 选择 · Enter 详情 · u 精确裁决 · r 刷新 · Esc 返回");
   }
   return color(ANSI.dim, "Tab 切换 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回");
 }
@@ -290,7 +296,7 @@ function renderDetail(view, snapshot, width) {
     );
     if (!item) return [color(ANSI.dim, "选择一条恢复事实查看详情")];
     return [
-      color(ANSI.cyan, "Agent 恢复事实 · 只读"),
+      color(ANSI.cyan, "Agent 恢复事实"),
       `${recoveryStatus(item.recovery_state)} · ${recoveryStateLabel(item.recovery_state)}`,
       `类型 · ${item.kind} · Agent ${item.agent_name}`,
       `Job · ${item.job_id} · 状态 ${item.job_state}`,
@@ -302,7 +308,14 @@ function renderDetail(view, snapshot, width) {
       `请求摘要 · ${shortDigest(item.request_sha256)}`,
       `回执摘要 · ${shortDigest(item.receipt_sha256)}`,
       `原因码 · ${item.reason_code}`,
-      color(ANSI.dim, "当前目录不执行自动模型重放，也不提供状态改写。"),
+      (
+        item.kind === "job"
+        && item.recovery_state === "recovery_required"
+        && item.session_scope === "current"
+      )
+        ? color(ANSI.yellow, "按 u 将该过期 running Job 精确收口为 unknown。")
+        : color(ANSI.dim, "当前条目没有可用的人工恢复动作。"),
+      color(ANSI.dim, "恢复裁决不会自动重放模型，也不会删除持久证据。"),
     ].filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
   }
   if (view?.selectedTab === "team") {

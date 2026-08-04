@@ -84,6 +84,9 @@
 - ARC-04.5d2c 已让 `SubAgentManager` 通过精确 delivery fence 认证读取当前 session 的 result inbox，
   并以 Agent Control schema v3 的有界脱敏 projection 同步 New UI/TUI“结果”标签；两端不读取
   SQLite 或解密原文。详见 `ARC-04-5d2c-agent-result-inbox-projection.md`。
+- HAR-10.7d/7e 已让 Agent Control 读取认证恢复目录，并以 request/session/receipt/claim epoch/expiry
+  exact fence 将当前会话的 expired running Job 人工收口为 `unknown`；该动作不重放模型，也不是
+  ARC-04.6 Supervisor。详见 `../harness/HAR-10-7e-exact-agent-recovery-action.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费与
   startup recovery 和只读 UI projection，但周期 retry、UI read/ack、retention 和外部 sink 仍未完成。

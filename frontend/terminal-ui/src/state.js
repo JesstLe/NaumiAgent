@@ -540,6 +540,7 @@ export function createInitialState() {
       stale: false,
       stopConfirmationTaskId: "",
       actionPendingTaskId: "",
+      recoveryActionPendingId: "",
       actionMessage: "",
     },
     permission: null,
@@ -1187,6 +1188,11 @@ export function reduceServerEvent(state, record) {
         state.agents.actionPendingTaskId = "";
       }
       break;
+    case "agents/recovery/action_result":
+      if (String(payload.job_id || "") !== state.agents.recoveryActionPendingId) break;
+      state.agents.actionMessage = String(payload.message || "");
+      state.agents.recoveryActionPendingId = "";
+      break;
     case "run/started":
       resetRunCancellation(state);
       startRunActivity(state, record, payload);
@@ -1581,6 +1587,7 @@ export function reduceServerEvent(state, record) {
         state.agents.stale = Boolean(state.agents.snapshot);
         state.agents.stopConfirmationTaskId = "";
         state.agents.actionPendingTaskId = "";
+        state.agents.recoveryActionPendingId = "";
         state.agents.actionMessage = state.agents.error;
         break;
       }
@@ -1828,6 +1835,7 @@ function resetAgentControlSnapshot(agents) {
   agents.stale = false;
   agents.stopConfirmationTaskId = "";
   agents.actionPendingTaskId = "";
+  agents.recoveryActionPendingId = "";
   agents.actionMessage = "";
 }
 
@@ -1848,6 +1856,7 @@ export function toggleAgentControlCenter(state, send, forceOpen = null) {
   state.agents.loading = open;
   state.agents.error = "";
   state.agents.stopConfirmationTaskId = "";
+  state.agents.recoveryActionPendingId = "";
   if (open) {
     state.route = {
       name: "agents",
@@ -1939,6 +1948,40 @@ export function handleAgentControlKey(state, key, send) {
     }
     return true;
   }
+  if (normalized === "u" && agents.selectedTab === "recovery") {
+    const selected = selectedAgentControlId(agents);
+    const item = (agents.snapshot?.recovery_catalog?.items || []).find(
+      (entry) => `recovery:${entry.kind}:${entry.item_id}` === selected,
+    );
+    if (
+      item?.kind === "job"
+      && item.recovery_state === "recovery_required"
+      && item.session_scope === "current"
+      && !agents.recoveryActionPendingId
+    ) {
+      const capability = negotiatedEventCapabilityStatus(
+        state,
+        "client",
+        "agents/recovery/resolve_unknown",
+      );
+      if (capability.status !== "available") {
+        agents.actionMessage = capability.status === "pending"
+          ? "协议协商尚未完成，未发送恢复裁决。"
+          : "当前 Bridge 不支持 Agent 恢复裁决，请升级完整安装后重试。";
+        return true;
+      }
+      agents.recoveryActionPendingId = String(item.job_id || "");
+      agents.actionMessage = "正在提交精确恢复裁决…";
+      send("agents/recovery/resolve_unknown", {
+        session_id: String(state.currentSessionId || ""),
+        job_id: item.job_id,
+        request_sha256: item.request_sha256,
+        receipt_sha256: item.receipt_sha256,
+        claim_epoch: item.claim_epoch,
+      });
+    }
+    return true;
+  }
   return true;
 }
 
@@ -2003,6 +2046,18 @@ function agentControlItemIds(agents) {
 }
 
 function settleAgentActionFromSnapshot(agents) {
+  const recoveryJobId = agents.recoveryActionPendingId;
+  if (recoveryJobId) {
+    const recovery = (agents.snapshot?.recovery_catalog?.items || []).find(
+      (item) => item.kind === "job" && item.job_id === recoveryJobId,
+    );
+    if (!recovery || recovery.recovery_state === "outcome_unknown") {
+      agents.recoveryActionPendingId = "";
+      agents.actionMessage = recovery
+        ? "恢复裁决已生效：结果标记为 unknown。"
+        : "恢复条目已离开当前有界目录，请刷新核对。";
+    }
+  }
   const taskId = agents.actionPendingTaskId;
   if (!taskId) return;
   const execution = (agents.snapshot?.executions || []).find((item) => item.task_id === taskId);

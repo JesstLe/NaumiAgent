@@ -901,6 +901,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "agents/action") {
     return normalizeAgentAction(payload);
   }
+  if (type === "agents/recovery/action_result") {
+    return normalizeAgentRecoveryActionResult(payload);
+  }
   if (type === "ui/message") {
     const messageType = String(payload.type ?? "");
     if (!messageType) {
@@ -6369,6 +6372,55 @@ function normalizeAgentAction(payload) {
     accepted: strictBoolean(payload.accepted, "agents/action accepted"),
     code: requiredAgentText(payload.code, "agents/action code"),
     message: agentText(payload.message),
+  };
+}
+
+function normalizeAgentRecoveryActionResult(payload) {
+  const accepted = strictBoolean(
+    payload.accepted,
+    "agents/recovery/action_result accepted",
+  );
+  const applied = strictBoolean(
+    payload.applied,
+    "agents/recovery/action_result applied",
+  );
+  if (applied && !accepted) {
+    throw new Error("Agent recovery action applied 不能在 rejected 时为 true");
+  }
+  const jobState = agentText(payload.job_state);
+  const receiptSha256 = optionalSha256(
+    payload.receipt_sha256,
+    "agents/recovery/action_result receipt_sha256",
+  );
+  if (accepted && (jobState !== "unknown" || !receiptSha256)) {
+    throw new Error("Agent recovery action accepted 结果缺少 unknown 回执");
+  }
+  if (!accepted && (jobState || receiptSha256)) {
+    throw new Error("Agent recovery action rejected 不得携带持久终态");
+  }
+  return {
+    action: strictChoice(
+      payload.action,
+      "agents/recovery/action_result action",
+      new Set(["resolve_unknown"]),
+    ),
+    job_id: requiredAgentText(
+      payload.job_id,
+      "agents/recovery/action_result job_id",
+    ),
+    accepted,
+    applied,
+    code: requiredAgentText(
+      payload.code,
+      "agents/recovery/action_result code",
+    ),
+    message: agentText(payload.message),
+    job_state: jobState,
+    claim_epoch: strictAgentNonnegativeInteger(
+      payload.claim_epoch,
+      "agents/recovery/action_result claim_epoch",
+    ),
+    receipt_sha256: receiptSha256,
   };
 }
 

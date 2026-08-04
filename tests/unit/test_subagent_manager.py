@@ -1,6 +1,9 @@
 """Agent 调度器测试."""
 
 import asyncio
+import hashlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,6 +11,7 @@ from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.config.settings import AppConfig, SafetyConfig
 from naumi_agent.daemons.agent_jobs import (
     AgentJobError,
+    AgentJobLifecycleConflictError,
     AgentJobPublicationState,
     AgentJobState,
     AgentJobStore,
@@ -70,6 +74,56 @@ class TestSubAgentManager:
         assert len(agents) == 3
         names = {a["name"] for a in agents}
         assert names == {"coder", "researcher", "browser"}
+
+    @pytest.mark.asyncio
+    async def test_exact_recovery_action_hashes_session_and_maps_conflicts(
+        self,
+        manager: SubAgentManager,
+    ) -> None:
+        job = SimpleNamespace(
+            job_id="agent-job-1",
+            state=AgentJobState.UNKNOWN,
+            claim_epoch=4,
+            latest_receipt=SimpleNamespace(receipt_sha256="c" * 64),
+        )
+        manager._agent_job_store.mark_recovery_unknown = AsyncMock(  # type: ignore[method-assign]
+            return_value=SimpleNamespace(job=job, applied=True)
+        )
+
+        result = await manager.resolve_recovery_unknown(
+            session_id="session-1",
+            job_id="agent-job-1",
+            expected_request_sha256="a" * 64,
+            expected_claim_epoch=4,
+            expected_latest_receipt_sha256="b" * 64,
+        )
+
+        assert result.accepted is True
+        assert result.applied is True
+        assert result.job_state == "unknown"
+        manager._agent_job_store.mark_recovery_unknown.assert_awaited_once_with(
+            "agent-job-1",
+            expected_request_sha256="a" * 64,
+            expected_session_id_sha256=hashlib.sha256(
+                b"session-1"
+            ).hexdigest(),
+            expected_claim_epoch=4,
+            expected_latest_receipt_sha256="b" * 64,
+        )
+
+        manager._agent_job_store.mark_recovery_unknown = AsyncMock(  # type: ignore[method-assign]
+            side_effect=AgentJobLifecycleConflictError("stale")
+        )
+        rejected = await manager.resolve_recovery_unknown(
+            session_id="session-1",
+            job_id="agent-job-1",
+            expected_request_sha256="a" * 64,
+            expected_claim_epoch=4,
+            expected_latest_receipt_sha256="b" * 64,
+        )
+        assert rejected.accepted is False
+        assert rejected.code == "recovery_fence_changed"
+        assert rejected.receipt_sha256 == ""
 
     @pytest.mark.asyncio
     async def test_execute_parallel_applies_fifo_backpressure(self) -> None:

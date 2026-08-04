@@ -82,7 +82,10 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalOutboxWorkerSnapshot,
     PursuitTerminalWorkerState,
 )
-from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.orchestrator.subagent_manager import (
+    AgentRecoveryActionResult,
+    SubTask,
+)
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.composition import create_agent_engine
@@ -1136,6 +1139,7 @@ def test_protocol_contract_matches_python_enums() -> None:
         "minimum_version": 1,
         "maximum_version": 1,
         "capabilities": [
+            "agent_recovery_actions",
             "evolution_evaluation_lane",
             "doctor_export",
             "doctor_live_probe",
@@ -1155,6 +1159,10 @@ def test_protocol_contract_matches_python_enums() -> None:
         "required_capabilities": ["typed_ui_messages"],
     }
     assert contract["event_capabilities"] == {
+        "agent_recovery_actions": {
+            "client_events": ["agents/recovery/resolve_unknown"],
+            "server_events": ["agents/recovery/action_result"],
+        },
         "doctor_export": {
             "client_events": ["doctor/export"],
             "server_events": ["doctor/export/result"],
@@ -2806,6 +2814,24 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
         "session_id": "session-1",
         "reason": "用户停止。",
     }
+    recovery_record = normalize_client_record({
+        "type": "agents/recovery/resolve_unknown",
+        "payload": {
+            "job_id": " agent-job-1 ",
+            "session_id": " session-1 ",
+            "request_sha256": "a" * 64,
+            "receipt_sha256": "b" * 64,
+            "claim_epoch": 3,
+            "ignored": "value",
+        },
+    })
+    assert recovery_record["payload"] == {
+        "job_id": "agent-job-1",
+        "session_id": "session-1",
+        "request_sha256": "a" * 64,
+        "receipt_sha256": "b" * 64,
+        "claim_epoch": 3,
+    }
 
     with pytest.raises(ValueError, match="协议 version 不兼容"):
         normalize_client_record({
@@ -2846,6 +2872,18 @@ def test_protocol_normalizes_known_client_event_payloads() -> None:
 
     with pytest.raises(ValueError, match="task_id"):
         normalize_client_record({"type": "agents/stop", "payload": {}})
+
+    with pytest.raises(ValueError, match="claim_epoch"):
+        normalize_client_record({
+            "type": "agents/recovery/resolve_unknown",
+            "payload": {
+                "job_id": "agent-job-1",
+                "session_id": "session-1",
+                "request_sha256": "a" * 64,
+                "receipt_sha256": "b" * 64,
+                "claim_epoch": 0,
+            },
+        })
 
 
 @pytest.mark.asyncio
@@ -3130,6 +3168,94 @@ async def test_bridge_agent_stop_unknown_task_returns_stable_action(
         assert action["request_id"] == "agents-stop-missing"
         assert action["payload"]["accepted"] is False
         assert action["payload"]["code"] == "not_found"
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_bridge_agent_recovery_action_is_exact_and_session_scoped(
+    tmp_path: Path,
+) -> None:
+    engine = AgentEngine(AppConfig(
+        workspace_root=str(tmp_path),
+        memory=MemoryConfig(
+            session_db_path=str(tmp_path / "sessions.db"),
+            vector_db_path=str(tmp_path / "vectors"),
+            long_term_enabled=False,
+        ),
+    ))
+    try:
+        session = await engine.get_or_create_session(title="Agent Recovery")
+        manager = engine.subagent_manager
+        manager.resolve_recovery_unknown = AsyncMock(  # type: ignore[method-assign]
+            return_value=AgentRecoveryActionResult(
+                action="resolve_unknown",
+                job_id="agent-job-1",
+                accepted=True,
+                applied=True,
+                code="recovery_resolved_unknown",
+                message="已收口。",
+                job_state="unknown",
+                claim_epoch=3,
+                receipt_sha256="c" * 64,
+            )
+        )
+        writer = io.StringIO()
+        bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+        bridge.bind_writer(writer)
+        await bridge.handle_client_record({
+            "id": "hello-agent-recovery",
+            "type": "hello",
+            "payload": {
+                "client": "naumi-terminal-ui",
+                "minimum_version": 1,
+                "maximum_version": 1,
+                "capabilities": [
+                    "agent_recovery_actions",
+                    "typed_ui_messages",
+                ],
+            },
+        })
+        await bridge.handle_client_record({
+            "id": "agent-recovery-1",
+            "type": "agents/recovery/resolve_unknown",
+            "payload": {
+                "session_id": session.id,
+                "job_id": "agent-job-1",
+                "request_sha256": "a" * 64,
+                "receipt_sha256": "b" * 64,
+                "claim_epoch": 3,
+            },
+        })
+
+        manager.resolve_recovery_unknown.assert_awaited_once_with(
+            session_id=session.id,
+            job_id="agent-job-1",
+            expected_request_sha256="a" * 64,
+            expected_claim_epoch=3,
+            expected_latest_receipt_sha256="b" * 64,
+        )
+        result = _records(writer)[-1]
+        assert result["type"] == "agents/recovery/action_result"
+        assert result["request_id"] == "agent-recovery-1"
+        assert result["payload"]["job_state"] == "unknown"
+        assert result["payload"]["receipt_sha256"] == "c" * 64
+
+        await bridge.handle_client_record({
+            "id": "agent-recovery-other",
+            "type": "agents/recovery/resolve_unknown",
+            "payload": {
+                "session_id": "other-session",
+                "job_id": "agent-job-1",
+                "request_sha256": "a" * 64,
+                "receipt_sha256": "b" * 64,
+                "claim_epoch": 3,
+            },
+        })
+        rejected = _records(writer)[-1]
+        assert rejected["type"] == "error"
+        assert rejected["payload"]["code"] == "agents_session_mismatch"
+        assert manager.resolve_recovery_unknown.await_count == 1
     finally:
         await engine.shutdown()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import math
 import time
@@ -29,6 +30,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobCapacitySnapshot,
     AgentJobError,
     AgentJobKeyUnavailableError,
+    AgentJobLifecycleConflictError,
     AgentJobPayload,
     AgentJobPublicationBacklog,
     AgentJobPublicationContent,
@@ -178,6 +180,21 @@ class StopExecutionResult:
     accepted: bool
     code: str
     message: str
+
+
+@dataclass(frozen=True)
+class AgentRecoveryActionResult:
+    """Content-free result of one exact durable recovery action."""
+
+    action: str
+    job_id: str
+    accepted: bool
+    applied: bool
+    code: str
+    message: str
+    job_state: str
+    claim_epoch: int
+    receipt_sha256: str
 
 
 @dataclass(frozen=True)
@@ -579,6 +596,68 @@ class SubAgentManager:
             raise TypeError("limit 必须是整数。")
         return await self._agent_job_store.recovery_catalog(
             limit=max(1, min(limit, 50)),
+        )
+
+    async def resolve_recovery_unknown(
+        self,
+        *,
+        session_id: str,
+        job_id: str,
+        expected_request_sha256: str,
+        expected_claim_epoch: int,
+        expected_latest_receipt_sha256: str,
+    ) -> AgentRecoveryActionResult:
+        """Fence one expired running Job into unknown without replaying it."""
+        normalized_session = str(session_id or "").strip()
+        if not normalized_session:
+            return AgentRecoveryActionResult(
+                "resolve_unknown", str(job_id or ""), False, False,
+                "missing_session", "Agent 恢复请求缺少当前会话。", "", 0, "",
+            )
+        session_sha256 = hashlib.sha256(
+            normalized_session.encode("utf-8")
+        ).hexdigest()
+        try:
+            transition = await self._agent_job_store.mark_recovery_unknown(
+                str(job_id or "").strip(),
+                expected_request_sha256=str(expected_request_sha256 or "").strip(),
+                expected_session_id_sha256=session_sha256,
+                expected_claim_epoch=expected_claim_epoch,
+                expected_latest_receipt_sha256=str(
+                    expected_latest_receipt_sha256 or ""
+                ).strip(),
+            )
+        except AgentJobLifecycleConflictError:
+            return AgentRecoveryActionResult(
+                "resolve_unknown", str(job_id or "").strip(), False, False,
+                "recovery_fence_changed",
+                "恢复事实已变化，请刷新后重新检查。", "", 0, "",
+            )
+        except (AgentJobError, TypeError, ValueError):
+            return AgentRecoveryActionResult(
+                "resolve_unknown", str(job_id or "").strip(), False, False,
+                "recovery_unavailable",
+                "当前无法完成恢复裁决；持久权威未被改写。", "", 0, "",
+            )
+        job = transition.job
+        return AgentRecoveryActionResult(
+            action="resolve_unknown",
+            job_id=job.job_id,
+            accepted=True,
+            applied=transition.applied,
+            code=(
+                "recovery_resolved_unknown"
+                if transition.applied
+                else "already_resolved_unknown"
+            ),
+            message=(
+                "已将过期 running Agent Job 收口为 unknown；不会自动重放模型。"
+                if transition.applied
+                else "该 Agent Job 已按同一恢复 fence 收口为 unknown。"
+            ),
+            job_state=str(job.state),
+            claim_epoch=job.claim_epoch,
+            receipt_sha256=job.latest_receipt.receipt_sha256,
         )
 
     def publication_recovery_status(self) -> dict[str, object]:

@@ -1655,6 +1655,12 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.AGENTS_STOP:
             await self.stop_agent_execution(payload, request_id=request_id)
             return
+        if event_type == ClientEventType.AGENTS_RECOVERY_RESOLVE_UNKNOWN:
+            await self.resolve_agent_recovery_unknown(
+                payload,
+                request_id=request_id,
+            )
+            return
         if event_type == ClientEventType.WORKBENCH_REQUEST:
             await self.show_workbench(payload, request_id=request_id)
             return
@@ -3690,6 +3696,41 @@ class JsonlEngineBridge:
         )
         await self.emit(
             ServerEventType.AGENTS_ACTION,
+            asdict(result),
+            request_id=request_id,
+        )
+        await self._emit_agents_update()
+
+    async def resolve_agent_recovery_unknown(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Apply one exact current-session running-to-unknown recovery fence."""
+        session = getattr(self.engine, "_session", None)
+        session_id = str(getattr(session, "id", "") or "")
+        requested_session_id = str(payload.get("session_id") or "")
+        if not session_id or requested_session_id != session_id:
+            await self.emit_error(
+                "Agent 恢复请求不属于当前会话。",
+                code="agents_session_mismatch",
+                request_id=request_id,
+            )
+            return
+        result = await self.engine.subagent_manager.resolve_recovery_unknown(
+            session_id=session_id,
+            job_id=str(payload.get("job_id") or ""),
+            expected_request_sha256=str(
+                payload.get("request_sha256") or ""
+            ),
+            expected_claim_epoch=int(payload.get("claim_epoch") or 0),
+            expected_latest_receipt_sha256=str(
+                payload.get("receipt_sha256") or ""
+            ),
+        )
+        await self.emit(
+            ServerEventType.AGENTS_RECOVERY_ACTION_RESULT,
             asdict(result),
             request_id=request_id,
         )

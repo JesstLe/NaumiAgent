@@ -106,6 +106,10 @@
     Agent Control schema v4 同步 New UI/Textual TUI“恢复”标签；claimed/running/unknown、pending/
     expired publication 被明确分类，但不自动重放或改写状态。见
     [设计](HAR-10-7d-agent-recovery-catalog.md)。
+  - HAR-10.7e 已增加当前会话 expired running Job 的 exact fenced 人工裁决：request/session/receipt/
+    claim epoch/expiry 在同一事务复验后才允许收口为 `unknown`；New UI 与 Textual TUI 共用 `u` 动作，
+    bypass 不增加二次确认但也不能绕过事实 fencing。见
+    [设计](HAR-10-7e-exact-agent-recovery-action.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
@@ -137,7 +141,7 @@
   - UI-13.1e 已继续投影 durable queue policy、live waiting、active claim、oldest wait 与到期待收口数；
     New UI/TUI 复用同一只读 authority，不暴露 job identity；见
     [设计](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
-  - 未完成：Agent/Browser 独立持久 Worker dispatch、自动 recovery scheduler、fenced 人工恢复动作、
+  - 未完成：Agent/Browser 独立持久 Worker dispatch、自动 recovery scheduler、pre-start 自动 takeover、
     可恢复 response、
     workspace 锁、能力路由、
     亲和/反亲和、公平队列和隔离。

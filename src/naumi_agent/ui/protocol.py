@@ -23,6 +23,7 @@ PROTOCOL_VERSION = 1
 PROTOCOL_MINIMUM_VERSION = 1
 PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
+    "agent_recovery_actions",
     "doctor_export",
     "doctor_live_probe",
     "doctor_trace_index",
@@ -71,6 +72,7 @@ class ClientEventType(StrEnum):
     INSPECTOR_REQUEST = "inspector/request"
     AGENTS_REQUEST = "agents/request"
     AGENTS_STOP = "agents/stop"
+    AGENTS_RECOVERY_RESOLVE_UNKNOWN = "agents/recovery/resolve_unknown"
     WORKBENCH_REQUEST = "workbench/request"
     WORKBENCH_REVIEW_REQUEST = "workbench/review/request"
     WORKBENCH_PROPOSAL_ACTION = "workbench/proposal/action"
@@ -140,6 +142,7 @@ class ServerEventType(StrEnum):
     AGENTS_SNAPSHOT = "agents/snapshot"
     AGENTS_UPDATE = "agents/update"
     AGENTS_ACTION = "agents/action"
+    AGENTS_RECOVERY_ACTION_RESULT = "agents/recovery/action_result"
     RUN_QUEUED = "run/queued"
     RUN_QUEUE_PROMOTED = "run/queue_promoted"
     RUN_QUEUE_CANCELLED = "run/queue_cancelled"
@@ -702,6 +705,34 @@ def _normalize_client_payload(
             "task_id": task_id,
             "session_id": session_id,
             "reason": reason or "用户请求停止子 Agent。",
+        }
+
+    if event_type == ClientEventType.AGENTS_RECOVERY_RESOLVE_UNKNOWN:
+        session_id = str(payload.get("session_id") or "").strip()
+        job_id = str(payload.get("job_id") or "").strip()
+        request_sha256 = str(payload.get("request_sha256") or "").strip()
+        receipt_sha256 = str(payload.get("receipt_sha256") or "").strip()
+        claim_epoch = payload.get("claim_epoch")
+        if not session_id or len(session_id) > 500:
+            raise ValueError("Agent 恢复 session_id 格式无效。")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", job_id):
+            raise ValueError("Agent 恢复 job_id 格式无效。")
+        if not re.fullmatch(r"[0-9a-f]{64}", request_sha256):
+            raise ValueError("Agent 恢复 request_sha256 格式无效。")
+        if not re.fullmatch(r"[0-9a-f]{64}", receipt_sha256):
+            raise ValueError("Agent 恢复 receipt_sha256 格式无效。")
+        if (
+            isinstance(claim_epoch, bool)
+            or not isinstance(claim_epoch, int)
+            or not 1 <= claim_epoch <= 2_147_483_647
+        ):
+            raise ValueError("Agent 恢复 claim_epoch 必须是正整数。")
+        return {
+            "session_id": session_id,
+            "job_id": job_id,
+            "request_sha256": request_sha256,
+            "receipt_sha256": receipt_sha256,
+            "claim_epoch": claim_epoch,
         }
 
     if event_type == ClientEventType.SET_MODE:

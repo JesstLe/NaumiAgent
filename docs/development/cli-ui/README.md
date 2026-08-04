@@ -66,7 +66,9 @@ ARC-04.5d2c 已在 Agent Control schema v3 增加只读 `results` section：New 
 AgentJob SQLite，也没有伪造 read/ack/retry 操作；
 HAR-10.7d 已将 Agent Control 升级到 schema v4，增加严格有界、逐条认证的只读 `recovery_catalog`；
 两端“恢复”标签用红/黄/蓝区分需裁决、可接管/待投递和 live 状态，只公开稳定 ID、epoch、expiry、
-摘要与 reason code，不公开 owner 或 task/context/response，也不提供自动模型重放；
+摘要与 reason code，不公开 owner 或 task/context/response；HAR-10.7e 又为当前会话
+`recovery_required` Job 增加协商后的 `u` 动作，两端共用 Manager/Store exact fence，无二次确认但会
+复验 request/session/receipt/epoch/expiry，动作回执在刷新后仍可见，且不自动重放模型；
 UI-14.2g 已增加 surface-aware 权威页面索引，两端页面 provider 只填入精确导航命令；
 跨启动历史、typed argument form 与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。

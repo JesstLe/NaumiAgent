@@ -686,6 +686,7 @@ test("protocol contract drives client and server event validation", () => {
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "agent_recovery_actions",
       "doctor_export",
       "doctor_live_probe",
       "doctor_trace_index",
@@ -882,6 +883,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     minimum_version: 1,
     maximum_version: 1,
     capabilities: [
+      "agent_recovery_actions",
       "doctor_export",
       "doctor_live_probe",
       "doctor_trace_index",
@@ -2487,6 +2489,25 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   }).payload;
   assert.equal(action.accepted, false);
   assert.equal(action.code, "already_finished");
+
+  const recoveryAction = normalizeServerRecord({
+    type: "agents/recovery/action_result",
+    payload: {
+      action: "resolve_unknown",
+      job_id: "agent-job-recovery",
+      accepted: true,
+      applied: true,
+      code: "recovery_resolved_unknown",
+      message: "已收口。",
+      job_state: "unknown",
+      claim_epoch: 2,
+      receipt_sha256: "f".repeat(64),
+      owner_id: "must-not-survive",
+    },
+  }).payload;
+  assert.equal(recoveryAction.job_state, "unknown");
+  assert.equal(recoveryAction.receipt_sha256, "f".repeat(64));
+  assert.equal(Object.hasOwn(recoveryAction, "owner_id"), false);
 });
 
 test("rejects malformed agent control payloads and unknown sections", () => {
@@ -2610,6 +2631,24 @@ test("rejects malformed agent control payloads and unknown sections", () => {
       payload: invalidRecoveryIdentity,
     }),
     /job recovery 标识不一致/,
+  );
+
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/recovery/action_result",
+      payload: {
+        action: "resolve_unknown",
+        job_id: "agent-job-recovery",
+        accepted: false,
+        applied: true,
+        code: "impossible",
+        message: "invalid",
+        job_state: "",
+        claim_epoch: 0,
+        receipt_sha256: "",
+      },
+    }),
+    /applied.*rejected/,
   );
 
   const missingSection = agentControlSnapshotFixture(1);

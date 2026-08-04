@@ -149,8 +149,11 @@ Textual formatter 都只消费该 authority：
    startup recovery，见
    [设计与验证](ARC-04-5d2b-agent-result-publication-consumption.md)；
 5. `HAR-10.7d Agent Recovery Catalog`：已只读列出 claimed/running/unknown 与 pending/expired
-   publication，提供有界、认证、内容隔离的 New UI/TUI 视图；精确 fenced 人工动作仍未实现，见
-   [设计与验证](../harness/HAR-10-7d-agent-recovery-catalog.md)。
+   publication，提供有界、认证、内容隔离的 New UI/TUI 视图，见
+   [设计与验证](../harness/HAR-10-7d-agent-recovery-catalog.md)；
+6. `HAR-10.7e Exact Fenced Agent Recovery Action`：已让当前会话 expired running Job 在五重 fence
+   复验后显式收口为 unknown，不重放模型，见
+   [设计与验证](../harness/HAR-10-7e-exact-agent-recovery-action.md)。
 
 选择前必须检查三者与当前 Harness durable queue、Agent Control 和 Supervisor 文档的依赖，不默认沿
 ARC 编号继续。
