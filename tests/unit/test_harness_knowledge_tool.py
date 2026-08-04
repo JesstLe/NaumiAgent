@@ -47,6 +47,7 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
         "harness_explain",
         "harness_replay",
         "harness_eval",
+        "harness_eval_live",
         "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",

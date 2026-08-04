@@ -886,6 +886,7 @@ class AgentEngine:
             shell_admission_composer=self.shell_worker_admission_composer,
             authorization_receipt_provider=current_permission_receipt,
             sandbox_eval_executor=self.harness_sandbox_eval_executor,
+            model_port=self._model_port,
         )
         self.evolution_candidate_store = resources.evolution_candidate_store
         self.feedback_intake_service = FeedbackIntakeService(

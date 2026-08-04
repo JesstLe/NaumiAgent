@@ -169,6 +169,7 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         explain = engine.tool_registry.get("harness_explain")
         replay = engine.tool_registry.get("harness_replay")
         eval_tool = engine.tool_registry.get("harness_eval")
+        live_eval_tool = engine.tool_registry.get("harness_eval_live")
         eval_replay_tool = engine.tool_registry.get("harness_eval_replay")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
@@ -206,6 +207,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert replay.metadata.concurrency_safe
         assert eval_tool is not None and eval_tool.metadata.read_only
         assert eval_tool.metadata.concurrency_safe
+        assert live_eval_tool is not None and not live_eval_tool.metadata.read_only
+        assert live_eval_tool.metadata.concurrency_safe
+        assert live_eval_tool.metadata.requires_confirmation
         assert eval_replay_tool is not None and eval_replay_tool.metadata.read_only
         assert eval_replay_tool.metadata.concurrency_safe
         assert baseline_tool is not None and baseline_tool.metadata.read_only

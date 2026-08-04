@@ -28,6 +28,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_explain",
         "harness_replay",
         "harness_eval",
+        "harness_eval_live",
         "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",
@@ -46,16 +47,19 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     ]
     assert all(
         tools[index].metadata.read_only
-        for index in (0, 1, 2, 3, 4, 5, 6, 11, 12, 13, 18)
+        for index in (0, 1, 2, 3, 4, 6, 7, 12, 13, 14, 19)
     )
-    assert not tools[7].metadata.read_only
+    assert not tools[5].metadata.read_only
+    assert tools[5].metadata.requires_confirmation
     assert not tools[8].metadata.read_only
     assert not tools[9].metadata.read_only
-    assert not tools[14].metadata.read_only
+    assert not tools[10].metadata.read_only
+    assert not tools[11].metadata.read_only
     assert not tools[15].metadata.read_only
     assert not tools[16].metadata.read_only
     assert not tools[17].metadata.read_only
-    assert not tools[19].metadata.read_only
+    assert not tools[18].metadata.read_only
+    assert not tools[20].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
     assert all(
         tool.parameters_schema == {"type": "object", "properties": {}}
@@ -65,8 +69,8 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
     assert "诊断" in await tools[1].execute()
     assert "没有找到" in await tools[2].execute()
     assert "尚未配置" in await tools[4].execute()
-    assert "评测错误" in await tools[5].execute(run_id="latest")
-    assert "尚无 Baseline" in await tools[6].execute(suite="protocol")
+    assert "评测错误" in await tools[6].execute(run_id="latest")
+    assert "尚无 Baseline" in await tools[7].execute(suite="protocol")
     assert all(tool.name not in {"harness_trust", "harness_untrust"} for tool in tools)
 
 

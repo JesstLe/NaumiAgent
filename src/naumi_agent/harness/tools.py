@@ -8,6 +8,10 @@ from typing import Any
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptError
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantError
 from naumi_agent.harness.eval import render_harness_eval
+from naumi_agent.harness.eval_live import (
+    HarnessLiveEvalError,
+    render_harness_live_eval,
+)
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
     render_eval_batch_status,
@@ -56,6 +60,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessExplainTool(service),
         HarnessReplayTool(service),
         HarnessEvalTool(service),
+        HarnessEvalLiveTool(service),
         HarnessEvalReplayTool(service),
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
@@ -303,6 +308,79 @@ class HarnessEvalTool(_HarnessReadOnlyTool):
         except ValueError as exc:
             return f"Harness Eval 参数无效：{exc}"
         return render_harness_eval(result)
+
+
+class HarnessEvalLiveTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_live"
+
+    @property
+    def description(self) -> str:
+        return "显式执行一次有成本和时限上限的真实模型传输评测"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=True,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=(
+                "harness live eval provider model capability cost timeout transport"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "description": "可选模型；省略时使用 capable/default model",
+                },
+                "max_duration_seconds": {
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 120,
+                    "default": 30,
+                },
+                "max_cost_usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10,
+                    "default": 0.05,
+                },
+                "max_output_tokens": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 64,
+                    "default": 32,
+                },
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        try:
+            receipt = await self._service.eval_live(
+                model=kwargs.get("model"),
+                max_duration_seconds=kwargs.get("max_duration_seconds", 30.0),
+                max_cost_usd=kwargs.get("max_cost_usd", 0.05),
+                max_output_tokens=kwargs.get("max_output_tokens", 32),
+            )
+        except (HarnessLiveEvalError, ValueError) as exc:
+            code = getattr(exc, "code", "live_eval_parameters_invalid")
+            return f"Harness Live Eval 无法启动（`{code}`）：{exc}"
+        return render_harness_live_eval(receipt)
 
 
 class HarnessEvalReplayTool(_HarnessReadOnlyTool):

@@ -55,6 +55,12 @@ from naumi_agent.harness.eval import (
     resolve_declared_eval_suite,
 )
 from naumi_agent.harness.eval_identity import capture_eval_source_identity
+from naumi_agent.harness.eval_live import (
+    HarnessLiveEvalError,
+    HarnessLiveEvalReceipt,
+    HarnessLiveEvalRequest,
+    HarnessLiveEvalRunner,
+)
 from naumi_agent.harness.eval_models import (
     EvalRunStatus,
     HarnessEvalReport,
@@ -142,6 +148,7 @@ from naumi_agent.harness.trust import (
     HarnessTrustStore,
     HarnessTrustStoreError,
 )
+from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.safety.guardrails import OutputGuardrail
 
 _STORE_WARNING = (
@@ -225,6 +232,7 @@ class HarnessService:
             Callable[[], PermissionDecisionReceipt | None] | None
         ) = None,
         sandbox_eval_executor: HarnessSandboxEvalExecutor | None = None,
+        model_port: ModelPort | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
@@ -254,6 +262,10 @@ class HarnessService:
         ):
             raise ValueError("Sandbox Eval executor 与 Harness workspace 不一致。")
         self._sandbox_eval_executor = sandbox_eval_executor
+        self._model_port = model_port
+        self._live_eval_runner = (
+            HarnessLiveEvalRunner(model_port) if model_port is not None else None
+        )
         self._sandbox_eval_request_builder = HarnessSandboxEvalRequestBuilder()
         self._completion_gate = CompletionGate()
         self._explainer = HarnessExplainer()
@@ -336,6 +348,32 @@ class HarnessService:
             profile_digest=status.profile_digest,
             profile_trusted=status.trusted,
         )
+
+    async def eval_live(
+        self,
+        *,
+        model: str | None = None,
+        max_duration_seconds: float = 30.0,
+        max_cost_usd: float = 0.05,
+        max_output_tokens: int = 32,
+    ) -> HarnessLiveEvalReceipt:
+        """Run one explicit, bounded, no-tool live model transport challenge."""
+        runner = self._live_eval_runner
+        model_port = self._model_port
+        if runner is None or model_port is None:
+            raise HarnessLiveEvalError(
+                "live_eval_unavailable",
+                "当前 Runtime 尚未向 Harness 提供模型调用端口。",
+            )
+        selected_model = model or model_port.resolve_model("capable")
+        request = HarnessLiveEvalRequest(
+            live=True,
+            model=selected_model,
+            max_duration_seconds=max_duration_seconds,
+            max_cost_usd=max_cost_usd,
+            max_output_tokens=max_output_tokens,
+        )
+        return await runner.run(request)
 
     async def eval_sandbox(
         self,

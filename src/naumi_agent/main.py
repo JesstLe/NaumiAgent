@@ -4149,6 +4149,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness detail [run-id|latest]\n"
         "      /harness evidence [run-id|latest]\n"
         "      /harness eval [suite-id|相对路径]\n"
+        "      /harness eval live [--model <id>] [--timeout 1..120] "
+        "[--max-cost 0..10] [--max-output 1..64]\n"
         "      /harness eval replay [run-id|latest]\n"
         "      /harness eval sandbox <check-id...> [--samples 5] [--batch <id>]\n"
         "      /harness eval sandbox cancel <ticket> --authority <sha256> "
@@ -4250,6 +4252,62 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]Harness 证据参数无效：{exc}[/yellow]")
             return
         console.print(Markdown(render_harness_evidence_markdown(explain_payload)))
+        return
+    if (
+        subcommand == "eval"
+        and len(parts) >= 2
+        and parts[1].lower() == "live"
+    ):
+        from naumi_agent.tools.base import ToolCall
+
+        parsed: dict[str, str] = {}
+        index = 2
+        valid = True
+        allowed = {"--model", "--timeout", "--max-cost", "--max-output"}
+        while index < len(parts):
+            option = parts[index]
+            if (
+                option not in allowed
+                or option in parsed
+                or index + 1 >= len(parts)
+                or parts[index + 1].startswith("--")
+            ):
+                valid = False
+                break
+            parsed[option] = parts[index + 1]
+            index += 2
+        try:
+            timeout = float(parsed.get("--timeout", "30"))
+            max_cost = float(parsed.get("--max-cost", "0.05"))
+            max_output = int(parsed.get("--max-output", "32"))
+        except ValueError:
+            valid = False
+            timeout = 0.0
+            max_cost = 0.0
+            max_output = 0
+        if (
+            not valid
+            or not 1 <= timeout <= 120
+            or not 0 < max_cost <= 10
+            or not 1 <= max_output <= 64
+        ):
+            console.print(f"[yellow]{usage}[/yellow]")
+            return
+        arguments: dict[str, object] = {
+            "max_duration_seconds": timeout,
+            "max_cost_usd": max_cost,
+            "max_output_tokens": max_output,
+        }
+        if "--model" in parsed:
+            arguments["model"] = parsed["--model"]
+        result = await engine.execute_tool(
+            ToolCall(
+                id=f"manual-harness-live-{uuid.uuid4().hex}",
+                name="harness_eval_live",
+                arguments=json.dumps(arguments, ensure_ascii=False),
+            ),
+        )
+        console.print(Markdown(result.content))
         return
     if (
         subcommand == "eval"
