@@ -17,7 +17,7 @@ typed receipt。
 2. 请求前取得真实模型能力合同、思考强度身份和可信价格来源。
 3. 在 Provider 调用前计算保守成本上界；超过用户上限时不发送请求。
 4. 单次调用同时受本地 deadline、最大输出 token 和成本上限约束。
-5. 回执记录 Provider 实际返回的模型身份、完整 token 用量、成本和终止原因。
+5. 回执记录 Provider 实际返回的模型身份、transport token 用量、catalog 成本估算来源和终止原因。
 6. 固定挑战必须精确匹配，Provider/合同/用量异常不得被判为通过。
 7. 不保存用户内容、工作区内容、reasoning 或模型原始输出，只保存响应 SHA-256。
 8. CLI、New UI、Textual TUI 和 Agent Tool 共享一个 Service/Runner 权威。
@@ -109,7 +109,7 @@ NAUMI_LIVE_OK_<request-id-suffix>
 
 - Provider 返回的实际模型名存在且只含安全字符；
 - input/output/total token 均为有限非负值，且总量严格相加；
-- Provider 报告的实际成本有限、非负且不超过用户上限；
+- 已记录成本有限、非负、来源可证明且不超过用户上限；catalog 估算不得冒充 Provider 账单；
 - finish reason 为 `stop` 或 `end_turn`；
 - 去除首尾空白后的内容与随机挑战精确匹配。
 
@@ -120,7 +120,7 @@ NAUMI_LIVE_OK_<request-id-suffix>
 | `passed` | `live_transport_verified` | 身份、用量、预算、终止与挑战均通过 |
 | `implementation_failure` | `challenge_mismatch` | 请求完成，但被测模型未满足固定协议 |
 | `evaluation_error` | `model_incompatible`、`cost_contract_unverified`、`provider_request_failed` | 评测环境或 Provider 调用本身不可用 |
-| `partial` | `deadline_exceeded`、`usage_inconsistent`、`model_contract_drift`、`actual_cost_exceeded` | 已产生部分真实执行证据，但不能形成通过结论 |
+| `partial` | `deadline_exceeded`、`usage_inconsistent`、`model_contract_drift`、`observed_cost_exceeded` | 已产生部分真实执行证据，但不能形成通过结论 |
 
 Provider 私有异常不会写入回执或用户界面。取消任务时 `CancelledError` 原样传播，避免 Harness 吞掉上层
 取消语义。
@@ -169,5 +169,6 @@ Provider 私有异常不会写入回执或用户界面。取消任务时 `Cancel
 5. 专用 typed Live 页、历史查询和 macOS/Linux/Windows Provider matrix 尚未实现。
 
 HAR-08.5b 已完成声明式 Live Suite/Case、可重复样本身份、逐样本 H5a 持久化和批次成本审计，详见
-`HAR-08-5b-declarative-live-suite-batch.md`。下一步 8.5c 仍需补 Provider cancellation/billing 证明、专用
-typed 进度/历史和三平台 Provider matrix；不得宣称完整 HAR-08.5 或 HAR-08 已完成。
+`HAR-08-5b-declarative-live-suite-batch.md`。HAR-08.5c1 已补类型化进度，HAR-08.5c2 又把 catalog
+成本估算与 Provider 账单证据严格分开。Provider cancellation/billing API、专用历史和三平台 Provider matrix
+仍未完成；不得宣称完整 HAR-08.5 或 HAR-08 已完成。

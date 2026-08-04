@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 import litellm
 
@@ -142,6 +143,56 @@ class TokenUsage:
 
 
 @dataclass(frozen=True)
+class ModelCallEvidence:
+    """Privacy-bounded provenance for one completed model transport response."""
+
+    schema_version: Literal[1] = 1
+    provider_response_id_sha256: str = ""
+    usage_source: Literal["transport_response", "unavailable"] = "unavailable"
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "unavailable"
+    ] = "unavailable"
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ] = "unavailable"
+    billing_status: Literal[
+        "supported", "unsupported", "unavailable"
+    ] = "unavailable"
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("ModelCallEvidence schema_version 不兼容。")
+        digest = self.provider_response_id_sha256
+        if not isinstance(digest, str) or (digest and (
+            len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)
+        )):
+            raise ValueError("provider_response_id_sha256 格式无效。")
+        if self.usage_source not in {"transport_response", "unavailable"}:
+            raise ValueError("usage_source 格式无效。")
+        if self.cost_source not in {
+            "rate_card_estimate", "provider_billing", "unavailable",
+        }:
+            raise ValueError("cost_source 格式无效。")
+        if self.billing_status not in {"supported", "unsupported", "unavailable"}:
+            raise ValueError("billing_status 格式无效。")
+        if self.rate_card_source not in {
+            "catalog", "config", "litellm", "mixed", "fallback", "unavailable",
+        }:
+            raise ValueError("rate_card_source 格式无效。")
+        if self.cost_source == "rate_card_estimate" and (
+            self.usage_source != "transport_response"
+            or self.rate_card_source == "unavailable"
+        ):
+            raise ValueError("rate_card_estimate 必须绑定用量与单价来源。")
+        if self.cost_source != "rate_card_estimate" and self.rate_card_source != "unavailable":
+            raise ValueError("非 rate-card 成本不得声明单价来源。")
+        if (self.cost_source == "provider_billing") != (
+            self.billing_status == "supported"
+        ):
+            raise ValueError("provider_billing 与 supported 账单状态必须同时出现。")
+
+
+@dataclass(frozen=True)
 class ModelResponse:
     content: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -150,6 +201,7 @@ class ModelResponse:
     finish_reason: str = ""
     reasoning_content: str = ""
     provider_model: str = ""
+    call_evidence: ModelCallEvidence = field(default_factory=ModelCallEvidence)
 
 
 @dataclass(frozen=True)
@@ -1112,6 +1164,7 @@ class ModelRouter:
             finish_reason=choice.finish_reason or "",
             reasoning_content=reasoning,
             provider_model=str(getattr(response, "model", "") or ""),
+            call_evidence=self._build_call_evidence(response, resolved),
         )
 
     async def stream(
@@ -1317,4 +1370,34 @@ class ModelRouter:
             total_tokens=inp + out,
             cost_usd=round(_calculate_cost(model, inp, out, rates), 6),
             cache_tokens=cache,
+        )
+
+    def _build_call_evidence(self, response: Any, model: str) -> ModelCallEvidence:
+        usage_available = getattr(response, "usage", None) is not None
+        response_id = str(getattr(response, "id", "") or "").strip()
+        if (
+            not response_id
+            or len(response_id) > 512
+            or any(ord(char) < 32 or ord(char) == 127 for char in response_id)
+        ):
+            response_id_digest = ""
+        else:
+            response_id_digest = hashlib.sha256(response_id.encode("utf-8")).hexdigest()
+        if usage_available:
+            contract = self.get_model_capability_contract(model)
+            rate_sources = {
+                contract.field_sources.get("input_cost_per_million", "fallback"),
+                contract.field_sources.get("output_cost_per_million", "fallback"),
+            }
+            rate_card_source = (
+                next(iter(rate_sources)) if len(rate_sources) == 1 else "mixed"
+            )
+        else:
+            rate_card_source = "unavailable"
+        return ModelCallEvidence(
+            provider_response_id_sha256=response_id_digest,
+            usage_source="transport_response" if usage_available else "unavailable",
+            cost_source="rate_card_estimate" if usage_available else "unavailable",
+            rate_card_source=rate_card_source,
+            billing_status="unsupported",
         )

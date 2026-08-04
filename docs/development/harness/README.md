@@ -56,9 +56,11 @@ fairness 和自动恢复仍未完成；ARC-04.5d2c 已让双端 Agent Control �
 response 摘录，但分页、read/ack 与完整结果导出仍未完成。
 HAR-08.5a 已交付显式、有成本和时限上限的单次 Live 模型传输评测；HAR-08.5b 又增加 Profile 声明的
 严格 Live Suite、5..20 次同身份样本、批次请求证据绑定、实际 Provider 模型 identity 与逐样本 H5a
-不可变持久化。基础设施错误不重试，实际超支立即停止后续样本，normal 一次确认、bypass 直通。
+不可变持久化。基础设施错误不重试，已记录成本超预算立即停止后续样本，normal 一次确认、bypass 直通。
 HAR-08.5c1 已进一步把 Live batch 的真实调用、保存、成本和终态通过受控 Tool Runtime Event 同步到
-New UI/TUI；专用历史、独立取消 authority、Provider cancellation/billing 证明和三平台 matrix 仍未完成。
+New UI/TUI。HAR-08.5c2 又将 transport 用量、rate-card 成本估算及单价来源、Provider 账单状态和 response-id 摘要作为
+同源证据贯穿 ModelResponse/H5a/双端 UI，不再把估算称为最终账单；专用历史、独立取消 authority、
+Provider billing/cancellation API 和三平台 matrix 仍未完成。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request

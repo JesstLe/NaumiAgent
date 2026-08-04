@@ -137,6 +137,12 @@ def harness_live_eval_batch_payload(
         "total_calls": progress.total_calls,
         "total_tokens": progress.total_tokens,
         "total_cost_usd": round(progress.total_cost_usd, 9),
+        "cost_source": progress.cost_source,
+        "rate_card_source": progress.rate_card_source,
+        "billing_status": progress.billing_status,
+        "provider_response_ids_observed": (
+            progress.provider_response_ids_observed
+        ),
         "duration_ms": round(progress.duration_ms, 3),
         "max_total_duration_seconds": progress.max_total_duration_seconds,
         "max_total_cost_usd": progress.max_total_cost_usd,

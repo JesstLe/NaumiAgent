@@ -11,7 +11,25 @@ from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.model.catalog import parse_provider_catalog_json
 from naumi_agent.model.discovery import ModelDiscoveryService
 from naumi_agent.model.reasoning import ReasoningEffortError
-from naumi_agent.model.router import ModelContractStatus, ModelRouter, ModelTier
+from naumi_agent.model.router import (
+    ModelCallEvidence,
+    ModelContractStatus,
+    ModelRouter,
+    ModelTier,
+)
+
+
+def test_model_call_evidence_rejects_forged_sources_and_digests() -> None:
+    with pytest.raises(ValueError, match="schema_version"):
+        ModelCallEvidence(schema_version=2)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="provider_response_id_sha256"):
+        ModelCallEvidence(provider_response_id_sha256="not-a-digest")
+    with pytest.raises(ValueError, match="provider_response_id_sha256"):
+        ModelCallEvidence(provider_response_id_sha256=3)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="usage_source"):
+        ModelCallEvidence(usage_source="provider_invoice")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="必须绑定"):
+        ModelCallEvidence(cost_source="rate_card_estimate")
 
 
 def _discovery_catalog(*, static: bool = False):

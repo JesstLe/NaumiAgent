@@ -21,7 +21,11 @@ from naumi_agent.harness.eval_live_suite import (
     load_live_eval_suite,
     resolve_declared_live_eval_suite,
 )
-from naumi_agent.harness.eval_models import EvalCaseStatus, EvalRunStatus
+from naumi_agent.harness.eval_models import (
+    EvalCaseStatus,
+    EvalRunStatus,
+    HarnessEvalLiveEvidence,
+)
 from naumi_agent.harness.service import HarnessService
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.harness.tools import create_harness_tools
@@ -32,6 +36,7 @@ from naumi_agent.model.reasoning import (
     ReasoningEffortStatus,
 )
 from naumi_agent.model.router import (
+    ModelCallEvidence,
     ModelCapabilityContract,
     ModelContractStatus,
     ModelResponse,
@@ -64,6 +69,29 @@ comparison_policy:
   max_implementation_failures: 0
   max_pass_rate_drop: 0.0
 """
+
+
+def test_legacy_live_evidence_digest_shape_is_stable_without_new_provenance() -> None:
+    legacy = HarnessEvalLiveEvidence(
+        provider_model="legacy-model",
+        finish_reason="stop",
+        input_tokens=3,
+        output_tokens=2,
+        total_tokens=5,
+        cost_usd=0.001,
+        response_sha256="a" * 64,
+        transport_receipt_sha256="b" * 64,
+        batch_request_sha256="c" * 64,
+        exact_match=True,
+    )
+
+    payload = legacy.model_dump(mode="json")
+
+    assert "usage_source" not in payload
+    assert "cost_source" not in payload
+    assert "rate_card_source" not in payload
+    assert "billing_status" not in payload
+    assert "provider_response_id_sha256" not in payload
 
 
 def _git(workspace: Path, *args: str) -> None:
@@ -169,6 +197,13 @@ class _ModelPort:
         ]
         return ModelResponse(
             content=challenge,
+            call_evidence=ModelCallEvidence(
+                provider_response_id_sha256="b" * 64,
+                usage_source="transport_response",
+                cost_source="rate_card_estimate",
+                rate_card_source="catalog",
+                billing_status="unsupported",
+            ),
             usage=TokenUsage(
                 input_tokens=20,
                 output_tokens=8,
@@ -207,6 +242,10 @@ async def test_live_suite_runs_five_real_transport_samples_with_one_identity(
     assert execution.total_calls == 5
     assert execution.total_tokens == 140
     assert execution.total_cost_usd == pytest.approx(0.005)
+    assert execution.cost_source == "rate_card_estimate"
+    assert execution.rate_card_source == "catalog"
+    assert execution.billing_status == "unsupported"
+    assert execution.provider_response_ids_observed == 5
     assert execution.provider_model == "live-model-20260805"
     identities = {
         result.baseline_identity.identity_sha256
@@ -226,6 +265,10 @@ async def test_live_suite_runs_five_real_transport_samples_with_one_identity(
         assert case.status is EvalCaseStatus.PASSED
         assert case.live_evidence is not None
         assert case.live_evidence.exact_match is True
+        assert case.live_evidence.cost_source == "rate_card_estimate"
+        assert case.live_evidence.rate_card_source == "catalog"
+        assert case.live_evidence.billing_status == "unsupported"
+        assert len(case.live_evidence.provider_response_id_sha256) == 64
         assert (
             case.live_evidence.batch_request_sha256
             == execution.request.request_sha256
@@ -334,7 +377,7 @@ async def test_live_suite_rejects_provider_model_drift_for_baseline_identity(
 
 
 @pytest.mark.asyncio
-async def test_live_suite_reports_provider_actual_overspend_as_partial(
+async def test_live_suite_reports_observed_estimate_overspend_as_partial(
     tmp_path: Path,
 ) -> None:
     workspace, suite_path = _workspace(tmp_path)
@@ -357,11 +400,11 @@ async def test_live_suite_reports_provider_actual_overspend_as_partial(
     )
 
     assert execution.status == "partial"
-    assert execution.code == "actual_cost_exceeded"
+    assert execution.code == "observed_cost_exceeded"
     assert execution.total_calls == 1
     assert execution.total_cost_usd == pytest.approx(0.03)
     assert status.status == "partial"
-    assert status.code == "actual_cost_exceeded"
+    assert status.code == "observed_cost_exceeded"
     assert status.actual_cost_exceeded is True
 
     persistence_error = build_live_batch_status(
@@ -556,9 +599,20 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
     assert status.status == "completed"
     assert status.persisted == 5
     assert status.baseline_eligible is True
+    assert status.cost_source == "rate_card_estimate"
+    assert status.rate_card_source == "catalog"
+    assert status.billing_status == "unsupported"
+    assert status.provider_response_ids_observed == 5
     assert [item.sample_index for item in stored] == list(range(5))
     assert len({item.identity_sha256 for item in stored}) == 1
     assert stored[0].result.cases[0].live_evidence is not None
+    stored_evidence = stored[0].result.cases[0].live_evidence
+    assert stored_evidence is not None
+    assert stored_evidence.usage_source == "transport_response"
+    assert stored_evidence.cost_source == "rate_card_estimate"
+    assert stored_evidence.rate_card_source == "catalog"
+    assert stored_evidence.billing_status == "unsupported"
+    assert stored_evidence.provider_response_id_sha256 == "b" * 64
     assert [item.stage for item in progress] == [
         "preparing",
         *("evaluating" for _ in range(5)),
@@ -581,6 +635,10 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
     ]
     assert progress[-1].identity_sha256 == status.identity_sha256
     assert progress[-1].baseline_eligible is True
+    assert progress[-1].cost_source == "rate_card_estimate"
+    assert progress[-1].rate_card_source == "catalog"
+    assert progress[-1].billing_status == "unsupported"
+    assert progress[-1].provider_response_ids_observed == 5
 
     tool = next(
         item for item in create_harness_tools(service) if item.name == "harness_eval_live_batch"

@@ -168,3 +168,9 @@ Browser TaskRunner 当前使用 `options.get("model_router") or ModelRouter(...)
 
 完成后 ARC-01.3 仍剩 ToolExecutionPort 与 EventSink。EventSink 71 个调用点必须单独设计，不能
 借 ModelPort 迁移顺手改写事件系统。
+
+## 后续兼容演进
+
+HAR-08.5c2 在不增加 ModelPort 操作的前提下，为 `ModelResponse` 追加了默认兼容的
+`ModelCallEvidence`。它区分 transport response 用量、catalog 成本估算、Provider 账单状态和低敏 response-id
+摘要；默认值为 `unavailable`，因此既有替代 Port 仍满足结构契约，但若参与严格 Live Eval，必须显式证明来源。

@@ -581,6 +581,12 @@ class HarnessService:
                     total_calls=execution.total_calls,
                     total_tokens=execution.total_tokens,
                     total_cost_usd=execution.total_cost_usd,
+                    cost_source=execution.cost_source,
+                    rate_card_source=execution.rate_card_source,
+                    billing_status=execution.billing_status,
+                    provider_response_ids_observed=(
+                        execution.provider_response_ids_observed
+                    ),
                     duration_ms=execution.duration_ms,
                     max_total_duration_seconds=(
                         execution.request.max_total_duration_seconds

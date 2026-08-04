@@ -42,8 +42,8 @@ Profile 通过 `evals.live_suites` 声明工作区内 YAML。解析器拒绝工�
    capability/reasoning model identity。
 2. 每个 sample 复用 5a 的真实传输 runner；每个 case 仍独立执行调用前成本预检。
 3. Provider/timeout/合同错误出现后不重试；同 sample 的后续 case 标记为未调用并停止后续 sample。
-4. 每次 Provider 回执累计真实 token 和成本。实际成本越界后立即停止；已发生的远端成本不能回滚，回执以
-   `actual_cost_exceeded=true` 明示。
+4. 每次 transport response 累计 token 和带来源的记录成本。记录成本越界后立即停止；已发生的远端成本
+   不能回滚，schema v1 继续以兼容字段 `actual_cost_exceeded=true` 明示预算越界，但该字段不等于最终账单。
 5. 批次结束后复验源码和模型合同；Provider 实际模型缺失或样本间漂移时不生成可晋升 identity。
 6. 只有同 source/config/model/provider identity 下完成全部样本，才保留 Baseline eligibility。
 
@@ -54,9 +54,9 @@ workspace/batch/suite/sample 不可变键、内容摘要、幂等重试和冲突
 确认的连续前缀，并返回 `live_batch_persistence_failed` 或 `live_batch_persistence_incomplete`，不会覆盖既有
 事实，也不会自动创建或切换 H5b Baseline。
 
-每个 case 保存：Provider 实际模型、finish reason、输入/输出/总 token、实际成本、响应 SHA-256、5a transport
-receipt SHA-256、batch request SHA-256 和 exact-match 结论。原始挑战、模型输出、reasoning、用户内容与
-Provider 私有异常均不持久化。
+每个 case 保存：Provider 实际模型、finish reason、输入/输出/总 token、成本及其来源、账单状态、Provider
+response id SHA-256、响应 SHA-256、5a transport receipt SHA-256、batch request SHA-256 和 exact-match
+结论。原始 Provider response id、挑战、模型输出、reasoning、用户内容与 Provider 私有异常均不持久化。
 
 ## 状态与失败语义
 
@@ -65,8 +65,8 @@ Provider 私有异常均不持久化。
 - `completed`：全部样本执行并保存，且未超出总成本；
 - `partial`：预算耗尽、评测基础设施失败、样本不完整或只保存连续前缀；
 - `error`：持久化权威失败；已完成执行证据仍保留；
-- `actual_cost_exceeded`：Provider 回执成本超出请求上限，停止后续调用；即使随后持久化失败，独立布尔字段仍
-  保留超支事实。
+- `observed_cost_exceeded`：已记录成本超出请求上限，停止后续调用；即使随后持久化失败，兼容布尔字段
+  `actual_cost_exceeded` 仍保留预算越界事实，但不得解释为 Provider 最终账单。
 
 ## 权威代码
 

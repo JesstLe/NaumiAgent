@@ -27,7 +27,7 @@ preparing -> evaluating* -> persisting* -> completed | partial | error
 - Live batch request id 与 SHA-256；
 - batch/suite/requested model 与 Provider 实际模型；
 - requested/completed/persisted；
-- 回执确认的调用数、token、实际成本、总成本/时限上限；
+- 回执确认的调用数、token、带来源的记录成本、总成本/时限上限；
 - actual-cost-exceeded、identity、Baseline eligibility、稳定 code/message。
 
 协议机械校验 `persisted <= completed <= requested`、完整终态、超支事实和 Baseline 资格。进度不包含 Prompt、
@@ -61,8 +61,9 @@ preparing -> evaluating* -> persisting* -> completed | partial | error
 
 ## Textual TUI
 
-Textual 通过相同 Runtime Event 更新持久状态栏：阶段、completed/requested、persisted、实际成本和 batch id。
-它不解析 Tool 文案，也不自行估算成本。
+Textual 通过相同 Runtime Event 更新持久状态栏：阶段、completed/requested、persisted、记录成本和 batch id。
+HAR-08.5c2 已将这里的成本明确区分为 catalog 估算或 Provider 账单来源；TUI 不解析 Tool 文案，也不自行
+重新估算成本。
 
 ## 验收标准
 

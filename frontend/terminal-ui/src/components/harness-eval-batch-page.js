@@ -81,7 +81,7 @@ function renderLiveEvalBatchPage(value, snapshot, width, height) {
   const progress = phaseProgress(snapshot.stage, completed, persisted, requested);
   const logical = [
     color(ANSI.cyan, "Harness Live Eval"),
-    color(ANSI.dim, "真实 Provider · 有界成本 · 不显示 Prompt/输出/思考 · ↑/↓ 滚动 · Esc 返回"),
+    color(ANSI.dim, "真实 Provider · 成本来源可见 · 不显示 Prompt/输出/思考 · ↑/↓ 滚动 · Esc 返回"),
     section("状态"),
     color(tone, `${label} · ${progress}%`),
     `Batch · ${text(snapshot.batch_id || value.batchId) || "等待分配"}`,
@@ -94,8 +94,11 @@ function renderLiveEvalBatchPage(value, snapshot, width, height) {
     section("预算"),
     color(
       snapshot.actual_cost_exceeded ? ANSI.red : ANSI.green,
-      `成本 · $${formatCost(snapshot.total_cost_usd)} / $${formatCost(snapshot.max_total_cost_usd)}`,
+      `${costSourceLabel(snapshot.cost_source)} · $${formatCost(snapshot.total_cost_usd)} / $${formatCost(snapshot.max_total_cost_usd)}`,
     ),
+    `单价来源 · ${rateCardSourceLabel(snapshot.rate_card_source)}`,
+    `Provider 账单 · ${billingStatusLabel(snapshot.billing_status)}`,
+    `Response ID 摘要 · ${Number(snapshot.provider_response_ids_observed) || 0}/${Number(snapshot.total_calls) || 0}`,
     `耗时 · ${formatDuration(snapshot.duration_ms)} / ${formatDuration(Number(snapshot.max_total_duration_seconds) * 1000)}`,
     section("证据"),
     `Request · ${shortSha(snapshot.request_sha256)}`,
@@ -298,6 +301,35 @@ function formatDuration(value) {
 
 function formatCost(value) {
   return Math.max(0, Number(value) || 0).toFixed(6);
+}
+
+function costSourceLabel(value) {
+  return {
+    rate_card_estimate: "能力单价估算成本",
+    provider_billing: "Provider 账单成本",
+    mixed: "混合来源成本",
+    unavailable: "成本来源不可用",
+  }[String(value || "unavailable")] || "成本来源不可用";
+}
+
+function rateCardSourceLabel(value) {
+  return {
+    catalog: "Provider catalog",
+    config: "用户模型配置",
+    litellm: "LiteLLM 元数据",
+    mixed: "混合来源",
+    fallback: "未验证 fallback",
+    unavailable: "不可用",
+  }[String(value || "unavailable")] || "不可用";
+}
+
+function billingStatusLabel(value) {
+  return {
+    supported: "已取得账单证据",
+    unsupported: "当前适配器未集成账单 API",
+    mixed: "批次内状态不一致",
+    unavailable: "状态不可用",
+  }[String(value || "unavailable")] || "状态不可用";
 }
 
 function phaseProgress(stage, completed, persisted, requested) {

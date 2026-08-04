@@ -316,12 +316,34 @@ class _TuiSlashCommandFrontend:
         }
         stage = str(progress.get("stage") or "")
         label = labels.get(stage, stage or "等待")
+        cost_source = str(progress.get("cost_source") or "unavailable")
+        rate_source = {
+            "catalog": "catalog",
+            "config": "配置",
+            "litellm": "LiteLLM",
+            "mixed": "混合单价",
+            "fallback": "fallback",
+            "unavailable": "未知单价",
+        }.get(str(progress.get("rate_card_source") or "unavailable"), "未知单价")
+        cost_label = {
+            "rate_card_estimate": f"估算/{rate_source}",
+            "provider_billing": "账单",
+            "mixed": "混合成本",
+            "unavailable": "成本来源未知",
+        }.get(cost_source, "成本来源未知")
+        billing = {
+            "supported": "账单已取证",
+            "unsupported": "账单未集成",
+            "mixed": "账单状态混合",
+            "unavailable": "账单状态未知",
+        }.get(str(progress.get("billing_status") or "unavailable"), "账单状态未知")
         status = self._app.query_one(StatusBar)
         status.status_text = (
             f"Live Eval {label}: {int(progress.get('completed') or 0)}/"
             f"{int(progress.get('requested') or 0)}"
             f" · 已保存 {int(progress.get('persisted') or 0)}"
-            f" · ${float(progress.get('total_cost_usd') or 0):.6f}"
+            f" · {cost_label} ${float(progress.get('total_cost_usd') or 0):.6f}"
+            f" · {billing}"
             f" · {str(progress.get('batch_id') or '-')}"
         )
 

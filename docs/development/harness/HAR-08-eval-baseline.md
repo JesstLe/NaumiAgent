@@ -47,7 +47,7 @@
   `HAR-08-3a-safe-replay-eval.md`。
 - HAR-08.5a 有界 Live 模型传输评测：已实现。显式 `/harness eval live` 或非只读 Agent Tool
   在可信 capability/reasoning/价格合同下执行一次固定、无工具挑战；请求前保守预算失败关闭，调用后
-  复验实际 Provider 模型、完整用量、成本、终止原因与合同漂移。回执防篡改且只保存响应摘要，不进入
+  复验实际 Provider 模型、完整用量、带来源成本、终止原因与合同漂移。回执防篡改且只保存响应摘要，不进入
   H5a/Baseline；normal 一次确认，bypass 直通。详见 `HAR-08-5a-bounded-live-transport-eval.md`。
 - HAR-08.5b 声明式 Live Suite Batch：已实现。Profile 声明严格 Suite，5..20 个同身份样本复用 5a
   transport，并把批次请求摘要、实际 Provider 模型、用量、成本和响应摘要逐样本写入 H5a；基础设施失败
@@ -56,6 +56,9 @@
 - HAR-08.5c1 Live Eval 类型化进度：已实现。Runner/Service 的真实调用、H5a 保存与终态事实通过受控 Tool
   Runtime Event 同步到 New UI/TUI；付费权限路径不变，UI 不显示 Prompt/输出/reasoning，本地取消明确不
   冒充 Provider 远端停止或最终计费证明。详见 `HAR-08-5c1-live-eval-typed-progress.md`。
+- HAR-08.5c2 Provider 成本与账单证据来源：已实现。ModelResponse、单次回执、H5a、Batch progress 与
+  双端 UI 明确区分 transport 用量、rate-card 成本估算/单价来源和 Provider 账单状态；只保存 response id 摘要，旧 H5a
+  canonical JSON 保持稳定。详见 `HAR-08-5c2-provider-cost-evidence.md`。
 - HAR-08.6a Baseline Identity 契约：已实现。真实 Git HEAD/脏树 fingerprint、Suite/Profile/
   Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
   identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
