@@ -174,6 +174,37 @@ function harnessEvalBatchPayload(stage = "evaluating") {
   };
 }
 
+function harnessLiveEvalPayload(stage = "evaluating") {
+  const completed = stage === "completed" ? 5 : 2;
+  return {
+    schema_version: 1,
+    kind: "live",
+    stage,
+    terminal: ["completed", "partial", "error"].includes(stage),
+    request_id: `hlivebatch_${"a".repeat(24)}`,
+    request_sha256: "b".repeat(64),
+    batch_id: "live-batch-1",
+    suite_id: "live-transport-core",
+    model: "provider/model",
+    provider_model: "model-20260805",
+    requested: 5,
+    completed,
+    persisted: stage === "completed" ? 5 : 0,
+    total_calls: completed,
+    total_tokens: completed * 28,
+    total_cost_usd: completed * 0.001,
+    duration_ms: 12.5,
+    max_total_duration_seconds: 30,
+    max_total_cost_usd: 0.1,
+    actual_cost_exceeded: false,
+    baseline_eligible: stage === "completed",
+    identity_sha256: stage === "completed" ? "c".repeat(64) : "",
+    code: "",
+    message: "",
+    private_payload: "must-drop",
+  };
+}
+
 function harnessSandboxEvalPayload(stage = "executing") {
   const persisted = stage === "completed" ? 5 : 2;
   return {
@@ -1120,6 +1151,29 @@ test("harness eval batch response validates factual progress and terminal state"
   assert.throws(
     () => normalizeServerRecord({ type: "harness/eval-batch", payload: invalid }),
     /完整样本/,
+  );
+});
+
+test("harness live eval response validates budget and privacy facts", () => {
+  const progress = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessLiveEvalPayload(),
+  }).payload;
+  const completed = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: harnessLiveEvalPayload("completed"),
+  }).payload;
+
+  assert.equal(progress.kind, "live");
+  assert.equal(progress.total_calls, 2);
+  assert.equal(completed.baseline_eligible, true);
+  assert.equal(Object.hasOwn(progress, "private_payload"), false);
+
+  const forged = harnessLiveEvalPayload("partial");
+  forged.total_cost_usd = 0.2;
+  assert.throws(
+    () => normalizeServerRecord({ type: "harness/eval-batch", payload: forged }),
+    /超支标记/,
   );
 });
 

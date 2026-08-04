@@ -12,7 +12,10 @@ from naumi_agent.harness.eval_live import (
     HarnessLiveEvalError,
     render_harness_live_eval,
 )
-from naumi_agent.harness.eval_live_suite import render_live_batch_status
+from naumi_agent.harness.eval_live_suite import (
+    HarnessLiveBatchProgress,
+    render_live_batch_status,
+)
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
     render_eval_batch_status,
@@ -51,7 +54,10 @@ from naumi_agent.harness.service import (
 from naumi_agent.harness.store import HarnessStoreError
 from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
 from naumi_agent.tools.base import Tool, ToolMetadata
-from naumi_agent.ui.harness_protocol import harness_sandbox_eval_progress_payload
+from naumi_agent.ui.harness_protocol import (
+    harness_live_eval_batch_payload,
+    harness_sandbox_eval_progress_payload,
+)
 
 
 def create_harness_tools(service: HarnessService) -> list[Tool]:
@@ -430,7 +436,20 @@ class HarnessEvalLiveBatchTool(Tool):
             "additionalProperties": False,
         }
 
-    async def execute(self, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        *,
+        event_callback: LegacyEventCallback | None = None,
+        **kwargs: Any,
+    ) -> str:
+        async def publish_progress(progress: HarnessLiveBatchProgress) -> None:
+            if event_callback is None:
+                return
+            await event_callback(
+                RuntimeEventType.HARNESS_LIVE_EVAL_PROGRESS.value,
+                harness_live_eval_batch_payload(progress),
+            )
+
         try:
             result = await self._service.eval_live_batch(
                 kwargs.get("suite"),
@@ -439,6 +458,7 @@ class HarnessEvalLiveBatchTool(Tool):
                 model=kwargs.get("model"),
                 max_total_duration_seconds=kwargs.get("max_total_duration_seconds"),
                 max_total_cost_usd=kwargs.get("max_total_cost_usd"),
+                on_progress=publish_progress,
             )
         except (HarnessLiveEvalError, ValueError) as exc:
             code = getattr(exc, "code", "live_batch_parameters_invalid")

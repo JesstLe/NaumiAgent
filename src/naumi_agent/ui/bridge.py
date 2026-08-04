@@ -5187,7 +5187,10 @@ class JsonlEngineBridge:
         """Publish one engine event after any durable completion boundary."""
 
         await self.emit(ServerEventType.ENGINE_EVENT, {"event": event, "data": data})
-        if event == "harness_sandbox_eval_progress":
+        if event in {
+            "harness_live_eval_progress",
+            "harness_sandbox_eval_progress",
+        }:
             await self.emit(
                 ServerEventType.HARNESS_EVAL_BATCH,
                 data,

@@ -63,9 +63,12 @@ from naumi_agent.harness.eval_live import (
     HarnessLiveEvalRunner,
 )
 from naumi_agent.harness.eval_live_suite import (
+    HarnessLiveBatchProgress,
     HarnessLiveBatchStatus,
     HarnessLiveSuiteRunner,
+    LiveBatchProgressCallback,
     build_live_batch_status,
+    live_batch_terminal_progress,
     resolve_declared_live_eval_suite,
 )
 from naumi_agent.harness.eval_models import (
@@ -395,6 +398,7 @@ class HarnessService:
         model: str | None = None,
         max_total_duration_seconds: float | None = None,
         max_total_cost_usd: float | None = None,
+        on_progress: LiveBatchProgressCallback | None = None,
     ) -> HarnessLiveBatchStatus:
         """Run and durably append one explicit declarative Live Eval cohort."""
         if not isinstance(suite, str) or not suite.strip() or len(suite.strip()) > 1_024:
@@ -488,17 +492,56 @@ class HarnessService:
             raise ValueError(
                 "max_total_duration_seconds 必须在 5 秒以上，且不得超过 Profile 上限。"
             )
-        execution = await runner.run(
-            workspace_root=self.workspace_root,
-            loaded=loaded,
-            profile_sha256=status.profile_digest,
-            profile_trusted=status.trusted,
-            model=selected_model,
-            repetitions=repetitions,
-            batch_id=normalized_batch,
-            max_total_duration_seconds=float(requested_duration),
-            max_total_cost_usd=float(requested_cost),
-        )
+        latest_progress: HarnessLiveBatchProgress | None = None
+
+        async def capture_progress(progress: HarnessLiveBatchProgress) -> None:
+            nonlocal latest_progress
+            latest_progress = progress
+            await _notify_live_batch_progress(on_progress, progress)
+
+        try:
+            execution = await runner.run(
+                workspace_root=self.workspace_root,
+                loaded=loaded,
+                profile_sha256=status.profile_digest,
+                profile_trusted=status.trusted,
+                model=selected_model,
+                repetitions=repetitions,
+                batch_id=normalized_batch,
+                max_total_duration_seconds=float(requested_duration),
+                max_total_cost_usd=float(requested_cost),
+                on_progress=capture_progress,
+            )
+        except asyncio.CancelledError:
+            if latest_progress is not None:
+                await _notify_live_batch_progress(
+                    on_progress,
+                    HarnessLiveBatchProgress.model_validate(
+                        {
+                            **latest_progress.model_dump(mode="json"),
+                            "stage": "partial",
+                            "code": "live_batch_cancelled_locally",
+                            "message": (
+                                "本地 Live batch 已取消；Provider 远端停止与最终计费仍需对账。"
+                            ),
+                        }
+                    ),
+                )
+            raise
+        except HarnessLiveEvalError as exc:
+            if latest_progress is not None:
+                await _notify_live_batch_progress(
+                    on_progress,
+                    HarnessLiveBatchProgress.model_validate(
+                        {
+                            **latest_progress.model_dump(mode="json"),
+                            "stage": "error",
+                            "code": exc.code,
+                            "message": str(exc)[:500],
+                        }
+                    ),
+                )
+            raise
         persisted: list[str] = []
         persistence_code = ""
         persistence_message = ""
@@ -521,12 +564,45 @@ class HarnessService:
                 )
                 break
             persisted.append(stored.result_sha256)
-        return build_live_batch_status(
+            identity = result.baseline_identity
+            await _notify_live_batch_progress(
+                on_progress,
+                HarnessLiveBatchProgress(
+                    stage="persisting",
+                    request_id=execution.request.request_id,
+                    request_sha256=execution.request.request_sha256,
+                    batch_id=execution.request.batch_id,
+                    suite_id=execution.request.suite_id,
+                    model=execution.request.model,
+                    provider_model=execution.provider_model,
+                    requested=execution.request.repetitions,
+                    completed=len(execution.results),
+                    persisted=len(persisted),
+                    total_calls=execution.total_calls,
+                    total_tokens=execution.total_tokens,
+                    total_cost_usd=execution.total_cost_usd,
+                    duration_ms=execution.duration_ms,
+                    max_total_duration_seconds=(
+                        execution.request.max_total_duration_seconds
+                    ),
+                    max_total_cost_usd=execution.request.max_total_cost_usd,
+                    actual_cost_exceeded=(
+                        execution.total_cost_usd
+                        > execution.request.max_total_cost_usd
+                    ),
+                    identity_sha256=(
+                        identity.identity_sha256 if identity is not None else ""
+                    ),
+                ),
+            )
+        result = build_live_batch_status(
             execution,
             persisted_result_sha256=persisted,
             persistence_code=persistence_code,
             persistence_message=persistence_message,
         )
+        await _notify_live_batch_progress(on_progress, live_batch_terminal_progress(result))
+        return result
 
     async def eval_sandbox(
         self,
@@ -2914,6 +2990,21 @@ async def _notify_eval_batch_progress(
     except Exception as exc:
         logger.warning(
             "Harness Eval Batch progress delivery failed (%s)",
+            type(exc).__name__,
+        )
+
+
+async def _notify_live_batch_progress(
+    callback: LiveBatchProgressCallback | None,
+    progress: HarnessLiveBatchProgress,
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(progress)
+    except Exception as exc:
+        logger.warning(
+            "Harness Live Eval progress delivery failed (%s)",
             type(exc).__name__,
         )
 

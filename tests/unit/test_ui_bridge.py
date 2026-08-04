@@ -1747,6 +1747,48 @@ async def test_bridge_streams_non_blocking_harness_eval_batch_progress() -> None
 
 
 @pytest.mark.asyncio
+async def test_bridge_forwards_live_eval_runtime_progress_to_typed_batch_page() -> None:
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(_FakeEngine(), config_path="config.yaml")
+    bridge.bind_writer(writer)
+    payload = {
+        "schema_version": 1,
+        "kind": "live",
+        "stage": "evaluating",
+        "terminal": False,
+        "request_id": "hlivebatch_" + "a" * 24,
+        "request_sha256": "b" * 64,
+        "batch_id": "live-batch-1",
+        "suite_id": "live-transport-core",
+        "model": "provider/model",
+        "provider_model": "model-20260805",
+        "requested": 5,
+        "completed": 1,
+        "persisted": 0,
+        "total_calls": 1,
+        "total_tokens": 28,
+        "total_cost_usd": 0.001,
+        "duration_ms": 10.0,
+        "max_total_duration_seconds": 30.0,
+        "max_total_cost_usd": 0.1,
+        "actual_cost_exceeded": False,
+        "identity_sha256": "",
+        "baseline_eligible": False,
+        "code": "",
+        "message": "",
+    }
+
+    await bridge.handle_engine_event("harness_live_eval_progress", payload)
+
+    records = _records(writer)
+    typed = [record for record in records if record["type"] == "harness/eval-batch"]
+    assert len(typed) == 1
+    assert typed[0]["payload"] == payload
+    engine_event = [record for record in records if record["type"] == "engine/event"]
+    assert engine_event[0]["payload"]["event"] == "harness_live_eval_progress"
+
+
+@pytest.mark.asyncio
 async def test_bridge_emits_durable_harness_sandbox_cancel_receipt() -> None:
     class CancelAuthority:
         async def cancel(self, **kwargs):

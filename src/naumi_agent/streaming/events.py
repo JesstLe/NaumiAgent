@@ -113,6 +113,7 @@ _RUNTIME_EVENT_TYPE_MAP: dict[RuntimeEventType, EventType | None] = {
     RuntimeEventType.HARNESS_COMPLETION_RECEIPT: None,
     RuntimeEventType.HARNESS_KNOWLEDGE: None,
     RuntimeEventType.HARNESS_KNOWLEDGE_INVALIDATED: None,
+    RuntimeEventType.HARNESS_LIVE_EVAL_PROGRESS: None,
     RuntimeEventType.HARNESS_SANDBOX_EVAL_PROGRESS: None,
     RuntimeEventType.HOOK_TRACE: None,
     RuntimeEventType.LATENCY_METRIC: None,

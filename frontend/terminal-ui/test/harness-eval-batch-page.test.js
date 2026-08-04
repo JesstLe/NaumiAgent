@@ -53,6 +53,45 @@ test("Harness Eval Batch page never invents identity before source review", () =
   assert(!plain.includes("可晋升"));
 });
 
+test("Harness Live Eval page renders provider cost and bounded evidence", () => {
+  const lines = renderHarnessEvalBatchPage({
+    batchId: "live-batch-1",
+    suiteId: "live-transport-core",
+    snapshot: {
+      kind: "live",
+      stage: "evaluating",
+      request_sha256: "b".repeat(64),
+      batch_id: "live-batch-1",
+      suite_id: "live-transport-core",
+      model: "provider/model",
+      provider_model: "model-20260805",
+      requested: 5,
+      completed: 2,
+      persisted: 0,
+      total_calls: 2,
+      total_tokens: 56,
+      total_cost_usd: 0.002,
+      max_total_cost_usd: 0.1,
+      duration_ms: 1250,
+      max_total_duration_seconds: 30,
+      actual_cost_exceeded: false,
+      identity_sha256: "",
+      baseline_eligible: false,
+      code: "",
+      message: "",
+    },
+  }, 110, 24);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert(plain.includes("Harness Live Eval"));
+  assert(plain.includes("Provider 实际模型 · model-20260805"));
+  assert(plain.includes("成本 · $0.002000 / $0.100000"));
+  assert(plain.includes("Request · bbbbbbbbbbbb"));
+  assert(!plain.includes("NAUMI_LIVE_OK"));
+  assert(!plain.includes("reasoning_content"));
+  assert(lines.every((line) => visibleWidth(line) <= 110));
+});
+
 test("Harness Sandbox Eval page renders only coordinator facts", () => {
   const lines = renderHarnessEvalBatchPage({
     batchId: "sandbox-1",

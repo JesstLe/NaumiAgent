@@ -2878,6 +2878,9 @@ function normalizeHarnessEvalBatch(payload) {
   if (payload.kind === "sandbox") {
     return normalizeHarnessSandboxEvalProgress(payload);
   }
+  if (payload.kind === "live") {
+    return normalizeHarnessLiveEvalProgress(payload);
+  }
   if (Number(payload.schema_version) !== 1) {
     throw new Error(`harness/eval-batch schema_version 不兼容: ${payload.schema_version}`);
   }
@@ -2941,6 +2944,96 @@ function normalizeHarnessEvalBatch(payload) {
     identity_sha256: identity,
     code: harnessText(payload.code, "harness/eval-batch code"),
     message: harnessText(payload.message, "harness/eval-batch message"),
+  };
+}
+
+function normalizeHarnessLiveEvalProgress(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error(`harness/eval-batch live schema_version 不兼容: ${payload.schema_version}`);
+  }
+  const stage = harnessChoice(
+    payload.stage,
+    "harness/eval-batch live stage",
+    HARNESS_EVAL_BATCH_STAGES,
+  );
+  const terminal = harnessBoolean(payload.terminal, "harness/eval-batch live terminal");
+  if (terminal !== ["completed", "partial", "error"].includes(stage)) {
+    throw new Error("harness/eval-batch live terminal 与 stage 不一致");
+  }
+  const requested = harnessPositiveInteger(payload.requested, "live requested");
+  const completed = harnessNonnegativeInteger(payload.completed, "live completed");
+  const persisted = harnessNonnegativeInteger(payload.persisted, "live persisted");
+  if (requested < 5 || requested > 20 || completed > requested || persisted > completed) {
+    throw new Error("harness/eval-batch live 进度计数无效");
+  }
+  if (stage === "completed" && (completed !== requested || persisted !== requested)) {
+    throw new Error("harness/eval-batch live completed 缺少完整样本");
+  }
+  const totalCost = harnessNonnegativeFiniteNumber(payload.total_cost_usd, "live cost");
+  const maxCost = harnessNonnegativeFiniteNumber(payload.max_total_cost_usd, "live max cost");
+  if (maxCost <= 0 || maxCost > 10) throw new Error("harness/eval-batch live 成本上限无效");
+  const actualCostExceeded = harnessBoolean(payload.actual_cost_exceeded, "live overspend");
+  if (actualCostExceeded !== (totalCost > maxCost)) {
+    throw new Error("harness/eval-batch live 超支标记不一致");
+  }
+  if (stage === "completed" && actualCostExceeded) {
+    throw new Error("harness/eval-batch live completed 不得超支");
+  }
+  const identity = harnessText(payload.identity_sha256, "live identity_sha256");
+  if (identity && !/^[0-9a-f]{64}$/u.test(identity)) {
+    throw new Error("harness/eval-batch live identity_sha256 无效");
+  }
+  const baselineEligible = harnessBoolean(payload.baseline_eligible, "live baseline eligible");
+  if (baselineEligible && (stage !== "completed" || !identity)) {
+    throw new Error("harness/eval-batch live Baseline 资格无效");
+  }
+  const requestId = harnessText(payload.request_id, "live request_id");
+  const requestSha = harnessText(payload.request_sha256, "live request_sha256");
+  const batchId = harnessText(payload.batch_id, "live batch_id");
+  const suiteId = harnessText(payload.suite_id, "live suite_id");
+  if (!/^hlivebatch_[0-9a-f]{24}$/u.test(requestId)
+    || !/^[0-9a-f]{64}$/u.test(requestSha)
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(batchId)
+    || !/^[a-z][a-z0-9_-]{0,63}$/u.test(suiteId)) {
+    throw new Error("harness/eval-batch live 请求身份无效");
+  }
+  const providerModel = harnessText(payload.provider_model, "live provider_model");
+  if (providerModel && !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}$/u.test(providerModel)) {
+    throw new Error("harness/eval-batch live Provider 模型无效");
+  }
+  const totalCalls = harnessNonnegativeInteger(payload.total_calls, "live calls");
+  const maxDuration = harnessNonnegativeFiniteNumber(
+    payload.max_total_duration_seconds,
+    "live max duration",
+  );
+  if (totalCalls > 200 || maxDuration < 5 || maxDuration > 3600) {
+    throw new Error("harness/eval-batch live 调用或时限上限无效");
+  }
+  return {
+    schema_version: 1,
+    kind: "live",
+    stage,
+    terminal,
+    request_id: requestId,
+    request_sha256: requestSha,
+    batch_id: batchId,
+    suite_id: suiteId,
+    model: harnessText(payload.model, "live model"),
+    provider_model: providerModel,
+    requested,
+    completed,
+    persisted,
+    total_calls: totalCalls,
+    total_tokens: harnessNonnegativeInteger(payload.total_tokens, "live tokens"),
+    total_cost_usd: totalCost,
+    duration_ms: harnessNonnegativeFiniteNumber(payload.duration_ms, "live duration"),
+    max_total_duration_seconds: maxDuration,
+    max_total_cost_usd: maxCost,
+    actual_cost_exceeded: actualCostExceeded,
+    identity_sha256: identity,
+    baseline_eligible: baselineEligible,
+    code: harnessText(payload.code, "live code"),
+    message: harnessText(payload.message, "live message"),
   };
 }
 
