@@ -113,16 +113,17 @@ Store 提供两类读取：
 如果仅 Bus notification 失败，durable inbox 与 published receipt不回滚，当前请求仍成功；日志记录
 通知失败，但 Bus 不参与可靠性判断。
 
-## 6. 启动恢复
+## 6. 启动与周期恢复
 
-`AgentEngine.start_long_running_services()` 在启动 retention worker 前调用
-`SubAgentManager.recover_pending_publications()`：
+`AgentEngine.start_long_running_services()` 在启动其他长运行 worker 前先执行一次同步恢复，随后启动
+HAR-10.7f `AgentPublicationRecoveryWorker`：
 
 ```text
 Evolution patch-set recovery
   -> Evolution patch recovery
   -> Session reconciliation recovery
-  -> bounded Agent publication recovery
+  -> bounded Agent publication recovery pass
+  -> start periodic Agent publication recovery worker
   -> start periodic retention worker
 ```
 
@@ -136,15 +137,16 @@ Evolution patch-set recovery
 - 记录 content-free `scanned/delivered/notification_failures/failed/failure_codes`
   summary。
 
-这证明 commit-before-deliver 的进程崩溃可以在下次启动自动恢复。当前没有常驻 publication retry
-worker：若 live delivery 失败后进程长期不重启，需后续周期 worker或人工动作唤醒。这一缺口不能用
-startup one-shot 冒充完成。
+这证明 commit-before-deliver 的进程崩溃可以在下次启动自动恢复。HAR-10.7f 又补齐默认启用的常驻
+publication recovery worker：空队列与失败分别使用有上限的指数退避，终态 live delivery 失败会发出
+wake 信号，Engine shutdown 会等待 worker 收口。关闭周期 worker 配置时仍保留一次 startup recovery，
+不会因配置降级而完全失去崩溃恢复。
 
 ## 7. 交付语义
 
 本切片对内置 result inbox 达成：
 
-- outbox publication 至少会在 live path 或后续 startup recovery 被尝试；
+- outbox publication 至少会在 live path、startup recovery 或周期 recovery 中被尝试；
 - inbox insert 与 outbox published ACK 原子；
 - delivery identity 幂等，重复尝试不会产生第二条 inbox record；
 - notification 可以丢失或重复，消费者必须以 durable inbox 为准。
@@ -171,8 +173,9 @@ startup one-shot 冒充完成。
 - SQLite bytes 不包含 raw session、task、context、response/error；
 - 正常委派先建立 durable inbox，再发送带稳定 identity 的 Bus notification；
 - Bus publish 失败不回滚 inbox 或把 execution 标成失败；
-- terminal commit 后注入 live delivery gap，第二个 manager 启动恢复成功；
-- startup publication recovery 完成后才启动 retention worker；
+- terminal commit 后注入 live delivery gap，第二个 manager 的周期 worker 恢复成功；
+- startup publication recovery 完成后才启动周期 worker与 retention worker；
+- 周期 worker 空闲/失败退避有界，并发 pass 串行，wake 可中断等待，shutdown 可收口；
 - 只运行 AgentJob、SubAgentManager、MessageBus、Store Catalog、Runtime Composition、
   retention startup 等小模块测试，不运行全量测试。
 
@@ -180,7 +183,7 @@ startup one-shot 冒充完成。
 
 本切片没有完成：
 
-- 周期 retry/backoff、最大 attempt、quarantine/dead-letter；
+- 最大 attempt、poison-record quarantine/dead-letter；
 - publication/inbox retention、GC、备份 root 与删除检测；
 - 未读数、详情分页/导出、人工重试/隔离；统一只读 inbox projection 已由
   `ARC-04.5d2c-agent-result-inbox-projection.md` 完成；

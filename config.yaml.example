@@ -38,6 +38,14 @@ harness:
     lease_seconds: 60
     scan_limit: 100
     catalog_limit: 200
+  agent_publication_recovery:
+    # 周期恢复已提交但尚未投递到 durable result inbox 的 Agent 终态结果。
+    enabled: true
+    interval_seconds: 30
+    max_empty_backoff_seconds: 300
+    max_failure_backoff_seconds: 300
+    scan_limit: 100
+    jitter_ratio: 0.1
 
 search:
   # 实际 token 不写入 YAML；运行时从环境变量解析。

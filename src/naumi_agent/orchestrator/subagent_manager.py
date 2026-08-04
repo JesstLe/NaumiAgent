@@ -7,6 +7,7 @@ import hashlib
 import logging
 import math
 import time
+from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -278,6 +279,7 @@ class SubAgentManager:
             f"embedded-agent-publisher-{uuid4().hex}"
         )
         self._last_publication_recovery = AgentPublicationRecoverySummary()
+        self._publication_recovery_wake: Callable[[], bool] | None = None
         self._agents: dict[str, BaseAgent] = {}
         self._configs: dict[str, AgentConfig] = dict(ALL_AGENT_CONFIGS)
         self._factory = DynamicAgentFactory(engine.router)
@@ -670,6 +672,15 @@ class SubAgentManager:
             "failed": summary.failed,
             "failure_codes": list(summary.failure_codes),
         }
+
+    def set_publication_recovery_wake(
+        self,
+        wake: Callable[[], bool] | None,
+    ) -> None:
+        """Register the Engine-owned periodic worker wake port."""
+        if wake is not None and not callable(wake):
+            raise TypeError("publication recovery wake 必须可调用。")
+        self._publication_recovery_wake = wake
 
     async def recover_pending_publications(
         self,
@@ -1264,6 +1275,7 @@ class SubAgentManager:
                             execution.worker_job_failure_code = (
                                 "agent_job_publication_delivery_failed"
                             )
+                            self._wake_publication_recovery()
 
         lifecycle = execution.heartbeat_lifecycle
         if lifecycle is not None:
@@ -1888,6 +1900,19 @@ class SubAgentManager:
                 publication_id,
                 type(exc).__name__,
             )
+
+    def _wake_publication_recovery(self) -> bool:
+        wake = self._publication_recovery_wake
+        if wake is None:
+            return False
+        try:
+            return bool(wake())
+        except Exception as exc:
+            logger.warning(
+                "Agent publication worker wake failed: %s",
+                type(exc).__name__,
+            )
+            return False
 
     async def _publish_publication_notification(
         self,

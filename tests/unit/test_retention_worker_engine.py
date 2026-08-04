@@ -17,7 +17,10 @@ def _engine(tmp_path, *, enabled: bool) -> AgentEngine:
     return create_agent_engine(
         AppConfig(
             workspace_root=str(tmp_path),
-            harness={"pursuit_terminal_outbox": {"enabled": False}},
+            harness={
+                "pursuit_terminal_outbox": {"enabled": False},
+                "agent_publication_recovery": {"enabled": False},
+            },
             memory=MemoryConfig(
                 session_db_path=str(tmp_path / "sessions.db"),
                 long_term_enabled=False,
@@ -155,6 +158,73 @@ async def test_terminal_outbox_startup_pass_precedes_periodic_workers(tmp_path) 
         await engine.shutdown()
 
     assert order == ["terminal-pass", "terminal-start", "retention-start"]
+
+
+@pytest.mark.asyncio
+async def test_agent_publication_startup_pass_precedes_periodic_worker(
+    tmp_path,
+) -> None:
+    engine = _engine(tmp_path, enabled=True)
+    engine._config.harness.agent_publication_recovery.enabled = True
+    order: list[str] = []
+    engine.evolution_patch_set_recovery.recover_pending = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+    engine.evolution_patch_recovery.recover_pending = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+    engine.recover_session_reconciliations = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+
+    async def publication_pass():
+        order.append("publication-pass")
+        return SimpleNamespace()
+
+    def publication_start() -> bool:
+        order.append("publication-start")
+        return True
+
+    def retention_start() -> bool:
+        order.append("retention-start")
+        return True
+
+    engine._agent_publication_recovery_worker.run_once = publication_pass  # type: ignore[method-assign]
+    engine._agent_publication_recovery_worker.start = publication_start  # type: ignore[method-assign]
+    engine.start_session_retention_worker = retention_start  # type: ignore[method-assign]
+    try:
+        await engine.start_long_running_services()
+    finally:
+        await engine.shutdown()
+
+    assert order == [
+        "publication-pass",
+        "publication-start",
+        "retention-start",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_publication_worker_ports_honor_gate_and_shutdown(
+    tmp_path,
+) -> None:
+    engine = _engine(tmp_path, enabled=False)
+    worker = engine._agent_publication_recovery_worker
+    worker.start = MagicMock(return_value=True)  # type: ignore[method-assign]
+    worker.wake = MagicMock(return_value=True)  # type: ignore[method-assign]
+    worker.stop = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    snapshot = SimpleNamespace(state="waiting")
+    worker.snapshot = MagicMock(return_value=snapshot)  # type: ignore[method-assign]
+
+    assert engine.start_agent_publication_recovery_worker() is False
+    worker.start.assert_not_called()
+    engine._config.harness.agent_publication_recovery.enabled = True
+    assert engine.start_agent_publication_recovery_worker() is True
+    assert engine.wake_agent_publication_recovery_worker() is True
+    assert engine.agent_publication_recovery_worker_snapshot() is snapshot
+    await engine.shutdown()
+
+    worker.stop.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
