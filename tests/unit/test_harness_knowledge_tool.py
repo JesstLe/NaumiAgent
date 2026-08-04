@@ -48,6 +48,7 @@ async def test_knowledge_tool_schema_metadata_and_shared_service(tmp_path: Path)
         "harness_replay",
         "harness_eval",
         "harness_eval_live",
+        "harness_eval_live_batch",
         "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",
@@ -99,8 +100,7 @@ async def test_knowledge_tool_validates_query_path_and_budget(tmp_path: Path) ->
     service = _service(tmp_path)
     await service.trust(source="test")
     tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_read_knowledge"
+        item for item in create_harness_tools(service) if item.name == "harness_read_knowledge"
     )
 
     missing = await tool.execute()
@@ -109,10 +109,7 @@ async def test_knowledge_tool_validates_query_path_and_budget(tmp_path: Path) ->
     small = await tool.execute(query="AgentEngine", max_tokens=0)
     large = await tool.execute(query="AgentEngine", max_tokens=4_001)
 
-    assert all(
-        "参数无效" in output
-        for output in (missing, both, small, large)
-    )
+    assert all("参数无效" in output for output in (missing, both, small, large))
     assert "越过工作区边界" in unsafe
 
 
@@ -121,14 +118,12 @@ async def test_knowledge_tool_is_safe_for_concurrent_queries(tmp_path: Path) -> 
     service = _service(tmp_path)
     await service.trust(source="test")
     tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_read_knowledge"
+        item for item in create_harness_tools(service) if item.name == "harness_read_knowledge"
     )
 
-    results = await asyncio.gather(*(
-        tool.execute(query="AgentEngineKnowledge", max_tokens=100)
-        for _ in range(30)
-    ))
+    results = await asyncio.gather(
+        *(tool.execute(query="AgentEngineKnowledge", max_tokens=100) for _ in range(30))
+    )
 
     assert len(set(results)) == 1
     assert "src/engine.py" in results[0]

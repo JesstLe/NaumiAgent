@@ -77,18 +77,21 @@ def _get_git_info() -> dict[str, str | bool]:
     # TTL cache: refresh every 5 seconds so branch switches show up
     now = time.monotonic()
     if (
-        hasattr(_get_git_info, "_cache")
-        and now - _get_git_info._cache_time < 5  # type: ignore[attr-defined]
+        hasattr(_get_git_info, "_cache") and now - _get_git_info._cache_time < 5  # type: ignore[attr-defined]
     ):
         return _get_git_info._cache.copy()  # type: ignore[attr-defined]
 
     result: dict[str, str | bool] = {"branch": "", "dirty": False}
     try:
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL,
-            cwd=str(Path.cwd()),
-        ).decode().strip()
+        branch = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                cwd=str(Path.cwd()),
+            )
+            .decode()
+            .strip()
+        )
         if branch:
             result["branch"] = branch
             try:
@@ -97,7 +100,9 @@ def _get_git_info() -> dict[str, str | bool]:
                         ["git", "status", "--porcelain"],
                         stderr=subprocess.DEVNULL,
                         cwd=str(Path.cwd()),
-                    ).decode().strip()
+                    )
+                    .decode()
+                    .strip()
                 )
             except Exception:
                 pass
@@ -107,6 +112,7 @@ def _get_git_info() -> dict[str, str | bool]:
     _get_git_info._cache = result  # type: ignore[attr-defined]
     _get_git_info._cache_time = now  # type: ignore[attr-defined]
     return result.copy()
+
 
 app = typer.Typer(
     name="naumi",
@@ -167,25 +173,18 @@ def runtime_key_status() -> None:
 
     try:
         injected = os.environ.get("NAUMI_RUNTIME_PAYLOAD_KEY", "").strip()
-        key_bytes = (
-            decode_runtime_payload_key(injected)
-            if injected
-            else load_runtime_payload_key()
-        )
+        key_bytes = decode_runtime_payload_key(injected) if injected else load_runtime_payload_key()
     except CredentialStoreError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     if key_bytes is None:
         console.print(
-            "[yellow]Runtime payload 密钥尚未初始化。"
-            "请运行 `naumi runtime-key init`。[/yellow]"
+            "[yellow]Runtime payload 密钥尚未初始化。请运行 `naumi runtime-key init`。[/yellow]"
         )
         raise typer.Exit(1)
     identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
     source = "环境变量" if injected else "系统凭据"
-    console.print(
-        f"[green]Runtime payload 密钥已就绪[/green] · {source} · {identity}"
-    )
+    console.print(f"[green]Runtime payload 密钥已就绪[/green] · {source} · {identity}")
 
 
 @runtime_key_app.command("init")
@@ -205,9 +204,7 @@ def runtime_key_init() -> None:
             key_bytes = decode_runtime_payload_key(injected)
             identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
             console.print(
-                "[green]Runtime payload 环境密钥已就绪，"
-                "未写入系统凭据。[/green]"
-                f" · {identity}"
+                f"[green]Runtime payload 环境密钥已就绪，未写入系统凭据。[/green] · {identity}"
             )
             return
         existing = load_runtime_payload_key()
@@ -217,15 +214,9 @@ def runtime_key_init() -> None:
         raise typer.Exit(1) from exc
     identity = RuntimePayloadKey.from_bytes(key_bytes).key_id
     if existing is None:
-        console.print(
-            "[green]Runtime payload 密钥已安全初始化。[/green]"
-            f" · {identity}"
-        )
+        console.print(f"[green]Runtime payload 密钥已安全初始化。[/green] · {identity}")
         return
-    console.print(
-        "[green]Runtime payload 密钥已存在，未执行轮换。[/green]"
-        f" · {identity}"
-    )
+    console.print(f"[green]Runtime payload 密钥已存在，未执行轮换。[/green] · {identity}")
 
 
 @app.callback(invoke_without_command=True)
@@ -279,6 +270,7 @@ def _safe_launch_error(exc: BaseException) -> str:
     first_line = raw.splitlines()[0] if raw else type(exc).__name__
     return OutputGuardrail.redact(first_line)[:300]
 
+
 # Friendly tool name mapping for display
 _TOOL_ICONS: dict[str, str] = {
     "file_read": "📖",
@@ -316,6 +308,7 @@ _TOOL_ICONS: dict[str, str] = {
     "worktree_remove": "🧹",
 }
 
+
 # ANSI separators for visual hierarchy
 def _sep(thin: bool = True) -> str:
     """Build a terminal-width separator line."""
@@ -334,13 +327,20 @@ def _tool_label(name: str, args: str = "") -> str:
     hint = ""
     if args:
         import json
+
         try:
             d = json.loads(args) if isinstance(args, str) else args
             if isinstance(d, dict):
                 # Pick the most informative arg
                 for key in (
-                    "path", "file_path", "command",
-                    "query", "url", "task", "description", "goal",
+                    "path",
+                    "file_path",
+                    "command",
+                    "query",
+                    "url",
+                    "task",
+                    "description",
+                    "goal",
                 ):
                     if key in d:
                         val = str(d[key])
@@ -416,9 +416,7 @@ def _capture_tui_launch_noise() -> Any:
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     noisy_loggers = ("litellm", "LiteLLM", "naumi_agent")
-    previous_levels = {
-        name: logging.getLogger(name).level for name in noisy_loggers
-    }
+    previous_levels = {name: logging.getLogger(name).level for name in noisy_loggers}
     try:
         for name in noisy_loggers:
             logging.getLogger(name).setLevel(logging.ERROR)
@@ -638,10 +636,7 @@ def _launch_interactive_ui(config_path: str) -> int:
     try:
         _launch_tui(config_path)
     except Exception as exc:
-        console.print(
-            "[red]Textual TUI 也无法启动："
-            f"{_safe_launch_error(exc)}[/red]"
-        )
+        console.print(f"[red]Textual TUI 也无法启动：{_safe_launch_error(exc)}[/red]")
         return 1
     return 0
 
@@ -697,9 +692,7 @@ def _resolve_terminal_ui_frontend_dir(
         if (candidate / "src" / "index.js").exists():
             return candidate
 
-    searched = "\n".join(
-        f"- {candidate / 'src' / 'index.js'}" for candidate in candidates
-    )
+    searched = "\n".join(f"- {candidate / 'src' / 'index.js'}" for candidate in candidates)
     raise TerminalUiLaunchError(f"未找到新终端 UI 入口，已检查：\n{searched}")
 
 
@@ -743,9 +736,7 @@ def _build_terminal_ui_command(
 
     node = node_executable or shutil.which("node")
     if not node:
-        raise TerminalUiLaunchError(
-            "未找到 Node.js，无法启动新一代终端 UI。请先安装 Node.js 20+。"
-        )
+        raise TerminalUiLaunchError("未找到 Node.js，无法启动新一代终端 UI。请先安装 Node.js 20+。")
     _validate_node_runtime(node)
 
     bridge_command = [
@@ -798,9 +789,7 @@ def _validate_node_runtime(node_executable: str) -> None:
             text=True,
         ).strip()
     except Exception as exc:
-        raise TerminalUiLaunchError(
-            f"无法检测 Node.js 版本，无法启动新一代终端 UI：{exc}"
-        ) from exc
+        raise TerminalUiLaunchError(f"无法检测 Node.js 版本，无法启动新一代终端 UI：{exc}") from exc
 
     parsed_version = _parse_node_version(version)
     if parsed_version is None:
@@ -826,9 +815,7 @@ def _parse_node_version(version: str) -> tuple[int, int, int] | None:
         normalized = normalized[1:]
     normalized = normalized.split("-", 1)[0]
     components = normalized.split(".")
-    if not 1 <= len(components) <= 3 or not all(
-        component.isdigit() for component in components
-    ):
+    if not 1 <= len(components) <= 3 or not all(component.isdigit() for component in components):
         return None
     parsed = [int(component) for component in components]
     parsed.extend([0] * (3 - len(parsed)))
@@ -871,9 +858,7 @@ def _launch_tui(config_path: str) -> None:
         keybindings=keybindings,
         style_config=style_config,
         show_reasoning=bool(getattr(config.ui, "show_reasoning", False)),
-        terminal_runtime_lifecycle_factory=(
-            engine.terminal_runtime_lifecycle_factory
-        ),
+        terminal_runtime_lifecycle_factory=(engine.terminal_runtime_lifecycle_factory),
     )
     app.run()
 
@@ -1015,10 +1000,7 @@ def _format_hook_trace(data: dict[str, Any]) -> str:
     status = "拦截" if aborted else "异常" if error else "触发"
     color = "33" if aborted else "31" if error else "35"
     suffix = f" · {error}" if error else ""
-    return (
-        f"\033[{color}m  hook {status}: "
-        f"{point} → {callback} ({duration}ms){suffix}\033[0m"
-    )
+    return f"\033[{color}m  hook {status}: {point} → {callback} ({duration}ms){suffix}\033[0m"
 
 
 def _format_task_snapshot(data: dict[str, Any]) -> str:
@@ -1107,10 +1089,7 @@ def _format_team_event(data: dict[str, Any]) -> str:
     message = str(data.get("message", "") or "")
     color = "31" if priority == "critical" else "33" if priority == "high" else "36"
     suffix = f" · {message[:120]}" if message else ""
-    return (
-        f"\033[{color}m  team {event_type}: "
-        f"{sender} → {recipient} [{priority}]{suffix}\033[0m"
-    )
+    return f"\033[{color}m  team {event_type}: {sender} → {recipient} [{priority}]{suffix}\033[0m"
 
 
 def _format_runtime_notification(data: dict[str, Any]) -> str:
@@ -1185,7 +1164,7 @@ def _extract_code_block(content: str) -> tuple[str, str, str, str] | None:
     header_end = content.find("\n", start)
     if header_end < 0:
         return None
-    language = content[start + 3:header_end].strip().split(maxsplit=1)[0]
+    language = content[start + 3 : header_end].strip().split(maxsplit=1)[0]
     body_start = header_end + 1
     end = content.find("```", body_start)
     if end < 0:
@@ -1194,7 +1173,7 @@ def _extract_code_block(content: str) -> tuple[str, str, str, str] | None:
         content[:start],
         language,
         content[body_start:end].rstrip("\n"),
-        content[end + 3:],
+        content[end + 3 :],
     )
 
 
@@ -1202,8 +1181,7 @@ def _looks_like_diff(lines: list[str]) -> bool:
     """Detect raw unified diff output, including +foo/-foo lines."""
     sample = [line for line in lines[:12] if line.strip()]
     return any(line.startswith(("---", "+++", "@@")) for line in sample) and any(
-        line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
-        for line in sample
+        line.startswith(("+", "-")) and not line.startswith(("+++", "---")) for line in sample
     )
 
 
@@ -1276,7 +1254,7 @@ class _StreamingMarkdownHighlighter:
                     remaining = ""
                 else:
                     self._fence_header += remaining[:newline]
-                    remaining = remaining[newline + 1:]
+                    remaining = remaining[newline + 1 :]
                     self._language = self._fence_header.strip() or "text"
                     self._code_line_count = 0
                     self._omitted_code_lines = 0
@@ -1309,9 +1287,7 @@ class _StreamingMarkdownHighlighter:
                 if complete:
                     safe_len = len(self._text_buffer)
                 else:
-                    trailing_ticks = len(self._text_buffer) - len(
-                        self._text_buffer.rstrip("`")
-                    )
+                    trailing_ticks = len(self._text_buffer) - len(self._text_buffer.rstrip("`"))
                     safe_len = max(0, len(self._text_buffer) - min(trailing_ticks, 2))
                 if safe_len:
                     out.append(self._text_buffer[:safe_len])
@@ -1319,7 +1295,7 @@ class _StreamingMarkdownHighlighter:
                 return "".join(out)
 
             out.append(self._text_buffer[:fence])
-            self._text_buffer = self._text_buffer[fence + 3:]
+            self._text_buffer = self._text_buffer[fence + 3 :]
             newline = self._text_buffer.find("\n")
             if newline < 0:
                 self._fence_header = self._text_buffer
@@ -1328,7 +1304,7 @@ class _StreamingMarkdownHighlighter:
                 return "".join(out)
 
             header = self._text_buffer[:newline]
-            self._code_buffer += self._text_buffer[newline + 1:]
+            self._code_buffer += self._text_buffer[newline + 1 :]
             self._text_buffer = ""
             self._language = header.strip() or "text"
             self._code_line_count = 0
@@ -1494,15 +1470,14 @@ def _cli_event_factory(cli: Any):
             TodoStatusMessage,
             ToolPrepareMessage,
         )
+
         if isinstance(msg, ErrorMessage):
             # Errors finalize the live area so the message is clearly visible
             cli.finalize_live()
         elif isinstance(msg, RuntimeStatusMessage):
             if hasattr(cli, "set_activity_status"):
                 if msg.phase == "perf_phase":
-                    cli.set_activity_status(
-                        f"{msg.label}: {msg.duration_ms}ms"
-                    )
+                    cli.set_activity_status(f"{msg.label}: {msg.duration_ms}ms")
                 elif msg.phase == "latency_metric":
                     metric = str(data.get("metric", ""))
                     seconds = msg.duration_ms / 1000
@@ -1512,9 +1487,7 @@ def _cli_event_factory(cli: Any):
                         first_model_chunk_latency = seconds
                     elif metric == "first_token":
                         first_token_latency = seconds
-                    cli.set_activity_status(
-                        f"{msg.label}: {msg.duration_ms}ms"
-                    )
+                    cli.set_activity_status(f"{msg.label}: {msg.duration_ms}ms")
         elif isinstance(msg, ToolPrepareMessage):
             if hasattr(cli, "set_activity_status"):
                 if msg.phase == "end":
@@ -1524,13 +1497,9 @@ def _cli_event_factory(cli: Any):
                     if msg.path:
                         parts.append(msg.path)
                     if msg.content_lines and msg.content_chars:
-                        parts.append(
-                            f"内容 {msg.content_lines} 行"
-                        )
+                        parts.append(f"内容 {msg.content_lines} 行")
                     elif msg.argument_chars:
-                        parts.append(
-                            f"参数 {msg.argument_chars} 字符"
-                        )
+                        parts.append(f"参数 {msg.argument_chars} 字符")
                     if msg.elapsed_ms >= 1000:
                         parts.append(f"{msg.elapsed_ms / 1000:.1f}s")
                     cli.set_activity_status(" · ".join(parts))
@@ -1626,12 +1595,9 @@ async def _chat(config_path: str) -> None:
 
     cli.append_output(_render_startup_banner(engine))
     if reconciliation_recovery:
-        completed = sum(
-            result.outcome.value == "completed" for result in reconciliation_recovery
-        )
+        completed = sum(result.outcome.value == "completed" for result in reconciliation_recovery)
         cli.append_output(
-            f"启动恢复：处理 {len(reconciliation_recovery)} 个会话协调任务，"
-            f"完成 {completed} 个。"
+            f"启动恢复：处理 {len(reconciliation_recovery)} 个会话协调任务，完成 {completed} 个。"
         )
 
     # Inject git info into prompt prefix
@@ -1938,9 +1904,7 @@ def _render_result(
         budget = engine.get_budget_info()
         budget_pct = budget["percentage"]
         budget_style = (
-            "yellow"
-            if isinstance(budget_pct, int | float) and budget_pct > 80
-            else "dim"
+            "yellow" if isinstance(budget_pct, int | float) and budget_pct > 80 else "dim"
         )
         line2.append(" | ", style="dim")
         line2.append(
@@ -2204,11 +2168,7 @@ async def _run_doctor_command(engine: Any, arg: str) -> None:
     expected_snapshot_sha256 = ""
     if tokens == ["export"]:
         action = "preview"
-    elif (
-        len(tokens) == 2
-        and tokens[0] == "export"
-        and re.fullmatch(r"[0-9a-fA-F]{64}", tokens[1])
-    ):
+    elif len(tokens) == 2 and tokens[0] == "export" and re.fullmatch(r"[0-9a-fA-F]{64}", tokens[1]):
         action = "write"
         expected_snapshot_sha256 = tokens[1].lower()
     else:
@@ -2327,9 +2287,7 @@ def _parse_copy_receipt_args(arg: str) -> str | None:
     try:
         parts = shlex.split(arg)
     except ValueError as exc:
-        raise ValueError(
-            "用法：/copy receipt [receipt-id|latest]"
-        ) from exc
+        raise ValueError("用法：/copy receipt [receipt-id|latest]") from exc
     if not parts or parts[0].lower() != "receipt":
         return None
     if len(parts) > 2:
@@ -2476,9 +2434,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             config = getattr(engine, "_config", None)
             if config is not None:
                 console.print(f"会话库: [dim]{Path(config.memory.session_db_path).resolve()}[/dim]")
-                console.print(
-                    "[dim]完整调试路径可用 /debug 查看[/dim]"
-                )
+                console.print("[dim]完整调试路径可用 /debug 查看[/dim]")
         case "/skills":
             _show_skills(engine)
         case "/extensions":
@@ -2521,9 +2477,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             console.print(f"默认模型: {engine.router.resolve_model('capable')}")
             console.print(f"快速模型: {engine.router.resolve_model('fast')}")
             console.print(f"推理模型: {engine.router.resolve_model('reasoning')}")
-            _print_reasoning_effort_status(
-                engine.router.get_reasoning_effort_status()
-            )
+            _print_reasoning_effort_status(engine.router.get_reasoning_effort_status())
         case "/models":
             await _show_available_models(engine, arg)
         case "/version" | "/v":
@@ -2566,10 +2520,8 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_analysis(engine, "page", "memory")
         case "/heal":
             if not arg:
-                console.print(
-                    "[yellow]用法: /heal <错误日志或错误描述>[/yellow]"
-                )
-                console.print("[dim]例: /heal \"TypeError: unsupported operand\"[/dim]")
+                console.print("[yellow]用法: /heal <错误日志或错误描述>[/yellow]")
+                console.print('[dim]例: /heal "TypeError: unsupported operand"[/dim]')
             else:
                 await _run_analysis(engine, "heal", arg)
         case "/dspy":
@@ -2578,62 +2530,38 @@ async def _handle_command(engine: Any, cmd: str) -> None:
             await _run_analysis(engine, "graph", arg or "")
         case "/mcts":
             if not arg:
-                console.print(
-                    "[yellow]用法: /mcts <问题描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /mcts \"如何设计一个高可用的分布式锁\"[/dim]"
-                )
+                console.print("[yellow]用法: /mcts <问题描述>[/yellow]")
+                console.print('[dim]例: /mcts "如何设计一个高可用的分布式锁"[/dim]')
             else:
                 await _run_analysis(engine, "mcts", arg)
         case "/route":
             if not arg:
-                console.print(
-                    "[yellow]用法: /route <任务描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /route \"设计一个AI股票分析系统\"[/dim]"
-                )
+                console.print("[yellow]用法: /route <任务描述>[/yellow]")
+                console.print('[dim]例: /route "设计一个AI股票分析系统"[/dim]')
             else:
                 await _run_analysis(engine, "route", arg)
         case "/speculate":
             if not arg:
-                console.print(
-                    "[yellow]用法: /speculate <文件或目录路径>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /speculate src/naumi_agent/orchestrator/[/dim]"
-                )
+                console.print("[yellow]用法: /speculate <文件或目录路径>[/yellow]")
+                console.print("[dim]例: /speculate src/naumi_agent/orchestrator/[/dim]")
             else:
                 await _run_analysis(engine, "speculate", arg)
         case "/jit":
             if not arg:
-                console.print(
-                    "[yellow]用法: /jit <计算任务描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /jit \"计算斐波那契数列第100项\"[/dim]"
-                )
+                console.print("[yellow]用法: /jit <计算任务描述>[/yellow]")
+                console.print('[dim]例: /jit "计算斐波那契数列第100项"[/dim]')
             else:
                 await _run_analysis(engine, "jit", arg)
         case "/pointer":
             if not arg:
-                console.print(
-                    "[yellow]用法: /pointer <文件或目录路径>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /pointer src/naumi_agent/tools/[/dim]"
-                )
+                console.print("[yellow]用法: /pointer <文件或目录路径>[/yellow]")
+                console.print("[dim]例: /pointer src/naumi_agent/tools/[/dim]")
             else:
                 await _run_analysis(engine, "pointer", arg)
         case "/cooe":
             if not arg:
-                console.print(
-                    "[yellow]用法: /cooe <多步骤任务描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /cooe \"生成宁德时代深度投资研报\"[/dim]"
-                )
+                console.print("[yellow]用法: /cooe <多步骤任务描述>[/yellow]")
+                console.print('[dim]例: /cooe "生成宁德时代深度投资研报"[/dim]')
             else:
                 await _run_analysis(engine, "cooe", arg)
         case "/sleep":
@@ -2660,122 +2588,74 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 await _run_analysis(engine, "vision", arg)
         case "/spar":
             if not arg:
-                console.print(
-                    "[yellow]用法: /spar <目标代码路径或功能描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /spar src/naumi_agent/tools/[/dim]"
-                )
+                console.print("[yellow]用法: /spar <目标代码路径或功能描述>[/yellow]")
+                console.print("[dim]例: /spar src/naumi_agent/tools/[/dim]")
             else:
                 await _run_analysis(engine, "spar", arg)
         case "/world":
             if not arg:
-                console.print(
-                    "[yellow]用法: /world <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /world src/naumi_agent/orchestrator/[/dim]"
-                )
+                console.print("[yellow]用法: /world <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /world src/naumi_agent/orchestrator/[/dim]")
             else:
                 await _run_analysis(engine, "world", arg)
         case "/fusion":
             if not arg:
-                console.print(
-                    "[yellow]用法: /fusion <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /fusion src/naumi_agent/tools/[/dim]"
-                )
+                console.print("[yellow]用法: /fusion <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /fusion src/naumi_agent/tools/[/dim]")
             else:
                 await _run_analysis(engine, "fusion", arg)
         case "/consensus":
             if not arg:
-                console.print(
-                    "[yellow]用法: /consensus <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /consensus src/naumi_agent/trading/[/dim]"
-                )
+                console.print("[yellow]用法: /consensus <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /consensus src/naumi_agent/trading/[/dim]")
             else:
                 await _run_analysis(engine, "consensus", arg)
         case "/pid":
             if not arg:
-                console.print(
-                    "[yellow]用法: /pid <代码路径或流程描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /pid src/naumi_agent/pipeline/[/dim]"
-                )
+                console.print("[yellow]用法: /pid <代码路径或流程描述>[/yellow]")
+                console.print("[dim]例: /pid src/naumi_agent/pipeline/[/dim]")
             else:
                 await _run_analysis(engine, "pid", arg)
         case "/zkp":
             if not arg:
-                console.print(
-                    "[yellow]用法: /zkp <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /zkp src/naumi_agent/tools/[/dim]"
-                )
+                console.print("[yellow]用法: /zkp <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /zkp src/naumi_agent/tools/[/dim]")
             else:
                 await _run_analysis(engine, "zkp", arg)
         case "/genesis":
             if not arg:
-                console.print(
-                    "[yellow]用法: /genesis <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /genesis src/naumi_agent/[/dim]"
-                )
+                console.print("[yellow]用法: /genesis <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /genesis src/naumi_agent/[/dim]")
             else:
                 await _run_analysis(engine, "genesis", arg)
         case "/macro":
             if not arg:
-                console.print(
-                    "[yellow]用法: /macro <任务或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /macro \"设计全球宏观经济分析系统\"[/dim]"
-                )
+                console.print("[yellow]用法: /macro <任务或系统描述>[/yellow]")
+                console.print('[dim]例: /macro "设计全球宏观经济分析系统"[/dim]')
             else:
                 await _run_analysis(engine, "macro", arg)
         case "/cosmos":
             if not arg:
-                console.print(
-                    "[yellow]用法: /cosmos <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /cosmos src/naumi_agent/[/dim]"
-                )
+                console.print("[yellow]用法: /cosmos <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /cosmos src/naumi_agent/[/dim]")
             else:
                 await _run_analysis(engine, "cosmos", arg)
         case "/watchdog":
             if not arg:
-                console.print(
-                    "[yellow]用法: /watchdog <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /watchdog src/naumi_agent/[/dim]"
-                )
+                console.print("[yellow]用法: /watchdog <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /watchdog src/naumi_agent/[/dim]")
             else:
                 await _run_analysis(engine, "watchdog", arg)
         case "/supervisor":
             if not arg:
-                console.print(
-                    "[yellow]用法: /supervisor <代码路径或系统描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /supervisor src/naumi_agent/[/dim]"
-                )
+                console.print("[yellow]用法: /supervisor <代码路径或系统描述>[/yellow]")
+                console.print("[dim]例: /supervisor src/naumi_agent/[/dim]")
             else:
                 await _run_analysis(engine, "supervisor", arg)
         case "/autopsy":
             if not arg:
-                console.print(
-                    "[yellow]用法: /autopsy <代码路径或 Bug 描述>[/yellow]"
-                )
-                console.print(
-                    "[dim]例: /autopsy src/naumi_agent/engine.py[/dim]"
-                )
+                console.print("[yellow]用法: /autopsy <代码路径或 Bug 描述>[/yellow]")
+                console.print("[dim]例: /autopsy src/naumi_agent/engine.py[/dim]")
             else:
                 await _run_analysis(engine, "autopsy", arg)
         case "/hook":
@@ -2785,9 +2665,7 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 await _run_analysis(engine, "hook", arg)
         case "/pursue":
             if not arg:
-                console.print(
-                    "[yellow]用法: /pursue <目标描述>[/yellow]"
-                )
+                console.print("[yellow]用法: /pursue <目标描述>[/yellow]")
                 console.print(
                     "[dim]例: /pursue 为 NaumiAgent 添加一个 CSV 导出工具，"
                     "支持自定义分隔符和编码[/dim]"
@@ -3000,8 +2878,10 @@ def _print_help() -> None:
         ("/skills", "列出已加载的 Skill"),
         ("/extensions [skills]", "查看扩展来源、优先级、冲突与无效清单"),
         ("/glob <pattern> [directory='.' ]", "按 glob 规则搜索工作区文件路径"),
-        ("/grep <pattern> [path='.'] [glob='**/*.py'] [max_matches=200] [case_sensitive=false]",
-         "搜索文件内容（可配置过滤）"),
+        (
+            "/grep <pattern> [path='.'] [glob='**/*.py'] [max_matches=200] [case_sensitive=false]",
+            "搜索文件内容（可配置过滤）",
+        ),
         ("/read <path> [offset=0] [limit=-1]", "读取文件内容（可分页）"),
         ("/write <path> <内容>", "写入文件（覆盖）"),
         ("/edit <path> <旧文本> <新文本>", "按文本替换更新文件"),
@@ -3134,8 +3014,7 @@ async def _run_conversation_queue(engine: Any, arg: str) -> None:
                 except ConversationQueueClaimError:
                     console.print(
                         Text(
-                            f"· {item.request_id} · 被前序历史 claim 阻断\n"
-                            f"  {item.text[:160]}",
+                            f"· {item.request_id} · 被前序历史 claim 阻断\n  {item.text[:160]}",
                             style="yellow",
                         )
                     )
@@ -3157,14 +3036,11 @@ async def _run_conversation_queue(engine: Any, arg: str) -> None:
                     )
                 )
         if recovery.blocked:
-            console.print(
-                "[dim]处置：/queue resolve <request-id> retry|cancel [原因][/dim]"
-            )
+            console.print("[dim]处置：/queue resolve <request-id> retry|cancel [原因][/dim]")
         return
     if action != "resolve" or len(parts) < 3 or len(parts) > 4:
         console.print(
-            "[yellow]用法：/queue list；"
-            "/queue resolve <request-id> <retry|cancel> [原因][/yellow]"
+            "[yellow]用法：/queue list；/queue resolve <request-id> <retry|cancel> [原因][/yellow]"
         )
         return
     request_id, decision = parts[1], parts[2].lower()
@@ -3206,10 +3082,7 @@ async def _run_feedback(engine: Any, arg: str) -> None:
     )
     from naumi_agent.tools.feedback import feedback_model_dimensions
 
-    usage = (
-        "用法：/feedback <correction|defect|preference|cancel|praise> "
-        "<scope> <topic> <摘要>"
-    )
+    usage = "用法：/feedback <correction|defect|preference|cancel|praise> <scope> <topic> <摘要>"
     try:
         parts = shlex.split(arg)
     except ValueError:
@@ -3366,19 +3239,15 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         if action == "evaluation":
             if len(parts) != 2:
                 raise ValueError("evaluation 需要一个 H5c Comparison ID。")
-            receipt = await (
-                engine.evolution_evaluation_lane_receipt_executor.execute_by_id(
-                    workspace_root=engine.workspace_root,
-                    comparison_id=parts[1],
-                )
+            receipt = await engine.evolution_evaluation_lane_receipt_executor.execute_by_id(
+                workspace_root=engine.workspace_root,
+                comparison_id=parts[1],
             )
             console.print(Markdown(render_evaluation_lane_receipt(receipt)))
             return
         if action == "evaluation-contract":
             if len(parts) != 2:
-                raise ValueError(
-                    "evaluation-contract 需要一个工作区内 Batch Request JSON 路径。"
-                )
+                raise ValueError("evaluation-contract 需要一个工作区内 Batch Request JSON 路径。")
             if Path(parts[1]).expanduser().is_absolute():
                 raise ValueError("Batch Request JSON 路径必须相对当前工作区。")
             try:
@@ -3396,18 +3265,14 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 with request_path.open("rb") as stream:
                     encoded = stream.read(1_048_577)
                 if len(encoded) > 1_048_576:
-                    raise ValueError(
-                        "Batch Request JSON 必须是小于等于 1 MiB 的普通文件。"
-                    )
+                    raise ValueError("Batch Request JSON 必须是小于等于 1 MiB 的普通文件。")
                 payload = json.loads(encoded.decode("utf-8"))
             except (OSError, UnicodeError, json.JSONDecodeError) as exc:
                 raise ValueError("Batch Request JSON 不可读或格式无效。") from exc
             request = EvolutionAdversarialBatchRequest.model_validate(payload)
-            contract = await (
-                engine.evolution_evaluation_aggregation_contract_issuer.issue(
-                    workspace_root=workspace,
-                    batch_request=request,
-                )
+            contract = await engine.evolution_evaluation_aggregation_contract_issuer.issue(
+                workspace_root=workspace,
+                batch_request=request,
             )
             console.print(Markdown(render_evaluation_aggregation_contract(contract)))
             return
@@ -3417,20 +3282,16 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                     "evaluation-final 需要 Contract ID、一个 Interventional H5c ID "
                     "和 1..3 个 Adversarial H5c ID。"
                 )
-            receipt = await (
-                engine.evolution_final_evaluation_receipt_executor.execute(
-                    aggregation_contract_id=parts[1],
-                    interventional_comparison_id=parts[2],
-                    adversarial_comparison_ids=tuple(parts[3:]),
-                )
+            receipt = await engine.evolution_final_evaluation_receipt_executor.execute(
+                aggregation_contract_id=parts[1],
+                interventional_comparison_id=parts[2],
+                adversarial_comparison_ids=tuple(parts[3:]),
             )
             console.print(Markdown(render_final_evaluation_receipt(receipt)))
             return
         if action == "decision-input":
             if len(parts) != 2:
-                raise ValueError(
-                    "decision-input 需要一个 Final Evaluation Receipt ID。"
-                )
+                raise ValueError("decision-input 需要一个 Final Evaluation Receipt ID。")
             artifact = await engine.evolution_decision_input_executor.execute(
                 workspace_root=engine.workspace_root,
                 final_evaluation_receipt_id=parts[1],
@@ -3448,9 +3309,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             return
         if action == "independent-review":
             if not 2 <= len(parts) <= 3:
-                raise ValueError(
-                    "independent-review 需要 Gate ID 和可选 Reviewer model。"
-                )
+                raise ValueError("independent-review 需要 Gate ID 和可选 Reviewer model。")
             review = await engine.evolution_independent_review_executor.execute(
                 workspace_root=engine.workspace_root,
                 gate_id=parts[1],
@@ -3461,22 +3320,18 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         if action == "counterfactual":
             if len(parts) != 2:
                 raise ValueError("counterfactual 需要一个 Independent Review ID。")
-            artifact = await (
-                engine.evolution_counterfactual_evidence_executor.execute(
-                    workspace_root=engine.workspace_root,
-                    review_id=parts[1],
-                )
+            artifact = await engine.evolution_counterfactual_evidence_executor.execute(
+                workspace_root=engine.workspace_root,
+                review_id=parts[1],
             )
             console.print(Markdown(render_counterfactual_evidence(artifact)))
             return
         if action == "reward-hacking":
             if len(parts) != 2:
                 raise ValueError("reward-hacking 需要一个 Counterfactual Evidence ID。")
-            artifact = await (
-                engine.evolution_reward_hacking_evidence_executor.execute(
-                    workspace_root=engine.workspace_root,
-                    counterfactual_evidence_id=parts[1],
-                )
+            artifact = await engine.evolution_reward_hacking_evidence_executor.execute(
+                workspace_root=engine.workspace_root,
+                counterfactual_evidence_id=parts[1],
             )
             console.print(Markdown(render_reward_hacking_evidence(artifact)))
             return
@@ -3528,9 +3383,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             return
         if action == "promotion-package":
             if len(parts) not in {2, 3}:
-                raise ValueError(
-                    "promotion-package 需要 Promotion Input ID，可选 target branch。"
-                )
+                raise ValueError("promotion-package 需要 Promotion Input ID，可选 target branch。")
             view = await engine.evolution_promotion_package_executor.execute(
                 workspace_root=engine.workspace_root,
                 promotion_input_id=parts[1],
@@ -3541,27 +3394,19 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         if action == "approval-requirement":
             if len(parts) != 2:
                 raise ValueError("approval-requirement 需要一个 Promotion Package ID。")
-            view = await (
-                engine.evolution_promotion_approval_requirement_executor.execute(
-                    workspace_root=engine.workspace_root,
-                    package_id=parts[1],
-                )
+            view = await engine.evolution_promotion_approval_requirement_executor.execute(
+                workspace_root=engine.workspace_root,
+                package_id=parts[1],
             )
-            console.print(
-                Markdown(render_evolution_promotion_approval_requirement(view))
-            )
+            console.print(Markdown(render_evolution_promotion_approval_requirement(view)))
             return
         if action == "approval-request":
             if len(parts) != 3:
-                raise ValueError(
-                    "approval-request 需要 Approval Requirement ID 和角色。"
-                )
-            view = await (
-                engine.evolution_promotion_approval_request_service.execute(
-                    workspace_root=engine.workspace_root,
-                    requirement_id=parts[1],
-                    role=parts[2],
-                )
+                raise ValueError("approval-request 需要 Approval Requirement ID 和角色。")
+            view = await engine.evolution_promotion_approval_request_service.execute(
+                workspace_root=engine.workspace_root,
+                requirement_id=parts[1],
+                role=parts[2],
             )
             console.print(Markdown(render_evolution_promotion_approval_response(view)))
             return
@@ -3649,12 +3494,9 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             else:
                 raise ValueError(
-                    "approval-decision 参数无效：<requirement-id>；"
-                    "show <decision-id>。"
+                    "approval-decision 参数无效：<requirement-id>；show <decision-id>。"
                 )
-            console.print(
-                Markdown(render_evolution_promotion_approval_decision(view))
-            )
+            console.print(Markdown(render_evolution_promotion_approval_decision(view)))
             return
         if action == "revalidation-request":
             service = engine.evolution_revalidation_request_service
@@ -3670,8 +3512,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             else:
                 raise ValueError(
-                    "revalidation-request 参数无效：<decision-id>；"
-                    "show <request-id>。"
+                    "revalidation-request 参数无效：<decision-id>；show <request-id>。"
                 )
             console.print(Markdown(render_evolution_revalidation_request(view)))
             return
@@ -4151,6 +3992,8 @@ async def _run_harness(engine: Any, arg: str) -> None:
         "      /harness eval [suite-id|相对路径]\n"
         "      /harness eval live [--model <id>] [--timeout 1..120] "
         "[--max-cost 0..10] [--max-output 1..64]\n"
+        "      /harness eval live <suite> --repeat 5 [--batch <id>] "
+        "[--model <id>] [--timeout 5..3600] [--max-cost 0..10]\n"
         "      /harness eval replay [run-id|latest]\n"
         "      /harness eval sandbox <check-id...> [--samples 5] [--batch <id>]\n"
         "      /harness eval sandbox cancel <ticket> --authority <sha256> "
@@ -4234,9 +4077,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         except ValueError as exc:
             console.print(f"[yellow]Harness 详情参数无效：{exc}[/yellow]")
             return
-        console.print(
-            Markdown(render_harness_detail_markdown(explain_payload, replay_payload))
-        )
+        console.print(Markdown(render_harness_detail_markdown(explain_payload, replay_payload)))
         return
     if subcommand == "evidence" and len(parts) <= 2:
         target = parts[1] if len(parts) == 2 else "latest"
@@ -4253,17 +4094,22 @@ async def _run_harness(engine: Any, arg: str) -> None:
             return
         console.print(Markdown(render_harness_evidence_markdown(explain_payload)))
         return
-    if (
-        subcommand == "eval"
-        and len(parts) >= 2
-        and parts[1].lower() == "live"
-    ):
+    if subcommand == "eval" and len(parts) >= 2 and parts[1].lower() == "live":
         from naumi_agent.tools.base import ToolCall
 
-        parsed: dict[str, str] = {}
+        live_suite = None
         index = 2
+        if index < len(parts) and not parts[index].startswith("--"):
+            live_suite = parts[index]
+            index += 1
+        parsed: dict[str, str] = {}
         valid = True
-        allowed = {"--model", "--timeout", "--max-cost", "--max-output"}
+        batch_mode = live_suite is not None
+        allowed = (
+            {"--model", "--timeout", "--max-cost", "--repeat", "--batch"}
+            if batch_mode
+            else {"--model", "--timeout", "--max-cost", "--max-output"}
+        )
         while index < len(parts):
             option = parts[index]
             if (
@@ -4276,6 +4122,47 @@ async def _run_harness(engine: Any, arg: str) -> None:
                 break
             parsed[option] = parts[index + 1]
             index += 2
+        if batch_mode:
+            try:
+                repetitions = int(parsed.get("--repeat", "5"))
+                timeout = float(parsed["--timeout"]) if "--timeout" in parsed else None
+                max_cost = float(parsed["--max-cost"]) if "--max-cost" in parsed else None
+            except ValueError:
+                valid = False
+                repetitions = 0
+                timeout = 0.0
+                max_cost = 0.0
+            if (
+                not valid
+                or not 5 <= repetitions <= 20
+                or (timeout is not None and not 5 <= timeout <= 3_600)
+                or (max_cost is not None and not 0 < max_cost <= 10)
+            ):
+                console.print(f"[yellow]{usage}[/yellow]")
+                return
+            arguments: dict[str, object] = {
+                "suite": live_suite,
+                "repetitions": repetitions,
+            }
+            for option, name in (
+                ("--batch", "batch_id"),
+                ("--model", "model"),
+            ):
+                if option in parsed:
+                    arguments[name] = parsed[option]
+            if timeout is not None:
+                arguments["max_total_duration_seconds"] = timeout
+            if max_cost is not None:
+                arguments["max_total_cost_usd"] = max_cost
+            result = await engine.execute_tool(
+                ToolCall(
+                    id=f"manual-harness-live-batch-{uuid.uuid4().hex}",
+                    name="harness_eval_live_batch",
+                    arguments=json.dumps(arguments, ensure_ascii=False),
+                ),
+            )
+            console.print(Markdown(result.content))
+            return
         try:
             timeout = float(parsed.get("--timeout", "30"))
             max_cost = float(parsed.get("--max-cost", "0.05"))
@@ -4309,11 +4196,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         )
         console.print(Markdown(result.content))
         return
-    if (
-        subcommand == "eval"
-        and len(parts) in {2, 3}
-        and parts[1].lower() == "replay"
-    ):
+    if subcommand == "eval" and len(parts) in {2, 3} and parts[1].lower() == "replay":
         target = parts[2] if len(parts) == 3 else None
         try:
             result = await service.eval_replay_run(target)
@@ -4396,8 +4279,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         while index < len(parts):
             option = parts[index]
             if (
-                option
-                not in {"--state", "--limit", "--cursor", "--assessed-at"}
+                option not in {"--state", "--limit", "--cursor", "--assessed-at"}
                 or option in parsed
                 or index + 1 >= len(parts)
             ):
@@ -4411,11 +4293,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             valid = False
             limit = 0
         state = parsed.get("--state", "all")
-        if (
-            not valid
-            or state not in {"all", "open", "terminal"}
-            or not 1 <= limit <= 100
-        ):
+        if not valid or state not in {"all", "open", "terminal"} or not 1 <= limit <= 100:
             console.print(f"[yellow]{usage}[/yellow]")
             return
         arguments: dict[str, object] = {
@@ -4458,11 +4336,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         }
         while index < len(parts):
             option = parts[index]
-            if (
-                option not in allowed
-                or option in parsed
-                or index + 1 >= len(parts)
-            ):
+            if option not in allowed or option in parsed or index + 1 >= len(parts):
                 valid = False
                 break
             parsed[option] = parts[index + 1]
@@ -4563,11 +4437,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         }
         while index < len(parts):
             option = parts[index]
-            if (
-                option not in allowed
-                or option in parsed
-                or index + 1 >= len(parts)
-            ):
+            if option not in allowed or option in parsed or index + 1 >= len(parts):
                 valid = False
                 break
             parsed[option] = parts[index + 1]
@@ -4698,10 +4568,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             arguments["assessed_at"] = parsed["--assessed-at"]
         result = await engine.execute_tool(
             ToolCall(
-                id=(
-                    "manual-harness-sandbox-retry-retention-preview-"
-                    f"{uuid.uuid4().hex}"
-                ),
+                id=(f"manual-harness-sandbox-retry-retention-preview-{uuid.uuid4().hex}"),
                 name="harness_eval_sandbox_retry_retention_preview",
                 arguments=json.dumps(arguments, ensure_ascii=False),
             ),
@@ -4800,8 +4667,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
                 return
             updater = (
                 _active_cli.update_harness_sandbox_eval
-                if _active_cli is not None
-                and hasattr(_active_cli, "update_harness_sandbox_eval")
+                if _active_cli is not None and hasattr(_active_cli, "update_harness_sandbox_eval")
                 else None
             )
             if updater is not None:
@@ -4869,8 +4735,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
                 return
             updater = (
                 _active_cli.update_harness_sandbox_eval
-                if _active_cli is not None
-                and hasattr(_active_cli, "update_harness_sandbox_eval")
+                if _active_cli is not None and hasattr(_active_cli, "update_harness_sandbox_eval")
                 else None
             )
             if updater is not None:
@@ -4895,11 +4760,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         )
         console.print(Markdown(result.content))
         return
-    if (
-        subcommand == "eval"
-        and len(parts) >= 2
-        and parts[1].lower() == "sandbox"
-    ):
+    if subcommand == "eval" and len(parts) >= 2 and parts[1].lower() == "sandbox":
         from naumi_agent.tools.base import ToolCall
 
         check_ids: list[str] = []
@@ -4932,11 +4793,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         except ValueError:
             valid = False
             samples = 5
-        if (
-            not valid
-            or not check_ids
-            or len(check_ids) != len(set(check_ids))
-        ):
+        if not valid or not check_ids or len(check_ids) != len(set(check_ids)):
             console.print(f"[yellow]{usage}[/yellow]")
             return
         batch_id = parsed.get("--batch") or f"sandbox-{uuid.uuid4().hex[:16]}"
@@ -4951,8 +4808,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
                 return
             updater = (
                 _active_cli.update_harness_sandbox_eval
-                if _active_cli is not None
-                and hasattr(_active_cli, "update_harness_sandbox_eval")
+                if _active_cli is not None and hasattr(_active_cli, "update_harness_sandbox_eval")
                 else None
             )
             if updater is not None:
@@ -5004,8 +4860,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         try:
             on_progress = (
                 _active_cli.update_harness_eval_batch
-                if _active_cli is not None
-                and hasattr(_active_cli, "update_harness_eval_batch")
+                if _active_cli is not None and hasattr(_active_cli, "update_harness_eval_batch")
                 else None
             )
             result = await service.eval_repetition_batch(
@@ -5028,21 +4883,15 @@ async def _run_harness(engine: Any, arg: str) -> None:
             return
         console.print(Markdown(render_harness_eval(result)))
         return
-    if (
-        subcommand == "baseline"
-        and len(parts) == 4
-        and parts[1].lower() == "promote"
-    ):
+    if subcommand == "baseline" and len(parts) == 4 and parts[1].lower() == "promote":
         interaction = (
             _active_cli.request_user_interaction
-            if _active_cli is not None
-            and hasattr(_active_cli, "request_user_interaction")
+            if _active_cli is not None and hasattr(_active_cli, "request_user_interaction")
             else None
         )
         if interaction is None:
             console.print(
-                "[yellow]当前终端不支持引导式理由输入；请使用 "
-                "`--reason <原因>` 显式晋升。[/yellow]"
+                "[yellow]当前终端不支持引导式理由输入；请使用 `--reason <原因>` 显式晋升。[/yellow]"
             )
             return
         try:
@@ -5075,11 +4924,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             return
         console.print(Markdown(render_eval_promotion_status(result)))
         return
-    if (
-        subcommand == "baseline"
-        and len(parts) == 4
-        and parts[1].lower() == "compare"
-    ):
+    if subcommand == "baseline" and len(parts) == 4 and parts[1].lower() == "compare":
         try:
             result = await service.compare_eval_candidate(parts[2], parts[3])
         except ValueError as exc:
@@ -5100,10 +4945,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
         max_tokens = 2_000
         if "--max-tokens" in knowledge_args:
             option_index = knowledge_args.index("--max-tokens")
-            if (
-                option_index != len(knowledge_args) - 2
-                or knowledge_args.count("--max-tokens") != 1
-            ):
+            if option_index != len(knowledge_args) - 2 or knowledge_args.count("--max-tokens") != 1:
                 console.print(f"[yellow]{usage}[/yellow]")
                 return
             try:
@@ -5168,9 +5010,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             "",
             "### 配置中的命令（信任后仅按需执行）",
         ]
-        lines.extend(
-            f"- `{command}`" for command in report.command_summaries
-        )
+        lines.extend(f"- `{command}`" for command in report.command_summaries)
         if not report.command_summaries:
             lines.append("- 没有配置命令")
         lines.extend(
@@ -5188,8 +5028,7 @@ async def _run_harness(engine: Any, arg: str) -> None:
             console.print(f"[yellow]{exc}[/yellow]\n{usage}")
             return
         console.print(
-            "[green]Harness Profile 已信任。[/green]\n"
-            f"digest: [dim]{record.profile_digest}[/dim]"
+            f"[green]Harness Profile 已信任。[/green]\ndigest: [dim]{record.profile_digest}[/dim]"
         )
         return
     if subcommand == "untrust" and len(parts) == 1:
@@ -5466,9 +5305,7 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         return
     if subcommand in {"status", "resume", "reconcile"} and not arg:
         identifier = "恢复请求ID" if subcommand == "reconcile" else "运行ID"
-        console.print(
-            f"[yellow]用法: /pursue {subcommand} <{identifier}>[/yellow]"
-        )
+        console.print(f"[yellow]用法: /pursue {subcommand} <{identifier}>[/yellow]")
         return
     if subcommand == "list":
         kwargs = {"active_only": "--active" in arg.split()}
@@ -5600,7 +5437,7 @@ async def _run_background(engine: Any, arg: str) -> None:
             if len(parts) < 2:
                 console.print("[yellow]用法: /background run <命令>[/yellow]")
                 return
-            command = arg.strip()[len("run"):].strip()
+            command = arg.strip()[len("run") :].strip()
             await _execute("background_run", command=command)
         case "status":
             if len(parts) < 2:
@@ -5668,7 +5505,7 @@ async def _run_schedule(engine: Any, arg: str) -> None:
             if len(parts) < 4:
                 console.print(
                     "[yellow]用法: /schedule create once <ISO时间> <提醒内容>[/yellow]\n"
-                    "[dim]或: /schedule create cron \"*/15 * * * *\" <提醒内容>[/dim]"
+                    '[dim]或: /schedule create cron "*/15 * * * *" <提醒内容>[/dim]'
                 )
                 return
             await _execute(
@@ -5696,8 +5533,7 @@ async def _run_schedule(engine: Any, arg: str) -> None:
             await _execute("schedule_resume", schedule_id=parts[1])
         case _:
             console.print(
-                "[yellow]未知调度子命令[/yellow]\n"
-                "[dim]可用: create/list/cancel/pause/resume[/dim]"
+                "[yellow]未知调度子命令[/yellow]\n[dim]可用: create/list/cancel/pause/resume[/dim]"
             )
 
 
@@ -5711,20 +5547,25 @@ async def _run_todo(engine: Any, arg: str) -> None:
     if _active_cli is not None and hasattr(_active_cli, "set_todo_status"):
         tasks = await engine.task_store.list_tasks()
         open_tasks = [task for task in tasks if task.status.value != "completed"]
-        _active_cli.set_todo_status(_format_todo_bar({
-            "count": len(tasks),
-            "open_count": len(open_tasks),
-            "completed_count": len(tasks) - len(open_tasks),
-            "items": [
+        _active_cli.set_todo_status(
+            _format_todo_bar(
                 {
-                    "id": task.id,
-                    "status": task.status.value,
-                    "subject": task.active_form or task.subject,
+                    "count": len(tasks),
+                    "open_count": len(open_tasks),
+                    "completed_count": len(tasks) - len(open_tasks),
+                    "items": [
+                        {
+                            "id": task.id,
+                            "status": task.status.value,
+                            "subject": task.active_form or task.subject,
+                        }
+                        for task in open_tasks
+                    ],
+                    "summary": result,
                 }
-                for task in open_tasks
-            ],
-            "summary": result,
-        }) or None)
+            )
+            or None
+        )
     console.print(
         Panel(
             Markdown(result),
@@ -5860,8 +5701,13 @@ async def _run_goal(engine: Any, arg: str) -> None:
             state_filter = parts[0].lower() if parts else "all"
             cursor = parts[1] if len(parts) == 2 else ""
             if (
-                state_filter not in {
-                    "all", "pending", "answered", "expired", "cancelled",
+                state_filter
+                not in {
+                    "all",
+                    "pending",
+                    "answered",
+                    "expired",
+                    "cancelled",
                 }
                 or len(parts) > 2
                 or len(cursor) > 1_024
@@ -5891,9 +5737,7 @@ async def _run_goal(engine: Any, arg: str) -> None:
                         "Textual TUI 中执行接管。[/yellow]"
                     )
                     return
-                result = await _active_cli.takeover_goal_interaction(
-                    interaction_id
-                )
+                result = await _active_cli.takeover_goal_interaction(interaction_id)
                 console.print(
                     Panel(
                         Markdown(result),
@@ -5971,7 +5815,6 @@ async def _run_reload(engine: Any, arg: str) -> None:
     console.print()
 
 
-
 async def _run_evolve(engine: Any, arg: str) -> None:
     """执行自我进化 — 反思循环: LLM生成方案 → 验证修改 → 质量评估 → 采纳/回滚."""
     import json
@@ -6025,10 +5868,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             domain_path = source_dir / domain_dir
             if domain_path.is_dir():
                 for py_file in sorted(domain_path.rglob("*.py")):
-                    if (
-                        py_file.name != "__init__.py"
-                        and not _is_protected_file(py_file)
-                    ):
+                    if py_file.name != "__init__.py" and not _is_protected_file(py_file):
                         modifiable_files.append(py_file.relative_to(source_dir).as_posix())
 
         file_list = "\n".join(f"- {f}" for f in modifiable_files)
@@ -6101,7 +5941,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             except json.JSONDecodeError:
                 continue
             if isinstance(candidate, dict):
-                return text[index:index + end]
+                return text[index : index + end]
         return text
 
     json_str = extract_evolve_proposal_json(llm_output)
@@ -6162,12 +6002,12 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             pass
         for prefix in ("src/naumi_agent/", "naumi_agent/"):
             if normalized.startswith(prefix):
-                return normalized[len(prefix):]
+                return normalized[len(prefix) :]
         if "/" not in normalized and not normalized.endswith(".py") and " " not in normalized:
             module_name = normalized
             for prefix in ("src.naumi_agent.", "naumi_agent."):
                 if module_name.startswith(prefix):
-                    module_name = module_name[len(prefix):]
+                    module_name = module_name[len(prefix) :]
                     break
             parts = module_name.split(".")
             if len(parts) >= 2 and parts[0] in {"tools", "memory", "skills"}:
@@ -6175,9 +6015,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
         return normalized
 
     target_file = (
-        proposal.get("target_file")
-        or proposal.get("file_path")
-        or proposal.get("path", "")
+        proposal.get("target_file") or proposal.get("file_path") or proposal.get("path", "")
     )
     new_content = (
         proposal.get("new_content")
@@ -6355,9 +6193,7 @@ async def _run_evolve(engine: Any, arg: str) -> None:
             return
 
         if action == "iterate":
-            console.print(
-                "[yellow]🔄 效果不明确，修改已保留但建议继续迭代优化[/yellow]"
-            )
+            console.print("[yellow]🔄 效果不明确，修改已保留但建议继续迭代优化[/yellow]")
         else:
             console.print("[green]✅ 质量提升，采纳修改[/green]")
 
@@ -6411,12 +6247,6 @@ def _show_evolve_history() -> None:
         )
 
     console.print(table)
-
-
-
-
-
-
 
 
 def _show_hooks(engine: Any) -> None:
@@ -6529,13 +6359,9 @@ async def _run_forge(engine: Any, arg: str) -> None:
             new_tool = load_generated_tool(tool_name)
             if new_tool:
                 engine.tool_registry.register(new_tool)
-                console.print(
-                    f"[green]✅ 工具 `{tool_name}` 已注册到工具表，立即可用[/green]"
-                )
+                console.print(f"[green]✅ 工具 `{tool_name}` 已注册到工具表，立即可用[/green]")
             else:
-                console.print(
-                    "[yellow]⚠️ 工具已保存但加载失败，请重启 Agent[/yellow]"
-                )
+                console.print("[yellow]⚠️ 工具已保存但加载失败，请重启 Agent[/yellow]")
 
     console.print()
 
@@ -6580,6 +6406,7 @@ def _run_forge_remove(arg: str) -> None:
     else:
         console.print(f"[red]未找到工具: {tool_name}[/red]")
 
+
 async def _show_history(engine: Any, arg: str = "") -> None:
     """显示历史会话列表、搜索结果或预览."""
     from rich.markdown import Markdown
@@ -6611,9 +6438,7 @@ async def _show_history(engine: Any, arg: str = "") -> None:
 
     if subcommand in {"delete-preview", "delete_preview"}:
         if not sub_arg:
-            console.print(
-                "[yellow]用法: /history delete-preview <session_id>[/yellow]"
-            )
+            console.print("[yellow]用法: /history delete-preview <session_id>[/yellow]")
             return
         preview = await engine.preview_session_delete(sub_arg)
         if preview is None:
@@ -6670,10 +6495,7 @@ async def _show_history(engine: Any, arg: str = "") -> None:
                 )
             )
             return
-        console.print(
-            "[yellow]用法: /history retention-worker "
-            "[status|start|stop|wake][/yellow]"
-        )
+        console.print("[yellow]用法: /history retention-worker [status|start|stop|wake][/yellow]")
         return
 
     if subcommand == "archive":
@@ -6716,9 +6538,7 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
 
     title = session.title or session.id
     display_messages = (
-        getattr(engine, "_full_history", None)
-        if engine is not None
-        else None
+        getattr(engine, "_full_history", None) if engine is not None else None
     ) or session.messages
     msg_count = len(display_messages)
 
@@ -6728,18 +6548,14 @@ def _replay_session_to_cli(cli: Any, session: Any, engine: Any = None) -> None:
     renderer = CLIRenderer(show_reasoning=_show_reasoning_text)
     ui_messages = replay_messages(display_messages)
 
-    cli.append_output(
-        f"\033[2m━━━ 恢复会话: {title} ({msg_count}条消息) ━━━\033[0m\n"
-    )
+    cli.append_output(f"\033[2m━━━ 恢复会话: {title} ({msg_count}条消息) ━━━\033[0m\n")
 
     for msg in ui_messages:
         ansi_text = renderer.render(msg)
         if ansi_text is not None:
             cli.append_output(ansi_text)
 
-    cli.append_output(
-        "\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n"
-    )
+    cli.append_output("\033[2m━━━ 会话已恢复，继续对话或 /new 开始新会话 ━━━\033[0m\n\n")
     if engine is not None:
         _show_cli_status(cli, engine)
 
@@ -6794,10 +6610,7 @@ async def _load_session(engine: Any, session_id: str) -> None:
                     f"({len(session.messages)}条消息)"
                 )
                 # Non-interactive mode fallback: brief summary
-                user_msgs = [
-                    m for m in session.messages
-                    if m.get("role") in ("user", "assistant")
-                ]
+                user_msgs = [m for m in session.messages if m.get("role") in ("user", "assistant")]
                 if user_msgs:
                     console.print("[dim]--- 最近对话 ---[/dim]")
                     for m in user_msgs[-6:]:
@@ -7086,8 +6899,7 @@ async def _memory_clean(engine: Any) -> None:
     console.print("[bold yellow]整理记忆中...[/bold yellow]")
     result = await engine.long_term_memory.consolidate()
     console.print(
-        f"[green]整理完成:[/green] "
-        f"去重 {result['deduped']} 条，遗忘 {result['forgotten']} 条",
+        f"[green]整理完成:[/green] 去重 {result['deduped']} 条，遗忘 {result['forgotten']} 条",
     )
 
 
@@ -7485,9 +7297,7 @@ async def _run_scan_report(engine: Any, arg: str) -> None:
 
         out = Path("security_report.json")
         out.write_text(
-            json.dumps(
-                result.get("data"), indent=2, ensure_ascii=False
-            ),
+            json.dumps(result.get("data"), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         console.print(f"[green]✅ JSON 报告已保存到 {out}[/green]")
@@ -7526,10 +7336,7 @@ async def _run_scan_baseline(engine: Any, arg: str) -> None:
 
     baseline_path = Path("security_baseline.json")
     auditor.save_baseline(str(baseline_path))
-    console.print(
-        f"[green]✅ 基线已保存到 {baseline_path} "
-        f"({len(auditor.results)} 个发现)[/green]"
-    )
+    console.print(f"[green]✅ 基线已保存到 {baseline_path} ({len(auditor.results)} 个发现)[/green]")
 
 
 def _run_btemplate_list(engine: Any) -> None:

@@ -49,9 +49,7 @@ class HarnessCompletionSpec(_StrictModel):
     require_todo_reconciliation: bool = True
     require_change_evidence: bool = True
     correction_attempts: int = Field(default=1, ge=0, le=1)
-    unverified_status: Literal["completed_unverified", "blocked"] = (
-        "completed_unverified"
-    )
+    unverified_status: Literal["completed_unverified", "blocked"] = "completed_unverified"
 
 
 class HarnessAcceptanceCriterion(_StrictModel):
@@ -92,9 +90,7 @@ class HarnessCompletionContract(_StrictModel):
     required_checks: tuple[str, ...] = Field(default=(), max_length=128)
     required_evidence: tuple[str, ...] = Field(default=(), max_length=128)
     correction_attempts: int = Field(default=1, ge=0, le=1)
-    unverified_status: Literal["completed_unverified", "blocked"] = (
-        "completed_unverified"
-    )
+    unverified_status: Literal["completed_unverified", "blocked"] = "completed_unverified"
     source_refs: tuple[str, ...] = Field(default=(), max_length=256)
 
     @field_validator("run_id")
@@ -166,9 +162,7 @@ class HarnessCheckSpec(_StrictModel):
     timeout_seconds: int = Field(default=180, ge=1, le=3_600)
     when_changed: tuple[str, ...] = ()
     required_for: tuple[Literal["answer", "analysis", "change", "monitor"], ...] = ()
-    provides: tuple[
-        Literal["lint", "compile", "unit", "contract", "smoke"], ...
-    ] = ()
+    provides: tuple[Literal["lint", "compile", "unit", "contract", "smoke"], ...] = ()
     adversarial_probes: tuple[
         Literal[
             "boundary",
@@ -186,9 +180,7 @@ class HarnessCheckSpec(_StrictModel):
     def _validate_id(cls, value: str) -> str:
         normalized = value.strip()
         if not _CHECK_ID_RE.fullmatch(normalized):
-            raise ValueError(
-                "check id 必须以小写字母开头，且只能包含小写字母、数字、_ 或 -"
-            )
+            raise ValueError("check id 必须以小写字母开头，且只能包含小写字母、数字、_ 或 -")
         return normalized
 
     @field_validator("label")
@@ -233,6 +225,7 @@ class HarnessCheckSpec(_StrictModel):
 
 class HarnessEvalSpec(_StrictModel):
     suites: tuple[str, ...] = Field(default=(), max_length=100)
+    live_suites: tuple[str, ...] = Field(default=(), max_length=100)
     live_default: Literal[False] = False
     max_cost_usd: float = Field(default=1.0, ge=0)
     max_duration_seconds: int = Field(default=1_800, ge=1, le=86_400)
@@ -244,6 +237,11 @@ class HarnessEvalSpec(_StrictModel):
         # the established path_outside_workspace diagnostic instead of a generic
         # schema error.
         return _normalize_unique_strings(values, field="evals.suites")
+
+    @field_validator("live_suites")
+    @classmethod
+    def _validate_live_suites(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        return _normalize_unique_strings(values, field="evals.live_suites")
 
 
 class HarnessProfile(_StrictModel):

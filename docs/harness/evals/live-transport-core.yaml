@@ -1,0 +1,26 @@
+schema_version: 1
+kind: live
+id: live-transport-core
+title: 真实模型传输、身份与用量核心评测
+cases:
+  - id: exact-echo
+    runner: live_transport_echo
+    prompt_version: naumi_live_echo@1
+    expected:
+      exact_match: true
+    metrics:
+      primary: live_transport_exact_match
+    budget:
+      max_duration_seconds: 15
+      max_cost_usd: 0.02
+      max_output_tokens: 32
+
+budget:
+  max_duration_seconds_per_sample: 15
+  max_cost_usd_per_sample: 0.02
+
+comparison_policy:
+  min_pass_rate: 1.0
+  max_regressions: 0
+  max_implementation_failures: 0
+  max_pass_rate_drop: 0.0

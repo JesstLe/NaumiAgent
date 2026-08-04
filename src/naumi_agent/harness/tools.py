@@ -12,6 +12,7 @@ from naumi_agent.harness.eval_live import (
     HarnessLiveEvalError,
     render_harness_live_eval,
 )
+from naumi_agent.harness.eval_live_suite import render_live_batch_status
 from naumi_agent.harness.eval_surface import (
     render_eval_baseline_status,
     render_eval_batch_status,
@@ -61,6 +62,7 @@ def create_harness_tools(service: HarnessService) -> list[Tool]:
         HarnessReplayTool(service),
         HarnessEvalTool(service),
         HarnessEvalLiveTool(service),
+        HarnessEvalLiveBatchTool(service),
         HarnessEvalReplayTool(service),
         HarnessEvalBaselineTool(service),
         HarnessEvalBatchTool(service),
@@ -185,9 +187,7 @@ class HarnessExplainTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness explain run failure receipt check evidence why status"
-            ),
+            search_hint=("harness explain run failure receipt check evidence why status"),
         )
 
     @property
@@ -231,9 +231,7 @@ class HarnessReplayTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness replay deterministic receipt evidence artifact verify history"
-            ),
+            search_hint=("harness replay deterministic receipt evidence artifact verify history"),
         )
 
     @property
@@ -277,9 +275,7 @@ class HarnessEvalTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness eval offline protocol regression fixture suite deterministic"
-            ),
+            search_hint=("harness eval offline protocol regression fixture suite deterministic"),
         )
 
     @property
@@ -331,9 +327,7 @@ class HarnessEvalLiveTool(Tool):
             requires_confirmation=True,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness live eval provider model capability cost timeout transport"
-            ),
+            search_hint=("harness live eval provider model capability cost timeout transport"),
         )
 
     @property
@@ -381,6 +375,75 @@ class HarnessEvalLiveTool(Tool):
             code = getattr(exc, "code", "live_eval_parameters_invalid")
             return f"Harness Live Eval 无法启动（`{code}`）：{exc}"
         return render_harness_live_eval(receipt)
+
+
+class HarnessEvalLiveBatchTool(Tool):
+    def __init__(self, service: HarnessService) -> None:
+        self._service = service
+
+    @property
+    def name(self) -> str:
+        return "harness_eval_live_batch"
+
+    @property
+    def description(self) -> str:
+        return "重复运行声明式 Live Eval Suite，并保存不可变 H5a 样本"
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=True,
+            command_argument_names=(),
+            user_facing_name=self.description,
+            search_hint=("harness live eval suite repeated provider model h5a baseline"),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "suite": {"type": "string", "minLength": 1, "maxLength": 1_024},
+                "repetitions": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 20,
+                    "default": 5,
+                },
+                "batch_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "model": {"type": "string", "minLength": 1, "maxLength": 512},
+                "max_total_duration_seconds": {
+                    "type": "number",
+                    "minimum": 5,
+                    "maximum": 3_600,
+                },
+                "max_total_cost_usd": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10,
+                },
+            },
+            "required": ["suite"],
+            "additionalProperties": False,
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        try:
+            result = await self._service.eval_live_batch(
+                kwargs.get("suite"),
+                repetitions=kwargs.get("repetitions", 5),
+                batch_id=kwargs.get("batch_id"),
+                model=kwargs.get("model"),
+                max_total_duration_seconds=kwargs.get("max_total_duration_seconds"),
+                max_total_cost_usd=kwargs.get("max_total_cost_usd"),
+            )
+        except (HarnessLiveEvalError, ValueError) as exc:
+            code = getattr(exc, "code", "live_batch_parameters_invalid")
+            return f"Harness Live Eval Batch 无法启动（`{code}`）：{exc}"
+        return render_live_batch_status(result)
 
 
 class HarnessEvalReplayTool(_HarnessReadOnlyTool):
@@ -444,9 +507,7 @@ class HarnessEvalBaselineTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness eval baseline comparison receipt regression status history"
-            ),
+            search_hint=("harness eval baseline comparison receipt regression status history"),
         )
 
     @property
@@ -559,9 +620,7 @@ class HarnessEvalSandboxTool(Tool):
             requires_confirmation=False,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox eval profile checks repeated batch h5a validation"
-            ),
+            search_hint=("harness sandbox eval profile checks repeated batch h5a validation"),
             delegated_tool_names=("bash_run",),
         )
 
@@ -690,9 +749,7 @@ class HarnessEvalSandboxRetryTool(Tool):
             requires_confirmation=False,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox eval retry resume cancelled batch h5a recovery"
-            ),
+            search_hint=("harness sandbox eval retry resume cancelled batch h5a recovery"),
             delegated_tool_names=("bash_run",),
         )
 
@@ -827,9 +884,7 @@ class HarnessEvalSandboxRetryCatalogTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox retry dispatch catalog history recovery expired"
-            ),
+            search_hint=("harness sandbox retry dispatch catalog history recovery expired"),
         )
 
     @property
@@ -909,8 +964,7 @@ class HarnessEvalSandboxRetryDetailTool(_HarnessReadOnlyTool):
             concurrency_safe=True,
             user_facing_name=self.description,
             search_hint=(
-                "harness sandbox retry dispatch detail receipt ticket "
-                "recovery retention h5a"
+                "harness sandbox retry dispatch detail receipt ticket recovery retention h5a"
             ),
         )
 
@@ -981,9 +1035,7 @@ class HarnessEvalSandboxRetryRetentionPreviewTool(_HarnessReadOnlyTool):
             read_only=True,
             concurrency_safe=True,
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox retry retention preview terminal prune dry run"
-            ),
+            search_hint=("harness sandbox retry retention preview terminal prune dry run"),
         )
 
     @property
@@ -1072,9 +1124,7 @@ class HarnessEvalSandboxRetryPruneAuthorizeTool(Tool):
             requires_persistent_authorization=True,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox retry retention prune authorize receipt fence"
-            ),
+            search_hint=("harness sandbox retry retention prune authorize receipt fence"),
         )
 
     @property
@@ -1146,8 +1196,7 @@ class HarnessEvalSandboxRetryPruneAuthorizeTool(Tool):
             "protection_refs_sha256": r"[0-9a-f]{64}",
         }
         if any(
-            not isinstance(kwargs.get(name), str)
-            or re.fullmatch(pattern, kwargs[name]) is None
+            not isinstance(kwargs.get(name), str) or re.fullmatch(pattern, kwargs[name]) is None
             for name, pattern in patterns.items()
         ):
             return "Sandbox retry prune authorize 参数无效：ID 或摘要格式错误。"
@@ -1169,11 +1218,7 @@ class HarnessEvalSandboxRetryPruneAuthorizeTool(Tool):
             ("run_id", 128),
         ):
             value = kwargs.get(name)
-            if (
-                not isinstance(value, str)
-                or not value.strip()
-                or len(value) > maximum
-            ):
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
                 return f"Sandbox retry prune authorize 参数无效：{name} 无效。"
         try:
             receipt = await self._service.authorize_sandbox_retry_prune(**kwargs)
@@ -1207,9 +1252,7 @@ class HarnessEvalSandboxRetryPruneExecuteTool(Tool):
             requires_persistent_authorization=True,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox retry prune execute receipt atomic delete"
-            ),
+            search_hint=("harness sandbox retry prune execute receipt atomic delete"),
         )
 
     @property
@@ -1274,18 +1317,13 @@ class HarnessEvalSandboxRetryPruneExecuteTool(Tool):
             "protection_refs_sha256": r"[0-9a-f]{64}",
         }
         if any(
-            not isinstance(kwargs.get(name), str)
-            or re.fullmatch(pattern, kwargs[name]) is None
+            not isinstance(kwargs.get(name), str) or re.fullmatch(pattern, kwargs[name]) is None
             for name, pattern in patterns.items()
         ):
             return "Sandbox retry prune execute 参数无效：ID 或摘要格式错误。"
         for name, maximum in (("reason", 500), ("run_id", 128)):
             value = kwargs.get(name)
-            if (
-                not isinstance(value, str)
-                or not value.strip()
-                or len(value) > maximum
-            ):
+            if not isinstance(value, str) or not value.strip() or len(value) > maximum:
                 return f"Sandbox retry prune execute 参数无效：{name} 无效。"
         try:
             receipt = await self._service.execute_sandbox_retry_prune(**kwargs)
@@ -1322,9 +1360,7 @@ class HarnessEvalSandboxResumeTool(Tool):
             requires_confirmation=False,
             command_argument_names=(),
             user_facing_name=self.description,
-            search_hint=(
-                "harness sandbox retry resume dispatch expired crash recovery h5a"
-            ),
+            search_hint=("harness sandbox retry resume dispatch expired crash recovery h5a"),
             delegated_tool_names=("bash_run",),
         )
 
@@ -1550,8 +1586,7 @@ class HarnessReadKnowledgeTool(_HarnessReadOnlyTool):
             path_argument_names=("path",),
             user_facing_name=self.description,
             search_hint=(
-                "harness repository knowledge read source docs instructions "
-                "symbol path evidence"
+                "harness repository knowledge read source docs instructions symbol path evidence"
             ),
         )
 

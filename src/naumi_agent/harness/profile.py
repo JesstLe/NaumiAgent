@@ -163,7 +163,11 @@ def load_harness_profile(
 
 
 def _find_escaped_path(workspace: Path, profile: HarnessProfile) -> str | None:
-    concrete = (*profile.knowledge.entrypoints, *profile.evals.suites)
+    concrete = (
+        *profile.knowledge.entrypoints,
+        *profile.evals.suites,
+        *profile.evals.live_suites,
+    )
     patterns = (
         *profile.knowledge.include,
         *profile.knowledge.exclude,
@@ -213,9 +217,7 @@ def _invalid_snapshot(
     digest: str | None = None,
     errors: Iterable[HarnessProfileError] = (),
 ) -> HarnessProfileSnapshot:
-    profile_errors = tuple(errors) or (
-        HarnessProfileError(code=code, message=message, hint=hint),
-    )
+    profile_errors = tuple(errors) or (HarnessProfileError(code=code, message=message, hint=hint),)
     return HarnessProfileSnapshot(
         workspace_root=workspace,
         profile_path=profile_path,

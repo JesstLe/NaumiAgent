@@ -170,22 +170,15 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         replay = engine.tool_registry.get("harness_replay")
         eval_tool = engine.tool_registry.get("harness_eval")
         live_eval_tool = engine.tool_registry.get("harness_eval_live")
+        live_batch_tool = engine.tool_registry.get("harness_eval_live_batch")
         eval_replay_tool = engine.tool_registry.get("harness_eval_replay")
         baseline_tool = engine.tool_registry.get("harness_eval_baseline")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
         sandbox_tool = engine.tool_registry.get("harness_eval_sandbox")
-        sandbox_retry_tool = engine.tool_registry.get(
-            "harness_eval_sandbox_retry"
-        )
-        sandbox_resume_tool = engine.tool_registry.get(
-            "harness_eval_sandbox_resume"
-        )
-        sandbox_retries_tool = engine.tool_registry.get(
-            "harness_eval_sandbox_retries"
-        )
-        sandbox_retry_detail_tool = engine.tool_registry.get(
-            "harness_eval_sandbox_retry_detail"
-        )
+        sandbox_retry_tool = engine.tool_registry.get("harness_eval_sandbox_retry")
+        sandbox_resume_tool = engine.tool_registry.get("harness_eval_sandbox_resume")
+        sandbox_retries_tool = engine.tool_registry.get("harness_eval_sandbox_retries")
+        sandbox_retry_detail_tool = engine.tool_registry.get("harness_eval_sandbox_retry_detail")
         sandbox_retry_retention_tool = engine.tool_registry.get(
             "harness_eval_sandbox_retry_retention_preview"
         )
@@ -210,6 +203,9 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert live_eval_tool is not None and not live_eval_tool.metadata.read_only
         assert live_eval_tool.metadata.concurrency_safe
         assert live_eval_tool.metadata.requires_confirmation
+        assert live_batch_tool is not None and not live_batch_tool.metadata.read_only
+        assert live_batch_tool.metadata.concurrency_safe
+        assert live_batch_tool.metadata.requires_confirmation
         assert eval_replay_tool is not None and eval_replay_tool.metadata.read_only
         assert eval_replay_tool.metadata.concurrency_safe
         assert baseline_tool is not None and baseline_tool.metadata.read_only
@@ -241,18 +237,13 @@ async def test_engine_registers_harness_read_tools_and_trusted_check(tmp_path: P
         assert not sandbox_retry_prune_tool.metadata.destructive
         assert sandbox_retry_prune_tool.metadata.concurrency_safe
         assert not sandbox_retry_prune_tool.metadata.requires_confirmation
-        assert (
-            sandbox_retry_prune_tool.metadata.requires_persistent_authorization
-        )
+        assert sandbox_retry_prune_tool.metadata.requires_persistent_authorization
         assert sandbox_retry_prune_execute_tool is not None
         assert not sandbox_retry_prune_execute_tool.metadata.read_only
         assert sandbox_retry_prune_execute_tool.metadata.destructive
         assert sandbox_retry_prune_execute_tool.metadata.concurrency_safe
         assert sandbox_retry_prune_execute_tool.metadata.requires_confirmation
-        assert (
-            sandbox_retry_prune_execute_tool.metadata
-            .requires_persistent_authorization
-        )
+        assert sandbox_retry_prune_execute_tool.metadata.requires_persistent_authorization
         assert promote_tool is not None and not promote_tool.metadata.read_only
         assert promote_tool.metadata.concurrency_safe
         assert compare_tool is not None and not compare_tool.metadata.read_only
@@ -276,13 +267,9 @@ async def test_harness_slash_flow_previews_confirms_and_revokes_trust(
         initial = _plain(await execute_slash_command(engine, "/harness status"))
         preview = _plain(await execute_slash_command(engine, "/harness trust"))
         still_untrusted = await engine.harness_service.status()
-        confirmed = _plain(
-            await execute_slash_command(engine, "/harness trust --confirm")
-        )
+        confirmed = _plain(await execute_slash_command(engine, "/harness trust --confirm"))
         ready = _plain(await execute_slash_command(engine, "/harness status"))
-        knowledge = _plain(
-            await execute_slash_command(engine, "/harness knowledge AGENTS.md")
-        )
+        knowledge = _plain(await execute_slash_command(engine, "/harness knowledge AGENTS.md"))
         check = _plain(await execute_slash_command(engine, "/harness check unit"))
         revoked = _plain(await execute_slash_command(engine, "/harness untrust"))
         eval_output = _plain(await execute_slash_command(engine, "/harness eval"))
@@ -322,12 +309,10 @@ async def test_harness_slash_check_uses_sandbox_worker_and_releases_authority(
 
         assert "Harness 检查通过" in check
         assert "surface check ok" in check
-        assert await engine._resources.worker_registry_store.get_active(
-            "local-shell-worker"
-        ) is None
-        history = await engine._resources.worker_registry_store.list_history(
-            "local-shell-worker"
+        assert (
+            await engine._resources.worker_registry_store.get_active("local-shell-worker") is None
         )
+        history = await engine._resources.worker_registry_store.list_history("local-shell-worker")
         assert len(history) == 1
         assert history[0].reason_code == "ephemeral_job_finished"
         assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
@@ -339,9 +324,7 @@ async def test_harness_slash_check_uses_sandbox_worker_and_releases_authority(
             "harness_run_check",
             "bash_run",
         }
-        parent = next(
-            receipt for receipt in receipts if receipt.tool_name == "harness_run_check"
-        )
+        parent = next(receipt for receipt in receipts if receipt.tool_name == "harness_run_check")
         child = next(receipt for receipt in receipts if receipt.tool_name == "bash_run")
         assert child.parent_receipt_id == parent.receipt_id
     finally:
@@ -372,10 +355,7 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
         rendered = _plain(
             await execute_slash_command(
                 engine,
-                (
-                    "/harness eval sandbox unit --samples 5 "
-                    "--batch sandbox-surface-1"
-                ),
+                ("/harness eval sandbox unit --samples 5 --batch sandbox-surface-1"),
                 frontend=frontend,
             )
         )
@@ -408,43 +388,37 @@ async def test_harness_sandbox_eval_slash_executes_real_worker_batch(
             "completed",
         ]
         assert [item["persisted"] for item in frontend.progress] == [
-            0, 0, 0, 1, 2, 3, 4, 5, 5,
+            0,
+            0,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            5,
         ]
-        ticket_ids = {
-            str(item["admission_ticket_id"]) for item in frontend.progress
-        }
+        ticket_ids = {str(item["admission_ticket_id"]) for item in frontend.progress}
         assert len(ticket_ids) == 1
         assert next(iter(ticket_ids)).startswith("hsadm_")
         assert frontend.progress[0]["admission_state"] == "active"
         assert frontend.progress[-1]["admission_state"] == "completed"
         assert frontend.progress[-1]["active_count"] == 0
         assert all(item["kind"] == "sandbox" for item in frontend.progress)
-        assert all(
-            item["check_ids"] == ["unit"] for item in frontend.progress
-        )
+        assert all(item["check_ids"] == ["unit"] for item in frontend.progress)
         assert len(records) == 5
         assert [item.sample_index for item in records] == list(range(5))
         assert all(item.result.status.value == "passed" for item in records)
         assert list(engine._paths.shell_worker_sandbox_dir.iterdir()) == []
-        artifacts = list(
-            engine._paths.shell_worker_artifact_dir.glob("unit-*.log")
-        )
+        artifacts = list(engine._paths.shell_worker_artifact_dir.glob("unit-*.log"))
         assert len(artifacts) == 5
-        assert all(
-            "surface check ok" in item.read_text(encoding="utf-8")
-            for item in artifacts
-        )
+        assert all("surface check ok" in item.read_text(encoding="utf-8") for item in artifacts)
         receipts = engine.list_permission_decision_receipts()
-        parents = [
-            item for item in receipts
-            if item.tool_name == "harness_eval_sandbox"
-        ]
+        parents = [item for item in receipts if item.tool_name == "harness_eval_sandbox"]
         children = [item for item in receipts if item.tool_name == "bash_run"]
         assert len(parents) == 1
         assert len(children) == 5
-        assert {item.parent_receipt_id for item in children} == {
-            parents[0].receipt_id
-        }
+        assert {item.parent_receipt_id for item in children} == {parents[0].receipt_id}
         grant_ids = {item.run_delegation_grant_id for item in children}
         assert len(grant_ids) == 1
         validation = await engine.run_delegation_grant_authority.validate(
@@ -462,9 +436,7 @@ async def test_harness_sandbox_eval_slash_rejects_incomplete_or_ambiguous_args(
 ) -> None:
     engine = _engine(tmp_path)
     try:
-        missing = _plain(
-            await execute_slash_command(engine, "/harness eval sandbox")
-        )
+        missing = _plain(await execute_slash_command(engine, "/harness eval sandbox"))
         misordered = _plain(
             await execute_slash_command(
                 engine,
@@ -570,12 +542,7 @@ async def test_harness_sandbox_retry_retention_preview_slash_is_read_only(
         assert "Sandbox retry retention 预览" in rendered
         assert "不会生成 prune receipt" in rendered
         assert "当前没有超过保留期" in rendered
-        assert (
-            engine.tool_registry.get(
-                "harness_eval_sandbox_retry_retention_preview"
-            )
-            is not None
-        )
+        assert engine.tool_registry.get("harness_eval_sandbox_retry_retention_preview") is not None
     finally:
         await engine.shutdown()
 
@@ -655,10 +622,7 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
         rendered = _plain(
             await execute_slash_command(
                 engine,
-                (
-                    "/harness eval sandbox retries --state open "
-                    f"--assessed-at {stamp(7)}"
-                ),
+                (f"/harness eval sandbox retries --state open --assessed-at {stamp(7)}"),
             )
         )
         detailed = _plain(
@@ -684,10 +648,7 @@ async def test_harness_sandbox_retries_slash_reads_real_expired_dispatch(
         assert dispatch.dispatch_id in detailed
         assert "Retention 保护集合（只读）" in detailed
         assert "/harness eval sandbox resume" in detailed
-        assert (
-            engine.tool_registry.get("harness_eval_sandbox_retry_detail")
-            is not None
-        )
+        assert engine.tool_registry.get("harness_eval_sandbox_retry_detail") is not None
     finally:
         await engine.shutdown()
 
@@ -819,8 +780,7 @@ async def test_harness_sandbox_resume_slash_recovers_real_expired_dispatch(
         assert len(resume_receipts) == 1
         assert len(child_receipts) == 5
         assert all(
-            item.parent_receipt_id == resume_receipts[0].receipt_id
-            for item in child_receipts
+            item.parent_receipt_id == resume_receipts[0].receipt_id for item in child_receipts
         )
     finally:
         await engine.shutdown()
@@ -843,10 +803,7 @@ async def test_harness_sandbox_retry_slash_resumes_real_cancelled_worker_batch(
             progress: dict[str, object],
         ) -> None:
             self.progress.append(progress)
-            if (
-                progress.get("stage") == "executing"
-                and progress.get("persisted") == 2
-            ):
+            if progress.get("stage") == "executing" and progress.get("persisted") == 2:
                 self.two_persisted.set()
 
     frontend = ProgressFrontend()
@@ -873,25 +830,20 @@ async def test_harness_sandbox_retry_slash_resumes_real_cancelled_worker_batch(
         original = asyncio.create_task(
             execute_slash_command(
                 engine,
-                (
-                    "/harness eval sandbox unit --samples 5 "
-                    "--batch sandbox-retry-surface-1"
-                ),
+                ("/harness eval sandbox unit --samples 5 --batch sandbox-retry-surface-1"),
                 frontend=frontend,
             )
         )
         await asyncio.wait_for(frontend.two_persisted.wait(), timeout=10)
         live = frontend.progress[-1]
-        cancel_receipt, cancelled = (
-            await engine.harness_sandbox_batch_admission.cancel(
-                action_id=f"hsac_{'c' * 24}",
-                ticket_id=str(live["admission_ticket_id"]),
-                authority_key=str(live["authority_key"]),
-                epoch=int(live["admission_epoch"]),
-                expected_state="active",
-                actor_id="tui",
-                reason="真实 Slash retry 回归",
-            )
+        cancel_receipt, cancelled = await engine.harness_sandbox_batch_admission.cancel(
+            action_id=f"hsac_{'c' * 24}",
+            ticket_id=str(live["admission_ticket_id"]),
+            authority_key=str(live["authority_key"]),
+            epoch=int(live["admission_epoch"]),
+            expected_state="active",
+            actor_id="tui",
+            reason="真实 Slash retry 回归",
         )
         assert cancel_receipt.decision == "accepted"
         assert cancelled is not None and cancelled.state == "cancelled"
@@ -943,14 +895,12 @@ async def test_harness_sandbox_retry_slash_resumes_real_cancelled_worker_batch(
         assert [item.sample_index for item in records] == list(range(5))
         assert len(retry_receipts) == 1
         assert len(child_receipts) == 5
-        assert sum(
-            item.parent_receipt_id == retry_receipts[0].receipt_id
-            for item in child_receipts
-        ) == 3
+        assert (
+            sum(item.parent_receipt_id == retry_receipts[0].receipt_id for item in child_receipts)
+            == 3
+        )
         retry_progress = [
-            item
-            for item in frontend.progress
-            if item["authority_key"] != request.request_sha256
+            item for item in frontend.progress if item["authority_key"] != request.request_sha256
         ]
         assert retry_progress[0]["persisted"] == 2
         assert retry_progress[-1]["stage"] == "completed"
@@ -965,9 +915,7 @@ async def test_harness_eval_slash_and_agent_tool_share_service_result(
 ) -> None:
     engine = _engine(tmp_path)
     try:
-        slash = _plain(
-            await execute_slash_command(engine, "/harness eval surface-protocol")
-        )
+        slash = _plain(await execute_slash_command(engine, "/harness eval surface-protocol"))
         tool = engine.tool_registry.get("harness_eval")
         assert tool is not None
         agent = await tool.execute(suite="surface-protocol")
@@ -996,9 +944,7 @@ async def test_harness_eval_replay_slash_and_agent_tool_share_safe_result(
 ) -> None:
     engine = _engine(tmp_path)
     try:
-        slash = _plain(
-            await execute_slash_command(engine, "/harness eval replay latest")
-        )
+        slash = _plain(await execute_slash_command(engine, "/harness eval replay latest"))
         tool = engine.tool_registry.get("harness_eval_replay")
         assert tool is not None
         agent = await tool.execute(run_id="latest")
@@ -1031,9 +977,7 @@ async def test_harness_baseline_slash_and_agent_tool_share_empty_state(
         assert "尚无 Baseline" in slash
         assert "尚无 Baseline" in agent
         assert "稳定的重复 Eval cohort" in slash
-        assert await tool.execute() == (
-            "Harness Baseline 参数无效：suite 必须是字符串。"
-        )
+        assert await tool.execute() == ("Harness Baseline 参数无效：suite 必须是字符串。")
     finally:
         await engine.shutdown()
 
@@ -1044,6 +988,7 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
 ) -> None:
     engine = _engine(tmp_path)
     try:
+
         class ProgressFrontend:
             def __init__(self) -> None:
                 self.progress = []
@@ -1085,12 +1030,20 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             *("evaluating" for _ in range(5)),
             *("persisting" for _ in range(5)),
         ]
-        assert [
-            item.completed for item in progress if item.stage == "evaluating"
-        ] == [1, 2, 3, 4, 5]
-        assert [
-            item.persisted for item in progress if item.stage == "persisting"
-        ] == [1, 2, 3, 4, 5]
+        assert [item.completed for item in progress if item.stage == "evaluating"] == [
+            1,
+            2,
+            3,
+            4,
+            5,
+        ]
+        assert [item.persisted for item in progress if item.stage == "persisting"] == [
+            1,
+            2,
+            3,
+            4,
+            5,
+        ]
         assert "完成 5/5 · 已保存 5" in slash
         assert "重复评测完成" in slash
         assert "surface-batch-1" in slash
@@ -1119,11 +1072,14 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
             suite="not-declared",
             batch_id="missing-suite",
         )
-        assert await engine.harness_service.store.list_eval_results(
-            engine.workspace_root,
-            "missing-suite",
-            "not-declared",
-        ) == ()
+        assert (
+            await engine.harness_service.store.list_eval_results(
+                engine.workspace_root,
+                "missing-suite",
+                "not-declared",
+            )
+            == ()
+        )
         ineligible = await promote_tool.execute(
             suite="surface-protocol",
             batch_id="surface-batch-1",
@@ -1131,10 +1087,13 @@ async def test_harness_repeated_eval_persists_real_candidate_batch(
         )
         assert "eligibility_rejected" in ineligible
         assert "未通过 Baseline eligibility gate" in ineligible
-        assert await engine.harness_service.store.get_active_eval_baseline(
-            engine.workspace_root,
-            "surface-protocol",
-        ) is None
+        assert (
+            await engine.harness_service.store.get_active_eval_baseline(
+                engine.workspace_root,
+                "surface-protocol",
+            )
+            is None
+        )
         no_baseline = await compare_tool.execute(
             suite="surface-protocol",
             candidate_batch_id="surface-batch-2",
@@ -1162,8 +1121,7 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
         promoted = _plain(
             await execute_slash_command(
                 engine,
-                "/harness baseline promote surface-protocol promote-1 "
-                "--reason 首个稳定协议基线",
+                "/harness baseline promote surface-protocol promote-1 --reason 首个稳定协议基线",
             )
         )
         status_v1 = _plain(
@@ -1172,9 +1130,7 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
                 "/harness baseline surface-protocol",
             )
         )
-        baseline_v1_status = await engine.harness_service.eval_baseline_status(
-            "surface-protocol"
-        )
+        baseline_v1_status = await engine.harness_service.eval_baseline_status("surface-protocol")
         assert baseline_v1_status.active is not None
         promote_tool = engine.tool_registry.get("harness_eval_baseline_promote")
         batch_tool = engine.tool_registry.get("harness_eval_batch")
@@ -1200,12 +1156,10 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
             suite="surface-protocol",
             candidate_batch_id="promote-2",
         )
-        comparison_receipts = (
-            await engine.harness_service.store.list_eval_comparison_receipts(
-                engine.workspace_root,
-                "surface-protocol",
-                baseline_id=baseline_v1_status.active.id,
-            )
+        comparison_receipts = await engine.harness_service.store.list_eval_comparison_receipts(
+            engine.workspace_root,
+            "surface-protocol",
+            baseline_id=baseline_v1_status.active.id,
         )
         first_candidate = await engine.harness_service.store.get_eval_result(
             engine.workspace_root,
@@ -1239,9 +1193,7 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
             suite="surface-protocol",
             candidate_batch_id="promote-2",
         )
-        status_v2 = await engine.harness_service.eval_baseline_status(
-            "surface-protocol"
-        )
+        status_v2 = await engine.harness_service.eval_baseline_status("surface-protocol")
         events = await engine.harness_service.store.list_eval_baseline_events(
             engine.workspace_root,
             "surface-protocol",
@@ -1251,9 +1203,7 @@ async def test_harness_explicit_promotion_updates_selector_and_audit_chain(
             "surface-protocol",
             "promote-1",
         )
-        original_get_active = (
-            engine.harness_service.store.get_active_eval_baseline
-        )
+        original_get_active = engine.harness_service.store.get_active_eval_baseline
         active_reads = 0
 
         async def selector_changes_during_compare(*args, **kwargs):
@@ -1375,9 +1325,7 @@ async def test_harness_slash_doctor_and_invalid_usage_are_actionable(
         invalid = _plain(await execute_slash_command(engine, "/harness trust now"))
         unknown = _plain(await execute_slash_command(engine, "/harness unknown"))
         malformed = _plain(await execute_slash_command(engine, "/harness 'broken"))
-        missing_knowledge = _plain(
-            await execute_slash_command(engine, "/harness knowledge")
-        )
+        missing_knowledge = _plain(await execute_slash_command(engine, "/harness knowledge"))
         invalid_knowledge = _plain(
             await execute_slash_command(
                 engine,
@@ -1440,9 +1388,7 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
             started_at="2026-07-15T10:00:01+00:00",
             completed_at="2026-07-15T10:00:02+00:00",
         )
-        evidence_artifact = (
-            engine.workspace_root / "slash-failed-run" / "tool-failure.json"
-        )
+        evidence_artifact = engine.workspace_root / "slash-failed-run" / "tool-failure.json"
         evidence_artifact.parent.mkdir(parents=True)
         evidence_artifact.write_text(
             '{"status":"failed","tool":"focused_test_tool"}\n',
@@ -1501,36 +1447,20 @@ async def test_harness_explain_slash_uses_real_durable_run(tmp_path: Path) -> No
         for tool in create_harness_tools(restored_service):
             engine.tool_registry.register(tool)
 
-        explained = _plain(
-            await execute_slash_command(engine, "/harness explain latest")
-        )
-        replayed = _plain(
-            await execute_slash_command(engine, "/harness replay latest")
-        )
-        detailed = _plain(
-            await execute_slash_command(engine, "/harness detail latest")
-        )
-        evidence_focused = _plain(
-            await execute_slash_command(engine, "/harness evidence latest")
-        )
+        explained = _plain(await execute_slash_command(engine, "/harness explain latest"))
+        replayed = _plain(await execute_slash_command(engine, "/harness replay latest"))
+        detailed = _plain(await execute_slash_command(engine, "/harness detail latest"))
+        evidence_focused = _plain(await execute_slash_command(engine, "/harness evidence latest"))
         explain_tool = engine.tool_registry.get("harness_explain")
         assert explain_tool is not None
         tool_explained = await explain_tool.execute(run_id=contract.run_id)
         replay_tool = engine.tool_registry.get("harness_replay")
         assert replay_tool is not None
         tool_replayed = await replay_tool.execute(run_id=contract.run_id)
-        invalid = _plain(
-            await execute_slash_command(engine, "/harness explain one two")
-        )
-        invalid_replay = _plain(
-            await execute_slash_command(engine, "/harness replay one two")
-        )
-        invalid_detail = _plain(
-            await execute_slash_command(engine, "/harness detail one two")
-        )
-        invalid_evidence = _plain(
-            await execute_slash_command(engine, "/harness evidence one two")
-        )
+        invalid = _plain(await execute_slash_command(engine, "/harness explain one two"))
+        invalid_replay = _plain(await execute_slash_command(engine, "/harness replay one two"))
+        invalid_detail = _plain(await execute_slash_command(engine, "/harness detail one two"))
+        invalid_evidence = _plain(await execute_slash_command(engine, "/harness evidence one two"))
 
         assert "slash-failed-run" in explained
         assert "verification_failure" in explained

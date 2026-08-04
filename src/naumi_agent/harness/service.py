@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import shlex
 import time
@@ -60,6 +61,12 @@ from naumi_agent.harness.eval_live import (
     HarnessLiveEvalReceipt,
     HarnessLiveEvalRequest,
     HarnessLiveEvalRunner,
+)
+from naumi_agent.harness.eval_live_suite import (
+    HarnessLiveBatchStatus,
+    HarnessLiveSuiteRunner,
+    build_live_batch_status,
+    resolve_declared_live_eval_suite,
 )
 from naumi_agent.harness.eval_models import (
     EvalRunStatus,
@@ -152,14 +159,11 @@ from naumi_agent.runtime.ports.model import ModelPort
 from naumi_agent.safety.guardrails import OutputGuardrail
 
 _STORE_WARNING = (
-    "infrastructure_error: Harness 状态库写入失败，本次主任务结果仍会返回；"
-    "请检查用户状态目录权限。"
+    "infrastructure_error: Harness 状态库写入失败，本次主任务结果仍会返回；请检查用户状态目录权限。"
 )
 logger = logging.getLogger(__name__)
 
-type EvalBatchProgressCallback = Callable[
-    [HarnessEvalBatchProgress], Awaitable[None]
-]
+type EvalBatchProgressCallback = Callable[[HarnessEvalBatchProgress], Awaitable[None]]
 
 
 class HarnessStatusCode(StrEnum):
@@ -237,9 +241,7 @@ class HarnessService:
         self.workspace_root = Path(workspace_root).expanduser().resolve()
         self._trust_store = trust_store
         self._store = store
-        self._evidence_collector = (
-            EvidenceCollector(store=store) if store is not None else None
-        )
+        self._evidence_collector = EvidenceCollector(store=store) if store is not None else None
         self._profile_path = profile_path
         self._knowledge_index = RepositoryKnowledgeIndex(self.workspace_root)
         self._check_runner = HarnessCheckRunner(workspace_root=self.workspace_root)
@@ -266,6 +268,14 @@ class HarnessService:
         self._live_eval_runner = (
             HarnessLiveEvalRunner(model_port) if model_port is not None else None
         )
+        self._live_suite_runner = (
+            HarnessLiveSuiteRunner(
+                model_port,
+                transport_runner=self._live_eval_runner,
+            )
+            if model_port is not None and self._live_eval_runner is not None
+            else None
+        )
         self._sandbox_eval_request_builder = HarnessSandboxEvalRequestBuilder()
         self._completion_gate = CompletionGate()
         self._explainer = HarnessExplainer()
@@ -279,15 +289,16 @@ class HarnessService:
         self._persisted_run_ids: OrderedDict[str, None] = OrderedDict()
         self._store_warnings: OrderedDict[str, list[str]] = OrderedDict()
         self._max_persisted_runs = 128
-        self._knowledge_composer = HarnessKnowledgeContextComposer(
-            self._knowledge_index
-        )
+        self._knowledge_composer = HarnessKnowledgeContextComposer(self._knowledge_index)
         self._knowledge_cache: KnowledgeIndexSnapshot | None = None
         self._knowledge_lock = asyncio.Lock()
-        self._knowledge_build: tuple[
-            str,
-            asyncio.Task[KnowledgeIndexSnapshot],
-        ] | None = None
+        self._knowledge_build: (
+            tuple[
+                str,
+                asyncio.Task[KnowledgeIndexSnapshot],
+            ]
+            | None
+        ) = None
         self._selection_cache: OrderedDict[
             tuple[str, str, int | None],
             KnowledgeContextBundle,
@@ -375,6 +386,148 @@ class HarnessService:
         )
         return await runner.run(request)
 
+    async def eval_live_batch(
+        self,
+        suite: str,
+        *,
+        repetitions: int = 5,
+        batch_id: str | None = None,
+        model: str | None = None,
+        max_total_duration_seconds: float | None = None,
+        max_total_cost_usd: float | None = None,
+    ) -> HarnessLiveBatchStatus:
+        """Run and durably append one explicit declarative Live Eval cohort."""
+        if not isinstance(suite, str) or not suite.strip() or len(suite.strip()) > 1_024:
+            raise ValueError("suite 必须是 1..1024 个字符。")
+        if not isinstance(repetitions, int) or isinstance(repetitions, bool):
+            raise ValueError("repetitions 必须是整数。")
+        if not 5 <= repetitions <= 20:
+            raise ValueError("repetitions 必须在 5..20 之间。")
+        normalized_batch = batch_id.strip() if isinstance(batch_id, str) else ""
+        if batch_id is not None and not normalized_batch:
+            raise ValueError("batch_id 不能为空。")
+        if normalized_batch and not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+            normalized_batch,
+        ):
+            raise ValueError("batch_id 格式无效。")
+        if not normalized_batch:
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            normalized_batch = f"live-{timestamp}-{uuid.uuid4().hex[:8]}"
+        runner = self._live_suite_runner
+        model_port = self._model_port
+        if runner is None or model_port is None:
+            raise HarnessLiveEvalError(
+                "live_eval_unavailable",
+                "当前 Runtime 尚未向 Harness 提供模型调用端口。",
+            )
+        if self._store is None:
+            raise HarnessLiveEvalError(
+                "live_store_unavailable",
+                "Harness 状态库尚未初始化，未执行付费 Live batch。",
+            )
+        status = await self.status()
+        if status.code is HarnessStatusCode.MISSING:
+            raise HarnessLiveEvalError(
+                "profile_missing",
+                "当前工作区尚未配置 Harness Profile。",
+            )
+        if status.code is HarnessStatusCode.INVALID:
+            raise HarnessLiveEvalError(
+                "profile_invalid",
+                "Harness Profile 无效；请先运行 /harness doctor。",
+            )
+        profile = status.snapshot.profile
+        assert profile is not None and status.profile_digest is not None
+        if not status.trusted:
+            raise HarnessLiveEvalError(
+                "profile_untrusted",
+                "Harness Profile 尚未受信任，未执行付费 Live batch。",
+            )
+        if not profile.evals.live_suites:
+            raise HarnessLiveEvalError(
+                "no_live_suites_declared",
+                "当前 Harness Profile 未声明 evals.live_suites。",
+            )
+        loaded = resolve_declared_live_eval_suite(
+            self.workspace_root,
+            profile.evals.live_suites,
+            suite.strip(),
+        )
+        selected_model = model or model_port.resolve_model("capable")
+        profile_cost = profile.evals.max_cost_usd
+        profile_duration = float(profile.evals.max_duration_seconds)
+        if profile_cost <= 0:
+            raise HarnessLiveEvalError(
+                "live_profile_cost_disabled",
+                "Harness Profile 的 Live 成本预算为 0，未发送请求。",
+            )
+        requested_cost = (
+            min(profile_cost, 10.0) if max_total_cost_usd is None else max_total_cost_usd
+        )
+        requested_duration = (
+            min(profile_duration, 3_600.0)
+            if max_total_duration_seconds is None
+            else max_total_duration_seconds
+        )
+        if (
+            isinstance(requested_cost, bool)
+            or not isinstance(requested_cost, (int, float))
+            or not math.isfinite(float(requested_cost))
+            or not 0 < requested_cost <= min(10.0, profile_cost)
+        ):
+            raise ValueError(
+                f"max_total_cost_usd 必须大于 0，且不得超过 Profile 上限 ${profile_cost:.6f}。"
+            )
+        if (
+            isinstance(requested_duration, bool)
+            or not isinstance(requested_duration, (int, float))
+            or not math.isfinite(float(requested_duration))
+            or not 5 <= requested_duration <= min(3_600.0, profile_duration)
+        ):
+            raise ValueError(
+                "max_total_duration_seconds 必须在 5 秒以上，且不得超过 Profile 上限。"
+            )
+        execution = await runner.run(
+            workspace_root=self.workspace_root,
+            loaded=loaded,
+            profile_sha256=status.profile_digest,
+            profile_trusted=status.trusted,
+            model=selected_model,
+            repetitions=repetitions,
+            batch_id=normalized_batch,
+            max_total_duration_seconds=float(requested_duration),
+            max_total_cost_usd=float(requested_cost),
+        )
+        persisted: list[str] = []
+        persistence_code = ""
+        persistence_message = ""
+        created_at = datetime.now(UTC).isoformat()
+        for index, result in enumerate(execution.results):
+            try:
+                stored = await self._store.record_eval_result(
+                    workspace_root=self.workspace_root,
+                    batch_id=normalized_batch,
+                    sample_index=index,
+                    result=result,
+                    created_at=created_at,
+                )
+            except (HarnessStoreError, ValueError) as exc:
+                persistence_code = "live_batch_persistence_failed"
+                persistence_message = "Live batch 持久化失败；已保存的不可变连续前缀仍保留。"
+                logger.warning(
+                    "Live Eval batch persistence failed (%s)",
+                    type(exc).__name__,
+                )
+                break
+            persisted.append(stored.result_sha256)
+        return build_live_batch_status(
+            execution,
+            persisted_result_sha256=persisted,
+            persistence_code=persistence_code,
+            persistence_message=persistence_message,
+        )
+
     async def eval_sandbox(
         self,
         *,
@@ -408,11 +561,7 @@ class HarnessService:
                 "sandbox_eval_service_profile_invalid",
                 "Harness Profile 无效；请先运行 /harness doctor。",
             )
-        if (
-            not status.trusted
-            or status.snapshot.profile is None
-            or status.profile_digest is None
-        ):
+        if not status.trusted or status.snapshot.profile is None or status.profile_digest is None:
             raise HarnessSandboxEvalServiceError(
                 "sandbox_eval_service_profile_untrusted",
                 "Harness Profile 未受信任；请先运行 /harness trust。",
@@ -718,11 +867,9 @@ class HarnessService:
         if (
             parent is None
             or not parent.authorizes_execution
-            or parent.tool_name
-            != "harness_eval_sandbox_retry_prune_authorize"
+            or parent.tool_name != "harness_eval_sandbox_retry_prune_authorize"
             or parent.run_id != run_id
-            or parent.arguments_sha256
-            != permission_arguments_sha256(expected_arguments)
+            or parent.arguments_sha256 != permission_arguments_sha256(expected_arguments)
         ):
             raise HarnessSandboxEvalServiceError(
                 "sandbox_retry_prune_parent_permission_mismatch",
@@ -736,17 +883,13 @@ class HarnessService:
             assessed_at=preview_assessed_at,
         )
         preflight_code = ""
-        if (
-            preview.preview_id != preview_id
-            or preview.preview_sha256 != preview_sha256
-        ):
+        if preview.preview_id != preview_id or preview.preview_sha256 != preview_sha256:
             preflight_code = "sandbox_retry_prune_preview_mismatch"
         candidate = next(
             (
                 item
                 for item in preview.candidates
-                if item.candidate_id == candidate_id
-                and item.candidate_sha256 == candidate_sha256
+                if item.candidate_id == candidate_id and item.candidate_sha256 == candidate_sha256
             ),
             None,
         )
@@ -836,8 +979,7 @@ class HarnessService:
             or not parent.authorizes_execution
             or parent.tool_name != "harness_eval_sandbox_retry_prune_execute"
             or parent.run_id != run_id
-            or parent.arguments_sha256
-            != permission_arguments_sha256(expected_arguments)
+            or parent.arguments_sha256 != permission_arguments_sha256(expected_arguments)
         ):
             raise HarnessSandboxEvalServiceError(
                 "sandbox_retry_prune_execution_parent_permission_mismatch",
@@ -1015,9 +1157,7 @@ class HarnessService:
                         implementation_failures=sum(
                             item.implementation_failures for item in batch.results
                         ),
-                        evaluation_errors=sum(
-                            item.evaluation_errors for item in batch.results
-                        ),
+                        evaluation_errors=sum(item.evaluation_errors for item in batch.results),
                         skipped=sum(item.skipped for item in batch.results),
                         duration_ms=(time.perf_counter() - progress_started) * 1_000,
                         identity_sha256=(
@@ -1038,9 +1178,7 @@ class HarnessService:
                 persisted=persisted,
                 duration_ms=(time.perf_counter() - progress_started) * 1_000,
             )
-        identity = (
-            batch.results[0].baseline_identity if batch.results else None
-        )
+        identity = batch.results[0].baseline_identity if batch.results else None
         return HarnessEvalBatchStatus(
             status=batch.status,
             code=batch.code,
@@ -1050,12 +1188,8 @@ class HarnessService:
             completed=batch.completed,
             persisted=persisted,
             passed_cases=sum(result.passed for result in batch.results),
-            implementation_failures=sum(
-                result.implementation_failures for result in batch.results
-            ),
-            evaluation_errors=sum(
-                result.evaluation_errors for result in batch.results
-            ),
+            implementation_failures=sum(result.implementation_failures for result in batch.results),
+            evaluation_errors=sum(result.evaluation_errors for result in batch.results),
             skipped=sum(result.skipped for result in batch.results),
             duration_ms=(time.perf_counter() - progress_started) * 1_000,
             baseline_eligible=bool(
@@ -1136,9 +1270,7 @@ class HarnessService:
                     implementation_failures=sum(
                         value.implementation_failures for value in observed
                     ),
-                    evaluation_errors=sum(
-                        value.evaluation_errors for value in observed
-                    ),
+                    evaluation_errors=sum(value.evaluation_errors for value in observed),
                     skipped=sum(value.skipped for value in observed),
                     duration_ms=(time.perf_counter() - started) * 1_000,
                 ),
@@ -1392,9 +1524,7 @@ class HarnessService:
             stored,
             baseline.version,
             status=(
-                "created"
-                if active is not None and active.id == baseline.id
-                else "stale_baseline"
+                "created" if active is not None and active.id == baseline.id else "stale_baseline"
             ),
         )
 
@@ -1483,8 +1613,7 @@ class HarnessService:
             or parent.tool_name != "harness_run_check"
             or parent.run_id != run_id
             or "bash_run" not in parent.delegated_tool_names
-            or parent.arguments_sha256
-            != permission_arguments_sha256(expected_arguments)
+            or parent.arguments_sha256 != permission_arguments_sha256(expected_arguments)
         ):
             return _unavailable_check_result(
                 check_id=check.id,
@@ -1855,9 +1984,7 @@ class HarnessService:
                 known_failure_ids=known_failure_ids,
                 disclosed_failure_ids=disclosed_failure_ids,
                 infrastructure_errors=infrastructure_errors,
-                informational_warnings=await self._persistence_warnings_for(
-                    state.contract.run_id
-                ),
+                informational_warnings=await self._persistence_warnings_for(state.contract.run_id),
                 mutating_tool_used=state.mutating_tool_used,
             ),
             correction_attempt=state.correction_attempt,
@@ -1963,11 +2090,7 @@ class HarnessService:
         except HarnessStoreError:
             await self._record_persistence_warning(run_id)
             return receipt.model_copy(
-                update={
-                    "warnings": tuple(
-                        dict.fromkeys((*receipt.warnings, _STORE_WARNING))
-                    )
-                }
+                update={"warnings": tuple(dict.fromkeys((*receipt.warnings, _STORE_WARNING)))}
             )
 
     async def _record_persistence_warning(self, run_id: str) -> None:
@@ -2113,9 +2236,7 @@ class HarnessService:
                     code="entrypoint_ok" if exists else "entrypoint_missing",
                     level="ok" if exists else "warning",
                     message=(
-                        f"知识入口可读取：{path_text}"
-                        if exists
-                        else f"知识入口不存在：{path_text}"
+                        f"知识入口可读取：{path_text}" if exists else f"知识入口不存在：{path_text}"
                     ),
                     hint="" if exists else "创建文件或从 knowledge.entrypoints 中移除。",
                 )
@@ -2211,13 +2332,10 @@ class HarnessService:
             selection_key = (snapshot.fingerprint, task, model_window)
             bundle = self._selection_cache.get(selection_key)
             selection_cache_hit = bundle is not None
-            if (
-                bundle is not None
-                and not await asyncio.to_thread(
-                    self._knowledge_index.sources_are_current,
-                    snapshot,
-                    bundle.source_paths,
-                )
+            if bundle is not None and not await asyncio.to_thread(
+                self._knowledge_index.sources_are_current,
+                snapshot,
+                bundle.source_paths,
             ):
                 await self.invalidate_knowledge_cache()
                 snapshot, cache_hit = await self._get_knowledge_snapshot(
@@ -2359,21 +2477,20 @@ class HarnessService:
             if self._knowledge_build is not None and self._knowledge_build[0] == digest:
                 build_task = self._knowledge_build[1]
             else:
-                build_task = asyncio.create_task(asyncio.to_thread(
-                    self._knowledge_index.build,
-                    profile,
-                    profile_digest=digest,
-                ))
+                build_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._knowledge_index.build,
+                        profile,
+                        profile_digest=digest,
+                    )
+                )
                 self._knowledge_build = (digest, build_task)
 
         try:
             built = await build_task
         except BaseException:
             async with self._knowledge_lock:
-                if (
-                    self._knowledge_build is not None
-                    and self._knowledge_build[1] is build_task
-                ):
+                if self._knowledge_build is not None and self._knowledge_build[1] is build_task:
                     self._knowledge_build = None
             raise
         async with self._knowledge_lock:
@@ -2384,18 +2501,12 @@ class HarnessService:
                 and existing is not cached
             ):
                 return existing, True
-            if (
-                self._knowledge_build is not None
-                and self._knowledge_build[1] is not build_task
-            ):
+            if self._knowledge_build is not None and self._knowledge_build[1] is not build_task:
                 return built, False
             self._knowledge_cache = built
             self._selection_cache.clear()
             self._last_git_audit_at = time.monotonic()
-            if (
-                self._knowledge_build is not None
-                and self._knowledge_build[1] is build_task
-            ):
+            if self._knowledge_build is not None and self._knowledge_build[1] is build_task:
                 self._knowledge_build = None
         return built, False
 
@@ -2425,10 +2536,7 @@ class HarnessService:
 
     async def _profile_trust_is_current(self, digest: str) -> bool:
         status = await self.status()
-        return (
-            status.code is HarnessStatusCode.TRUSTED
-            and status.snapshot.digest == digest
-        )
+        return status.code is HarnessStatusCode.TRUSTED and status.snapshot.digest == digest
 
     def _load(self) -> HarnessProfileSnapshot:
         return load_harness_profile(self.workspace_root, self._profile_path)
@@ -2449,13 +2557,8 @@ def render_harness_status(status: HarnessStatus) -> str:
             "下一步：创建 `.naumi/harness.yaml`，然后运行 `/harness doctor`。"
         )
     if status.code is HarnessStatusCode.INVALID:
-        errors = "\n".join(
-            f"- {error.message} {error.hint}" for error in snapshot.errors
-        )
-        return (
-            "## Harness 配置无效\n\n"
-            f"配置路径：`{snapshot.profile_path}`\n\n{errors}"
-        )
+        errors = "\n".join(f"- {error.message} {error.hint}" for error in snapshot.errors)
+        return f"## Harness 配置无效\n\n配置路径：`{snapshot.profile_path}`\n\n{errors}"
 
     assert snapshot.profile is not None
     digest = snapshot.digest or "-"
@@ -2473,9 +2576,7 @@ def render_harness_status(status: HarnessStatus) -> str:
             )
     else:
         title = "## Harness 已就绪"
-        next_step = (
-            "已启用受信任的仓库知识；可按需运行 Profile 中精确声明的检查。"
-        )
+        next_step = "已启用受信任的仓库知识；可按需运行 Profile 中精确声明的检查。"
     return (
         f"{title}\n\n"
         f"配置路径：`{snapshot.profile_path}`\n"
@@ -2563,10 +2664,7 @@ def render_sandbox_retry_catalog(page: HarnessSandboxRetryCatalogPage) -> str:
                     f"`{dispatch.retry_receipt_id}` / "
                     f"`{dispatch.retry_receipt_sha256}`"
                 ),
-                (
-                    "- Cancel receipt："
-                    f"`{item.cancel_receipt_id}` / `{item.cancel_receipt_sha256}`"
-                ),
+                (f"- Cancel receipt：`{item.cancel_receipt_id}` / `{item.cancel_receipt_sha256}`"),
                 f"- Source ticket：`{item.source_ticket_id}`",
                 (
                     "- 当前 ticket："
@@ -2633,10 +2731,7 @@ def render_harness_knowledge(result: KnowledgeReadResult) -> str:
         )
     if result.status == "ambiguous":
         candidates = "\n".join(f"- `{path}`" for path in result.candidates)
-        return (
-            "## Harness 知识查询不唯一\n\n"
-            f"{result.message}\n\n候选：\n{candidates}"
-        )
+        return f"## Harness 知识查询不唯一\n\n{result.message}\n\n候选：\n{candidates}"
     return (
         "## Harness 知识暂不可用\n\n"
         f"状态：`{result.status}`\n\n"
@@ -2648,9 +2743,7 @@ def render_harness_replay(lookup: HarnessReplayLookup) -> str:
     """Render one bounded Chinese Replay receipt without artifact contents."""
     if lookup.status != "ok" or lookup.result is None:
         title = (
-            "没有找到 Harness Replay"
-            if lookup.status == "not_found"
-            else "Harness Replay 暂不可用"
+            "没有找到 Harness Replay" if lookup.status == "not_found" else "Harness Replay 暂不可用"
         )
         return f"## {title}\n\n{lookup.message}"
     result = lookup.result
@@ -2672,10 +2765,7 @@ def render_harness_replay(lookup: HarnessReplayLookup) -> str:
         f"- 状态：**{labels[result.status]}** (`{result.status}`)",
         f"- Run：`{result.run_id}`",
         f"- Manifest：`{result.current_manifest_sha256}`",
-        (
-            "- 规则版本："
-            f"`{result.baseline_rule_version}` → `{result.current_rule_version}`"
-        ),
+        (f"- 规则版本：`{result.baseline_rule_version}` → `{result.current_rule_version}`"),
         f"- 时间线事件：{len(result.timeline)}",
         f"- Artifact/证据校验：{len(result.artifacts)}",
     ]
@@ -2687,17 +2777,13 @@ def render_harness_replay(lookup: HarnessReplayLookup) -> str:
     if result.differences:
         lines.extend(("", "### 差异"))
         lines.extend(
-            f"- `{item.field}`：`{item.baseline}` → `{item.current}`"
-            for item in result.differences
+            f"- `{item.field}`：`{item.baseline}` → `{item.current}`" for item in result.differences
         )
-    failed_artifacts = tuple(
-        item for item in result.artifacts if item.status != "verified"
-    )
+    failed_artifacts = tuple(item for item in result.artifacts if item.status != "verified")
     if failed_artifacts:
         lines.extend(("", "### 证据校验"))
         lines.extend(
-            f"- `{item.id}`：`{item.status}`（`{item.reference}`）"
-            for item in failed_artifacts
+            f"- `{item.id}`：`{item.status}`（`{item.reference}`）" for item in failed_artifacts
         )
     lines.extend(("", f"下一步：{next_steps[result.status]}"))
     return "\n".join(lines)
@@ -2751,9 +2837,7 @@ def _sandbox_result_to_check_result(
         HarnessSandboxCheckStatus.RESOURCE_LIMIT: HarnessCheckStatus.FAILED,
         HarnessSandboxCheckStatus.BLOCKED: HarnessCheckStatus.BLOCKED_BY_POLICY,
         HarnessSandboxCheckStatus.STALE: HarnessCheckStatus.STALE,
-        HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR: (
-            HarnessCheckStatus.INFRASTRUCTURE_ERROR
-        ),
+        HarnessSandboxCheckStatus.INFRASTRUCTURE_ERROR: (HarnessCheckStatus.INFRASTRUCTURE_ERROR),
     }[result.status]
     evidence: list[str] = []
     if result.job_id is not None:
@@ -2887,9 +2971,7 @@ def _eval_comparison_status(
     status: Literal["created", "existing", "stale_baseline"],
 ) -> HarnessEvalComparisonRunStatus:
     receipt = stored.receipt
-    policy_failed = sum(
-        item.policy_verdict.value == "failed" for item in receipt.sample_evidence
-    )
+    policy_failed = sum(item.policy_verdict.value == "failed" for item in receipt.sample_evidence)
     policy_inconclusive = sum(
         item.policy_verdict.value in {"inconclusive", "incompatible"}
         for item in receipt.sample_evidence
@@ -2916,8 +2998,7 @@ def _safe_check_output(output: str, *, max_chars: int = 12_000) -> str:
     redacted = OutputGuardrail.redact(output)
     sanitized = "".join(
         character
-        if character in {"\n", "\t"}
-        or (ord(character) >= 32 and not 127 <= ord(character) <= 159)
+        if character in {"\n", "\t"} or (ord(character) >= 32 and not 127 <= ord(character) <= 159)
         else "�"
         for character in redacted
     )

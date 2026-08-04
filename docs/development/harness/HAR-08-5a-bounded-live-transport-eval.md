@@ -168,5 +168,6 @@ Provider 私有异常不会写入回执或用户界面。取消任务时 `Cancel
 4. 当前回执不持久化，因此不能进入 H5a/H5b/H5c。
 5. 专用 typed Live 页、历史查询和 macOS/Linux/Windows Provider matrix 尚未实现。
 
-下一步 HAR-08.5b 应先定义声明式 Live Suite/Case、可重复样本身份、逐样本 H5a 持久化和取消/成本审计，
-再复用现有 H5b/H5c 比较链；不得从本切片直接宣称完整 HAR-08.5 或 HAR-08 已完成。
+HAR-08.5b 已完成声明式 Live Suite/Case、可重复样本身份、逐样本 H5a 持久化和批次成本审计，详见
+`HAR-08-5b-declarative-live-suite-batch.md`。下一步 8.5c 仍需补 Provider cancellation/billing 证明、专用
+typed 进度/历史和三平台 Provider matrix；不得宣称完整 HAR-08.5 或 HAR-08 已完成。

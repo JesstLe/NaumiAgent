@@ -155,9 +155,7 @@ class HarnessEvalCase(_StrictModel):
             "no_model",
             "no_side_effect",
         }:
-            raise ValueError(
-                "protocol_hello 必须声明 no_model 与 no_side_effect guardrail"
-            )
+            raise ValueError("protocol_hello 必须声明 no_model 与 no_side_effect guardrail")
         return self
 
 
@@ -235,9 +233,7 @@ class HarnessEvalMetricObservation(_StrictModel):
             not self.value.is_integer() or not self.target.is_integer()
         ):
             raise ValueError("count/tokens 指标必须是整数值。")
-        if self.unit == "ratio" and not (
-            0 <= self.value <= 1 and 0 <= self.target <= 1
-        ):
+        if self.unit == "ratio" and not (0 <= self.value <= 1 and 0 <= self.target <= 1):
             raise ValueError("ratio 指标必须位于 0..1。")
         return self
 
@@ -252,6 +248,29 @@ class HarnessEvalMetricObservation(_StrictModel):
         if self.direction == "decrease":
             return self.value < self.target or equal
         return self.value > self.target or equal
+
+
+class HarnessEvalLiveEvidence(_StrictModel):
+    """Bounded transport evidence retained by one persisted Live Eval case."""
+
+    provider_model: str = Field(default="", max_length=512)
+    finish_reason: str = Field(default="", max_length=64)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    cost_usd: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    response_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    transport_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    batch_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    exact_match: bool = False
+
+    @model_validator(mode="after")
+    def _usage_and_match_are_consistent(self) -> HarnessEvalLiveEvidence:
+        if self.total_tokens != self.input_tokens + self.output_tokens:
+            raise ValueError("Live evidence total_tokens 与输入输出用量不一致。")
+        if self.exact_match and (not self.response_sha256 or not self.provider_model):
+            raise ValueError("精确匹配的 Live evidence 缺少响应或 Provider 模型身份。")
+        return self
 
 
 class HarnessEvalCaseResult(_StrictModel):
@@ -272,6 +291,10 @@ class HarnessEvalCaseResult(_StrictModel):
     code: str = ""
     message: str = ""
     duration_ms: float = Field(default=0, ge=0)
+    live_evidence: HarnessEvalLiveEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @field_validator("primary_metric")
     @classmethod
@@ -313,6 +336,20 @@ class HarnessEvalCaseResult(_StrictModel):
             raise ValueError("case status 与 primary metric target 判定不一致。")
         return self
 
+    @model_validator(mode="after")
+    def _live_evidence_matches_runner(self) -> HarnessEvalCaseResult:
+        evidence = self.live_evidence
+        is_live = self.runner == "live_transport_echo@1"
+        if (evidence is not None) != is_live:
+            raise ValueError("Live runner 与 typed live_evidence 必须同时出现。")
+        if evidence is None:
+            return self
+        if self.status is EvalCaseStatus.PASSED and not evidence.exact_match:
+            raise ValueError("通过的 Live case 必须具有 exact_match evidence。")
+        if self.status is EvalCaseStatus.IMPLEMENTATION_FAILURE and evidence.exact_match:
+            raise ValueError("失败的 Live case 不能具有 exact_match evidence。")
+        return self
+
 
 class HarnessEvalSuiteResult(_StrictModel):
     suite_id: str
@@ -346,9 +383,7 @@ class HarnessEvalSuiteResult(_StrictModel):
 
     @property
     def implementation_failures(self) -> int:
-        return sum(
-            case.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for case in self.cases
-        )
+        return sum(case.status is EvalCaseStatus.IMPLEMENTATION_FAILURE for case in self.cases)
 
     @property
     def evaluation_errors(self) -> int:

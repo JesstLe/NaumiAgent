@@ -205,6 +205,8 @@ checks:
 evals:
   suites:
     - docs/harness/evals/protocol-hello-core.yaml
+  live_suites:
+    - docs/harness/evals/live-transport-core.yaml
   live_default: false
   max_cost_usd: 1.0
   max_duration_seconds: 1800

@@ -179,6 +179,7 @@ async def test_live_runner_verifies_fixed_transport_without_retaining_output() -
     assert receipt.output_tokens == 12
     assert receipt.total_tokens == 36
     assert receipt.exact_match is True
+    assert receipt.provider_call_attempted is True
     assert receipt.persisted is False
     assert receipt.baseline_eligible is False
     assert receipt.model is not None
@@ -233,6 +234,7 @@ async def test_live_preflight_fails_closed_without_provider_call(
 
     assert receipt.status is HarnessLiveEvalStatus.EVALUATION_ERROR
     assert receipt.code == code
+    assert receipt.provider_call_attempted is False
     assert port.calls == []
 
 
@@ -296,6 +298,24 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     content_receipt = await _runner(invalid_content).run(_request())
     assert content_receipt.status is HarnessLiveEvalStatus.PARTIAL
     assert content_receipt.code == "response_content_invalid"
+
+    unsafe_provider_model = _LiveModelPort(
+        response=ModelResponse(
+            content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            usage=TokenUsage(
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+                cost_usd=0.001,
+            ),
+            provider_model="test model [untrusted]",
+            finish_reason="stop",
+        )
+    )
+    provider_receipt = await _runner(unsafe_provider_model).run(_request())
+    assert provider_receipt.status is HarnessLiveEvalStatus.PARTIAL
+    assert provider_receipt.code == "provider_identity_missing"
+    assert provider_receipt.provider_model == ""
 
     mismatch = _LiveModelPort(
         response=ModelResponse(
