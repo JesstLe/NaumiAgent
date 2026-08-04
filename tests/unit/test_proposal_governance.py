@@ -13,17 +13,29 @@ from naumi_agent.workbench.models import (
     WorkbenchProposal,
 )
 from naumi_agent.workbench.proposal_governance import (
+    DEFER_PRESET_DAYS,
     GOVERNANCE_POLICY_VERSION,
     ProposalAction,
     ProposalGovernanceConflictError,
     evaluate_proposal_cooldown,
     plan_proposal_transition,
+    proposal_defer_until_for_preset,
     validate_merge_target,
 )
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
 NOW = datetime(2026, 7, 19, 1, 0, tzinfo=UTC)
+
+
+def test_defer_ui_presets_use_authority_clock_and_closed_choices() -> None:
+    assert DEFER_PRESET_DAYS == (1, 7, 30)
+    assert proposal_defer_until_for_preset(7, now=NOW) == (
+        NOW + timedelta(days=7)
+    ).isoformat(timespec="seconds")
+    for invalid in (True, 0, 2, 7.0, "7", 90):
+        with pytest.raises(ValueError, match="1/7/30"):
+            proposal_defer_until_for_preset(invalid, now=NOW)
 
 
 def _proposal(**changes) -> WorkbenchProposal:

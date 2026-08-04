@@ -9,7 +9,7 @@ import sys
 import types
 import zipfile
 from dataclasses import fields, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -125,6 +125,7 @@ from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
 )
+from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 
@@ -703,10 +704,12 @@ class _ProposalActionWorkbenchService:
             **kwargs,
         })
         self.revision += 1
+        states = {"approve": "approved", "reject": "rejected", "defer": "deferred"}
         return {
             "id": proposal_id,
             "session_id": session_id,
-            "state": "approved" if kwargs["action"].value == "approve" else "rejected",
+            "state": states[kwargs["action"].value],
+            "cooldown_until": kwargs.get("defer_until", ""),
         }
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
@@ -4411,6 +4414,53 @@ async def test_bridge_bypass_executes_proposal_action_without_second_confirmatio
 
 
 @pytest.mark.asyncio
+async def test_bridge_bypass_defers_proposal_with_authority_clock_preset() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.permission_mode = PermissionMode.BYPASS
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.BYPASS,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ProposalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    before = datetime.now(UTC)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-defer-bypass",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "session-task",
+                "proposal_id": "proposal-1",
+                "action": "defer",
+                "decision_note": "等待跨平台验证证据",
+                "defer_days": 7,
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    governed = service.governed[0]
+    defer_until = datetime.fromisoformat(governed["defer_until"])
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["action"] == "defer"
+    assert result["payload"]["proposal"]["state"] == "deferred"
+    assert governed["action"] is ProposalAction.DEFER
+    assert governed["decision_note"] == "等待跨平台验证证据"
+    assert before + timedelta(days=7, seconds=-1) <= defer_until
+    assert defer_until <= datetime.now(UTC) + timedelta(days=7)
+
+
+@pytest.mark.asyncio
 async def test_bridge_proposal_action_rejects_cross_session_write() -> None:
     engine = _TaskSubmitFakeEngine()
     engine._session = SimpleNamespace(id="session-task")
@@ -4508,6 +4558,83 @@ async def test_real_sqlite_bridge_proposal_action_persists_state_and_audit(
     assert persisted["reviewer"] == "Human"
     assert any(
         event["type"] == "proposal.approved" and event["subject_id"] == proposal["id"]
+        for event in events["events"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_sqlite_bridge_defer_persists_cooldown_and_audit(
+    tmp_path: Path,
+) -> None:
+    engine = create_agent_engine(
+        AppConfig(
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+            )
+        )
+    )
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session("Proposal defer real chain")
+    mission = await engine.workbench_service.create_mission(
+        session_id=session.id,
+        title="延后 Proposal",
+        goal="验证 Bridge 到 SQLite 的 defer 闭环",
+    )
+    issue = await engine.workbench_service.create_issue(
+        session_id=session.id,
+        mission_id=mission.id,
+        title="等待跨平台证据",
+        description="延后审阅而不执行 Proposal",
+    )
+    proposal = await engine.workbench_service.create_proposal(
+        session_id=session.id,
+        mission_id=mission.id,
+        task_id=str(issue["task_id"]),
+        agent_id="Harness-Agent",
+        title="等待 Windows 回归证据",
+        impact_scope="Workbench review governance",
+        intended_files=["src/naumi_agent/workbench/service.py"],
+        validation_plan=["运行 Proposal governance 模块测试"],
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    before = datetime.now(UTC)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-real-defer",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": session.id,
+                "proposal_id": proposal["id"],
+                "action": "defer",
+                "decision_note": "等待 Windows 与 Linux 回归证据",
+                "defer_days": 7,
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    persisted = await engine.workbench_service.get_proposal(session.id, proposal["id"])
+    events = await engine.workbench_service.list_events(session.id)
+    assert persisted is not None
+    cooldown_until = datetime.fromisoformat(persisted["cooldown_until"])
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["proposal"]["state"] == "deferred"
+    assert persisted["state"] == "deferred"
+    assert persisted["decision_note"] == "等待 Windows 与 Linux 回归证据"
+    assert before + timedelta(days=7, seconds=-1) <= cooldown_until
+    assert cooldown_until <= datetime.now(UTC) + timedelta(days=7)
+    assert any(
+        event["type"] == "proposal.deferred"
+        and event["subject_id"] == proposal["id"]
         for event in events["events"]
     )
 

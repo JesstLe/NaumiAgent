@@ -1245,7 +1245,7 @@ function normalizeWorkbenchProposalActionResult(payload) {
   const action = harnessChoice(
     payload.action,
     "workbench/proposal/action_result action",
-    new Set(["approve", "reject", "issue_contract"]),
+    new Set(["approve", "reject", "defer", "issue_contract"]),
   );
   const experimentContract = payload.experiment_contract == null
     ? null

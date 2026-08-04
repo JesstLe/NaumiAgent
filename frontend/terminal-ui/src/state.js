@@ -3770,6 +3770,14 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     }
     if (
       selected?.review_kind === "proposal"
+      && selected.state === "open"
+      && normalized === "d"
+    ) {
+      beginWorkbenchProposalAction(state, selected, "defer", send);
+      return true;
+    }
+    if (
+      selected?.review_kind === "proposal"
       && selected.state === "approved"
       && selected.source_kind === "evolution_candidate"
       && normalized === "c"
@@ -3896,8 +3904,9 @@ function beginWorkbenchProposalAction(state, proposal, action, send) {
     proposal_id: String(proposal.id || ""),
     title: String(proposal.title || proposal.id || "Proposal"),
     action,
-    phase: action === "reject" ? "note" : "confirm",
+    phase: ["reject", "defer"].includes(action) ? "note" : "confirm",
     decision_note: "",
+    defer_days: 0,
     input: "",
     inputCursor: 0,
     inputPreferredColumn: null,
@@ -3924,6 +3933,22 @@ function handleWorkbenchProposalActionKey(state, key, send) {
     }
     return true;
   }
+  if (action.phase === "defer_duration") {
+    const preset = { 1: 1, 2: 7, 3: 30 }[String(key || "")];
+    if (preset) {
+      action.defer_days = preset;
+      state.workbench.action_error = "";
+      if (state.status?.permission_mode === "bypass") {
+        sendWorkbenchProposalAction(state, send, false);
+      } else {
+        action.phase = "confirm";
+      }
+    } else if (key === INPUT_KEYS.escape) {
+      state.workbench.proposal_action = null;
+      state.workbench.action_notice = "已取消操作，未写入任何变更。";
+    }
+    return true;
+  }
   if (action.phase !== "note") return true;
   if (key === INPUT_KEYS.escape) {
     state.workbench.proposal_action = null;
@@ -3933,11 +3958,17 @@ function handleWorkbenchProposalActionKey(state, key, send) {
   if (key === "\r" || key === "\n" || key === INPUT_KEYS.ctrlEnter) {
     const note = String(action.input || "").trim();
     if (!note) {
-      state.workbench.action_error = "拒绝原因不能为空。";
+      state.workbench.action_error = action.action === "defer"
+        ? "延后原因不能为空。"
+        : "拒绝原因不能为空。";
       return true;
     }
     action.decision_note = note;
     state.workbench.action_error = "";
+    if (action.action === "defer") {
+      action.phase = "defer_duration";
+      return true;
+    }
     if (state.status?.permission_mode === "bypass") {
       sendWorkbenchProposalAction(state, send, false);
     } else {
@@ -3976,13 +4007,15 @@ function sendWorkbenchProposalAction(state, send, confirmed) {
   if (!action || action.phase === "loading") return;
   action.phase = "loading";
   state.workbench.action_error = "";
-  send("workbench/proposal/action", {
+  const payload = {
     session_id: String(state.currentSessionId || ""),
     proposal_id: action.proposal_id,
     action: action.action,
     decision_note: action.decision_note,
     confirmed: confirmed === true,
-  });
+  };
+  if (action.action === "defer") payload.defer_days = action.defer_days;
+  send("workbench/proposal/action", payload);
 }
 
 function applyWorkbenchProposalActionResult(state, payload) {

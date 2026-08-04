@@ -135,7 +135,15 @@
 - 完整用户状态机见 `UI-10-6c-experiment-contract-action.md`，后端契约见
   `../harness/HAR-09-5c-explicit-experiment-contract-issuance.md`。
 
+### UI-10.6b1 已实现：Proposal defer
+
+- open Proposal 增加 `d` 延后；New UI 与 Textual TUI 都收集必填原因和 1/7/30 天有界预设。
+- 绝对 `defer_until` 由 Python authority clock 生成，再交给既有 HAR-09.5b1 状态机执行 CAS、cooldown
+  和 `proposal.deferred` 审计；前端不自行计算治理状态。
+- normal 模式保留一次确认；bypass 在参数齐全后直接执行且不显示二次确认，但不跳过状态机与审计。
+- 详见 `UI-10-6b1-proposal-defer.md`。merge 选择器仍属于后续 UI-10.6b2。
+
 ### 尚未完成
 
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
-- UI-10.6b：Proposal defer/merge 表单与 waiting Approval 动作。
+- UI-10.6b2：Proposal merge 目标选择器与 waiting Approval 动作。

@@ -473,8 +473,35 @@ test("workbench Reviews tab renders Proposal preview and decision form at common
     assert(plain.includes("Proposal"));
     assert(plain.includes("优化 footer 截断"));
     assert(plain.includes("批准只进入下一 policy gate"));
+    assert(plain.includes("d 延后"));
     assert(plain.includes("拒绝原因"));
     assert(plain.includes("证据不足"));
+  }
+});
+
+test("workbench Proposal defer duration presets stay visible at common widths", () => {
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "proposal-1",
+    selected_review_kind: "proposal",
+    approvals: [],
+    proposals: [{
+      id: "proposal-1", state: "open", title: "等待依赖", risk_level: "medium",
+      intended_files: [], validation_plan: [],
+    }],
+    proposal_action: {
+      proposal_id: "proposal-1", action: "defer", phase: "defer_duration",
+      decision_note: "等待跨平台证据", defer_days: 0,
+    },
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("选择延后时长"));
+    assert(plain.includes("1 一天 · 2 七天 · 3 三十天"));
   }
 });
 
