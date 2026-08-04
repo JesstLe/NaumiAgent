@@ -17,6 +17,8 @@ from naumi_agent.agent_control.models import (
     AgentControlSnapshot,
     AgentControlSummary,
     AgentDescriptor,
+    AgentRecoveryCatalog,
+    AgentRecoveryDescriptor,
     AgentResultDescriptor,
     BlackboardDescriptor,
     ExecutionDescriptor,
@@ -82,6 +84,7 @@ class AgentControlService:
         agents: tuple[AgentDescriptor, ...] = ()
         executions: tuple[ExecutionDescriptor, ...] = ()
         results: tuple[AgentResultDescriptor, ...] = ()
+        recovery_catalog = AgentRecoveryCatalog()
         team_messages: tuple[TeamMessageDescriptor, ...] = ()
         blackboard: tuple[BlackboardDescriptor, ...] = ()
         pending_messages = 0
@@ -215,6 +218,24 @@ class AgentControlService:
                 f"Agent publication backlog 读取失败：{type(exc).__name__}: {exc}"
             )
 
+        try:
+            if manager is not None:
+                durable_catalog = await manager.recovery_catalog(limit=50)
+                recovery_catalog = _project_recovery_catalog(
+                    durable_catalog,
+                    session_id=session_id,
+                    limit=50,
+                )
+                if recovery_catalog.truncated:
+                    warnings.append(
+                        "Agent 恢复目录已达到 50 项展示上限；"
+                        "当前视图只展示高优先级有界前缀。"
+                    )
+        except Exception as exc:
+            warnings.append(
+                f"Agent 恢复目录读取失败：{type(exc).__name__}: {exc}"
+            )
+
         active_agents = sum(item.state in _ACTIVE_AGENT_STATES for item in agents)
         attention_agents = len({
             item.agent_name
@@ -260,6 +281,7 @@ class AgentControlService:
             agents=agents,
             executions=executions,
             results=results,
+            recovery_catalog=recovery_catalog,
             team_messages=team_messages,
             blackboard=blackboard,
             warnings=tuple(dict.fromkeys(warnings))[:20],
@@ -317,6 +339,7 @@ def _fingerprint(snapshot: AgentControlSnapshot) -> str:
     comparable = snapshot.to_dict()
     comparable["revision"] = 0
     comparable["generated_at"] = ""
+    comparable["recovery_catalog"]["assessed_at"] = ""
     for agent in comparable["agents"]:
         agent["age_ms"] = 0
         agent["heartbeat_age_ms"] = 0
@@ -342,6 +365,8 @@ def _section_value(snapshot: AgentControlSnapshot, section: str) -> Any:
         for item in value:
             item["elapsed_ms"] = 0
             item["heartbeat_age_ms"] = 0
+    elif section == "recovery_catalog":
+        value["assessed_at"] = ""
     return value
 
 
@@ -371,6 +396,121 @@ def _nonnegative_int(value: Any) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _project_recovery_catalog(
+    catalog: Any,
+    *,
+    session_id: str,
+    limit: int,
+) -> AgentRecoveryCatalog:
+    assessed_at = str(catalog.assessed_at)
+    assessed = datetime.fromisoformat(assessed_at)
+    session_sha256 = (
+        hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        if session_id
+        else ""
+    )
+    items: list[AgentRecoveryDescriptor] = []
+    for job in catalog.jobs:
+        state = str(job.state)
+        expiry = (
+            datetime.fromisoformat(job.claim_expires_at)
+            if job.claim_expires_at
+            else None
+        )
+        if state == "claimed":
+            recovery_state = (
+                "reclaimable_prestart"
+                if expiry is not None and expiry <= assessed
+                else "claim_active"
+            )
+        elif state == "running":
+            recovery_state = (
+                "recovery_required"
+                if expiry is not None and expiry <= assessed
+                else "worker_active"
+            )
+        else:
+            recovery_state = "outcome_unknown"
+        items.append(AgentRecoveryDescriptor(
+            kind="job",
+            item_id=_public(job.job_id),
+            job_id=_public(job.job_id),
+            publication_id="",
+            agent_name=_public(job.request.agent_name),
+            job_state=state,
+            recovery_state=recovery_state,
+            session_scope=_session_scope(
+                job.request.session_id_sha256,
+                session_sha256=session_sha256,
+            ),
+            claim_epoch=max(0, int(job.claim_epoch)),
+            claim_expires_at=_public(job.claim_expires_at),
+            attempt_count=0,
+            occurred_at=_public(job.latest_receipt.occurred_at),
+            request_sha256=job.request_sha256,
+            receipt_sha256=job.latest_receipt.receipt_sha256,
+            reason_code=_public(job.latest_receipt.reason_code),
+        ))
+    for entry in catalog.publications:
+        publication = entry.publication
+        job = entry.job
+        recovery_state = (
+            "publication_pending"
+            if str(publication.state) == "pending"
+            else "publication_claim_expired"
+        )
+        items.append(AgentRecoveryDescriptor(
+            kind="publication",
+            item_id=_public(publication.publication_id),
+            job_id=_public(publication.job_id),
+            publication_id=_public(publication.publication_id),
+            agent_name=_public(job.request.agent_name),
+            job_state=str(job.state),
+            recovery_state=recovery_state,
+            session_scope=_session_scope(
+                job.request.session_id_sha256,
+                session_sha256=session_sha256,
+            ),
+            claim_epoch=max(0, int(publication.claim_epoch)),
+            claim_expires_at=_public(publication.claim_expires_at),
+            attempt_count=max(0, int(publication.attempt_count)),
+            occurred_at=_public(publication.latest_receipt.occurred_at),
+            request_sha256=publication.request_sha256,
+            receipt_sha256=publication.latest_receipt.receipt_sha256,
+            reason_code=_public(publication.latest_receipt.reason_code),
+        ))
+    priority = {
+        "recovery_required": 0,
+        "outcome_unknown": 1,
+        "publication_claim_expired": 2,
+        "reclaimable_prestart": 3,
+        "publication_pending": 4,
+        "worker_active": 5,
+        "claim_active": 6,
+    }
+    items.sort(key=lambda item: (
+        priority[item.recovery_state],
+        item.occurred_at,
+        item.kind,
+        item.item_id,
+    ))
+    return AgentRecoveryCatalog(
+        assessed_at=assessed_at,
+        items=tuple(items[:limit]),
+        truncated=(
+            bool(catalog.jobs_truncated)
+            or bool(catalog.publications_truncated)
+            or len(items) > limit
+        ),
+    )
+
+
+def _session_scope(request_session_sha256: str, *, session_sha256: str) -> str:
+    if not session_sha256:
+        return "unknown"
+    return "current" if request_session_sha256 == session_sha256 else "other"
 
 
 def _now_iso() -> str:

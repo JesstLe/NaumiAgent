@@ -221,6 +221,50 @@ class AgentJobPublicationBacklog:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentJobPublicationRecoveryEntry:
+    """Authenticated publication plus the exact terminal job it belongs to."""
+
+    publication: StoredAgentJobPublication
+    job: StoredAgentJob
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.publication, StoredAgentJobPublication):
+            raise TypeError("publication 必须是 StoredAgentJobPublication。")
+        if not isinstance(self.job, StoredAgentJob):
+            raise TypeError("job 必须是 StoredAgentJob。")
+        _validate_publication_job_binding(self.publication, self.job)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobRecoveryCatalog:
+    """Bounded authenticated recovery facts for operational projection."""
+
+    jobs: tuple[StoredAgentJob, ...]
+    publications: tuple[AgentJobPublicationRecoveryEntry, ...]
+    jobs_truncated: bool
+    publications_truncated: bool
+    assessed_at: str
+
+    def __post_init__(self) -> None:
+        if len(self.jobs) > 100 or len(self.publications) > 100:
+            raise ValueError("AgentJob recovery catalog 每类最多保留 100 项。")
+        if any(not isinstance(item, StoredAgentJob) for item in self.jobs):
+            raise TypeError("jobs 必须只包含 StoredAgentJob。")
+        if any(
+            not isinstance(item, AgentJobPublicationRecoveryEntry)
+            for item in self.publications
+        ):
+            raise TypeError(
+                "publications 必须只包含 AgentJobPublicationRecoveryEntry。"
+            )
+        if not isinstance(self.jobs_truncated, bool):
+            raise TypeError("jobs_truncated 必须是 bool。")
+        if not isinstance(self.publications_truncated, bool):
+            raise TypeError("publications_truncated 必须是 bool。")
+        _aware_time(self.assessed_at, field="assessed_at")
+
+
+@dataclass(frozen=True, slots=True)
 class AgentJobPublicationDeliveryReceipt:
     schema_version: int
     delivery_id: str
@@ -1761,7 +1805,12 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法取消 AgentJob。") from exc
 
-    async def list_recovery_required(self) -> tuple[StoredAgentJob, ...]:
+    async def list_recovery_required(
+        self,
+        *,
+        limit: int = 100,
+    ) -> tuple[StoredAgentJob, ...]:
+        _require_bounded_limit(limit, maximum=1000)
         if not _regular_file_exists(self._db_path):
             return ()
         key = self._runtime_key()
@@ -1775,8 +1824,9 @@ class AgentJobStore:
                     SELECT * FROM agent_jobs
                     WHERE state = ? AND claim_expires_at <= ?
                     ORDER BY claim_expires_at, job_id
+                    LIMIT ?
                     """,
-                    (AgentJobState.RUNNING.value, now),
+                    (AgentJobState.RUNNING.value, now, limit),
                 )
                 jobs = tuple(
                     [
@@ -1790,6 +1840,158 @@ class AgentJobStore:
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法读取待恢复 AgentJob。") from exc
+
+    async def recovery_catalog(
+        self,
+        *,
+        limit: int = 50,
+    ) -> AgentJobRecoveryCatalog:
+        """Read a bounded authenticated catalog without exposing raw payloads.
+
+        The catalog deliberately includes live claimed/running jobs as context,
+        expired claims that need recovery handling, terminal ``unknown`` jobs,
+        and publications that are pending or whose claim expired. Every row is
+        reconstructed through the existing authenticated receipt path before it
+        can reach an operational surface.
+        """
+        _require_bounded_limit(limit, maximum=100)
+        now = self._now()
+        if not _regular_file_exists(self._db_path):
+            return AgentJobRecoveryCatalog(
+                jobs=(),
+                publications=(),
+                jobs_truncated=False,
+                publications_truncated=False,
+                assessed_at=now.isoformat(),
+            )
+        key = self._runtime_key()
+        await self._ensure_schema()
+        fetch_limit = limit + 1
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                job_candidates: list[tuple[int, aiosqlite.Row]] = []
+                job_queries = (
+                    (
+                        0,
+                        "state = ? AND claim_expires_at <= ?",
+                        (AgentJobState.RUNNING.value, now.isoformat()),
+                    ),
+                    (1, "state = ?", (AgentJobState.UNKNOWN.value,)),
+                    (
+                        2,
+                        "state = ? AND claim_expires_at <= ?",
+                        (AgentJobState.CLAIMED.value, now.isoformat()),
+                    ),
+                    (
+                        3,
+                        "state = ? AND claim_expires_at > ?",
+                        (AgentJobState.RUNNING.value, now.isoformat()),
+                    ),
+                    (
+                        4,
+                        "state = ? AND claim_expires_at > ?",
+                        (AgentJobState.CLAIMED.value, now.isoformat()),
+                    ),
+                )
+                for priority, where_clause, parameters in job_queries:
+                    job_cursor = await db.execute(
+                        f"""
+                        SELECT * FROM agent_jobs
+                        WHERE {where_clause}
+                        ORDER BY COALESCE(claim_expires_at, admitted_at), job_id
+                        LIMIT ?
+                        """,  # noqa: S608 - clauses are fixed internal constants
+                        (*parameters, fetch_limit),
+                    )
+                    job_candidates.extend(
+                        (priority, row) for row in await job_cursor.fetchall()
+                    )
+                job_candidates.sort(key=lambda entry: (
+                    entry[0],
+                    str(
+                        entry[1]["claim_expires_at"]
+                        or entry[1]["admitted_at"]
+                    ),
+                    str(entry[1]["job_id"]),
+                ))
+                job_rows = [row for _, row in job_candidates[:fetch_limit]]
+                jobs = tuple(
+                    [
+                        await _stored_from_row(db, row, key=key)
+                        for row in job_rows[:limit]
+                    ]
+                )
+
+                publication_candidates: list[tuple[int, aiosqlite.Row]] = []
+                publication_queries = (
+                    (
+                        0,
+                        "state = ? AND (claim_expires_at IS NULL OR claim_expires_at <= ?)",
+                        (
+                            AgentJobPublicationState.CLAIMED.value,
+                            now.isoformat(),
+                        ),
+                    ),
+                    (
+                        1,
+                        "state = ?",
+                        (AgentJobPublicationState.PENDING.value,),
+                    ),
+                )
+                for priority, where_clause, parameters in publication_queries:
+                    publication_cursor = await db.execute(
+                        f"""
+                        SELECT publication_id, claim_expires_at, created_at
+                        FROM agent_job_publications
+                        WHERE {where_clause}
+                        ORDER BY COALESCE(claim_expires_at, created_at), publication_id
+                        LIMIT ?
+                        """,  # noqa: S608 - clauses are fixed internal constants
+                        (*parameters, fetch_limit),
+                    )
+                    publication_candidates.extend(
+                        (priority, row)
+                        for row in await publication_cursor.fetchall()
+                    )
+                publication_candidates.sort(key=lambda entry: (
+                    entry[0],
+                    str(
+                        entry[1]["claim_expires_at"]
+                        or entry[1]["created_at"]
+                    ),
+                    str(entry[1]["publication_id"]),
+                ))
+                publication_rows = [
+                    row for _, row in publication_candidates[:fetch_limit]
+                ]
+                publication_entries: list[AgentJobPublicationRecoveryEntry] = []
+                for row in publication_rows[:limit]:
+                    publication = await _require_publication(
+                        db,
+                        str(row["publication_id"]),
+                        key=key,
+                    )
+                    job = await _require_stored(
+                        db,
+                        publication.job_id,
+                        key=key,
+                    )
+                    publication_entries.append(
+                        AgentJobPublicationRecoveryEntry(publication, job)
+                    )
+                await db.commit()
+                return AgentJobRecoveryCatalog(
+                    jobs=jobs,
+                    publications=tuple(publication_entries),
+                    jobs_truncated=len(job_rows) > limit,
+                    publications_truncated=len(publication_rows) > limit,
+                    assessed_at=now.isoformat(),
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取 AgentJob 恢复目录。") from exc
 
     async def mark_recovery_unknown(
         self,
@@ -4857,11 +5059,13 @@ __all__ = [
     "AgentJobPublicationContent",
     "AgentJobPublicationDeliveryReceipt",
     "AgentJobPublicationDeliveryTransition",
+    "AgentJobPublicationRecoveryEntry",
     "AgentJobPublicationReceipt",
     "AgentJobPublicationState",
     "AgentJobPublicationTransition",
     "AgentJobState",
     "AgentJobStore",
+    "AgentJobRecoveryCatalog",
     "AgentJobTerminalPayload",
     "AgentJobTransitionResult",
     "StoredAgentJob",

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from naumi_agent.agent_control import AGENT_CONTROL_SCHEMA_VERSION
 from naumi_agent.ui.protocol import ClientEventType, ServerEventType
 from naumi_agent.ui.protocol_registry import (
     ProtocolRegistryError,
@@ -48,6 +49,25 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert registry.required_capability("client", "submit") is None
     with pytest.raises(TypeError):
         registry.client["future/event"] = registry.policy("client", "ping")  # type: ignore[index]
+
+
+def test_published_agent_control_contract_tracks_recovery_schema() -> None:
+    document = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    contract = document["agent_control"]
+
+    assert contract["schema_version"] == AGENT_CONTROL_SCHEMA_VERSION
+    assert contract["recovery_catalog_fields"] == [
+        "assessed_at",
+        "items",
+        "truncated",
+    ]
+    assert "receipt_sha256" in contract["recovery_item_fields"]
+    assert set(contract["recovery_kinds"]) == {"job", "publication"}
+    assert set(contract["recovery_session_scopes"]) == {
+        "current",
+        "other",
+        "unknown",
+    }
 
 
 def test_sensitive_persistent_events_require_explicit_redaction() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,7 @@ def test_snapshot_round_trip_is_strict_and_bounded() -> None:
         "agents",
         "executions",
         "results",
+        "recovery_catalog",
         "team_messages",
         "blackboard",
         "warnings",
@@ -106,6 +108,31 @@ def test_snapshot_round_trip_is_strict_and_bounded() -> None:
     ]
     with pytest.raises(ValueError, match="results.*50"):
         AgentControlSnapshot.from_dict(oversized_results)
+
+    malformed_recovery = snapshot.to_dict()
+    malformed_recovery["recovery_catalog"] = {
+        "assessed_at": "2026-07-24T00:00:00+00:00",
+        "items": [{
+            "kind": "job",
+            "item_id": "job-1",
+            "job_id": "job-1",
+            "publication_id": "publication-must-be-empty",
+            "agent_name": "coder",
+            "job_state": "running",
+            "recovery_state": "recovery_required",
+            "session_scope": "current",
+            "claim_epoch": 1,
+            "claim_expires_at": "2026-07-23T23:59:00+00:00",
+            "attempt_count": 0,
+            "occurred_at": "2026-07-23T23:58:00+00:00",
+            "request_sha256": "a" * 64,
+            "receipt_sha256": "b" * 64,
+            "reason_code": "agent_job_running",
+        }],
+        "truncated": False,
+    }
+    with pytest.raises(ValueError, match="publication_id"):
+        AgentControlSnapshot.from_dict(malformed_recovery)
 
     unknown = snapshot.to_dict()
     unknown["invented_section"] = {}
@@ -184,6 +211,33 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert first.summary.durable_recovery_required_jobs == 0
         assert first.summary.durable_results_visible == 0
         assert first.summary.durable_publications_pending == 0
+        execution = first.executions[0]
+        assert first.recovery_catalog.assessed_at
+        recovery = next(
+            item for item in first.recovery_catalog.items
+            if item.job_id == execution.worker_job_id
+        )
+        assert recovery.recovery_state == "worker_active"
+        assert recovery.session_scope == "current"
+        assert recovery.agent_name == "observer"
+        assert recovery.request_sha256 == execution.worker_request_sha256
+        assert set(asdict(recovery)) == {
+            "kind",
+            "item_id",
+            "job_id",
+            "publication_id",
+            "agent_name",
+            "job_state",
+            "recovery_state",
+            "session_scope",
+            "claim_epoch",
+            "claim_expires_at",
+            "attempt_count",
+            "occurred_at",
+            "request_sha256",
+            "receipt_sha256",
+            "reason_code",
+        }
         observer = next(item for item in first.agents if item.name == "observer")
         assert observer.kind == "dynamic"
         assert observer.state == "running"
@@ -194,7 +248,6 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         coder = next(item for item in first.agents if item.name == "coder")
         assert "file_read" in coder.tools
         assert "bash_run" in coder.tools
-        execution = first.executions[0]
         assert execution.task_id == "execution-1"
         assert execution.session_id == session.id
         assert execution.stop_supported is True

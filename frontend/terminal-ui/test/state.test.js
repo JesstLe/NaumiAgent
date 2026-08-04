@@ -612,7 +612,7 @@ test("only explicit infrastructure notices dismiss welcome", () => {
 
 function agentSnapshot(revision = 1) {
   return {
-    schema_version: 3,
+    schema_version: 4,
     session_id: "session-agents",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -643,6 +643,27 @@ function agentSnapshot(revision = 1) {
       agent_name: "coder",
       status: "completed",
     }],
+    recovery_catalog: {
+      assessed_at: "2026-07-13T00:00:02+00:00",
+      items: [{
+        kind: "job",
+        item_id: "agent-job-recovery",
+        job_id: "agent-job-recovery",
+        publication_id: "",
+        agent_name: "coder",
+        job_state: "running",
+        recovery_state: "recovery_required",
+        session_scope: "current",
+        claim_epoch: 2,
+        claim_expires_at: "2026-07-13T00:00:01+00:00",
+        attempt_count: 0,
+        occurred_at: "2026-07-13T00:00:00+00:00",
+        request_sha256: "d".repeat(64),
+        receipt_sha256: "e".repeat(64),
+        reason_code: "agent_job_running",
+      }],
+      truncated: false,
+    },
     executions: [{
       task_id: "task-1",
       session_id: "session-agents",
@@ -809,7 +830,15 @@ test("agent control keyboard uses stable tabs and confirms one authoritative sto
   assert.equal(state.agents.selectedTab, "results");
   assert.equal(state.agents.selectedByTab.results, "delivery-1");
   handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  assert.equal(state.agents.selectedTab, "recovery");
+  assert.equal(
+    state.agents.selectedByTab.recovery,
+    "recovery:job:agent-job-recovery",
+  );
+  handleAgentControlKey(state, INPUT_KEYS.tab, send);
   assert.equal(state.agents.selectedTab, "team");
+  handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
+  assert.equal(state.agents.selectedTab, "recovery");
   handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);
   assert.equal(state.agents.selectedTab, "results");
   handleAgentControlKey(state, INPUT_KEYS.shiftTab, send);

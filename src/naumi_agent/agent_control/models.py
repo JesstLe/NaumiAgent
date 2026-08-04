@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 3
+AGENT_CONTROL_SCHEMA_VERSION = 4
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
     "executions",
     "results",
+    "recovery_catalog",
     "team_messages",
     "blackboard",
     "warnings",
@@ -43,6 +45,17 @@ _WORKER_JOB_STATES = frozenset({
 _RESULT_STATUSES = frozenset({
     "completed", "error", "timeout", "max_turns", "cancelled",
 })
+_RECOVERY_KINDS = frozenset({"job", "publication"})
+_RECOVERY_STATES = frozenset({
+    "claim_active",
+    "worker_active",
+    "reclaimable_prestart",
+    "recovery_required",
+    "outcome_unknown",
+    "publication_pending",
+    "publication_claim_expired",
+})
+_SESSION_SCOPES = frozenset({"current", "other", "unknown"})
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -102,6 +115,19 @@ def _sha256(value: Any, name: str, *, optional: bool = True) -> str:
         return ""
     if not _SHA256_RE.fullmatch(result):
         raise ValueError(f"{name} must be a lowercase SHA-256")
+    return result
+
+
+def _timestamp(value: Any, name: str, *, optional: bool = False) -> str:
+    result = _text(value, name, required=not optional)
+    if not result and optional:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(result)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{name} must include a timezone")
     return result
 
 
@@ -463,6 +489,150 @@ class AgentResultDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentRecoveryDescriptor:
+    kind: str
+    item_id: str
+    job_id: str
+    publication_id: str
+    agent_name: str
+    job_state: str
+    recovery_state: str
+    session_scope: str
+    claim_epoch: int
+    claim_expires_at: str
+    attempt_count: int
+    occurred_at: str
+    request_sha256: str
+    receipt_sha256: str
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        if self.kind == "job":
+            if self.publication_id:
+                raise ValueError("job recovery 不得携带 publication_id")
+            if self.job_state not in {"claimed", "running", "unknown"}:
+                raise ValueError("job recovery 的 job_state 无效")
+            if self.recovery_state not in {
+                "claim_active",
+                "worker_active",
+                "reclaimable_prestart",
+                "recovery_required",
+                "outcome_unknown",
+            }:
+                raise ValueError("job recovery 的 recovery_state 无效")
+        elif self.kind == "publication":
+            if not self.publication_id:
+                raise ValueError("publication recovery 缺少 publication_id")
+            if self.recovery_state not in {
+                "publication_pending",
+                "publication_claim_expired",
+            }:
+                raise ValueError("publication recovery 的 recovery_state 无效")
+        if self.item_id != (
+            self.job_id if self.kind == "job" else self.publication_id
+        ):
+            raise ValueError("recovery item_id 与 kind 标识不一致")
+
+    @classmethod
+    def from_dict(cls, value: Any) -> AgentRecoveryDescriptor:
+        data = _mapping(value, "recovery")
+        _only(data, {
+            "kind", "item_id", "job_id", "publication_id", "agent_name",
+            "job_state", "recovery_state", "session_scope", "claim_epoch",
+            "claim_expires_at", "attempt_count", "occurred_at",
+            "request_sha256", "receipt_sha256", "reason_code",
+        }, "recovery")
+        return cls(
+            kind=_choice(data.get("kind"), "recovery.kind", _RECOVERY_KINDS),
+            item_id=_text(
+                data.get("item_id"), "recovery.item_id", required=True
+            ),
+            job_id=_text(data.get("job_id"), "recovery.job_id", required=True),
+            publication_id=_text(
+                data.get("publication_id"), "recovery.publication_id"
+            ),
+            agent_name=_text(
+                data.get("agent_name"), "recovery.agent_name", required=True
+            ),
+            job_state=_choice(
+                data.get("job_state"), "recovery.job_state", _WORKER_JOB_STATES
+            ),
+            recovery_state=_choice(
+                data.get("recovery_state"),
+                "recovery.recovery_state",
+                _RECOVERY_STATES,
+            ),
+            session_scope=_choice(
+                data.get("session_scope"),
+                "recovery.session_scope",
+                _SESSION_SCOPES,
+            ),
+            claim_epoch=_integer(
+                data.get("claim_epoch", 0), "recovery.claim_epoch"
+            ),
+            claim_expires_at=_timestamp(
+                data.get("claim_expires_at"),
+                "recovery.claim_expires_at",
+                optional=True,
+            ),
+            attempt_count=_integer(
+                data.get("attempt_count", 0), "recovery.attempt_count"
+            ),
+            occurred_at=_timestamp(
+                data.get("occurred_at"), "recovery.occurred_at"
+            ),
+            request_sha256=_sha256(
+                data.get("request_sha256"),
+                "recovery.request_sha256",
+                optional=False,
+            ),
+            receipt_sha256=_sha256(
+                data.get("receipt_sha256"),
+                "recovery.receipt_sha256",
+                optional=False,
+            ),
+            reason_code=_text(
+                data.get("reason_code"), "recovery.reason_code", required=True
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRecoveryCatalog:
+    assessed_at: str = ""
+    items: tuple[AgentRecoveryDescriptor, ...] = ()
+    truncated: bool = False
+
+    def __post_init__(self) -> None:
+        identities = tuple((item.kind, item.item_id) for item in self.items)
+        if len(set(identities)) != len(identities):
+            raise ValueError("recovery_catalog 包含重复条目")
+        if (self.items or self.truncated) and not self.assessed_at:
+            raise ValueError("非空 recovery_catalog 缺少 assessed_at")
+
+    @classmethod
+    def from_dict(cls, value: Any) -> AgentRecoveryCatalog:
+        data = _mapping(value, "recovery_catalog")
+        _only(data, {"assessed_at", "items", "truncated"}, "recovery_catalog")
+        return cls(
+            assessed_at=_timestamp(
+                data.get("assessed_at"),
+                "recovery_catalog.assessed_at",
+                optional=True,
+            ),
+            items=tuple(
+                AgentRecoveryDescriptor.from_dict(item)
+                for item in _sequence(
+                    data.get("items"), "recovery_catalog.items", _MAX_SMALL_ITEMS
+                )
+            ),
+            truncated=_boolean(
+                data.get("truncated", False), "recovery_catalog.truncated"
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class TeamMessageDescriptor:
     sender: str
     recipient: str
@@ -520,6 +690,9 @@ class AgentControlSnapshot:
     agents: tuple[AgentDescriptor, ...] = ()
     executions: tuple[ExecutionDescriptor, ...] = ()
     results: tuple[AgentResultDescriptor, ...] = ()
+    recovery_catalog: AgentRecoveryCatalog = field(
+        default_factory=AgentRecoveryCatalog
+    )
     team_messages: tuple[TeamMessageDescriptor, ...] = ()
     blackboard: tuple[BlackboardDescriptor, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -539,7 +712,8 @@ class AgentControlSnapshot:
         data = _mapping(value, "agent_control")
         _only(data, {
             "schema_version", "session_id", "revision", "generated_at", "summary",
-            "agents", "executions", "results", "team_messages", "blackboard",
+            "agents", "executions", "results", "recovery_catalog",
+            "team_messages", "blackboard",
             "warnings",
         }, "agent_control")
         if data.get("schema_version") != AGENT_CONTROL_SCHEMA_VERSION:
@@ -565,6 +739,9 @@ class AgentControlSnapshot:
                 AgentResultDescriptor.from_dict(item)
                 for item in _sequence(data.get("results"), "results", _MAX_SMALL_ITEMS)
             ),
+            recovery_catalog=AgentRecoveryCatalog.from_dict(
+                data.get("recovery_catalog", {})
+            ),
             team_messages=tuple(
                 TeamMessageDescriptor.from_dict(item)
                 for item in _sequence(data.get("team_messages"), "team_messages")
@@ -584,6 +761,8 @@ __all__ = [
     "AgentControlSummary",
     "AgentDescriptor",
     "AgentResultDescriptor",
+    "AgentRecoveryCatalog",
+    "AgentRecoveryDescriptor",
     "BlackboardDescriptor",
     "ExecutionDescriptor",
     "TeamMessageDescriptor",

@@ -15,11 +15,22 @@ const CLIENT_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.client_events ?? []);
 const SERVER_EVENT_TYPES = new Set(PROTOCOL_CONTRACT.server_events ?? []);
 const INSPECTOR_TAB_NAMES = ["plan", "tools", "context", "changes", "tests"];
 const INSPECTOR_STATES = new Set(["ready", "empty", "loading", "stale", "error"]);
-const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "results", "team_messages", "blackboard", "warnings"];
+const AGENT_CONTROL_SECTIONS = ["summary", "agents", "executions", "results", "recovery_catalog", "team_messages", "blackboard", "warnings"];
 const AGENT_KINDS = new Set(["preset", "dynamic"]);
 const AGENT_STATES = new Set(["uninitialized", "spawned", "ready", "running", "idle", "destroyed"]);
 const EXECUTION_STATUSES = new Set(["running", "stopping", "completed", "error", "failed", "timeout", "max_turns", "cancelled"]);
 const AGENT_RESULT_STATUSES = new Set(["completed", "error", "timeout", "max_turns", "cancelled"]);
+const AGENT_RECOVERY_KINDS = new Set(["job", "publication"]);
+const AGENT_RECOVERY_STATES = new Set([
+  "claim_active",
+  "worker_active",
+  "reclaimable_prestart",
+  "recovery_required",
+  "outcome_unknown",
+  "publication_pending",
+  "publication_claim_expired",
+]);
+const AGENT_RECOVERY_SESSION_SCOPES = new Set(["current", "other", "unknown"]);
 const EXECUTION_PHASES = new Set(["starting", "waiting_capacity", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
 const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
 const WORKER_JOB_STATES = new Set(["admitted", "claimed", "running", "completed", "error", "timeout", "max_turns", "cancelled", "unknown"]);
@@ -5982,6 +5993,7 @@ function normalizeAgentControlSnapshot(payload) {
     agents: agentObjectArray(payload.agents, "agents", 100).map(normalizeAgentDescriptor),
     executions: agentObjectArray(payload.executions, "executions", 100).map(normalizeExecutionDescriptor),
     results: agentObjectArray(payload.results, "results", 50).map(normalizeAgentResultDescriptor),
+    recovery_catalog: normalizeAgentRecoveryCatalog(payload.recovery_catalog),
     team_messages: agentObjectArray(payload.team_messages, "team_messages", 100).map(normalizeTeamMessage),
     blackboard: agentObjectArray(payload.blackboard, "blackboard", 100).map(normalizeBlackboard),
     warnings: agentTextArray(payload.warnings, "warnings", 20),
@@ -6000,6 +6012,7 @@ function normalizeAgentControlUpdate(payload) {
     else if (section === "agents") changedSections.agents = agentObjectArray(value, "agents", 100).map(normalizeAgentDescriptor);
     else if (section === "executions") changedSections.executions = agentObjectArray(value, "executions", 100).map(normalizeExecutionDescriptor);
     else if (section === "results") changedSections.results = agentObjectArray(value, "results", 50).map(normalizeAgentResultDescriptor);
+    else if (section === "recovery_catalog") changedSections.recovery_catalog = normalizeAgentRecoveryCatalog(value);
     else if (section === "team_messages") changedSections.team_messages = agentObjectArray(value, "team_messages", 100).map(normalizeTeamMessage);
     else if (section === "blackboard") changedSections.blackboard = agentObjectArray(value, "blackboard", 100).map(normalizeBlackboard);
     else changedSections.warnings = agentTextArray(value, "warnings", 20);
@@ -6011,11 +6024,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 3) {
+  if (payload.schema_version !== 4) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 3,
+    schema_version: 4,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -6180,6 +6193,138 @@ function normalizeAgentResultDescriptor(item) {
     turns: strictAgentNonnegativeInteger(item.turns ?? 0, "result.turns"),
     reason_code: agentText(item.reason_code),
   };
+}
+
+function normalizeAgentRecoveryCatalog(value) {
+  const catalog = agentObject(value, "recovery_catalog");
+  const items = agentObjectArray(
+    catalog.items,
+    "recovery_catalog.items",
+    50,
+  ).map(normalizeAgentRecoveryDescriptor);
+  const truncated = strictBoolean(
+    catalog.truncated,
+    "recovery_catalog.truncated",
+  );
+  const assessedAt = optionalAgentTimestamp(
+    catalog.assessed_at,
+    "recovery_catalog.assessed_at",
+  );
+  if ((items.length > 0 || truncated) && !assessedAt) {
+    throw new Error("Agent Control recovery_catalog.assessed_at 不能为空");
+  }
+  const identities = new Set();
+  for (const item of items) {
+    const identity = `${item.kind}:${item.item_id}`;
+    if (identities.has(identity)) {
+      throw new Error("Agent Control recovery_catalog 包含重复条目");
+    }
+    identities.add(identity);
+  }
+  return { assessed_at: assessedAt, items, truncated };
+}
+
+function normalizeAgentRecoveryDescriptor(item) {
+  const kind = strictChoice(item.kind, "recovery.kind", AGENT_RECOVERY_KINDS);
+  const itemId = requiredAgentText(item.item_id, "recovery.item_id");
+  const jobId = requiredAgentText(item.job_id, "recovery.job_id");
+  const publicationId = agentText(item.publication_id);
+  const jobState = strictChoice(
+    item.job_state,
+    "recovery.job_state",
+    WORKER_JOB_STATES,
+  );
+  const recoveryState = strictChoice(
+    item.recovery_state,
+    "recovery.recovery_state",
+    AGENT_RECOVERY_STATES,
+  );
+  const jobRecoveryStates = new Set([
+    "claim_active",
+    "worker_active",
+    "reclaimable_prestart",
+    "recovery_required",
+    "outcome_unknown",
+  ]);
+  const publicationRecoveryStates = new Set([
+    "publication_pending",
+    "publication_claim_expired",
+  ]);
+  if (kind === "job") {
+    if (publicationId || itemId !== jobId) {
+      throw new Error("Agent Control job recovery 标识不一致");
+    }
+    if (!["claimed", "running", "unknown"].includes(jobState)) {
+      throw new Error("Agent Control job recovery 状态无效");
+    }
+    if (!jobRecoveryStates.has(recoveryState)) {
+      throw new Error("Agent Control job recovery_state 无效");
+    }
+  } else {
+    if (!publicationId || itemId !== publicationId) {
+      throw new Error("Agent Control publication recovery 标识不一致");
+    }
+    if (!publicationRecoveryStates.has(recoveryState)) {
+      throw new Error("Agent Control publication recovery_state 无效");
+    }
+  }
+  return {
+    kind,
+    item_id: itemId,
+    job_id: jobId,
+    publication_id: publicationId,
+    agent_name: requiredAgentText(item.agent_name, "recovery.agent_name"),
+    job_state: jobState,
+    recovery_state: recoveryState,
+    session_scope: strictChoice(
+      item.session_scope,
+      "recovery.session_scope",
+      AGENT_RECOVERY_SESSION_SCOPES,
+    ),
+    claim_epoch: strictAgentNonnegativeInteger(
+      item.claim_epoch,
+      "recovery.claim_epoch",
+    ),
+    claim_expires_at: optionalAgentTimestamp(
+      item.claim_expires_at,
+      "recovery.claim_expires_at",
+    ),
+    attempt_count: strictAgentNonnegativeInteger(
+      item.attempt_count,
+      "recovery.attempt_count",
+    ),
+    occurred_at: requiredAgentTimestamp(
+      item.occurred_at,
+      "recovery.occurred_at",
+    ),
+    request_sha256: requiredSha256(
+      item.request_sha256,
+      "recovery.request_sha256",
+    ),
+    receipt_sha256: requiredSha256(
+      item.receipt_sha256,
+      "recovery.receipt_sha256",
+    ),
+    reason_code: requiredAgentText(item.reason_code, "recovery.reason_code"),
+  };
+}
+
+function requiredAgentTimestamp(value, name) {
+  const result = optionalAgentTimestamp(value, name);
+  if (!result) throw new Error(`Agent Control ${name} 不能为空`);
+  return result;
+}
+
+function optionalAgentTimestamp(value, name) {
+  const result = agentText(value);
+  if (!result) return "";
+  if (
+    !/(?:[zZ]|[+-]\d{2}:\d{2})$/.test(result)
+    || Number.isNaN(Date.parse(result))
+  ) {
+    throw new Error(`Agent Control ${name} 必须是带时区的 ISO-8601 时间`);
+  }
+  return result;
 }
 
 function optionalSha256(value, field) {

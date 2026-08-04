@@ -148,8 +148,9 @@ Textual formatter 都只消费该 authority：
 4. `ARC-04.5d2b Agent Result Publication Consumption`：已建立幂等 durable inbox、在线消费和
    startup recovery，见
    [设计与验证](ARC-04-5d2b-agent-result-publication-consumption.md)；
-5. Agent recovery UI：只读列出 claimed/running/unknown、publication backlog 与 inbox，并提供精确
-   人工动作。
+5. `HAR-10.7d Agent Recovery Catalog`：已只读列出 claimed/running/unknown 与 pending/expired
+   publication，提供有界、认证、内容隔离的 New UI/TUI 视图；精确 fenced 人工动作仍未实现，见
+   [设计与验证](../harness/HAR-10-7d-agent-recovery-catalog.md)。
 
 选择前必须检查三者与当前 Harness durable queue、Agent Control 和 Supervisor 文档的依赖，不默认沿
 ARC 编号继续。

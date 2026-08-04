@@ -33,6 +33,7 @@ from naumi_agent.daemons.agent_jobs import (
     AgentJobPublicationBacklog,
     AgentJobPublicationContent,
     AgentJobPublicationDeliveryTransition,
+    AgentJobRecoveryCatalog,
     AgentJobState,
     AgentJobStore,
     AgentJobTerminalPayload,
@@ -567,6 +568,18 @@ class SubAgentManager:
     async def publication_backlog(self) -> AgentJobPublicationBacklog:
         """Expose content-free durable publication backlog counters."""
         return await self._agent_job_store.publication_backlog()
+
+    async def recovery_catalog(
+        self,
+        *,
+        limit: int = 50,
+    ) -> AgentJobRecoveryCatalog:
+        """Expose bounded authenticated recovery facts without raw content."""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit 必须是整数。")
+        return await self._agent_job_store.recovery_catalog(
+            limit=max(1, min(limit, 50)),
+        )
 
     def publication_recovery_status(self) -> dict[str, object]:
         """Expose only bounded counters and stable failure codes."""

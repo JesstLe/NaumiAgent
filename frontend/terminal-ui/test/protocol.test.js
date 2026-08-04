@@ -2460,11 +2460,14 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.summary.durable_results_visible, 1);
   assert.equal(normalized.results[0].task_id, "result-task");
   assert.equal(normalized.results[0].delivery_sha256, "c".repeat(64));
+  assert.equal(normalized.recovery_catalog.items[0].recovery_state, "recovery_required");
+  assert.equal(normalized.recovery_catalog.items[0].session_scope, "current");
+  assert.equal(Object.hasOwn(normalized.recovery_catalog.items[0], "owner_id"), false);
 
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 3,
+      schema_version: 4,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -2589,6 +2592,26 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     /results.*最多 50 项/,
   );
 
+  const invalidRecoveryDigest = agentControlSnapshotFixture(1);
+  invalidRecoveryDigest.recovery_catalog.items[0].receipt_sha256 = "invalid";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: invalidRecoveryDigest,
+    }),
+    /recovery.receipt_sha256.*SHA-256/,
+  );
+
+  const invalidRecoveryIdentity = agentControlSnapshotFixture(1);
+  invalidRecoveryIdentity.recovery_catalog.items[0].publication_id = "publication-1";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: invalidRecoveryIdentity,
+    }),
+    /job recovery 标识不一致/,
+  );
+
   const missingSection = agentControlSnapshotFixture(1);
   delete missingSection.blackboard;
   assert.throws(
@@ -2601,7 +2624,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     () => normalizeServerRecord({
       type: "agents/update",
       payload: {
-        schema_version: 3,
+        schema_version: 4,
         session_id: "session-1",
         revision: 2,
         generated_at: "now",
@@ -2614,7 +2637,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 3,
+    schema_version: 4,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -2669,6 +2692,27 @@ function agentControlSnapshotFixture(revision) {
       turns: 1,
       reason_code: "agent_completed",
     }],
+    recovery_catalog: {
+      assessed_at: "2026-07-13T00:00:02+00:00",
+      items: [{
+        kind: "job",
+        item_id: "agent-job-recovery",
+        job_id: "agent-job-recovery",
+        publication_id: "",
+        agent_name: "coder",
+        job_state: "running",
+        recovery_state: "recovery_required",
+        session_scope: "current",
+        claim_epoch: 3,
+        claim_expires_at: "2026-07-13T00:00:01+00:00",
+        attempt_count: 0,
+        occurred_at: "2026-07-13T00:00:00+00:00",
+        request_sha256: "d".repeat(64),
+        receipt_sha256: "e".repeat(64),
+        reason_code: "agent_job_running",
+      }],
+      truncated: false,
+    },
     executions: [{
       task_id: "task-1",
       session_id: "session-1",

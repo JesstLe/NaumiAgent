@@ -52,7 +52,7 @@ UI-14.2c 已复用 UI-11 类型化任务快照增加两端任务 provider，`Tab
 UI-14.2d 已复用 ARC-03.2b2 工作区会话快照增加两端会话 provider，选择只填入 `/load <id>`；
 UI-14.2e 已增加 Engine-owned、可取消、workspace 隔离、最多 100k 文件的后台索引，两端文件 provider
 选择只填入安全 `/read` 模板；
-UI-14.2f 已复用当前 Agent Control schema v3 one-shot snapshot 增加两端 Agent provider，选择只填入
+UI-14.2f 已复用 Agent Control one-shot snapshot 增加两端 Agent provider，选择只填入
 `/agents agent <name>` 并在显式提交后定位详情；
 ARC-04.5a 已继续扩展同一 Agent Control execution descriptor，让 New UI/TUI 详情显示模型调用前签发的
 Worker 请求摘要、终态结果摘要、精确工具范围与合同降级码，不在前端重算合同；
@@ -61,9 +61,12 @@ Agent Control authority，不直接读取 Agent Job SQLite，也不展示 owner�
 HAR-10.7c/ARC-06.2c 继续把共享 active/waiting 上限、reclaimable 与 recovery-required 计数加入
 summary，并以 `waiting_capacity` 呈现尚未调用模型的执行：New UI 使用绿/黄/红状态色，Textual
 复用同一权威状态；
-ARC-04.5d2c 已在相同 Agent Control schema v3 增加只读 `results` section：New UI/TUI 都能查看
+ARC-04.5d2c 已在 Agent Control schema v3 增加只读 `results` section：New UI/TUI 都能查看
 当前 session 已认证投递的结果、usage 与摘要，公开摘录统一脱敏并限制为 2000 字符；两端不直接读取
 AgentJob SQLite，也没有伪造 read/ack/retry 操作；
+HAR-10.7d 已将 Agent Control 升级到 schema v4，增加严格有界、逐条认证的只读 `recovery_catalog`；
+两端“恢复”标签用红/黄/蓝区分需裁决、可接管/待投递和 live 状态，只公开稳定 ID、epoch、expiry、
+摘要与 reason code，不公开 owner 或 task/context/response，也不提供自动模型重放；
 UI-14.2g 已增加 surface-aware 权威页面索引，两端页面 provider 只填入精确导航命令；
 跨启动历史、typed argument form 与 Vim/input mode 尚未实现。
 两端不再依赖各自的临时排队状态。

@@ -959,7 +959,7 @@ function inspectorSnapshot(revision) {
 function agentControlSnapshot(revision) {
   const stopped = revision > 1;
   return {
-    schema_version: 3,
+    schema_version: 4,
     session_id: sessionId,
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -985,6 +985,7 @@ function agentControlSnapshot(revision) {
       heartbeat_age_ms: 100,
     }],
     results: [],
+    recovery_catalog: { assessed_at: "", items: [], truncated: false },
     executions: [{
       task_id: "task-agent-1",
       session_id: sessionId,

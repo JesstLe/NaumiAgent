@@ -151,7 +151,7 @@ class FakeAgentControl:
         stopped = self._engine.agent_stopped
         return AgentControlSnapshot.from_dict(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "session_id": "session-python",
                 "revision": 2 if stopped else 1,
                 "generated_at": "2026-07-13T00:00:01+00:00",
@@ -177,6 +177,11 @@ class FakeAgentControl:
                         "heartbeat_age_ms": 30,
                     }
                 ],
+                "recovery_catalog": {
+                    "assessed_at": "",
+                    "items": [],
+                    "truncated": False,
+                },
                 "executions": [
                     {
                         "task_id": "python-agent-task",
@@ -225,6 +230,7 @@ class FakeAgentControl:
                 "agents",
                 "executions",
                 "results",
+                "recovery_catalog",
                 "team_messages",
                 "blackboard",
                 "warnings",
