@@ -34,6 +34,11 @@ from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
     new_pursuit_reconciliation_receipt,
 )
 from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
+from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalOutboxRecord,
+    PursuitTerminalOutboxState,
+    pursuit_terminal_outbox_id,
+)
 
 
 class PursuitStoreError(RuntimeError):
@@ -677,6 +682,11 @@ class PursuitStore:
                         receipt.reconciled_at,
                     ),
                 )
+                self._deliver_terminal_outbox_with_connection(
+                    conn,
+                    attempt=resolved,
+                    delivered_at=reconciled_at,
+                )
                 return receipt
         except PursuitRecoveryReconcileError:
             raise
@@ -733,6 +743,10 @@ class PursuitStore:
                         )
                     if checkpoint.sequence == current_sequence:
                         if hmac.compare_digest(current["payload_sha256"], digest):
+                            self._enqueue_terminal_outbox_with_connection(
+                                conn,
+                                checkpoint=checkpoint,
+                            )
                             return
                         raise PursuitStoreConflictError(
                             f"checkpoint 序号 {checkpoint.sequence} 已绑定不同内容。"
@@ -761,8 +775,16 @@ class PursuitStore:
                         checkpoint.created_at,
                     ),
                 )
+                self._enqueue_terminal_outbox_with_connection(
+                    conn,
+                    checkpoint=checkpoint,
+                )
         except PursuitStoreError:
             raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"保存 checkpoint 的 terminal outbox 失败：{exc}"
+            ) from exc
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"保存 checkpoint 失败：{exc}") from exc
 
@@ -779,6 +801,66 @@ class PursuitStore:
             raise PursuitStoreError(f"checkpoint 结构校验失败：{exc}") from exc
         except sqlite3.Error as exc:
             raise PursuitStoreError(f"读取 checkpoint 失败：{exc}") from exc
+
+    def get_terminal_outbox(
+        self,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxRecord | None:
+        """Read one authenticated terminal outbox record."""
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._get_terminal_outbox_with_connection(conn, outbox_id)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox 结构校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取 terminal outbox 失败：{exc}") from exc
+
+    def list_pending_terminal_outbox(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[PursuitTerminalOutboxRecord]:
+        """Return an authenticated, oldest-first and strictly bounded backlog."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("terminal outbox limit 必须在 1..1000。")
+        if not self._db_path.exists():
+            return []
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT outbox_id
+                    FROM pursuit_terminal_outbox
+                    WHERE state = 'pending'
+                    ORDER BY created_at ASC, outbox_id ASC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                records = [
+                    self._get_terminal_outbox_with_connection(
+                        conn,
+                        str(row["outbox_id"]),
+                    )
+                    for row in rows
+                ]
+            return [record for record in records if record is not None]
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox 恢复目录校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox 恢复目录失败：{exc}"
+            ) from exc
 
     @staticmethod
     def _get_checkpoint_with_connection(
@@ -1279,6 +1361,11 @@ class PursuitStore:
                     raise PursuitStoreConflictError(
                         "recovery attempt 被并发更新，拒绝覆盖。"
                     )
+                self._deliver_terminal_outbox_with_connection(
+                    conn,
+                    attempt=candidate,
+                    delivered_at=updated_at,
+                )
                 return candidate
         except PursuitStoreError:
             raise
@@ -1326,6 +1413,319 @@ class PursuitStore:
                 "recovery attempt 快照与事件链末端不一致，拒绝读取。"
             )
         return latest
+
+    def _enqueue_terminal_outbox_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        checkpoint: PursuitCheckpoint,
+    ) -> PursuitTerminalOutboxRecord | None:
+        terminal_statuses = {
+            PursuitRunStatus.WAITING.value,
+            PursuitRunStatus.BLOCKED.value,
+            PursuitRunStatus.COMPLETED.value,
+            PursuitRunStatus.CANCELLED.value,
+            PursuitRunStatus.BUDGET_EXCEEDED.value,
+        }
+        if checkpoint.status not in terminal_statuses:
+            return None
+        rows = conn.execute(
+            """
+            SELECT attempt_id
+            FROM pursuit_recovery_attempts
+            WHERE run_id = ? AND state = 'admitted'
+            ORDER BY requested_at ASC, attempt_id ASC
+            LIMIT 2
+            """,
+            (checkpoint.run_id,),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise PursuitStoreConflictError(
+                "同一 PursuitRun 存在多个 admitted recovery attempt，拒绝创建 outbox。"
+            )
+        attempt = self._get_recovery_attempt_with_connection(
+            conn,
+            str(rows[0]["attempt_id"]),
+        )
+        if attempt is None or attempt.state is not PursuitRecoveryAttemptState.ADMITTED:
+            raise PursuitStoreConflictError("terminal outbox admission 事实不可用。")
+        checkpoint_id = checkpoint.checkpoint_id()
+        if (
+            checkpoint.created_at <= attempt.admitted_at
+            or checkpoint_id == attempt.checkpoint_id
+        ):
+            return None
+        run_row = conn.execute(
+            "SELECT status, boundary_decision_id FROM pursuit_runs WHERE id = ?",
+            (checkpoint.run_id,),
+        ).fetchone()
+        if run_row is None:
+            raise PursuitStoreConflictError("terminal outbox 对应 PursuitRun 不存在。")
+        boundary_id = str(run_row["boundary_decision_id"])
+        if str(run_row["status"]) != checkpoint.status or not boundary_id:
+            raise PursuitStoreConflictError(
+                "terminal checkpoint 与 PursuitRun 终态不一致，拒绝缺失 outbox 的提交。"
+            )
+        boundary_row = conn.execute(
+            """
+            SELECT *
+            FROM pursuit_boundary_decisions
+            WHERE run_id = ? AND decision_id = ?
+            """,
+            (checkpoint.run_id, boundary_id),
+        ).fetchone()
+        if boundary_row is None:
+            raise PursuitStoreConflictError("terminal outbox 机械裁判指针无效。")
+        boundary = _boundary_decision_from_row(boundary_row)
+        boundary_recorded_at = float(boundary_row["recorded_at"])
+        if (
+            boundary.status != checkpoint.status
+            or not attempt.admitted_at < boundary_recorded_at <= checkpoint.created_at
+        ):
+            raise PursuitStoreConflictError(
+                "terminal checkpoint 缺少准入后的同状态机械裁判，拒绝提交。"
+            )
+        record = PursuitTerminalOutboxRecord(
+            outbox_id=pursuit_terminal_outbox_id(
+                attempt_id=attempt.attempt_id,
+                admitted_attempt_sha256=attempt.digest(),
+                boundary_decision_id=boundary_id,
+                checkpoint_id=checkpoint_id,
+            ),
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            admitted_attempt_sha256=attempt.digest(),
+            boundary_decision_id=boundary_id,
+            checkpoint_id=checkpoint_id,
+            sequence=1,
+            state=PursuitTerminalOutboxState.PENDING,
+            created_at=checkpoint.created_at,
+            updated_at=checkpoint.created_at,
+        )
+        existing_row = conn.execute(
+            "SELECT outbox_id FROM pursuit_terminal_outbox WHERE attempt_id = ?",
+            (attempt.attempt_id,),
+        ).fetchone()
+        if existing_row is not None:
+            existing = self._get_terminal_outbox_with_connection(
+                conn,
+                str(existing_row["outbox_id"]),
+            )
+            if existing is not None and existing.outbox_id == record.outbox_id:
+                return existing
+            raise PursuitStoreConflictError(
+                "recovery attempt 已绑定不同 terminal outbox 事实。"
+            )
+        conn.execute(
+            """
+            INSERT INTO pursuit_terminal_outbox (
+                outbox_id, attempt_id, run_id, latest_sequence, state,
+                payload_json, payload_sha256, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.outbox_id,
+                record.attempt_id,
+                record.run_id,
+                record.sequence,
+                record.state.value,
+                record.canonical_json(),
+                record.digest(),
+                record.created_at,
+                record.updated_at,
+            ),
+        )
+        self._append_terminal_outbox_event(conn, record, previous_digest="")
+        return record
+
+    def _deliver_terminal_outbox_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        attempt: PursuitRecoveryAttempt,
+        delivered_at: float,
+    ) -> PursuitTerminalOutboxRecord | None:
+        row = conn.execute(
+            "SELECT outbox_id FROM pursuit_terminal_outbox WHERE attempt_id = ?",
+            (attempt.attempt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        current = self._get_terminal_outbox_with_connection(
+            conn,
+            str(row["outbox_id"]),
+        )
+        if current is None:
+            raise PursuitStoreError("terminal outbox 快照丢失。")
+        terminal_digest = attempt.digest()
+        if current.state is PursuitTerminalOutboxState.DELIVERED:
+            if hmac.compare_digest(
+                current.terminal_attempt_sha256,
+                terminal_digest,
+            ):
+                return current
+            raise PursuitStoreConflictError(
+                "terminal outbox 已绑定不同 recovery attempt 终态。"
+            )
+        if attempt.state not in {
+            PursuitRecoveryAttemptState.RESOLVED,
+            PursuitRecoveryAttemptState.FAILED,
+        }:
+            raise PursuitStoreConflictError("terminal outbox 只能确认终态 attempt。")
+        candidate = PursuitTerminalOutboxRecord.model_validate(
+            current.model_copy(update={
+                "sequence": 2,
+                "state": PursuitTerminalOutboxState.DELIVERED,
+                "updated_at": delivered_at,
+                "delivered_at": delivered_at,
+                "terminal_attempt_sha256": terminal_digest,
+            }).model_dump(mode="json")
+        )
+        self._append_terminal_outbox_event(
+            conn,
+            candidate,
+            previous_digest=current.digest(),
+        )
+        cursor = conn.execute(
+            """
+            UPDATE pursuit_terminal_outbox
+            SET latest_sequence = ?, state = ?, payload_json = ?,
+                payload_sha256 = ?, updated_at = ?
+            WHERE outbox_id = ? AND latest_sequence = ? AND state = 'pending'
+            """,
+            (
+                candidate.sequence,
+                candidate.state.value,
+                candidate.canonical_json(),
+                candidate.digest(),
+                candidate.updated_at,
+                candidate.outbox_id,
+                current.sequence,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PursuitStoreConflictError("terminal outbox 被并发更新，拒绝覆盖。")
+        return candidate
+
+    def _get_terminal_outbox_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxRecord | None:
+        row = conn.execute(
+            "SELECT * FROM pursuit_terminal_outbox WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        events = self._verify_terminal_outbox_events(conn, outbox_id)
+        if not events:
+            raise PursuitStoreError("terminal outbox 快照存在但事件链为空。")
+        payload = str(row["payload_json"])
+        actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+            raise PursuitStoreError("terminal outbox 快照摘要校验失败。")
+        snapshot = PursuitTerminalOutboxRecord.model_validate_json(payload)
+        latest = events[-1]
+        if (
+            snapshot != latest
+            or str(row["attempt_id"]) != latest.attempt_id
+            or str(row["run_id"]) != latest.run_id
+            or int(row["latest_sequence"]) != latest.sequence
+            or str(row["state"]) != latest.state.value
+        ):
+            raise PursuitStoreError("terminal outbox 快照与事件链末端不一致。")
+        attempt_events = self._verify_recovery_attempt_events(
+            conn,
+            latest.attempt_id,
+        )
+        if len(attempt_events) < 2 or not hmac.compare_digest(
+            attempt_events[1].digest(),
+            latest.admitted_attempt_sha256,
+        ):
+            raise PursuitStoreError("terminal outbox 与 admission 事件不一致。")
+        if latest.state is PursuitTerminalOutboxState.DELIVERED and (
+            len(attempt_events) != 3
+            or not hmac.compare_digest(
+                attempt_events[-1].digest(),
+                latest.terminal_attempt_sha256,
+            )
+        ):
+            raise PursuitStoreError("terminal outbox 与 attempt 终态不一致。")
+        boundary_row = conn.execute(
+            """
+            SELECT 1 FROM pursuit_boundary_decisions
+            WHERE run_id = ? AND decision_id = ?
+            """,
+            (latest.run_id, latest.boundary_decision_id),
+        ).fetchone()
+        if boundary_row is None:
+            raise PursuitStoreError("terminal outbox 引用的机械裁判不存在。")
+        return latest
+
+    @staticmethod
+    def _append_terminal_outbox_event(
+        conn: sqlite3.Connection,
+        record: PursuitTerminalOutboxRecord,
+        *,
+        previous_digest: str,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO pursuit_terminal_outbox_events (
+                outbox_id, sequence, state, payload_json, payload_sha256,
+                previous_payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.outbox_id,
+                record.sequence,
+                record.state.value,
+                record.canonical_json(),
+                record.digest(),
+                previous_digest,
+                record.updated_at,
+            ),
+        )
+
+    @staticmethod
+    def _verify_terminal_outbox_events(
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> list[PursuitTerminalOutboxRecord]:
+        rows = conn.execute(
+            """
+            SELECT * FROM pursuit_terminal_outbox_events
+            WHERE outbox_id = ? ORDER BY sequence ASC
+            """,
+            (outbox_id,),
+        ).fetchall()
+        records: list[PursuitTerminalOutboxRecord] = []
+        previous_digest = ""
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = str(row["payload_json"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(row["sequence"]) != expected_sequence:
+                raise PursuitStoreError("terminal outbox 事件序号不连续。")
+            if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+                raise PursuitStoreError("terminal outbox 事件摘要校验失败。")
+            if not hmac.compare_digest(
+                previous_digest,
+                str(row["previous_payload_sha256"]),
+            ):
+                raise PursuitStoreError("terminal outbox 事件哈希链断裂。")
+            record = PursuitTerminalOutboxRecord.model_validate_json(payload)
+            if (
+                record.outbox_id != outbox_id
+                or record.sequence != expected_sequence
+                or record.state.value != str(row["state"])
+            ):
+                raise PursuitStoreError("terminal outbox 事件元数据不一致。")
+            records.append(record)
+            previous_digest = actual_digest
+        return records
 
     def _get_recovery_reconciliation_with_connection(
         self,
@@ -1737,6 +2137,56 @@ class PursuitStore:
                         created_at REAL NOT NULL,
                         FOREIGN KEY(attempt_id)
                             REFERENCES pursuit_recovery_attempts(attempt_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_terminal_outbox (
+                        outbox_id TEXT PRIMARY KEY,
+                        attempt_id TEXT NOT NULL UNIQUE,
+                        run_id TEXT NOT NULL,
+                        latest_sequence INTEGER NOT NULL
+                            CHECK(latest_sequence BETWEEN 1 AND 2),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'pending', 'delivered'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        FOREIGN KEY(attempt_id)
+                            REFERENCES pursuit_recovery_attempts(attempt_id)
+                            ON DELETE CASCADE,
+                        FOREIGN KEY(run_id) REFERENCES pursuit_runs(id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_pursuit_terminal_outbox_recovery
+                    ON pursuit_terminal_outbox(state, created_at, outbox_id)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_terminal_outbox_events (
+                        outbox_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL
+                            CHECK(sequence BETWEEN 1 AND 2),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'pending', 'delivered'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        previous_payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(outbox_id, sequence),
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
                             ON DELETE CASCADE
                     )
                     """

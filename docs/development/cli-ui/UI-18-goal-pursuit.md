@@ -38,8 +38,8 @@
     `pursuit_resume` ToolExecution；TUI fallback 展示同源动作、精确共享命令和最近 attempt，结果以
     持久账本而非工具文案为准；见
     [UI-18.5b1](UI-18-5b1-pursuit-recovery-action.md)。
-  - 未完成：自动 terminal outbox、takeover/cleanup、专用 attempt push stream 与多 run cursor
-    历史仍属于后续切片。
+  - HAR-10.8f1 已完成 terminal outbox 的原子 pending/delivered Store 核心；自动 worker、typed backlog
+    投影、takeover/cleanup、专用 attempt push stream 与多 run cursor 历史仍属于后续切片。
 - UI-18.6 TUI parity：Textual TUI 消费相同 snapshot/动作协议，以紧凑布局提供核心状态和操作。
 
 ## UI-18.1 已实现边界
