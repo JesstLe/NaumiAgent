@@ -43,6 +43,7 @@ def print_help() -> None:
         ("/usage", "显示 token 用量"),
         ("/hooks", "显示已注册的钩子"),
         ("/skills", "列出已加载的 Skill"),
+        ("/extensions [skills]", "查看扩展来源、优先级、冲突与无效清单"),
         ("/history", "查看历史会话列表"),
         ("/memory [子命令]", "记忆管理 (stats/search/clean/export)"),
         ("/load <id>", "加载指定会话并继续对话"),

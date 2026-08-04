@@ -328,7 +328,7 @@ from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
 from naumi_agent.safety.permissions import PermissionMode, PermissionOutcome
 from naumi_agent.scheduler import SchedulerRunner, SchedulerStore, create_scheduler_tools
-from naumi_agent.skills.loader import SkillLoader
+from naumi_agent.skills.loader import SkillLoader, build_skill_sources
 from naumi_agent.skills.tool import create_skill_tools
 from naumi_agent.streaming.event_bus import EventEmitter
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
@@ -1597,6 +1597,7 @@ class AgentEngine:
             DoctorLiveProbeTool,
         )
         from naumi_agent.tools.evolution_review import create_evolution_review_tools
+        from naumi_agent.tools.extensions import ExtensionDiscoveryTool
         from naumi_agent.tools.feedback import create_feedback_tools
         from naumi_agent.tools.runtime import create_runtime_tools
         from naumi_agent.tools.search import create_tool_search_tools
@@ -1606,6 +1607,7 @@ class AgentEngine:
         self._tool_registry.register(DoctorDiagnosticsTool(self))
         self._tool_registry.register(DoctorExportTool(self))
         self._tool_registry.register(DoctorLiveProbeTool(self))
+        self._tool_registry.register(ExtensionDiscoveryTool(self))
         self._tool_registry.register(RequestUserInputTool(self))
         for tool in create_feedback_tools(self, self.feedback_intake_service):
             self._tool_registry.register(tool)
@@ -1749,14 +1751,11 @@ class AgentEngine:
         """从配置的搜索路径加载 Skill 并注册为 Tool."""
         search_paths = self._config.skills.search_paths
 
-        # 默认搜索路径：项目 .naumi/skills/ 和用户 ~/.naumi/skills/
-        default_paths = [
-            str(Path.cwd() / ".naumi" / "skills"),
-            str(Path.home() / ".naumi" / "skills"),
-        ]
-        all_paths = default_paths + search_paths
-
-        self.skill_loader = SkillLoader(search_paths=all_paths)
+        sources = build_skill_sources(
+            workspace_root=self.workspace_root,
+            configured_paths=search_paths,
+        )
+        self.skill_loader = SkillLoader(sources=sources)
         skills = self.skill_loader.load_all()
 
         if not skills:
@@ -1765,7 +1764,7 @@ class AgentEngine:
         for tool in create_skill_tools(skills):
             self._tool_registry.register(tool)
 
-        logger.info("Registered %d skills from %d search paths", len(skills), len(all_paths))
+        logger.info("Registered %d skills from %d search paths", len(skills), len(sources))
 
     async def setup_mcp_tools(self) -> None:
         """从配置连接 MCP Server 并注册工具（需在异步上下文中调用）."""

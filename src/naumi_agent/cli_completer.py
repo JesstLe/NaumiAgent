@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover - backward-compatible fallback path
         ("/usage", "显示 token 用量", False),
         ("/hooks", "显示已注册的钩子", False),
         ("/skills", "列出已加载的 Skill", False),
+        ("/extensions", "查看扩展来源、优先级、冲突与无效清单", True),
         ("/glob", "按 glob 规则搜索工作区文件路径", True),
         ("/grep", "搜索文件内容（可配置过滤）", True),
         ("/read", "读取文件内容", True),

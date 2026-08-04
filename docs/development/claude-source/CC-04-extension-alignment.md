@@ -7,7 +7,10 @@ NaumiAgent 自身 Tool metadata、PermissionChecker 和配置布局。
 
 ## 子模块
 
-- CC-04.1 Discovery model：系统/用户/workspace 来源、优先级、冲突命名。
+- CC-04.1 Discovery model：系统/用户/workspace 来源、优先级、冲突命名。CC-04.1a 已让真实 Skill
+  Loader 形成 workspace/user/configured typed snapshot，并通过 `/extensions skills` 与 Agent Tool 暴露
+  选择、遮蔽和无效事实；Plugin/MCP provenance 仍未完成，详见
+  `CC-04-1a-skill-source-discovery.md`。
 - CC-04.2 Manifest contract：id/version/capabilities/entrypoints/config/secrets/platform。
 - CC-04.3 Trust/install：预览文件、依赖、命令、网络、权限；用户明确确认。
 - CC-04.4 Runtime isolation：失败隔离、超时、卸载、热重载边界。
@@ -25,3 +28,8 @@ NaumiAgent 自身 Tool metadata、PermissionChecker 和配置布局。
 ## 非目标
 
 不承诺 Claude Code 私有 API 二进制兼容；优先对齐公开可验证行为。
+
+## 当前状态
+
+CC-04.1a 已交付，CC-04 为 `partial`。下一步应先为 MCP 配置保存不可反推的来源 provenance，或冻结
+Plugin manifest contract；不得把 Skill 来源展示误报为 Plugin 安装、workspace 信任或运行时隔离完成。
