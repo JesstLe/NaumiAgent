@@ -231,6 +231,7 @@ def _filtered_discovery_catalog():
 
 def _completion_response(content: str = "adapter-ok") -> SimpleNamespace:
     return SimpleNamespace(
+        id="provider-response-20260805",
         model="provider-returned-model",
         choices=[
             SimpleNamespace(
@@ -366,6 +367,11 @@ async def test_unknown_catalog_model_is_discovered_before_call(
     assert captured["api_base"] == "https://discovery.vendor.example/v1"
     assert response.content == "dynamic-ok"
     assert response.provider_model == "provider-returned-model"
+    assert response.call_evidence.usage_source == "transport_response"
+    assert response.call_evidence.cost_source == "rate_card_estimate"
+    assert response.call_evidence.rate_card_source == "fallback"
+    assert response.call_evidence.billing_status == "unsupported"
+    assert len(response.call_evidence.provider_response_id_sha256) == 64
     assert discovery_requests == 1
 
 

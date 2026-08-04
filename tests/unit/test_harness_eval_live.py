@@ -26,6 +26,7 @@ from naumi_agent.model.reasoning import (
     ReasoningEffortStatus,
 )
 from naumi_agent.model.router import (
+    ModelCallEvidence,
     ModelCapabilityContract,
     ModelContractStatus,
     ModelResponse,
@@ -40,6 +41,16 @@ from naumi_agent.safety.permissions import (
 REQUEST_ID = "hlive_" + "a" * 24
 NOW = datetime(2026, 8, 5, 9, 0, tzinfo=UTC)
 MODEL = "test-provider/test-model"
+
+
+def _evidence() -> ModelCallEvidence:
+    return ModelCallEvidence(
+        provider_response_id_sha256="b" * 64,
+        usage_source="transport_response",
+        cost_source="rate_card_estimate",
+        rate_card_source="catalog",
+        billing_status="unsupported",
+    )
 
 
 def _capability(
@@ -134,6 +145,7 @@ class _LiveModelPort:
         challenge = str(messages[-1]["content"]).removeprefix("Return exactly: ")
         return ModelResponse(
             content=challenge,
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=24,
                 output_tokens=12,
@@ -180,6 +192,11 @@ async def test_live_runner_verifies_fixed_transport_without_retaining_output() -
     assert receipt.total_tokens == 36
     assert receipt.exact_match is True
     assert receipt.provider_call_attempted is True
+    assert receipt.usage_source == "transport_response"
+    assert receipt.cost_source == "rate_card_estimate"
+    assert receipt.rate_card_source == "catalog"
+    assert receipt.billing_status == "unsupported"
+    assert receipt.provider_response_id_sha256 == "b" * 64
     assert receipt.persisted is False
     assert receipt.baseline_eligible is False
     assert receipt.model is not None
@@ -202,6 +219,56 @@ async def test_live_runner_verifies_fixed_transport_without_retaining_output() -
     payload["cost_usd"] = 9.0
     with pytest.raises(ValidationError, match="receipt_sha256"):
         HarnessLiveEvalReceipt.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_live_runner_rejects_unattested_cost_provenance() -> None:
+    port = _LiveModelPort(
+        response=ModelResponse(
+            content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            usage=TokenUsage(
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+                cost_usd=0.001,
+            ),
+            provider_model="test-model",
+            finish_reason="stop",
+        )
+    )
+
+    receipt = await _runner(port).run(_request())
+
+    assert receipt.status is HarnessLiveEvalStatus.PARTIAL
+    assert receipt.code == "usage_provenance_unavailable"
+    assert receipt.cost_source == "unavailable"
+    assert receipt.billing_status == "unavailable"
+
+    fallback = _LiveModelPort(
+        response=ModelResponse(
+            content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            call_evidence=ModelCallEvidence(
+                provider_response_id_sha256="c" * 64,
+                usage_source="transport_response",
+                cost_source="rate_card_estimate",
+                rate_card_source="fallback",
+                billing_status="unsupported",
+            ),
+            usage=TokenUsage(
+                input_tokens=3,
+                output_tokens=2,
+                total_tokens=5,
+                cost_usd=0.001,
+            ),
+            provider_model="test-model",
+            finish_reason="stop",
+        )
+    )
+
+    fallback_receipt = await _runner(fallback).run(_request())
+
+    assert fallback_receipt.status is HarnessLiveEvalStatus.PARTIAL
+    assert fallback_receipt.code == "cost_rate_source_unverified"
 
 
 @pytest.mark.asyncio
@@ -249,6 +316,7 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     inconsistent = _LiveModelPort(
         response=ModelResponse(
             content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3,
                 output_tokens=2,
@@ -266,6 +334,7 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     fractional = _LiveModelPort(
         response=ModelResponse(
             content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3.5,  # type: ignore[arg-type]
                 output_tokens=2,
@@ -285,6 +354,7 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     invalid_content = _LiveModelPort(
         response=ModelResponse(
             content=None,  # type: ignore[arg-type]
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3,
                 output_tokens=2,
@@ -302,6 +372,7 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     unsafe_provider_model = _LiveModelPort(
         response=ModelResponse(
             content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3,
                 output_tokens=2,
@@ -320,6 +391,7 @@ async def test_live_runner_distinguishes_timeout_usage_and_challenge_failure() -
     mismatch = _LiveModelPort(
         response=ModelResponse(
             content="not-the-challenge",
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3,
                 output_tokens=2,
@@ -347,6 +419,7 @@ async def test_live_runner_marks_contract_drift_and_actual_overspend_partial() -
     overspend = _LiveModelPort(
         response=ModelResponse(
             content=f"NAUMI_LIVE_OK_{'A' * 24}",
+            call_evidence=_evidence(),
             usage=TokenUsage(
                 input_tokens=3,
                 output_tokens=2,
@@ -359,7 +432,7 @@ async def test_live_runner_marks_contract_drift_and_actual_overspend_partial() -
     )
     overspend_receipt = await _runner(overspend).run(_request())
     assert overspend_receipt.status is HarnessLiveEvalStatus.PARTIAL
-    assert overspend_receipt.code == "actual_cost_exceeded"
+    assert overspend_receipt.code == "observed_cost_exceeded"
 
 
 def test_live_request_requires_explicit_mode_and_safe_budgets() -> None:

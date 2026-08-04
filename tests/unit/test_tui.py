@@ -161,11 +161,15 @@ class TestNaumiApp:
             "requested": 5,
             "persisted": 0,
             "total_cost_usd": 0.001234,
+            "cost_source": "rate_card_estimate",
+            "rate_card_source": "catalog",
+            "billing_status": "unsupported",
             "batch_id": "live-1",
         })
 
         assert status.status_text == (
-            "Live Eval 调用模型: 2/5 · 已保存 0 · $0.001234 · live-1"
+            "Live Eval 调用模型: 2/5 · 已保存 0 · 估算/catalog $0.001234"
+            " · 账单未集成 · live-1"
         )
 
     @pytest.mark.asyncio

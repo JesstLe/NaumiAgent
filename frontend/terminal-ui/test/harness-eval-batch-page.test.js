@@ -71,6 +71,10 @@ test("Harness Live Eval page renders provider cost and bounded evidence", () => 
       total_calls: 2,
       total_tokens: 56,
       total_cost_usd: 0.002,
+      cost_source: "rate_card_estimate",
+      rate_card_source: "catalog",
+      billing_status: "unsupported",
+      provider_response_ids_observed: 2,
       max_total_cost_usd: 0.1,
       duration_ms: 1250,
       max_total_duration_seconds: 30,
@@ -85,7 +89,10 @@ test("Harness Live Eval page renders provider cost and bounded evidence", () => 
 
   assert(plain.includes("Harness Live Eval"));
   assert(plain.includes("Provider 实际模型 · model-20260805"));
-  assert(plain.includes("成本 · $0.002000 / $0.100000"));
+  assert(plain.includes("能力单价估算成本 · $0.002000 / $0.100000"));
+  assert(plain.includes("单价来源 · Provider catalog"));
+  assert(plain.includes("当前适配器未集成账单 API"));
+  assert(plain.includes("Response ID 摘要 · 2/2"));
   assert(plain.includes("Request · bbbbbbbbbbbb"));
   assert(!plain.includes("NAUMI_LIVE_OK"));
   assert(!plain.includes("reasoning_content"));

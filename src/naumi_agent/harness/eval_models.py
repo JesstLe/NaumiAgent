@@ -259,6 +259,33 @@ class HarnessEvalLiveEvidence(_StrictModel):
     output_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    usage_source: Literal["transport_response", "unavailable"] = Field(
+        default="unavailable",
+        exclude_if=lambda value: value == "unavailable",
+    )
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "unavailable"
+    ] = Field(
+        default="unavailable",
+        exclude_if=lambda value: value == "unavailable",
+    )
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ] = Field(
+        default="unavailable",
+        exclude_if=lambda value: value == "unavailable",
+    )
+    billing_status: Literal[
+        "supported", "unsupported", "unavailable"
+    ] = Field(
+        default="unavailable",
+        exclude_if=lambda value: value == "unavailable",
+    )
+    provider_response_id_sha256: str = Field(
+        default="",
+        pattern=r"^(?:|[0-9a-f]{64})$",
+        exclude_if=lambda value: value == "",
+    )
     response_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
     transport_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     batch_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -270,6 +297,17 @@ class HarnessEvalLiveEvidence(_StrictModel):
             raise ValueError("Live evidence total_tokens 与输入输出用量不一致。")
         if self.exact_match and (not self.response_sha256 or not self.provider_model):
             raise ValueError("精确匹配的 Live evidence 缺少响应或 Provider 模型身份。")
+        if self.cost_source == "rate_card_estimate" and (
+            self.usage_source != "transport_response"
+            or self.rate_card_source == "unavailable"
+        ):
+            raise ValueError("Live evidence rate-card 估算缺少用量或单价来源。")
+        if self.cost_source != "rate_card_estimate" and self.rate_card_source != "unavailable":
+            raise ValueError("Live evidence 非 rate-card 成本不得声明单价来源。")
+        if (self.cost_source == "provider_billing") != (
+            self.billing_status == "supported"
+        ):
+            raise ValueError("Live evidence Provider 账单来源与状态不一致。")
         return self
 
 

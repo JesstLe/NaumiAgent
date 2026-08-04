@@ -193,6 +193,10 @@ function harnessLiveEvalPayload(stage = "evaluating") {
     total_calls: completed,
     total_tokens: completed * 28,
     total_cost_usd: completed * 0.001,
+    cost_source: "rate_card_estimate",
+    rate_card_source: "catalog",
+    billing_status: "unsupported",
+    provider_response_ids_observed: completed,
     duration_ms: 12.5,
     max_total_duration_seconds: 30,
     max_total_cost_usd: 0.1,
@@ -1166,6 +1170,10 @@ test("harness live eval response validates budget and privacy facts", () => {
 
   assert.equal(progress.kind, "live");
   assert.equal(progress.total_calls, 2);
+  assert.equal(progress.cost_source, "rate_card_estimate");
+  assert.equal(progress.rate_card_source, "catalog");
+  assert.equal(progress.billing_status, "unsupported");
+  assert.equal(progress.provider_response_ids_observed, 2);
   assert.equal(completed.baseline_eligible, true);
   assert.equal(Object.hasOwn(progress, "private_payload"), false);
 
@@ -1175,6 +1183,30 @@ test("harness live eval response validates budget and privacy facts", () => {
     () => normalizeServerRecord({ type: "harness/eval-batch", payload: forged }),
     /超支标记/,
   );
+
+  const forgedBilling = harnessLiveEvalPayload("partial");
+  forgedBilling.cost_source = "provider_billing";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "harness/eval-batch",
+      payload: forgedBilling,
+    }),
+    /账单来源与状态/,
+  );
+
+  const legacy = harnessLiveEvalPayload("partial");
+  delete legacy.cost_source;
+  delete legacy.rate_card_source;
+  delete legacy.billing_status;
+  delete legacy.provider_response_ids_observed;
+  const normalizedLegacy = normalizeServerRecord({
+    type: "harness/eval-batch",
+    payload: legacy,
+  }).payload;
+  assert.equal(normalizedLegacy.cost_source, "unavailable");
+  assert.equal(normalizedLegacy.rate_card_source, "unavailable");
+  assert.equal(normalizedLegacy.billing_status, "unavailable");
+  assert.equal(normalizedLegacy.provider_response_ids_observed, 0);
 });
 
 test("harness sandbox eval response preserves coordinator checkpoint semantics", () => {

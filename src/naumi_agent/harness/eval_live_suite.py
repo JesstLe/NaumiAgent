@@ -324,6 +324,16 @@ class HarnessLiveBatchStatus(_StrictModel):
     total_calls: int = Field(ge=0, le=200)
     total_tokens: int = Field(ge=0)
     total_cost_usd: float = Field(ge=0.0, le=10_000.0)
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "mixed", "unavailable"
+    ] = "unavailable"
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ] = "unavailable"
+    billing_status: Literal[
+        "supported", "unsupported", "mixed", "unavailable"
+    ] = "unavailable"
+    provider_response_ids_observed: int = Field(default=0, ge=0, le=200)
     duration_ms: float = Field(ge=0.0)
     max_total_duration_seconds: float = Field(ge=5.0, le=3_600.0)
     max_total_cost_usd: float = Field(gt=0.0, le=10.0)
@@ -349,8 +359,24 @@ class HarnessLiveBatchStatus(_StrictModel):
             raise ValueError("Live batch requested/completed/persisted 不一致。")
         if len(self.sample_result_sha256) != self.persisted:
             raise ValueError("Live batch sample digest 数量与 persisted 不一致。")
+        if self.provider_response_ids_observed > self.total_calls:
+            raise ValueError("Live batch Provider response id 数量超过确认调用数。")
+        if (self.cost_source == "provider_billing") != (
+            self.billing_status == "supported"
+        ):
+            raise ValueError("Live batch Provider 账单来源与状态不一致。")
+        if self.cost_source == "rate_card_estimate" and (
+            self.rate_card_source == "unavailable"
+        ):
+            raise ValueError("Live batch rate-card 估算缺少单价来源。")
+        if self.status == "completed" and self.rate_card_source == "fallback":
+            raise ValueError("completed Live batch 不得使用 fallback 单价来源。")
+        if self.cost_source in {"provider_billing", "unavailable"} and (
+            self.rate_card_source != "unavailable"
+        ):
+            raise ValueError("Live batch 非 rate-card 成本不得声明单价来源。")
         if self.actual_cost_exceeded != (self.total_cost_usd > self.max_total_cost_usd):
-            raise ValueError("Live batch actual_cost_exceeded 与实际成本不一致。")
+            raise ValueError("Live batch actual_cost_exceeded 与已记录成本不一致。")
         if self.status == "completed" and self.actual_cost_exceeded:
             raise ValueError("completed Live batch 不得超过总成本预算。")
         if self.status == "completed" and (
@@ -387,6 +413,16 @@ class HarnessLiveBatchProgress(_StrictModel):
     total_calls: int = Field(default=0, ge=0, le=200)
     total_tokens: int = Field(default=0, ge=0)
     total_cost_usd: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "mixed", "unavailable"
+    ] = "unavailable"
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ] = "unavailable"
+    billing_status: Literal[
+        "supported", "unsupported", "mixed", "unavailable"
+    ] = "unavailable"
+    provider_response_ids_observed: int = Field(default=0, ge=0, le=200)
     duration_ms: float = Field(default=0.0, ge=0.0)
     max_total_duration_seconds: float = Field(ge=5.0, le=3_600.0)
     max_total_cost_usd: float = Field(gt=0.0, le=10.0)
@@ -455,6 +491,7 @@ class HarnessLiveBatchProgress(_StrictModel):
         "persisted",
         "total_calls",
         "total_tokens",
+        "provider_response_ids_observed",
         mode="before",
     )
     @classmethod
@@ -470,7 +507,23 @@ class HarnessLiveBatchProgress(_StrictModel):
         if self.stage == "preparing" and (self.completed or self.persisted):
             raise ValueError("Live batch preparing 阶段不能声明已完成样本。")
         if self.actual_cost_exceeded != (self.total_cost_usd > self.max_total_cost_usd):
-            raise ValueError("Live batch progress 超支标记与实际成本不一致。")
+            raise ValueError("Live batch progress 超支标记与已记录成本不一致。")
+        if self.provider_response_ids_observed > self.total_calls:
+            raise ValueError("Live batch progress Provider response id 数量超过确认调用数。")
+        if (self.cost_source == "provider_billing") != (
+            self.billing_status == "supported"
+        ):
+            raise ValueError("Live batch progress Provider 账单来源与状态不一致。")
+        if self.cost_source == "rate_card_estimate" and (
+            self.rate_card_source == "unavailable"
+        ):
+            raise ValueError("Live batch progress rate-card 估算缺少单价来源。")
+        if self.stage == "completed" and self.rate_card_source == "fallback":
+            raise ValueError("completed Live batch progress 不得使用 fallback 单价来源。")
+        if self.cost_source in {"provider_billing", "unavailable"} and (
+            self.rate_card_source != "unavailable"
+        ):
+            raise ValueError("Live batch progress 非 rate-card 成本不得声明单价来源。")
         if self.stage == "completed" and (
             self.completed != self.requested or self.persisted != self.requested
         ):
@@ -503,6 +556,16 @@ class HarnessLiveBatchExecution:
     total_calls: int
     total_tokens: int
     total_cost_usd: float
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "mixed", "unavailable"
+    ]
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ]
+    billing_status: Literal[
+        "supported", "unsupported", "mixed", "unavailable"
+    ]
+    provider_response_ids_observed: int
     duration_ms: float
 
 
@@ -590,6 +653,10 @@ class HarnessLiveSuiteRunner:
         total_calls = 0
         total_tokens = 0
         total_cost = 0.0
+        cost_sources: set[str] = set()
+        rate_card_sources: set[str] = set()
+        billing_statuses: set[str] = set()
+        provider_response_ids_observed = 0
         terminal_code = ""
         terminal_message = ""
         for _sample_index in range(request.repetitions):
@@ -621,6 +688,10 @@ class HarnessLiveSuiteRunner:
             total_calls += sample.calls
             total_tokens += sample.tokens
             total_cost = round(total_cost + sample.cost_usd, 9)
+            cost_sources.update(sample.cost_sources)
+            rate_card_sources.update(sample.rate_card_sources)
+            billing_statuses.update(sample.billing_statuses)
+            provider_response_ids_observed += sample.provider_response_ids_observed
             await _notify_live_batch_progress(
                 on_progress,
                 HarnessLiveBatchProgress(
@@ -639,6 +710,10 @@ class HarnessLiveSuiteRunner:
                     total_calls=total_calls,
                     total_tokens=total_tokens,
                     total_cost_usd=total_cost,
+                    cost_source=_aggregate_evidence_state(cost_sources),
+                    rate_card_source=_aggregate_evidence_state(rate_card_sources),
+                    billing_status=_aggregate_evidence_state(billing_statuses),
+                    provider_response_ids_observed=provider_response_ids_observed,
                     duration_ms=_elapsed_ms(self._monotonic(), started),
                     max_total_duration_seconds=request.max_total_duration_seconds,
                     max_total_cost_usd=request.max_total_cost_usd,
@@ -652,9 +727,9 @@ class HarnessLiveSuiteRunner:
                 ),
             )
             if total_cost > request.max_total_cost_usd:
-                terminal_code = "actual_cost_exceeded"
+                terminal_code = "observed_cost_exceeded"
                 terminal_message = (
-                    "Provider 回执成本超过批次剩余预算；已停止后续样本且不会重试。"
+                    "已记录成本超过批次剩余预算；已停止后续样本且不会重试，来源见成本证据。"
                 )
                 break
             if sample.halt_batch:
@@ -731,6 +806,10 @@ class HarnessLiveSuiteRunner:
             total_calls=total_calls,
             total_tokens=total_tokens,
             total_cost_usd=total_cost,
+            cost_source=_aggregate_evidence_state(cost_sources),
+            rate_card_source=_aggregate_evidence_state(rate_card_sources),
+            billing_status=_aggregate_evidence_state(billing_statuses),
+            provider_response_ids_observed=provider_response_ids_observed,
             duration_ms=_elapsed_ms(self._monotonic(), started),
         )
 
@@ -751,6 +830,10 @@ class HarnessLiveSuiteRunner:
         calls = 0
         tokens = 0
         spent = 0.0
+        cost_sources: set[str] = set()
+        rate_card_sources: set[str] = set()
+        billing_statuses: set[str] = set()
+        provider_response_ids_observed = 0
         halt_batch = False
         halt_code = ""
         for case in loaded.suite.cases:
@@ -788,6 +871,13 @@ class HarnessLiveSuiteRunner:
             calls += int(receipt.provider_call_attempted)
             tokens += receipt.total_tokens
             spent = round(spent + receipt.cost_usd, 9)
+            if receipt.provider_call_attempted:
+                cost_sources.add(receipt.cost_source)
+                rate_card_sources.add(receipt.rate_card_source)
+                billing_statuses.add(receipt.billing_status)
+                provider_response_ids_observed += int(
+                    bool(receipt.provider_response_id_sha256)
+                )
             remaining_cost = max(0.0, max_cost_usd - spent)
             if receipt.provider_model:
                 providers.add(receipt.provider_model)
@@ -826,6 +916,10 @@ class HarnessLiveSuiteRunner:
             calls=calls,
             tokens=tokens,
             cost_usd=spent,
+            cost_sources=frozenset(cost_sources),
+            rate_card_sources=frozenset(rate_card_sources),
+            billing_statuses=frozenset(billing_statuses),
+            provider_response_ids_observed=provider_response_ids_observed,
             halt_batch=halt_batch,
             code=halt_code,
         )
@@ -838,8 +932,20 @@ class _LiveSampleExecution:
     calls: int
     tokens: int
     cost_usd: float
+    cost_sources: frozenset[str]
+    rate_card_sources: frozenset[str]
+    billing_statuses: frozenset[str]
+    provider_response_ids_observed: int
     halt_batch: bool
     code: str
+
+
+def _aggregate_evidence_state(values: set[str]) -> str:
+    if not values:
+        return "unavailable"
+    if len(values) == 1:
+        return next(iter(values))
+    return "mixed"
 
 
 def resolve_declared_live_eval_suite(
@@ -967,6 +1073,12 @@ def build_live_batch_status(
         "total_calls": execution.total_calls,
         "total_tokens": execution.total_tokens,
         "total_cost_usd": execution.total_cost_usd,
+        "cost_source": execution.cost_source,
+        "rate_card_source": execution.rate_card_source,
+        "billing_status": execution.billing_status,
+        "provider_response_ids_observed": (
+            execution.provider_response_ids_observed
+        ),
         "duration_ms": execution.duration_ms,
         "max_total_duration_seconds": execution.request.max_total_duration_seconds,
         "max_total_cost_usd": execution.request.max_total_cost_usd,
@@ -1000,6 +1112,10 @@ def live_batch_terminal_progress(
         total_calls=status.total_calls,
         total_tokens=status.total_tokens,
         total_cost_usd=status.total_cost_usd,
+        cost_source=status.cost_source,
+        rate_card_source=status.rate_card_source,
+        billing_status=status.billing_status,
+        provider_response_ids_observed=status.provider_response_ids_observed,
         duration_ms=status.duration_ms,
         max_total_duration_seconds=status.max_total_duration_seconds,
         max_total_cost_usd=status.max_total_cost_usd,
@@ -1021,13 +1137,18 @@ def render_live_batch_status(status: HarnessLiveBatchStatus) -> str:
         f"- 模型：`{status.model}`",
         f"- 样本：完成 {status.completed}/{status.requested} · 已保存 {status.persisted}",
         f"- 调用：{status.total_calls} · Token：{status.total_tokens}",
-        f"- 成本：${status.total_cost_usd:.6f} / ${status.max_total_cost_usd:.6f}",
+        f"- 成本：${status.total_cost_usd:.6f} / ${status.max_total_cost_usd:.6f} "
+        f"（{_batch_cost_source_label(status.cost_source)}）",
+        f"- 单价来源：{_batch_rate_card_source_label(status.rate_card_source)}",
+        f"- Provider 账单：{_batch_billing_status_label(status.billing_status)}",
+        f"- Provider Response ID：{status.provider_response_ids_observed}/"
+        f"{status.total_calls} 个调用取得摘要",
         f"- 耗时：{status.duration_ms:.0f}ms / {status.max_total_duration_seconds:.1f}s",
     ]
     if status.provider_model:
         lines.append(f"- Provider 实际模型：`{status.provider_model}`")
     if status.actual_cost_exceeded:
-        lines.append("- 成本保护：Provider 回执显示实际成本已超出上限，后续样本已停止")
+        lines.append("- 成本保护：已记录成本超过上限，后续样本已停止；证据来源见上方")
     if status.identity_sha256:
         lines.append(
             f"- Identity：`{status.identity_sha256[:12]}…` · "
@@ -1039,6 +1160,35 @@ def render_live_batch_status(status: HarnessLiveBatchStatus) -> str:
         lines.append(f"- 说明：{status.message}")
     lines.append(f"- 回执：`{status.receipt_sha256[:12]}…`")
     return "\n".join(lines)
+
+
+def _batch_cost_source_label(value: str) -> str:
+    return {
+        "rate_card_estimate": "能力单价估算",
+        "provider_billing": "Provider 账单",
+        "mixed": "混合来源",
+        "unavailable": "来源不可用",
+    }.get(value, "来源不可用")
+
+
+def _batch_rate_card_source_label(value: str) -> str:
+    return {
+        "catalog": "Provider catalog",
+        "config": "用户模型配置",
+        "litellm": "LiteLLM 元数据",
+        "mixed": "混合来源",
+        "fallback": "未验证 fallback",
+        "unavailable": "不可用",
+    }.get(value, "不可用")
+
+
+def _batch_billing_status_label(value: str) -> str:
+    return {
+        "supported": "已取得账单证据",
+        "unsupported": "当前适配器未集成账单 API",
+        "mixed": "批次内状态不一致",
+        "unavailable": "状态不可用",
+    }.get(value, "状态不可用")
 
 
 def _live_case_result(
@@ -1109,6 +1259,11 @@ def _live_case_result(
             output_tokens=receipt.output_tokens,
             total_tokens=receipt.total_tokens,
             cost_usd=receipt.cost_usd,
+            usage_source=receipt.usage_source,
+            cost_source=receipt.cost_source,
+            rate_card_source=receipt.rate_card_source,
+            billing_status=receipt.billing_status,
+            provider_response_id_sha256=receipt.provider_response_id_sha256,
             response_sha256=receipt.response_sha256,
             transport_receipt_sha256=receipt.receipt_sha256,
             batch_request_sha256=batch_request_sha256,

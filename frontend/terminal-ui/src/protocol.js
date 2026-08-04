@@ -3002,12 +3002,49 @@ function normalizeHarnessLiveEvalProgress(payload) {
     throw new Error("harness/eval-batch live Provider 模型无效");
   }
   const totalCalls = harnessNonnegativeInteger(payload.total_calls, "live calls");
+  const costSource = harnessChoice(
+    payload.cost_source ?? "unavailable",
+    "live cost source",
+    new Set(["rate_card_estimate", "provider_billing", "mixed", "unavailable"]),
+  );
+  const rateCardSource = harnessChoice(
+    payload.rate_card_source ?? "unavailable",
+    "live rate-card source",
+    new Set(["catalog", "config", "litellm", "mixed", "fallback", "unavailable"]),
+  );
+  const billingStatus = harnessChoice(
+    payload.billing_status ?? "unavailable",
+    "live billing status",
+    new Set(["supported", "unsupported", "mixed", "unavailable"]),
+  );
+  const responseIdsObserved = harnessNonnegativeInteger(
+    payload.provider_response_ids_observed ?? 0,
+    "live provider response ids",
+  );
   const maxDuration = harnessNonnegativeFiniteNumber(
     payload.max_total_duration_seconds,
     "live max duration",
   );
-  if (totalCalls > 200 || maxDuration < 5 || maxDuration > 3600) {
+  if (
+    totalCalls > 200
+    || responseIdsObserved > totalCalls
+    || maxDuration < 5
+    || maxDuration > 3600
+  ) {
     throw new Error("harness/eval-batch live 调用或时限上限无效");
+  }
+  if ((costSource === "provider_billing") !== (billingStatus === "supported")) {
+    throw new Error("harness/eval-batch live Provider 账单来源与状态不一致");
+  }
+  if (
+    (costSource === "rate_card_estimate" && rateCardSource === "unavailable")
+    || (["provider_billing", "unavailable"].includes(costSource)
+      && rateCardSource !== "unavailable")
+  ) {
+    throw new Error("harness/eval-batch live 单价来源与成本来源不一致");
+  }
+  if (stage === "completed" && rateCardSource === "fallback") {
+    throw new Error("harness/eval-batch live completed 不得使用 fallback 单价");
   }
   return {
     schema_version: 1,
@@ -3026,6 +3063,10 @@ function normalizeHarnessLiveEvalProgress(payload) {
     total_calls: totalCalls,
     total_tokens: harnessNonnegativeInteger(payload.total_tokens, "live tokens"),
     total_cost_usd: totalCost,
+    cost_source: costSource,
+    rate_card_source: rateCardSource,
+    billing_status: billingStatus,
+    provider_response_ids_observed: responseIdsObserved,
     duration_ms: harnessNonnegativeFiniteNumber(payload.duration_ms, "live duration"),
     max_total_duration_seconds: maxDuration,
     max_total_cost_usd: maxCost,

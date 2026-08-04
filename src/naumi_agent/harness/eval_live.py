@@ -105,6 +105,20 @@ class HarnessLiveEvalReceipt(_StrictModel):
     output_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    cost_source: Literal[
+        "rate_card_estimate", "provider_billing", "unavailable"
+    ] = "unavailable"
+    rate_card_source: Literal[
+        "catalog", "config", "litellm", "mixed", "fallback", "unavailable"
+    ] = "unavailable"
+    billing_status: Literal[
+        "supported", "unsupported", "unavailable"
+    ] = "unavailable"
+    usage_source: Literal["transport_response", "unavailable"] = "unavailable"
+    provider_response_id_sha256: str = Field(
+        default="",
+        pattern=r"^(?:|[0-9a-f]{64})$",
+    )
     duration_ms: float = Field(default=0.0, ge=0.0)
     max_duration_seconds: float = Field(ge=1.0, le=120.0)
     max_cost_usd: float = Field(gt=0.0, le=10.0)
@@ -178,6 +192,26 @@ class HarnessLiveEvalReceipt(_StrictModel):
             raise ValueError("通过的 Live Eval 回执缺少完整成功证据。")
         if self.exact_match and not self.response_sha256:
             raise ValueError("exact_match 必须绑定 response digest。")
+        if self.cost_source == "rate_card_estimate" and (
+            self.usage_source != "transport_response"
+            or self.rate_card_source == "unavailable"
+        ):
+            raise ValueError("Live Eval rate-card 估算缺少用量或单价来源。")
+        if self.cost_source != "rate_card_estimate" and self.rate_card_source != "unavailable":
+            raise ValueError("非 rate-card 成本不得声明单价来源。")
+        if (self.cost_source == "provider_billing") != (
+            self.billing_status == "supported"
+        ):
+            raise ValueError("provider_billing 与 supported 账单状态必须同时出现。")
+        if self.provider_response_id_sha256 and not self.provider_call_attempted:
+            raise ValueError("Provider response id 必须绑定已尝试调用。")
+        if self.status is HarnessLiveEvalStatus.PASSED and (
+            self.usage_source != "transport_response"
+            or self.cost_source == "unavailable"
+            or self.billing_status == "unavailable"
+            or self.rate_card_source == "fallback"
+        ):
+            raise ValueError("通过的 Live Eval 回执缺少调用证据来源。")
         return self
 
 
@@ -343,6 +377,13 @@ class HarnessLiveEvalRunner:
             "total_tokens": _nonnegative_int(response.usage.input_tokens)
             + _nonnegative_int(response.usage.output_tokens),
             "cost_usd": _nonnegative_float(response.usage.cost_usd),
+            "cost_source": response.call_evidence.cost_source,
+            "rate_card_source": response.call_evidence.rate_card_source,
+            "billing_status": response.call_evidence.billing_status,
+            "usage_source": response.call_evidence.usage_source,
+            "provider_response_id_sha256": (
+                response.call_evidence.provider_response_id_sha256
+            ),
             "duration_ms": duration_ms,
             "preflight_max_cost_usd": preflight_max_cost,
             "provider_call_attempted": True,
@@ -363,6 +404,30 @@ class HarnessLiveEvalRunner:
                 code=usage_error,
                 message="Provider 未返回可信完整用量，结果不可进入成本比较。",
             )
+        if response.call_evidence.usage_source != "transport_response":
+            return _receipt(
+                **common,
+                status=HarnessLiveEvalStatus.PARTIAL,
+                code="usage_provenance_unavailable",
+                message="模型适配器未证明 token 用量来自 transport response。",
+            )
+        if response.call_evidence.cost_source == "unavailable":
+            return _receipt(
+                **common,
+                status=HarnessLiveEvalStatus.PARTIAL,
+                code="cost_provenance_unavailable",
+                message="模型适配器未声明成本证据来源。",
+            )
+        if (
+            response.call_evidence.cost_source == "rate_card_estimate"
+            and response.call_evidence.rate_card_source in {"fallback", "unavailable"}
+        ):
+            return _receipt(
+                **common,
+                status=HarnessLiveEvalStatus.PARTIAL,
+                code="cost_rate_source_unverified",
+                message="模型适配器使用未验证单价来源，成本估算不可进入 Live Eval。",
+            )
         if content_invalid:
             return _receipt(
                 **common,
@@ -374,8 +439,8 @@ class HarnessLiveEvalRunner:
             return _receipt(
                 **common,
                 status=HarnessLiveEvalStatus.PARTIAL,
-                code="actual_cost_exceeded",
-                message="Provider 报告的实际成本超过本次预算，已停止后续调用。",
+                code="observed_cost_exceeded",
+                message="已记录成本超过本次预算，已停止后续调用；其来源见成本证据。",
             )
         if not provider_model:
             return _receipt(
@@ -438,7 +503,16 @@ def render_harness_live_eval(receipt: HarnessLiveEvalReceipt) -> str:
         [
             f"- 用量：{receipt.input_tokens} 输入 / {receipt.output_tokens} 输出 / "
             f"{receipt.total_tokens} 合计 token",
-            f"- 成本：${receipt.cost_usd:.6f} / 上限 ${receipt.max_cost_usd:.6f}",
+            f"- 成本：${receipt.cost_usd:.6f} / 上限 ${receipt.max_cost_usd:.6f} "
+            f"（{_cost_source_label(receipt.cost_source)}）",
+            f"- 单价来源：{_rate_card_source_label(receipt.rate_card_source)}",
+            f"- Provider 账单：{_billing_status_label(receipt.billing_status)}",
+            "- Provider Response ID："
+            + (
+                f"`{receipt.provider_response_id_sha256[:12]}…`（仅保存摘要）"
+                if receipt.provider_response_id_sha256
+                else "不可用"
+            ),
             f"- 耗时：{receipt.duration_ms:.0f}ms / 上限 {receipt.max_duration_seconds:.1f}s",
             f"- 响应摘要：`{receipt.response_sha256[:12]}…`"
             if receipt.response_sha256
@@ -464,6 +538,11 @@ def _receipt(
     output_tokens: int = 0,
     total_tokens: int = 0,
     cost_usd: float = 0.0,
+    cost_source: str = "unavailable",
+    rate_card_source: str = "unavailable",
+    billing_status: str = "unavailable",
+    usage_source: str = "unavailable",
+    provider_response_id_sha256: str = "",
     duration_ms: float = 0.0,
     preflight_max_cost_usd: float = 0.0,
     provider_call_attempted: bool = False,
@@ -485,6 +564,11 @@ def _receipt(
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "cost_usd": round(cost_usd, 9),
+        "cost_source": cost_source,
+        "rate_card_source": rate_card_source,
+        "billing_status": billing_status,
+        "usage_source": usage_source,
+        "provider_response_id_sha256": provider_response_id_sha256,
         "duration_ms": round(duration_ms, 3),
         "max_duration_seconds": request.max_duration_seconds,
         "max_cost_usd": request.max_cost_usd,
@@ -497,6 +581,33 @@ def _receipt(
         "baseline_eligible": False,
     }
     return HarnessLiveEvalReceipt.model_validate({**raw, "receipt_sha256": _sha256_payload(raw)})
+
+
+def _cost_source_label(value: str) -> str:
+    return {
+        "rate_card_estimate": "能力单价估算",
+        "provider_billing": "Provider 账单",
+        "unavailable": "来源不可用",
+    }.get(value, "来源不可用")
+
+
+def _rate_card_source_label(value: str) -> str:
+    return {
+        "catalog": "Provider catalog",
+        "config": "用户模型配置",
+        "litellm": "LiteLLM 元数据",
+        "mixed": "混合来源",
+        "fallback": "未验证 fallback",
+        "unavailable": "不可用",
+    }.get(value, "不可用")
+
+
+def _billing_status_label(value: str) -> str:
+    return {
+        "supported": "已取得 Provider 账单证据",
+        "unsupported": "当前适配器未集成账单 API",
+        "unavailable": "状态不可用",
+    }.get(value, "状态不可用")
 
 
 def _challenge_messages(challenge: str) -> list[dict[str, str]]:
