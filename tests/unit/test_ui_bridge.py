@@ -78,6 +78,10 @@ from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     new_recovery_attempt,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorkerSnapshot,
+    PursuitTerminalWorkerState,
+)
 from naumi_agent.orchestrator.subagent_manager import SubTask
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.store import ChatRunStore
@@ -7458,6 +7462,8 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "interaction_filter": "all",
         "interaction_cursor": "",
         "selected_interaction_id": "",
+        "terminal_outbox_enabled": False,
+        "terminal_outbox_worker_snapshot": None,
     }]
 
     writer.seek(0)
@@ -7486,6 +7492,8 @@ async def test_bridge_emits_typed_goal_snapshot_and_legacy_fallback(
         "interaction_filter": "all",
         "interaction_cursor": "",
         "selected_interaction_id": "",
+        "terminal_outbox_enabled": False,
+        "terminal_outbox_worker_snapshot": None,
     }
 
 
@@ -7497,6 +7505,22 @@ async def test_bridge_goal_snapshot_contains_real_recovery_authorities(tmp_path)
     engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
     harness_store = HarnessStore(tmp_path / "harness.db")
     engine.harness_service = SimpleNamespace(store=harness_store)
+    engine.pursuit_terminal_outbox_enabled = True
+    engine.pursuit_terminal_outbox_worker_snapshot = lambda: (
+        PursuitTerminalOutboxWorkerSnapshot(
+            state=PursuitTerminalWorkerState.WAITING,
+            pass_count=2,
+            claimed_count=0,
+            delivered_count=0,
+            retry_scheduled_count=0,
+            failure_count=0,
+            consecutive_empty_passes=1,
+            next_delay_seconds=60,
+            last_failure_codes=(),
+            started_at="2026-08-05T00:00:00+00:00",
+            last_pass_at="2026-08-05T00:01:00+00:00",
+        )
+    )
     goal = engine.goal_store.create("显示真实恢复健康")
     run = PursuitRun(
         id="pursuit-bridge-recovery",
@@ -7550,6 +7574,10 @@ async def test_bridge_goal_snapshot_contains_real_recovery_authorities(tmp_path)
     assert recovery["lease"]["owner_id"] == "worker-a"
     assert recovery["heartbeat"]["health"] == "healthy"
     assert recovery["heartbeat"]["instance_id"] == "worker-a"
+    terminal = record["payload"]["terminal_outbox"]
+    assert terminal["status"] == "idle"
+    assert terminal["worker_state"] == "waiting"
+    assert terminal["pass_count"] == 2
 
 
 def _bridge_recovery_checkpoint(run_id: str) -> PursuitCheckpoint:

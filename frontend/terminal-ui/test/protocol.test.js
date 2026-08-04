@@ -1949,6 +1949,29 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
         lease_expired: true,
         owner_id: "private-owner",
       },
+      terminal_outbox: {
+        schema_version: 1,
+        enabled: true,
+        status: "recovering",
+        worker_state: "waiting",
+        assessed_at: "2026-07-18T00:00:01+00:00",
+        counts: {
+          total_pending: 3,
+          due: 1,
+          backoff: 1,
+          live_claimed: 1,
+          expired_claimed: 0,
+          private_owner: "drop",
+        },
+        pass_count: 8,
+        delivered_count: 4,
+        retry_scheduled_count: 2,
+        failure_count: 0,
+        next_delay_seconds: 12.5,
+        failure_codes: [],
+        warning: "",
+        private_owner: "drop",
+      },
     },
   }).payload;
 
@@ -1990,10 +2013,40 @@ test("goal snapshot is strict, bounded, and preserves stable Pursuit links", () 
   assert.equal(normalized.interaction_filter, "pending");
   assert.equal(normalized.interaction_has_more, true);
   assert.equal(normalized.selected_interaction.options[0].label, "继续");
+  assert.equal(normalized.terminal_outbox.status, "recovering");
+  assert.equal(normalized.terminal_outbox.counts.total_pending, 3);
+  assert.equal(Object.hasOwn(normalized.terminal_outbox, "private_owner"), false);
+  assert.equal(Object.hasOwn(normalized.terminal_outbox.counts, "private_owner"), false);
   assert.equal(Object.hasOwn(normalized.selected_interaction, "owner_id"), false);
   assert.equal(
     Object.hasOwn(normalized.selected_interaction.options[0], "private_payload"),
     false,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        terminal_outbox: {
+          ...normalized.terminal_outbox,
+          counts: { ...normalized.terminal_outbox.counts, total_pending: 4 },
+        },
+      },
+    }),
+    /分类计数/,
+  );
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "goals/snapshot",
+      payload: {
+        ...normalized,
+        terminal_outbox: {
+          ...normalized.terminal_outbox,
+          assessed_at: "2026-07-18T00:00:01",
+        },
+      },
+    }),
+    /带时区/,
   );
   assert.throws(
     () => normalizeServerRecord({

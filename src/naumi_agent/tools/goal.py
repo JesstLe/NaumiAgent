@@ -16,6 +16,9 @@ from naumi_agent.orchestrator.goal_store import (
     format_goal,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorkerSnapshot,
+)
 from naumi_agent.tools.base import Tool, ToolMetadata
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot_with_recovery,
@@ -81,6 +84,10 @@ class GoalStatusTool(Tool):
         *,
         recovery_authority: PursuitRecoveryAuthority | None = None,
         workspace_root: str | Path | None = None,
+        terminal_outbox_enabled: bool | None = None,
+        terminal_outbox_worker_snapshot: (
+            Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None
+        ) = None,
     ) -> None:
         self._store = store
         self._pursuit_store = pursuit_store
@@ -88,6 +95,8 @@ class GoalStatusTool(Tool):
         self._workspace_root = Path(
             workspace_root or store.base_dir.parent
         ).expanduser().resolve()
+        self._terminal_outbox_enabled = terminal_outbox_enabled
+        self._terminal_outbox_worker_snapshot = terminal_outbox_worker_snapshot
 
     @property
     def name(self) -> str:
@@ -124,7 +133,20 @@ class GoalStatusTool(Tool):
         if goal is None:
             if goal_id:
                 return f"目标不存在：{goal_id}"
-            return "当前没有未完成目标。使用 `/goal <目标>` 创建。"
+            return render_goal_pursuit_snapshot(
+                await build_goal_pursuit_snapshot_with_recovery(
+                    self._store,
+                    self._pursuit_store,
+                    self._recovery_authority,
+                    workspace_root=self._workspace_root,
+                    limit=1,
+                    include_finished=False,
+                    terminal_outbox_enabled=self._terminal_outbox_enabled,
+                    terminal_outbox_worker_snapshot=(
+                        self._terminal_outbox_worker_snapshot
+                    ),
+                )
+            )
         if goal_id:
             return format_goal(goal)
         return render_goal_pursuit_snapshot(
@@ -135,6 +157,10 @@ class GoalStatusTool(Tool):
                 workspace_root=self._workspace_root,
                 limit=1,
                 include_finished=False,
+                terminal_outbox_enabled=self._terminal_outbox_enabled,
+                terminal_outbox_worker_snapshot=(
+                    self._terminal_outbox_worker_snapshot
+                ),
             )
         )
 
@@ -147,6 +173,10 @@ class GoalListTool(Tool):
         *,
         recovery_authority: PursuitRecoveryAuthority | None = None,
         workspace_root: str | Path | None = None,
+        terminal_outbox_enabled: bool | None = None,
+        terminal_outbox_worker_snapshot: (
+            Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None
+        ) = None,
     ) -> None:
         self._store = store
         self._pursuit_store = pursuit_store
@@ -154,6 +184,8 @@ class GoalListTool(Tool):
         self._workspace_root = Path(
             workspace_root or store.base_dir.parent
         ).expanduser().resolve()
+        self._terminal_outbox_enabled = terminal_outbox_enabled
+        self._terminal_outbox_worker_snapshot = terminal_outbox_worker_snapshot
 
     @property
     def name(self) -> str:
@@ -223,6 +255,10 @@ class GoalListTool(Tool):
                 interaction_filter=interaction_filter,
                 interaction_cursor=interaction_cursor,
                 selected_interaction_id=selected_interaction_id,
+                terminal_outbox_enabled=self._terminal_outbox_enabled,
+                terminal_outbox_worker_snapshot=(
+                    self._terminal_outbox_worker_snapshot
+                ),
             )
         )
 
@@ -484,6 +520,10 @@ def create_goal_tools(
     pursuit_tool_getter: Callable[[], Tool | None],
     recovery_authority: PursuitRecoveryAuthority | None = None,
     workspace_root: str | Path | None = None,
+    terminal_outbox_enabled: bool | None = None,
+    terminal_outbox_worker_snapshot: (
+        Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None
+    ) = None,
 ) -> list[Tool]:
     return [
         GoalCreateTool(store, session_id_getter),
@@ -492,12 +532,16 @@ def create_goal_tools(
             pursuit_store,
             recovery_authority=recovery_authority,
             workspace_root=workspace_root,
+            terminal_outbox_enabled=terminal_outbox_enabled,
+            terminal_outbox_worker_snapshot=terminal_outbox_worker_snapshot,
         ),
         GoalListTool(
             store,
             pursuit_store,
             recovery_authority=recovery_authority,
             workspace_root=workspace_root,
+            terminal_outbox_enabled=terminal_outbox_enabled,
+            terminal_outbox_worker_snapshot=terminal_outbox_worker_snapshot,
         ),
         GoalUpdateTool(store),
         GoalInteractionDetailTool(

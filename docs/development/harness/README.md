@@ -23,7 +23,8 @@ RunLease epoch 并复验准入后的 checkpoint、机械裁判与 run 状态后�
 HAR-10.8f1 又把完整终态 checkpoint 与 pending outbox、attempt 收口与 delivered 分别放入同一
 PursuitStore 事务，并提供有界认证恢复目录。
 HAR-10.8f2a 已在该边界上补齐 durable claim/expiry/takeover/backoff、默认 startup/periodic worker 与
-shutdown drain；typed backlog 和 New UI/TUI 投影留给 10.8f2b。
+shutdown drain；HAR-10.8f2b 又把有界 backlog 与 worker health 同源投影到 Bridge、New UI 和
+Goal Tool/Textual TUI fallback。控制动作、push stream、dead-letter/retention 仍未完成。
 UI-18.5b1 已让 New UI 通过 typed ToolExecution 消费该账本，并让 TUI fallback 显示同源动作、共享命令
 和最近 attempt；前端不解析工具文案生成结果状态。
 HAR-10.2a 在 Harness DB v12 建立 typed heartbeat，并接入 Pursuit lease worker 的 acquire/renew/release；

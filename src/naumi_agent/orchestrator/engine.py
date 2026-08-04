@@ -1718,6 +1718,12 @@ class AgentEngine:
             pursuit_tool_getter=lambda: self._tool_registry.get("pursue_goal"),
             recovery_authority=self._harness_store,
             workspace_root=self.workspace_root,
+            terminal_outbox_enabled=(
+                self._config.harness.pursuit_terminal_outbox.enabled
+            ),
+            terminal_outbox_worker_snapshot=(
+                self.pursuit_terminal_outbox_worker_snapshot
+            ),
         ):
             self._tool_registry.register(tool)
 
@@ -2695,6 +2701,10 @@ class AgentEngine:
         self,
     ) -> PursuitTerminalOutboxWorkerSnapshot:
         return self._pursuit_terminal_outbox_worker.snapshot()
+
+    @property
+    def pursuit_terminal_outbox_enabled(self) -> bool:
+        return self._config.harness.pursuit_terminal_outbox.enabled
 
     def evolution_patch_recovery_status(self) -> dict[str, object]:
         """Return a content-free startup recovery summary for CLI/UI surfaces."""

@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.harness.interaction import HarnessInteractionRecord
 from naumi_agent.orchestrator.goal_store import Goal, GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import PursuitRun
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorkerSnapshot,
+)
 from naumi_agent.ui.pursuit_recovery import (
     PursuitRecoveryAuthority,
     build_pursuit_recovery_snapshot,
@@ -23,6 +29,72 @@ MAX_GOAL_PANEL_EVIDENCE = 20
 MAX_GOAL_PANEL_WAITS = 20
 MAX_GOAL_PANEL_INTERACTIONS = 50
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_FAILURE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+class TerminalOutboxCounts(BaseModel):
+    """Bounded public counts; dispatch identities never cross the UI boundary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    total_pending: int = Field(ge=0, le=10_000)
+    due: int = Field(ge=0, le=10_000)
+    backoff: int = Field(ge=0, le=10_000)
+    live_claimed: int = Field(ge=0, le=10_000)
+    expired_claimed: int = Field(ge=0, le=10_000)
+
+    @model_validator(mode="after")
+    def _sum_matches_total(self) -> TerminalOutboxCounts:
+        classified = (
+            self.due
+            + self.backoff
+            + self.live_claimed
+            + self.expired_claimed
+        )
+        if classified != self.total_pending:
+            raise ValueError("terminal outbox 分类计数与总数不一致。")
+        return self
+
+
+class TerminalOutboxProjection(BaseModel):
+    """Typed Goal-page projection of the automatic terminal recovery service."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    enabled: bool
+    status: Literal[
+        "idle", "recovering", "backoff", "degraded", "disabled", "unavailable"
+    ]
+    worker_state: Literal[
+        "running", "waiting", "stopping", "stopped", "disabled", "unavailable"
+    ]
+    assessed_at: str = Field(min_length=1, max_length=64)
+    counts: TerminalOutboxCounts
+    pass_count: int = Field(ge=0)
+    delivered_count: int = Field(ge=0)
+    retry_scheduled_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    next_delay_seconds: float = Field(ge=0, le=604_800)
+    failure_codes: tuple[str, ...] = Field(max_length=8)
+    warning: str = Field(max_length=500)
+
+    @model_validator(mode="after")
+    def _state_is_coherent(self) -> TerminalOutboxProjection:
+        _parse_aware(self.assessed_at)
+        if any(not _FAILURE_CODE_RE.fullmatch(code) for code in self.failure_codes):
+            raise ValueError("terminal outbox failure code 无效。")
+        if not self.enabled and (
+            self.status != "disabled" or self.worker_state != "disabled"
+        ):
+            raise ValueError("terminal outbox 关闭状态不一致。")
+        if self.enabled and self.worker_state == "disabled":
+            raise ValueError("terminal outbox 启用状态不得标记为 disabled。")
+        if self.status == "unavailable" and not self.warning:
+            raise ValueError("terminal outbox unavailable 必须说明原因。")
+        if self.status == "degraded" and not self.failure_codes:
+            raise ValueError("terminal outbox degraded 必须包含 failure code。")
+        return self
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +111,7 @@ class GoalPursuitSnapshot:
     interaction_cursor: str = ""
     interaction_next_cursor: str = ""
     selected_interaction: dict[str, Any] | None = None
+    terminal_outbox: TerminalOutboxProjection | None = None
 
     def to_protocol_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +133,11 @@ class GoalPursuitSnapshot:
             "selected_interaction": (
                 dict(self.selected_interaction)
                 if self.selected_interaction is not None
+                else None
+            ),
+            "terminal_outbox": (
+                self.terminal_outbox.model_dump(mode="json")
+                if self.terminal_outbox is not None
                 else None
             ),
         }
@@ -137,6 +215,11 @@ async def build_goal_pursuit_snapshot_with_recovery(
     interaction_filter: str = "all",
     interaction_cursor: str = "",
     selected_interaction_id: str = "",
+    terminal_outbox_enabled: bool | None = None,
+    terminal_outbox_worker_snapshot: (
+        Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None
+    ) = None,
+    assessed_at: str | None = None,
 ) -> GoalPursuitSnapshot:
     """Add typed recovery facts while preserving the bounded base projection."""
     base = build_goal_pursuit_snapshot(
@@ -253,6 +336,111 @@ async def build_goal_pursuit_snapshot_with_recovery(
         interaction_cursor=_bounded_text(interaction_cursor, 1_024),
         interaction_next_cursor=_bounded_text(next_cursor, 1_024),
         selected_interaction=selected_interaction,
+        terminal_outbox=_build_terminal_outbox_projection(
+            pursuit_store,
+            enabled=terminal_outbox_enabled,
+            worker_snapshot=terminal_outbox_worker_snapshot,
+            assessed_at=assessed_at,
+        ),
+    )
+
+
+def _build_terminal_outbox_projection(
+    pursuit_store: PursuitStore,
+    *,
+    enabled: bool | None,
+    worker_snapshot: Callable[[], PursuitTerminalOutboxWorkerSnapshot] | None,
+    assessed_at: str | None,
+) -> TerminalOutboxProjection | None:
+    if enabled is None:
+        return None
+    now = _parse_aware(assessed_at or datetime.now(UTC).isoformat())
+    counts = TerminalOutboxCounts(
+        total_pending=0,
+        due=0,
+        backoff=0,
+        live_claimed=0,
+        expired_claimed=0,
+    )
+    warnings: list[str] = []
+    if pursuit_store.db_path.is_file():
+        try:
+            backlog = pursuit_store.terminal_outbox_backlog(
+                now=now.timestamp(),
+                scan_limit=10_000,
+            )
+            counts = TerminalOutboxCounts(
+                total_pending=backlog.total_pending,
+                due=backlog.due,
+                backoff=backlog.backoff,
+                live_claimed=backlog.live_claimed,
+                expired_claimed=backlog.expired_claimed,
+            )
+        except Exception:
+            warnings.append(
+                "终态恢复队列读取失败，请运行 `/doctor` 检查 Pursuit Store。"
+            )
+
+    snapshot: PursuitTerminalOutboxWorkerSnapshot | None = None
+    if enabled and worker_snapshot is not None:
+        try:
+            candidate = worker_snapshot()
+            if not isinstance(candidate, PursuitTerminalOutboxWorkerSnapshot):
+                raise TypeError("terminal outbox worker snapshot 类型无效")
+            snapshot = candidate
+        except Exception:
+            warnings.append("终态恢复 Worker 状态读取失败，请运行 `/doctor`。")
+    elif enabled:
+        warnings.append("终态恢复 Worker 状态 authority 未接入。")
+
+    warning = _bounded_text("；".join(warnings), 500)
+
+    raw_failure_codes = list(
+        snapshot.last_failure_codes if snapshot is not None else ()
+    )
+    if (
+        enabled
+        and snapshot is not None
+        and snapshot.state.value == "stopped"
+        and "worker_stopped" not in raw_failure_codes
+    ):
+        raw_failure_codes.append("worker_stopped")
+    failure_codes = tuple(dict.fromkeys(
+        _bounded_text(item, 64) for item in raw_failure_codes
+    ))[:8]
+    if not enabled:
+        status = "disabled"
+    elif warning:
+        status = "unavailable"
+    elif failure_codes:
+        status = "degraded"
+    elif counts.due or counts.live_claimed or counts.expired_claimed:
+        status = "recovering"
+    elif counts.backoff:
+        status = "backoff"
+    else:
+        status = "idle"
+    return TerminalOutboxProjection(
+        enabled=enabled,
+        status=status,
+        worker_state=(
+            snapshot.state.value
+            if snapshot is not None
+            else "disabled" if not enabled else "unavailable"
+        ),
+        assessed_at=now.isoformat(),
+        counts=counts,
+        pass_count=snapshot.pass_count if snapshot is not None else 0,
+        delivered_count=snapshot.delivered_count if snapshot is not None else 0,
+        retry_scheduled_count=(
+            snapshot.retry_scheduled_count if snapshot is not None else 0
+        ),
+        failure_count=snapshot.failure_count if snapshot is not None else 0,
+        next_delay_seconds=(
+            snapshot.next_delay_seconds if snapshot is not None else 0
+        ),
+        failure_codes=failure_codes,
+        warning=warning,
     )
 
 
@@ -311,6 +499,8 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
         lines.append("> 目标记录较多，当前视图已按上限截断。")
     if snapshot.warnings:
         lines.extend(["", "#### 警告", *[f"- {item}" for item in snapshot.warnings]])
+    if snapshot.terminal_outbox is not None:
+        lines.extend(["", *_render_terminal_outbox(snapshot.terminal_outbox)])
     if (
         snapshot.interactions
         or snapshot.interaction_filter != "all"
@@ -349,6 +539,42 @@ def render_goal_pursuit_snapshot(snapshot: GoalPursuitSnapshot) -> str:
             _render_interaction_detail_projection(snapshot.selected_interaction),
         ])
     return "\n".join(lines).rstrip()
+
+
+def _render_terminal_outbox(value: TerminalOutboxProjection) -> list[str]:
+    counts = value.counts
+    status = {
+        "idle": "空闲",
+        "recovering": "正在恢复",
+        "backoff": "等待重试",
+        "degraded": "部分失败",
+        "disabled": "已关闭",
+        "unavailable": "状态不可用",
+    }[value.status]
+    worker = {
+        "running": "运行中",
+        "waiting": "等待中",
+        "stopping": "正在停止",
+        "stopped": "已停止",
+        "disabled": "已关闭",
+        "unavailable": "不可用",
+    }[value.worker_state]
+    lines = [
+        "#### 终态自动恢复",
+        f"- 状态：{status} · Worker {worker}",
+        f"- 队列：{counts.total_pending} · 到期 {counts.due} · "
+        f"退避 {counts.backoff} · 认领 {counts.live_claimed} · "
+        f"过期认领 {counts.expired_claimed}",
+        f"- 累计：轮次 {value.pass_count} · 已收口 {value.delivered_count} · "
+        f"已退避 {value.retry_scheduled_count} · 失败 {value.failure_count}",
+    ]
+    if value.enabled and value.worker_state in {"running", "waiting"}:
+        lines.append(f"- 下次检查：约 {value.next_delay_seconds:.1f}s")
+    if value.failure_codes:
+        lines.append(f"- 最近失败：{', '.join(value.failure_codes)}")
+    if value.warning:
+        lines.append(f"- ⚠️ {value.warning}")
+    return lines
 
 
 def render_goal_interaction_detail(
@@ -769,6 +995,8 @@ def _recovery_attempt_label(value: str) -> str:
 __all__ = [
     "GOAL_PANEL_SCHEMA_VERSION",
     "GoalPursuitSnapshot",
+    "TerminalOutboxCounts",
+    "TerminalOutboxProjection",
     "build_goal_pursuit_snapshot",
     "build_goal_pursuit_snapshot_with_recovery",
     "render_goal_interaction_detail",

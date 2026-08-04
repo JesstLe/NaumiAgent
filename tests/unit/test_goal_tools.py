@@ -15,6 +15,10 @@ from naumi_agent.harness.store import HarnessStore
 from naumi_agent.orchestrator.goal_store import GoalStatus, GoalStore
 from naumi_agent.orchestrator.pursuit import PursuitRun, PursuitRunStatus
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorkerSnapshot,
+    PursuitTerminalWorkerState,
+)
 from naumi_agent.tools.goal import create_goal_tools
 from naumi_agent.user_interaction import normalize_interaction_request
 
@@ -35,6 +39,8 @@ def _tool_map(
     pursuit_store: PursuitStore | None = None,
     interaction_authority: HarnessStore | None = None,
     workspace_root: str | Path | None = None,
+    terminal_outbox_enabled: bool | None = None,
+    terminal_outbox_worker_snapshot=None,
 ):
     tools = create_goal_tools(
         store,
@@ -43,6 +49,8 @@ def _tool_map(
         pursuit_tool_getter=lambda: pursuit,
         recovery_authority=interaction_authority,
         workspace_root=workspace_root,
+        terminal_outbox_enabled=terminal_outbox_enabled,
+        terminal_outbox_worker_snapshot=terminal_outbox_worker_snapshot,
     )
     return {tool.name: tool for tool in tools}
 
@@ -107,6 +115,36 @@ async def test_goal_status_uses_shared_typed_projection_for_pursuit(tmp_path) ->
     assert "pursuit_tool_view" in output
     assert "成功标准：3/5" in output
     assert "等待验证" in output
+
+
+@pytest.mark.asyncio
+async def test_goal_status_renders_terminal_outbox_for_tui_fallback(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    worker = PursuitTerminalOutboxWorkerSnapshot(
+        state=PursuitTerminalWorkerState.WAITING,
+        pass_count=3,
+        claimed_count=0,
+        delivered_count=0,
+        retry_scheduled_count=0,
+        failure_count=0,
+        consecutive_empty_passes=2,
+        next_delay_seconds=60,
+        last_failure_codes=(),
+        started_at="2026-08-05T00:00:00+00:00",
+        last_pass_at="2026-08-05T00:01:00+00:00",
+    )
+    tools = _tool_map(
+        goal_store,
+        terminal_outbox_enabled=True,
+        terminal_outbox_worker_snapshot=lambda: worker,
+    )
+
+    output = await tools["goal_status"].execute()
+
+    assert "终态自动恢复" in output
+    assert "当前没有未完成目标" in output
+    assert "状态：空闲 · Worker 等待中" in output
+    assert "累计：轮次 3" in output
 
 
 @pytest.mark.asyncio
