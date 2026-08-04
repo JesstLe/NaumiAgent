@@ -592,6 +592,7 @@ def _normalize_client_payload(
         action = str(payload.get("action") or "").strip().lower()
         decision_note = str(payload.get("decision_note") or "").strip()
         defer_days = payload.get("defer_days", 0)
+        merge_into_id = str(payload.get("merge_into_id") or "").strip()
         confirmed = payload.get("confirmed", False)
         if len(session_id) > 500:
             raise ValueError("Workbench session_id 不能超过 500 个字符。")
@@ -599,9 +600,9 @@ def _normalize_client_payload(
             char in proposal_id for char in ("\x00", "\r", "\n")
         ):
             raise ValueError("Workbench proposal_id 格式无效。")
-        if action not in {"approve", "reject", "defer", "issue_contract"}:
+        if action not in {"approve", "reject", "defer", "merge", "issue_contract"}:
             raise ValueError(
-                "Proposal UI action 仅支持 approve/reject/defer/issue_contract。"
+                "Proposal UI action 仅支持 approve/reject/defer/merge/issue_contract。"
             )
         if len(decision_note) > 2_000 or any(
             char in decision_note for char in ("\x00", "\r")
@@ -620,6 +621,15 @@ def _normalize_client_payload(
                 raise ValueError("延后 Proposal 只支持 1、7 或 30 天。")
         elif defer_days not in {0, None}:
             raise ValueError("非 defer Proposal action 不接受 defer_days。")
+        if action == "merge":
+            if not merge_into_id or len(merge_into_id) > 128 or any(
+                char in merge_into_id for char in ("\x00", "\r", "\n")
+            ):
+                raise ValueError("merge Proposal 必须提供有效 merge_into_id。")
+            if merge_into_id == proposal_id:
+                raise ValueError("Proposal 不能 merge 到自身。")
+        elif merge_into_id:
+            raise ValueError("非 merge Proposal action 不接受 merge_into_id。")
         if action == "issue_contract" and decision_note:
             raise ValueError("签发 Experiment Contract 不接受 decision_note。")
         if not isinstance(confirmed, bool):
@@ -633,6 +643,8 @@ def _normalize_client_payload(
         }
         if action == "defer":
             normalized["defer_days"] = defer_days
+        if action == "merge":
+            normalized["merge_into_id"] = merge_into_id
         return normalized
 
     if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:

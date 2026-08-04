@@ -43,6 +43,7 @@ from naumi_agent.workbench.proposal_governance import (
     ProposalAction,
     ProposalCooldownDecision,
     ProposalGovernanceConflictError,
+    eligible_proposal_merge_targets,
     evaluate_proposal_cooldown,
     plan_proposal_transition,
     validate_merge_target,
@@ -858,6 +859,14 @@ class WorkbenchService:
             session_id, [task.id for task in tasks]
         )
         proposals = await self._workbench_store.list_proposals_for_snapshot(session_id)
+        proposal_snapshots = []
+        for proposal in proposals:
+            snapshot = self._proposal_to_dict(proposal)
+            snapshot["merge_target_ids"] = [
+                target.id
+                for target in eligible_proposal_merge_targets(proposal, proposals)
+            ]
+            proposal_snapshots.append(snapshot)
         worktrees, worktrees_status, worktrees_code, worktrees_total = (
             await self._worktree_snapshot(tasks_by_id=tasks_by_id, leases=leases)
         )
@@ -880,7 +889,7 @@ class WorkbenchService:
             "issues": issues,
             "leases": leases,
             "bids": [self._bid_to_dict(bid) for bid in bids],
-            "proposals": [self._proposal_to_dict(p) for p in proposals],
+            "proposals": proposal_snapshots,
             "failures": failures,
             "events": [self._event_to_dict(event, tasks_by_id) for event in events],
             "validation_runs": validation_runs,

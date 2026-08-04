@@ -23,7 +23,8 @@ UI-15.5b 又将 Textual TUI 的全局 pointer sensitivity 从默认每事件 2 �
 VerticalScroll 页面沿用同一逐行策略。
 UI-10.6b1 已让 New UI/Textual TUI 在同一 Workbench Reviews 页延后 open Proposal：原因必填，
 时长限定 1/7/30 天并由 Python authority clock 生成精确 cooldown；normal 一次确认，bypass 参数齐全后
-直接执行且不出现二次确认。merge 目标选择器仍未实现。
+直接执行且不出现二次确认。UI-10.6b2 又补齐 merge：后端投影同 Candidate 的较新 open revision，
+两端键盘选择，Service 最终重验并以 CAS 写入 source merged/target open 和审计；bypass 不增加二次确认。
 UI-13.1c 与 ARC-01.4c1-4c3 已让 New UI/TUI Doctor 都展示各自 terminal lifecycle 的实时 retention 状态；
 UI-13.1d/1e 又让两端从同一只读 Worker authority 看见 capacity 与 durable queue backlog；缺少
 Composition 注入时明确标记不可观测，而不是伪造调度健康。UI-17.1 已为两端发布 14 项严格 capability manifest；

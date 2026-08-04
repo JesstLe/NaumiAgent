@@ -3495,6 +3495,7 @@ test("normalizes workbench snapshot events", () => {
     source_revision: 2, source_occurrence_count: 4,
     source_proposal_id: `evp_${"b".repeat(24)}`, proposal_kind: "code",
     reviewer: "", decision_at: "", cooldown_until: "", merged_into_id: "",
+    merge_target_ids: ["proposal-2"],
     governance_policy_version: "", created_at: "now", updated_at: "now",
     private_prompt: "drop-me",
   };
@@ -3542,6 +3543,7 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.active_selection.task_id, "7");
   assert.equal(record.payload.active_selection.review_kind, "proposal");
   assert.equal(record.payload.proposals[0].source_revision, 2);
+  assert.deepEqual(record.payload.proposals[0].merge_target_ids, ["proposal-2"]);
   assert.equal(Object.hasOwn(record.payload.proposals[0], "private_prompt"), false);
   assert.equal(record.payload.missions[0].title, "Mac 工作台");
   assert.equal(record.payload.worktrees_status, "ready");
@@ -3552,6 +3554,21 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.worktrees[0].agent_id, "Agent-1");
   assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
   assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
+
+  for (const mergeTargetIds of [
+    ["proposal-2", "proposal-2"],
+    ["proposal-2\nforged"],
+    ["x".repeat(129)],
+    Array.from({ length: 21 }, (_, index) => `proposal-${index}`),
+  ]) {
+    assert.throws(() => normalizeServerRecord({
+      type: "workbench/snapshot",
+      payload: {
+        ...record.payload,
+        proposals: [{ ...proposal, merge_target_ids: mergeTargetIds }],
+      },
+    }), /merge_target_ids/);
+  }
 });
 
 test("normalizes strict workbench proposal action results", () => {
@@ -3598,6 +3615,37 @@ test("normalizes strict workbench proposal action results", () => {
   }).payload;
   assert.equal(deferred.action, "defer");
   assert.equal(deferred.proposal.state, "deferred");
+
+  const merged = normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      ...payload,
+      action: "merge",
+      message: "Proposal 已合并。",
+      proposal: {
+        ...payload.proposal,
+        state: "merged",
+        merged_into_id: "proposal-2",
+      },
+    },
+  }).payload;
+  assert.equal(merged.action, "merge");
+  assert.equal(merged.proposal.merged_into_id, "proposal-2");
+  for (const invalidProposal of [
+    null,
+    { ...payload.proposal, state: "open", merged_into_id: "proposal-2" },
+    { ...payload.proposal, state: "merged", merged_into_id: "" },
+    { ...payload.proposal, id: "proposal-other", state: "merged", merged_into_id: "proposal-2" },
+  ]) {
+    assert.throws(() => normalizeServerRecord({
+      type: "workbench/proposal/action_result",
+      payload: {
+        ...payload,
+        action: "merge",
+        proposal: invalidProposal,
+      },
+    }), /merge 绑定无效/);
+  }
 
   const contract = {
     schema_version: 1,

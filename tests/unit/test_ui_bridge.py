@@ -125,6 +125,7 @@ from naumi_agent.user_interaction import (
     UserInteractionUnavailableError,
     normalize_interaction_request,
 )
+from naumi_agent.workbench.models import ProposalSourceKind
 from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
@@ -704,12 +705,18 @@ class _ProposalActionWorkbenchService:
             **kwargs,
         })
         self.revision += 1
-        states = {"approve": "approved", "reject": "rejected", "defer": "deferred"}
+        states = {
+            "approve": "approved",
+            "reject": "rejected",
+            "defer": "deferred",
+            "merge": "merged",
+        }
         return {
             "id": proposal_id,
             "session_id": session_id,
             "state": states[kwargs["action"].value],
             "cooldown_until": kwargs.get("defer_until", ""),
+            "merged_into_id": kwargs.get("merge_into_id", ""),
         }
 
     async def dashboard_snapshot(self, session_id: str) -> dict[str, Any]:
@@ -4461,6 +4468,48 @@ async def test_bridge_bypass_defers_proposal_with_authority_clock_preset() -> No
 
 
 @pytest.mark.asyncio
+async def test_bridge_bypass_merges_into_explicit_backend_target() -> None:
+    engine = _TaskSubmitFakeEngine()
+    engine._session = SimpleNamespace(id="session-task")
+    engine.permission_mode = PermissionMode.BYPASS
+    engine._permission_checker = PermissionChecker(
+        PermissionMode.BYPASS,
+        workspace_root=str(Path.cwd()),
+    )
+    service = _ProposalActionWorkbenchService()
+    engine.workbench_service = service
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-merge-bypass",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "session-task",
+                "proposal_id": "proposal-1",
+                "action": "merge",
+                "merge_into_id": "proposal-2",
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    governed = service.governed[0]
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["proposal"]["state"] == "merged"
+    assert result["payload"]["proposal"]["merged_into_id"] == "proposal-2"
+    assert governed["action"] is ProposalAction.MERGE
+    assert governed["merge_into_id"] == "proposal-2"
+
+
+@pytest.mark.asyncio
 async def test_bridge_proposal_action_rejects_cross_session_write() -> None:
     engine = _TaskSubmitFakeEngine()
     engine._session = SimpleNamespace(id="session-task")
@@ -4637,6 +4686,105 @@ async def test_real_sqlite_bridge_defer_persists_cooldown_and_audit(
         and event["subject_id"] == proposal["id"]
         for event in events["events"]
     )
+
+
+@pytest.mark.asyncio
+async def test_real_sqlite_bridge_merge_preserves_target_and_audits_source(
+    tmp_path: Path,
+) -> None:
+    engine = create_agent_engine(
+        AppConfig(
+            memory=MemoryConfig(
+                session_db_path=str(tmp_path / "sessions.db"),
+                vector_db_path=str(tmp_path / "chroma"),
+            )
+        )
+    )
+    engine.set_runtime_mode("bypass")
+    session = await engine.get_or_create_session("Proposal merge real chain")
+    mission = await engine.workbench_service.create_mission(
+        session_id=session.id,
+        title="合并 Proposal",
+        goal="验证 Bridge 到 SQLite 的 merge 闭环",
+    )
+    issue = await engine.workbench_service.create_issue(
+        session_id=session.id,
+        mission_id=mission.id,
+        title="收口 Candidate revisions",
+        description="只合并治理记录，不执行代码",
+    )
+    common = {
+        "session_id": session.id,
+        "mission_id": mission.id,
+        "task_id": str(issue["task_id"]),
+        "agent_id": "Evolution-Agent",
+        "impact_scope": "Workbench proposal governance",
+        "source_kind": ProposalSourceKind.EVOLUTION_CANDIDATE,
+        "source_id": "evc_" + "a" * 24,
+        "source_occurrence_count": 4,
+        "generator_version": "evolution-proposal-v1",
+        "proposal_kind": "code",
+    }
+    source = await engine.workbench_service.create_proposal(
+        **common,
+        title="Candidate revision 2",
+        source_revision=2,
+        source_sha256="2" * 64,
+        source_proposal_id="evp_" + "2" * 24,
+        idempotency_key="evolution:evp_" + "2" * 24,
+    )
+    target = await engine.workbench_service.create_proposal(
+        **common,
+        title="Candidate revision 3",
+        source_revision=3,
+        source_sha256="3" * 64,
+        source_proposal_id="evp_" + "3" * 24,
+        idempotency_key="evolution:evp_" + "3" * 24,
+    )
+    snapshot = await engine.workbench_service.dashboard_snapshot(session.id)
+    projected_source = next(
+        item for item in snapshot["proposals"] if item["id"] == source["id"]
+    )
+    assert projected_source["merge_target_ids"] == [target["id"]]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+
+    await bridge.handle_client_record(
+        {
+            "id": "proposal-real-merge",
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": session.id,
+                "proposal_id": source["id"],
+                "action": "merge",
+                "merge_into_id": target["id"],
+                "confirmed": False,
+            },
+        }
+    )
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "workbench/proposal/action_result"
+    )
+    persisted_source = await engine.workbench_service.get_proposal(
+        session.id, source["id"]
+    )
+    persisted_target = await engine.workbench_service.get_proposal(
+        session.id, target["id"]
+    )
+    events = await engine.workbench_service.list_events(session.id)
+    assert result["payload"]["status"] == "completed"
+    assert result["payload"]["proposal"]["merged_into_id"] == target["id"]
+    assert persisted_source is not None and persisted_source["state"] == "merged"
+    assert persisted_target is not None and persisted_target["state"] == "open"
+    assert sum(
+        event["type"] == "proposal.merged"
+        and event["subject_id"] == source["id"]
+        for event in events["events"]
+    ) == 1
 
 
 @pytest.mark.asyncio

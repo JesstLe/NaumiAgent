@@ -141,9 +141,18 @@
 - 绝对 `defer_until` 由 Python authority clock 生成，再交给既有 HAR-09.5b1 状态机执行 CAS、cooldown
   和 `proposal.deferred` 审计；前端不自行计算治理状态。
 - normal 模式保留一次确认；bypass 在参数齐全后直接执行且不显示二次确认，但不跳过状态机与审计。
-- 详见 `UI-10-6b1-proposal-defer.md`。merge 选择器仍属于后续 UI-10.6b2。
+- defer 详见 `UI-10-6b1-proposal-defer.md`；merge 由下述 UI-10.6b2 独立交付。
+
+### UI-10.6b2 已实现：Proposal merge
+
+- Python authority 为每个 open Proposal 投影最多 20 个同 Candidate、较新 revision、仍 open 的目标；
+  New UI/TUI 不自行推导合法性。
+- 两端都支持键盘选择目标；normal 保留一次明确确认，bypass 选择目标后直接提交且不追加二次确认。
+- Bridge 将目标纳入权限参数，Service 写入前重新读取并重验 session/Candidate/revision/state，随后以 CAS
+  把源标记为 merged、保留目标 open 并写 `proposal.merged` 审计。
+- 详见 `UI-10-6b2-proposal-merge.md`。merge 不执行代码、不签发实验或 promotion 权限。
 
 ### 尚未完成
 
 - UI-10.5：Timeline tab 与 revisioned 增量事件生产。
-- UI-10.6b2：Proposal merge 目标选择器与 waiting Approval 动作。
+- UI-10.6：waiting Approval 动作。

@@ -80,6 +80,9 @@ function renderPageState(snapshot) {
   if (snapshot.proposal_action?.phase === "defer_duration") {
     return color(ANSI.yellow, "延后时长 · 1 一天 · 2 七天 · 3 三十天 · Esc 取消");
   }
+  if (snapshot.proposal_action?.phase === "merge_target") {
+    return color(ANSI.yellow, "合并目标 · ↑/↓ 选择 · Enter 继续 · Esc 取消");
+  }
   if (snapshot.proposal_action?.phase === "confirm") {
     return color(ANSI.yellow, "确认操作 · y/Enter 确认 · n/Esc 取消");
   }
@@ -217,7 +220,7 @@ function renderProposalDetail(snapshot, proposal, width) {
       : color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
     proposal.state === "approved"
       ? color(ANSI.dim, "c 签发/重开 Contract · r 刷新 · Esc 返回")
-      : color(ANSI.dim, "a 批准 · x 拒绝 · d 延后 · r 刷新 · Esc 返回"),
+      : color(ANSI.dim, "a 批准 · x 拒绝 · d 延后 · m 合并 · r 刷新 · Esc 返回"),
   ];
   if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
   if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
@@ -233,6 +236,18 @@ function renderProposalDetail(snapshot, proposal, width) {
         color(ANSI.yellow, "选择延后时长"),
         color(ANSI.cyan, "1 一天 · 2 七天 · 3 三十天 · Esc 取消"),
       );
+    } else if (action.phase === "merge_target") {
+      const targetIds = array(action.merge_target_ids);
+      const byId = new Map(array(snapshot.proposals).map((item) => [item.id, item]));
+      lines.push(color(ANSI.yellow, "选择同 Candidate 的较新 open Proposal"));
+      for (const [index, targetId] of targetIds.entries()) {
+        const target = object(byId.get(targetId));
+        const marker = index === Number(action.merge_target_index) ? "▶" : "·";
+        lines.push(
+          `${marker} r${Number(target.source_revision) || 0} · ${compactText(target.title || targetId, 500)} · ${compactText(targetId, 128)}`,
+        );
+      }
+      lines.push(color(ANSI.dim, "↑/↓ 选择 · Enter 继续 · Esc 取消"));
     } else if (action.phase === "confirm") {
       const label = action.action === "approve"
         ? "批准"
@@ -240,7 +255,9 @@ function renderProposalDetail(snapshot, proposal, width) {
           ? "签发不可执行 Experiment Contract"
           : action.action === "defer"
             ? `延后 ${Number(action.defer_days) || 0} 天`
-            : "拒绝";
+            : action.action === "merge"
+              ? `合并到 ${compactText(action.merge_into_id, 128)}`
+              : "拒绝";
       lines.push(
         color(ANSI.yellow, `确认${label}此 Proposal？`),
         action.decision_note ? color(ANSI.dim, `原因 · ${compactText(action.decision_note, 1_000)}`) : "",
@@ -597,6 +614,10 @@ function durationMs(startedAt, completedAt) {
 
 function array(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function object(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function number(value) {

@@ -15,6 +15,7 @@ from naumi_agent.tui.app import NaumiApp
 from naumi_agent.tui.workbench_overview import (
     ExperimentContractIssueScreen,
     ProposalDecisionScreen,
+    ProposalMergeScreen,
     WorkbenchOverviewScreen,
     format_workbench_overview_markdown,
     format_workbench_reviews_markdown,
@@ -408,6 +409,101 @@ async def test_textual_workbench_bypass_approves_proposal_without_modal() -> Non
 
 
 @pytest.mark.asyncio
+async def test_textual_workbench_merges_into_selected_authority_target() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _merge_proposal_snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "proposals": [initial["proposals"][1]],  # type: ignore[index]
+        "counts": {**initial["counts"], "reviews": 1},  # type: ignore[arg-type]
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.govern_proposal = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "id": "proposal-1",
+            "state": "merged",
+            "merged_into_id": "proposal-2",
+        }
+    )
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "m")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, ProposalMergeScreen)
+        await pilot.press("enter")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        engine.workbench_service.govern_proposal.assert_awaited_once_with(
+            "session-workbench-tui",
+            "proposal-1",
+            action=ProposalAction.MERGE,
+            reviewer="Human",
+            decision_note="",
+            merge_into_id="proposal-2",
+        )
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert "Proposal 已合并到 proposal-2" in rendered
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_rejects_merge_without_authority_target() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _proposal_snapshot()
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        return_value=initial
+    )
+    engine.workbench_service.govern_proposal = AsyncMock()  # type: ignore[method-assign]
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "m")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        assert "没有同 Candidate" in app.screen.query_one(
+            "#workbench-content", Markdown
+        )._markdown
+        engine.workbench_service.govern_proposal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_rejects_malformed_merge_target_projection() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _merge_proposal_snapshot()
+    source = initial["proposals"][0]  # type: ignore[index]
+    source["merge_target_ids"] = ["proposal-2", "proposal-2"]
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        return_value=initial
+    )
+    engine.workbench_service.govern_proposal = AsyncMock()  # type: ignore[method-assign]
+    app = NaumiApp(engine)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "m")
+        await pilot.pause(0.05)
+
+        assert "目标快照格式无效" in app.screen.query_one(
+            "#workbench-content", Markdown
+        )._markdown
+        engine.workbench_service.govern_proposal.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_textual_workbench_issues_approved_contract_after_confirmation() -> None:
     engine = create_agent_engine(AppConfig())
     engine._session = SimpleNamespace(id="session-workbench-tui")
@@ -684,4 +780,21 @@ def _approved_proposal_snapshot() -> dict[str, object]:
     snapshot = _proposal_snapshot()
     proposal = snapshot["proposals"][0]  # type: ignore[index]
     proposal["state"] = "approved"
+    return snapshot
+
+
+def _merge_proposal_snapshot() -> dict[str, object]:
+    snapshot = _proposal_snapshot()
+    source = snapshot["proposals"][0]  # type: ignore[index]
+    source["merge_target_ids"] = ["proposal-2"]
+    snapshot["proposals"].append(  # type: ignore[union-attr]
+        {
+            **source,
+            "id": "proposal-2",
+            "title": "收紧 Harness 裁判 revision 3",
+            "source_revision": 3,
+            "merge_target_ids": [],
+        }
+    )
+    snapshot["counts"] = {**snapshot["counts"], "reviews": 2}  # type: ignore[arg-type]
     return snapshot

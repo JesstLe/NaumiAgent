@@ -93,7 +93,8 @@ Profile/Trust/Knowledge、Completion Gate、Store、实时持久化、EvidenceCo
 `src/naumi_agent/harness/`，状态库位于用户状态目录的 `harness.db`。
 UI-10.6b1 已在既有 HAR-09.5b1 Proposal governance authority 上补齐 New UI/TUI defer 入口：
 原因与 1/7/30 天预设由界面收集，精确时间由 Python authority clock 生成，normal 一次确认、bypass
-无二次确认；merge 交互与 HAR-09.6 outcome tracking 仍未完成。
+无二次确认。UI-10.6b2 又补齐同 Candidate 较新 open revision 的 merge 目标投影和两端选择器，最终
+Service 重验、CAS 与审计保持不变；HAR-09.6 outcome tracking 仍未完成。
 HAR-07.5b 已为 New UI 增加 `v` Evidence 焦点和 `/harness evidence`，并让 CLI/Textual TUI 复用相同
 Explain authority；HAR-07.4b1 已补齐空闲 Bridge 有界重启、重新协商和精确 session 回执恢复。
 ARC-02.5a 又补齐两类安全回执的持久事件身份与 session cursor；ARC-02.5b 已补齐 New UI 持久 ACK、
