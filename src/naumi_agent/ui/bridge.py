@@ -423,6 +423,10 @@ def _fallback_slash_command_registry() -> list[dict[str, Any]]:
         {"command": "/permissions", "description": "显示待确认权限面板"},
         {"command": "/doctor", "description": "运行环境诊断"},
         {
+            "command": "/extensions",
+            "description": "查看扩展来源、优先级、冲突与无效清单",
+        },
+        {
             "command": "/harness",
             "description": "Harness 状态、重复评测、Baseline、运行解释、证据、知识、检查与信任",
         },

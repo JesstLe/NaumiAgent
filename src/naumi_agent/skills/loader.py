@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from naumi_agent.skills.skill import Skill, SkillError
@@ -29,6 +30,89 @@ from naumi_agent.skills.skill import Skill, SkillError
 logger = logging.getLogger(__name__)
 
 _SKILL_FILE = "SKILL.md"
+
+
+@dataclass(frozen=True)
+class SkillSource:
+    """One ordered skill discovery root used by the real loader."""
+
+    scope: str
+    path: Path
+    priority: int
+    available: bool = False
+    requires_trust_gate: bool = False
+
+
+@dataclass(frozen=True)
+class SkillCandidate:
+    """A selected, shadowed, or invalid SKILL.md discovered on disk."""
+
+    name: str
+    manifest_path: Path
+    source_scope: str
+    source_priority: int
+    state: str
+    reason_code: str = ""
+    selected_manifest_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class SkillDiscoverySnapshot:
+    """Exact discovery facts produced while loading skills."""
+
+    sources: tuple[SkillSource, ...]
+    candidates: tuple[SkillCandidate, ...]
+
+    @property
+    def selected_count(self) -> int:
+        return sum(item.state == "selected" for item in self.candidates)
+
+    @property
+    def shadowed_count(self) -> int:
+        return sum(item.state == "shadowed" for item in self.candidates)
+
+    @property
+    def invalid_count(self) -> int:
+        return sum(item.state == "invalid" for item in self.candidates)
+
+
+def build_skill_sources(
+    *,
+    workspace_root: Path,
+    configured_paths: list[str],
+    home: Path | None = None,
+) -> tuple[SkillSource, ...]:
+    """Build and de-duplicate the actual workspace/user/configured precedence."""
+
+    workspace = Path(workspace_root).expanduser().resolve()
+    user_home = (home or Path.home()).expanduser().resolve()
+    declarations: list[tuple[str, Path, bool]] = [
+        ("workspace", workspace / ".naumi" / "skills", True),
+        ("user", user_home / ".naumi" / "skills", False),
+    ]
+    for raw in configured_paths:
+        configured = Path(raw).expanduser()
+        if not configured.is_absolute():
+            configured = workspace / configured
+        declarations.append(("configured", configured, False))
+
+    sources: list[SkillSource] = []
+    seen: set[Path] = set()
+    for _declared_priority, (scope, raw_path, untrusted) in enumerate(declarations):
+        path = raw_path.resolve()
+        if path in seen:
+            continue
+        seen.add(path)
+        sources.append(
+            SkillSource(
+                scope=scope,
+                path=path,
+                priority=len(sources),
+                available=path.is_dir(),
+                requires_trust_gate=untrusted,
+            )
+        )
+    return tuple(sources)
 
 
 class SkillLoader:
@@ -43,9 +127,30 @@ class SkillLoader:
         skill = loader.get("code-review")
     """
 
-    def __init__(self, search_paths: list[str] | None = None) -> None:
-        self._search_paths = self._resolve_paths(search_paths or [])
+    def __init__(
+        self,
+        search_paths: list[str] | None = None,
+        *,
+        sources: tuple[SkillSource, ...] | None = None,
+    ) -> None:
+        if sources is None:
+            resolved = self._resolve_paths(search_paths or [])
+            self._sources = tuple(
+                SkillSource(
+                    scope="configured",
+                    path=path,
+                    priority=index,
+                    available=True,
+                )
+                for index, path in enumerate(resolved)
+            )
+        else:
+            self._sources = tuple(sources)
         self._skills: dict[str, Skill] = {}
+        self._discovery_snapshot = SkillDiscoverySnapshot(
+            sources=self._sources,
+            candidates=(),
+        )
 
     @staticmethod
     def _resolve_paths(paths: list[str]) -> list[Path]:
@@ -66,9 +171,23 @@ class SkillLoader:
         返回所有成功加载的 Skill 列表。
         """
         loaded: list[Skill] = []
-        seen_names: set[str] = set()
+        seen_names: dict[str, Path] = {}
+        candidates: list[SkillCandidate] = []
+        self._skills.clear()
 
-        for search_dir in self._search_paths:
+        self._sources = tuple(
+            SkillSource(
+                scope=source.scope,
+                path=source.path,
+                priority=source.priority,
+                available=source.path.is_dir(),
+                requires_trust_gate=source.requires_trust_gate,
+            )
+            for source in self._sources
+        )
+
+        for source in self._sources:
+            search_dir = source.path
             if not search_dir.is_dir():
                 continue
 
@@ -84,10 +203,30 @@ class SkillLoader:
                     skill = self._load_one(skill_file)
                 except SkillError as e:
                     logger.warning("Failed to load skill: %s", e)
+                    candidates.append(
+                        SkillCandidate(
+                            name=skill_dir.name,
+                            manifest_path=skill_file,
+                            source_scope=source.scope,
+                            source_priority=source.priority,
+                            state="invalid",
+                            reason_code="invalid_manifest",
+                        )
+                    )
                     continue
                 except Exception:
                     logger.exception(
                         "Unexpected error loading skill: %s", skill_file,
+                    )
+                    candidates.append(
+                        SkillCandidate(
+                            name=skill_dir.name,
+                            manifest_path=skill_file,
+                            source_scope=source.scope,
+                            source_priority=source.priority,
+                            state="invalid",
+                            reason_code="read_failed",
+                        )
                     )
                     continue
 
@@ -97,13 +236,37 @@ class SkillLoader:
                         skill.name,
                         skill_file,
                     )
+                    candidates.append(
+                        SkillCandidate(
+                            name=skill.name,
+                            manifest_path=skill_file,
+                            source_scope=source.scope,
+                            source_priority=source.priority,
+                            state="shadowed",
+                            reason_code="lower_priority_duplicate",
+                            selected_manifest_path=seen_names[skill.name],
+                        )
+                    )
                     continue
 
-                seen_names.add(skill.name)
+                seen_names[skill.name] = skill_file
                 self._skills[skill.name] = skill
                 loaded.append(skill)
+                candidates.append(
+                    SkillCandidate(
+                        name=skill.name,
+                        manifest_path=skill_file,
+                        source_scope=source.scope,
+                        source_priority=source.priority,
+                        state="selected",
+                    )
+                )
                 logger.info("Loaded skill '%s' from %s", skill.name, skill_dir)
 
+        self._discovery_snapshot = SkillDiscoverySnapshot(
+            sources=self._sources,
+            candidates=tuple(candidates),
+        )
         return loaded
 
     def _load_one(self, path: Path) -> Skill:
@@ -120,6 +283,12 @@ class SkillLoader:
     def all(self) -> list[Skill]:
         """返回所有已加载的 Skill."""
         return list(self._skills.values())
+
+    @property
+    def discovery_snapshot(self) -> SkillDiscoverySnapshot:
+        """Return the same ordered discovery facts that selected loaded skills."""
+
+        return self._discovery_snapshot
 
     @property
     def names(self) -> list[str]:

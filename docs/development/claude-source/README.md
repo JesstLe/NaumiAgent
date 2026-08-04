@@ -22,5 +22,7 @@ CC-01 治理先行；CC-02 是 Ink 决策实验，CC-02.4a 已让实验 renderer
 event/keybinding 的 typed 符号差异；后续行为 fixture、影响路由与采纳报告仍不得绕过 source refresh
 approval。CC-03 的 Naumi Doctor export 产品合同已由 UI-13.5a 提供；
 CC-03.1a 已增加绑定 source identity、license scope、source symbol、target symbol 与 target test 的
-核心行为清单，因此 CC-03 可标记为 `partial`。完整行为矩阵、语义迁移和 golden 对齐仍未完成，
-不得把 CC-03 标记为 implemented。
+核心行为清单，因此 CC-03 可标记为 `partial`。CC-04.1a 又把真实 Skill Loader 的 workspace/user/
+configured 来源、同名遮蔽与无效 manifest 形成 typed snapshot，并由 `/extensions skills` 和 Agent Tool
+共享读取；Plugin/MCP provenance、信任、安装、隔离与管理 UI 尚未完成。完整行为矩阵、语义迁移和
+golden 对齐仍未完成，不得把 CC-03 或 CC-04 标记为 implemented。

@@ -2470,6 +2470,18 @@ async def _handle_command(engine: Any, cmd: str) -> None:
                 )
         case "/skills":
             _show_skills(engine)
+        case "/extensions":
+            from naumi_agent.tools.extensions import execute_extension_discovery
+
+            try:
+                output = await execute_extension_discovery(
+                    engine,
+                    kind=arg or "skills",
+                )
+            except (ValueError, RuntimeError) as exc:
+                console.print(str(exc), style="yellow", markup=False)
+            else:
+                console.print(Markdown(output))
         case "/tools" | "/t":
             tools = engine.tool_registry.all()
             console.print("[bold]可用工具:[/bold]")
@@ -2972,6 +2984,7 @@ def _print_help() -> None:
         ("/version", "显示版本号"),
         ("/hooks", "显示已注册的钩子"),
         ("/skills", "列出已加载的 Skill"),
+        ("/extensions [skills]", "查看扩展来源、优先级、冲突与无效清单"),
         ("/glob <pattern> [directory='.' ]", "按 glob 规则搜索工作区文件路径"),
         ("/grep <pattern> [path='.'] [glob='**/*.py'] [max_matches=200] [case_sensitive=false]",
          "搜索文件内容（可配置过滤）"),
