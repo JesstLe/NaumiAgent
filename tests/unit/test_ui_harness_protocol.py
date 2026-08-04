@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from naumi_agent.harness.eval_live_suite import HarnessLiveBatchProgress
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBaselineView,
@@ -34,6 +35,7 @@ from naumi_agent.ui.harness_protocol import (
     harness_eval_batch_payload,
     harness_eval_promotion_payload,
     harness_explain_payload,
+    harness_live_eval_batch_payload,
     harness_replay_payload,
     harness_sandbox_eval_progress_payload,
     harness_sandbox_retry_result_payload,
@@ -164,6 +166,37 @@ def test_harness_eval_batch_payload_distinguishes_progress_and_terminal() -> Non
                 ),
             )
         )
+
+
+def test_harness_live_eval_payload_is_typed_and_privacy_bounded() -> None:
+    payload = harness_live_eval_batch_payload(
+        HarnessLiveBatchProgress(
+            stage="evaluating",
+            request_id="hlivebatch_" + "a" * 24,
+            request_sha256="b" * 64,
+            batch_id="live-batch-1",
+            suite_id="live-transport-core",
+            model="provider/model",
+            provider_model="model-20260805",
+            requested=5,
+            completed=2,
+            persisted=0,
+            total_calls=2,
+            total_tokens=56,
+            total_cost_usd=0.002,
+            duration_ms=12.3456,
+            max_total_duration_seconds=30,
+            max_total_cost_usd=0.1,
+        )
+    )
+
+    assert payload["kind"] == "live"
+    assert payload["terminal"] is False
+    assert payload["duration_ms"] == 12.346
+    assert payload["total_cost_usd"] == 0.002
+    assert "prompt" not in payload
+    assert "output" not in payload
+    assert "reasoning" not in payload
 
 
 def test_harness_sandbox_eval_progress_payload_preserves_checkpoint_facts() -> None:

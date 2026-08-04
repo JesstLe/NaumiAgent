@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from naumi_agent.cli.slash_router import execute_slash_command
 from naumi_agent.harness.eval_live_suite import (
     MAX_LIVE_SUITE_BYTES,
+    HarnessLiveBatchProgress,
     HarnessLiveBatchRequest,
     HarnessLiveBatchStatus,
     HarnessLiveSuiteRunner,
@@ -245,6 +247,34 @@ async def test_live_suite_runs_five_real_transport_samples_with_one_identity(
     tampered["total_tokens"] += 1
     with pytest.raises(ValidationError, match="receipt_sha256"):
         HarnessLiveBatchStatus.model_validate(tampered)
+
+
+@pytest.mark.asyncio
+async def test_live_progress_delivery_failure_does_not_retry_or_change_execution(
+    tmp_path: Path,
+) -> None:
+    workspace, suite_path = _workspace(tmp_path)
+    port = _ModelPort()
+
+    async def fail_delivery(_progress: HarnessLiveBatchProgress) -> None:
+        raise RuntimeError("private UI failure")
+
+    execution = await HarnessLiveSuiteRunner(port).run(
+        workspace_root=workspace,
+        loaded=load_live_eval_suite(workspace, suite_path),
+        profile_sha256="a" * 64,
+        profile_trusted=True,
+        model=MODEL,
+        repetitions=5,
+        batch_id="live-progress-failure",
+        max_total_duration_seconds=30,
+        max_total_cost_usd=0.1,
+        on_progress=fail_delivery,
+    )
+
+    assert execution.status == "completed"
+    assert execution.total_calls == 5
+    assert len(port.calls) == 5
 
 
 @pytest.mark.asyncio
@@ -502,6 +532,10 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
         model_port=port,
     )
     await service.trust(source="test")
+    progress: list[HarnessLiveBatchProgress] = []
+
+    async def capture_progress(item: HarnessLiveBatchProgress) -> None:
+        progress.append(item)
 
     status = await service.eval_live_batch(
         "live-transport-core",
@@ -510,6 +544,7 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
         model=MODEL,
         max_total_duration_seconds=30,
         max_total_cost_usd=0.1,
+        on_progress=capture_progress,
     )
     stored = await store.list_eval_results(
         workspace,
@@ -524,6 +559,28 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
     assert [item.sample_index for item in stored] == list(range(5))
     assert len({item.identity_sha256 for item in stored}) == 1
     assert stored[0].result.cases[0].live_evidence is not None
+    assert [item.stage for item in progress] == [
+        "preparing",
+        *("evaluating" for _ in range(5)),
+        *("persisting" for _ in range(5)),
+        "completed",
+    ]
+    assert [item.completed for item in progress if item.stage == "evaluating"] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert [item.persisted for item in progress if item.stage == "persisting"] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert progress[-1].identity_sha256 == status.identity_sha256
+    assert progress[-1].baseline_eligible is True
 
     tool = next(
         item for item in create_harness_tools(service) if item.name == "harness_eval_live_batch"
@@ -535,6 +592,155 @@ async def test_service_tool_and_h5a_share_one_live_batch_authority(
     assert moderate.allowed and moderate.requires_confirmation
     assert bypass.allowed and not bypass.requires_confirmation
 
+
+@pytest.mark.asyncio
+async def test_live_batch_tool_publishes_sanitized_runtime_progress(
+    tmp_path: Path,
+) -> None:
+    workspace, _suite_path = _workspace(tmp_path)
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.json"),
+        store=HarnessStore(tmp_path / "harness.db"),
+        model_port=_ModelPort(),
+    )
+    await service.trust(source="test")
+    tool = next(
+        item for item in create_harness_tools(service) if item.name == "harness_eval_live_batch"
+    )
+    events: list[tuple[str, dict[str, object]]] = []
+
+    async def capture(event: str, payload: dict[str, object]) -> None:
+        events.append((event, payload))
+
+    rendered = await tool.execute(
+        suite="live-transport-core",
+        repetitions=5,
+        batch_id="tool-live-progress",
+        model=MODEL,
+        max_total_duration_seconds=30,
+        max_total_cost_usd=0.1,
+        event_callback=capture,
+    )
+
+    assert "已完成" in rendered
+    assert events
+    assert {event for event, _payload in events} == {"harness_live_eval_progress"}
+    assert [payload["stage"] for _event, payload in events][-1] == "completed"
+    assert all(payload["kind"] == "live" for _event, payload in events)
+    serialized = json.dumps(events, ensure_ascii=False)
+    assert "NAUMI_LIVE_OK" not in serialized
+    assert "reasoning_content" not in serialized
+
+
+def test_live_progress_rejects_false_terminal_and_overspend_facts() -> None:
+    raw = {
+        "stage": "completed",
+        "request_id": "hlivebatch_" + "a" * 24,
+        "request_sha256": "b" * 64,
+        "batch_id": "batch",
+        "suite_id": "suite",
+        "model": MODEL,
+        "requested": 5,
+        "completed": 4,
+        "persisted": 4,
+        "max_total_duration_seconds": 30,
+        "max_total_cost_usd": 0.1,
+    }
+    with pytest.raises(ValidationError, match="completed"):
+        HarnessLiveBatchProgress.model_validate(raw)
+
+    raw.update(stage="partial", completed=1, persisted=1, total_cost_usd=0.2)
+    with pytest.raises(ValidationError, match="超支标记"):
+        HarnessLiveBatchProgress.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("request_id", "hlivebatch_not-a-digest", "request_id"),
+        ("batch_id", "unsafe batch", "batch_id"),
+        ("suite_id", "UnsafeSuite", "suite_id"),
+        ("model", "provider/model\nforged", "model"),
+        ("provider_model", "provider/model\nforged", "provider_model"),
+        ("requested", True, "计数"),
+        ("duration_ms", True, "布尔值"),
+    ],
+)
+def test_live_progress_rejects_unsafe_boundary_values(
+    field: str,
+    value: object,
+    message: str,
+) -> None:
+    raw: dict[str, object] = {
+        "stage": "preparing",
+        "request_id": "hlivebatch_" + "a" * 24,
+        "request_sha256": "b" * 64,
+        "batch_id": "batch",
+        "suite_id": "suite",
+        "model": MODEL,
+        "requested": 5,
+        "completed": 0,
+        "persisted": 0,
+        "max_total_duration_seconds": 30,
+        "max_total_cost_usd": 0.1,
+    }
+    raw[field] = value
+
+    with pytest.raises(ValidationError, match=message):
+        HarnessLiveBatchProgress.model_validate(raw)
+
+
+@pytest.mark.asyncio
+async def test_live_progress_reports_local_cancellation_without_claiming_remote_stop(
+    tmp_path: Path,
+) -> None:
+    started = asyncio.Event()
+
+    class _BlockingPort(_ModelPort):
+        async def call(
+            self,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> ModelResponse:
+            self.calls.append({"messages": messages, **kwargs})
+            started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    workspace, _suite_path = _workspace(tmp_path)
+    service = HarnessService(
+        workspace_root=workspace,
+        trust_store=HarnessTrustStore(tmp_path / "trust.json"),
+        store=HarnessStore(tmp_path / "harness.db"),
+        model_port=_BlockingPort(),
+    )
+    await service.trust(source="test")
+    progress: list[HarnessLiveBatchProgress] = []
+
+    async def capture(item: HarnessLiveBatchProgress) -> None:
+        progress.append(item)
+
+    task = asyncio.create_task(
+        service.eval_live_batch(
+            "live-transport-core",
+            repetitions=5,
+            batch_id="cancel-live-batch",
+            model=MODEL,
+            max_total_duration_seconds=30,
+            max_total_cost_usd=0.1,
+            on_progress=capture,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert progress[-1].stage == "partial"
+    assert progress[-1].code == "live_batch_cancelled_locally"
+    assert "最终计费仍需对账" in progress[-1].message
+    assert progress[-1].total_calls == 0
 
 @pytest.mark.asyncio
 async def test_service_rejects_untrusted_live_profile_before_provider_call(

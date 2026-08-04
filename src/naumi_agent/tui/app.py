@@ -304,6 +304,27 @@ class _TuiSlashCommandFrontend:
             f" · 已保存 {progress.persisted} · {progress.batch_id}"
         )
 
+    async def update_harness_live_eval(self, progress: dict[str, object]) -> None:
+        """Project paid Live Eval facts without exposing prompt or model output."""
+        labels = {
+            "preparing": "准备",
+            "evaluating": "调用模型",
+            "persisting": "保存证据",
+            "completed": "完成",
+            "partial": "部分完成",
+            "error": "失败",
+        }
+        stage = str(progress.get("stage") or "")
+        label = labels.get(stage, stage or "等待")
+        status = self._app.query_one(StatusBar)
+        status.status_text = (
+            f"Live Eval {label}: {int(progress.get('completed') or 0)}/"
+            f"{int(progress.get('requested') or 0)}"
+            f" · 已保存 {int(progress.get('persisted') or 0)}"
+            f" · ${float(progress.get('total_cost_usd') or 0):.6f}"
+            f" · {str(progress.get('batch_id') or '-')}"
+        )
+
     async def update_harness_sandbox_eval(
         self,
         progress: dict[str, object],
@@ -3047,6 +3068,8 @@ class NaumiApp(App):
                             self._latest_harness_detail_run_id = run_id
                 case "harness_sandbox_eval_progress":
                     await self._slash_frontend.update_harness_sandbox_eval(data)
+                case "harness_live_eval_progress":
+                    await self._slash_frontend.update_harness_live_eval(data)
                 case "tool_prepare_start" | "tool_prepare_snapshot":
                     prepare_text = format_tool_prepare_status(data)
                     chat.update_tool_prepare(prepare_text)

@@ -5274,6 +5274,58 @@ test("Harness Sandbox Eval command keeps shared Slash execution and opens typed 
   assert.equal(state.followTail, false);
 });
 
+test("Harness Live Eval keeps paid Tool execution and opens typed progress", () => {
+  const state = createInitialState();
+  const sent = [];
+
+  handleSubmitText(
+    state,
+    "/harness eval live live-transport-core --repeat 5 --batch live-1 --max-cost 0.1",
+    (type, payload, options) => {
+      sent.push({ type, payload, options });
+      return "submit-live-1";
+    },
+  );
+
+  assert.equal(state.route.name, "conversation");
+  assert.equal(sent[0].type, "submit");
+
+  reduceServerEvent(state, {
+    type: "harness/eval-batch",
+    request_id: "submit-live-1",
+    payload: {
+      schema_version: 1,
+      kind: "live",
+      stage: "evaluating",
+      terminal: false,
+      request_id: `hlivebatch_${"a".repeat(24)}`,
+      request_sha256: "b".repeat(64),
+      batch_id: "live-1",
+      suite_id: "live-transport-core",
+      model: "provider/model",
+      provider_model: "model-20260805",
+      requested: 5,
+      completed: 1,
+      persisted: 0,
+      total_calls: 1,
+      total_tokens: 28,
+      total_cost_usd: 0.001,
+      duration_ms: 10,
+      max_total_duration_seconds: 30,
+      max_total_cost_usd: 0.1,
+      actual_cost_exceeded: false,
+      identity_sha256: "",
+      baseline_eligible: false,
+      code: "",
+      message: "",
+    },
+  });
+
+  assert.equal(state.route.name, "harness_eval_batch");
+  assert.equal(state.harnessEvalBatches["live-1"].kind, "live");
+  assert.equal(state.harnessEvalBatch.suiteId, "live-transport-core");
+});
+
 test("Harness Sandbox page submits an exact cancel action and applies durable receipt", () => {
   const state = createInitialState();
   state.route = { name: "harness_eval_batch", originAnchor: null };

@@ -51,6 +51,7 @@ MAX_LIVE_SUITE_BYTES = 256 * 1024
 _ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _BATCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _REQUEST_ID_RE = re.compile(r"^hlivebatch_[0-9a-f]{24}$")
+_SAFE_PROVIDER_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}$")
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -361,6 +362,128 @@ class HarnessLiveBatchStatus(_StrictModel):
         return self
 
 
+class HarnessLiveBatchProgress(_StrictModel):
+    """Factual progress for one paid Live Eval batch."""
+
+    schema_version: Literal[1] = 1
+    kind: Literal["live"] = "live"
+    stage: Literal[
+        "preparing",
+        "evaluating",
+        "persisting",
+        "completed",
+        "partial",
+        "error",
+    ]
+    request_id: str
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    batch_id: str
+    suite_id: str
+    model: str
+    provider_model: str = Field(default="", max_length=512)
+    requested: int = Field(ge=5, le=20)
+    completed: int = Field(ge=0, le=20)
+    persisted: int = Field(ge=0, le=20)
+    total_calls: int = Field(default=0, ge=0, le=200)
+    total_tokens: int = Field(default=0, ge=0)
+    total_cost_usd: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    duration_ms: float = Field(default=0.0, ge=0.0)
+    max_total_duration_seconds: float = Field(ge=5.0, le=3_600.0)
+    max_total_cost_usd: float = Field(gt=0.0, le=10.0)
+    actual_cost_exceeded: bool = False
+    identity_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
+    baseline_eligible: bool = False
+    code: str = Field(default="", pattern=r"^(?:|[a-z][a-z0-9_]{0,127})$")
+    message: str = Field(default="", max_length=500)
+
+    @field_validator("request_id")
+    @classmethod
+    def _safe_request_id(cls, value: str) -> str:
+        if not _REQUEST_ID_RE.fullmatch(value):
+            raise ValueError("Live batch progress request_id 格式无效。")
+        return value
+
+    @field_validator("batch_id")
+    @classmethod
+    def _safe_batch_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not _BATCH_RE.fullmatch(normalized):
+            raise ValueError("Live batch progress batch_id 格式无效。")
+        return normalized
+
+    @field_validator("suite_id")
+    @classmethod
+    def _safe_suite_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not _ID_RE.fullmatch(normalized):
+            raise ValueError("Live batch progress suite_id 格式无效。")
+        return normalized
+
+    @field_validator("model")
+    @classmethod
+    def _safe_model(cls, value: str) -> str:
+        normalized = value.strip()
+        if (
+            not normalized
+            or len(normalized) > 512
+            or any(ord(char) < 32 or ord(char) == 127 for char in normalized)
+        ):
+            raise ValueError("Live batch progress model 格式无效。")
+        return normalized
+
+    @field_validator("provider_model")
+    @classmethod
+    def _safe_provider_model(cls, value: str) -> str:
+        if value and not _SAFE_PROVIDER_MODEL_RE.fullmatch(value):
+            raise ValueError("Live batch progress provider_model 格式无效。")
+        return value
+
+    @field_validator(
+        "total_cost_usd",
+        "duration_ms",
+        "max_total_duration_seconds",
+        "max_total_cost_usd",
+        mode="before",
+    )
+    @classmethod
+    def _finite_non_boolean_float(cls, value: object) -> object:
+        return HarnessLiveSuiteCaseBudget._finite_non_boolean_float(value)
+
+    @field_validator(
+        "requested",
+        "completed",
+        "persisted",
+        "total_calls",
+        "total_tokens",
+        mode="before",
+    )
+    @classmethod
+    def _integer_not_boolean(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("Live batch progress 计数不得使用布尔值。")
+        return value
+
+    @model_validator(mode="after")
+    def _progress_is_coherent(self) -> HarnessLiveBatchProgress:
+        if not 0 <= self.persisted <= self.completed <= self.requested:
+            raise ValueError("Live batch 进度必须满足 persisted <= completed <= requested。")
+        if self.stage == "preparing" and (self.completed or self.persisted):
+            raise ValueError("Live batch preparing 阶段不能声明已完成样本。")
+        if self.actual_cost_exceeded != (self.total_cost_usd > self.max_total_cost_usd):
+            raise ValueError("Live batch progress 超支标记与实际成本不一致。")
+        if self.stage == "completed" and (
+            self.completed != self.requested or self.persisted != self.requested
+        ):
+            raise ValueError("Live batch completed 阶段必须完成并保存全部样本。")
+        if self.stage == "completed" and self.actual_cost_exceeded:
+            raise ValueError("Live batch completed 阶段不得实际超支。")
+        if self.baseline_eligible and (
+            self.stage != "completed" or not self.identity_sha256
+        ):
+            raise ValueError("Live batch 只有完整终态可声明 Baseline 资格。")
+        return self
+
+
 @dataclass(frozen=True, slots=True)
 class LoadedLiveEvalSuite:
     path: Path
@@ -383,7 +506,7 @@ class HarnessLiveBatchExecution:
     duration_ms: float
 
 
-LiveSampleCallback = Callable[[int, HarnessEvalSuiteResult], Awaitable[None]]
+LiveBatchProgressCallback = Callable[[HarnessLiveBatchProgress], Awaitable[None]]
 
 
 class HarnessLiveSuiteRunner:
@@ -418,7 +541,7 @@ class HarnessLiveSuiteRunner:
         batch_id: str,
         max_total_duration_seconds: float,
         max_total_cost_usd: float,
-        on_sample: LiveSampleCallback | None = None,
+        on_progress: LiveBatchProgressCallback | None = None,
     ) -> HarnessLiveBatchExecution:
         request = HarnessLiveBatchRequest.create(
             request_id=self._request_id_factory(),
@@ -435,6 +558,22 @@ class HarnessLiveSuiteRunner:
         workspace = Path(workspace_root).expanduser().resolve()
         started = self._monotonic()
         deadline = started + request.max_total_duration_seconds
+        await _notify_live_batch_progress(
+            on_progress,
+            HarnessLiveBatchProgress(
+                stage="preparing",
+                request_id=request.request_id,
+                request_sha256=request.request_sha256,
+                batch_id=request.batch_id,
+                suite_id=request.suite_id,
+                model=request.model,
+                requested=request.repetitions,
+                completed=0,
+                persisted=0,
+                max_total_duration_seconds=request.max_total_duration_seconds,
+                max_total_cost_usd=request.max_total_cost_usd,
+            ),
+        )
         source_before, source_code = _capture_source(workspace)
         try:
             capability_before = self._model_port.get_model_capability_contract(model)
@@ -482,11 +621,36 @@ class HarnessLiveSuiteRunner:
             total_calls += sample.calls
             total_tokens += sample.tokens
             total_cost = round(total_cost + sample.cost_usd, 9)
-            if on_sample is not None:
-                try:
-                    await on_sample(len(raw_results), sample.result)
-                except Exception as exc:
-                    _LOGGER.warning("Live batch progress callback failed: %s", exc)
+            await _notify_live_batch_progress(
+                on_progress,
+                HarnessLiveBatchProgress(
+                    stage="evaluating",
+                    request_id=request.request_id,
+                    request_sha256=request.request_sha256,
+                    batch_id=request.batch_id,
+                    suite_id=request.suite_id,
+                    model=request.model,
+                    provider_model=(
+                        next(iter(provider_models)) if len(provider_models) == 1 else ""
+                    ),
+                    requested=request.repetitions,
+                    completed=len(raw_results),
+                    persisted=0,
+                    total_calls=total_calls,
+                    total_tokens=total_tokens,
+                    total_cost_usd=total_cost,
+                    duration_ms=_elapsed_ms(self._monotonic(), started),
+                    max_total_duration_seconds=request.max_total_duration_seconds,
+                    max_total_cost_usd=request.max_total_cost_usd,
+                    actual_cost_exceeded=total_cost > request.max_total_cost_usd,
+                    code=sample.code if sample.halt_batch else "",
+                    message=(
+                        "Live batch 遇到评测基础设施错误，未进行隐式重试。"
+                        if sample.halt_batch
+                        else ""
+                    ),
+                ),
+            )
             if total_cost > request.max_total_cost_usd:
                 terminal_code = "actual_cost_exceeded"
                 terminal_message = (
@@ -818,6 +982,35 @@ def build_live_batch_status(
     return HarnessLiveBatchStatus.model_validate({**raw, "receipt_sha256": _sha256_payload(raw)})
 
 
+def live_batch_terminal_progress(
+    status: HarnessLiveBatchStatus,
+) -> HarnessLiveBatchProgress:
+    """Project the tamper-evident terminal receipt into the progress protocol."""
+    return HarnessLiveBatchProgress(
+        stage=status.status,
+        request_id=status.request_id,
+        request_sha256=status.request_sha256,
+        batch_id=status.batch_id,
+        suite_id=status.suite_id,
+        model=status.model,
+        provider_model=status.provider_model,
+        requested=status.requested,
+        completed=status.completed,
+        persisted=status.persisted,
+        total_calls=status.total_calls,
+        total_tokens=status.total_tokens,
+        total_cost_usd=status.total_cost_usd,
+        duration_ms=status.duration_ms,
+        max_total_duration_seconds=status.max_total_duration_seconds,
+        max_total_cost_usd=status.max_total_cost_usd,
+        actual_cost_exceeded=status.actual_cost_exceeded,
+        identity_sha256=status.identity_sha256,
+        baseline_eligible=status.baseline_eligible,
+        code=status.code,
+        message=status.message,
+    )
+
+
 def render_live_batch_status(status: HarnessLiveBatchStatus) -> str:
     tone = {"completed": "已完成", "partial": "部分完成", "error": "错误"}
     lines = [
@@ -988,6 +1181,18 @@ def _utc_timestamp(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+async def _notify_live_batch_progress(
+    callback: LiveBatchProgressCallback | None,
+    progress: HarnessLiveBatchProgress,
+) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(progress)
+    except Exception as exc:
+        _LOGGER.warning("Live batch progress callback failed: %s", type(exc).__name__)
+
+
 def _sha256_payload(payload: object) -> str:
     encoded = json.dumps(
         payload,
@@ -1002,6 +1207,7 @@ def _sha256_payload(payload: object) -> str:
 __all__ = [
     "LIVE_SUITE_RUNNER_VERSION",
     "HarnessLiveBatchExecution",
+    "HarnessLiveBatchProgress",
     "HarnessLiveBatchRequest",
     "HarnessLiveBatchStatus",
     "HarnessLiveEvalSuite",
@@ -1009,6 +1215,7 @@ __all__ = [
     "LoadedLiveEvalSuite",
     "build_live_batch_status",
     "load_live_eval_suite",
+    "live_batch_terminal_progress",
     "render_live_batch_status",
     "resolve_declared_live_eval_suite",
 ]

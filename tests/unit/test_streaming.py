@@ -187,7 +187,7 @@ class TestStreamEventSink:
         runtime_event = _make_runtime_event(runtime_type)
         await StreamEventSink(collect).emit(runtime_event)
 
-        assert len(tuple(RuntimeEventType)) == 32
+        assert len(tuple(RuntimeEventType)) == 33
         assert len(received) == 1
         transport_event = received[0]
         assert transport_event.type is not EventType.TURN_END

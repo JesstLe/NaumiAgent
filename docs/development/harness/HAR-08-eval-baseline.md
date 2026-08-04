@@ -53,6 +53,9 @@
   transport，并把批次请求摘要、实际 Provider 模型、用量、成本和响应摘要逐样本写入 H5a；基础设施失败
   不重试，实际超支停止后续调用，持久化只保留不可变连续前缀。详见
   `HAR-08-5b-declarative-live-suite-batch.md`。
+- HAR-08.5c1 Live Eval 类型化进度：已实现。Runner/Service 的真实调用、H5a 保存与终态事实通过受控 Tool
+  Runtime Event 同步到 New UI/TUI；付费权限路径不变，UI 不显示 Prompt/输出/reasoning，本地取消明确不
+  冒充 Provider 远端停止或最终计费证明。详见 `HAR-08-5c1-live-eval-typed-progress.md`。
 - HAR-08.6a Baseline Identity 契约：已实现。真实 Git HEAD/脏树 fingerprint、Suite/Profile/
   Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
   identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
@@ -205,5 +208,5 @@
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
 - HAR-08.4 仍为 partial：跨主机 Batch admission、跨 workspace 批量 prune、共享事实深度回收，以及
   Linux/Windows CI 证据尚未完成。HAR-08.5b 已完成声明式 Live Suite、至少 5 次重复样本和 H5a 接入；
-  Provider cancellation/billing 证明、专用 typed 页面和三平台 Provider matrix 仍为 planned，当前不得把
-  HAR-08 整体标记为 implemented。
+  Provider cancellation/billing 证明、Live 历史/独立取消 authority 和三平台 Provider matrix 仍为
+  planned，当前不得把 HAR-08 整体标记为 implemented。

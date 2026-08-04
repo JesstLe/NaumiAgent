@@ -32,6 +32,9 @@ export function renderHarnessEvalBatchPage(view, width, height) {
   if (snapshot.kind === "sandbox") {
     return renderSandboxEvalBatchPage(value, snapshot, safeWidth, safeHeight);
   }
+  if (snapshot.kind === "live") {
+    return renderLiveEvalBatchPage(value, snapshot, safeWidth, safeHeight);
+  }
   const [tone, label] = STAGES[snapshot.stage] || [ANSI.dim, "等待后端"];
   const requested = Number(snapshot.requested) || 0;
   const completed = Number(snapshot.completed) || 0;
@@ -68,6 +71,48 @@ export function renderHarnessEvalBatchPage(view, width, height) {
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.slice(0, safeHeight).map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function renderLiveEvalBatchPage(value, snapshot, width, height) {
+  const [tone, label] = STAGES[snapshot.stage] || [ANSI.dim, "等待后端"];
+  const requested = Number(snapshot.requested) || 0;
+  const completed = Number(snapshot.completed) || 0;
+  const persisted = Number(snapshot.persisted) || 0;
+  const progress = phaseProgress(snapshot.stage, completed, persisted, requested);
+  const logical = [
+    color(ANSI.cyan, "Harness Live Eval"),
+    color(ANSI.dim, "真实 Provider · 有界成本 · 不显示 Prompt/输出/思考 · ↑/↓ 滚动 · Esc 返回"),
+    section("状态"),
+    color(tone, `${label} · ${progress}%`),
+    `Batch · ${text(snapshot.batch_id || value.batchId) || "等待分配"}`,
+    `Suite · ${text(snapshot.suite_id || value.suiteId) || "-"}`,
+    `样本 · 完成 ${completed}/${requested || "-"} · 已保存 ${persisted}`,
+    section("模型与调用"),
+    `请求模型 · ${text(snapshot.model) || "-"}`,
+    `Provider 实际模型 · ${text(snapshot.provider_model) || "等待回执"}`,
+    `回执确认调用 · ${Number(snapshot.total_calls) || 0} · Token ${Number(snapshot.total_tokens) || 0}`,
+    section("预算"),
+    color(
+      snapshot.actual_cost_exceeded ? ANSI.red : ANSI.green,
+      `成本 · $${formatCost(snapshot.total_cost_usd)} / $${formatCost(snapshot.max_total_cost_usd)}`,
+    ),
+    `耗时 · ${formatDuration(snapshot.duration_ms)} / ${formatDuration(Number(snapshot.max_total_duration_seconds) * 1000)}`,
+    section("证据"),
+    `Request · ${shortSha(snapshot.request_sha256)}`,
+    snapshot.identity_sha256
+      ? `Identity · ${shortSha(snapshot.identity_sha256)} · ${snapshot.baseline_eligible ? color(ANSI.green, "可晋升") : color(ANSI.yellow, "不可晋升")}`
+      : color(ANSI.dim, "Identity 将在 source/model/provider 终态复核后生成。"),
+    ...(snapshot.message ? [section("说明"), color(tone, text(snapshot.message))] : []),
+    ...(snapshot.code ? [color(ANSI.dim, `Code · ${text(snapshot.code)}`)] : []),
+  ];
+  const wrapped = logical.flatMap((line) => wrapAnsiLine(line, width));
+  const offset = Math.min(
+    Math.max(0, Number(value.scrollOffset) || 0),
+    Math.max(0, wrapped.length - 1),
+  );
+  const lines = wrapped.slice(offset, offset + height);
+  while (lines.length < height) lines.push("");
+  return lines.slice(0, height).map((line) => padRight(fit(line, width), width));
 }
 
 function renderSandboxEvalBatchPage(value, snapshot, width, height) {
@@ -249,6 +294,10 @@ function text(value) {
 function formatDuration(value) {
   const milliseconds = Math.max(0, Number(value) || 0);
   return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(1)}s` : `${Math.round(milliseconds)}ms`;
+}
+
+function formatCost(value) {
+  return Math.max(0, Number(value) || 0).toFixed(6);
 }
 
 function phaseProgress(stage, completed, persisted, requested) {

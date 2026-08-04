@@ -146,6 +146,29 @@ class _HistoryDispatchApp:
 
 class TestNaumiApp:
     @pytest.mark.asyncio
+    async def test_live_eval_progress_updates_cost_aware_status(self) -> None:
+        status = SimpleNamespace(status_text="")
+
+        class _App:
+            def query_one(self, widget_type: type[object]) -> object:
+                assert widget_type is StatusBar
+                return status
+
+        frontend = _TuiSlashCommandFrontend(_App())  # type: ignore[arg-type]
+        await frontend.update_harness_live_eval({
+            "stage": "evaluating",
+            "completed": 2,
+            "requested": 5,
+            "persisted": 0,
+            "total_cost_usd": 0.001234,
+            "batch_id": "live-1",
+        })
+
+        assert status.status_text == (
+            "Live Eval 调用模型: 2/5 · 已保存 0 · $0.001234 · live-1"
+        )
+
+    @pytest.mark.asyncio
     async def test_sandbox_eval_checkpoint_updates_persistent_status(self) -> None:
         status = SimpleNamespace(status_text="")
 

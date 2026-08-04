@@ -94,5 +94,6 @@ Provider 私有异常均不持久化。
 4. 尚无 macOS/Linux/Windows 的真实 Provider matrix；当前不能声称跨平台 Provider 完整可用。
 5. H5b/H5c 已可消费合格 cohort，但本切片不自动晋升或比较。
 
-下一步 HAR-08.5c 应优先补 Provider cancellation/billing 证据和专用 typed 进度/历史，再建立三平台、主流
-Provider 的小额真实验证矩阵。
+HAR-08.5c1 已补齐 Live batch 类型化进度和 New UI/TUI 同源展示，详见
+`HAR-08-5c1-live-eval-typed-progress.md`。下一步 8.5c2 应建立 Provider cancellation/billing evidence
+contract，再建立三平台、主流 Provider 的小额真实验证矩阵。

@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from naumi_agent.harness.checks import validate_run_id
+from naumi_agent.harness.eval_live_suite import HarnessLiveBatchProgress
 from naumi_agent.harness.eval_surface import (
     HarnessEvalBaselineStatus,
     HarnessEvalBatchProgress,
@@ -110,6 +111,38 @@ def harness_eval_batch_payload(progress: HarnessEvalBatchProgress) -> dict[str, 
         "duration_ms": round(progress.duration_ms, 3),
         "baseline_eligible": progress.baseline_eligible,
         "identity_sha256": progress.identity_sha256,
+        "code": _text(progress.code),
+        "message": _text(progress.message),
+    }
+
+
+def harness_live_eval_batch_payload(
+    progress: HarnessLiveBatchProgress,
+) -> dict[str, Any]:
+    """Serialize paid Live Eval progress without prompts, outputs, or reasoning."""
+    return {
+        "schema_version": progress.schema_version,
+        "kind": progress.kind,
+        "stage": progress.stage,
+        "terminal": progress.stage in {"completed", "partial", "error"},
+        "request_id": progress.request_id,
+        "request_sha256": progress.request_sha256,
+        "batch_id": progress.batch_id,
+        "suite_id": progress.suite_id,
+        "model": progress.model,
+        "provider_model": progress.provider_model,
+        "requested": progress.requested,
+        "completed": progress.completed,
+        "persisted": progress.persisted,
+        "total_calls": progress.total_calls,
+        "total_tokens": progress.total_tokens,
+        "total_cost_usd": round(progress.total_cost_usd, 9),
+        "duration_ms": round(progress.duration_ms, 3),
+        "max_total_duration_seconds": progress.max_total_duration_seconds,
+        "max_total_cost_usd": progress.max_total_cost_usd,
+        "actual_cost_exceeded": progress.actual_cost_exceeded,
+        "identity_sha256": progress.identity_sha256,
+        "baseline_eligible": progress.baseline_eligible,
         "code": _text(progress.code),
         "message": _text(progress.message),
     }
@@ -513,6 +546,7 @@ __all__ = [
     "HARNESS_DETAIL_SCHEMA_VERSION",
     "harness_eval_baseline_payload",
     "harness_eval_batch_payload",
+    "harness_live_eval_batch_payload",
     "harness_sandbox_eval_progress_payload",
     "harness_eval_promotion_payload",
     "harness_explain_payload",

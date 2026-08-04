@@ -959,7 +959,7 @@ export function reduceServerEvent(state, record) {
     case "harness/eval-batch":
       addHarnessEvalBatch(state.harnessEvalBatches, payload);
       if (
-        payload.kind === "sandbox"
+        ["live", "sandbox"].includes(payload.kind)
         && state.route?.name === "conversation"
       ) {
         const originAnchor = state.harnessEvalBatch.originAnchor || {
@@ -969,7 +969,7 @@ export function reduceServerEvent(state, record) {
         state.route = { name: "harness_eval_batch", originAnchor };
       }
       if (
-        payload.kind === "sandbox"
+        ["live", "sandbox"].includes(payload.kind)
         ||
         state.harnessEvalBatch.requestId === String(record.request_id || "")
         || state.harnessEvalBatch.batchId === payload.batch_id
