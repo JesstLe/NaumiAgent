@@ -18,6 +18,7 @@ GOVERNANCE_POLICY_VERSION = "proposal-governance-v1"
 REJECT_COOLDOWN = timedelta(days=30)
 MIN_DEFER = timedelta(hours=1)
 MAX_DEFER = timedelta(days=90)
+DEFER_PRESET_DAYS = (1, 7, 30)
 
 
 class ProposalAction(StrEnum):
@@ -30,6 +31,19 @@ class ProposalAction(StrEnum):
 
 class ProposalGovernanceConflictError(ValueError):
     """The proposal was already decided through another terminal transition."""
+
+
+def proposal_defer_until_for_preset(
+    days: int,
+    *,
+    now: datetime | None = None,
+) -> str:
+    """Resolve a bounded UI preset with the authority clock, not a client clock."""
+    if isinstance(days, bool) or not isinstance(days, int) or days not in DEFER_PRESET_DAYS:
+        choices = "/".join(str(value) for value in DEFER_PRESET_DAYS)
+        raise ValueError(f"defer_days 只支持 {choices} 天。")
+    instant = _aware_utc(now or datetime.now(UTC))
+    return _iso(instant + timedelta(days=days))
 
 
 @dataclass(frozen=True, slots=True)

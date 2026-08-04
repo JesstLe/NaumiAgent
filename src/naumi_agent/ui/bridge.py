@@ -3306,6 +3306,7 @@ class JsonlEngineBridge:
             return
         action = ProposalAction(action_name)
         decision_note = str(payload.get("decision_note") or "")
+        defer_days = payload.get("defer_days", 0)
         confirmed = payload.get("confirmed") is True
         if requested_session_id and requested_session_id != session_id:
             await self.emit_error(
@@ -3327,6 +3328,7 @@ class JsonlEngineBridge:
             {
                 "proposal_id": proposal_id,
                 "action": action.value,
+                "defer_days": defer_days,
             },
         )
         if not decision.allowed:
@@ -3358,12 +3360,24 @@ class JsonlEngineBridge:
             )
             return
         try:
+            defer_until = ""
+            if action is ProposalAction.DEFER:
+                from naumi_agent.workbench.proposal_governance import (
+                    proposal_defer_until_for_preset,
+                )
+
+                defer_until = proposal_defer_until_for_preset(defer_days)
+            governance_kwargs: dict[str, Any] = {
+                "action": action,
+                "reviewer": "Human",
+                "decision_note": decision_note,
+            }
+            if defer_until:
+                governance_kwargs["defer_until"] = defer_until
             proposal = await service.govern_proposal(
                 session_id,
                 proposal_id,
-                action=action,
-                reviewer="Human",
-                decision_note=decision_note,
+                **governance_kwargs,
             )
             if proposal is None:
                 status = "not_found"
@@ -3371,11 +3385,12 @@ class JsonlEngineBridge:
                 snapshot = None
             else:
                 status = "completed"
-                message = (
-                    "Proposal 已批准。"
-                    if action is ProposalAction.APPROVE
-                    else "Proposal 已拒绝。"
-                )
+                if action is ProposalAction.APPROVE:
+                    message = "Proposal 已批准。"
+                elif action is ProposalAction.REJECT:
+                    message = "Proposal 已拒绝。"
+                else:
+                    message = f"Proposal 已延后至 {proposal.get('cooldown_until', '-')}。"
                 snapshot = await service.dashboard_snapshot(session_id)
         except ProposalGovernanceConflictError as exc:
             status = "conflict"

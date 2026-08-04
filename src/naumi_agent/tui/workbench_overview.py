@@ -19,8 +19,10 @@ from naumi_agent.evolution.experiments import (
     default_experiment_seed,
 )
 from naumi_agent.workbench.proposal_governance import (
+    DEFER_PRESET_DAYS,
     ProposalAction,
     ProposalGovernanceConflictError,
+    proposal_defer_until_for_preset,
 )
 
 logger = logging.getLogger(__name__)
@@ -378,13 +380,13 @@ def _append_proposal_review(
                 "",
                 "> 批准只进入下一 policy gate，不执行代码，也不授予实验资格。",
                 "",
-                "`a` 批准 · `x` 拒绝 · `r` 刷新 · `Esc` 返回",
+                "`a` 批准 · `x` 拒绝 · `d` 延后 · `r` 刷新 · `Esc` 返回",
             ]
         )
     return "\n".join(lines)
 
 
-class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
+class ProposalDecisionScreen(ModalScreen[dict[str, Any] | None]):
     """Collect one explicit Proposal decision without persisting draft input."""
 
     BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
@@ -425,21 +427,42 @@ class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
         self.proposal_title = title
 
     def compose(self) -> ComposeResult:
-        label = "批准" if self.proposal_action is ProposalAction.APPROVE else "拒绝"
+        label = {
+            ProposalAction.APPROVE: "批准",
+            ProposalAction.REJECT: "拒绝",
+            ProposalAction.DEFER: "延后",
+        }[self.proposal_action]
         with Container():
-            yield Label(f"[bold]确认{label} Proposal？[/bold]")
+            heading = (
+                "延后 Proposal"
+                if self.proposal_action is ProposalAction.DEFER
+                else f"确认{label} Proposal？"
+            )
+            yield Label(f"[bold]{heading}[/bold]")
             yield Label(_plain(self.proposal_title) or "未命名 Proposal")
-            if self.proposal_action is ProposalAction.REJECT:
+            if self.proposal_action in {ProposalAction.REJECT, ProposalAction.DEFER}:
                 yield Input(
-                    placeholder="填写拒绝原因（必填，最多 2000 字符）",
+                    placeholder=f"填写{label}原因（必填，最多 2000 字符）",
                     max_length=2_000,
                     id="proposal-decision-note",
+                )
+            if self.proposal_action is ProposalAction.DEFER:
+                yield Input(
+                    value="7",
+                    placeholder="延后天数：1、7 或 30",
+                    max_length=2,
+                    id="proposal-defer-days",
                 )
             error = Static("", classes="proposal-decision-error", id="proposal-decision-error")
             error.display = False
             yield error
             with Horizontal():
-                yield Button(f"确认{label}", variant="warning", id="proposal-confirm")
+                button_label = (
+                    "提交延后"
+                    if self.proposal_action is ProposalAction.DEFER
+                    else f"确认{label}"
+                )
+                yield Button(button_label, variant="warning", id="proposal-confirm")
                 yield Button("取消", variant="primary", id="proposal-cancel")
 
     def on_mount(self) -> None:
@@ -451,6 +474,16 @@ class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
 
     @on(Input.Submitted, "#proposal-decision-note")
     def on_note_submitted(self) -> None:
+        if self.proposal_action is ProposalAction.DEFER:
+            if not self.query_one("#proposal-decision-note", Input).value.strip():
+                self._submit()
+                return
+            self.query_one("#proposal-defer-days", Input).focus()
+            return
+        self._submit()
+
+    @on(Input.Submitted, "#proposal-defer-days")
+    def on_defer_days_submitted(self) -> None:
         self._submit()
 
     @on(Button.Pressed)
@@ -464,14 +497,37 @@ class ProposalDecisionScreen(ModalScreen[dict[str, str] | None]):
     def _submit(self) -> None:
         note_input = self.query("#proposal-decision-note").first(Input)
         note = note_input.value.strip() if note_input is not None else ""
-        if self.proposal_action is ProposalAction.REJECT and not note:
+        if self.proposal_action in {ProposalAction.REJECT, ProposalAction.DEFER} and not note:
             error = self.query_one("#proposal-decision-error", Static)
-            error.update("拒绝原因不能为空。")
+            error.update(
+                "延后原因不能为空。"
+                if self.proposal_action is ProposalAction.DEFER
+                else "拒绝原因不能为空。"
+            )
             error.display = True
             if note_input is not None:
                 note_input.focus()
             return
-        self.dismiss({"action": self.proposal_action.value, "decision_note": note})
+        defer_days = 0
+        if self.proposal_action is ProposalAction.DEFER:
+            value = self.query_one("#proposal-defer-days", Input).value.strip()
+            try:
+                defer_days = int(value)
+            except ValueError:
+                defer_days = 0
+            if defer_days not in DEFER_PRESET_DAYS:
+                error = self.query_one("#proposal-decision-error", Static)
+                error.update("延后天数只支持 1、7 或 30。")
+                error.display = True
+                self.query_one("#proposal-defer-days", Input).focus()
+                return
+        self.dismiss(
+            {
+                "action": self.proposal_action.value,
+                "decision_note": note,
+                "defer_days": defer_days,
+            }
+        )
 
 
 class ExperimentContractIssueScreen(ModalScreen[bool]):
@@ -522,6 +578,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("down", "select_next", "下一项", show=False),
         Binding("a", "approve_proposal", "批准 Proposal", show=False),
         Binding("x", "reject_proposal", "拒绝 Proposal", show=False),
+        Binding("d", "defer_proposal", "延后 Proposal", show=False),
         Binding("c", "issue_experiment_contract", "签发实验契约", show=False),
     ]
 
@@ -725,6 +782,9 @@ class WorkbenchOverviewScreen(Screen[None]):
     def action_reject_proposal(self) -> None:
         self._begin_proposal_action(ProposalAction.REJECT)
 
+    def action_defer_proposal(self) -> None:
+        self._begin_proposal_action(ProposalAction.DEFER)
+
     def action_issue_experiment_contract(self) -> None:
         if self.proposal_action_pending:
             return
@@ -851,14 +911,15 @@ class WorkbenchOverviewScreen(Screen[None]):
             )
             return
 
-        def on_decision(result: dict[str, str] | None) -> None:
+        def on_decision(result: dict[str, Any] | None) -> None:
             if result is None:
                 return
             self._start_proposal_action(
                 _normalized(selected.get("id")),
                 ProposalAction(result["action"]),
                 decision_note=result.get("decision_note", ""),
-                confirmed=True,
+                defer_days=int(result.get("defer_days", 0)),
+                confirmed=decision.requires_confirmation,
             )
 
         self.app.push_screen(
@@ -875,6 +936,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         action: ProposalAction,
         *,
         decision_note: str,
+        defer_days: int = 0,
         confirmed: bool,
     ) -> None:
         if self.proposal_action_pending:
@@ -884,6 +946,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             proposal_id,
             action,
             decision_note=decision_note,
+            defer_days=defer_days,
             confirmed=confirmed,
         )
 
@@ -894,12 +957,17 @@ class WorkbenchOverviewScreen(Screen[None]):
         action: ProposalAction,
         *,
         decision_note: str,
+        defer_days: int = 0,
         confirmed: bool,
     ) -> None:
         try:
             decision = self.engine._permission_checker.check(
                 "workbench_govern_proposal",
-                {"proposal_id": proposal_id, "action": action.value},
+                {
+                    "proposal_id": proposal_id,
+                    "action": action.value,
+                    "defer_days": defer_days,
+                },
             )
             if not decision.allowed:
                 self.review_error = "当前权限模式不允许治理 Proposal。"
@@ -913,12 +981,22 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.review_notice = "正在提交 Proposal 决策…"
             self._render_snapshot()
             session_id = _normalized(self.snapshot.get("session_id"))  # type: ignore[union-attr]
+            defer_until = (
+                proposal_defer_until_for_preset(defer_days)
+                if action is ProposalAction.DEFER
+                else ""
+            )
+            governance_kwargs: dict[str, Any] = {
+                "action": action,
+                "reviewer": "Human",
+                "decision_note": decision_note,
+            }
+            if defer_until:
+                governance_kwargs["defer_until"] = defer_until
             proposal = await self.engine.workbench_service.govern_proposal(
                 session_id,
                 proposal_id,
-                action=action,
-                reviewer="Human",
-                decision_note=decision_note,
+                **governance_kwargs,
             )
             if proposal is None:
                 raise WorkbenchSnapshotError("Proposal 不存在或不属于当前会话。")
@@ -942,11 +1020,14 @@ class WorkbenchOverviewScreen(Screen[None]):
         finally:
             self.proposal_action_pending = False
         self.snapshot = snapshot
-        self.review_notice = (
-            "Proposal 已批准。"
-            if action is ProposalAction.APPROVE
-            else "Proposal 已拒绝。"
-        )
+        if action is ProposalAction.APPROVE:
+            self.review_notice = "Proposal 已批准。"
+        elif action is ProposalAction.REJECT:
+            self.review_notice = "Proposal 已拒绝。"
+        else:
+            self.review_notice = (
+                f"Proposal 已延后至 {proposal.get('cooldown_until', '-')}。"
+            )
         self.selected_review_index = min(
             self.selected_review_index,
             max(0, len(_review_records(snapshot)) - 1),

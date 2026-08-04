@@ -3587,6 +3587,18 @@ test("normalizes strict workbench proposal action results", () => {
     payload: { ...payload, status: "invented" },
   }), /status/);
 
+  const deferred = normalizeServerRecord({
+    type: "workbench/proposal/action_result",
+    payload: {
+      ...payload,
+      action: "defer",
+      message: "Proposal 已延后。",
+      proposal: { ...payload.proposal, state: "deferred" },
+    },
+  }).payload;
+  assert.equal(deferred.action, "defer");
+  assert.equal(deferred.proposal.state, "deferred");
+
   const contract = {
     schema_version: 1,
     authority_id: `evxauth_${"a".repeat(24)}`,

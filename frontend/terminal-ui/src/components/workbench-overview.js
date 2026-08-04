@@ -72,7 +72,13 @@ function renderPageState(snapshot) {
   }
   if (snapshot.loading) return color(ANSI.cyan, "状态 · 正在刷新 · r 重试 · Esc 返回");
   if (snapshot.proposal_action?.phase === "note") {
-    return color(ANSI.yellow, "拒绝原因 · 输入文字后 Enter 继续 · Esc 取消");
+    return color(
+      ANSI.yellow,
+      `${snapshot.proposal_action.action === "defer" ? "延后" : "拒绝"}原因 · 输入文字后 Enter 继续 · Esc 取消`,
+    );
+  }
+  if (snapshot.proposal_action?.phase === "defer_duration") {
+    return color(ANSI.yellow, "延后时长 · 1 一天 · 2 七天 · 3 三十天 · Esc 取消");
   }
   if (snapshot.proposal_action?.phase === "confirm") {
     return color(ANSI.yellow, "确认操作 · y/Enter 确认 · n/Esc 取消");
@@ -211,7 +217,7 @@ function renderProposalDetail(snapshot, proposal, width) {
       : color(ANSI.yellow, "批准只进入下一 policy gate，不执行代码、不授予实验资格。"),
     proposal.state === "approved"
       ? color(ANSI.dim, "c 签发/重开 Contract · r 刷新 · Esc 返回")
-      : color(ANSI.dim, "a 批准 · x 拒绝 · r 刷新 · Esc 返回"),
+      : color(ANSI.dim, "a 批准 · x 拒绝 · d 延后 · r 刷新 · Esc 返回"),
   ];
   if (snapshot.action_notice) lines.push(color(ANSI.green, compactText(snapshot.action_notice, 1_000)));
   if (snapshot.action_error) lines.push(color(ANSI.red, compactText(snapshot.action_error, 1_000)));
@@ -219,15 +225,22 @@ function renderProposalDetail(snapshot, proposal, width) {
   if (action?.proposal_id === proposal.id) {
     if (action.phase === "note") {
       lines.push(
-        color(ANSI.yellow, "拒绝原因（必填）"),
+        color(ANSI.yellow, `${action.action === "defer" ? "延后" : "拒绝"}原因（必填）`),
         `> ${compactText(action.input || "", 2_000)}${color(ANSI.cyan, "▌")}`,
+      );
+    } else if (action.phase === "defer_duration") {
+      lines.push(
+        color(ANSI.yellow, "选择延后时长"),
+        color(ANSI.cyan, "1 一天 · 2 七天 · 3 三十天 · Esc 取消"),
       );
     } else if (action.phase === "confirm") {
       const label = action.action === "approve"
         ? "批准"
         : action.action === "issue_contract"
           ? "签发不可执行 Experiment Contract"
-          : "拒绝";
+          : action.action === "defer"
+            ? `延后 ${Number(action.defer_days) || 0} 天`
+            : "拒绝";
       lines.push(
         color(ANSI.yellow, `确认${label}此 Proposal？`),
         action.decision_note ? color(ANSI.dim, `原因 · ${compactText(action.decision_note, 1_000)}`) : "",

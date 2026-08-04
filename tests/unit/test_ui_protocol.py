@@ -618,6 +618,28 @@ def test_protocol_normalizes_workbench_proposal_actions() -> None:
         "confirmed": False,
     }
 
+    defer_record = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "session-1",
+                "proposal_id": "proposal-1",
+                "action": "defer",
+                "decision_note": "等待跨平台证据",
+                "defer_days": 7,
+                "confirmed": False,
+            },
+        }
+    )
+    assert defer_record["payload"] == {
+        "session_id": "session-1",
+        "proposal_id": "proposal-1",
+        "action": "defer",
+        "decision_note": "等待跨平台证据",
+        "defer_days": 7,
+        "confirmed": False,
+    }
+
 
 def test_protocol_normalizes_pursuit_recovery_resume() -> None:
     record = normalize_client_record({
@@ -642,6 +664,18 @@ def test_protocol_normalizes_pursuit_recovery_resume() -> None:
     "payload",
     [
         {"proposal_id": "proposal-1", "action": "defer"},
+        {
+            "proposal_id": "proposal-1",
+            "action": "defer",
+            "decision_note": "等待证据",
+            "defer_days": 2,
+        },
+        {
+            "proposal_id": "proposal-1",
+            "action": "defer",
+            "decision_note": "等待证据",
+            "defer_days": 7.0,
+        },
         {"proposal_id": "proposal-1", "action": "reject", "decision_note": ""},
         {"proposal_id": "", "action": "approve"},
         {"proposal_id": "proposal-1", "action": "approve", "confirmed": "yes"},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -152,7 +153,7 @@ def test_reviews_formatter_renders_open_proposal_actions_and_policy_boundary() -
     assert "高风险" in rendered
     assert "harness/judge.py" in rendered
     assert "批准只进入下一 policy gate" in rendered
-    assert "`a` 批准 · `x` 拒绝" in rendered
+    assert "`a` 批准 · `x` 拒绝 · `d` 延后" in rendered
 
 
 def test_reviews_formatter_renders_approved_proposal_contract_boundary() -> None:
@@ -312,6 +313,62 @@ async def test_textual_workbench_rejects_proposal_with_required_reason() -> None
         )
         rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
         assert "Proposal 已拒绝" in rendered
+
+
+@pytest.mark.asyncio
+async def test_textual_workbench_defers_proposal_with_bounded_preset() -> None:
+    engine = create_agent_engine(AppConfig())
+    engine._session = SimpleNamespace(id="session-workbench-tui")
+    initial = _proposal_snapshot()
+    completed = {
+        **initial,
+        "revision": 4,
+        "proposals": [],
+        "counts": {**initial["counts"], "reviews": 0},
+    }
+    engine.workbench_service.dashboard_snapshot = AsyncMock(  # type: ignore[method-assign]
+        side_effect=[initial, completed]
+    )
+    engine.workbench_service.govern_proposal = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "id": "proposal-1",
+            "state": "deferred",
+            "cooldown_until": "2026-08-12T00:00:00+00:00",
+        }
+    )
+    app = NaumiApp(engine)
+    before = datetime.now(UTC)
+
+    async with app.run_test(size=(100, 32)) as pilot:
+        app._handle_slash_command("/workbench")
+        await pilot.pause(0.1)
+        await pilot.press("3", "d")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, ProposalDecisionScreen)
+        note = app.screen.query_one("#proposal-decision-note", Input)
+        days = app.screen.query_one("#proposal-defer-days", Input)
+        await pilot.press("enter")
+        assert "延后原因不能为空" in str(
+            app.screen.query_one("#proposal-decision-error", Static).render()
+        )
+        note.value = "等待跨平台回归证据"
+        days.value = "7"
+        note.focus()
+        await pilot.press("enter", "enter")
+        await pilot.pause(0.15)
+
+        assert isinstance(app.screen, WorkbenchOverviewScreen)
+        call = engine.workbench_service.govern_proposal.await_args
+        assert call.args == ("session-workbench-tui", "proposal-1")
+        assert call.kwargs["action"] is ProposalAction.DEFER
+        assert call.kwargs["reviewer"] == "Human"
+        assert call.kwargs["decision_note"] == "等待跨平台回归证据"
+        defer_until = datetime.fromisoformat(call.kwargs["defer_until"])
+        assert before + timedelta(days=7, seconds=-1) <= defer_until
+        assert defer_until <= datetime.now(UTC) + timedelta(days=7)
+        rendered = app.screen.query_one("#workbench-content", Markdown)._markdown
+        assert "Proposal 已延后" in rendered
 
 
 @pytest.mark.asyncio

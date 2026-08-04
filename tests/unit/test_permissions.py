@@ -87,16 +87,17 @@ class TestPermissionChecker:
     def test_workbench_proposal_governance_confirms_except_in_bypass(self) -> None:
         moderate = PermissionChecker(PermissionMode.MODERATE)
         bypass = PermissionChecker(PermissionMode.BYPASS)
-        arguments = {"proposal_id": "proposal-1", "action": "approve"}
+        for action in ("approve", "defer"):
+            arguments = {"proposal_id": "proposal-1", "action": action}
 
-        guarded = moderate.check("workbench_govern_proposal", arguments)
-        unrestricted = bypass.check("workbench_govern_proposal", arguments)
+            guarded = moderate.check("workbench_govern_proposal", arguments)
+            unrestricted = bypass.check("workbench_govern_proposal", arguments)
 
-        assert guarded.allowed
-        assert guarded.requires_confirmation
-        assert guarded.risk_level == PermissionRiskLevel.HIGH
-        assert unrestricted.allowed
-        assert not unrestricted.requires_confirmation
+            assert guarded.allowed
+            assert guarded.requires_confirmation
+            assert guarded.risk_level == PermissionRiskLevel.HIGH
+            assert unrestricted.allowed
+            assert not unrestricted.requires_confirmation
 
     def test_experiment_contract_issuance_confirms_except_in_bypass(self) -> None:
         moderate = PermissionChecker(PermissionMode.MODERATE)

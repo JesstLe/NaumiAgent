@@ -3984,6 +3984,72 @@ test("workbench bypass approves Proposal without a second confirmation", () => {
   assert.equal(sent[0].payload.confirmed, false);
 });
 
+test("workbench defers Proposal with reason and bounded duration presets", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "moderate";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "等待依赖", intended_files: [],
+    validation_plan: [],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "d", send);
+  assert.equal(state.workbench.proposal_action.phase, "note");
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.match(state.workbench.action_error, /延后原因不能为空/);
+  handleWorkbenchOverviewKey(state, "等待跨平台回归证据", send);
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.equal(state.workbench.proposal_action.phase, "defer_duration");
+  handleWorkbenchOverviewKey(state, "2", send);
+  assert.equal(state.workbench.proposal_action.defer_days, 7);
+  assert.equal(state.workbench.proposal_action.phase, "confirm");
+  handleWorkbenchOverviewKey(state, "y", send);
+
+  assert.deepEqual(sent, [{
+    type: "workbench/proposal/action",
+    payload: {
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "defer",
+      decision_note: "等待跨平台回归证据",
+      confirmed: true,
+      defer_days: 7,
+    },
+  }]);
+});
+
+test("workbench bypass submits defer after fields without a second confirmation", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "等待依赖", intended_files: [],
+    validation_plan: [],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "d", (type, payload) => sent.push({ type, payload }));
+  handleWorkbenchOverviewKey(state, "等待依赖", (type, payload) => sent.push({ type, payload }));
+  handleWorkbenchOverviewKey(state, "\r", (type, payload) => sent.push({ type, payload }));
+  handleWorkbenchOverviewKey(state, "3", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.proposal_action.phase, "loading");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].payload.action, "defer");
+  assert.equal(sent[0].payload.defer_days, 30);
+  assert.equal(sent[0].payload.confirmed, false);
+});
+
 test("approved Evolution Proposal explicitly issues and displays a durable Contract", () => {
   const state = createInitialState();
   state.currentSessionId = "session-workbench";

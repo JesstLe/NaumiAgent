@@ -591,6 +591,7 @@ def _normalize_client_payload(
         proposal_id = str(payload.get("proposal_id") or "").strip()
         action = str(payload.get("action") or "").strip().lower()
         decision_note = str(payload.get("decision_note") or "").strip()
+        defer_days = payload.get("defer_days", 0)
         confirmed = payload.get("confirmed", False)
         if len(session_id) > 500:
             raise ValueError("Workbench session_id 不能超过 500 个字符。")
@@ -598,27 +599,41 @@ def _normalize_client_payload(
             char in proposal_id for char in ("\x00", "\r", "\n")
         ):
             raise ValueError("Workbench proposal_id 格式无效。")
-        if action not in {"approve", "reject", "issue_contract"}:
+        if action not in {"approve", "reject", "defer", "issue_contract"}:
             raise ValueError(
-                "Proposal UI action 仅支持 approve/reject/issue_contract。"
+                "Proposal UI action 仅支持 approve/reject/defer/issue_contract。"
             )
         if len(decision_note) > 2_000 or any(
             char in decision_note for char in ("\x00", "\r")
         ):
             raise ValueError("Proposal decision_note 格式无效。")
-        if action == "reject" and not decision_note:
-            raise ValueError("拒绝 Proposal 时必须填写原因。")
+        if action in {"reject", "defer"} and not decision_note:
+            raise ValueError("拒绝或延后 Proposal 时必须填写原因。")
+        if action == "defer":
+            from naumi_agent.workbench.proposal_governance import DEFER_PRESET_DAYS
+
+            if (
+                isinstance(defer_days, bool)
+                or not isinstance(defer_days, int)
+                or defer_days not in DEFER_PRESET_DAYS
+            ):
+                raise ValueError("延后 Proposal 只支持 1、7 或 30 天。")
+        elif defer_days not in {0, None}:
+            raise ValueError("非 defer Proposal action 不接受 defer_days。")
         if action == "issue_contract" and decision_note:
             raise ValueError("签发 Experiment Contract 不接受 decision_note。")
         if not isinstance(confirmed, bool):
             raise ValueError("Proposal confirmed 必须是布尔值。")
-        return {
+        normalized = {
             "session_id": session_id,
             "proposal_id": proposal_id,
             "action": action,
             "decision_note": decision_note,
             "confirmed": confirmed,
         }
+        if action == "defer":
+            normalized["defer_days"] = defer_days
+        return normalized
 
     if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
         return {
