@@ -31,6 +31,9 @@ from naumi_agent.orchestrator.pursuit_terminal import (
     PursuitBoundaryFacts,
     decide_pursuit_boundary,
 )
+from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalOutboxState,
+)
 
 T0 = datetime.fromisoformat("2026-07-20T00:00:00+00:00")
 
@@ -173,6 +176,259 @@ def test_store_atomically_reconciles_and_authenticates_receipt(tmp_path) -> None
     assert PursuitStore(store.base_dir).get_recovery_reconciliation(
         attempt_id
     ) == receipt
+    with sqlite3.connect(store.db_path) as conn:
+        outbox_id = conn.execute(
+            "SELECT outbox_id FROM pursuit_terminal_outbox WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()[0]
+    delivered = store.get_terminal_outbox(outbox_id)
+    assert delivered is not None
+    assert delivered.state is PursuitTerminalOutboxState.DELIVERED
+    assert delivered.terminal_attempt_sha256 == attempt.digest()
+
+
+def test_terminal_checkpoint_atomically_creates_recoverable_outbox(tmp_path) -> None:
+    store, attempt_id, admitted_at = _admitted_store(tmp_path)
+
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+
+    pending = store.list_pending_terminal_outbox(limit=1)
+    assert len(pending) == 1
+    assert pending[0].attempt_id == attempt_id
+    assert pending[0].state is PursuitTerminalOutboxState.PENDING
+    assert pending[0].boundary_decision_id
+    assert pending[0].checkpoint_id == store.get_checkpoint(
+        "pursuit-reconcile"
+    ).checkpoint_id()
+    reopened = PursuitStore(store.base_dir)
+    assert reopened.get_terminal_outbox(pending[0].outbox_id) == pending[0]
+
+
+def test_inline_attempt_resolution_atomically_delivers_outbox(tmp_path) -> None:
+    store, attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    run = store.get_run("pursuit-reconcile")
+    assert run is not None and run.boundary_decision is not None
+
+    terminal = store.resolve_recovery_attempt(
+        attempt_id,
+        resolved_at=admitted_at + 20,
+        result_code=run.boundary_decision.code,
+        boundary_decision_id=run.boundary_decision.decision_id,
+    )
+
+    delivered = store.get_terminal_outbox(pending.outbox_id)
+    assert delivered is not None
+    assert delivered.state is PursuitTerminalOutboxState.DELIVERED
+    assert delivered.terminal_attempt_sha256 == terminal.digest()
+    assert store.list_pending_terminal_outbox() == []
+
+
+def test_outbox_delivery_failure_rolls_back_attempt_resolution(tmp_path) -> None:
+    store, attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    run = store.get_run("pursuit-reconcile")
+    assert run is not None and run.boundary_decision is not None
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            CREATE TRIGGER reject_terminal_outbox_delivery
+            BEFORE INSERT ON pursuit_terminal_outbox_events
+            WHEN NEW.sequence = 2
+            BEGIN
+              SELECT RAISE(ABORT, 'injected delivery failure');
+            END
+            """
+        )
+
+    with pytest.raises(PursuitStoreError, match="injected delivery failure"):
+        store.resolve_recovery_attempt(
+            attempt_id,
+            resolved_at=admitted_at + 20,
+            result_code=run.boundary_decision.code,
+            boundary_decision_id=run.boundary_decision.decision_id,
+        )
+
+    attempt = store.get_recovery_attempt(attempt_id)
+    assert attempt is not None
+    assert attempt.state is PursuitRecoveryAttemptState.ADMITTED
+    assert store.get_terminal_outbox(pending.outbox_id) == pending
+
+
+def test_parallel_terminal_checkpoint_replay_creates_one_outbox(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    decision = decide_pursuit_boundary(PursuitBoundaryFacts(
+        criterion_count=1,
+        verified_count=1,
+        hard_evidence_count=1,
+        final_verification="passed",
+    ))
+    observed_at = admitted_at + 10
+    store.save_run(PursuitRun(
+        id="pursuit-reconcile",
+        goal="可靠收口恢复请求",
+        status=PursuitRunStatus.COMPLETED,
+        phase="complete",
+        started_at=T0.timestamp(),
+        updated_at=observed_at,
+        iteration=2,
+        criteria_total=1,
+        criteria_verified=1,
+        boundary_decision=decision,
+    ))
+    checkpoint = _checkpoint(
+        sequence=2,
+        created_at=observed_at + 0.1,
+        status="completed",
+        phase="complete",
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _index: store.save_checkpoint(checkpoint), range(16)))
+
+    assert len(store.list_pending_terminal_outbox()) == 1
+    with sqlite3.connect(store.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM pursuit_terminal_outbox_events"
+        ).fetchone()[0] == 1
+
+
+def test_outbox_insert_failure_rolls_back_terminal_checkpoint(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    old_checkpoint = store.get_checkpoint("pursuit-reconcile")
+    assert old_checkpoint is not None
+    decision = decide_pursuit_boundary(PursuitBoundaryFacts(
+        criterion_count=1,
+        verified_count=1,
+        hard_evidence_count=1,
+        final_verification="passed",
+    ))
+    observed_at = admitted_at + 10
+    store.save_run(PursuitRun(
+        id="pursuit-reconcile",
+        goal="可靠收口恢复请求",
+        status=PursuitRunStatus.COMPLETED,
+        phase="complete",
+        started_at=T0.timestamp(),
+        updated_at=observed_at,
+        iteration=2,
+        criteria_total=1,
+        criteria_verified=1,
+        boundary_decision=decision,
+    ))
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            CREATE TRIGGER reject_terminal_outbox
+            BEFORE INSERT ON pursuit_terminal_outbox
+            BEGIN
+              SELECT RAISE(ABORT, 'injected outbox failure');
+            END
+            """
+        )
+
+    with pytest.raises(PursuitStoreError, match="injected outbox failure"):
+        store.save_checkpoint(_checkpoint(
+            sequence=2,
+            created_at=observed_at + 0.1,
+            status="completed",
+            phase="complete",
+        ))
+
+    assert store.get_checkpoint("pursuit-reconcile") == old_checkpoint
+    assert store.list_pending_terminal_outbox() == []
+
+
+def test_terminal_checkpoint_without_matching_boundary_fails_closed(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    old_checkpoint = store.get_checkpoint("pursuit-reconcile")
+
+    with pytest.raises(PursuitStoreError, match="终态不一致"):
+        store.save_checkpoint(_checkpoint(
+            sequence=2,
+            created_at=admitted_at + 10,
+            status="completed",
+            phase="complete",
+        ))
+
+    assert store.get_checkpoint("pursuit-reconcile") == old_checkpoint
+    assert store.list_pending_terminal_outbox() == []
+
+
+def test_multiple_admitted_attempts_block_terminal_outbox_commit(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    old_checkpoint = store.get_checkpoint("pursuit-reconcile")
+    assert old_checkpoint is not None
+    second, _ = store.prepare_recovery_attempt(new_recovery_attempt(
+        run_id="pursuit-reconcile",
+        source_request_id="second-concurrent-recovery",
+        requested_at=admitted_at + 0.1,
+    ))
+    store.mark_recovery_attempt_admitted(
+        second.attempt_id,
+        admitted_at=admitted_at + 0.2,
+        lease_epoch=2,
+        checkpoint_id=old_checkpoint.checkpoint_id(),
+    )
+    decision = decide_pursuit_boundary(PursuitBoundaryFacts(
+        criterion_count=1,
+        verified_count=1,
+        hard_evidence_count=1,
+        final_verification="passed",
+    ))
+    observed_at = admitted_at + 10
+    store.save_run(PursuitRun(
+        id="pursuit-reconcile",
+        goal="可靠收口恢复请求",
+        status=PursuitRunStatus.COMPLETED,
+        phase="complete",
+        started_at=T0.timestamp(),
+        updated_at=observed_at,
+        iteration=2,
+        criteria_total=1,
+        criteria_verified=1,
+        boundary_decision=decision,
+    ))
+
+    with pytest.raises(PursuitStoreError, match="多个 admitted"):
+        store.save_checkpoint(_checkpoint(
+            sequence=2,
+            created_at=observed_at + 0.1,
+            status="completed",
+            phase="complete",
+        ))
+
+    assert store.get_checkpoint("pursuit-reconcile") == old_checkpoint
+    assert store.list_pending_terminal_outbox() == []
+
+
+def test_tampered_terminal_outbox_fails_closed(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE pursuit_terminal_outbox
+            SET payload_sha256 = ? WHERE outbox_id = ?
+            """,
+            ("f" * 64, pending.outbox_id),
+        )
+
+    with pytest.raises(PursuitStoreError, match="快照摘要"):
+        store.get_terminal_outbox(pending.outbox_id)
+
+
+@pytest.mark.parametrize("limit", [0, 1001, True, 1.0])
+def test_terminal_outbox_recovery_catalog_is_strictly_bounded(
+    tmp_path,
+    limit,
+) -> None:
+    store = PursuitStore(tmp_path / "pursuit")
+    with pytest.raises(ValueError, match="1..1000"):
+        store.list_pending_terminal_outbox(limit=limit)
 
 
 def test_store_rejects_missing_post_admission_evidence_without_mutation(
