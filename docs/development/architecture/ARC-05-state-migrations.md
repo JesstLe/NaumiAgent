@@ -54,10 +54,21 @@
 - 真实 SQLite 测试覆盖成功、幂等、失败回滚、取消回滚、锁冲突、事务逃逸、高版本、损坏库、
   缺失文件和 Registry 断层。详细契约见 `ARC-05-2a-sqlite-migration-runner-design.md`。
 
-尚未完成 ARC-05.2b 与 ARC-05.3-05.7；当前内核未自动接管生产 Store，也不替代升级前备份、
-恢复和跨 Store 编排。Catalog 仍只报告权限问题，不自动修改用户文件。ARC-05 保持
-`partial (5.1, 5.2a)`。
+### ARC-05.3a SQLite 预迁移备份（已实现，2026-08-05）
+
+- `src/naumi_agent/persistence/backups.py` 提供只读空间 Plan、SQLite online backup、私有 staging、
+  目录级原子发布、canonical manifest/digest 和独立 verify。
+- committed WAL 数据会进入快照，持久 `.db`/`-wal` 不被修改；易失 `-shm` 协调区可能由 SQLite reader
+  更新，不被错误包装成 durable byte-identical 证据。
+- POSIX 新目录为 0700、文件为 0600；已存在宽权限根目录失败关闭且不自动 chmod。Windows 等价 ACL
+  仍属于 5.3b/ARC-07。
+- 真实测试覆盖空间不足、权限、发布/验证故障清理、篡改、符号链接、损坏/高版本、同 ID 并发、WAL
+  和 MigrationRunner 前后旧版本快照保持。详见 `ARC-05-3a-sqlite-pre-migration-backup.md`。
+
+尚未完成 ARC-05.2b、ARC-05.3b 与 ARC-05.4-05.7；当前内核未自动接管生产 Store，也没有 restore、
+Windows ACL、签名或跨 Store 编排。Catalog 仍只报告权限问题，不自动修改用户文件。ARC-05 保持
+`partial (5.1, 5.2a, 5.3a)`。
 
 HAR-06.4 已在 Harness 领域内实现 Session 删除专用的 Artifact 引用安全 GC 和 v4→v5 状态迁移，
 但它不替代 ARC-05.7 的跨 Store 通用 retention/GC 平台；ARC-05 状态因此仍保持
-`partial (5.1, 5.2a)`。
+`partial (5.1, 5.2a, 5.3a)`。

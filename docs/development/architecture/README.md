@@ -13,6 +13,11 @@
 
 模块顺序：ARC-01/03/05 → ARC-02 → ARC-04 → ARC-06 → ARC-07/08。
 
+ARC-05.1/5.2a 已建立 Store Catalog 与事务化 SQLite Migration Runner；ARC-05.3a 又补齐单 Store
+预迁移空间计划、WAL 一致性快照、原子目录发布、canonical digest manifest 和独立验证。多 Store
+journal、Windows ACL、restore、完整性检查、saga 与 retention 尚未完成，因此 ARC-05 保持 partial，
+生产 Store 仍不能在启动时静默自动迁移。
+
 ARC-01.4c1-4c3 已交付由 Composition Root 构造的首个 `RuntimeServices` 切片、共享 terminal runtime lifecycle
 factory 与 New UI/TUI adapter 迁移；其余 Service 与全局关闭注册表仍未完成，因此 ARC-02 退出门尚未满足。
 ARC-03.3a 已交付显式 registry 兼容 ledger 和未知 informational 事件的 sequence-safe、payload-free
