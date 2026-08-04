@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -32,7 +33,13 @@ from naumi_agent.orchestrator.pursuit_terminal import (
     decide_pursuit_boundary,
 )
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalDispatchState,
     PursuitTerminalOutboxState,
+)
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorker,
+    PursuitTerminalOutboxWorkerPolicy,
+    PursuitTerminalWorkerState,
 )
 
 T0 = datetime.fromisoformat("2026-07-20T00:00:00+00:00")
@@ -202,6 +209,432 @@ def test_terminal_checkpoint_atomically_creates_recoverable_outbox(tmp_path) -> 
     ).checkpoint_id()
     reopened = PursuitStore(store.base_dir)
     assert reopened.get_terminal_outbox(pending[0].outbox_id) == pending[0]
+    dispatch = reopened.get_terminal_outbox_dispatch(pending[0].outbox_id)
+    assert dispatch is not None
+    assert dispatch.state is PursuitTerminalDispatchState.IDLE
+    assert dispatch.next_attempt_at == admitted_at + 30
+
+
+def test_terminal_dispatch_claim_takeover_release_and_backoff(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    due_at = admitted_at + 30
+
+    assert store.claim_next_terminal_outbox(
+        owner_id="worker-a",
+        now=due_at - 0.1,
+    ) is None
+    first = store.claim_next_terminal_outbox(
+        owner_id="worker-a",
+        now=due_at,
+        lease_seconds=10,
+    )
+    assert first is not None
+    assert first.outbox == pending
+    assert first.dispatch.state is PursuitTerminalDispatchState.CLAIMED
+    assert first.dispatch.claim_epoch == 1
+    assert first.dispatch.attempt_count == 1
+    assert "worker-a" not in first.dispatch.canonical_json()
+    second_store = PursuitStore(store.base_dir)
+    assert second_store.claim_next_terminal_outbox(
+        owner_id="worker-b",
+        now=due_at + 9,
+    ) is None
+    takeover = second_store.claim_next_terminal_outbox(
+        owner_id="worker-b",
+        now=due_at + 10,
+        lease_seconds=10,
+    )
+    assert takeover is not None
+    assert takeover.dispatch.claim_epoch == 2
+    assert takeover.dispatch.attempt_count == 2
+    with pytest.raises(PursuitStoreError, match="已失效或不属于"):
+        store.release_terminal_outbox_claim(
+            pending.outbox_id,
+            owner_id="worker-a",
+            claim_epoch=1,
+            now=due_at + 11,
+            retry_delay_seconds=5,
+            failure_code="live_lease",
+        )
+    released = second_store.release_terminal_outbox_claim(
+        pending.outbox_id,
+        owner_id="worker-b",
+        claim_epoch=2,
+        now=due_at + 11,
+        retry_delay_seconds=5,
+        failure_code="live_lease",
+    )
+    assert released.state is PursuitTerminalDispatchState.IDLE
+    assert released.next_attempt_at == due_at + 16
+    assert released.last_failure_code == "live_lease"
+    assert second_store.claim_next_terminal_outbox(
+        owner_id="worker-c",
+        now=due_at + 15.9,
+    ) is None
+    third = second_store.claim_next_terminal_outbox(
+        owner_id="worker-c",
+        now=due_at + 16,
+    )
+    assert third is not None
+    assert third.dispatch.claim_epoch == 3
+    assert third.dispatch.attempt_count == 3
+
+
+def test_terminal_dispatch_backlog_classifies_durable_states(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    due_at = admitted_at + 30
+    assert store.terminal_outbox_backlog(now=due_at - 1).backoff == 1
+    assert store.terminal_outbox_backlog(now=due_at).due == 1
+    claim = store.claim_next_terminal_outbox(
+        owner_id="worker-a",
+        now=due_at,
+        lease_seconds=10,
+    )
+    assert claim is not None
+    live = store.terminal_outbox_backlog(now=due_at + 5)
+    assert live.live_claimed == 1
+    expired = store.terminal_outbox_backlog(now=due_at + 10)
+    assert expired.expired_claimed == 1
+
+
+def test_terminal_dispatch_claim_is_single_flight_under_parallel_workers(
+    tmp_path,
+) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    due_at = admitted_at + 30
+
+    def claim(index: int):
+        return PursuitStore(store.base_dir).claim_next_terminal_outbox(
+            owner_id=f"parallel-worker-{index}",
+            now=due_at,
+            lease_seconds=30,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(claim, range(16)))
+
+    claimed = [item for item in results if item is not None]
+    assert len(claimed) == 1
+    assert claimed[0].dispatch.claim_epoch == 1
+    assert claimed[0].dispatch.attempt_count == 1
+
+
+def test_tampered_terminal_dispatch_fails_closed(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE pursuit_terminal_outbox_dispatch
+            SET payload_sha256 = ? WHERE outbox_id = ?
+            """,
+            ("f" * 64, pending.outbox_id),
+        )
+
+    with pytest.raises(PursuitStoreError, match="dispatch 快照摘要"):
+        store.get_terminal_outbox_dispatch(pending.outbox_id)
+
+
+def test_existing_f1_outbox_backfills_dispatch_on_reopen(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    pending = store.list_pending_terminal_outbox()[0]
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("DROP TABLE pursuit_terminal_outbox_dispatch_events")
+        conn.execute("DROP TABLE pursuit_terminal_outbox_dispatch")
+
+    reopened = PursuitStore(store.base_dir)
+    dispatch = reopened.get_terminal_outbox_dispatch(pending.outbox_id)
+    assert dispatch is not None
+    assert dispatch.state is PursuitTerminalDispatchState.IDLE
+    assert dispatch.pending_outbox_sha256 == pending.digest()
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"interval_seconds": float("nan")}, "周期间隔"),
+        ({"claim_lease_seconds": True}, "claim 租约"),
+        ({"scan_limit": True}, "scan limit"),
+        ({"jitter_ratio": float("inf")}, "jitter"),
+    ],
+)
+def test_terminal_worker_policy_rejects_non_finite_or_boolean_numbers(
+    override,
+    message,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        PursuitTerminalOutboxWorkerPolicy(**override)
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_rejects_naive_clock(tmp_path) -> None:
+    worker = PursuitTerminalOutboxWorker(
+        store=PursuitStore(tmp_path / "naive-clock-pursuit"),
+        authority=HarnessStore(tmp_path / "naive-clock-harness.db"),
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(jitter_ratio=0),
+        now=lambda: T0.replace(tzinfo=None),
+    )
+
+    with pytest.raises(ValueError, match="时钟必须包含时区"):
+        await worker.run_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_rejects_invalid_random_source(tmp_path) -> None:
+    worker = PursuitTerminalOutboxWorker(
+        store=PursuitStore(tmp_path / "invalid-random-pursuit"),
+        authority=HarnessStore(tmp_path / "invalid-random-harness.db"),
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(jitter_ratio=0.1),
+        now=lambda: T0,
+        random_value=lambda: float("nan"),
+    )
+
+    with pytest.raises(ValueError, match="random source"):
+        await worker.run_once()
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_uses_real_harness_fence_and_delivers(tmp_path) -> None:
+    store, attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    harness = HarnessStore(tmp_path / "harness-worker.db")
+    original = await harness.acquire_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id="pursuit-reconcile",
+        owner_id="crashed-worker",
+        now=T0.isoformat(),
+        lease_seconds=5,
+    )
+    assert original is not None and original.epoch == 1
+    assessed = T0 + timedelta(seconds=40)
+    worker = PursuitTerminalOutboxWorker(
+        store=store,
+        authority=harness,
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(
+            interval_seconds=30,
+            max_empty_backoff_seconds=300,
+            claim_lease_seconds=60,
+            scan_limit=5,
+            reconcile_grace_seconds=30,
+            retry_base_seconds=5,
+            retry_max_seconds=60,
+            jitter_ratio=0,
+        ),
+        owner_id="terminal-worker-a",
+        now=lambda: assessed,
+    )
+
+    result = await worker.run_once()
+
+    assert result.claimed == 1
+    assert result.delivered == 1
+    assert result.failures == 0
+    assert store.get_recovery_attempt(
+        attempt_id
+    ).state is PursuitRecoveryAttemptState.RESOLVED
+    assert store.list_pending_terminal_outbox() == []
+    snapshot = worker.snapshot()
+    assert snapshot.state is PursuitTerminalWorkerState.WAITING
+    assert snapshot.delivered_count == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_schedules_backoff_for_live_lease(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    harness = HarnessStore(tmp_path / "harness-worker-live.db")
+    lease_now = T0 + timedelta(seconds=29)
+    live = await harness.acquire_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id="pursuit-reconcile",
+        owner_id="live-worker",
+        now=lease_now.isoformat(),
+        lease_seconds=60,
+    )
+    assert live is not None and live.epoch == 1
+    assessed = T0 + timedelta(seconds=40)
+    worker = PursuitTerminalOutboxWorker(
+        store=store,
+        authority=harness,
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(
+            interval_seconds=30,
+            max_empty_backoff_seconds=300,
+            claim_lease_seconds=60,
+            scan_limit=5,
+            reconcile_grace_seconds=30,
+            retry_base_seconds=5,
+            retry_max_seconds=60,
+            jitter_ratio=0,
+        ),
+        owner_id="terminal-worker-a",
+        now=lambda: assessed,
+    )
+
+    result = await worker.run_once()
+
+    assert result.claimed == 1
+    assert result.delivered == 0
+    assert result.retry_scheduled == 1
+    assert result.failure_codes == ("live_lease",)
+    pending = store.list_pending_terminal_outbox()[0]
+    dispatch = store.get_terminal_outbox_dispatch(pending.outbox_id)
+    assert dispatch is not None
+    assert dispatch.state is PursuitTerminalDispatchState.IDLE
+    assert dispatch.next_attempt_at == assessed.timestamp() + 5
+    assert dispatch.last_failure_code == "live_lease"
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_start_stop_is_single_flight(tmp_path) -> None:
+    worker = PursuitTerminalOutboxWorker(
+        store=PursuitStore(tmp_path / "empty-pursuit"),
+        authority=HarnessStore(tmp_path / "empty-harness.db"),
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(
+            interval_seconds=60,
+            max_empty_backoff_seconds=120,
+            jitter_ratio=0,
+        ),
+        owner_id="terminal-worker-lifecycle",
+        now=lambda: T0,
+    )
+
+    assert worker.start() is True
+    assert worker.start() is False
+    await asyncio.sleep(0)
+    assert await worker.stop() is True
+    assert worker.snapshot().state is PursuitTerminalWorkerState.STOPPED
+    assert await worker.stop() is False
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_serializes_explicit_and_periodic_passes(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    harness = HarnessStore(tmp_path / "harness-worker-single-flight.db")
+    await harness.acquire_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id="pursuit-reconcile",
+        owner_id="crashed-worker",
+        now=T0.isoformat(),
+        lease_seconds=5,
+    )
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingAuthority:
+        async def get_heartbeat(self, **kwargs):
+            entered.set()
+            await release.wait()
+            return await harness.get_heartbeat(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(harness, name)
+
+    worker = PursuitTerminalOutboxWorker(
+        store=store,
+        authority=BlockingAuthority(),  # type: ignore[arg-type]
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(jitter_ratio=0),
+        owner_id="terminal-worker-single-flight",
+        now=lambda: T0 + timedelta(seconds=40),
+    )
+
+    first = asyncio.create_task(worker.run_once())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    second = asyncio.create_task(worker.run_once())
+    await asyncio.sleep(0)
+    assert not second.done()
+    release.set()
+    first_result, second_result = await asyncio.gather(first, second)
+
+    assert first_result.delivered == 1
+    assert second_result.claimed == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_empty_backoff_caps_large_pass_count(tmp_path) -> None:
+    worker = PursuitTerminalOutboxWorker(
+        store=PursuitStore(tmp_path / "empty-backoff-pursuit"),
+        authority=HarnessStore(tmp_path / "empty-backoff-harness.db"),
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(
+            interval_seconds=1,
+            max_empty_backoff_seconds=300,
+            jitter_ratio=0,
+        ),
+        now=lambda: T0,
+    )
+    worker._consecutive_empty_passes = 10_000
+
+    result = await worker.run_once()
+
+    assert result.claimed == 0
+    assert worker.snapshot().next_delay_seconds == 300
+
+
+@pytest.mark.asyncio
+async def test_terminal_worker_shutdown_drains_inflight_reconcile(tmp_path) -> None:
+    store, _attempt_id, admitted_at = _admitted_store(tmp_path)
+    _persist_completed_evidence(store, admitted_at=admitted_at)
+    harness = HarnessStore(tmp_path / "harness-worker-drain.db")
+    original = await harness.acquire_run_lease(
+        workspace_root=tmp_path,
+        run_kind=HarnessRunKind.PURSUIT,
+        run_id="pursuit-reconcile",
+        owner_id="crashed-worker",
+        now=T0.isoformat(),
+        lease_seconds=5,
+    )
+    assert original is not None
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingAuthority:
+        async def get_heartbeat(self, **kwargs):
+            entered.set()
+            await release.wait()
+            return await harness.get_heartbeat(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(harness, name)
+
+    assessed = T0 + timedelta(seconds=40)
+    worker = PursuitTerminalOutboxWorker(
+        store=store,
+        authority=BlockingAuthority(),  # type: ignore[arg-type]
+        workspace_root=tmp_path,
+        policy=PursuitTerminalOutboxWorkerPolicy(
+            interval_seconds=60,
+            max_empty_backoff_seconds=120,
+            jitter_ratio=0,
+        ),
+        owner_id="terminal-worker-drain",
+        now=lambda: assessed,
+    )
+
+    assert worker.start() is True
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    stopping = asyncio.create_task(worker.stop())
+    await asyncio.sleep(0)
+    assert not stopping.done()
+    release.set()
+    assert await asyncio.wait_for(stopping, timeout=2) is True
+    assert worker.snapshot().state is PursuitTerminalWorkerState.STOPPED
+    assert store.list_pending_terminal_outbox() == []
 
 
 def test_inline_attempt_resolution_atomically_delivers_outbox(tmp_path) -> None:

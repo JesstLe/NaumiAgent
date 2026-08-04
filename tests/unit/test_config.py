@@ -25,6 +25,8 @@ class TestAppConfig:
         assert config.ui.output_style == "detailed"
         assert config.harness.runtime_heartbeat_retention.enabled is True
         assert config.harness.runtime_heartbeat_retention.retention_days == 7
+        assert config.harness.pursuit_terminal_outbox.enabled is True
+        assert config.harness.pursuit_terminal_outbox.scan_limit == 20
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
         assert config.browser.max_concurrent_runs == 2
@@ -54,6 +56,28 @@ class TestAppConfig:
                     "runtime_heartbeat_retention": {"retention_days": 2}
                 }
             )
+
+    def test_pursuit_terminal_outbox_config_is_bounded(self) -> None:
+        config = AppConfig(harness={
+            "pursuit_terminal_outbox": {
+                "enabled": False,
+                "interval_seconds": 10,
+                "max_empty_backoff_seconds": 60,
+                "scan_limit": 5,
+            }
+        })
+        policy = config.harness.pursuit_terminal_outbox
+        assert policy.enabled is False
+        assert policy.interval_seconds == 10
+        assert policy.scan_limit == 5
+
+        with pytest.raises(ValueError, match="retry_max_seconds"):
+            AppConfig(harness={
+                "pursuit_terminal_outbox": {
+                    "retry_base_seconds": 20,
+                    "retry_max_seconds": 10,
+                }
+            })
 
     def test_search_config_loads_advanced_brave_options(self, tmp_path: Path) -> None:
         yaml_path = tmp_path / "config.yaml"

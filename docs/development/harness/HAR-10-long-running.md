@@ -156,7 +156,10 @@
   - HAR-10.8f1 已实现：终态 checkpoint 与 pending outbox 同事务，普通 resolution/显式 reconcile
     与 delivered 同事务，并提供 oldest-first 有界认证恢复目录；详见
     `HAR-10-8f1-pursuit-terminal-outbox-core.md`。
-  - 未完成：outbox cursor/claim/backoff 自动扫描、跨 Store 原子 terminal commit 与 A5 故障/soak 验证。
+  - HAR-10.8f2a 已实现：durable dispatch claim/expiry/takeover/backoff、默认启动与周期 bounded worker、
+    Engine shutdown drain；自动恢复仍复用 10.8e Harness fencing。详见
+    `HAR-10-8f2a-pursuit-terminal-outbox-worker.md`。
+  - 未完成：typed backlog/New UI/TUI、dead-letter/retention、跨 Store 原子 terminal commit 与 A5 故障/soak。
 
 ## 与 Pursuit 的合并原则
 
@@ -190,8 +193,8 @@ Agent 委派 heartbeat producer，HAR-10.2h 已交付 browser producer；同步 
 接入仍属于后续实现；TUI queue parity 已由 HAR-10.3b4 完成。HAR-10.8d 已让每次生产恢复动作先进入
 可去重的审计账本，HAR-10.8e 已让中断后的 admitted attempt 通过更高 lease epoch 和机械终态证据显式
 收口，UI-18.5b1 已让 New UI/TUI fallback 消费该 authority 并完成受控 resume 动作闭环；
-自动 terminal outbox worker、历史 cursor/retention 与 takeover/cleanup 仍待独立治理；10.8f1 已提供
-worker 所需的原子 pending/delivered Store 边界，但不能代替自动消费。
+自动 terminal outbox worker 已由 10.8f2a 接入；typed backlog、历史 cursor/retention 与
+takeover/cleanup 用户动作仍待独立治理。
 
 ## 验收标准
 
