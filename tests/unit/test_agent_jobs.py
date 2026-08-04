@@ -255,16 +255,35 @@ async def test_expired_prestart_claim_can_take_over_but_running_cannot_retry(
         )
     recovery = await store.list_recovery_required()
     assert [item.job_id for item in recovery] == [admitted.job_id]
-    unknown = await store.mark_recovery_unknown(
-        admitted.job_id,
-        expected_latest_receipt_sha256=running.job.latest_receipt.receipt_sha256,
+    recovery_kwargs = {
+        "expected_request_sha256": running.job.request_sha256,
+        "expected_session_id_sha256": running.job.request.session_id_sha256,
+        "expected_claim_epoch": running.job.claim_epoch,
+        "expected_latest_receipt_sha256": (
+            running.job.latest_receipt.receipt_sha256
+        ),
+    }
+    with pytest.raises(AgentJobLifecycleConflictError, match="request fence"):
+        await store.mark_recovery_unknown(
+            admitted.job_id,
+            **{**recovery_kwargs, "expected_request_sha256": "f" * 64},
+        )
+    with pytest.raises(AgentJobLifecycleConflictError, match="session fence"):
+        await store.mark_recovery_unknown(
+            admitted.job_id,
+            **{**recovery_kwargs, "expected_session_id_sha256": "e" * 64},
+        )
+    with pytest.raises(AgentJobLifecycleConflictError, match="epoch fence"):
+        await store.mark_recovery_unknown(
+            admitted.job_id,
+            **{**recovery_kwargs, "expected_claim_epoch": 999},
+        )
+    concurrent = await asyncio.gather(
+        store.mark_recovery_unknown(admitted.job_id, **recovery_kwargs),
+        store.mark_recovery_unknown(admitted.job_id, **recovery_kwargs),
     )
-    assert unknown.job.state is AgentJobState.UNKNOWN
-    replay = await store.mark_recovery_unknown(
-        admitted.job_id,
-        expected_latest_receipt_sha256=running.job.latest_receipt.receipt_sha256,
-    )
-    assert not replay.applied
+    assert sum(item.applied for item in concurrent) == 1
+    assert all(item.job.state is AgentJobState.UNKNOWN for item in concurrent)
 
 
 @pytest.mark.asyncio
@@ -338,6 +357,11 @@ async def test_recovery_catalog_is_bounded_authenticated_and_content_free(
     clock.advance(seconds=11)
     await store.mark_recovery_unknown(
         unknown.job_id,
+        expected_request_sha256=unknown_running.job.request_sha256,
+        expected_session_id_sha256=(
+            unknown_running.job.request.session_id_sha256
+        ),
+        expected_claim_epoch=unknown_running.job.claim_epoch,
         expected_latest_receipt_sha256=(
             unknown_running.job.latest_receipt.receipt_sha256
         ),
@@ -1222,6 +1246,9 @@ async def test_expired_running_job_blocks_capacity_until_recovery_unknown(
     assert snapshot.available_jobs == 0
     await store.mark_recovery_unknown(
         running.job.job_id,
+        expected_request_sha256=started.job.request_sha256,
+        expected_session_id_sha256=started.job.request.session_id_sha256,
+        expected_claim_epoch=started.job.claim_epoch,
         expected_latest_receipt_sha256=(
             started.job.latest_receipt.receipt_sha256
         ),

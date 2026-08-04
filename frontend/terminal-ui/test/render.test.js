@@ -245,10 +245,11 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   state.agents.detailId = "recovery:job:agent-job-recovery";
   const recoveryWide = renderAgentControlPage(state.agents, 120, 20).map(stripAnsi);
   const recoveryNarrow = renderAgentControlPage(state.agents, 72, 16).map(stripAnsi);
-  assert(recoveryWide.some((line) => line.includes("Agent 恢复事实 · 只读")));
+  assert(recoveryWide.some((line) => line.includes("Agent 恢复事实")));
   assert(recoveryWide.some((line) => line.includes("running Job 需要恢复裁决")));
-  assert(recoveryWide.some((line) => line.includes("当前目录不执行自动模型重放")));
-  assert(recoveryNarrow.some((line) => line.includes("Agent 恢复事实 · 只读")));
+  assert(recoveryWide.some((line) => line.includes("按 u 将该过期 running Job")));
+  assert(recoveryWide.some((line) => line.includes("不会自动重放模型")));
+  assert(recoveryNarrow.some((line) => line.includes("Agent 恢复事实")));
   assert(renderAgentControlPage(state.agents, 72, 16).every((line) => visibleWidth(line) <= 72));
 });
 

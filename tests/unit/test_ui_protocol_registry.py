@@ -46,6 +46,12 @@ def test_published_event_registry_exactly_covers_python_protocol_enums() -> None
     assert registry.required_capability(
         "server", "pursuit/recovery/action_result"
     ) == "pursuit_recovery_actions"
+    assert registry.required_capability(
+        "client", "agents/recovery/resolve_unknown"
+    ) == "agent_recovery_actions"
+    assert registry.required_capability(
+        "server", "agents/recovery/action_result"
+    ) == "agent_recovery_actions"
     assert registry.required_capability("client", "submit") is None
     with pytest.raises(TypeError):
         registry.client["future/event"] = registry.policy("client", "ping")  # type: ignore[index]
@@ -68,6 +74,17 @@ def test_published_agent_control_contract_tracks_recovery_schema() -> None:
         "other",
         "unknown",
     }
+    assert contract["recovery_action_fields"] == [
+        "action",
+        "job_id",
+        "accepted",
+        "applied",
+        "code",
+        "message",
+        "job_state",
+        "claim_epoch",
+        "receipt_sha256",
+    ]
 
 
 def test_sensitive_persistent_events_require_explicit_redaction() -> None:

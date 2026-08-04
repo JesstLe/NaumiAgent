@@ -25,7 +25,7 @@ attachJsonlLineReader(process.stdin, (line) => {
         selected_version: 1,
         server_minimum_version: 1,
         server_maximum_version: 1,
-        capabilities: ["doctor_export", "doctor_live_probe", "goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
+        capabilities: ["agent_recovery_actions", "doctor_export", "doctor_live_probe", "goal_snapshot", "heartbeat", "task_snapshot", "typed_ui_messages", "workbench_snapshot"],
       },
     }, record.id);
     const delayMs = Math.max(0, Number(process.env.NAUMI_TEST_READY_DELAY_MS) || 0);

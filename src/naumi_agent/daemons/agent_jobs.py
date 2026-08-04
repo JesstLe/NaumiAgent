@@ -1997,9 +1997,26 @@ class AgentJobStore:
         self,
         job_id: str,
         *,
+        expected_request_sha256: str,
+        expected_session_id_sha256: str,
+        expected_claim_epoch: int,
         expected_latest_receipt_sha256: str,
     ) -> AgentJobTransitionResult:
         _require_identifier(job_id, field="job_id")
+        _require_sha256(
+            expected_request_sha256,
+            field="expected_request_sha256",
+        )
+        _require_sha256(
+            expected_session_id_sha256,
+            field="expected_session_id_sha256",
+        )
+        if (
+            isinstance(expected_claim_epoch, bool)
+            or not isinstance(expected_claim_epoch, int)
+            or expected_claim_epoch < 1
+        ):
+            raise ValueError("expected_claim_epoch 必须是正整数。")
         _require_sha256(
             expected_latest_receipt_sha256,
             field="expected_latest_receipt_sha256",
@@ -2011,6 +2028,24 @@ class AgentJobStore:
             async with self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
                 stored = await _require_stored(db, job_id, key=key)
+                if not hmac.compare_digest(
+                    stored.request_sha256,
+                    expected_request_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob recovery request fence 已变化。"
+                    )
+                if not hmac.compare_digest(
+                    stored.request.session_id_sha256,
+                    expected_session_id_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob recovery session fence 已变化。"
+                    )
+                if stored.claim_epoch != expected_claim_epoch:
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob recovery epoch fence 已变化。"
+                    )
                 if stored.state is AgentJobState.UNKNOWN:
                     if (
                         stored.latest_receipt.previous_receipt_sha256

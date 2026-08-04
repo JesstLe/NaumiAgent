@@ -111,10 +111,10 @@ reasoning、消息正文和解密后的 session ID。New UI 协议 normalizer �
 
 ## 9. 后续依赖
 
-下一步不应直接把按钮接到 `mark_recovery_unknown()`。应先在 HAR-10、ARC-06 和 Supervisor 文档间
-重新比较依赖，最小候选是：
+依赖比较已完成：HAR-10.7e 没有让按钮直接信任旧快照，而是在 Store 同一事务内增加 request/session/
+receipt/epoch/expiry exact fence，并由双端共享动作端口；见
+[HAR-10.7e](HAR-10-7e-exact-agent-recovery-action.md)。其后候选仍是：
 
-1. exact fenced manual recovery action：必须携带最新 receipt SHA-256 与预期 epoch；
-2. Agent publication 周期 retry 与 shutdown drain health；
-3. 独立 Agent Worker dispatch/scheduler；
-4. recovery catalog cursor/retention，仅在真实规模证明 50 项前缀不足后实现。
+1. Agent publication 周期 retry 与 shutdown drain health；
+2. 独立 Agent Worker dispatch/scheduler；
+3. recovery catalog cursor/retention，仅在真实规模证明 50 项前缀不足后实现。

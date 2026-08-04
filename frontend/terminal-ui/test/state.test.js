@@ -851,6 +851,84 @@ test("agent control keyboard uses stable tabs and confirms one authoritative sto
   assert.equal("revision" in persisted.agents, false);
 });
 
+test("agent recovery action is capability-gated exact and has no second confirmation", () => {
+  const state = createInitialState();
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+  state.currentSessionId = "session-agents";
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["agent_recovery_actions", "typed_ui_messages"],
+  };
+  toggleAgentControlCenter(state, send, true);
+  reduceServerEvent(state, { type: "agents/snapshot", payload: agentSnapshot(1) });
+  for (let index = 0; index < 3; index += 1) {
+    handleAgentControlKey(state, INPUT_KEYS.tab, send);
+  }
+  assert.equal(state.agents.selectedTab, "recovery");
+
+  handleAgentControlKey(state, "u", send);
+  handleAgentControlKey(state, "u", send);
+  const actions = sent.filter(
+    (item) => item.type === "agents/recovery/resolve_unknown",
+  );
+  assert.deepEqual(actions, [{
+    type: "agents/recovery/resolve_unknown",
+    payload: {
+      session_id: "session-agents",
+      job_id: "agent-job-recovery",
+      request_sha256: "d".repeat(64),
+      receipt_sha256: "e".repeat(64),
+      claim_epoch: 2,
+    },
+  }]);
+  assert.equal(state.agents.recoveryActionPendingId, "agent-job-recovery");
+
+  reduceServerEvent(state, {
+    type: "agents/recovery/action_result",
+    payload: {
+      action: "resolve_unknown",
+      job_id: "agent-job-recovery",
+      accepted: true,
+      applied: true,
+      code: "recovery_resolved_unknown",
+      message: "已收口。",
+      job_state: "unknown",
+      claim_epoch: 2,
+      receipt_sha256: "f".repeat(64),
+    },
+  });
+  assert.equal(state.agents.recoveryActionPendingId, "");
+  assert.equal(state.agents.actionMessage, "已收口。");
+
+  const unsupported = createInitialState();
+  const unsupportedSent = [];
+  const unsupportedSend = (type, payload) => unsupportedSent.push({ type, payload });
+  unsupported.currentSessionId = "session-agents";
+  unsupported.protocolNegotiated = true;
+  unsupported.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["typed_ui_messages"],
+  };
+  toggleAgentControlCenter(unsupported, unsupportedSend, true);
+  reduceServerEvent(unsupported, {
+    type: "agents/snapshot",
+    payload: agentSnapshot(1),
+  });
+  for (let index = 0; index < 3; index += 1) {
+    handleAgentControlKey(unsupported, INPUT_KEYS.tab, unsupportedSend);
+  }
+  handleAgentControlKey(unsupported, "u", unsupportedSend);
+  assert.equal(
+    unsupportedSent.some(
+      (item) => item.type === "agents/recovery/resolve_unknown",
+    ),
+    false,
+  );
+  assert.match(unsupported.agents.actionMessage, /不支持 Agent 恢复裁决/);
+});
+
 test("assistant stream updates one active message", () => {
   const state = createInitialState();
 

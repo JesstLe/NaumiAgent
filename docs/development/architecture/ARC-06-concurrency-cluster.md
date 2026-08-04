@@ -37,6 +37,10 @@
   - UI-13.1e 已把 durable policy、live waiting、active claim、oldest wait 与到期待收口事实投影到
     New UI/TUI 共用的只读 Doctor authority，为自动 scheduler 提供最小运维门。见
     [设计与验证](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
+  - HAR-10.7d/7e 已在 Agent Control 提供认证恢复目录与 exact fenced expired-running 人工裁决；只有
+    当前会话、旧 lease 且 request/receipt/epoch 全部匹配时才释放 recovery-blocking capacity，不等于
+    自动 scheduler 或 Supervisor。见
+    [设计与验证](../harness/HAR-10-7e-exact-agent-recovery-action.md)。
   - ARC-04.5a 已为 embedded Agent 签发真实 request/result contract 并在 New UI/TUI 投影低敏摘要。见
     [设计与验证](ARC-04-5a-agent-worker-contract.md)。
   - ARC-04.5b1 已提供 OS credential-backed Runtime payload key 与 authenticated envelope；

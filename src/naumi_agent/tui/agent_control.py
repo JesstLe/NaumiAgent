@@ -140,8 +140,8 @@ def _recovery_catalog_line(snapshot: AgentControlSnapshot) -> str:
     )
     suffix = "+" if catalog.truncated else ""
     return (
-        f"**只读恢复目录**：`{len(catalog.items)}{suffix}` 项 · "
-        f"需裁决 `{attention}` · 不执行自动模型重放"
+        f"**恢复目录**：`{len(catalog.items)}{suffix}` 项 · "
+        f"需裁决 `{attention}` · 人工动作不重放模型"
     )
 
 
@@ -158,6 +158,7 @@ class AgentControlScreen(Screen[None]):
         Binding("right", "next_tab", "下一标签", show=False),
         Binding("r", "refresh", "刷新"),
         Binding("x", "request_stop", "停止"),
+        Binding("u", "resolve_recovery_unknown", "恢复裁决"),
         Binding("y", "confirm_stop", "确认停止", show=False),
         Binding("n", "cancel_stop", "取消停止", show=False),
     ]
@@ -225,6 +226,8 @@ class AgentControlScreen(Screen[None]):
         self.selected_id = normalized_initial_id
         self.stop_confirmation_task_id = ""
         self.action_pending_task_id = ""
+        self.recovery_action_pending_id = ""
+        self.action_notice = ""
         self._entry_ids: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -274,7 +277,7 @@ class AgentControlScreen(Screen[None]):
             self._content_widget().update(
                 "正在加载 Agent 权威快照…"
             )
-        error.update("")
+        error.update(self.action_notice)
         try:
             snapshot = await self.engine.agent_control.snapshot()
         except Exception as exc:
@@ -285,6 +288,17 @@ class AgentControlScreen(Screen[None]):
             error.update(f"刷新失败，已保留上一次快照：{type(exc).__name__} — {exc}")
             return
         self.snapshot = snapshot
+        if self.recovery_action_pending_id:
+            recovery = next(
+                (
+                    item for item in snapshot.recovery_catalog.items
+                    if item.kind == "job"
+                    and item.job_id == self.recovery_action_pending_id
+                ),
+                None,
+            )
+            if recovery is None or recovery.recovery_state == "outcome_unknown":
+                self.recovery_action_pending_id = ""
         if self.action_pending_task_id:
             execution = next(
                 (
@@ -382,6 +396,7 @@ class AgentControlScreen(Screen[None]):
         self._select_tab(1)
 
     def action_refresh(self) -> None:
+        self.action_notice = ""
         self.refresh_snapshot()
 
     def action_request_stop(self) -> None:
@@ -393,6 +408,7 @@ class AgentControlScreen(Screen[None]):
         )
         if execution is None or not execution.stop_supported or self.action_pending_task_id:
             return
+        self.action_notice = ""
         self.stop_confirmation_task_id = execution.task_id
         self.query_one("#agent-error", Static).update(
             f"确认停止 {execution.task_id}？按 y 确认，n/Esc 取消。"
@@ -411,7 +427,41 @@ class AgentControlScreen(Screen[None]):
         if not self.stop_confirmation_task_id:
             return
         self.stop_confirmation_task_id = ""
+        self.action_notice = ""
         self.query_one("#agent-error", Static).update("")
+
+    def action_resolve_recovery_unknown(self) -> None:
+        if (
+            self.selected_tab != "recovery"
+            or self.snapshot is None
+            or self.recovery_action_pending_id
+        ):
+            return
+        item = next(
+            (
+                value for value in self.snapshot.recovery_catalog.items
+                if f"recovery:{value.kind}:{value.item_id}" == self.selected_id
+            ),
+            None,
+        )
+        if (
+            item is None
+            or item.kind != "job"
+            or item.recovery_state != "recovery_required"
+            or item.session_scope != "current"
+        ):
+            return
+        self.action_notice = ""
+        self.recovery_action_pending_id = item.job_id
+        self.query_one("#agent-error", Static).update(
+            "正在提交精确恢复裁决…"
+        )
+        self._resolve_recovery_unknown(
+            item.job_id,
+            item.request_sha256,
+            item.claim_epoch,
+            item.receipt_sha256,
+        )
 
     def action_close(self) -> None:
         if self.stop_confirmation_task_id:
@@ -428,13 +478,44 @@ class AgentControlScreen(Screen[None]):
             )
         except Exception as exc:
             self.action_pending_task_id = ""
-            self.query_one("#agent-error", Static).update(
-                f"停止请求失败：{type(exc).__name__} — {exc}"
-            )
+            self.action_notice = f"停止请求失败：{type(exc).__name__} — {exc}"
+            self.query_one("#agent-error", Static).update(self.action_notice)
             return
-        self.query_one("#agent-error", Static).update(result.message)
+        self.action_notice = result.message
+        self.query_one("#agent-error", Static).update(self.action_notice)
         if not result.accepted:
             self.action_pending_task_id = ""
+        self.refresh_snapshot()
+
+    @work(exclusive=True, group="agent-control-recovery", exit_on_error=False)
+    async def _resolve_recovery_unknown(
+        self,
+        job_id: str,
+        request_sha256: str,
+        claim_epoch: int,
+        receipt_sha256: str,
+    ) -> None:
+        try:
+            session = getattr(self.engine, "_session", None)
+            if session is None:
+                session = await self.engine.get_or_create_session()
+            result = (
+                await self.engine.subagent_manager.resolve_recovery_unknown(
+                    session_id=str(getattr(session, "id", "") or ""),
+                    job_id=job_id,
+                    expected_request_sha256=request_sha256,
+                    expected_claim_epoch=claim_epoch,
+                    expected_latest_receipt_sha256=receipt_sha256,
+                )
+            )
+        except Exception as exc:
+            self.recovery_action_pending_id = ""
+            self.action_notice = f"恢复裁决失败：{type(exc).__name__} — {exc}"
+            self.query_one("#agent-error", Static).update(self.action_notice)
+            return
+        self.recovery_action_pending_id = ""
+        self.action_notice = result.message
+        self.query_one("#agent-error", Static).update(self.action_notice)
         self.refresh_snapshot()
 
     def _select_tab(self, delta: int) -> None:
@@ -614,7 +695,16 @@ def _format_recovery(
         f"- 请求摘要：`{_code(_short_digest(item.request_sha256))}`",
         f"- 回执摘要：`{_code(_short_digest(item.receipt_sha256))}`",
         f"- 原因码：`{_code(item.reason_code)}`",
-        "- ℹ️ 当前目录只读，不执行自动模型重放，也不改写持久状态。",
+        *(
+            ["- ⚠️ 按 `u` 将该过期 running Job 精确收口为 `unknown`。"]
+            if (
+                item.kind == "job"
+                and item.recovery_state == "recovery_required"
+                and item.session_scope == "current"
+            )
+            else ["- ℹ️ 当前条目没有可用的人工恢复动作。"]
+        ),
+        "- ℹ️ 恢复裁决不会自动重放模型，也不会删除持久证据。",
         *(
             ["- ⚠️ 目录已达到 50 项展示上限，仅展示高优先级有界前缀。"]
             if catalog.truncated
