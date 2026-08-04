@@ -7,6 +7,7 @@ import hmac
 import math
 import sqlite3
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -35,10 +36,28 @@ from naumi_agent.orchestrator.pursuit_recovery_reconcile import (
 )
 from naumi_agent.orchestrator.pursuit_terminal import PursuitBoundaryDecision
 from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalDispatchState,
+    PursuitTerminalOutboxDispatch,
     PursuitTerminalOutboxRecord,
     PursuitTerminalOutboxState,
     pursuit_terminal_outbox_id,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxClaim:
+    outbox: PursuitTerminalOutboxRecord
+    dispatch: PursuitTerminalOutboxDispatch
+
+
+@dataclass(frozen=True, slots=True)
+class PursuitTerminalOutboxBacklog:
+    total_pending: int
+    due: int
+    backoff: int
+    live_claimed: int
+    expired_claimed: int
+    assessed_at: float
 
 
 class PursuitStoreError(RuntimeError):
@@ -862,6 +881,226 @@ class PursuitStore:
                 f"读取 terminal outbox 恢复目录失败：{exc}"
             ) from exc
 
+    def get_terminal_outbox_dispatch(
+        self,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxDispatch | None:
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                return self._get_terminal_dispatch_with_connection(conn, outbox_id)
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(
+                f"terminal outbox dispatch 校验失败：{exc}"
+            ) from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(
+                f"读取 terminal outbox dispatch 失败：{exc}"
+            ) from exc
+
+    def claim_next_terminal_outbox(
+        self,
+        *,
+        owner_id: str,
+        now: float,
+        lease_seconds: int = 30,
+        scan_limit: int = 100,
+    ) -> PursuitTerminalOutboxClaim | None:
+        owner_sha256 = _terminal_dispatch_owner_sha256(owner_id)
+        if (
+            not math.isfinite(now)
+            or now <= 0
+            or isinstance(lease_seconds, bool)
+            or not 3 <= lease_seconds <= 300
+            or isinstance(scan_limit, bool)
+            or not 1 <= scan_limit <= 1000
+        ):
+            raise ValueError("terminal dispatch claim 策略无效。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                rows = conn.execute(
+                    """
+                    SELECT o.outbox_id
+                    FROM pursuit_terminal_outbox AS o
+                    JOIN pursuit_terminal_outbox_dispatch AS d
+                      ON d.outbox_id = o.outbox_id
+                    WHERE o.state = 'pending'
+                      AND (
+                        (d.state = 'idle' AND d.next_attempt_at <= ?)
+                        OR (d.state = 'claimed' AND d.claim_expires_at <= ?)
+                      )
+                    ORDER BY o.created_at ASC, o.outbox_id ASC
+                    LIMIT ?
+                    """,
+                    (now, now, scan_limit),
+                ).fetchall()
+                if not rows:
+                    return None
+                outbox_id = str(rows[0]["outbox_id"])
+                outbox = self._get_terminal_outbox_with_connection(conn, outbox_id)
+                current = self._get_terminal_dispatch_with_connection(
+                    conn,
+                    outbox_id,
+                )
+                if outbox is None or current is None:
+                    raise PursuitStoreError("terminal dispatch 候选权威缺失。")
+                candidate = PursuitTerminalOutboxDispatch.model_validate(
+                    current.model_copy(update={
+                        "sequence": current.sequence + 1,
+                        "state": PursuitTerminalDispatchState.CLAIMED,
+                        "claim_owner_sha256": owner_sha256,
+                        "claim_epoch": current.claim_epoch + 1,
+                        "claim_expires_at": now + lease_seconds,
+                        "attempt_count": current.attempt_count + 1,
+                        "next_attempt_at": 0,
+                        "updated_at": now,
+                    }).model_dump(mode="json")
+                )
+                self._update_terminal_dispatch_with_connection(
+                    conn,
+                    current=current,
+                    candidate=candidate,
+                )
+                return PursuitTerminalOutboxClaim(
+                    outbox=outbox,
+                    dispatch=candidate,
+                )
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"认领 terminal outbox 失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"认领 terminal outbox 失败：{exc}") from exc
+
+    def release_terminal_outbox_claim(
+        self,
+        outbox_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        now: float,
+        retry_delay_seconds: float,
+        failure_code: str,
+    ) -> PursuitTerminalOutboxDispatch:
+        owner_sha256 = _terminal_dispatch_owner_sha256(owner_id)
+        normalized_code = str(failure_code or "").strip()
+        if (
+            not math.isfinite(now)
+            or now <= 0
+            or not math.isfinite(retry_delay_seconds)
+            or not 1 <= retry_delay_seconds <= 3600
+            or isinstance(claim_epoch, bool)
+            or claim_epoch <= 0
+        ):
+            raise ValueError("terminal dispatch release 策略无效。")
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                outbox = self._get_terminal_outbox_with_connection(conn, outbox_id)
+                current = self._get_terminal_dispatch_with_connection(
+                    conn,
+                    outbox_id,
+                )
+                if outbox is None or current is None:
+                    raise PursuitStoreConflictError("terminal dispatch 不存在。")
+                if outbox.state is PursuitTerminalOutboxState.DELIVERED:
+                    if current.state is PursuitTerminalDispatchState.DELIVERED:
+                        return current
+                    raise PursuitStoreConflictError("delivered outbox 调度状态不一致。")
+                if (
+                    current.state is not PursuitTerminalDispatchState.CLAIMED
+                    or current.claim_epoch != claim_epoch
+                    or not hmac.compare_digest(
+                        current.claim_owner_sha256,
+                        owner_sha256,
+                    )
+                    or current.claim_expires_at <= now
+                ):
+                    raise PursuitStoreConflictError(
+                        "terminal dispatch claim 已失效或不属于当前 owner。"
+                    )
+                candidate = PursuitTerminalOutboxDispatch.model_validate(
+                    current.model_copy(update={
+                        "sequence": current.sequence + 1,
+                        "state": PursuitTerminalDispatchState.IDLE,
+                        "claim_owner_sha256": "",
+                        "claim_expires_at": 0,
+                        "next_attempt_at": now + retry_delay_seconds,
+                        "last_failure_code": normalized_code,
+                        "updated_at": now,
+                    }).model_dump(mode="json")
+                )
+                self._update_terminal_dispatch_with_connection(
+                    conn,
+                    current=current,
+                    candidate=candidate,
+                )
+                return candidate
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"释放 terminal outbox claim 失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"释放 terminal outbox claim 失败：{exc}") from exc
+
+    def terminal_outbox_backlog(
+        self,
+        *,
+        now: float,
+        scan_limit: int = 10_000,
+    ) -> PursuitTerminalOutboxBacklog:
+        if (
+            not math.isfinite(now)
+            or now <= 0
+            or isinstance(scan_limit, bool)
+            or not 1 <= scan_limit <= 10_000
+        ):
+            raise ValueError("terminal outbox backlog 策略无效。")
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT o.outbox_id
+                FROM pursuit_terminal_outbox AS o
+                WHERE o.state = 'pending'
+                ORDER BY o.created_at ASC, o.outbox_id ASC
+                LIMIT ?
+                """,
+                (scan_limit + 1,),
+            ).fetchall()
+            if len(rows) > scan_limit:
+                raise PursuitStoreError("terminal outbox backlog 超过有界扫描上限。")
+            due = backoff = live_claimed = expired_claimed = 0
+            for row in rows:
+                outbox_id = str(row["outbox_id"])
+                self._get_terminal_outbox_with_connection(conn, outbox_id)
+                dispatch = self._get_terminal_dispatch_with_connection(
+                    conn,
+                    outbox_id,
+                )
+                if dispatch is None:
+                    raise PursuitStoreError("pending outbox 缺少 dispatch。")
+                if dispatch.state is PursuitTerminalDispatchState.IDLE:
+                    if dispatch.next_attempt_at <= now:
+                        due += 1
+                    else:
+                        backoff += 1
+                elif dispatch.claim_expires_at <= now:
+                    expired_claimed += 1
+                else:
+                    live_claimed += 1
+        return PursuitTerminalOutboxBacklog(
+            total_pending=len(rows),
+            due=due,
+            backoff=backoff,
+            live_claimed=live_claimed,
+            expired_claimed=expired_claimed,
+            assessed_at=now,
+        )
+
     @staticmethod
     def _get_checkpoint_with_connection(
         conn: sqlite3.Connection,
@@ -1538,6 +1777,11 @@ class PursuitStore:
             ),
         )
         self._append_terminal_outbox_event(conn, record, previous_digest="")
+        self._create_terminal_dispatch_with_connection(
+            conn,
+            outbox=record,
+            next_attempt_at=max(record.created_at, attempt.admitted_at + 30.0),
+        )
         return record
 
     def _deliver_terminal_outbox_with_connection(
@@ -1607,7 +1851,274 @@ class PursuitStore:
         )
         if cursor.rowcount != 1:
             raise PursuitStoreConflictError("terminal outbox 被并发更新，拒绝覆盖。")
+        self._deliver_terminal_dispatch_with_connection(
+            conn,
+            outbox=candidate,
+            delivered_at=delivered_at,
+        )
         return candidate
+
+    def _create_terminal_dispatch_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        outbox: PursuitTerminalOutboxRecord,
+        next_attempt_at: float,
+    ) -> PursuitTerminalOutboxDispatch:
+        existing = self._get_terminal_dispatch_with_connection(
+            conn,
+            outbox.outbox_id,
+        )
+        if existing is not None:
+            if hmac.compare_digest(
+                existing.pending_outbox_sha256,
+                outbox.digest(),
+            ):
+                return existing
+            raise PursuitStoreConflictError(
+                "terminal dispatch 已绑定不同 pending outbox。"
+            )
+        dispatch = PursuitTerminalOutboxDispatch(
+            outbox_id=outbox.outbox_id,
+            pending_outbox_sha256=outbox.digest(),
+            sequence=1,
+            state=PursuitTerminalDispatchState.IDLE,
+            next_attempt_at=next_attempt_at,
+            created_at=outbox.created_at,
+            updated_at=outbox.created_at,
+        )
+        conn.execute(
+            """
+            INSERT INTO pursuit_terminal_outbox_dispatch (
+                outbox_id, latest_sequence, state, payload_json,
+                payload_sha256, next_attempt_at, claim_expires_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dispatch.outbox_id,
+                dispatch.sequence,
+                dispatch.state.value,
+                dispatch.canonical_json(),
+                dispatch.digest(),
+                dispatch.next_attempt_at,
+                dispatch.claim_expires_at,
+                dispatch.updated_at,
+            ),
+        )
+        self._append_terminal_dispatch_event(conn, dispatch, previous_digest="")
+        return dispatch
+
+    def _deliver_terminal_dispatch_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        outbox: PursuitTerminalOutboxRecord,
+        delivered_at: float,
+    ) -> PursuitTerminalOutboxDispatch:
+        current = self._get_terminal_dispatch_with_connection(
+            conn,
+            outbox.outbox_id,
+        )
+        if current is None:
+            raise PursuitStoreError("delivered outbox 缺少 dispatch。")
+        if current.state is PursuitTerminalDispatchState.DELIVERED:
+            return current
+        candidate = PursuitTerminalOutboxDispatch.model_validate(
+            current.model_copy(update={
+                "sequence": current.sequence + 1,
+                "state": PursuitTerminalDispatchState.DELIVERED,
+                "claim_owner_sha256": "",
+                "claim_expires_at": 0,
+                "next_attempt_at": 0,
+                "last_failure_code": "",
+                "updated_at": delivered_at,
+            }).model_dump(mode="json")
+        )
+        self._update_terminal_dispatch_with_connection(
+            conn,
+            current=current,
+            candidate=candidate,
+        )
+        return candidate
+
+    def _get_terminal_dispatch_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> PursuitTerminalOutboxDispatch | None:
+        row = conn.execute(
+            "SELECT * FROM pursuit_terminal_outbox_dispatch WHERE outbox_id = ?",
+            (outbox_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        events = self._verify_terminal_dispatch_events(conn, outbox_id)
+        if not events:
+            raise PursuitStoreError("terminal dispatch 快照存在但事件链为空。")
+        payload = str(row["payload_json"])
+        actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+            raise PursuitStoreError("terminal dispatch 快照摘要校验失败。")
+        snapshot = PursuitTerminalOutboxDispatch.model_validate_json(payload)
+        latest = events[-1]
+        if (
+            snapshot != latest
+            or int(row["latest_sequence"]) != latest.sequence
+            or str(row["state"]) != latest.state.value
+            or float(row["next_attempt_at"]) != latest.next_attempt_at
+            or float(row["claim_expires_at"]) != latest.claim_expires_at
+        ):
+            raise PursuitStoreError("terminal dispatch 快照与事件链末端不一致。")
+        outbox_events = self._verify_terminal_outbox_events(conn, outbox_id)
+        if not outbox_events or not hmac.compare_digest(
+            outbox_events[0].digest(),
+            latest.pending_outbox_sha256,
+        ):
+            raise PursuitStoreError("terminal dispatch 与 pending outbox 不一致。")
+        if latest.state is PursuitTerminalDispatchState.DELIVERED and (
+            len(outbox_events) != 2
+            or outbox_events[-1].state is not PursuitTerminalOutboxState.DELIVERED
+        ):
+            raise PursuitStoreError("terminal dispatch 与 delivered outbox 不一致。")
+        return latest
+
+    def _update_terminal_dispatch_with_connection(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        current: PursuitTerminalOutboxDispatch,
+        candidate: PursuitTerminalOutboxDispatch,
+    ) -> None:
+        self._append_terminal_dispatch_event(
+            conn,
+            candidate,
+            previous_digest=current.digest(),
+        )
+        cursor = conn.execute(
+            """
+            UPDATE pursuit_terminal_outbox_dispatch
+            SET latest_sequence = ?, state = ?, payload_json = ?,
+                payload_sha256 = ?, next_attempt_at = ?,
+                claim_expires_at = ?, updated_at = ?
+            WHERE outbox_id = ? AND latest_sequence = ? AND state = ?
+            """,
+            (
+                candidate.sequence,
+                candidate.state.value,
+                candidate.canonical_json(),
+                candidate.digest(),
+                candidate.next_attempt_at,
+                candidate.claim_expires_at,
+                candidate.updated_at,
+                candidate.outbox_id,
+                current.sequence,
+                current.state.value,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PursuitStoreConflictError("terminal dispatch 被并发更新。")
+
+    @staticmethod
+    def _append_terminal_dispatch_event(
+        conn: sqlite3.Connection,
+        dispatch: PursuitTerminalOutboxDispatch,
+        *,
+        previous_digest: str,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO pursuit_terminal_outbox_dispatch_events (
+                outbox_id, sequence, state, payload_json, payload_sha256,
+                previous_payload_sha256, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dispatch.outbox_id,
+                dispatch.sequence,
+                dispatch.state.value,
+                dispatch.canonical_json(),
+                dispatch.digest(),
+                previous_digest,
+                dispatch.updated_at,
+            ),
+        )
+
+    @staticmethod
+    def _verify_terminal_dispatch_events(
+        conn: sqlite3.Connection,
+        outbox_id: str,
+    ) -> list[PursuitTerminalOutboxDispatch]:
+        rows = conn.execute(
+            """
+            SELECT * FROM pursuit_terminal_outbox_dispatch_events
+            WHERE outbox_id = ? ORDER BY sequence ASC
+            """,
+            (outbox_id,),
+        ).fetchall()
+        records: list[PursuitTerminalOutboxDispatch] = []
+        previous_digest = ""
+        for expected_sequence, row in enumerate(rows, start=1):
+            payload = str(row["payload_json"])
+            actual_digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if int(row["sequence"]) != expected_sequence:
+                raise PursuitStoreError("terminal dispatch 事件序号不连续。")
+            if not hmac.compare_digest(actual_digest, str(row["payload_sha256"])):
+                raise PursuitStoreError("terminal dispatch 事件摘要校验失败。")
+            if not hmac.compare_digest(
+                previous_digest,
+                str(row["previous_payload_sha256"]),
+            ):
+                raise PursuitStoreError("terminal dispatch 事件哈希链断裂。")
+            record = PursuitTerminalOutboxDispatch.model_validate_json(payload)
+            if (
+                record.outbox_id != outbox_id
+                or record.sequence != expected_sequence
+                or record.state.value != str(row["state"])
+            ):
+                raise PursuitStoreError("terminal dispatch 事件元数据不一致。")
+            records.append(record)
+            previous_digest = actual_digest
+        return records
+
+    def _backfill_terminal_dispatches_with_connection(
+        self,
+        conn: sqlite3.Connection,
+    ) -> None:
+        rows = conn.execute(
+            """
+            SELECT o.outbox_id
+            FROM pursuit_terminal_outbox AS o
+            LEFT JOIN pursuit_terminal_outbox_dispatch AS d
+              ON d.outbox_id = o.outbox_id
+            WHERE d.outbox_id IS NULL
+            ORDER BY o.created_at ASC, o.outbox_id ASC
+            LIMIT 10001
+            """
+        ).fetchall()
+        if len(rows) > 10_000:
+            raise PursuitStoreError(
+                "terminal dispatch 迁移超过 10000 条安全上限。"
+            )
+        for row in rows:
+            outbox_id = str(row["outbox_id"])
+            current = self._get_terminal_outbox_with_connection(conn, outbox_id)
+            events = self._verify_terminal_outbox_events(conn, outbox_id)
+            if current is None or not events:
+                raise PursuitStoreError("terminal dispatch 迁移源 outbox 无效。")
+            pending = events[0]
+            dispatch = self._create_terminal_dispatch_with_connection(
+                conn,
+                outbox=pending,
+                next_attempt_at=pending.created_at,
+            )
+            if current.state is PursuitTerminalOutboxState.DELIVERED:
+                self._deliver_terminal_dispatch_with_connection(
+                    conn,
+                    outbox=current,
+                    delivered_at=current.delivered_at,
+                )
+            elif dispatch.state is not PursuitTerminalDispatchState.IDLE:
+                raise PursuitStoreError("terminal dispatch 迁移初态无效。")
 
     def _get_terminal_outbox_with_connection(
         self,
@@ -2191,7 +2702,63 @@ class PursuitStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_terminal_outbox_dispatch (
+                        outbox_id TEXT PRIMARY KEY,
+                        latest_sequence INTEGER NOT NULL CHECK(latest_sequence >= 1),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'idle', 'claimed', 'delivered'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        next_attempt_at REAL NOT NULL,
+                        claim_expires_at REAL NOT NULL,
+                        updated_at REAL NOT NULL,
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_pursuit_terminal_dispatch_recovery
+                    ON pursuit_terminal_outbox_dispatch(
+                        state, next_attempt_at, claim_expires_at, outbox_id
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS
+                    pursuit_terminal_outbox_dispatch_events (
+                        outbox_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL CHECK(sequence >= 1),
+                        state TEXT NOT NULL CHECK(state IN (
+                            'idle', 'claimed', 'delivered'
+                        )),
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        previous_payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        PRIMARY KEY(outbox_id, sequence),
+                        FOREIGN KEY(outbox_id)
+                            REFERENCES pursuit_terminal_outbox(outbox_id)
+                            ON DELETE CASCADE
+                    )
+                    """
+                )
+                self._backfill_terminal_dispatches_with_connection(conn)
             self._initialized = True
+
+
+def _terminal_dispatch_owner_sha256(owner_id: str) -> str:
+    normalized = str(owner_id or "").strip()
+    if not normalized or len(normalized) > 256:
+        raise ValueError("terminal dispatch owner_id 必须为 1 到 256 个字符。")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def format_run(run: PursuitRun) -> str:

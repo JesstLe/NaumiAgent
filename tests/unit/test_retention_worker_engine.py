@@ -17,6 +17,7 @@ def _engine(tmp_path, *, enabled: bool) -> AgentEngine:
     return create_agent_engine(
         AppConfig(
             workspace_root=str(tmp_path),
+            harness={"pursuit_terminal_outbox": {"enabled": False}},
             memory=MemoryConfig(
                 session_db_path=str(tmp_path / "sessions.db"),
                 long_term_enabled=False,
@@ -113,6 +114,47 @@ async def test_long_running_startup_recovers_before_starting_worker(tmp_path) ->
         "publications",
         "start",
     ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_startup_pass_precedes_periodic_workers(tmp_path) -> None:
+    engine = _engine(tmp_path, enabled=True)
+    engine._config.harness.pursuit_terminal_outbox.enabled = True
+    order: list[str] = []
+    engine.evolution_patch_set_recovery.recover_pending = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+    engine.evolution_patch_recovery.recover_pending = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+    engine.recover_session_reconciliations = AsyncMock(  # type: ignore[method-assign]
+        return_value=()
+    )
+    engine.subagent_manager.recover_pending_publications = AsyncMock(  # type: ignore[method-assign]
+        return_value=SimpleNamespace()
+    )
+
+    async def terminal_pass():
+        order.append("terminal-pass")
+        return SimpleNamespace()
+
+    def terminal_start() -> bool:
+        order.append("terminal-start")
+        return True
+
+    def retention_start() -> bool:
+        order.append("retention-start")
+        return True
+
+    engine._pursuit_terminal_outbox_worker.run_once = terminal_pass  # type: ignore[method-assign]
+    engine._pursuit_terminal_outbox_worker.start = terminal_start  # type: ignore[method-assign]
+    engine.start_session_retention_worker = retention_start  # type: ignore[method-assign]
+    try:
+        await engine.start_long_running_services()
+    finally:
+        await engine.shutdown()
+
+    assert order == ["terminal-pass", "terminal-start", "retention-start"]
 
 
 @pytest.mark.asyncio

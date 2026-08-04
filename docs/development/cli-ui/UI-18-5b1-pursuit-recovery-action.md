@@ -129,7 +129,7 @@ Bridge 在创建后台 ToolExecution 前重新读取一次恢复 snapshot：
   attempt push stream。
 - recovery attempt 与 Pursuit checkpoint 同库，Harness lease/heartbeat 属于另一事务域，仍不宣称
   exactly-once；HAR-10.8e 已用更高 RunLease epoch fencing 和同库不可变回执补齐显式 admitted
-  terminal reconciliation，HAR-10.8f1 已补齐 outbox 原子 Store 核心，但自动 worker 与 typed backlog
+  terminal reconciliation，HAR-10.8f1/2a 已补齐 outbox 原子 Store 核心和自动 worker，但 typed backlog
   仍未实现。
 - 未执行 24 小时 soak、进程 kill 和跨平台故障矩阵，UI-18 与 HAR-10 继续保持 `partial`。
 

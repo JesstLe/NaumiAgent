@@ -296,6 +296,12 @@ from naumi_agent.orchestrator.context_assembly import (
     is_harness_context_message,
 )
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxPassResult,
+    PursuitTerminalOutboxWorker,
+    PursuitTerminalOutboxWorkerPolicy,
+    PursuitTerminalOutboxWorkerSnapshot,
+)
 from naumi_agent.orchestrator.system_prompt import (
     PromptAssemblyInput,
     build_system_prompt,
@@ -1516,6 +1522,26 @@ class AgentEngine:
         )
         self.goal_store = resources.goal_store
         self.pursuit_store = resources.pursuit_store
+        terminal_outbox_config = config.harness.pursuit_terminal_outbox
+        self._pursuit_terminal_outbox_worker = PursuitTerminalOutboxWorker(
+            store=self.pursuit_store,
+            authority=self._harness_store,
+            workspace_root=self.workspace_root,
+            policy=PursuitTerminalOutboxWorkerPolicy(
+                interval_seconds=terminal_outbox_config.interval_seconds,
+                max_empty_backoff_seconds=(
+                    terminal_outbox_config.max_empty_backoff_seconds
+                ),
+                claim_lease_seconds=terminal_outbox_config.claim_lease_seconds,
+                scan_limit=terminal_outbox_config.scan_limit,
+                reconcile_grace_seconds=(
+                    terminal_outbox_config.reconcile_grace_seconds
+                ),
+                retry_base_seconds=terminal_outbox_config.retry_base_seconds,
+                retry_max_seconds=terminal_outbox_config.retry_max_seconds,
+                jitter_ratio=terminal_outbox_config.jitter_ratio,
+            ),
+        )
         self.runtime_inspector = RuntimeInspectorService(self)
 
         self._mcp_manager: MCPClientManager | None = None
@@ -2101,6 +2127,10 @@ class AgentEngine:
             "session_retention_worker",
             self._retention_periodic_service.stop,
         )
+        await self._shutdown_component(
+            "pursuit_terminal_outbox_worker",
+            self._pursuit_terminal_outbox_worker.stop,
+        )
         if self.workspace_file_index.building:
             await self._shutdown_component(
                 "workspace_file_index",
@@ -2638,8 +2668,33 @@ class AgentEngine:
         )
         recovered = await self.recover_session_reconciliations()
         await self.subagent_manager.recover_pending_publications()
+        if self._config.harness.pursuit_terminal_outbox.enabled:
+            await self._pursuit_terminal_outbox_worker.run_once()
+            self._pursuit_terminal_outbox_worker.start()
         self.start_session_retention_worker()
         return recovered
+
+    async def run_pursuit_terminal_outbox_once(
+        self,
+    ) -> PursuitTerminalOutboxPassResult:
+        """Run one explicit bounded terminal recovery pass."""
+        return await self._pursuit_terminal_outbox_worker.run_once()
+
+    def start_pursuit_terminal_outbox_worker(self) -> bool:
+        if not self._config.harness.pursuit_terminal_outbox.enabled:
+            return False
+        return self._pursuit_terminal_outbox_worker.start()
+
+    async def stop_pursuit_terminal_outbox_worker(self) -> bool:
+        return await self._pursuit_terminal_outbox_worker.stop()
+
+    def wake_pursuit_terminal_outbox_worker(self) -> bool:
+        return self._pursuit_terminal_outbox_worker.wake()
+
+    def pursuit_terminal_outbox_worker_snapshot(
+        self,
+    ) -> PursuitTerminalOutboxWorkerSnapshot:
+        return self._pursuit_terminal_outbox_worker.snapshot()
 
     def evolution_patch_recovery_status(self) -> dict[str, object]:
         """Return a content-free startup recovery summary for CLI/UI surfaces."""

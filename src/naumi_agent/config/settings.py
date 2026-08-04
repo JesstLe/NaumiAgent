@@ -407,6 +407,32 @@ class RuntimeHeartbeatRetentionConfig(BaseSettings):
     catalog_limit: int = Field(default=200, ge=1, le=200)
 
 
+class PursuitTerminalOutboxConfig(BaseSettings):
+    """Bounded automatic recovery for admitted Pursuit terminal outbox."""
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30.0, ge=0.1, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    claim_lease_seconds: int = Field(default=60, ge=3, le=300)
+    scan_limit: int = Field(default=20, ge=1, le=1000)
+    reconcile_grace_seconds: float = Field(default=30.0, ge=1, le=86_400)
+    retry_base_seconds: float = Field(default=5.0, ge=1, le=3600)
+    retry_max_seconds: float = Field(default=300.0, ge=1, le=3600)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_terminal_outbox(self) -> PursuitTerminalOutboxConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError(
+                "terminal outbox max_empty_backoff_seconds 不能小于 interval_seconds"
+            )
+        if self.retry_max_seconds < self.retry_base_seconds:
+            raise ValueError(
+                "terminal outbox retry_max_seconds 不能小于 retry_base_seconds"
+            )
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -414,6 +440,9 @@ class HarnessConfig(BaseSettings):
 
     runtime_heartbeat_retention: RuntimeHeartbeatRetentionConfig = Field(
         default_factory=RuntimeHeartbeatRetentionConfig
+    )
+    pursuit_terminal_outbox: PursuitTerminalOutboxConfig = Field(
+        default_factory=PursuitTerminalOutboxConfig
     )
 
 
