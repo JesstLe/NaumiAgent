@@ -231,6 +231,7 @@ def _filtered_discovery_catalog():
 
 def _completion_response(content: str = "adapter-ok") -> SimpleNamespace:
     return SimpleNamespace(
+        model="provider-returned-model",
         choices=[
             SimpleNamespace(
                 message=SimpleNamespace(
@@ -364,6 +365,7 @@ async def test_unknown_catalog_model_is_discovered_before_call(
     assert captured["model"] == "openai/org/remote"
     assert captured["api_base"] == "https://discovery.vendor.example/v1"
     assert response.content == "dynamic-ok"
+    assert response.provider_model == "provider-returned-model"
     assert discovery_requests == 1
 
 

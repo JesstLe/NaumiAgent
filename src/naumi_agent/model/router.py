@@ -149,6 +149,7 @@ class ModelResponse:
     model: str = ""
     finish_reason: str = ""
     reasoning_content: str = ""
+    provider_model: str = ""
 
 
 @dataclass(frozen=True)
@@ -1110,6 +1111,7 @@ class ModelRouter:
             model=resolved,
             finish_reason=choice.finish_reason or "",
             reasoning_content=reasoning,
+            provider_model=str(getattr(response, "model", "") or ""),
         )
 
     async def stream(

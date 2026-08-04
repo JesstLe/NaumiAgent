@@ -339,6 +339,14 @@ def _model_identity(
     )
 
 
+def build_eval_model_identity(
+    capability: ModelCapabilityContract,
+    reasoning: ReasoningEffortStatus,
+) -> HarnessEvalModelIdentity:
+    """Build the public model-only identity used by non-baseline eval receipts."""
+    return _model_identity(capability, reasoning)
+
+
 def _sha256_payload(payload: object) -> str:
     encoded = json.dumps(
         payload,
@@ -357,6 +365,7 @@ __all__ = [
     "HarnessEvalPlatformIdentity",
     "HarnessEvalSourceIdentity",
     "build_eval_baseline_identity",
+    "build_eval_model_identity",
     "capture_eval_platform_identity",
     "capture_eval_source_identity",
 ]
