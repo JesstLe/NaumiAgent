@@ -4336,6 +4336,16 @@ class JsonlEngineBridge:
             selected_interaction_id=str(
                 payload.get("selected_interaction_id") or ""
             ),
+            terminal_outbox_enabled=(
+                bool(getattr(self.engine, "pursuit_terminal_outbox_enabled", False))
+            ),
+            terminal_outbox_worker_snapshot=(
+                getattr(
+                    self.engine,
+                    "pursuit_terminal_outbox_worker_snapshot",
+                    None,
+                )
+            ),
         )
         if "goal_snapshot" in self._client_capabilities:
             await self.emit(

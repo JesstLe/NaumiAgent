@@ -4,6 +4,41 @@ import assert from "node:assert/strict";
 import { stripAnsi } from "../src/ansi.js";
 import { renderGoalPursuitPage } from "../src/components/goal-pursuit-page.js";
 
+test("Goal page renders typed terminal outbox health without a Goal", () => {
+  const lines = renderGoalPursuitPage({
+    snapshot: {
+      include_finished: true,
+      goals: [],
+      terminal_outbox: {
+        enabled: true,
+        status: "degraded",
+        worker_state: "waiting",
+        counts: {
+          total_pending: 3,
+          due: 1,
+          backoff: 1,
+          live_claimed: 0,
+          expired_claimed: 1,
+        },
+        pass_count: 9,
+        delivered_count: 4,
+        retry_scheduled_count: 2,
+        failure_count: 1,
+        next_delay_seconds: 12.5,
+        failure_codes: ["dispatch_claim_failed"],
+        warning: "",
+      },
+    },
+  }, 160, 20).map(stripAnsi).join("\n");
+
+  assert.match(lines, /终态自动恢复/);
+  assert.match(lines, /部分失败 · Worker 等待中/);
+  assert.match(lines, /队列 3 · 到期 1 · 退避 1 · 认领 0 · 过期认领 1/);
+  assert.match(lines, /累计 · 轮次 9 · 已收口 4 · 已退避 2 · 失败 1/);
+  assert.match(lines, /最近失败 · dispatch_claim_failed/);
+  assert.match(lines, /下次检查 · 约 12\.5s/);
+});
+
 test("Goal page exposes shared interaction detail command for every state", () => {
   const lines = renderGoalPursuitPage({
     snapshot: {

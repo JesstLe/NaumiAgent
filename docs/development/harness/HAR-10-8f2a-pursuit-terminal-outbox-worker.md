@@ -117,8 +117,8 @@ harness:
 
 - 本切片没有 dead-letter。持续不可恢复记录以 capped backoff 保留并继续可见，不会静默丢弃；人工隔离和
   retention 需要独立权限/回执设计。
-- Worker snapshot 已类型化，但尚未进入 Bridge/Goal/New UI/TUI；HAR-10.8f2b 将增加 bounded backlog
-  和 worker 状态投影，前端不得扫描 SQLite。
+- HAR-10.8f2b 已把 bounded backlog 和 worker snapshot 投影到 Bridge/Goal/New UI/TUI，前端不扫描
+  SQLite；控制动作和 push stream 仍未实现。
 - HarnessStore fencing 与 PursuitStore dispatch 仍非跨库事务，因此语义是 at-least-once 收敛；
   reconciliation 与 outbox delivered 在 PursuitStore 内是幂等原子事实。
 - 仍未完成 kill-at-every-write-point 全矩阵、多主机时钟漂移、Linux/Windows 进程杀死和 24 小时 soak。

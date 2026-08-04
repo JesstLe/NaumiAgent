@@ -4804,6 +4804,9 @@ function normalizeGoalSnapshot(payload) {
   const selectedInteraction = schemaVersion >= 2 && payload.selected_interaction != null
     ? normalizeGoalInteractionDetail(payload.selected_interaction)
     : null;
+  const terminalOutbox = payload.terminal_outbox == null
+    ? null
+    : normalizeGoalTerminalOutbox(payload.terminal_outbox);
   if (
     selectedInteraction
     && !visibleRunIds.has(selectedInteraction.pursuit_run_id)
@@ -4828,7 +4831,135 @@ function normalizeGoalSnapshot(payload) {
     interaction_next_cursor: interactionNextCursor,
     interaction_has_more: interactionHasMore,
     selected_interaction: selectedInteraction,
+    terminal_outbox: terminalOutbox,
   };
+}
+
+function normalizeGoalTerminalOutbox(value) {
+  const item = harnessObject(value, "goals/snapshot terminal_outbox");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("goals/snapshot terminal_outbox schema_version 不兼容");
+  }
+  const counts = harnessObject(
+    item.counts,
+    "goals/snapshot terminal_outbox.counts",
+  );
+  const normalizedCounts = {
+    total_pending: harnessNonnegativeInteger(
+      counts.total_pending,
+      "goals/snapshot terminal_outbox.counts.total_pending",
+    ),
+    due: harnessNonnegativeInteger(
+      counts.due,
+      "goals/snapshot terminal_outbox.counts.due",
+    ),
+    backoff: harnessNonnegativeInteger(
+      counts.backoff,
+      "goals/snapshot terminal_outbox.counts.backoff",
+    ),
+    live_claimed: harnessNonnegativeInteger(
+      counts.live_claimed,
+      "goals/snapshot terminal_outbox.counts.live_claimed",
+    ),
+    expired_claimed: harnessNonnegativeInteger(
+      counts.expired_claimed,
+      "goals/snapshot terminal_outbox.counts.expired_claimed",
+    ),
+  };
+  const classified = normalizedCounts.due
+    + normalizedCounts.backoff
+    + normalizedCounts.live_claimed
+    + normalizedCounts.expired_claimed;
+  if (classified !== normalizedCounts.total_pending) {
+    throw new Error("goals/snapshot terminal_outbox 分类计数与总数不一致");
+  }
+  const failureCodes = harnessTextArray(
+    item.failure_codes,
+    "goals/snapshot terminal_outbox.failure_codes",
+    8,
+  );
+  if (failureCodes.some((code) => !/^[a-z][a-z0-9_]{0,63}$/.test(code))) {
+    throw new Error("goals/snapshot terminal_outbox failure_code 无效");
+  }
+  const warning = harnessText(item.warning, "goals/snapshot terminal_outbox.warning");
+  if (warning.length > 500 || /[\u0000-\u001f\u007f]/.test(warning)) {
+    throw new Error("goals/snapshot terminal_outbox warning 格式无效");
+  }
+  const nextDelay = harnessNonnegativeFiniteNumber(
+    item.next_delay_seconds,
+    "goals/snapshot terminal_outbox.next_delay_seconds",
+  );
+  if (nextDelay > 604_800) {
+    throw new Error("goals/snapshot terminal_outbox next_delay_seconds 超出上限");
+  }
+  const enabled = harnessBoolean(
+    item.enabled,
+    "goals/snapshot terminal_outbox.enabled",
+  );
+  const status = harnessChoice(
+    item.status,
+    "goals/snapshot terminal_outbox.status",
+    new Set(["idle", "recovering", "backoff", "degraded", "disabled", "unavailable"]),
+  );
+  const workerState = harnessChoice(
+    item.worker_state,
+    "goals/snapshot terminal_outbox.worker_state",
+    new Set(["running", "waiting", "stopping", "stopped", "disabled", "unavailable"]),
+  );
+  if (!enabled && (status !== "disabled" || workerState !== "disabled")) {
+    throw new Error("goals/snapshot terminal_outbox 关闭状态不一致");
+  }
+  if (enabled && workerState === "disabled") {
+    throw new Error("goals/snapshot terminal_outbox 启用状态不得标记为 disabled");
+  }
+  if (status === "unavailable" && !warning) {
+    throw new Error("goals/snapshot terminal_outbox unavailable 必须说明原因");
+  }
+  if (status === "degraded" && !failureCodes.length) {
+    throw new Error("goals/snapshot terminal_outbox degraded 必须包含 failure_code");
+  }
+  return {
+    schema_version: 1,
+    enabled,
+    status,
+    worker_state: workerState,
+    assessed_at: goalTerminalTimestamp(
+      item.assessed_at,
+      "goals/snapshot terminal_outbox.assessed_at",
+    ),
+    counts: normalizedCounts,
+    pass_count: harnessNonnegativeInteger(
+      item.pass_count,
+      "goals/snapshot terminal_outbox.pass_count",
+    ),
+    delivered_count: harnessNonnegativeInteger(
+      item.delivered_count,
+      "goals/snapshot terminal_outbox.delivered_count",
+    ),
+    retry_scheduled_count: harnessNonnegativeInteger(
+      item.retry_scheduled_count,
+      "goals/snapshot terminal_outbox.retry_scheduled_count",
+    ),
+    failure_count: harnessNonnegativeInteger(
+      item.failure_count,
+      "goals/snapshot terminal_outbox.failure_count",
+    ),
+    next_delay_seconds: nextDelay,
+    failure_codes: failureCodes,
+    warning,
+  };
+}
+
+function goalTerminalTimestamp(value, name) {
+  const timestamp = harnessText(value, name);
+  if (
+    timestamp.length > 64
+    || !/(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp)
+    || !Number.isFinite(Date.parse(timestamp))
+  ) {
+    throw new Error(`${name} 必须是带时区的 ISO 8601 时间`);
+  }
+  return timestamp;
 }
 
 function goalCursor(value, name) {

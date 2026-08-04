@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,6 +23,10 @@ from naumi_agent.orchestrator.pursuit_store import PursuitStore
 from naumi_agent.orchestrator.pursuit_terminal import (
     PursuitBoundaryFacts,
     decide_pursuit_boundary,
+)
+from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
+    PursuitTerminalOutboxWorkerSnapshot,
+    PursuitTerminalWorkerState,
 )
 from naumi_agent.ui.goal_panel import (
     build_goal_pursuit_snapshot,
@@ -179,6 +184,103 @@ async def test_recovery_projection_is_shared_by_typed_and_text_views(tmp_path) -
     assert "恢复健康：安全等待" in rendered
     assert "心跳 缺失" in rendered
     assert f"/pursue reconcile {requested.attempt_id}" in rendered
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_projection_is_shared_and_identity_free(tmp_path) -> None:
+    goal_store = GoalStore(tmp_path / "goals")
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    goal = goal_store.create("查看终态自动恢复")
+    run = PursuitRun(
+        id="pursuit_terminal_outbox_view",
+        goal=goal.objective,
+        status=PursuitRunStatus.WAITING,
+        phase="waiting",
+        started_at=1.0,
+        updated_at=2.0,
+    )
+    pursuit_store.save_run(run)
+    goal_store.attach_pursuit(goal.id, run.id)
+    pursuit_store.terminal_outbox_backlog = lambda **_: SimpleNamespace(  # type: ignore[method-assign]
+        total_pending=3,
+        due=1,
+        backoff=1,
+        live_claimed=1,
+        expired_claimed=0,
+    )
+    worker = PursuitTerminalOutboxWorkerSnapshot(
+        state=PursuitTerminalWorkerState.WAITING,
+        pass_count=7,
+        claimed_count=4,
+        delivered_count=2,
+        retry_scheduled_count=1,
+        failure_count=0,
+        consecutive_empty_passes=0,
+        next_delay_seconds=12.5,
+        last_failure_codes=(),
+        started_at="2026-08-05T00:00:00+00:00",
+        last_pass_at="2026-08-05T00:00:10+00:00",
+    )
+
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        goal_store,
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+        terminal_outbox_enabled=True,
+        terminal_outbox_worker_snapshot=lambda: worker,
+        assessed_at="2026-08-05T00:00:20+00:00",
+    )
+    payload = snapshot.to_protocol_dict()["terminal_outbox"]
+
+    assert payload == {
+        "schema_version": 1,
+        "enabled": True,
+        "status": "recovering",
+        "worker_state": "waiting",
+        "assessed_at": "2026-08-05T00:00:20+00:00",
+        "counts": {
+            "total_pending": 3,
+            "due": 1,
+            "backoff": 1,
+            "live_claimed": 1,
+            "expired_claimed": 0,
+        },
+        "pass_count": 7,
+        "delivered_count": 2,
+        "retry_scheduled_count": 1,
+        "failure_count": 0,
+        "next_delay_seconds": 12.5,
+        "failure_codes": [],
+        "warning": "",
+    }
+    assert "owner" not in str(payload).lower()
+    rendered = render_goal_pursuit_snapshot(snapshot)
+    assert "终态自动恢复" in rendered
+    assert "正在恢复 · Worker 等待中" in rendered
+    assert "队列：3 · 到期 1 · 退避 1 · 认领 1" in rendered
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_projection_fails_closed_when_authority_missing(
+    tmp_path,
+) -> None:
+    pursuit_store = PursuitStore(tmp_path / "pursuit")
+    snapshot = await build_goal_pursuit_snapshot_with_recovery(
+        GoalStore(tmp_path / "goals"),
+        pursuit_store,
+        None,
+        workspace_root=tmp_path,
+        terminal_outbox_enabled=True,
+        assessed_at="2026-08-05T00:00:20+00:00",
+    )
+
+    projection = snapshot.terminal_outbox
+    assert projection is not None
+    assert projection.status == "unavailable"
+    assert projection.worker_state == "unavailable"
+    assert "authority 未接入" in projection.warning
+    assert not pursuit_store.base_dir.exists()
 
 
 @pytest.mark.asyncio

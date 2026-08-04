@@ -64,12 +64,67 @@ export function renderGoalPursuitPage(view, width, height) {
       );
     }
   }
+  if (snapshot?.terminal_outbox) {
+    logical.push(...renderTerminalOutbox(snapshot.terminal_outbox));
+  }
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const maximum = Math.max(0, wrapped.length - safeHeight);
   const offset = Math.min(Math.max(0, Number(value.scrollOffset) || 0), maximum);
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function renderTerminalOutbox(value) {
+  const labels = {
+    idle: "空闲",
+    recovering: "正在恢复",
+    backoff: "等待重试",
+    degraded: "部分失败",
+    disabled: "已关闭",
+    unavailable: "状态不可用",
+  };
+  const workerLabels = {
+    running: "运行中",
+    waiting: "等待中",
+    stopping: "正在停止",
+    stopped: "已停止",
+    disabled: "已关闭",
+    unavailable: "不可用",
+  };
+  const style = value.status === "idle"
+    ? ANSI.green
+    : value.status === "recovering"
+      ? ANSI.cyan
+      : value.status === "backoff" || value.status === "disabled"
+        ? ANSI.yellow
+        : ANSI.red;
+  const counts = value.counts;
+  const lines = [
+    color(ANSI.cyan, "── 终态自动恢复"),
+    color(
+      style,
+      `${labels[value.status] || value.status} · Worker ${workerLabels[value.worker_state] || value.worker_state}`,
+    ),
+    color(
+      ANSI.dim,
+      `队列 ${counts.total_pending} · 到期 ${counts.due} · 退避 ${counts.backoff} · 认领 ${counts.live_claimed} · 过期认领 ${counts.expired_claimed}`,
+    ),
+    color(
+      ANSI.dim,
+      `累计 · 轮次 ${value.pass_count} · 已收口 ${value.delivered_count} · 已退避 ${value.retry_scheduled_count} · 失败 ${value.failure_count}`,
+    ),
+  ];
+  if (value.enabled && ["running", "waiting"].includes(value.worker_state)) {
+    lines.push(color(ANSI.dim, `下次检查 · 约 ${value.next_delay_seconds.toFixed(1)}s`));
+  }
+  if (value.failure_codes?.length) {
+    lines.push(color(ANSI.red, `最近失败 · ${value.failure_codes.join(", ")}`));
+  }
+  if (value.warning) {
+    lines.push(color(ANSI.yellow, `⚠ ${compactText(value.warning, 500)}`));
+  }
+  return lines;
 }
 
 function renderGoal(goal, currentGoalId) {
