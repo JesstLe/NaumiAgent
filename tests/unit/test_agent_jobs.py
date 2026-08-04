@@ -268,6 +268,124 @@ async def test_expired_prestart_claim_can_take_over_but_running_cannot_retry(
 
 
 @pytest.mark.asyncio
+async def test_recovery_catalog_is_bounded_authenticated_and_content_free(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+
+    live_request, live_payload = _facts(
+        clock,
+        task_id="catalog-live-claim",
+        task="目录不得泄露 live claim 正文",
+    )
+    live = await store.admit(request=live_request, payload=live_payload)
+    await store.claim(live.job_id, owner_id="worker-live", lease_seconds=30)
+
+    expired_request, expired_payload = _facts(
+        clock,
+        task_id="catalog-expired-claim",
+    )
+    expired = await store.admit(
+        request=expired_request,
+        payload=expired_payload,
+    )
+    await store.claim(
+        expired.job_id,
+        owner_id="worker-expired",
+        lease_seconds=10,
+    )
+
+    running_request, running_payload = _facts(
+        clock,
+        task_id="catalog-running",
+    )
+    running = await store.admit(
+        request=running_request,
+        payload=running_payload,
+    )
+    running_claim = await store.claim(
+        running.job_id,
+        owner_id="worker-running",
+        lease_seconds=10,
+    )
+    await store.mark_running(
+        running.job_id,
+        owner_id="worker-running",
+        claim_epoch=running_claim.job.claim_epoch,
+    )
+
+    unknown_request, unknown_payload = _facts(
+        clock,
+        task_id="catalog-unknown",
+    )
+    unknown = await store.admit(
+        request=unknown_request,
+        payload=unknown_payload,
+    )
+    unknown_claim = await store.claim(
+        unknown.job_id,
+        owner_id="worker-unknown",
+        lease_seconds=10,
+    )
+    unknown_running = await store.mark_running(
+        unknown.job_id,
+        owner_id="worker-unknown",
+        claim_epoch=unknown_claim.job.claim_epoch,
+    )
+    clock.advance(seconds=11)
+    await store.mark_recovery_unknown(
+        unknown.job_id,
+        expected_latest_receipt_sha256=(
+            unknown_running.job.latest_receipt.receipt_sha256
+        ),
+    )
+
+    terminal, _result = await _complete_job(
+        store,
+        clock,
+        task_id="catalog-publication",
+    )
+
+    bounded = await store.recovery_catalog(limit=2)
+    assert len(bounded.jobs) == 2
+    assert bounded.jobs_truncated is True
+    assert len(bounded.publications) == 1
+    assert bounded.publications_truncated is False
+
+    catalog = await store.recovery_catalog(limit=10)
+    assert {item.state for item in catalog.jobs} == {
+        AgentJobState.CLAIMED,
+        AgentJobState.RUNNING,
+        AgentJobState.UNKNOWN,
+    }
+    assert {item.job_id for item in catalog.jobs} == {
+        live.job_id,
+        expired.job_id,
+        running.job_id,
+        unknown.job_id,
+    }
+    assert catalog.publications[0].job.job_id == terminal.job_id
+    assert catalog.publications[0].job.state is AgentJobState.COMPLETED
+    assert catalog.publications[0].publication.state is (
+        AgentJobPublicationState.PENDING
+    )
+    assert live_payload.task not in repr(catalog)
+    assert live_payload.context not in repr(catalog)
+
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE agent_jobs SET latest_receipt_json = ? WHERE job_id = ?",
+            ("{}", live.job_id),
+        )
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="持久记录"):
+        await reopened.recovery_catalog(limit=10)
+
+
+@pytest.mark.asyncio
 async def test_renew_running_finish_and_terminal_retry_are_fenced(
     tmp_path,
 ) -> None:

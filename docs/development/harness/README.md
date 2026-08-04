@@ -56,9 +56,11 @@ admission、排队计数与取消清理，并拒绝容量饱和时会自锁的�
 `max_queued_agents` 封住本地等待协程的无界增长，并提供稳定过载回执。ARC-04.5a 已先让现有委派在
 模型调用前签发请求合同、终态签发低敏结果回执；ARC-04.5b2/5c 又接入加密 durable Agent Job、
 claim renewal、终态发布屏障和双端 job state/epoch 证据。HAR-10.7c/ARC-06.2c 进一步让多个 Runtime
-共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数。独立 Worker、跨 workspace/provider
-fairness 和自动恢复仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session 的认证、脱敏
-response 摘录，但分页、read/ack 与完整结果导出仍未完成。
+共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数；HAR-10.7d 又交付逐条认证、最多
+50 项的只读恢复目录，并通过 Agent Control schema v4 同步两端 claimed/running/unknown 与
+pending/expired publication。独立 Worker、跨 workspace/provider fairness、fenced 人工动作和自动恢复
+仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session 的认证、脱敏 response 摘录，但分页、
+read/ack 与完整结果导出仍未完成。
 HAR-08.5a 已交付显式、有成本和时限上限的单次 Live 模型传输评测；HAR-08.5b 又增加 Profile 声明的
 严格 Live Suite、5..20 次同身份样本、批次请求证据绑定、实际 Provider 模型 identity 与逐样本 H5a
 不可变持久化。基础设施错误不重试，已记录成本超预算立即停止后续样本，normal 一次确认、bypass 直通。

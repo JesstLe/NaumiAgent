@@ -23,11 +23,12 @@ from textual.widgets import (
 
 from naumi_agent.agent_control import AgentControlSnapshot
 
-AGENT_CONTROL_TABS = ("agents", "executions", "results", "team")
+AGENT_CONTROL_TABS = ("agents", "executions", "results", "recovery", "team")
 _TAB_LABELS = {
     "agents": "Agent",
     "executions": "执行",
     "results": "结果",
+    "recovery": "恢复",
     "team": "协作",
 }
 _TERMINAL_EXECUTION_STATUSES = {
@@ -70,6 +71,11 @@ def format_agent_control_markdown(
             if summary.durable_capacity_configured
             else []
         ),
+        *(
+            [_recovery_catalog_line(snapshot)]
+            if snapshot.recovery_catalog.items or snapshot.recovery_catalog.truncated
+            else []
+        ),
         f"最后更新：{_plain(snapshot.generated_at) or '-'}",
     ]
     if tab == "agents":
@@ -78,6 +84,8 @@ def format_agent_control_markdown(
         lines.extend(_format_execution(snapshot, selected_id))
     elif tab == "results":
         lines.extend(_format_result(snapshot, selected_id))
+    elif tab == "recovery":
+        lines.extend(_format_recovery(snapshot, selected_id))
     else:
         lines.extend(_format_team(snapshot, selected_id))
     for warning in snapshot.warnings[:5]:
@@ -117,6 +125,23 @@ def _durable_publication_line(summary: Any) -> str:
         "**Agent publication**："
         f"待处理 `{summary.durable_publications_pending}` · "
         f"已认领 `{summary.durable_publications_claimed}` · {status}"
+    )
+
+
+def _recovery_catalog_line(snapshot: AgentControlSnapshot) -> str:
+    catalog = snapshot.recovery_catalog
+    attention = sum(
+        item.recovery_state in {
+            "recovery_required",
+            "outcome_unknown",
+            "publication_claim_expired",
+        }
+        for item in catalog.items
+    )
+    suffix = "+" if catalog.truncated else ""
+    return (
+        f"**只读恢复目录**：`{len(catalog.items)}{suffix}` 项 · "
+        f"需裁决 `{attention}` · 不执行自动模型重放"
     )
 
 
@@ -314,6 +339,16 @@ class AgentControlScreen(Screen[None]):
                     + (" · 已脱敏/截断" if item.content_truncated else ""),
                 )
                 for item in self.snapshot.results
+            ]
+        if self.selected_tab == "recovery":
+            return [
+                (
+                    f"recovery:{item.kind}:{item.item_id}",
+                    f"{_recovery_state_label(item.recovery_state)} · "
+                    f"{item.item_id} · {item.agent_name} · "
+                    f"{_session_scope_label(item.session_scope)}",
+                )
+                for item in self.snapshot.recovery_catalog.items
             ]
         return [
             *(
@@ -534,6 +569,78 @@ def _tool_scope_summary(values: tuple[str, ...]) -> str:
         if len(values) > 8
         else visible
     )
+
+
+def _format_recovery(
+    snapshot: AgentControlSnapshot,
+    selected_id: str,
+) -> list[str]:
+    catalog = snapshot.recovery_catalog
+    if not catalog.items:
+        return ["", "✅ 暂无 Agent 恢复条目"]
+    item = next(
+        (
+            value for value in catalog.items
+            if f"recovery:{value.kind}:{value.item_id}" == selected_id
+        ),
+        catalog.items[0],
+    )
+    return [
+        "",
+        f"### Agent 恢复事实 · `{_code(item.item_id)}`",
+        f"- 状态：{_recovery_state_label(item.recovery_state)}",
+        f"- 类型：{item.kind} · Agent：`{_code(item.agent_name)}`",
+        f"- Job：`{_code(item.job_id)}` · 状态：{item.job_state}",
+        *(
+            [f"- Publication：`{_code(item.publication_id)}`"]
+            if item.publication_id
+            else []
+        ),
+        f"- 会话范围：{_session_scope_label(item.session_scope)}",
+        (
+            f"- claim epoch：{item.claim_epoch}"
+            + (
+                f" · 到期：{_plain(item.claim_expires_at)}"
+                if item.claim_expires_at
+                else ""
+            )
+        ),
+        *(
+            [f"- 投递尝试：{item.attempt_count}"]
+            if item.kind == "publication"
+            else []
+        ),
+        f"- 发生时间：{_plain(item.occurred_at)}",
+        f"- 请求摘要：`{_code(_short_digest(item.request_sha256))}`",
+        f"- 回执摘要：`{_code(_short_digest(item.receipt_sha256))}`",
+        f"- 原因码：`{_code(item.reason_code)}`",
+        "- ℹ️ 当前目录只读，不执行自动模型重放，也不改写持久状态。",
+        *(
+            ["- ⚠️ 目录已达到 50 项展示上限，仅展示高优先级有界前缀。"]
+            if catalog.truncated
+            else []
+        ),
+    ]
+
+
+def _recovery_state_label(state: str) -> str:
+    return {
+        "claim_active": "🔵 claim 仍有效",
+        "worker_active": "🔵 worker 仍在运行",
+        "reclaimable_prestart": "🟡 启动前 claim 可接管",
+        "recovery_required": "🔴 running Job 需要恢复裁决",
+        "outcome_unknown": "🔴 执行结果未知",
+        "publication_pending": "🟡 终态结果等待发布",
+        "publication_claim_expired": "🔴 发布 claim 已过期",
+    }.get(state, state)
+
+
+def _session_scope_label(scope: str) -> str:
+    return {
+        "current": "当前会话",
+        "other": "其他会话",
+        "unknown": "会话未知",
+    }.get(scope, "会话未知")
 
 
 def _format_team(snapshot: AgentControlSnapshot, selected_id: str) -> list[str]:

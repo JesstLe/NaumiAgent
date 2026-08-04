@@ -102,6 +102,10 @@
     有界 FIFO；`waiting_capacity` 可见、可停止，terminal 后下一项自动取得 claim，New UI/TUI 与
     `/runtime` 显示同一共享计数。ARC-04.5d1 升级到 schema v3 后继续保留该 authority。见
     [设计](HAR-10-7c-durable-agent-capacity-admission.md)。
+  - HAR-10.7d 已交付 authenticated、每类有界、内容隔离的 Agent recovery catalog，并通过
+    Agent Control schema v4 同步 New UI/Textual TUI“恢复”标签；claimed/running/unknown、pending/
+    expired publication 被明确分类，但不自动重放或改写状态。见
+    [设计](HAR-10-7d-agent-recovery-catalog.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
@@ -133,7 +137,8 @@
   - UI-13.1e 已继续投影 durable queue policy、live waiting、active claim、oldest wait 与到期待收口数；
     New UI/TUI 复用同一只读 authority，不暴露 job identity；见
     [设计](../cli-ui/UI-13-1e-worker-queue-backlog-health.md)。
-  - 未完成：Agent/Browser 独立持久 Worker dispatch、自动 recovery scheduler、可恢复 response、
+  - 未完成：Agent/Browser 独立持久 Worker dispatch、自动 recovery scheduler、fenced 人工恢复动作、
+    可恢复 response、
     workspace 锁、能力路由、
     亲和/反亲和、公平队列和隔离。
 - HAR-10.8 Terminal decision：完成、waiting、blocked、cancelled、budget_exceeded。

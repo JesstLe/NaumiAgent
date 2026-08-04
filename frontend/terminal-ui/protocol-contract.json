@@ -283,7 +283,7 @@
     }
   },
   "agent_control": {
-    "schema_version": 3,
+    "schema_version": 4,
     "summary_capacity_fields": [
       "durable_capacity_configured",
       "durable_active_jobs",
@@ -323,6 +323,46 @@
       "timeout",
       "max_turns",
       "cancelled"
+    ],
+    "recovery_catalog_fields": [
+      "assessed_at",
+      "items",
+      "truncated"
+    ],
+    "recovery_item_fields": [
+      "kind",
+      "item_id",
+      "job_id",
+      "publication_id",
+      "agent_name",
+      "job_state",
+      "recovery_state",
+      "session_scope",
+      "claim_epoch",
+      "claim_expires_at",
+      "attempt_count",
+      "occurred_at",
+      "request_sha256",
+      "receipt_sha256",
+      "reason_code"
+    ],
+    "recovery_kinds": [
+      "job",
+      "publication"
+    ],
+    "recovery_states": [
+      "claim_active",
+      "worker_active",
+      "reclaimable_prestart",
+      "recovery_required",
+      "outcome_unknown",
+      "publication_pending",
+      "publication_claim_expired"
+    ],
+    "recovery_session_scopes": [
+      "current",
+      "other",
+      "unknown"
     ],
     "execution_phases": [
       "starting",

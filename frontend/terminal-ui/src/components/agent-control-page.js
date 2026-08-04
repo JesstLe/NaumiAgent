@@ -12,6 +12,7 @@ const TABS = [
   { id: "agents", label: "Agent" },
   { id: "executions", label: "执行" },
   { id: "results", label: "结果" },
+  { id: "recovery", label: "恢复" },
   { id: "team", label: "协作" },
 ];
 
@@ -57,10 +58,23 @@ function renderSummary(view, snapshot) {
     `可停止 ${number(summary.stoppable_executions)}`,
     `消息 ${number(summary.pending_messages)}`,
     `结果 ${number(summary.durable_results_visible)}`,
+    recoveryCatalogSummary(snapshot?.recovery_catalog),
     durable,
     durablePublicationSummary(summary),
     snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
+}
+
+function recoveryCatalogSummary(catalog) {
+  const items = array(catalog?.items);
+  if (!items.length) return "";
+  const attention = items.filter((item) => [
+    "recovery_required",
+    "outcome_unknown",
+    "publication_claim_expired",
+  ].includes(item.recovery_state)).length;
+  const label = `恢复目录 ${items.length}${catalog?.truncated ? "+" : ""}`;
+  return color(attention > 0 ? ANSI.red : ANSI.yellow, label);
 }
 
 function durablePublicationSummary(summary) {
@@ -125,6 +139,9 @@ function renderPageState(view) {
   if (array(view?.snapshot?.warnings).length) {
     return color(ANSI.yellow, `警告 · ${compactText(view.snapshot.warnings[0], 300)}`);
   }
+  if (view?.selectedTab === "recovery") {
+    return color(ANSI.dim, "只读恢复目录 · ↑/↓ 选择 · Enter 详情 · r 刷新 · Esc 返回");
+  }
   return color(ANSI.dim, "Tab 切换 · ↑/↓ 选择 · Enter 详情 · r 刷新 · x 停止 · Esc 返回");
 }
 
@@ -159,6 +176,23 @@ function renderList(view, snapshot, width, maxLines = 100) {
       const truncated = item.content_truncated ? color(ANSI.yellow, " · 已脱敏/截断") : "";
       return `${marker} ${executionStatus(item.status)} ${compactText(item.task_id, 120)} · ${compactText(item.agent_name, 80)}${truncated}`;
     }).flatMap((line) => wrapAnsiLine(line, Math.max(1, width))).slice(0, maxLines);
+  }
+  if (view?.selectedTab === "recovery") {
+    const catalog = snapshot.recovery_catalog || {};
+    const items = array(catalog.items);
+    if (!items.length) return [color(ANSI.green, "暂无 Agent 恢复条目")];
+    const selectedItems = visibleListItems(view, items, maxLines);
+    const lines = selectedItems.map((item) => {
+      const id = `recovery:${item.kind}:${item.item_id}`;
+      const marker = id === selected ? color(ANSI.cyan, "›") : " ";
+      return `${marker} ${recoveryStatus(item.recovery_state)} ${compactText(item.item_id, 120)} · ${compactText(item.agent_name, 80)} · ${sessionScope(item.session_scope)}`;
+    });
+    if (catalog.truncated) {
+      lines.push(color(ANSI.yellow, "  展示已达到 50 项上限"));
+    }
+    return lines
+      .flatMap((line) => wrapAnsiLine(line, Math.max(1, width)))
+      .slice(0, maxLines);
   }
   if (view?.selectedTab === "team") {
     const messages = array(snapshot.team_messages).map((item) => ({
@@ -250,6 +284,27 @@ function renderDetail(view, snapshot, width) {
         : "",
     ].filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
   }
+  if (view?.selectedTab === "recovery") {
+    const item = array(snapshot.recovery_catalog?.items).find(
+      (entry) => `recovery:${entry.kind}:${entry.item_id}` === id,
+    );
+    if (!item) return [color(ANSI.dim, "选择一条恢复事实查看详情")];
+    return [
+      color(ANSI.cyan, "Agent 恢复事实 · 只读"),
+      `${recoveryStatus(item.recovery_state)} · ${recoveryStateLabel(item.recovery_state)}`,
+      `类型 · ${item.kind} · Agent ${item.agent_name}`,
+      `Job · ${item.job_id} · 状态 ${item.job_state}`,
+      item.publication_id ? `Publication · ${item.publication_id}` : "",
+      `会话范围 · ${sessionScope(item.session_scope)}`,
+      `claim epoch · ${number(item.claim_epoch)}${item.claim_expires_at ? ` · 到期 ${item.claim_expires_at}` : ""}`,
+      item.kind === "publication" ? `投递尝试 · ${number(item.attempt_count)}` : "",
+      `发生时间 · ${item.occurred_at}`,
+      `请求摘要 · ${shortDigest(item.request_sha256)}`,
+      `回执摘要 · ${shortDigest(item.receipt_sha256)}`,
+      `原因码 · ${item.reason_code}`,
+      color(ANSI.dim, "当前目录不执行自动模型重放，也不提供状态改写。"),
+    ].filter(Boolean).flatMap((line) => wrapAnsiLine(line, Math.max(1, width)));
+  }
   if (view?.selectedTab === "team") {
     if (id.startsWith("blackboard:")) {
       const item = array(snapshot.blackboard).find((entry) => `blackboard:${entry.key}` === id);
@@ -302,6 +357,32 @@ function agentState(state) {
   if (["running", "spawned"].includes(state)) return color(ANSI.cyan, "●");
   if (["destroyed"].includes(state)) return color(ANSI.dim, "×");
   return color(ANSI.green, "●");
+}
+
+function recoveryStatus(state) {
+  if (["recovery_required", "outcome_unknown", "publication_claim_expired"].includes(state)) {
+    return color(ANSI.red, "!");
+  }
+  if (["reclaimable_prestart", "publication_pending"].includes(state)) {
+    return color(ANSI.yellow, "◆");
+  }
+  return color(ANSI.cyan, "●");
+}
+
+function recoveryStateLabel(state) {
+  return ({
+    claim_active: "claim 仍有效",
+    worker_active: "worker 仍在运行",
+    reclaimable_prestart: "启动前 claim 可接管",
+    recovery_required: "running Job 需要恢复裁决",
+    outcome_unknown: "执行结果未知",
+    publication_pending: "终态结果等待发布",
+    publication_claim_expired: "发布 claim 已过期",
+  })[state] || state;
+}
+
+function sessionScope(scope) {
+  return ({ current: "当前会话", other: "其他会话", unknown: "会话未知" })[scope] || "会话未知";
 }
 
 function array(value) {

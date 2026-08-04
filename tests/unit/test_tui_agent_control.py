@@ -40,6 +40,11 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     agents = format_agent_control_markdown(snapshot, "agents", "coder")
     executions = format_agent_control_markdown(snapshot, "executions", "task-1")
     results = format_agent_control_markdown(snapshot, "results", "delivery-1")
+    recovery = format_agent_control_markdown(
+        snapshot,
+        "recovery",
+        "recovery:job:agent-job-recovery",
+    )
     team = format_agent_control_markdown(snapshot, "team", "blackboard:team/review")
 
     assert "Agent Control Center · Agent" in agents
@@ -59,6 +64,9 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "持久结果" in results
     assert "结果正文" in results
     assert "已经脱敏或截断" in results
+    assert "running Job 需要恢复裁决" in recovery
+    assert "agent-job-recovery" in recovery
+    assert "当前目录只读" in recovery
     assert "team/review" in team
     assert "ready" in team
 
@@ -69,6 +77,7 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
         "agents": [],
         "executions": [],
         "results": [],
+        "recovery_catalog": {"assessed_at": "", "items": [], "truncated": False},
         "team_messages": [],
         "blackboard": [],
         "warnings": ["消息总线暂时不可用。"],
@@ -77,6 +86,9 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
     assert "暂无 Agent" in format_agent_control_markdown(snapshot, "agents", "")
     assert "暂无执行记录" in format_agent_control_markdown(snapshot, "executions", "")
     assert "暂无持久结果" in format_agent_control_markdown(snapshot, "results", "")
+    assert "暂无 Agent 恢复条目" in format_agent_control_markdown(
+        snapshot, "recovery", ""
+    )
     team = format_agent_control_markdown(snapshot, "team", "")
     assert "暂无团队消息或黑板记录" in team
     assert "消息总线暂时不可用" in team
@@ -243,7 +255,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 3,
+        "schema_version": 4,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -298,6 +310,27 @@ def _snapshot() -> AgentControlSnapshot:
             "turns": 1,
             "reason_code": "agent_completed",
         }],
+        "recovery_catalog": {
+            "assessed_at": "2026-07-13T00:00:02+00:00",
+            "items": [{
+                "kind": "job",
+                "item_id": "agent-job-recovery",
+                "job_id": "agent-job-recovery",
+                "publication_id": "",
+                "agent_name": "coder",
+                "job_state": "running",
+                "recovery_state": "recovery_required",
+                "session_scope": "current",
+                "claim_epoch": 4,
+                "claim_expires_at": "2026-07-13T00:00:01+00:00",
+                "attempt_count": 0,
+                "occurred_at": "2026-07-13T00:00:00+00:00",
+                "request_sha256": "d" * 64,
+                "receipt_sha256": "e" * 64,
+                "reason_code": "agent_job_running",
+            }],
+            "truncated": False,
+        },
         "executions": [{
             "task_id": "task-1",
             "session_id": "session-tui-agents",

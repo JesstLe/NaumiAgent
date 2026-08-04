@@ -45,7 +45,7 @@ const MAX_SUBAGENT_ACTIVITY_EVENTS = 20;
 const MAX_HARNESS_RECEIPTS = 100;
 const MAX_HARNESS_DETAILS = 100;
 const RUNTIME_INSPECTOR_TABS = Object.freeze(["plan", "tools", "context", "changes", "tests"]);
-const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "results", "team"]);
+const AGENT_CONTROL_TABS = Object.freeze(["agents", "executions", "results", "recovery", "team"]);
 const COMMAND_INDEX_CATEGORIES = new Set(["basic", "session", "analysis", "orchestration", "navigation", "control"]);
 const COMMAND_INDEX_SOURCES = new Set(["shared_runtime", "new_ui", "tui"]);
 const COMMAND_INDEX_RISKS = new Set(["read_only", "session_state", "permission_change", "workspace_write", "tool_execution", "destructive"]);
@@ -1988,6 +1988,11 @@ function agentControlItemIds(agents) {
   }
   if (agents.selectedTab === "results") {
     return (snapshot.results || []).map((item) => String(item.delivery_id || "")).filter(Boolean);
+  }
+  if (agents.selectedTab === "recovery") {
+    return (snapshot.recovery_catalog?.items || []).map(
+      (item) => `recovery:${item.kind}:${item.item_id}`,
+    );
   }
   return [
     ...(snapshot.team_messages || []).map(
