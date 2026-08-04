@@ -29,6 +29,7 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_replay",
         "harness_eval",
         "harness_eval_live",
+        "harness_eval_live_batch",
         "harness_eval_replay",
         "harness_eval_baseline",
         "harness_eval_batch",
@@ -45,32 +46,28 @@ async def test_harness_tools_are_read_only_and_share_one_service(tmp_path: Path)
         "harness_read_knowledge",
         "harness_run_check",
     ]
-    assert all(
-        tools[index].metadata.read_only
-        for index in (0, 1, 2, 3, 4, 6, 7, 12, 13, 14, 19)
-    )
+    assert all(tools[index].metadata.read_only for index in (0, 1, 2, 3, 4, 7, 8, 13, 14, 15, 20))
     assert not tools[5].metadata.read_only
     assert tools[5].metadata.requires_confirmation
-    assert not tools[8].metadata.read_only
+    assert not tools[6].metadata.read_only
+    assert tools[6].metadata.requires_confirmation
     assert not tools[9].metadata.read_only
     assert not tools[10].metadata.read_only
     assert not tools[11].metadata.read_only
-    assert not tools[15].metadata.read_only
+    assert not tools[12].metadata.read_only
     assert not tools[16].metadata.read_only
     assert not tools[17].metadata.read_only
     assert not tools[18].metadata.read_only
-    assert not tools[20].metadata.read_only
+    assert not tools[19].metadata.read_only
+    assert not tools[21].metadata.read_only
     assert all(tool.metadata.concurrency_safe for tool in tools)
-    assert all(
-        tool.parameters_schema == {"type": "object", "properties": {}}
-        for tool in tools[:2]
-    )
+    assert all(tool.parameters_schema == {"type": "object", "properties": {}} for tool in tools[:2])
     assert "尚未配置" in await tools[0].execute()
     assert "诊断" in await tools[1].execute()
     assert "没有找到" in await tools[2].execute()
     assert "尚未配置" in await tools[4].execute()
-    assert "评测错误" in await tools[6].execute(run_id="latest")
-    assert "尚无 Baseline" in await tools[7].execute(suite="protocol")
+    assert "评测错误" in await tools[7].execute(run_id="latest")
+    assert "尚无 Baseline" in await tools[8].execute(suite="protocol")
     assert all(tool.name not in {"harness_trust", "harness_untrust"} for tool in tools)
 
 
@@ -84,10 +81,7 @@ async def test_harness_check_tool_uses_service_and_validates_arguments(
         workspace_root=workspace,
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
-    tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_run_check"
-    )
+    tool = next(item for item in create_harness_tools(service) if item.name == "harness_run_check")
 
     assert tool.metadata.concurrency_safe
     assert tool.parameters_schema["required"] == ["check_id", "run_id"]
@@ -104,10 +98,7 @@ async def test_harness_explain_tool_validates_run_id(tmp_path: Path) -> None:
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
         store=HarnessStore(tmp_path / "harness.db"),
     )
-    tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_explain"
-    )
+    tool = next(item for item in create_harness_tools(service) if item.name == "harness_explain")
 
     assert tool.metadata.read_only
     assert tool.metadata.concurrency_safe
@@ -128,10 +119,7 @@ async def test_harness_replay_tool_is_read_only_and_validates_run_id(
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
         store=HarnessStore(tmp_path / "harness.db"),
     )
-    tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_replay"
-    )
+    tool = next(item for item in create_harness_tools(service) if item.name == "harness_replay")
 
     assert tool.metadata.read_only
     assert tool.metadata.concurrency_safe
@@ -151,10 +139,7 @@ async def test_harness_eval_tool_is_read_only_allowlisted_and_validates_suite(
         workspace_root=workspace,
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
-    tool = next(
-        item for item in create_harness_tools(service)
-        if item.name == "harness_eval"
-    )
+    tool = next(item for item in create_harness_tools(service) if item.name == "harness_eval")
 
     assert tool.metadata.read_only
     assert tool.metadata.concurrency_safe
@@ -177,9 +162,7 @@ async def test_harness_sandbox_eval_tool_declares_delegation_and_validates_argum
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
     tool = next(
-        item
-        for item in create_harness_tools(service)
-        if item.name == "harness_eval_sandbox"
+        item for item in create_harness_tools(service) if item.name == "harness_eval_sandbox"
     )
 
     assert not tool.metadata.read_only
@@ -217,9 +200,7 @@ async def test_harness_sandbox_retry_tool_requires_exact_durable_authority(
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
     tool = next(
-        item
-        for item in create_harness_tools(service)
-        if item.name == "harness_eval_sandbox_retry"
+        item for item in create_harness_tools(service) if item.name == "harness_eval_sandbox_retry"
     )
 
     assert not tool.metadata.read_only
@@ -260,9 +241,7 @@ async def test_harness_sandbox_resume_tool_binds_existing_dispatch_authority(
         trust_store=HarnessTrustStore(tmp_path / "trust.db"),
     )
     tool = next(
-        item
-        for item in create_harness_tools(service)
-        if item.name == "harness_eval_sandbox_resume"
+        item for item in create_harness_tools(service) if item.name == "harness_eval_sandbox_resume"
     )
 
     assert not tool.metadata.read_only
@@ -304,9 +283,7 @@ async def test_harness_eval_replay_tool_is_read_only_and_validates_run_id(
         store=HarnessStore(tmp_path / "harness.db"),
     )
     tool = next(
-        item
-        for item in create_harness_tools(service)
-        if item.name == "harness_eval_replay"
+        item for item in create_harness_tools(service) if item.name == "harness_eval_replay"
     )
 
     assert tool.metadata.read_only

@@ -16,6 +16,7 @@ Baseline Identity 与比较策略；未来阶段记录在
 | 理解仓库知识选择 | [architecture.md](architecture.md) | `src/naumi_agent/harness/knowledge.py`、`context.py` |
 | 运行受信任检查 | [architecture.md](architecture.md) | `src/naumi_agent/harness/checks.py`、`fingerprint.py`、`validation/` |
 | 运行与比较离线协议评测 | `evals/protocol-hello-core.yaml` | `src/naumi_agent/harness/eval.py`、`eval_models.py`、`eval_identity.py`、`eval_compare.py`、`eval_suite_compare.py`、`eval_policy.py` |
+| 显式运行真实模型传输评测 | `evals/live-transport-core.yaml` | `src/naumi_agent/harness/eval_live.py`、`eval_live_suite.py`、`eval_identity.py`、`store.py` |
 | 修改 Agent 临时上下文 | [golden-principles.md](golden-principles.md) | `src/naumi_agent/orchestrator/context_assembly.py`、`engine.py` |
 | 修改 Terminal UI | `docs/product/terminal-ui/` | `frontend/terminal-ui/src/`、`frontend/terminal-ui/test/` |
 | 修改 Mac Workbench | `apps/macos/NaumiAgentWorkbench/README.md` | `apps/macos/NaumiAgentWorkbench/Sources/` |

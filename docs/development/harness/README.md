@@ -54,10 +54,10 @@ claim renewal、终态发布屏障和双端 job state/epoch 证据。HAR-10.7c/A
 共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数。独立 Worker、跨 workspace/provider
 fairness 和自动恢复仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session 的认证、脱敏
 response 摘录，但分页、read/ack 与完整结果导出仍未完成。
-HAR-08.5a 已交付显式、有成本和时限上限的单次 Live 模型传输评测：在真实调用前复验
-capability/reasoning/可信价格并做保守成本预检，调用后绑定 Provider 实际模型、完整用量、成本、
-终止原因和合同漂移；回执只保存响应摘要，normal 一次确认、bypass 直通，且明确不进入 H5a/Baseline。
-声明式 Live Suite、重复样本、持久比较和三平台 Provider matrix 仍未完成。
+HAR-08.5a 已交付显式、有成本和时限上限的单次 Live 模型传输评测；HAR-08.5b 又增加 Profile 声明的
+严格 Live Suite、5..20 次同身份样本、批次请求证据绑定、实际 Provider 模型 identity 与逐样本 H5a
+不可变持久化。基础设施错误不重试，实际超支立即停止后续样本，normal 一次确认、bypass 直通。
+Provider cancellation/billing 证明、专用 typed 进度/历史和三平台 Provider matrix 仍未完成。
 HAR-08.4e/4f 已把成组 Sandbox checks 与可恢复 Batch 状态机下沉到 Harness；HAR-08.4g 又让 Engine 内
 RED/GREEN/adversarial 生产 consumer 共用 `max_parallel_sandbox_batches` / `max_queued_sandbox_batches`
 容量门；HAR-08.4h 已增加原生 `sandbox` lane，以及受信 Profile + 干净 Git revision 的不可变 request

@@ -58,9 +58,7 @@ class HarnessEvalConfigurationIdentity(_StrictModel):
 
     @model_validator(mode="after")
     def _digest_matches_payload(self) -> Self:
-        expected = _sha256_payload(
-            self.model_dump(mode="json", exclude={"digest"})
-        )
+        expected = _sha256_payload(self.model_dump(mode="json", exclude={"digest"}))
         if not hmac.compare_digest(self.digest, expected):
             raise ValueError("configuration digest 与身份字段不匹配。")
         return self
@@ -127,6 +125,7 @@ class HarnessEvalModelIdentity(_StrictModel):
     canonical_model: str = Field(max_length=512)
     upstream_model: str = Field(max_length=512)
     provider: str = Field(max_length=128)
+    provider_model: str = Field(default="", max_length=512)
     api_format: str = Field(max_length=128)
     capability_sha256: str = Field(pattern=_SHA256_RE)
     capability_status: Literal["verified", "partial", "unverified", "incompatible"]
@@ -141,6 +140,7 @@ class HarnessEvalModelIdentity(_StrictModel):
         "canonical_model",
         "upstream_model",
         "provider",
+        "provider_model",
         "api_format",
     )
     @classmethod
@@ -202,9 +202,7 @@ class HarnessEvalBaselineIdentity(_StrictModel):
 
     @model_validator(mode="after")
     def _identity_digest_matches(self) -> Self:
-        expected = _sha256_payload(
-            self.model_dump(mode="json", exclude={"identity_sha256"})
-        )
+        expected = _sha256_payload(_identity_digest_payload(self))
         if not hmac.compare_digest(self.identity_sha256, expected):
             raise ValueError("identity_sha256 与 Baseline identity 字段不匹配。")
         return self
@@ -262,6 +260,7 @@ def build_eval_baseline_identity(
     configuration: HarnessEvalConfigurationIdentity,
     capability: ModelCapabilityContract | None = None,
     reasoning: ReasoningEffortStatus | None = None,
+    provider_model: str | None = None,
     platform_identity: HarnessEvalPlatformIdentity | None = None,
     profile_trusted: bool = True,
     source_identity: HarnessEvalSourceIdentity | None = None,
@@ -270,8 +269,14 @@ def build_eval_baseline_identity(
     source = source_identity or capture_eval_source_identity(workspace_root)
     if (capability is None) != (reasoning is None):
         raise ValueError("模型能力合同与思考强度必须同时提供或同时省略。")
+    if provider_model is not None and capability is None:
+        raise ValueError("Provider 实际模型身份必须与模型能力合同同时提供。")
     model = (
-        _model_identity(capability, reasoning)
+        _model_identity(
+            capability,
+            reasoning,
+            provider_model=provider_model or "",
+        )
         if capability is not None and reasoning is not None
         else None
     )
@@ -308,13 +313,15 @@ def build_eval_baseline_identity(
         "warnings": warnings,
     }
     return HarnessEvalBaselineIdentity.model_validate(
-        {**raw, "identity_sha256": _sha256_payload(raw)}
+        {**raw, "identity_sha256": _sha256_payload(_identity_digest_payload(raw))}
     )
 
 
 def _model_identity(
     capability: ModelCapabilityContract,
     reasoning: ReasoningEffortStatus,
+    *,
+    provider_model: str = "",
 ) -> HarnessEvalModelIdentity:
     if reasoning.model.strip() != capability.requested_model.strip():
         raise ValueError("模型能力合同与思考强度状态不属于同一个 requested model。")
@@ -326,15 +333,14 @@ def _model_identity(
         canonical_model=capability.canonical_model,
         upstream_model=capability.upstream_model,
         provider=capability.provider,
+        provider_model=provider_model,
         api_format=capability.api_format,
         capability_sha256=_sha256_payload(capability_payload),
         capability_status=capability.status.value,
         reasoning_effort=reasoning.effective.value,
         reasoning_source=reasoning.source,
         reasoning_supported=tuple(sorted(value.value for value in reasoning.supported)),
-        reasoning_default=(
-            reasoning.default.value if reasoning.default is not None else None
-        ),
+        reasoning_default=(reasoning.default.value if reasoning.default is not None else None),
         reasoning_warning=reasoning.warning is not None,
     )
 
@@ -356,6 +362,20 @@ def _sha256_payload(payload: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _identity_digest_payload(
+    identity: HarnessEvalBaselineIdentity | dict[str, object],
+) -> dict[str, object]:
+    """Keep legacy identity digests stable while binding new provider facts."""
+    if isinstance(identity, HarnessEvalBaselineIdentity):
+        payload = identity.model_dump(mode="json", exclude={"identity_sha256"})
+    else:
+        payload = json.loads(json.dumps(identity, ensure_ascii=False))
+    model = payload.get("model")
+    if isinstance(model, dict) and not model.get("provider_model"):
+        model.pop("provider_model", None)
+    return payload
 
 
 __all__ = [

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from naumi_agent.config.settings import ModelConfig, ModelMeta
 from naumi_agent.harness.eval_identity import (
+    HarnessEvalBaselineIdentity,
     HarnessEvalConfigurationIdentity,
     HarnessEvalPlatformIdentity,
     build_eval_baseline_identity,
@@ -358,6 +359,43 @@ def test_capture_current_platform_returns_bounded_runtime_facts() -> None:
     assert "=" not in identity.model_dump_json()
 
 
+def test_provider_response_model_is_bound_without_breaking_legacy_digest(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    configuration = _configuration()
+    capability = _capability()
+    reasoning = _reasoning()
+
+    legacy = build_eval_baseline_identity(
+        workspace,
+        configuration=configuration,
+        capability=capability,
+        reasoning=reasoning,
+        platform_identity=_platform(),
+    )
+    legacy_payload = legacy.model_dump(mode="json")
+    assert legacy_payload["model"].pop("provider_model") == ""
+    assert HarnessEvalBaselineIdentity.model_validate(legacy_payload) == legacy
+
+    concrete = build_eval_baseline_identity(
+        workspace,
+        configuration=configuration,
+        capability=capability,
+        reasoning=reasoning,
+        provider_model="provider-model-20260805",
+        platform_identity=_platform(),
+    )
+    assert concrete.model is not None
+    assert concrete.model.provider_model == "provider-model-20260805"
+    assert concrete.identity_sha256 != legacy.identity_sha256
+
+    tampered = concrete.model_dump(mode="json")
+    tampered["model"]["provider_model"] = "different-model"
+    with pytest.raises(ValidationError, match="identity_sha256"):
+        HarnessEvalBaselineIdentity.model_validate(tampered)
+
+
 def test_no_model_runner_has_stable_null_model_identity(tmp_path: Path) -> None:
     identity = build_eval_baseline_identity(
         _workspace(tmp_path),
@@ -423,6 +461,8 @@ def test_deserialization_rejects_forged_eligible_governance_facts(
     payload = identity.model_dump(mode="json")
     payload.update(mutation)
     digest_payload = {key: value for key, value in payload.items() if key != "identity_sha256"}
+    if digest_payload["model"].get("provider_model") == "":
+        digest_payload["model"].pop("provider_model")
     payload["identity_sha256"] = hashlib.sha256(
         json.dumps(
             digest_payload,

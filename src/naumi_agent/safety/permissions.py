@@ -117,6 +117,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="harness_eval_external",
     ),
+    "harness_eval_live_batch": PermissionRule(
+        tool_name="harness_eval_live_batch",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=True,
+        max_calls_per_session=5,
+        risk_level=PermissionRiskLevel.MEDIUM,
+        tool_family="harness_eval_external",
+    ),
     "harness_eval_sandbox": PermissionRule(
         tool_name="harness_eval_sandbox",
         allowed_modes=[
@@ -1416,9 +1429,7 @@ class PermissionChecker:
         workspace_root: str | None = None,
     ) -> None:
         self._mode = mode
-        self._workspace_root = os.path.abspath(
-            os.path.expanduser(workspace_root or os.getcwd())
-        )
+        self._workspace_root = os.path.abspath(os.path.expanduser(workspace_root or os.getcwd()))
         self._allowed_dirs = [
             self._resolve_path_for_sandbox(path) for path in (allowed_dirs or ["/workspace"])
         ]
@@ -1620,9 +1631,7 @@ class PermissionChecker:
         risk_level = rule.risk_level
         if metadata and metadata.destructive:
             risk_level = PermissionRiskLevel.HIGH
-        metadata_requires_confirmation = bool(
-            metadata and metadata.requires_confirmation is True
-        )
+        metadata_requires_confirmation = bool(metadata and metadata.requires_confirmation is True)
         requires_confirmation = (
             rule.requires_confirmation
             or metadata_requires_confirmation
@@ -1631,9 +1640,7 @@ class PermissionChecker:
         if requires_confirmation and risk_level == PermissionRiskLevel.LOW:
             risk_level = PermissionRiskLevel.MEDIUM
 
-        allow_session_grant = (
-            risk_level == PermissionRiskLevel.MEDIUM and rule.allow_session_grant
-        )
+        allow_session_grant = risk_level == PermissionRiskLevel.MEDIUM and rule.allow_session_grant
         confirmation_required = requires_confirmation
 
         return PermissionDecision(
@@ -2092,11 +2099,7 @@ class PermissionChecker:
         for command_index, argument in enumerate(arguments):
             if argument == "--":
                 return False
-            if (
-                argument.startswith("-")
-                and not argument.startswith("--")
-                and "c" in argument[1:]
-            ):
+            if argument.startswith("-") and not argument.startswith("--") and "c" in argument[1:]:
                 if command_index + 1 >= len(arguments):
                     return False
                 return PermissionChecker._contains_destructive_rm_command(
@@ -2115,11 +2118,7 @@ class PermissionChecker:
         for command_index, argument in enumerate(arguments):
             if argument == "--":
                 return False
-            if (
-                argument.startswith("-")
-                and not argument.startswith("--")
-                and "c" in argument[1:]
-            ):
+            if argument.startswith("-") and not argument.startswith("--") and "c" in argument[1:]:
                 if command_index + 1 >= len(arguments):
                     return None
                 return PermissionChecker._contains_sudo_rm_command(
@@ -2134,9 +2133,8 @@ class PermissionChecker:
         expanded_target = os.path.expanduser(target)
         if not os.path.isabs(expanded_target):
             return False
-        return (
-            PermissionChecker._is_root_equivalent_target(expanded_target)
-            or os.path.isabs(expanded_target)
+        return PermissionChecker._is_root_equivalent_target(expanded_target) or os.path.isabs(
+            expanded_target
         )
 
     @staticmethod

@@ -31,6 +31,7 @@ checks:
     provides: [unit, contract]
 evals:
   suites: [docs/harness/evals/core.yaml]
+  live_suites: [docs/harness/evals/live.yaml]
   live_default: false
   max_cost_usd: 1.0
   max_duration_seconds: 1800
@@ -60,6 +61,7 @@ def test_load_valid_profile_returns_exact_digest_and_immutable_contract(
         "AGENTS.md",
         "docs/harness/index.md",
     )
+    assert snapshot.profile.evals.live_suites == ("docs/harness/evals/live.yaml",)
     assert snapshot.digest == hashlib.sha256(profile_path.read_bytes()).hexdigest()
     assert snapshot.errors == ()
     assert snapshot.workspace_root == tmp_path.resolve()
@@ -101,13 +103,11 @@ def test_missing_profile_is_actionable_non_error_state(tmp_path: Path) -> None:
             "invalid_profile",
         ),
         (
-            "schema_version: 1\nchecks:\n"
-            "  - {id: tests, argv: [uv], timeout_seconds: 0}\n",
+            "schema_version: 1\nchecks:\n  - {id: tests, argv: [uv], timeout_seconds: 0}\n",
             "invalid_profile",
         ),
         (
-            "schema_version: 1\nchecks:\n"
-            "  - {id: tests, argv: [uv], provides: [unit, unit]}\n",
+            "schema_version: 1\nchecks:\n  - {id: tests, argv: [uv], provides: [unit, unit]}\n",
             "invalid_profile",
         ),
         (
@@ -126,6 +126,14 @@ def test_missing_profile_is_actionable_non_error_state(tmp_path: Path) -> None:
         ),
         (
             "schema_version: 1\nevals:\n  suites: [one.yaml, one.yaml]\n",
+            "invalid_profile",
+        ),
+        (
+            "schema_version: 1\nevals:\n  live_suites: [../outside.yaml]\n",
+            "path_outside_workspace",
+        ),
+        (
+            "schema_version: 1\nevals:\n  live_suites: [one.yaml, one.yaml]\n",
             "invalid_profile",
         ),
         (

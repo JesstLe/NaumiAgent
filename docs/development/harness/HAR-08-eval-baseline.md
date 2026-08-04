@@ -49,6 +49,10 @@
   在可信 capability/reasoning/价格合同下执行一次固定、无工具挑战；请求前保守预算失败关闭，调用后
   复验实际 Provider 模型、完整用量、成本、终止原因与合同漂移。回执防篡改且只保存响应摘要，不进入
   H5a/Baseline；normal 一次确认，bypass 直通。详见 `HAR-08-5a-bounded-live-transport-eval.md`。
+- HAR-08.5b 声明式 Live Suite Batch：已实现。Profile 声明严格 Suite，5..20 个同身份样本复用 5a
+  transport，并把批次请求摘要、实际 Provider 模型、用量、成本和响应摘要逐样本写入 H5a；基础设施失败
+  不重试，实际超支停止后续调用，持久化只保留不可变连续前缀。详见
+  `HAR-08-5b-declarative-live-suite-batch.md`。
 - HAR-08.6a Baseline Identity 契约：已实现。真实 Git HEAD/脏树 fingerprint、Suite/Profile/
   Runner 配置摘要、模型 capability contract、实际思考强度、平台与 Naumi 版本共同生成防篡改
   identity；脏树、未验证/不兼容能力和思考强度告警阻止 Baseline 晋升。实施与边界见
@@ -200,6 +204,6 @@
   Receipt；Harness Store 新查询仍保持工作区隔离，不承担候选整体完成判断。见
   `../self-evolution/EVO-03-7a-evaluation-lane-receipt.md`。
 - HAR-08.4 仍为 partial：跨主机 Batch admission、跨 workspace 批量 prune、共享事实深度回收，以及
-  Linux/Windows CI 证据尚未完成。HAR-08.5a 只完成单次有界 transport challenge；声明式 Live Suite、
-  至少 5 次重复样本、H5a/Baseline 接入、Provider cancellation/billing 证明、专用 typed 页面和三平台
-  Provider matrix 仍为 planned，当前不得把 HAR-08 整体标记为 implemented。
+  Linux/Windows CI 证据尚未完成。HAR-08.5b 已完成声明式 Live Suite、至少 5 次重复样本和 H5a 接入；
+  Provider cancellation/billing 证明、专用 typed 页面和三平台 Provider matrix 仍为 planned，当前不得把
+  HAR-08 整体标记为 implemented。

@@ -27,7 +27,7 @@ from naumi_agent.runtime.ports.model import ModelPort
 LIVE_EVAL_RUNNER_VERSION = "live_transport_echo@1"
 LIVE_EVAL_PROMPT_VERSION = "naumi_live_echo@1"
 _REQUEST_ID_RE = re.compile(r"hlive_[0-9a-f]{24}\Z")
-_SAFE_PROVIDER_MODEL_RE = re.compile(r"[^\x00-\x1f\x7f]{1,512}\Z")
+_SAFE_PROVIDER_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 
 
 class _StrictModel(BaseModel):
@@ -110,6 +110,7 @@ class HarnessLiveEvalReceipt(_StrictModel):
     max_cost_usd: float = Field(gt=0.0, le=10.0)
     max_output_tokens: int = Field(ge=1, le=64)
     preflight_max_cost_usd: float = Field(default=0.0, ge=0.0, le=10_000.0)
+    provider_call_attempted: bool = False
     response_sha256: str = Field(default="", pattern=r"^(?:|[0-9a-f]{64})$")
     exact_match: bool = False
     persisted: Literal[False] = False
@@ -169,6 +170,7 @@ class HarnessLiveEvalReceipt(_StrictModel):
             raise ValueError("Live Eval total_tokens 与输入输出用量不一致。")
         if self.status is HarnessLiveEvalStatus.PASSED and (
             not self.exact_match
+            or not self.provider_call_attempted
             or not self.response_sha256
             or not self.provider_model
             or self.cost_usd > self.max_cost_usd
@@ -295,6 +297,7 @@ class HarnessLiveEvalRunner:
                 model=model_identity,
                 duration_ms=_elapsed_ms(self._monotonic(), started),
                 preflight_max_cost_usd=preflight_max_cost,
+                provider_call_attempted=True,
             )
         except asyncio.CancelledError:
             raise
@@ -309,6 +312,7 @@ class HarnessLiveEvalRunner:
                 model=model_identity,
                 duration_ms=_elapsed_ms(self._monotonic(), started),
                 preflight_max_cost_usd=preflight_max_cost,
+                provider_call_attempted=True,
             )
 
         duration_ms = _elapsed_ms(self._monotonic(), started)
@@ -341,6 +345,7 @@ class HarnessLiveEvalRunner:
             "cost_usd": _nonnegative_float(response.usage.cost_usd),
             "duration_ms": duration_ms,
             "preflight_max_cost_usd": preflight_max_cost,
+            "provider_call_attempted": True,
             "response_sha256": response_sha256,
             "exact_match": exact_match,
         }
@@ -461,6 +466,7 @@ def _receipt(
     cost_usd: float = 0.0,
     duration_ms: float = 0.0,
     preflight_max_cost_usd: float = 0.0,
+    provider_call_attempted: bool = False,
     response_sha256: str = "",
     exact_match: bool = False,
 ) -> HarnessLiveEvalReceipt:
@@ -484,6 +490,7 @@ def _receipt(
         "max_cost_usd": request.max_cost_usd,
         "max_output_tokens": request.max_output_tokens,
         "preflight_max_cost_usd": round(preflight_max_cost_usd, 9),
+        "provider_call_attempted": provider_call_attempted,
         "response_sha256": response_sha256,
         "exact_match": exact_match,
         "persisted": False,
