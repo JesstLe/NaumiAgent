@@ -505,6 +505,37 @@ test("workbench Proposal defer duration presets stay visible at common widths", 
   }
 });
 
+test("workbench Proposal merge targets stay readable at common widths", () => {
+  const view = {
+    ...workbenchOverviewFixture(),
+    selected_tab: "reviews",
+    selected_review_id: "proposal-1",
+    selected_review_kind: "proposal",
+    approvals: [],
+    proposals: [
+      {
+        id: "proposal-1", state: "open", title: "旧 revision", risk_level: "medium",
+        intended_files: [], validation_plan: [], merge_target_ids: ["proposal-3", "proposal-2"],
+      },
+      { id: "proposal-3", state: "open", title: "最新可靠方案", source_revision: 3 },
+      { id: "proposal-2", state: "open", title: "中间方案", source_revision: 2 },
+    ],
+    proposal_action: {
+      proposal_id: "proposal-1", action: "merge", phase: "merge_target",
+      merge_target_ids: ["proposal-3", "proposal-2"], merge_target_index: 1,
+    },
+  };
+
+  for (const width of [80, 120, 200]) {
+    const rendered = renderWorkbenchOverview(view, width, 24);
+    const plain = rendered.map(stripAnsi).join("\n");
+    assert(rendered.every((line) => visibleWidth(line) <= width));
+    assert(plain.includes("选择同 Candidate 的较新 open Proposal"));
+    assert(plain.includes("最新可靠方案"));
+    assert(plain.includes("▶ r2 · 中间方案"));
+  }
+});
+
 test("workbench Reviews tab distinguishes an approved Proposal and its non-executable Contract", () => {
   const proposal = {
     id: "proposal-1", state: "approved", title: "优化 footer 截断", risk_level: "medium",

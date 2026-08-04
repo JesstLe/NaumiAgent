@@ -3307,6 +3307,7 @@ class JsonlEngineBridge:
         action = ProposalAction(action_name)
         decision_note = str(payload.get("decision_note") or "")
         defer_days = payload.get("defer_days", 0)
+        merge_into_id = str(payload.get("merge_into_id") or "")
         confirmed = payload.get("confirmed") is True
         if requested_session_id and requested_session_id != session_id:
             await self.emit_error(
@@ -3329,6 +3330,7 @@ class JsonlEngineBridge:
                 "proposal_id": proposal_id,
                 "action": action.value,
                 "defer_days": defer_days,
+                "merge_into_id": merge_into_id,
             },
         )
         if not decision.allowed:
@@ -3374,6 +3376,8 @@ class JsonlEngineBridge:
             }
             if defer_until:
                 governance_kwargs["defer_until"] = defer_until
+            if merge_into_id:
+                governance_kwargs["merge_into_id"] = merge_into_id
             proposal = await service.govern_proposal(
                 session_id,
                 proposal_id,
@@ -3389,8 +3393,10 @@ class JsonlEngineBridge:
                     message = "Proposal 已批准。"
                 elif action is ProposalAction.REJECT:
                     message = "Proposal 已拒绝。"
-                else:
+                elif action is ProposalAction.DEFER:
                     message = f"Proposal 已延后至 {proposal.get('cooldown_until', '-')}。"
+                else:
+                    message = f"Proposal 已合并到 {proposal.get('merged_into_id', '-')}。"
                 snapshot = await service.dashboard_snapshot(session_id)
         except ProposalGovernanceConflictError as exc:
             status = "conflict"

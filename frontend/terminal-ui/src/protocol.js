@@ -1222,6 +1222,11 @@ function normalizeWorkbenchProposal(value) {
     decision_at: workbenchText(item.decision_at, "workbench proposal.decision_at", 100),
     cooldown_until: workbenchText(item.cooldown_until, "workbench proposal.cooldown_until", 100),
     merged_into_id: workbenchText(item.merged_into_id, "workbench proposal.merged_into_id", 128),
+    merge_target_ids: workbenchIdArray(
+      item.merge_target_ids,
+      "workbench proposal.merge_target_ids",
+      20,
+    ),
     governance_policy_version: workbenchText(
       item.governance_policy_version,
       "workbench proposal.governance_policy_version",
@@ -1245,17 +1250,30 @@ function normalizeWorkbenchProposalActionResult(payload) {
   const action = harnessChoice(
     payload.action,
     "workbench/proposal/action_result action",
-    new Set(["approve", "reject", "defer", "issue_contract"]),
+    new Set(["approve", "reject", "defer", "merge", "issue_contract"]),
   );
   const experimentContract = payload.experiment_contract == null
     ? null
     : normalizeExperimentContractSummary(payload.experiment_contract);
+  const proposal = payload.proposal == null ? null : normalizeWorkbenchProposal(payload.proposal);
   if (
     (action === "issue_contract" && status === "completed" && experimentContract == null)
     || (experimentContract != null && (action !== "issue_contract" || status !== "completed"))
     || (experimentContract != null && experimentContract.proposal_id !== proposalId)
   ) {
     throw new Error("workbench/proposal/action_result Experiment Contract 绑定无效");
+  }
+  if (
+    action === "merge"
+    && status === "completed"
+    && (
+      proposal == null
+      || proposal.id !== proposalId
+      || proposal.state !== "merged"
+      || !proposal.merged_into_id
+    )
+  ) {
+    throw new Error("workbench/proposal/action_result merge 绑定无效");
   }
   return {
     schema_version: 1,
@@ -1264,7 +1282,7 @@ function normalizeWorkbenchProposalActionResult(payload) {
     action,
     status,
     message: workbenchText(payload.message, "workbench/proposal/action_result message", 2_000),
-    proposal: payload.proposal == null ? null : normalizeWorkbenchProposal(payload.proposal),
+    proposal,
     experiment_contract: experimentContract,
     workbench_snapshot: payload.workbench_snapshot == null
       ? null
@@ -1550,6 +1568,21 @@ function normalizeWorkbenchReview(payload) {
 
 function workbenchText(value, name, limit) {
   return harnessText(value, name).slice(0, limit);
+}
+
+function workbenchIdArray(value, name, limit) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > limit) {
+    throw new Error(`${name} 必须是不超过 ${limit} 项的数组`);
+  }
+  const normalized = value.map((item) => harnessText(item, name));
+  if (
+    normalized.some((item) => !item || item.length > 128 || /[\x00\r\n]/u.test(item))
+    || new Set(normalized).size !== normalized.length
+  ) {
+    throw new Error(`${name} 包含无效或重复 ID`);
+  }
+  return normalized;
 }
 
 function normalizeWorkbenchWorktree(value) {

@@ -640,6 +640,27 @@ def test_protocol_normalizes_workbench_proposal_actions() -> None:
         "confirmed": False,
     }
 
+    merge_record = normalize_client_record(
+        {
+            "type": ClientEventType.WORKBENCH_PROPOSAL_ACTION,
+            "payload": {
+                "session_id": "session-1",
+                "proposal_id": "proposal-1",
+                "action": "merge",
+                "merge_into_id": " proposal-2 ",
+                "confirmed": True,
+            },
+        }
+    )
+    assert merge_record["payload"] == {
+        "session_id": "session-1",
+        "proposal_id": "proposal-1",
+        "action": "merge",
+        "decision_note": "",
+        "merge_into_id": "proposal-2",
+        "confirmed": True,
+    }
+
 
 def test_protocol_normalizes_pursuit_recovery_resume() -> None:
     record = normalize_client_record({
@@ -677,6 +698,22 @@ def test_protocol_normalizes_pursuit_recovery_resume() -> None:
             "defer_days": 7.0,
         },
         {"proposal_id": "proposal-1", "action": "reject", "decision_note": ""},
+        {"proposal_id": "proposal-1", "action": "merge"},
+        {
+            "proposal_id": "proposal-1",
+            "action": "merge",
+            "merge_into_id": "proposal-1",
+        },
+        {
+            "proposal_id": "proposal-1",
+            "action": "merge",
+            "merge_into_id": "proposal-2\nforged",
+        },
+        {
+            "proposal_id": "proposal-1",
+            "action": "approve",
+            "merge_into_id": "proposal-2",
+        },
         {"proposal_id": "", "action": "approve"},
         {"proposal_id": "proposal-1", "action": "approve", "confirmed": "yes"},
         {

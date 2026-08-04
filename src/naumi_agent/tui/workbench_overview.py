@@ -12,7 +12,8 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Footer, Input, Label, Markdown, Static
+from textual.widgets import Button, Footer, Input, Label, Markdown, OptionList, Static
+from textual.widgets.option_list import Option
 
 from naumi_agent.evolution.experiments import (
     EvolutionExperimentContractStoreError,
@@ -380,7 +381,7 @@ def _append_proposal_review(
                 "",
                 "> 批准只进入下一 policy gate，不执行代码，也不授予实验资格。",
                 "",
-                "`a` 批准 · `x` 拒绝 · `d` 延后 · `r` 刷新 · `Esc` 返回",
+                "`a` 批准 · `x` 拒绝 · `d` 延后 · `m` 合并 · `r` 刷新 · `Esc` 返回",
             ]
         )
     return "\n".join(lines)
@@ -530,6 +531,69 @@ class ProposalDecisionScreen(ModalScreen[dict[str, Any] | None]):
         )
 
 
+class ProposalMergeScreen(ModalScreen[str | None]):
+    """Select one backend-projected merge target without persisting UI state."""
+
+    BINDINGS = [Binding("escape", "cancel", "取消", show=False)]
+    DEFAULT_CSS = """
+    ProposalMergeScreen {
+        align: center middle;
+    }
+    ProposalMergeScreen > Container {
+        width: 84;
+        max-width: 94%;
+        height: auto;
+        max-height: 80%;
+        padding: 1 2;
+        border: thick $warning 80%;
+        background: $surface;
+    }
+    ProposalMergeScreen OptionList {
+        width: 1fr;
+        height: auto;
+        max-height: 16;
+        margin: 1 0;
+    }
+    """
+
+    def __init__(self, *, title: str, targets: list[Mapping[str, Any]]) -> None:
+        super().__init__()
+        self.proposal_title = title
+        self.targets = targets[:20]
+
+    def compose(self) -> ComposeResult:
+        with Container():
+            yield Label("[bold]合并 Proposal[/bold]")
+            yield Label(_plain(self.proposal_title) or "未命名 Proposal")
+            yield Label("仅显示同一 Candidate 的较新 open revision。")
+            yield OptionList(
+                *[
+                    Option(
+                        (
+                            f"r{_integer(target.get('source_revision'))} · "
+                            f"{_plain(target.get('title') or target.get('id'))} · "
+                            f"{_plain(target.get('id'))}"
+                        ),
+                        id=_normalized(target.get("id")),
+                    )
+                    for target in self.targets
+                ],
+                id="proposal-merge-targets",
+            )
+            yield Label("↑/↓ 选择 · Enter 合并 · Esc 取消")
+
+    def on_mount(self) -> None:
+        self.query_one("#proposal-merge-targets", OptionList).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(OptionList.OptionSelected, "#proposal-merge-targets")
+    def on_target_selected(self, event: OptionList.OptionSelected) -> None:
+        target_id = _normalized(event.option.id)
+        self.dismiss(target_id or None)
+
+
 class ExperimentContractIssueScreen(ModalScreen[bool]):
     """Confirm the separate approved Proposal to Contract transition."""
 
@@ -579,6 +643,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         Binding("a", "approve_proposal", "批准 Proposal", show=False),
         Binding("x", "reject_proposal", "拒绝 Proposal", show=False),
         Binding("d", "defer_proposal", "延后 Proposal", show=False),
+        Binding("m", "merge_proposal", "合并 Proposal", show=False),
         Binding("c", "issue_experiment_contract", "签发实验契约", show=False),
     ]
 
@@ -708,6 +773,7 @@ class WorkbenchOverviewScreen(Screen[None]):
 
     def action_reviews_tab(self) -> None:
         self.selected_tab = "reviews"
+        self.review_error = ""
         self._render_snapshot()
         self.refresh_review_detail()
 
@@ -718,6 +784,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         elif self.selected_tab == "reviews":
             self.selected_review_index = max(0, self.selected_review_index - 1)
             self.review_detail = None
+            self.review_error = ""
             self._render_snapshot()
             self.refresh_review_detail()
 
@@ -730,6 +797,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             last = max(0, len(_review_records(self.snapshot)) - 1)
             self.selected_review_index = min(last, self.selected_review_index + 1)
             self.review_detail = None
+            self.review_error = ""
             self._render_snapshot()
             self.refresh_review_detail()
 
@@ -749,7 +817,6 @@ class WorkbenchOverviewScreen(Screen[None]):
         if selected.get("review_kind") == "proposal":
             self.review_detail = None
             self.review_loading = False
-            self.review_error = ""
             self._render_snapshot()
             return
         review_id = _normalized(selected.get("id"))
@@ -784,6 +851,69 @@ class WorkbenchOverviewScreen(Screen[None]):
 
     def action_defer_proposal(self) -> None:
         self._begin_proposal_action(ProposalAction.DEFER)
+
+    def action_merge_proposal(self) -> None:
+        if self.proposal_action_pending:
+            return
+        selected = self._selected_review()
+        if selected is None or selected.get("review_kind") != "proposal":
+            return
+        try:
+            target_ids = _proposal_merge_target_ids(selected.get("merge_target_ids"))
+        except WorkbenchSnapshotError:
+            self.review_error = "Merge 目标快照格式无效，请刷新 Workbench。"
+            self._render_snapshot()
+            return
+        if not target_ids:
+            self.review_error = "当前没有同 Candidate 的较新 open Proposal 可合并。"
+            self._render_snapshot()
+            return
+        decision = self.engine._permission_checker.check(
+            "workbench_govern_proposal",
+            {"proposal_id": selected.get("id"), "action": "merge"},
+        )
+        if not decision.allowed:
+            self.review_error = "当前权限模式不允许治理 Proposal。"
+            self._render_snapshot()
+            return
+        raw_proposals = self.snapshot.get("proposals", []) if self.snapshot else []
+        if not isinstance(raw_proposals, (list, tuple)):
+            raw_proposals = []
+        proposal_by_id = {
+            item["id"]: dict(item)
+            for item in raw_proposals
+            if isinstance(item, Mapping)
+            and isinstance(item.get("id"), str)
+            and item["id"] in target_ids
+        }
+        targets = [
+            proposal_by_id[target_id]
+            for target_id in target_ids
+            if target_id in proposal_by_id
+        ]
+        if len(targets) != len(target_ids):
+            self.review_error = "Merge 目标快照不完整，请刷新 Workbench。"
+            self._render_snapshot()
+            return
+
+        def on_target(target_id: str | None) -> None:
+            if not target_id:
+                return
+            self._start_proposal_action(
+                _normalized(selected.get("id")),
+                ProposalAction.MERGE,
+                decision_note="",
+                merge_into_id=target_id,
+                confirmed=decision.requires_confirmation,
+            )
+
+        self.app.push_screen(
+            ProposalMergeScreen(
+                title=_plain(selected.get("title") or selected.get("id")),
+                targets=targets,
+            ),
+            on_target,
+        )
 
     def action_issue_experiment_contract(self) -> None:
         if self.proposal_action_pending:
@@ -937,6 +1067,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         *,
         decision_note: str,
         defer_days: int = 0,
+        merge_into_id: str = "",
         confirmed: bool,
     ) -> None:
         if self.proposal_action_pending:
@@ -947,6 +1078,7 @@ class WorkbenchOverviewScreen(Screen[None]):
             action,
             decision_note=decision_note,
             defer_days=defer_days,
+            merge_into_id=merge_into_id,
             confirmed=confirmed,
         )
 
@@ -958,6 +1090,7 @@ class WorkbenchOverviewScreen(Screen[None]):
         *,
         decision_note: str,
         defer_days: int = 0,
+        merge_into_id: str = "",
         confirmed: bool,
     ) -> None:
         try:
@@ -967,6 +1100,7 @@ class WorkbenchOverviewScreen(Screen[None]):
                     "proposal_id": proposal_id,
                     "action": action.value,
                     "defer_days": defer_days,
+                    "merge_into_id": merge_into_id,
                 },
             )
             if not decision.allowed:
@@ -993,6 +1127,8 @@ class WorkbenchOverviewScreen(Screen[None]):
             }
             if defer_until:
                 governance_kwargs["defer_until"] = defer_until
+            if merge_into_id:
+                governance_kwargs["merge_into_id"] = merge_into_id
             proposal = await self.engine.workbench_service.govern_proposal(
                 session_id,
                 proposal_id,
@@ -1024,9 +1160,13 @@ class WorkbenchOverviewScreen(Screen[None]):
             self.review_notice = "Proposal 已批准。"
         elif action is ProposalAction.REJECT:
             self.review_notice = "Proposal 已拒绝。"
-        else:
+        elif action is ProposalAction.DEFER:
             self.review_notice = (
                 f"Proposal 已延后至 {proposal.get('cooldown_until', '-')}。"
+            )
+        else:
+            self.review_notice = (
+                f"Proposal 已合并到 {proposal.get('merged_into_id', '-')}。"
             )
         self.selected_review_index = min(
             self.selected_review_index,
@@ -1200,6 +1340,27 @@ def _normalized(value: Any, limit: int = 600) -> str:
     return " ".join(text.split())[:limit]
 
 
+def _proposal_merge_target_ids(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)) or len(value) > 20:
+        if value in (None, []):
+            return []
+        raise WorkbenchSnapshotError("merge_target_ids 必须是不超过 20 项的数组")
+    target_ids: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if (
+            not isinstance(item, str)
+            or not item
+            or len(item) > 128
+            or re.search(r"[\x00-\x1f\x7f]", item)
+            or item in seen
+        ):
+            raise WorkbenchSnapshotError("merge_target_ids 包含无效或重复 ID")
+        seen.add(item)
+        target_ids.append(item)
+    return target_ids
+
+
 def _code(value: Any) -> str:
     return _normalized(value, 800).replace("`", "'")
 
@@ -1252,6 +1413,7 @@ def _worktree_status(value: Any) -> str:
 
 __all__ = [
     "ProposalDecisionScreen",
+    "ProposalMergeScreen",
     "WorkbenchOverviewScreen",
     "WorkbenchSnapshotError",
     "format_workbench_overview_markdown",

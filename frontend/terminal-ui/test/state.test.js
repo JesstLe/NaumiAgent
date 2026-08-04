@@ -4050,6 +4050,84 @@ test("workbench bypass submits defer after fields without a second confirmation"
   assert.equal(sent[0].payload.confirmed, false);
 });
 
+test("workbench merges Proposal through backend-projected target selection", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "moderate";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "旧 revision", intended_files: [],
+    validation_plan: [], merge_target_ids: ["proposal-3", "proposal-2"],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+  const send = (type, payload) => sent.push({ type, payload });
+
+  handleWorkbenchOverviewKey(state, "m", send);
+  assert.equal(state.workbench.proposal_action.phase, "merge_target");
+  handleWorkbenchOverviewKey(state, "\x1b[B", send);
+  handleWorkbenchOverviewKey(state, "\r", send);
+  assert.equal(state.workbench.proposal_action.phase, "confirm");
+  assert.equal(state.workbench.proposal_action.merge_into_id, "proposal-2");
+  handleWorkbenchOverviewKey(state, "y", send);
+
+  assert.deepEqual(sent, [{
+    type: "workbench/proposal/action",
+    payload: {
+      session_id: "session-workbench",
+      proposal_id: "proposal-1",
+      action: "merge",
+      decision_note: "",
+      confirmed: true,
+      merge_into_id: "proposal-2",
+    },
+  }]);
+});
+
+test("workbench bypass merge keeps target selection but skips second confirmation", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.status.permission_mode = "bypass";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "旧 revision", intended_files: [],
+    validation_plan: [], merge_target_ids: ["proposal-2"],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "m", (type, payload) => sent.push({ type, payload }));
+  handleWorkbenchOverviewKey(state, "\r", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.proposal_action.phase, "loading");
+  assert.equal(sent[0].payload.merge_into_id, "proposal-2");
+  assert.equal(sent[0].payload.confirmed, false);
+});
+
+test("workbench refuses merge when authority projects no eligible target", () => {
+  const state = createInitialState();
+  state.currentSessionId = "session-workbench";
+  state.route = { name: "workbench", originAnchor: null };
+  state.workbench.selected_tab = "reviews";
+  state.workbench.proposals = [{
+    id: "proposal-1", state: "open", title: "最新 revision", intended_files: [],
+    validation_plan: [], merge_target_ids: [],
+  }];
+  state.workbench.selected_review_id = "proposal-1";
+  state.workbench.selected_review_kind = "proposal";
+  const sent = [];
+
+  handleWorkbenchOverviewKey(state, "m", (type, payload) => sent.push({ type, payload }));
+
+  assert.equal(state.workbench.proposal_action, null);
+  assert.match(state.workbench.action_error, /没有同 Candidate/);
+  assert.equal(sent.length, 0);
+});
+
 test("approved Evolution Proposal explicitly issues and displays a durable Contract", () => {
   const state = createInitialState();
   state.currentSessionId = "session-workbench";

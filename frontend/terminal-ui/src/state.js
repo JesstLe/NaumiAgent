@@ -3778,6 +3778,18 @@ export function handleWorkbenchOverviewKey(state, key, send) {
     }
     if (
       selected?.review_kind === "proposal"
+      && selected.state === "open"
+      && normalized === "m"
+    ) {
+      if (!Array.isArray(selected.merge_target_ids) || !selected.merge_target_ids.length) {
+        state.workbench.action_error = "当前没有同 Candidate 的较新 open Proposal 可合并。";
+        return true;
+      }
+      beginWorkbenchProposalAction(state, selected, "merge", send);
+      return true;
+    }
+    if (
+      selected?.review_kind === "proposal"
       && selected.state === "approved"
       && selected.source_kind === "evolution_candidate"
       && normalized === "c"
@@ -3904,9 +3916,16 @@ function beginWorkbenchProposalAction(state, proposal, action, send) {
     proposal_id: String(proposal.id || ""),
     title: String(proposal.title || proposal.id || "Proposal"),
     action,
-    phase: ["reject", "defer"].includes(action) ? "note" : "confirm",
+    phase: action === "merge"
+      ? "merge_target"
+      : ["reject", "defer"].includes(action) ? "note" : "confirm",
     decision_note: "",
     defer_days: 0,
+    merge_target_ids: action === "merge"
+      ? [...proposal.merge_target_ids].slice(0, 20)
+      : [],
+    merge_target_index: 0,
+    merge_into_id: "",
     input: "",
     inputCursor: 0,
     inputPreferredColumn: null,
@@ -3946,6 +3965,40 @@ function handleWorkbenchProposalActionKey(state, key, send) {
     } else if (key === INPUT_KEYS.escape) {
       state.workbench.proposal_action = null;
       state.workbench.action_notice = "已取消操作，未写入任何变更。";
+    }
+    return true;
+  }
+  if (action.phase === "merge_target") {
+    const targets = Array.isArray(action.merge_target_ids) ? action.merge_target_ids : [];
+    if (key === INPUT_KEYS.escape) {
+      state.workbench.proposal_action = null;
+      state.workbench.action_notice = "已取消操作，未写入任何变更。";
+      return true;
+    }
+    if ([INPUT_KEYS.up, INPUT_KEYS.upAlt].includes(key)) {
+      action.merge_target_index = Math.max(0, Number(action.merge_target_index) - 1);
+      return true;
+    }
+    if ([INPUT_KEYS.down, INPUT_KEYS.downAlt].includes(key)) {
+      action.merge_target_index = Math.min(
+        Math.max(0, targets.length - 1),
+        Number(action.merge_target_index) + 1,
+      );
+      return true;
+    }
+    if (key === "\r" || key === "\n") {
+      const target = String(targets[action.merge_target_index] || "");
+      if (!target) {
+        state.workbench.action_error = "Merge 目标已失效，请刷新 Workbench。";
+        return true;
+      }
+      action.merge_into_id = target;
+      state.workbench.action_error = "";
+      if (state.status?.permission_mode === "bypass") {
+        sendWorkbenchProposalAction(state, send, false);
+      } else {
+        action.phase = "confirm";
+      }
     }
     return true;
   }
@@ -4015,6 +4068,7 @@ function sendWorkbenchProposalAction(state, send, confirmed) {
     confirmed: confirmed === true,
   };
   if (action.action === "defer") payload.defer_days = action.defer_days;
+  if (action.action === "merge") payload.merge_into_id = action.merge_into_id;
   send("workbench/proposal/action", payload);
 }
 

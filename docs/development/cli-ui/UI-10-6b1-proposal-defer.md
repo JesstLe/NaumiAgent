@@ -105,10 +105,12 @@ d -> reason input -> 1/7/30 day choice -> loading -> result
 
 ## 8. 非目标与后续
 
-- UI-10.6b2：Proposal merge 目标选择器、同 Candidate 较新 revision 过滤和确认；
+- UI-10.6b2 Proposal merge 目标选择器、同 Candidate 较新 revision 过滤和确认已独立交付，详见
+  `UI-10-6b2-proposal-merge.md`；
 - waiting Approval 的 approve/reject/defer 动作；
 - 自定义绝对时间、小时级任意输入或跨 Proposal 批量 defer；
 - HAR-09.6 before/after outcome tracking；
 - 任何代码执行、Experiment Contract 签发、merge、promotion 或 Git 写入。
 
-因此 UI-10 与 HAR-09 仍为 `partial`。本切片不能被表述为完整 UI-10.6b 或完整 Review Queue。
+因此 UI-10 与 HAR-09 仍为 `partial`。UI-10.6b2 后，Proposal defer/merge 入口已经齐备，但 waiting
+Approval 动作与 HAR-09.6 Outcome authority 仍未完成。

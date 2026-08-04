@@ -15,8 +15,10 @@ from naumi_agent.workbench.models import (
 from naumi_agent.workbench.proposal_governance import (
     DEFER_PRESET_DAYS,
     GOVERNANCE_POLICY_VERSION,
+    MAX_MERGE_TARGETS,
     ProposalAction,
     ProposalGovernanceConflictError,
+    eligible_proposal_merge_targets,
     evaluate_proposal_cooldown,
     plan_proposal_transition,
     proposal_defer_until_for_preset,
@@ -165,6 +167,55 @@ def test_merge_target_must_be_same_candidate_and_not_older() -> None:
         validate_merge_target(source, _proposal(id="proposal-3", source_id="evc_" + "9" * 24))
     with pytest.raises(ValueError, match="较新"):
         validate_merge_target(source, _proposal(id="proposal-4", source_revision=1))
+    with pytest.raises(ValueError, match="同一 Candidate"):
+        validate_merge_target(
+            source,
+            _proposal(id="proposal-5", session_id="session-other", source_revision=3),
+        )
+    with pytest.raises(ValueError, match="open Proposal"):
+        validate_merge_target(
+            source,
+            _proposal(
+                id="proposal-6",
+                source_revision=3,
+                state=ProposalState.APPROVED,
+            ),
+        )
+
+
+def test_merge_target_projection_is_canonical_ordered_and_bounded() -> None:
+    source = _proposal(source_revision=2)
+    revision_3 = _proposal(
+        id="proposal-3", source_revision=3, created_at="2026-07-19T01:03:00+00:00"
+    )
+    revision_4 = _proposal(
+        id="proposal-4", source_revision=4, created_at="2026-07-19T01:04:00+00:00"
+    )
+    rejected_revision_5 = _proposal(
+        id="proposal-5",
+        source_revision=5,
+        state=ProposalState.REJECTED,
+    )
+    wrong_candidate = _proposal(
+        id="proposal-other",
+        source_id="evc_" + "9" * 24,
+        source_revision=6,
+    )
+
+    targets = eligible_proposal_merge_targets(
+        source,
+        [source, revision_3, revision_4, rejected_revision_5, wrong_candidate, revision_4],
+        limit=2,
+    )
+
+    assert [target.id for target in targets] == ["proposal-4", "proposal-3"]
+    assert eligible_proposal_merge_targets(
+        _proposal(state=ProposalState.APPROVED), [revision_3]
+    ) == ()
+    assert MAX_MERGE_TARGETS == 20
+    for invalid in (True, 0, 51, 2.0, "2"):
+        with pytest.raises(ValueError, match="1..50"):
+            eligible_proposal_merge_targets(source, [revision_3], limit=invalid)
 
 
 async def _stored_proposal(
@@ -297,3 +348,28 @@ async def test_service_merge_preserves_open_target_and_audits_source(tmp_path) -
     assert (await store.get_proposal("session-1", target.id)).state is ProposalState.OPEN
     events = await store.list_events("session-1", event_type="proposal.merged")
     assert len(events) == 1
+
+
+@pytest.mark.asyncio
+async def test_dashboard_projects_only_authoritative_merge_targets(tmp_path) -> None:
+    database = str(tmp_path / "merge-projection.db")
+    store = WorkbenchStore(database)
+    service = WorkbenchService(task_store=TaskStore(database), workbench_store=store)
+    source = await _stored_proposal(store, revision=2, suffix="2")
+    target = await _stored_proposal(store, revision=3, suffix="3")
+    rejected = await _stored_proposal(store, revision=4, suffix="4")
+    await service.govern_proposal(
+        "session-1",
+        rejected.id,
+        action=ProposalAction.REJECT,
+        reviewer="Human",
+        decision_note="不作为合并目标",
+        now=NOW,
+    )
+
+    snapshot = await service.dashboard_snapshot("session-1")
+    proposals = {proposal["id"]: proposal for proposal in snapshot["proposals"]}
+
+    assert proposals[source.id]["merge_target_ids"] == [target.id]
+    assert proposals[target.id]["merge_target_ids"] == []
+    assert proposals[rejected.id]["merge_target_ids"] == []

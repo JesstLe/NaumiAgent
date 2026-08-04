@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -19,6 +20,7 @@ REJECT_COOLDOWN = timedelta(days=30)
 MIN_DEFER = timedelta(hours=1)
 MAX_DEFER = timedelta(days=90)
 DEFER_PRESET_DAYS = (1, 7, 30)
+MAX_MERGE_TARGETS = 20
 
 
 class ProposalAction(StrEnum):
@@ -178,6 +180,35 @@ def validate_merge_target(source: WorkbenchProposal, target: WorkbenchProposal) 
         raise ValueError("merge 目标必须是同一 Candidate 的较新 revision open Proposal。")
 
 
+def eligible_proposal_merge_targets(
+    source: WorkbenchProposal,
+    candidates: Iterable[WorkbenchProposal],
+    *,
+    limit: int = MAX_MERGE_TARGETS,
+) -> tuple[WorkbenchProposal, ...]:
+    """Project a bounded ordered target list using the canonical merge rule."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise ValueError("merge target limit 必须在 1..50。")
+    if source.state is not ProposalState.OPEN:
+        return ()
+    eligible: list[WorkbenchProposal] = []
+    seen: set[str] = set()
+    for target in candidates:
+        if target.id in seen:
+            continue
+        try:
+            validate_merge_target(source, target)
+        except ValueError:
+            continue
+        seen.add(target.id)
+        eligible.append(target)
+    eligible.sort(
+        key=lambda item: (item.source_revision, item.created_at, item.id),
+        reverse=True,
+    )
+    return tuple(eligible[:limit])
+
+
 def _has_significant_new_evidence(
     previous: WorkbenchProposal,
     *,
@@ -217,10 +248,12 @@ def _iso(value: datetime) -> str:
 
 __all__ = [
     "GOVERNANCE_POLICY_VERSION",
+    "MAX_MERGE_TARGETS",
     "ProposalAction",
     "ProposalCooldownDecision",
     "ProposalGovernanceConflictError",
     "ProposalTransitionPlan",
+    "eligible_proposal_merge_targets",
     "evaluate_proposal_cooldown",
     "plan_proposal_transition",
     "validate_merge_target",
