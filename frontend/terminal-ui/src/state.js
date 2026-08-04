@@ -444,6 +444,12 @@ export function createInitialState() {
       probeError: "",
       probeNotice: "",
       probeTimeoutMs: 15_000,
+      traceLoading: false,
+      traceRequestId: "",
+      traceSnapshot: null,
+      traceError: "",
+      traceNotice: "",
+      traceQuery: "",
     },
     permissionCenter: {
       loading: false,
@@ -1048,6 +1054,20 @@ export function reduceServerEvent(state, record) {
         return [{ type: "doctor_export_preview" }];
       }
       break;
+    case "doctor/trace/result":
+      if (
+        !state.doctorHealth.traceRequestId
+        || String(record.request_id || "") !== state.doctorHealth.traceRequestId
+      ) {
+        break;
+      }
+      state.doctorHealth.traceLoading = false;
+      state.doctorHealth.traceRequestId = "";
+      state.doctorHealth.traceError = "";
+      state.doctorHealth.traceNotice = "";
+      state.doctorHealth.traceSnapshot = payload;
+      state.doctorHealth.traceQuery = String(payload.query || "");
+      break;
     case "doctor/export/result":
       if (
         !state.doctorHealth.exportRequestId
@@ -1484,6 +1504,16 @@ export function reduceServerEvent(state, record) {
         state.evolutionEvaluationLane.loading = false;
         state.evolutionEvaluationLane.error = payload.message
           ?? "Evaluation Lane Receipt 加载失败。";
+        break;
+      }
+      if (
+        state.doctorHealth.traceRequestId
+        && String(record.request_id || "") === state.doctorHealth.traceRequestId
+      ) {
+        state.doctorHealth.traceLoading = false;
+        state.doctorHealth.traceError = payload.message
+          ?? "Trace 索引读取失败，请检查本地 debug-runs。";
+        state.doctorHealth.traceRequestId = "";
         break;
       }
       if (String(payload.code || "").startsWith("doctor_export_")) {
@@ -3500,7 +3530,47 @@ export function handleSubmitText(state, text, send) {
     state.doctorHealth.probeResult = null;
     state.doctorHealth.probeError = "";
     state.doctorHealth.probeNotice = "";
+    state.doctorHealth.traceLoading = false;
+    state.doctorHealth.traceRequestId = "";
+    state.doctorHealth.traceSnapshot = null;
+    state.doctorHealth.traceError = "";
+    state.doctorHealth.traceNotice = "";
+    state.doctorHealth.traceQuery = "";
     send("doctor", {});
+    return;
+  }
+  const doctorTraceMatch = text.match(/^\/doctor\s+trace(?:\s+(.{1,128}))?$/iu);
+  if (doctorTraceMatch) {
+    const originAnchor = {
+      scrollOffset: Math.max(0, Number(state.scrollOffset) || 0),
+      followTail: Boolean(state.followTail),
+    };
+    const query = String(doctorTraceMatch[1] || "").trim();
+    state.route = { name: "doctor_health", originAnchor };
+    state.doctorHealth.loading = false;
+    state.doctorHealth.error = "";
+    state.doctorHealth.scrollOffset = 0;
+    state.doctorHealth.traceSnapshot = null;
+    state.doctorHealth.traceError = "";
+    state.doctorHealth.traceNotice = "";
+    state.doctorHealth.traceQuery = query;
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "doctor/trace",
+    );
+    if (capability.status !== "available") {
+      state.doctorHealth.traceLoading = false;
+      state.doctorHealth.traceNotice = doctorTraceCompatibilityNotice(
+        capability.status,
+      );
+      return;
+    }
+    state.doctorHealth.traceLoading = true;
+    state.doctorHealth.traceRequestId = String(send("doctor/trace", {
+      query,
+      limit: 80,
+    }) || "");
     return;
   }
   const doctorProbeMatch = text.match(/^\/doctor\s+probe(?:\s+(\d+))?$/iu);
@@ -3545,7 +3615,7 @@ export function handleSubmitText(state, text, send) {
     pushSystemMessage(
       state,
       "Doctor",
-      "用法：/doctor、/doctor probe [timeout-ms] 或 /doctor export；"
+      "用法：/doctor、/doctor trace [筛选]、/doctor probe [timeout-ms] 或 /doctor export；"
         + "在线探测最多 1 请求/8 输出 token，且不会自动重试。",
       "warning",
     );
@@ -4274,6 +4344,34 @@ export function handleDoctorHealthKey(state, key, send) {
     }) || "");
     return true;
   }
+  if (key === "t" || key === "T") {
+    if (
+      state.doctorHealth.loading
+      || state.doctorHealth.exportLoading
+      || state.doctorHealth.probeLoading
+      || state.doctorHealth.traceLoading
+    ) return true;
+    const capability = negotiatedEventCapabilityStatus(
+      state,
+      "client",
+      "doctor/trace",
+    );
+    if (capability.status !== "available") {
+      state.doctorHealth.traceError = "";
+      state.doctorHealth.traceNotice = doctorTraceCompatibilityNotice(
+        capability.status,
+      );
+      return true;
+    }
+    state.doctorHealth.traceLoading = true;
+    state.doctorHealth.traceError = "";
+    state.doctorHealth.traceNotice = "";
+    state.doctorHealth.traceRequestId = String(send("doctor/trace", {
+      query: String(state.doctorHealth.traceQuery || ""),
+      limit: 80,
+    }) || "");
+    return true;
+  }
   if (key === "c" || key === "C") {
     if (!state.doctorHealth.probeLoading || !state.doctorHealth.probeRequestId) {
       state.doctorHealth.probeNotice = "当前没有可取消的在线探测。";
@@ -4335,6 +4433,13 @@ function doctorProbeCompatibilityNotice(status) {
     return "当前 Bridge 不支持受控在线探测；可使用 `naumi doctor --live`。";
   }
   return "在线探测协议未注册，未发送任何模型请求。";
+}
+
+function doctorTraceCompatibilityNotice(status) {
+  if (status === "pending") {
+    return "协议协商尚未完成，未发送 Trace 索引请求。";
+  }
+  return "当前 Bridge 不支持 typed Trace 索引；可使用 `/doctor trace` 的文本 fallback。";
 }
 
 function parseHarnessEvalBatchCommand(commandText) {

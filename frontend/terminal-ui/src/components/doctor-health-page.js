@@ -25,6 +25,7 @@ export function renderDoctorHealthPage(view, width, height) {
   const exportPreview = object(value.exportPreview);
   const exportReceipt = object(value.exportReceipt);
   const probeResult = object(value.probeResult);
+  const traceSnapshot = object(value.traceSnapshot);
   const counts = items.reduce((result, item) => {
     const key = SEVERITY[item.severity] ? item.severity : "unknown";
     result[key] += 1;
@@ -34,7 +35,7 @@ export function renderDoctorHealthPage(view, width, height) {
     color(ANSI.cyan, "环境健康诊断"),
     color(
       ANSI.dim,
-      "r 本地只读零网络 · p 在线（最多 1 请求/最多 8 输出 token/15000ms/不自动重试）"
+      "r 本地只读零网络 · t Trace 索引 · p 在线（最多 1 请求/最多 8 输出 token/15000ms/不自动重试）"
         + " · e 导出 · Esc 返回",
     ),
     value.loading && !snapshot.schema_version
@@ -67,6 +68,14 @@ export function renderDoctorHealthPage(view, width, height) {
       ? [color(ANSI.red, `在线探测失败 · ${text(value.probeError)}`)]
       : []),
     ...renderProbeResult(probeResult),
+    ...(value.traceLoading ? [color(ANSI.cyan, "正在读取受限 Trace 索引…")] : []),
+    ...(value.traceNotice
+      ? [color(ANSI.yellow, `Trace 兼容模式 · ${text(value.traceNotice)}`)]
+      : []),
+    ...(value.traceError
+      ? [color(ANSI.red, `Trace 失败 · ${text(value.traceError)}`)]
+      : []),
+    ...renderTraceIndex(traceSnapshot),
   ];
   const wrapped = logical.flatMap((line) => wrapAnsiLine(line, safeWidth));
   const offset = Math.min(
@@ -76,6 +85,40 @@ export function renderDoctorHealthPage(view, width, height) {
   const lines = wrapped.slice(offset, offset + safeHeight);
   while (lines.length < safeHeight) lines.push("");
   return lines.map((line) => padRight(fit(line, safeWidth), safeWidth));
+}
+
+function renderTraceIndex(snapshot) {
+  if (!snapshot.schema_version) return [];
+  const lines = [
+    color(
+      snapshot.status === "ready" ? ANSI.green : ANSI.yellow,
+      `Trace 索引 · ${snapshot.status === "ready" ? "就绪" : "受限"}`,
+    ),
+    `  运行 ${text(snapshot.run_id)} · ${text(snapshot.interface)}`,
+    `  窗口 ${Number(snapshot.window_event_count) || 0}`
+      + ` · 匹配 ${Number(snapshot.matched_event_count) || 0}`
+      + ` · 显示 ${array(snapshot.entries).length}/${Number(snapshot.limit) || 0}`
+      + ` · 损坏行 ${Number(snapshot.malformed_line_count) || 0}`,
+    ...(snapshot.query ? [`  筛选 · ${text(snapshot.query)}`] : []),
+    ...(snapshot.truncated
+      ? [color(ANSI.yellow, "  仅覆盖最近 2 MiB 或 limit 条匹配。")]
+      : []),
+  ];
+  for (const entry of array(snapshot.entries)) {
+    const tone = entry.severity === "error"
+      ? ANSI.red : entry.severity === "warning" ? ANSI.yellow : ANSI.dim;
+    const identifiers = Object.entries(object(entry.identifiers))
+      .map(([key, value]) => `${key}=${text(value)}`)
+      .join(" · ");
+    lines.push(color(
+      tone,
+      `  ${text(entry.event_type)} · ${text(entry.timestamp || "-")} · ${text(entry.summary)}`,
+    ));
+    if (identifiers) lines.push(color(ANSI.dim, `    ${identifiers}`));
+  }
+  lines.push(color(ANSI.yellow, `  ${text(snapshot.privacy_notice)}`));
+  lines.push(color(ANSI.dim, `  Snapshot · ${text(snapshot.snapshot_sha256).slice(0, 16)}`));
+  return lines;
 }
 
 function renderProbeResult(result) {

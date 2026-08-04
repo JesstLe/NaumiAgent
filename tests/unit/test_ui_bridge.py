@@ -1124,8 +1124,11 @@ def test_protocol_contract_matches_python_enums() -> None:
         "capabilities": [
             "evolution_evaluation_lane",
             "doctor_export",
+            "doctor_live_probe",
+            "doctor_trace_index",
             "goal_snapshot",
             "heartbeat",
+            "pursuit_recovery_actions",
             "session_list",
             "sequence_integrity",
             "task_snapshot",
@@ -1142,9 +1145,21 @@ def test_protocol_contract_matches_python_enums() -> None:
             "client_events": ["doctor/export"],
             "server_events": ["doctor/export/result"],
         },
+        "doctor_live_probe": {
+            "client_events": ["doctor/probe", "doctor/probe/cancel"],
+            "server_events": ["doctor/probe/result"],
+        },
+        "doctor_trace_index": {
+            "client_events": ["doctor/trace"],
+            "server_events": ["doctor/trace/result"],
+        },
         "evolution_evaluation_lane": {
             "client_events": ["evolution/evaluation-lane/request"],
             "server_events": ["evolution/evaluation-lane"],
+        },
+        "pursuit_recovery_actions": {
+            "client_events": ["pursuit/recovery/resume"],
+            "server_events": ["pursuit/recovery/action_result"],
         },
         "terminal_event_recovery": {
             "client_events": ["terminal_events/ack"],
@@ -7741,6 +7756,101 @@ async def test_bridge_doctor_failure_returns_typed_product_runtime_fallback(
     assert item["responsibility"] == "product_runtime"
     assert "诊断流程自身失败" in item["detail"]
     assert "private doctor failure" not in json.dumps(health, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_trace_returns_correlated_body_folded_index(
+    tmp_path: Path,
+) -> None:
+    from naumi_agent.debug_trace import DebugTrace
+
+    engine = _FakeEngine()
+    trace = DebugTrace.create(interface="terminal-ui-bridge", base_dir=tmp_path)
+    trace.input("ui_bridge.stdin", "sk-private-user-body", request_id="request-7")
+    trace.event(
+        "engine.stream_event",
+        {
+            "event": "tool_start",
+            "data": {"name": "bash_run", "call_id": "call-7", "args": "private"},
+        },
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(
+        engine,
+        config_path="config.yaml",
+        debug_trace=trace,
+    )
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-doctor-trace",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["doctor_trace_index", "typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record({
+        "id": "doctor-trace-1",
+        "type": ClientEventType.DOCTOR_TRACE,
+        "payload": {"query": "call-7", "limit": 20},
+    })
+
+    result = next(
+        record for record in _records(writer) if record["type"] == "doctor/trace/result"
+    )
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert result["request_id"] == "doctor-trace-1"
+    assert result["payload"]["matched_event_count"] == 1
+    assert result["payload"]["entries"][0]["identifiers"]["call_id"] == "call-7"
+    assert "sk-private-user-body" not in serialized
+    assert '"args"' not in serialized
+
+
+@pytest.mark.asyncio
+async def test_bridge_doctor_trace_rejects_disabled_trace() -> None:
+    from naumi_agent.debug_trace import DebugTrace
+
+    engine = _FakeEngine()
+    trace = DebugTrace(
+        run_id="disabled-run",
+        run_dir=Path("/tmp/disabled-run"),
+        interface="terminal-ui-bridge",
+        enabled=False,
+    )
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(
+        engine,
+        config_path="config.yaml",
+        debug_trace=trace,
+    )
+    bridge.bind_writer(writer)
+    await bridge.handle_client_record({
+        "id": "hello-doctor-trace-disabled",
+        "type": ClientEventType.HELLO,
+        "payload": {
+            "client": "naumi-terminal-ui",
+            "minimum_version": 1,
+            "maximum_version": 1,
+            "capabilities": ["doctor_trace_index", "typed_ui_messages"],
+        },
+    })
+    writer.seek(0)
+    writer.truncate(0)
+
+    await bridge.handle_client_record({
+        "id": "doctor-trace-disabled",
+        "type": ClientEventType.DOCTOR_TRACE,
+        "payload": {},
+    })
+
+    error = next(record for record in _records(writer) if record["type"] == "error")
+    assert error["request_id"] == "doctor-trace-disabled"
+    assert error["payload"]["code"] == "trace_disabled"
 
 
 @pytest.mark.asyncio

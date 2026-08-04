@@ -159,3 +159,41 @@ test("doctor health page distinguishes compatibility downgrade from export failu
   assert.match(plain, /导出失败 · 状态目录不可写/);
   assert(lines.every((line) => visibleWidth(line) <= 100));
 });
+
+test("doctor health page renders body-folded trace metadata", () => {
+  const lines = renderDoctorHealthPage({
+    snapshot: snapshot(),
+    heartbeat: { status: "healthy", rttMs: 12 },
+    traceSnapshot: {
+      schema_version: 1,
+      status: "degraded",
+      run_id: "run-1",
+      interface: "terminal-ui-bridge",
+      query: "call-7",
+      limit: 80,
+      window_event_count: 12,
+      matched_event_count: 1,
+      malformed_line_count: 1,
+      truncated: true,
+      entries: [{
+        timestamp: "2026-08-05T01:00:00+00:00",
+        event_type: "engine.stream_event",
+        severity: "warning",
+        summary: "运行事件 tool_start · bash_run（正文已折叠）",
+        identifiers: { call_id: "call-7" },
+      }],
+      snapshot_sha256: "f".repeat(64),
+      privacy_notice: "正文、模型输出、reasoning、参数与 traceback 默认折叠。",
+    },
+  }, 100, 50);
+  const plain = lines.map(stripAnsi).join("\n");
+
+  assert.match(plain, /t Trace 索引/);
+  assert.match(plain, /Trace 索引 · 受限/);
+  assert.match(plain, /筛选 · call-7/);
+  assert.match(plain, /engine.stream_event/);
+  assert.match(plain, /2026-08-05T01:00:00\+00:00/);
+  assert.match(plain, /call_id=call-7/);
+  assert.match(plain, /正文已折叠/);
+  assert(lines.every((line) => visibleWidth(line) <= 100));
+});

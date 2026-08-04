@@ -2576,6 +2576,79 @@ test("doctor command opens typed health route refreshes and restores origin", ()
   assert.equal(state.followTail, false);
 });
 
+test("doctor trace opens typed filtered index and refreshes with t", () => {
+  const state = createInitialState();
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = {
+    selected_version: 1,
+    capabilities: ["doctor_trace_index", "typed_ui_messages"],
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return `request-${sent.length}`;
+  };
+
+  handleSubmitText(state, "/doctor trace call-7", send);
+  assert.equal(state.route.name, "doctor_health");
+  assert.equal(state.doctorHealth.traceLoading, true);
+  assert.deepEqual(sent, [{
+    type: "doctor/trace",
+    payload: { query: "call-7", limit: 80 },
+  }]);
+  reduceServerEvent(state, {
+    type: "doctor/trace/result",
+    request_id: "request-1",
+    payload: {
+      schema_version: 1,
+      status: "ready",
+      query: "call-7",
+      entries: [{ event_type: "tool", identifiers: { call_id: "call-7" } }],
+    },
+  });
+  assert.equal(state.doctorHealth.traceLoading, false);
+  assert.equal(state.doctorHealth.traceSnapshot.query, "call-7");
+  assert.equal(handleDoctorHealthKey(state, "t", send), true);
+  assert.deepEqual(sent.at(-1), {
+    type: "doctor/trace",
+    payload: { query: "call-7", limit: 80 },
+  });
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "request-2",
+    payload: {
+      code: "protocol_capability_not_negotiated",
+      message: "Bridge 能力在刷新前发生变化。",
+    },
+  });
+  assert.equal(state.doctorHealth.traceLoading, false);
+  assert.equal(state.doctorHealth.traceError, "Bridge 能力在刷新前发生变化。");
+});
+
+test("doctor trace stays local when capability is unavailable", () => {
+  for (const negotiated of [false, true]) {
+    const state = createInitialState();
+    state.protocolNegotiated = negotiated;
+    state.protocolNegotiation = negotiated
+      ? { selected_version: 1, capabilities: ["typed_ui_messages"] }
+      : null;
+    const sent = [];
+
+    handleSubmitText(
+      state,
+      "/doctor trace error",
+      (type, payload) => sent.push({ type, payload }),
+    );
+
+    assert.deepEqual(sent, []);
+    assert.equal(state.doctorHealth.traceLoading, false);
+    assert.match(
+      state.doctorHealth.traceNotice,
+      negotiated ? /不支持 typed Trace/ : /协议协商尚未完成/,
+    );
+  }
+});
+
 test("doctor live probe is explicit bounded cancellable and correlated", () => {
   const state = createInitialState();
   state.protocolNegotiated = true;

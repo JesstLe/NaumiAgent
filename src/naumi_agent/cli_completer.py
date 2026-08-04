@@ -18,7 +18,7 @@ except Exception:  # pragma: no cover - backward-compatible fallback path
         ("/style", "显示当前主题和输出风格", False),
         ("/reasoning", "显示或隐藏模型思考文本", True),
         ("/effort", "查看或切换模型思考强度", True),
-        ("/doctor", "运行环境诊断或导出脱敏诊断包", True),
+        ("/doctor", "运行诊断、查看 Trace 或导出脱敏诊断包", True),
         ("/harness", "Harness Profile 状态、离线评测、运行解释、证据、知识、检查与信任", True),
         ("/feedback", "记录隐私安全的用户纠正或缺陷候选", True),
         ("/evolution", "审查 Candidate、签发单 Lane 回执或加入 Workbench 队列", True),

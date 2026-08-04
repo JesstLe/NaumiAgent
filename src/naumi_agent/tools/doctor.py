@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from naumi_agent.tools.base import Tool, ToolMetadata
@@ -20,6 +21,12 @@ from naumi_agent.ui.doctor_probe import (
     DOCTOR_LIVE_PROBE_MIN_TIMEOUT_MS,
     render_doctor_live_probe_result,
     run_bounded_doctor_live_probe,
+)
+from naumi_agent.ui.doctor_trace import (
+    DOCTOR_TRACE_DEFAULT_LIMIT,
+    DOCTOR_TRACE_MAX_LIMIT,
+    build_doctor_trace_index,
+    render_doctor_trace_index,
 )
 
 
@@ -217,3 +224,68 @@ class DoctorLiveProbeTool(Tool):
             model_router=self._engine.router,
         )
         return render_doctor_live_probe_result(result)
+
+
+class DoctorTraceIndexTool(Tool):
+    """Read a bounded body-folded index of the latest local debug run."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "doctor_trace_index"
+
+    @property
+    def description(self) -> str:
+        return (
+            "读取最近一次本地 DebugTrace 的受限索引，可按事件类型、错误或安全 ID 筛选；"
+            "正文、模型输出、reasoning、参数、异常 message 与 traceback 默认折叠。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=True,
+            concurrency_safe=True,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="调试事件索引",
+            search_hint=(
+                "doctor debug trace event index filter error call id task id privacy"
+            ),
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "default": "",
+                    "description": "按事件类型、严重度或安全标识符筛选。",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": DOCTOR_TRACE_MAX_LIMIT,
+                    "default": DOCTOR_TRACE_DEFAULT_LIMIT,
+                    "description": "最多返回的匹配事件数。",
+                },
+            },
+            "additionalProperties": False,
+        }
+
+    async def execute(
+        self,
+        *,
+        query: str = "",
+        limit: int = DOCTOR_TRACE_DEFAULT_LIMIT,
+        **kwargs: Any,
+    ) -> str:
+        config = self._engine._config
+        base_dir = Path(config.memory.session_db_path).expanduser().parent / "debug-runs"
+        index = build_doctor_trace_index(base_dir, query=query, limit=limit)
+        return render_doctor_trace_index(index)

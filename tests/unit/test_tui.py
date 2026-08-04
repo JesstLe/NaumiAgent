@@ -339,6 +339,20 @@ class TestNaumiApp:
         ]
         assert "用法" in status.status_text
 
+    def test_tui_doctor_trace_uses_shared_cli_tool_path(self) -> None:
+        calls: list[str] = []
+
+        class FakeApp:
+            debug_trace = None
+
+            def _run_cli_slash_command(self, command: str) -> None:
+                calls.append(command)
+
+        app = FakeApp()
+        NaumiApp._handle_slash_command(app, "/doctor trace call-7")
+
+        assert calls == ["/doctor trace call-7"]
+
     def test_tui_doctor_probe_is_explicit_bounded_and_cancellable(
         self,
         monkeypatch: pytest.MonkeyPatch,
