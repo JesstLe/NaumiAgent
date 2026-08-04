@@ -994,6 +994,7 @@ class TestSubAgentManager:
             "scanned": 1,
             "delivered": 1,
             "notification_failures": 0,
+            "quarantined": 0,
             "failed": 0,
             "failure_codes": [],
         }

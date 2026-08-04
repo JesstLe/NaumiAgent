@@ -45,6 +45,8 @@ harness:
     max_empty_backoff_seconds: 300
     max_failure_backoff_seconds: 300
     scan_limit: 100
+    # 同一 publication 达到该 claim 次数后，认证隔离并继续处理后续 FIFO。
+    max_attempts: 5
     jitter_ratio: 0.1
 
 search:

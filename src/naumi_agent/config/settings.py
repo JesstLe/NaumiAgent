@@ -441,6 +441,7 @@ class AgentPublicationRecoveryConfig(BaseSettings):
     max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
     max_failure_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
     scan_limit: int = Field(default=100, ge=1, le=1000)
+    max_attempts: int = Field(default=5, ge=1, le=1000)
     jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
 
     @model_validator(mode="after")

@@ -183,7 +183,7 @@ wake 信号，Engine shutdown 会等待 worker 收口。关闭周期 worker 配�
 
 本切片没有完成：
 
-- 最大 attempt、poison-record quarantine/dead-letter；
+- HAR-10.7g 已补齐最大 attempt 与 poison-record quarantine/dead-letter；exact requeue/prune 仍未完成；
 - publication/inbox retention、GC、备份 root 与删除检测；
 - 未读数、详情分页/导出、人工重试/隔离；统一只读 inbox projection 已由
   `ARC-04.5d2c-agent-result-inbox-projection.md` 完成；

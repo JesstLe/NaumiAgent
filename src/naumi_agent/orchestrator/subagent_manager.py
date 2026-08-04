@@ -205,6 +205,7 @@ class AgentPublicationRecoverySummary:
     scanned: int = 0
     delivered: int = 0
     notification_failures: int = 0
+    quarantined: int = 0
     failed: int = 0
     failure_codes: tuple[str, ...] = ()
 
@@ -669,6 +670,7 @@ class SubAgentManager:
             "scanned": summary.scanned,
             "delivered": summary.delivered,
             "notification_failures": summary.notification_failures,
+            "quarantined": summary.quarantined,
             "failed": summary.failed,
             "failure_codes": list(summary.failure_codes),
         }
@@ -686,12 +688,20 @@ class SubAgentManager:
         self,
         *,
         limit: int = _AGENT_PUBLICATION_RECOVERY_LIMIT,
+        max_attempts: int = 5,
     ) -> AgentPublicationRecoverySummary:
         """Deliver a bounded FIFO prefix of terminal publications after restart."""
         safe_limit = max(1, min(int(limit), 1000))
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or not 1 <= max_attempts <= 1000
+        ):
+            raise ValueError("Agent publication max_attempts 必须在 1 到 1000 之间。")
         scanned = 0
         delivered = 0
         notification_failures = 0
+        quarantined = 0
         failure_codes: list[str] = []
         for _ in range(safe_limit):
             try:
@@ -729,9 +739,33 @@ class SubAgentManager:
                     publication.publication_id,
                     type(exc).__name__,
                 )
-                failure_codes.append(
-                    "agent_publication_recovery_delivery_failed"
-                )
+                failure_code = "agent_publication_recovery_delivery_failed"
+                if publication.attempt_count >= max_attempts:
+                    try:
+                        await self._agent_job_store.quarantine_publication(
+                            publication.publication_id,
+                            owner_id=self._agent_publication_owner_id,
+                            claim_epoch=publication.claim_epoch,
+                            max_attempts=max_attempts,
+                            failure_code=failure_code,
+                        )
+                    except Exception as quarantine_exc:
+                        logger.warning(
+                            "Agent publication quarantine failed [%s]: %s",
+                            publication.publication_id,
+                            type(quarantine_exc).__name__,
+                        )
+                        failure_codes.append(
+                            "agent_publication_recovery_quarantine_failed"
+                        )
+                        await self._release_publication_after_failure(
+                            publication.publication_id,
+                            claim_epoch=publication.claim_epoch,
+                        )
+                        break
+                    quarantined += 1
+                    continue
+                failure_codes.append(failure_code)
                 await self._release_publication_after_failure(
                     publication.publication_id,
                     claim_epoch=publication.claim_epoch,
@@ -748,6 +782,7 @@ class SubAgentManager:
             scanned=scanned,
             delivered=delivered,
             notification_failures=notification_failures,
+            quarantined=quarantined,
             failed=len(failure_codes),
             failure_codes=tuple(sorted(set(failure_codes))),
         )

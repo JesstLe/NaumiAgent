@@ -115,7 +115,8 @@ Python Bridge 继续使用现有 `agents/snapshot` / `agents/update`，`changed_
 
 - read/unread、ack cursor、跨设备同步或多消费者语义；
 - inbox pagination、搜索、过滤和完整结果导出；
-- retry/backoff、quarantine/dead-letter 与人工恢复动作；
+- HAR-10.7f/7g 已补齐 retry/backoff 与 quarantine/dead-letter；exact quarantine requeue、result read/ack
+  与人工恢复动作仍未完成；
 - publication/inbox retention、GC、备份 root 与删除检测；
 - 大输出按页读取；当前只展示 2000 字符安全摘录；
 - 独立 Agent Worker、Supervisor、跨进程 drain/upgrade；

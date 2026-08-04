@@ -48,9 +48,10 @@
     与 running recovery fence；ARC-04.5c 已让 embedded Agent 消费 admit/claim/run/renew/finish
     并阻断未认证终态发布；ARC-04.5d1/5d2a 又补齐加密 terminal payload 与 durable publication
     outbox authority；ARC-04.5d2b 已补齐幂等 result inbox、在线消费与 startup recovery；HAR-10.7f
-    已补齐 publication periodic recovery、有界退避、失败唤醒与 shutdown drain。
+    已补齐 publication periodic recovery、有界退避、失败唤醒与 shutdown drain；HAR-10.7g 已补齐
+    durable retry budget、poison-record quarantine/dead-letter 与双端隔离投影。
     ARC-06.2c 已补齐 embedded 多 Runtime 的共享 active 上限与 durable FIFO；独立 Worker
-    reservation、publication dead-letter 和跨 workspace 公平仍未完成。见
+    reservation、quarantine requeue/prune 和跨 workspace 公平仍未完成。见
     [设计与验证](ARC-04-5c-embedded-agent-durable-dispatch.md)。
   - 未完成：自动 scheduler loop、claim owner lease、queue catalog、priority、aging、跨 workspace
     公平、dependency DAG、affinity、cursor 与 starvation 指标。

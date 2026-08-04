@@ -23,6 +23,7 @@ export function renderAgentControlPage(view, width, height) {
   const header = [
     color(ANSI.cyan, fitAnsiWidth("Agent Control Center", safeWidth)),
     fitAnsiWidth(renderSummary(view, snapshot), safeWidth),
+    fitAnsiWidth(renderDurableSummary(snapshot), safeWidth),
     fitAnsiWidth(renderTabs(view?.selectedTab), safeWidth),
     fitAnsiWidth(renderPageState(view), safeWidth),
   ];
@@ -47,9 +48,6 @@ export function renderAgentControlPage(view, width, height) {
 function renderSummary(view, snapshot) {
   const summary = snapshot?.summary || {};
   const revision = Number(snapshot?.revision ?? view?.revision ?? 0) || 0;
-  const durable = summary.durable_capacity_configured
-    ? durableCapacitySummary(summary)
-    : "";
   return [
     `rev ${revision}`,
     `Agent ${number(summary.total_agents)}`,
@@ -58,10 +56,19 @@ function renderSummary(view, snapshot) {
     `可停止 ${number(summary.stoppable_executions)}`,
     `消息 ${number(summary.pending_messages)}`,
     `结果 ${number(summary.durable_results_visible)}`,
+    snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function renderDurableSummary(snapshot) {
+  const summary = snapshot?.summary || {};
+  const durable = summary.durable_capacity_configured
+    ? durableCapacitySummary(summary)
+    : "";
+  return [
+    durablePublicationSummary(summary),
     recoveryCatalogSummary(snapshot?.recovery_catalog),
     durable,
-    durablePublicationSummary(summary),
-    snapshot?.generated_at ? `更新 ${compactText(snapshot.generated_at, 40)}` : "",
   ].filter(Boolean).join(" · ");
 }
 
@@ -72,6 +79,7 @@ function recoveryCatalogSummary(catalog) {
     "recovery_required",
     "outcome_unknown",
     "publication_claim_expired",
+    "publication_quarantined",
   ].includes(item.recovery_state)).length;
   const label = `恢复目录 ${items.length}${catalog?.truncated ? "+" : ""}`;
   return color(attention > 0 ? ANSI.red : ANSI.yellow, label);
@@ -81,6 +89,13 @@ function durablePublicationSummary(summary) {
   const pending = number(summary.durable_publications_pending);
   const claimed = number(summary.durable_publications_claimed);
   const expired = number(summary.durable_publications_expired);
+  const quarantined = number(summary.durable_publications_quarantined);
+  if (quarantined > 0) {
+    return color(
+      ANSI.red,
+      `发布待处理 ${pending} · 已认领 ${claimed} · 已隔离 ${quarantined}`,
+    );
+  }
   if (expired > 0) {
     return color(
       ANSI.red,
@@ -373,7 +388,7 @@ function agentState(state) {
 }
 
 function recoveryStatus(state) {
-  if (["recovery_required", "outcome_unknown", "publication_claim_expired"].includes(state)) {
+  if (["recovery_required", "outcome_unknown", "publication_claim_expired", "publication_quarantined"].includes(state)) {
     return color(ANSI.red, "!");
   }
   if (["reclaimable_prestart", "publication_pending"].includes(state)) {
@@ -391,6 +406,7 @@ function recoveryStateLabel(state) {
     outcome_unknown: "执行结果未知",
     publication_pending: "终态结果等待发布",
     publication_claim_expired: "发布 claim 已过期",
+    publication_quarantined: "发布失败已隔离",
   })[state] || state;
 }
 

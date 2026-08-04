@@ -114,6 +114,9 @@
     既有加密 outbox/claim epoch/result inbox，提供串行 pass、有界空闲/失败退避、live failure wake
     和 Engine shutdown drain。最大重试预算、poison-record quarantine/dead-letter 仍未完成。见
     [设计](HAR-10-7f-periodic-agent-publication-recovery.md)。
+  - HAR-10.7g 已增加 Store schema v6 的 HMAC 认证 quarantine receipt、durable retry budget 和 FIFO
+    poison-record 隔离；Agent Control schema v5 将隔离计数/事实同步到 New UI/TUI。exact requeue、
+    放弃和 prune 尚未完成。见 [设计](HAR-10-7g-publication-quarantine-dead-letter.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。

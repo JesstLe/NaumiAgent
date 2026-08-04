@@ -98,6 +98,42 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
     assert "消息总线暂时不可用" in team
 
 
+def test_agent_control_formatter_highlights_quarantined_publication() -> None:
+    payload = _snapshot().to_dict()
+    payload["summary"]["durable_publications_quarantined"] = 1
+    payload["recovery_catalog"] = {
+        "assessed_at": "2026-08-05T12:00:01+00:00",
+        "items": [{
+            "kind": "publication",
+            "item_id": "publication-quarantined",
+            "job_id": "agent-job-quarantined",
+            "publication_id": "publication-quarantined",
+            "agent_name": "coder",
+            "job_state": "completed",
+            "recovery_state": "publication_quarantined",
+            "session_scope": "current",
+            "claim_epoch": 2,
+            "claim_expires_at": "",
+            "attempt_count": 5,
+            "occurred_at": "2026-08-05T12:00:00+00:00",
+            "request_sha256": "a" * 64,
+            "receipt_sha256": "b" * 64,
+            "reason_code": "agent_publication_recovery_delivery_failed",
+        }],
+        "truncated": False,
+    }
+    rendered = format_agent_control_markdown(
+        AgentControlSnapshot.from_dict(payload),
+        "recovery",
+        "recovery:publication:publication-quarantined",
+    )
+
+    assert "已隔离 1" in rendered
+    assert "发布失败已隔离" in rendered
+    assert "投递尝试：5" in rendered
+    assert "agent_publication_recovery_delivery_failed" in rendered
+
+
 @pytest.mark.asyncio
 async def test_textual_agent_control_loads_switches_and_confirms_stop() -> None:
     engine = AgentEngine(AppConfig())
@@ -323,7 +359,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 4,
+        "schema_version": 5,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -344,6 +380,7 @@ def _snapshot() -> AgentControlSnapshot:
             "durable_publications_pending": 0,
             "durable_publications_claimed": 0,
             "durable_publications_expired": 0,
+            "durable_publications_quarantined": 0,
         },
         "agents": [{
             "name": "coder",

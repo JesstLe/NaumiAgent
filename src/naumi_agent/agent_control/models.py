@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 4
+AGENT_CONTROL_SCHEMA_VERSION = 5
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
@@ -54,6 +54,7 @@ _RECOVERY_STATES = frozenset({
     "outcome_unknown",
     "publication_pending",
     "publication_claim_expired",
+    "publication_quarantined",
 })
 _SESSION_SCOPES = frozenset({"current", "other", "unknown"})
 _PRIORITIES = frozenset({"low", "normal", "high", "critical"})
@@ -166,6 +167,7 @@ class AgentControlSummary:
     durable_publications_pending: int = 0
     durable_publications_claimed: int = 0
     durable_publications_expired: int = 0
+    durable_publications_quarantined: int = 0
 
     @classmethod
     def from_dict(cls, value: Any) -> AgentControlSummary:
@@ -179,6 +181,7 @@ class AgentControlSummary:
             "durable_recovery_required_jobs",
             "durable_results_visible", "durable_publications_pending",
             "durable_publications_claimed", "durable_publications_expired",
+            "durable_publications_quarantined",
         }, "summary")
         return cls(
             total_agents=_integer(data.get("total_agents", 0), "summary.total_agents"),
@@ -235,6 +238,10 @@ class AgentControlSummary:
             durable_publications_expired=_integer(
                 data.get("durable_publications_expired", 0),
                 "summary.durable_publications_expired",
+            ),
+            durable_publications_quarantined=_integer(
+                data.get("durable_publications_quarantined", 0),
+                "summary.durable_publications_quarantined",
             ),
         )
 
@@ -526,6 +533,7 @@ class AgentRecoveryDescriptor:
             if self.recovery_state not in {
                 "publication_pending",
                 "publication_claim_expired",
+                "publication_quarantined",
             }:
                 raise ValueError("publication recovery 的 recovery_state 无效")
         if self.item_id != (
