@@ -63,6 +63,7 @@ def format_agent_control_markdown(
                 summary.durable_publications_pending
                 or summary.durable_publications_claimed
                 or summary.durable_publications_expired
+                or summary.durable_publications_quarantined
             )
             else []
         ),
@@ -117,9 +118,13 @@ def _durable_capacity_line(summary: Any) -> str:
 
 def _durable_publication_line(summary: Any) -> str:
     status = (
-        f"🔴 过期 claim {summary.durable_publications_expired}"
-        if summary.durable_publications_expired
-        else "🟡 等待投递"
+        f"🔴 已隔离 {summary.durable_publications_quarantined}"
+        if summary.durable_publications_quarantined
+        else (
+            f"🔴 过期 claim {summary.durable_publications_expired}"
+            if summary.durable_publications_expired
+            else "🟡 等待投递"
+        )
     )
     return (
         "**Agent publication**："
@@ -135,6 +140,7 @@ def _recovery_catalog_line(snapshot: AgentControlSnapshot) -> str:
             "recovery_required",
             "outcome_unknown",
             "publication_claim_expired",
+            "publication_quarantined",
         }
         for item in catalog.items
     )
@@ -722,6 +728,7 @@ def _recovery_state_label(state: str) -> str:
         "outcome_unknown": "🔴 执行结果未知",
         "publication_pending": "🟡 终态结果等待发布",
         "publication_claim_expired": "🔴 发布 claim 已过期",
+        "publication_quarantined": "🔴 发布失败已隔离",
     }.get(state, state)
 
 

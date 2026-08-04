@@ -293,7 +293,7 @@
     }
   },
   "agent_control": {
-    "schema_version": 4,
+    "schema_version": 5,
     "summary_capacity_fields": [
       "durable_capacity_configured",
       "durable_active_jobs",
@@ -305,7 +305,8 @@
       "durable_results_visible",
       "durable_publications_pending",
       "durable_publications_claimed",
-      "durable_publications_expired"
+      "durable_publications_expired",
+      "durable_publications_quarantined"
     ],
     "result_fields": [
       "delivery_id",
@@ -367,7 +368,8 @@
       "recovery_required",
       "outcome_unknown",
       "publication_pending",
-      "publication_claim_expired"
+      "publication_claim_expired",
+      "publication_quarantined"
     ],
     "recovery_session_scopes": [
       "current",

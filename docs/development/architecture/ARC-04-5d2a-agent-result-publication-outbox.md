@@ -170,7 +170,8 @@ boundary；Bus 仍只是 best-effort notification，外部 sink 仍禁止写“e
 - `SubAgentManager` 正常路径统一消费 outbox，而不是 commit 后直接返回；
 - 对 event callback、父调用方和 message bus 的 delivery digest 定义；
 - sink 侧稳定 publication ID、幂等消费 receipt 或重复可见语义；
-- publish retry/backoff/dead-letter、告警、retention/GC；
+- HAR-10.7f/7g 已补齐周期 retry/backoff、durable retry budget 与 quarantine/dead-letter；exact requeue、
+  告警、retention/GC 仍未完成；
 - recovery projection、人工重试/隔离动作及 New UI/TUI 一致展示；
 - 跨平台打包后的 crash-point 矩阵与多 Runtime soak。
 

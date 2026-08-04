@@ -213,6 +213,12 @@ class AgentControlService:
                         f"{publication_backlog.expired_claims} 个过期 claim "
                         "等待恢复。"
                     )
+                if publication_backlog.quarantined:
+                    warnings.append(
+                        "Agent publication 中有 "
+                        f"{publication_backlog.quarantined} 个结果已隔离；"
+                        "自动恢复不会静默删除这些证据。"
+                    )
         except Exception as exc:
             warnings.append(
                 f"Agent publication backlog 读取失败：{type(exc).__name__}: {exc}"
@@ -270,6 +276,9 @@ class AgentControlService:
             ),
             durable_publications_expired=(
                 publication_backlog.expired_claims if publication_backlog else 0
+            ),
+            durable_publications_quarantined=(
+                publication_backlog.quarantined if publication_backlog else 0
             ),
         )
         return AgentControlSnapshot(
@@ -456,10 +465,15 @@ def _project_recovery_catalog(
     for entry in catalog.publications:
         publication = entry.publication
         job = entry.job
+        quarantine = entry.quarantine
         recovery_state = (
-            "publication_pending"
-            if str(publication.state) == "pending"
-            else "publication_claim_expired"
+            "publication_quarantined"
+            if quarantine is not None
+            else (
+                "publication_pending"
+                if str(publication.state) == "pending"
+                else "publication_claim_expired"
+            )
         )
         items.append(AgentRecoveryDescriptor(
             kind="publication",
@@ -476,19 +490,32 @@ def _project_recovery_catalog(
             claim_epoch=max(0, int(publication.claim_epoch)),
             claim_expires_at=_public(publication.claim_expires_at),
             attempt_count=max(0, int(publication.attempt_count)),
-            occurred_at=_public(publication.latest_receipt.occurred_at),
+            occurred_at=_public(
+                quarantine.quarantined_at
+                if quarantine is not None
+                else publication.latest_receipt.occurred_at
+            ),
             request_sha256=publication.request_sha256,
-            receipt_sha256=publication.latest_receipt.receipt_sha256,
-            reason_code=_public(publication.latest_receipt.reason_code),
+            receipt_sha256=(
+                quarantine.receipt.receipt_sha256
+                if quarantine is not None
+                else publication.latest_receipt.receipt_sha256
+            ),
+            reason_code=_public(
+                quarantine.failure_code
+                if quarantine is not None
+                else publication.latest_receipt.reason_code
+            ),
         ))
     priority = {
         "recovery_required": 0,
-        "outcome_unknown": 1,
-        "publication_claim_expired": 2,
-        "reclaimable_prestart": 3,
-        "publication_pending": 4,
-        "worker_active": 5,
-        "claim_active": 6,
+        "publication_quarantined": 1,
+        "outcome_unknown": 2,
+        "publication_claim_expired": 3,
+        "reclaimable_prestart": 4,
+        "publication_pending": 5,
+        "worker_active": 6,
+        "claim_active": 7,
     }
     items.sort(key=lambda item: (
         priority[item.recovery_state],

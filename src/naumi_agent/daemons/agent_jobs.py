@@ -34,7 +34,7 @@ from naumi_agent.safety.payload_envelope import (
     seal_runtime_payload,
 )
 
-AGENT_JOB_SCHEMA_VERSION = 5
+AGENT_JOB_SCHEMA_VERSION = 6
 _PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_MAGIC = b"NAUMI_AGENT_JOB_TERMINAL_PAYLOAD_V1\x00"
 _TERMINAL_PAYLOAD_AAD = b"NAUMI_AGENT_JOB_TERMINAL_AAD_V1\x00"
@@ -206,14 +206,93 @@ class AgentJobPublicationTransition:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentJobPublicationQuarantineReceipt:
+    """Authenticated immutable evidence that a retry budget was exhausted."""
+
+    schema_version: int
+    publication_id: str
+    job_id: str
+    request_sha256: str
+    result_sha256: str
+    owner_id: str
+    claim_epoch: int
+    attempt_count: int
+    max_attempts: int
+    failure_code: str
+    quarantined_at: str
+    publication_receipt_sha256: str
+    receipt_sha256: str
+    authentication_sha256: str
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("AgentJob publication quarantine schema_version 必须为 1。")
+        _require_identifier(self.publication_id, field="publication_id")
+        _require_identifier(self.job_id, field="job_id")
+        _require_sha256(self.request_sha256, field="request_sha256")
+        _require_sha256(self.result_sha256, field="result_sha256")
+        _require_identifier(self.owner_id, field="owner_id")
+        _require_positive_int(self.claim_epoch, field="claim_epoch")
+        _require_positive_int(self.attempt_count, field="attempt_count")
+        _require_retry_budget(self.max_attempts)
+        if self.attempt_count < self.max_attempts:
+            raise ValueError("AgentJob publication 尚未耗尽重试预算。")
+        _require_identifier(self.failure_code, field="failure_code")
+        _aware_time(self.quarantined_at, field="quarantined_at")
+        _require_sha256(
+            self.publication_receipt_sha256,
+            field="publication_receipt_sha256",
+        )
+        _require_sha256(self.receipt_sha256, field="receipt_sha256")
+        _require_sha256(
+            self.authentication_sha256,
+            field="authentication_sha256",
+        )
+        if not hmac.compare_digest(
+            self.receipt_sha256,
+            _digest(_publication_quarantine_receipt_payload(self)),
+        ):
+            raise ValueError("AgentJob publication quarantine receipt 摘要校验失败。")
+
+
+@dataclass(frozen=True, slots=True)
+class StoredAgentJobPublicationQuarantine:
+    publication_id: str
+    job_id: str
+    request_sha256: str
+    result_sha256: str
+    owner_id: str
+    claim_epoch: int
+    attempt_count: int
+    max_attempts: int
+    failure_code: str
+    quarantined_at: str
+    publication_receipt_sha256: str
+    receipt: AgentJobPublicationQuarantineReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class AgentJobPublicationQuarantineTransition:
+    publication: StoredAgentJobPublication
+    quarantine: StoredAgentJobPublicationQuarantine
+    applied: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AgentJobPublicationBacklog:
     pending: int
     live_claimed: int
     expired_claims: int
+    quarantined: int
     assessed_at: str
 
     def __post_init__(self) -> None:
-        for name in ("pending", "live_claimed", "expired_claims"):
+        for name in (
+            "pending",
+            "live_claimed",
+            "expired_claims",
+            "quarantined",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{name} 必须是非负整数。")
@@ -226,6 +305,7 @@ class AgentJobPublicationRecoveryEntry:
 
     publication: StoredAgentJobPublication
     job: StoredAgentJob
+    quarantine: StoredAgentJobPublicationQuarantine | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.publication, StoredAgentJobPublication):
@@ -233,6 +313,11 @@ class AgentJobPublicationRecoveryEntry:
         if not isinstance(self.job, StoredAgentJob):
             raise TypeError("job 必须是 StoredAgentJob。")
         _validate_publication_job_binding(self.publication, self.job)
+        if self.quarantine is not None:
+            _validate_publication_quarantine_binding(
+                self.publication,
+                self.quarantine,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1139,6 +1224,19 @@ class AgentJobStore:
                     publication_id,
                     key=key,
                 )
+                quarantine = await _find_publication_quarantine(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if quarantine is not None:
+                    _validate_publication_quarantine_binding(
+                        publication,
+                        quarantine,
+                    )
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob publication 已隔离，不能 claim。"
+                    )
                 job = await _require_stored(
                     db,
                     publication.job_id,
@@ -1176,19 +1274,28 @@ class AgentJobStore:
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN IMMEDIATE")
+                await _validate_publication_quarantine_catalog(
+                    db,
+                    key=key,
+                )
                 cursor = await db.execute(
                     """
-                    SELECT publication_id
-                    FROM agent_job_publications
-                    WHERE state = ?
+                    SELECT p.publication_id
+                    FROM agent_job_publications AS p
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM agent_job_publication_quarantines AS q
+                        WHERE q.publication_id = p.publication_id
+                    )
+                      AND (p.state = ?
                        OR (
-                           state = ?
+                           p.state = ?
                            AND (
-                               claim_expires_at IS NULL
-                               OR claim_expires_at <= ?
+                               p.claim_expires_at IS NULL
+                               OR p.claim_expires_at <= ?
                            )
-                       )
-                    ORDER BY created_at, publication_id
+                       ))
+                    ORDER BY p.created_at, p.publication_id
                     LIMIT 1
                     """,
                     (
@@ -1539,6 +1646,180 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法续期 AgentJob publication claim。") from exc
 
+    async def get_publication_quarantine(
+        self,
+        publication_id: str,
+    ) -> StoredAgentJobPublicationQuarantine | None:
+        _require_identifier(publication_id, field="publication_id")
+        if not _regular_file_exists(self._db_path):
+            return None
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                quarantine = await _find_publication_quarantine(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if quarantine is not None:
+                    publication = await _require_publication(
+                        db,
+                        publication_id,
+                        key=key,
+                    )
+                    _validate_publication_quarantine_binding(
+                        publication,
+                        quarantine,
+                    )
+                await db.commit()
+                return quarantine
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法读取 AgentJob publication quarantine。"
+            ) from exc
+
+    async def quarantine_publication(
+        self,
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        max_attempts: int,
+        failure_code: str,
+    ) -> AgentJobPublicationQuarantineTransition:
+        """Atomically isolate an exact live claim after its retry budget."""
+        _require_identifier(publication_id, field="publication_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        _require_retry_budget(max_attempts)
+        _require_identifier(failure_code, field="failure_code")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                publication = await _require_publication(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                existing = await _find_publication_quarantine(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if existing is not None:
+                    _validate_publication_quarantine_binding(
+                        publication,
+                        existing,
+                    )
+                    if (
+                        existing.owner_id != owner_id
+                        or existing.claim_epoch != claim_epoch
+                        or existing.max_attempts != max_attempts
+                        or existing.failure_code != failure_code
+                    ):
+                        raise AgentJobLifecycleConflictError(
+                            "AgentJob publication quarantine 幂等事实不一致。"
+                        )
+                    await db.commit()
+                    return AgentJobPublicationQuarantineTransition(
+                        publication=publication,
+                        quarantine=existing,
+                        applied=False,
+                    )
+                _require_live_publication_owner(
+                    publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                )
+                if publication.attempt_count < max_attempts:
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob publication 尚未耗尽重试预算。"
+                    )
+                transition = await _append_publication_transition(
+                    db,
+                    publication=publication,
+                    state=AgentJobPublicationState.PENDING,
+                    owner_id=None,
+                    claim_epoch=claim_epoch,
+                    claim_expires_at=None,
+                    attempt_count=publication.attempt_count,
+                    delivery_sha256=None,
+                    published_at=None,
+                    reason_code="agent_publication_quarantined",
+                    occurred_at=now.isoformat(),
+                    key=key,
+                )
+                receipt = _issue_publication_quarantine_receipt(
+                    publication=transition.publication,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    max_attempts=max_attempts,
+                    failure_code=failure_code,
+                    quarantined_at=now.isoformat(),
+                    publication_receipt_sha256=(
+                        transition.publication.latest_receipt.receipt_sha256
+                    ),
+                    key=key.key_bytes,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO agent_job_publication_quarantines (
+                        publication_id, job_id, request_sha256, result_sha256,
+                        owner_id, claim_epoch, attempt_count, max_attempts,
+                        failure_code, quarantined_at,
+                        publication_receipt_sha256, receipt_sha256, receipt_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.publication_id,
+                        receipt.job_id,
+                        receipt.request_sha256,
+                        receipt.result_sha256,
+                        receipt.owner_id,
+                        receipt.claim_epoch,
+                        receipt.attempt_count,
+                        receipt.max_attempts,
+                        receipt.failure_code,
+                        receipt.quarantined_at,
+                        receipt.publication_receipt_sha256,
+                        receipt.receipt_sha256,
+                        _serialize_publication_quarantine_receipt(receipt),
+                    ),
+                )
+                quarantine = await _find_publication_quarantine(
+                    db,
+                    publication_id,
+                    key=key,
+                )
+                if quarantine is None:
+                    raise AgentJobError(
+                        "AgentJob publication quarantine 未写入。"
+                    )
+                _validate_publication_quarantine_binding(
+                    transition.publication,
+                    quarantine,
+                )
+                await db.commit()
+                return AgentJobPublicationQuarantineTransition(
+                    publication=transition.publication,
+                    quarantine=quarantine,
+                    applied=True,
+                )
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法隔离 AgentJob publication。"
+            ) from exc
+
     async def release_publication_claim(
         self,
         publication_id: str,
@@ -1587,19 +1868,28 @@ class AgentJobStore:
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN")
+                await _validate_publication_quarantine_catalog(
+                    db,
+                    key=key,
+                )
                 cursor = await db.execute(
                     """
-                    SELECT publication_id
-                    FROM agent_job_publications
-                    WHERE state = ?
+                    SELECT p.publication_id
+                    FROM agent_job_publications AS p
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM agent_job_publication_quarantines AS q
+                        WHERE q.publication_id = p.publication_id
+                    )
+                      AND (p.state = ?
                        OR (
-                           state = ?
+                           p.state = ?
                            AND (
-                               claim_expires_at IS NULL
-                               OR claim_expires_at <= ?
+                               p.claim_expires_at IS NULL
+                               OR p.claim_expires_at <= ?
                            )
-                       )
-                    ORDER BY created_at, publication_id
+                       ))
+                    ORDER BY p.created_at, p.publication_id
                     LIMIT ?
                     """,
                     (
@@ -1636,6 +1926,7 @@ class AgentJobStore:
                 pending=0,
                 live_claimed=0,
                 expired_claims=0,
+                quarantined=0,
                 assessed_at=self._now().isoformat(),
             )
         key = self._runtime_key()
@@ -1646,10 +1937,15 @@ class AgentJobStore:
                 await db.execute("BEGIN")
                 cursor = await db.execute(
                     """
-                    SELECT publication_id
-                    FROM agent_job_publications
-                    WHERE state IN (?, ?)
-                    ORDER BY created_at, publication_id
+                    SELECT p.publication_id
+                    FROM agent_job_publications AS p
+                    WHERE p.state IN (?, ?)
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM agent_job_publication_quarantines AS q
+                          WHERE q.publication_id = p.publication_id
+                      )
+                    ORDER BY p.created_at, p.publication_id
                     LIMIT 10001
                     """,
                     (
@@ -1683,11 +1979,44 @@ class AgentJobStore:
                         expired_claims += 1
                     else:
                         live_claimed += 1
+                quarantine_cursor = await db.execute(
+                    """
+                    SELECT publication_id
+                    FROM agent_job_publication_quarantines
+                    ORDER BY quarantined_at, publication_id
+                    LIMIT 10001
+                    """
+                )
+                quarantine_rows = await quarantine_cursor.fetchall()
+                if len(quarantine_rows) > 10000:
+                    raise AgentJobError(
+                        "AgentJob publication quarantine 超过 10000 项安全上限。"
+                    )
+                for row in quarantine_rows:
+                    publication = await _require_publication(
+                        db,
+                        str(row["publication_id"]),
+                        key=key,
+                    )
+                    quarantine = await _find_publication_quarantine(
+                        db,
+                        publication.publication_id,
+                        key=key,
+                    )
+                    if quarantine is None:
+                        raise AgentJobError(
+                            "AgentJob publication quarantine 目录缺少记录。"
+                        )
+                    _validate_publication_quarantine_binding(
+                        publication,
+                        quarantine,
+                    )
                 await db.commit()
                 return AgentJobPublicationBacklog(
                     pending=pending,
                     live_claimed=live_claimed,
                     expired_claims=expired_claims,
+                    quarantined=len(quarantine_rows),
                     assessed_at=now.isoformat(),
                 )
         except AgentJobError:
@@ -1870,6 +2199,10 @@ class AgentJobStore:
         try:
             async with self._connection() as db:
                 await db.execute("BEGIN")
+                await _validate_publication_quarantine_catalog(
+                    db,
+                    key=key,
+                )
                 job_candidates: list[tuple[int, aiosqlite.Row]] = []
                 job_queries = (
                     (
@@ -1923,10 +2256,26 @@ class AgentJobStore:
                     ]
                 )
 
-                publication_candidates: list[tuple[int, aiosqlite.Row]] = []
+                publication_candidates: list[
+                    tuple[int, aiosqlite.Row, bool]
+                ] = []
+                quarantine_cursor = await db.execute(
+                    """
+                    SELECT q.publication_id, NULL AS claim_expires_at,
+                           q.quarantined_at AS created_at
+                    FROM agent_job_publication_quarantines AS q
+                    ORDER BY q.quarantined_at, q.publication_id
+                    LIMIT ?
+                    """,
+                    (fetch_limit,),
+                )
+                publication_candidates.extend(
+                    (0, row, True)
+                    for row in await quarantine_cursor.fetchall()
+                )
                 publication_queries = (
                     (
-                        0,
+                        1,
                         "state = ? AND (claim_expires_at IS NULL OR claim_expires_at <= ?)",
                         (
                             AgentJobPublicationState.CLAIMED.value,
@@ -1934,7 +2283,7 @@ class AgentJobStore:
                         ),
                     ),
                     (
-                        1,
+                        2,
                         "state = ?",
                         (AgentJobPublicationState.PENDING.value,),
                     ),
@@ -1943,15 +2292,20 @@ class AgentJobStore:
                     publication_cursor = await db.execute(
                         f"""
                         SELECT publication_id, claim_expires_at, created_at
-                        FROM agent_job_publications
+                        FROM agent_job_publications AS p
                         WHERE {where_clause}
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM agent_job_publication_quarantines AS q
+                              WHERE q.publication_id = p.publication_id
+                          )
                         ORDER BY COALESCE(claim_expires_at, created_at), publication_id
                         LIMIT ?
                         """,  # noqa: S608 - clauses are fixed internal constants
                         (*parameters, fetch_limit),
                     )
                     publication_candidates.extend(
-                        (priority, row)
+                        (priority, row, False)
                         for row in await publication_cursor.fetchall()
                     )
                 publication_candidates.sort(key=lambda entry: (
@@ -1963,10 +2317,12 @@ class AgentJobStore:
                     str(entry[1]["publication_id"]),
                 ))
                 publication_rows = [
-                    row for _, row in publication_candidates[:fetch_limit]
+                    (row, quarantined)
+                    for _, row, quarantined
+                    in publication_candidates[:fetch_limit]
                 ]
                 publication_entries: list[AgentJobPublicationRecoveryEntry] = []
-                for row in publication_rows[:limit]:
+                for row, quarantined in publication_rows[:limit]:
                     publication = await _require_publication(
                         db,
                         str(row["publication_id"]),
@@ -1977,8 +2333,25 @@ class AgentJobStore:
                         publication.job_id,
                         key=key,
                     )
+                    quarantine = (
+                        await _find_publication_quarantine(
+                            db,
+                            publication.publication_id,
+                            key=key,
+                        )
+                        if quarantined
+                        else None
+                    )
+                    if quarantined and quarantine is None:
+                        raise AgentJobError(
+                            "AgentJob publication quarantine 目录缺少记录。"
+                        )
                     publication_entries.append(
-                        AgentJobPublicationRecoveryEntry(publication, job)
+                        AgentJobPublicationRecoveryEntry(
+                            publication,
+                            job,
+                            quarantine,
+                        )
                     )
                 await db.commit()
                 return AgentJobRecoveryCatalog(
@@ -2383,6 +2756,8 @@ class AgentJobStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V5:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V6:
+                            await db.execute(statement)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -2392,6 +2767,7 @@ class AgentJobStore:
                         await _apply_schema_v3(db)
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
+                        await _apply_schema_v6(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -2399,18 +2775,28 @@ class AgentJobStore:
                         await _apply_schema_v3(db)
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
+                        await _apply_schema_v6(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 3:
                         await _apply_schema_v4(db, allow_create=True)
                         await _apply_schema_v5(db, allow_create=True)
+                        await _apply_schema_v6(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
                     elif version == 4:
                         await _apply_schema_v4(db, allow_create=False)
                         await _apply_schema_v5(db, allow_create=True)
+                        await _apply_schema_v6(db, allow_create=True)
+                        await db.execute(
+                            f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
+                        )
+                    elif version == 5:
+                        await _apply_schema_v4(db, allow_create=False)
+                        await _apply_schema_v5(db, allow_create=False)
+                        await _apply_schema_v6(db, allow_create=True)
                         await db.execute(
                             f"PRAGMA user_version = {AGENT_JOB_SCHEMA_VERSION}"
                         )
@@ -2422,6 +2808,7 @@ class AgentJobStore:
                     else:
                         await _apply_schema_v4(db, allow_create=False)
                         await _apply_schema_v5(db, allow_create=False)
+                        await _apply_schema_v6(db, allow_create=False)
                     await db.commit()
                 if not existed and os.name != "nt":
                     self._db_path.chmod(0o600)
@@ -3018,6 +3405,116 @@ async def _require_publication(
     return publication
 
 
+async def _find_publication_quarantine(
+    db: aiosqlite.Connection,
+    publication_id: str,
+    *,
+    key: RuntimePayloadKey,
+) -> StoredAgentJobPublicationQuarantine | None:
+    cursor = await db.execute(
+        """
+        SELECT * FROM agent_job_publication_quarantines
+        WHERE publication_id = ?
+        """,
+        (publication_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    try:
+        receipt = _deserialize_publication_quarantine_receipt(
+            str(row["receipt_json"])
+        )
+        _verify_publication_quarantine_authentication(
+            receipt,
+            key=key.key_bytes,
+        )
+        quarantine = StoredAgentJobPublicationQuarantine(
+            publication_id=str(row["publication_id"]),
+            job_id=str(row["job_id"]),
+            request_sha256=str(row["request_sha256"]),
+            result_sha256=str(row["result_sha256"]),
+            owner_id=str(row["owner_id"]),
+            claim_epoch=int(row["claim_epoch"]),
+            attempt_count=int(row["attempt_count"]),
+            max_attempts=int(row["max_attempts"]),
+            failure_code=str(row["failure_code"]),
+            quarantined_at=str(row["quarantined_at"]),
+            publication_receipt_sha256=str(
+                row["publication_receipt_sha256"]
+            ),
+            receipt=receipt,
+        )
+        comparisons = (
+            (receipt.publication_id, quarantine.publication_id),
+            (receipt.job_id, quarantine.job_id),
+            (receipt.request_sha256, quarantine.request_sha256),
+            (receipt.result_sha256, quarantine.result_sha256),
+            (receipt.owner_id, quarantine.owner_id),
+            (receipt.claim_epoch, quarantine.claim_epoch),
+            (receipt.attempt_count, quarantine.attempt_count),
+            (receipt.max_attempts, quarantine.max_attempts),
+            (receipt.failure_code, quarantine.failure_code),
+            (receipt.quarantined_at, quarantine.quarantined_at),
+            (
+                receipt.publication_receipt_sha256,
+                quarantine.publication_receipt_sha256,
+            ),
+            (receipt.receipt_sha256, str(row["receipt_sha256"])),
+        )
+        if any(left != right for left, right in comparisons):
+            raise AgentJobError(
+                "AgentJob publication quarantine 投影与 receipt 不一致。"
+            )
+        return quarantine
+    except AgentJobError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentJobError(
+            "AgentJob publication quarantine 持久记录无效。"
+        ) from exc
+
+
+async def _validate_publication_quarantine_catalog(
+    db: aiosqlite.Connection,
+    *,
+    key: RuntimePayloadKey,
+) -> None:
+    cursor = await db.execute(
+        """
+        SELECT publication_id
+        FROM agent_job_publication_quarantines
+        ORDER BY quarantined_at, publication_id
+        LIMIT 10001
+        """
+    )
+    rows = await cursor.fetchall()
+    if len(rows) > 10000:
+        raise AgentJobError(
+            "AgentJob publication quarantine 超过 10000 项安全上限。"
+        )
+    for row in rows:
+        publication_id = str(row["publication_id"])
+        publication = await _require_publication(
+            db,
+            publication_id,
+            key=key,
+        )
+        quarantine = await _find_publication_quarantine(
+            db,
+            publication_id,
+            key=key,
+        )
+        if quarantine is None:
+            raise AgentJobError(
+                "AgentJob publication quarantine 目录缺少记录。"
+            )
+        _validate_publication_quarantine_binding(
+            publication,
+            quarantine,
+        )
+
+
 async def _stored_publication_from_row(
     db: aiosqlite.Connection,
     row: aiosqlite.Row,
@@ -3209,10 +3706,13 @@ def _validate_publication_transition(
             and current.claim_epoch == previous.claim_epoch + 1
             and current.attempt_count == previous.attempt_count + 1
         )
-    elif transition == (
-        AgentJobPublicationState.CLAIMED,
-        AgentJobPublicationState.PENDING,
-        "agent_publication_released",
+    elif (
+        previous.state is AgentJobPublicationState.CLAIMED
+        and current.state is AgentJobPublicationState.PENDING
+        and current.reason_code in {
+            "agent_publication_released",
+            "agent_publication_quarantined",
+        }
     ):
         valid = (
             current.claim_epoch == previous.claim_epoch
@@ -3274,6 +3774,27 @@ def _validate_publication_job_binding(
         job.result.result_sha256,
     ):
         raise AgentJobError("AgentJob publication identity 不一致。")
+
+
+def _validate_publication_quarantine_binding(
+    publication: StoredAgentJobPublication,
+    quarantine: StoredAgentJobPublicationQuarantine,
+) -> None:
+    if (
+        publication.publication_id != quarantine.publication_id
+        or publication.job_id != quarantine.job_id
+        or publication.request_sha256 != quarantine.request_sha256
+        or publication.result_sha256 != quarantine.result_sha256
+        or publication.state is not AgentJobPublicationState.PENDING
+        or publication.owner_id is not None
+        or publication.claim_epoch != quarantine.claim_epoch
+        or publication.attempt_count != quarantine.attempt_count
+        or publication.latest_receipt.reason_code
+        != "agent_publication_quarantined"
+        or publication.latest_receipt.receipt_sha256
+        != quarantine.publication_receipt_sha256
+    ):
+        raise AgentJobError("AgentJob publication quarantine 绑定不一致。")
 
 
 async def _claim_publication_locked(
@@ -4376,7 +4897,10 @@ def _validate_publication_receipt_semantics(
             or receipt.attempt_count < 1
             or receipt.delivery_sha256 is not None
             or receipt.published_at is not None
-            or receipt.reason_code != "agent_publication_released"
+            or receipt.reason_code not in {
+                "agent_publication_released",
+                "agent_publication_quarantined",
+            }
         ):
             raise ValueError("AgentJob publication release receipt 语义无效。")
         return
@@ -4511,6 +5035,99 @@ def _publication_receipt_authentication(
     ).hexdigest()
 
 
+def _issue_publication_quarantine_receipt(
+    *,
+    publication: StoredAgentJobPublication,
+    owner_id: str,
+    claim_epoch: int,
+    max_attempts: int,
+    failure_code: str,
+    quarantined_at: str,
+    publication_receipt_sha256: str,
+    key: bytes,
+) -> AgentJobPublicationQuarantineReceipt:
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "publication_id": publication.publication_id,
+        "job_id": publication.job_id,
+        "request_sha256": publication.request_sha256,
+        "result_sha256": publication.result_sha256,
+        "owner_id": owner_id,
+        "claim_epoch": claim_epoch,
+        "attempt_count": publication.attempt_count,
+        "max_attempts": max_attempts,
+        "failure_code": failure_code,
+        "quarantined_at": quarantined_at,
+        "publication_receipt_sha256": publication_receipt_sha256,
+    }
+    receipt_sha256 = _digest(payload)
+    return AgentJobPublicationQuarantineReceipt(
+        **payload,
+        receipt_sha256=receipt_sha256,
+        authentication_sha256=_publication_quarantine_authentication(
+            payload,
+            receipt_sha256=receipt_sha256,
+            key=key,
+        ),
+    )
+
+
+def _publication_quarantine_receipt_payload(
+    receipt: AgentJobPublicationQuarantineReceipt,
+) -> dict[str, Any]:
+    return {
+        "schema_version": receipt.schema_version,
+        "publication_id": receipt.publication_id,
+        "job_id": receipt.job_id,
+        "request_sha256": receipt.request_sha256,
+        "result_sha256": receipt.result_sha256,
+        "owner_id": receipt.owner_id,
+        "claim_epoch": receipt.claim_epoch,
+        "attempt_count": receipt.attempt_count,
+        "max_attempts": receipt.max_attempts,
+        "failure_code": receipt.failure_code,
+        "quarantined_at": receipt.quarantined_at,
+        "publication_receipt_sha256": receipt.publication_receipt_sha256,
+    }
+
+
+def _publication_quarantine_authentication(
+    payload: Mapping[str, Any],
+    *,
+    receipt_sha256: str,
+    key: bytes,
+) -> str:
+    derived = hmac.new(
+        key,
+        b"naumi-agent-job-publication-quarantine-authentication-v1",
+        hashlib.sha256,
+    ).digest()
+    return hmac.new(
+        derived,
+        _canonical_json({
+            **payload,
+            "receipt_sha256": receipt_sha256,
+        }).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_publication_quarantine_authentication(
+    receipt: AgentJobPublicationQuarantineReceipt,
+    *,
+    key: bytes,
+) -> None:
+    expected = _publication_quarantine_authentication(
+        _publication_quarantine_receipt_payload(receipt),
+        receipt_sha256=receipt.receipt_sha256,
+        key=key,
+    )
+    if not hmac.compare_digest(receipt.authentication_sha256, expected):
+        raise AgentJobError(
+            "AgentJob publication quarantine authentication 无效。"
+        )
+
+
 def _serialize_request(request: AgentWorkerRequest) -> str:
     return _canonical_json(asdict(request))
 
@@ -4564,6 +5181,12 @@ def _serialize_publication_delivery_receipt(
     return _canonical_json(asdict(receipt))
 
 
+def _serialize_publication_quarantine_receipt(
+    receipt: AgentJobPublicationQuarantineReceipt,
+) -> str:
+    return _canonical_json(asdict(receipt))
+
+
 def _deserialize_publication_receipt(
     value: str,
 ) -> AgentJobPublicationReceipt:
@@ -4588,6 +5211,18 @@ def _deserialize_publication_delivery_receipt(
         )
     payload["sink"] = AgentJobDeliverySink(payload["sink"])
     return AgentJobPublicationDeliveryReceipt(**payload)
+
+
+def _deserialize_publication_quarantine_receipt(
+    value: str,
+) -> AgentJobPublicationQuarantineReceipt:
+    payload = _load_json_object(value)
+    expected = set(AgentJobPublicationQuarantineReceipt.__dataclass_fields__)
+    if set(payload) != expected:
+        raise ValueError(
+            "AgentJob publication quarantine receipt 字段集合无效。"
+        )
+    return AgentJobPublicationQuarantineReceipt(**payload)
 
 
 def _load_json_object(value: str) -> dict[str, Any]:
@@ -4714,6 +5349,15 @@ def _require_lease_seconds(value: int) -> None:
         raise ValueError(
             f"AgentJob lease_seconds 必须在 1 到 {_MAX_LEASE_SECONDS} 之间。"
         )
+
+
+def _require_retry_budget(value: int) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= 1000
+    ):
+        raise ValueError("AgentJob publication max_attempts 必须在 1 到 1000 之间。")
 
 
 def _require_text(
@@ -4947,6 +5591,113 @@ async def _apply_schema_v5(
         )
 
 
+async def _apply_schema_v6(
+    db: aiosqlite.Connection,
+    *,
+    allow_create: bool,
+) -> None:
+    table = "agent_job_publication_quarantines"
+    expected_columns = {
+        "publication_id": ("TEXT", 0, 1),
+        "job_id": ("TEXT", 1, 0),
+        "request_sha256": ("TEXT", 1, 0),
+        "result_sha256": ("TEXT", 1, 0),
+        "owner_id": ("TEXT", 1, 0),
+        "claim_epoch": ("INTEGER", 1, 0),
+        "attempt_count": ("INTEGER", 1, 0),
+        "max_attempts": ("INTEGER", 1, 0),
+        "failure_code": ("TEXT", 1, 0),
+        "quarantined_at": ("TEXT", 1, 0),
+        "publication_receipt_sha256": ("TEXT", 1, 0),
+        "receipt_sha256": ("TEXT", 1, 0),
+        "receipt_json": ("TEXT", 1, 0),
+    }
+    tables = set(await _user_tables(db))
+    if table not in tables:
+        if not allow_create:
+            raise AgentJobError(
+                "AgentJob schema v6 publication quarantine 表缺失。"
+            )
+        for statement in _SCHEMA_V6:
+            await db.execute(statement)
+        return
+    cursor = await db.execute(f"PRAGMA table_info({table})")
+    actual_columns = {
+        str(row[1]): (str(row[2]).upper(), int(row[3]), int(row[5]))
+        for row in await cursor.fetchall()
+    }
+    if actual_columns != expected_columns:
+        raise AgentJobError(
+            "AgentJob schema v6 publication quarantine 列定义无效。"
+        )
+    cursor = await db.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type = 'index'
+          AND name = 'agent_job_publication_quarantines_catalog'
+          AND tbl_name = 'agent_job_publication_quarantines'
+        """
+    )
+    if await cursor.fetchone() is None:
+        raise AgentJobError(
+            "AgentJob schema v6 publication quarantine 索引缺失。"
+        )
+    cursor = await db.execute(
+        "PRAGMA index_info(agent_job_publication_quarantines_catalog)"
+    )
+    if tuple(str(row[2]) for row in await cursor.fetchall()) != (
+        "quarantined_at",
+        "publication_id",
+    ):
+        raise AgentJobError(
+            "AgentJob schema v6 publication quarantine 索引列无效。"
+        )
+    cursor = await db.execute(f"PRAGMA index_list({table})")
+    unique_indexes: set[tuple[str, ...]] = set()
+    for row in await cursor.fetchall():
+        if int(row[2]) != 1:
+            continue
+        index_cursor = await db.execute(
+            "SELECT name FROM pragma_index_info(?) ORDER BY seqno",
+            (str(row[1]),),
+        )
+        unique_indexes.add(
+            tuple(str(item[0]) for item in await index_cursor.fetchall())
+        )
+    if unique_indexes != {
+        ("publication_id",),
+        ("job_id",),
+        ("result_sha256",),
+        ("publication_receipt_sha256",),
+        ("receipt_sha256",),
+    }:
+        raise AgentJobError(
+            "AgentJob schema v6 publication quarantine 唯一约束无效。"
+        )
+    cursor = await db.execute(f"PRAGMA foreign_key_list({table})")
+    foreign_keys = {
+        (
+            str(row[2]),
+            str(row[3]),
+            str(row[4]),
+            str(row[6]).upper(),
+        )
+        for row in await cursor.fetchall()
+    }
+    if foreign_keys != {
+        (
+            "agent_job_publications",
+            "publication_id",
+            "publication_id",
+            "RESTRICT",
+        ),
+        ("agent_jobs", "job_id", "job_id", "RESTRICT"),
+    }:
+        raise AgentJobError(
+            "AgentJob schema v6 publication quarantine 外键约束无效。"
+        )
+
+
 _STATE_VALUES = ", ".join(f"'{state.value}'" for state in AgentJobState)
 _PUBLICATION_STATE_VALUES = ", ".join(
     f"'{state.value}'" for state in AgentJobPublicationState
@@ -5077,6 +5828,32 @@ _SCHEMA_V5 = (
     """,
 )
 
+_SCHEMA_V6 = (
+    """
+    CREATE TABLE agent_job_publication_quarantines (
+        publication_id TEXT PRIMARY KEY
+            REFERENCES agent_job_publications(publication_id) ON DELETE RESTRICT,
+        job_id TEXT NOT NULL UNIQUE
+            REFERENCES agent_jobs(job_id) ON DELETE RESTRICT,
+        request_sha256 TEXT NOT NULL,
+        result_sha256 TEXT NOT NULL UNIQUE,
+        owner_id TEXT NOT NULL,
+        claim_epoch INTEGER NOT NULL CHECK (claim_epoch >= 1),
+        attempt_count INTEGER NOT NULL CHECK (attempt_count >= 1),
+        max_attempts INTEGER NOT NULL CHECK (max_attempts BETWEEN 1 AND 1000),
+        failure_code TEXT NOT NULL,
+        quarantined_at TEXT NOT NULL,
+        publication_receipt_sha256 TEXT NOT NULL UNIQUE,
+        receipt_sha256 TEXT NOT NULL UNIQUE,
+        receipt_json TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX agent_job_publication_quarantines_catalog
+    ON agent_job_publication_quarantines (quarantined_at, publication_id)
+    """,
+)
+
 
 __all__ = [
     "AGENT_JOB_SCHEMA_VERSION",
@@ -5094,6 +5871,8 @@ __all__ = [
     "AgentJobPublicationContent",
     "AgentJobPublicationDeliveryReceipt",
     "AgentJobPublicationDeliveryTransition",
+    "AgentJobPublicationQuarantineReceipt",
+    "AgentJobPublicationQuarantineTransition",
     "AgentJobPublicationRecoveryEntry",
     "AgentJobPublicationReceipt",
     "AgentJobPublicationState",
@@ -5106,5 +5885,6 @@ __all__ = [
     "StoredAgentJob",
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",
+    "StoredAgentJobPublicationQuarantine",
     "TERMINAL_AGENT_JOB_STATES",
 ]

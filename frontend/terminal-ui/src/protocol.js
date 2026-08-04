@@ -29,6 +29,7 @@ const AGENT_RECOVERY_STATES = new Set([
   "outcome_unknown",
   "publication_pending",
   "publication_claim_expired",
+  "publication_quarantined",
 ]);
 const AGENT_RECOVERY_SESSION_SCOPES = new Set(["current", "other", "unknown"]);
 const EXECUTION_PHASES = new Set(["starting", "waiting_capacity", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
@@ -6027,11 +6028,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 4) {
+  if (payload.schema_version !== 5) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 4,
+    schema_version: 5,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -6089,6 +6090,10 @@ function normalizeAgentSummary(value) {
     durable_publications_expired: strictAgentNonnegativeInteger(
       summary.durable_publications_expired ?? 0,
       "summary.durable_publications_expired",
+    ),
+    durable_publications_quarantined: strictAgentNonnegativeInteger(
+      summary.durable_publications_quarantined ?? 0,
+      "summary.durable_publications_quarantined",
     ),
   };
 }
@@ -6252,6 +6257,7 @@ function normalizeAgentRecoveryDescriptor(item) {
   const publicationRecoveryStates = new Set([
     "publication_pending",
     "publication_claim_expired",
+    "publication_quarantined",
   ]);
   if (kind === "job") {
     if (publicationId || itemId !== jobId) {

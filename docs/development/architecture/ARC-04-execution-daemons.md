@@ -78,6 +78,7 @@
   事务原子创建 `pending` publication，提供 FIFO claim、lease/epoch fencing、renew/release/ack、
   HMAC receipt chain、重启恢复目录与 backlog 聚合。ARC-04.5d2b 又升级到 schema v5，用同一事务
   原子写入幂等 result inbox 与 published receipt，接入生产 manager 在线消费及有界 startup recovery；
+  HAR-10.7g 又升级到 schema v6，增加认证 quarantine authority；
   Bus 只作通知，不声称外部 exactly-once。详见
   `ARC-04-5d2a-agent-result-publication-outbox.md` 与
   `ARC-04-5d2b-agent-result-publication-consumption.md`。
@@ -90,8 +91,8 @@
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费、
   startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
-  唤醒与 shutdown drain。最大 attempt、poison-record quarantine/dead-letter、UI read/ack、retention
-  和外部 sink 仍未完成。
+  唤醒与 shutdown drain；HAR-10.7g 已补齐 durable retry budget、HMAC quarantine receipt 和双端隔离
+  投影。exact requeue/prune、UI read/ack、retention 和外部 sink 仍未完成。
   因此 ARC-04 保持 partial。
 
 ## 验收标准

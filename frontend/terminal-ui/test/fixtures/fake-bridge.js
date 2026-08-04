@@ -959,7 +959,7 @@ function inspectorSnapshot(revision) {
 function agentControlSnapshot(revision) {
   const stopped = revision > 1;
   return {
-    schema_version: 4,
+    schema_version: 5,
     session_id: sessionId,
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",

@@ -179,7 +179,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   state.agents.detailId = "task-1";
   state.agents.revision = 3;
   state.agents.snapshot = {
-    schema_version: 4,
+    schema_version: 5,
     session_id: "session-agents",
     revision: 3,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -200,6 +200,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
       durable_publications_pending: 0,
       durable_publications_claimed: 0,
       durable_publications_expired: 0,
+      durable_publications_quarantined: 1,
     },
     agents: [{ name: "coder", description: "编程 Agent", kind: "preset", state: "running", task_count: 1, model_tier: "capable", capabilities: ["代码"], tools: ["file_read"], permission_level: "moderate", age_ms: 500, heartbeat_age_ms: 100 }],
     executions: [{ task_id: "task-1", session_id: "session-agents", agent_name: "coder", description: "实现控制中心", status: "running", phase: "running_tool", started_at: 1, finished_at: null, elapsed_ms: 1000, heartbeat_age_ms: 100, heartbeat_subject_id: "agent-execution-test", heartbeat_phase: "running", heartbeat_failure_code: "", worker_request_sha256: "a".repeat(64), worker_result_sha256: "", worker_tool_scope: ["file_read"], worker_contract_failure_code: "", worker_job_id: "agent-job-1234567890", worker_job_state: "running", worker_claim_epoch: 2, worker_job_failure_code: "", current_tool: "file_read", recent_tools: ["file_read"], total_tokens: 42, total_cost_usd: 0.01, turns: 2, error: "", stop_supported: true, stop_requested: false }],
@@ -223,6 +224,7 @@ test("agent control page renders bounded wide and narrow authoritative layouts",
   assert(wide.some((line) => line.includes("持久任务 · agent-job-12")));
   assert(wide.some((line) => line.includes("状态 running · epoch 2")));
   assert(wide.some((line) => line.includes("共享容量 1/4 · 等待 2/64")));
+  assert(wide.some((line) => line.includes("已隔离 1")));
   assert(narrow.some((line) => line.includes("执行详情")));
   assert.equal(wide.length, 20);
   assert.equal(narrow.length, 16);

@@ -151,7 +151,7 @@ class FakeAgentControl:
         stopped = self._engine.agent_stopped
         return AgentControlSnapshot.from_dict(
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "session_id": "session-python",
                 "revision": 2 if stopped else 1,
                 "generated_at": "2026-07-13T00:00:01+00:00",

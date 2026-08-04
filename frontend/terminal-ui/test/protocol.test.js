@@ -2463,13 +2463,14 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.results[0].task_id, "result-task");
   assert.equal(normalized.results[0].delivery_sha256, "c".repeat(64));
   assert.equal(normalized.recovery_catalog.items[0].recovery_state, "recovery_required");
+  assert.equal(normalized.recovery_catalog.items[1].recovery_state, "publication_quarantined");
   assert.equal(normalized.recovery_catalog.items[0].session_scope, "current");
   assert.equal(Object.hasOwn(normalized.recovery_catalog.items[0], "owner_id"), false);
 
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 4,
+      schema_version: 5,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -2663,7 +2664,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     () => normalizeServerRecord({
       type: "agents/update",
       payload: {
-        schema_version: 4,
+        schema_version: 5,
         session_id: "session-1",
         revision: 2,
         generated_at: "now",
@@ -2676,7 +2677,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 4,
+    schema_version: 5,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -2697,6 +2698,7 @@ function agentControlSnapshotFixture(revision) {
       durable_publications_pending: 0,
       durable_publications_claimed: 0,
       durable_publications_expired: 0,
+      durable_publications_quarantined: 0,
     },
     agents: [{
       name: "coder",
@@ -2749,6 +2751,22 @@ function agentControlSnapshotFixture(revision) {
         request_sha256: "d".repeat(64),
         receipt_sha256: "e".repeat(64),
         reason_code: "agent_job_running",
+      }, {
+        kind: "publication",
+        item_id: "publication-quarantined",
+        job_id: "agent-job-quarantined",
+        publication_id: "publication-quarantined",
+        agent_name: "coder",
+        job_state: "completed",
+        recovery_state: "publication_quarantined",
+        session_scope: "current",
+        claim_epoch: 4,
+        claim_expires_at: "",
+        attempt_count: 5,
+        occurred_at: "2026-07-13T00:00:01+00:00",
+        request_sha256: "f".repeat(64),
+        receipt_sha256: "0".repeat(64),
+        reason_code: "agent_publication_recovery_delivery_failed",
       }],
       truncated: false,
     },

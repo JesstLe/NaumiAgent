@@ -612,7 +612,7 @@ test("only explicit infrastructure notices dismiss welcome", () => {
 
 function agentSnapshot(revision = 1) {
   return {
-    schema_version: 4,
+    schema_version: 5,
     session_id: "session-agents",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",

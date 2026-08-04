@@ -1290,7 +1290,7 @@ async def test_schema_v1_migrates_capacity_policy_without_losing_jobs(
             WHERE type = 'table' AND name = 'agent_job_capacity_policy'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 5
+    assert version == AGENT_JOB_SCHEMA_VERSION == 6
     assert table == ("agent_job_capacity_policy",)
 
 
@@ -1321,7 +1321,7 @@ async def test_schema_v2_adds_terminal_payload_without_losing_jobs(
             row[1]
             for row in db.execute("PRAGMA table_info(agent_jobs)").fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 5
+    assert version == AGENT_JOB_SCHEMA_VERSION == 6
     assert "terminal_payload_envelope_json" in columns
 
 
@@ -1460,6 +1460,236 @@ async def test_publication_expiry_takeover_release_and_old_owner_fence(
     assert third is not None
     assert third.publication.claim_epoch == 3
     assert third.publication.attempt_count == 3
+
+
+@pytest.mark.asyncio
+async def test_publication_quarantine_is_fenced_and_unblocks_fifo(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(store, clock, task_id="publication-poison")
+    clock.advance(seconds=1)
+    await _complete_job(store, clock, task_id="publication-after-poison")
+
+    first = await store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    assert first is not None
+    with pytest.raises(AgentJobLifecycleConflictError, match="尚未耗尽"):
+        await store.quarantine_publication(
+            first.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=first.publication.claim_epoch,
+            max_attempts=2,
+            failure_code="agent_publication_recovery_delivery_failed",
+        )
+    await store.release_publication_claim(
+        first.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=first.publication.claim_epoch,
+    )
+    second_attempt = await store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    assert second_attempt is not None
+    assert second_attempt.publication.publication_id == first.publication.publication_id
+    assert second_attempt.publication.attempt_count == 2
+    with pytest.raises(AgentJobLifecycleConflictError, match="owner"):
+        await store.quarantine_publication(
+            second_attempt.publication.publication_id,
+            owner_id="publisher-b",
+            claim_epoch=second_attempt.publication.claim_epoch,
+            max_attempts=2,
+            failure_code="agent_publication_recovery_delivery_failed",
+        )
+    with pytest.raises(AgentJobLifecycleConflictError, match="owner"):
+        await store.quarantine_publication(
+            second_attempt.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=second_attempt.publication.claim_epoch + 1,
+            max_attempts=2,
+            failure_code="agent_publication_recovery_delivery_failed",
+        )
+
+    isolated = await store.quarantine_publication(
+        second_attempt.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=second_attempt.publication.claim_epoch,
+        max_attempts=2,
+        failure_code="agent_publication_recovery_delivery_failed",
+    )
+    assert isolated.applied is True
+    assert isolated.publication.state is AgentJobPublicationState.PENDING
+    assert isolated.publication.latest_receipt.reason_code == (
+        "agent_publication_quarantined"
+    )
+    assert isolated.quarantine.attempt_count == 2
+    replay = await store.quarantine_publication(
+        second_attempt.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=second_attempt.publication.claim_epoch,
+        max_attempts=2,
+        failure_code="agent_publication_recovery_delivery_failed",
+    )
+    assert replay.applied is False
+    with pytest.raises(AgentJobLifecycleConflictError, match="幂等事实"):
+        await store.quarantine_publication(
+            second_attempt.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=second_attempt.publication.claim_epoch,
+            max_attempts=2,
+            failure_code="different_failure",
+        )
+    with pytest.raises(AgentJobLifecycleConflictError, match="已隔离"):
+        await store.claim_publication(
+            second_attempt.publication.publication_id,
+            owner_id="publisher-b",
+            lease_seconds=30,
+        )
+
+    backlog = await store.publication_backlog()
+    assert (
+        backlog.pending,
+        backlog.live_claimed,
+        backlog.expired_claims,
+        backlog.quarantined,
+    ) == (1, 0, 0, 1)
+    recovery = await store.list_publication_recovery()
+    assert len(recovery) == 1
+    assert recovery[0].publication_id != isolated.publication.publication_id
+    next_claim = await store.claim_next_publication(
+        owner_id="publisher-b",
+        lease_seconds=30,
+    )
+    assert next_claim is not None
+    assert next_claim.publication.publication_id == recovery[0].publication_id
+
+    catalog = await store.recovery_catalog(limit=10)
+    quarantined = [
+        entry for entry in catalog.publications
+        if entry.quarantine is not None
+    ]
+    assert len(quarantined) == 1
+    assert quarantined[0].quarantine == isolated.quarantine
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    assert await reopened.get_publication_quarantine(
+        isolated.publication.publication_id
+    ) == isolated.quarantine
+
+
+@pytest.mark.asyncio
+async def test_publication_quarantine_tampering_fails_authentication(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(store, clock, task_id="publication-quarantine-tamper")
+    claimed = await store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    assert claimed is not None
+    isolated = await store.quarantine_publication(
+        claimed.publication.publication_id,
+        owner_id="publisher-a",
+        claim_epoch=claimed.publication.claim_epoch,
+        max_attempts=1,
+        failure_code="agent_publication_recovery_delivery_failed",
+    )
+    with sqlite3.connect(path) as db:
+        payload = json.loads(
+            db.execute(
+                """
+                SELECT receipt_json
+                FROM agent_job_publication_quarantines
+                WHERE publication_id = ?
+                """,
+                (isolated.publication.publication_id,),
+            ).fetchone()[0]
+        )
+        payload["failure_code"] = "forged_failure"
+        payload["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in payload.items()
+                    if key not in {"receipt_sha256", "authentication_sha256"}
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        db.execute(
+            """
+            UPDATE agent_job_publication_quarantines
+            SET failure_code = ?, receipt_sha256 = ?, receipt_json = ?
+            WHERE publication_id = ?
+            """,
+            (
+                payload["failure_code"],
+                payload["receipt_sha256"],
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                isolated.publication.publication_id,
+            ),
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="authentication"):
+        await reopened.get_publication_quarantine(
+            isolated.publication.publication_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_publication_quarantine_rolls_back_publication_on_insert_failure(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    await _complete_job(store, clock, task_id="publication-quarantine-rollback")
+    claimed = await store.claim_next_publication(
+        owner_id="publisher-a",
+        lease_seconds=30,
+    )
+    assert claimed is not None
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """
+            CREATE TRIGGER fail_publication_quarantine_insert
+            BEFORE INSERT ON agent_job_publication_quarantines
+            BEGIN
+                SELECT RAISE(ABORT, 'injected quarantine failure');
+            END
+            """
+        )
+
+    with pytest.raises(AgentJobError, match="无法隔离"):
+        await store.quarantine_publication(
+            claimed.publication.publication_id,
+            owner_id="publisher-a",
+            claim_epoch=claimed.publication.claim_epoch,
+            max_attempts=1,
+            failure_code="agent_publication_recovery_delivery_failed",
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    publication = await reopened.get_publication(
+        claimed.publication.publication_id
+    )
+    assert publication == claimed.publication
+    assert await reopened.get_publication_quarantine(
+        claimed.publication.publication_id
+    ) is None
 
 
 @pytest.mark.asyncio
@@ -1841,7 +2071,7 @@ async def test_schema_v3_adds_publication_outbox_and_replay_backfills(
                 """
             ).fetchall()
         }
-    assert version == AGENT_JOB_SCHEMA_VERSION == 5
+    assert version == AGENT_JOB_SCHEMA_VERSION == 6
     assert {
         "agent_job_publications",
         "agent_job_publication_events",
@@ -1917,7 +2147,7 @@ async def test_schema_v4_adds_result_inbox_without_losing_publication(
               AND name = 'agent_job_publication_deliveries'
             """
         ).fetchone()
-    assert version == AGENT_JOB_SCHEMA_VERSION == 5
+    assert version == AGENT_JOB_SCHEMA_VERSION == 6
     assert table == ("agent_job_publication_deliveries",)
 
 
@@ -1973,6 +2203,104 @@ async def test_schema_v5_rejects_weakened_delivery_constraints(
             CREATE INDEX agent_job_publication_deliveries_inbox
             ON agent_job_publication_deliveries (
                 session_routing_hmac, delivered_at, delivery_id
+            )
+            """
+        )
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="唯一约束无效"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v5_adds_quarantine_authority_without_losing_publication(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    admitted, _result = await _complete_job(
+        store,
+        clock,
+        task_id="quarantine-schema-migration",
+    )
+    publication = await store.get_job_publication(admitted.job_id)
+    assert publication is not None
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_quarantines")
+        db.execute("PRAGMA user_version = 5")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    assert await reopened.get_publication(publication.publication_id) == publication
+    assert await reopened.get_publication_quarantine(
+        publication.publication_id
+    ) is None
+    with sqlite3.connect(path) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+        table = db.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'agent_job_publication_quarantines'
+            """
+        ).fetchone()
+    assert version == AGENT_JOB_SCHEMA_VERSION == 6
+    assert table == ("agent_job_publication_quarantines",)
+
+
+@pytest.mark.asyncio
+async def test_schema_v6_rejects_missing_quarantine_authority(tmp_path) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="quarantine-schema-integrity")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_quarantines")
+
+    reopened = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    with pytest.raises(AgentJobError, match="quarantine 表缺失"):
+        await reopened.get(admitted.job_id)
+
+
+@pytest.mark.asyncio
+async def test_schema_v6_rejects_weakened_quarantine_constraints(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 12, 0, tzinfo=UTC))
+    path = tmp_path / "agent-jobs.db"
+    key = bytes(range(32))
+    store = AgentJobStore(path, key_provider=lambda: key, clock=clock)
+    request, payload = _facts(clock, task_id="quarantine-schema-constraints")
+    admitted = await store.admit(request=request, payload=payload)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE agent_job_publication_quarantines")
+        db.execute(
+            """
+            CREATE TABLE agent_job_publication_quarantines (
+                publication_id TEXT PRIMARY KEY,
+                job_id TEXT NOT NULL,
+                request_sha256 TEXT NOT NULL,
+                result_sha256 TEXT NOT NULL,
+                owner_id TEXT NOT NULL,
+                claim_epoch INTEGER NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                max_attempts INTEGER NOT NULL,
+                failure_code TEXT NOT NULL,
+                quarantined_at TEXT NOT NULL,
+                publication_receipt_sha256 TEXT NOT NULL,
+                receipt_sha256 TEXT NOT NULL,
+                receipt_json TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE INDEX agent_job_publication_quarantines_catalog
+            ON agent_job_publication_quarantines (
+                quarantined_at, publication_id
             )
             """
         )

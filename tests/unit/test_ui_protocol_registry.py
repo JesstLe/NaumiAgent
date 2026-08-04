@@ -74,6 +74,10 @@ def test_published_agent_control_contract_tracks_recovery_schema() -> None:
         "other",
         "unknown",
     }
+    assert "publication_quarantined" in contract["recovery_states"]
+    assert "durable_publications_quarantined" in contract[
+        "summary_capacity_fields"
+    ]
     assert contract["recovery_action_fields"] == [
         "action",
         "job_id",

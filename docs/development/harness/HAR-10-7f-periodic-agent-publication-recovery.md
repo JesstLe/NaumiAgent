@@ -100,11 +100,12 @@ worker 投递成功后，该条目从恢复目录消失，并通过同一 result
 
 本切片解决“同一运行进程内周期恢复 post-commit publication gap”，没有声称完成 publication 治理：
 
-- poison publication 仍会按 FIFO 失败关闭，尚无 per-record retry budget、quarantine 或 dead-letter；
+- HAR-10.7g 已补齐 per-record durable retry budget 与 quarantine/dead-letter，poison publication 不再永久
+  阻塞后续 FIFO；exact requeue、放弃和 prune 仍未完成；
 - 尚无 retention/ack/prune 操作和历史 worker 健康页；
 - notification 是 best-effort，不是持久订阅队列；
 - 尚未实现独立 Agent Worker、跨 workspace 公平、Supervisor owner lease 或跨主机 topology；
 - A5 kill-at-every-write-point 与长时间 soak 仍需独立验收。
 
-下一步应在 `HAR-10.7g` 比较 publication quarantine/dead-letter 与独立 Agent Worker owner lease。不能让周期
-worker 在没有 Store fence 的情况下自行跳过或删除失败记录。
+HAR-10.7g 的依赖比较选择先完成 publication quarantine/dead-letter，并坚持不能让周期 worker 在没有 Store
+fence 的情况下自行跳过或删除失败记录。下一步重新比较 exact requeue 与独立 Agent Worker owner lease。

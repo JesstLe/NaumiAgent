@@ -1704,6 +1704,7 @@ class AgentEngine:
                         publication_config.max_failure_backoff_seconds
                     ),
                     scan_limit=publication_config.scan_limit,
+                    max_attempts=publication_config.max_attempts,
                     jitter_ratio=publication_config.jitter_ratio,
                 ),
             )

@@ -41,7 +41,8 @@ local bounded admission
 ARC-04.5d1 后续把 Store 升级到 schema v3 并新增加密 terminal payload 列；ARC-04.5d2a 又升级到
 schema v4，新增 publication outbox 和 event chain。本节的 capacity policy、计数与迁移语义保持不变。
 ARC-04.5d2b 又把 Store 升级到 schema v5，新增幂等 result inbox；同样不改变本节 capacity
-policy 与 FIFO 语义。
+policy 与 FIFO 语义。HAR-10.7g 再升级到 schema v6，新增 publication quarantine authority；隔离结果
+不再占用 publication FIFO，但同样不改变 Agent Job active/waiting capacity。
 
 policy 不保存 workspace 路径、Prompt、模型结果、owner ID 或密钥。Store 仍使用原有显式 Runtime key 管理
 加密 job payload 和认证 lifecycle receipt。

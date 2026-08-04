@@ -57,6 +57,8 @@ def test_policy_rejects_unbounded_or_inconsistent_values() -> None:
         )
     with pytest.raises(ValueError, match="jitter"):
         AgentPublicationWorkerPolicy(jitter_ratio=0.6)
+    with pytest.raises(ValueError, match="retry budget"):
+        AgentPublicationWorkerPolicy(max_attempts=0)
 
 
 @pytest.mark.asyncio
@@ -79,9 +81,14 @@ async def test_run_once_serializes_passes_and_applies_bounded_backoff(
         )
     )
 
-    async def recover(*, limit: int) -> AgentPublicationRecoverySummary:
+    async def recover(
+        *,
+        limit: int,
+        max_attempts: int,
+    ) -> AgentPublicationRecoverySummary:
         nonlocal active, peak
         assert limit == 7
+        assert max_attempts == 4
         active += 1
         peak = max(peak, active)
         first_started.set()
@@ -97,6 +104,7 @@ async def test_run_once_serializes_passes_and_applies_bounded_backoff(
             max_empty_backoff_seconds=40,
             max_failure_backoff_seconds=80,
             scan_limit=7,
+            max_attempts=4,
             jitter_ratio=0,
         ),
         now=lambda: datetime(2026, 8, 5, 12, 0, tzinfo=UTC),
@@ -130,8 +138,13 @@ async def test_start_waits_until_wake_and_stop_drains_worker(tmp_path) -> None:
     engine, manager = _manager(tmp_path)
     called = asyncio.Event()
 
-    async def recover(*, limit: int) -> AgentPublicationRecoverySummary:
+    async def recover(
+        *,
+        limit: int,
+        max_attempts: int,
+    ) -> AgentPublicationRecoverySummary:
         assert limit == 3
+        assert max_attempts == 2
         called.set()
         return AgentPublicationRecoverySummary(scanned=1, delivered=1)
 
@@ -143,6 +156,7 @@ async def test_start_waits_until_wake_and_stop_drains_worker(tmp_path) -> None:
             max_empty_backoff_seconds=3600,
             max_failure_backoff_seconds=3600,
             scan_limit=3,
+            max_attempts=2,
             jitter_ratio=0,
         ),
     )
@@ -248,3 +262,99 @@ async def test_real_worker_pass_recovers_post_commit_publication_gap(
     assert delivered is not None
     assert delivered.state is AgentJobPublicationState.PUBLISHED
     assert len(inbox) == 1
+
+
+@pytest.mark.asyncio
+async def test_real_recovery_quarantines_poison_and_continues_fifo(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_engine, first = _manager(tmp_path)
+    agent = first.get_agent("coder")
+    assert agent is not None
+
+    async def execute(**_: object) -> AgentResult:
+        return AgentResult(
+            status="completed",
+            response="quarantine-recovery-result",
+            total_tokens=3,
+            total_cost_usd=0.0,
+            turns=1,
+        )
+
+    async def fail_live_delivery(_: object) -> object:
+        raise AgentJobError("injected live delivery gap")
+
+    monkeypatch.setattr(agent, "execute", execute)
+    monkeypatch.setattr(first, "_deliver_execution_publication", fail_live_delivery)
+    await first.delegate(SubTask("poison-publication", "work", "coder"))
+    await first.delegate(SubTask("healthy-publication", "work", "coder"))
+    pending = await first._agent_job_store.list_publication_recovery()  # noqa: SLF001
+    assert len(pending) == 2
+    poison_id = pending[0].publication_id
+    await first_engine.shutdown()
+
+    second_engine, second = _manager(tmp_path)
+    original_delivery = second._agent_job_store.deliver_publication_to_inbox  # noqa: SLF001
+
+    async def deliver(
+        publication_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+    ) -> object:
+        if publication_id == poison_id:
+            raise AgentJobError("raw secret poison must not persist")
+        return await original_delivery(
+            publication_id,
+            owner_id=owner_id,
+            claim_epoch=claim_epoch,
+        )
+
+    monkeypatch.setattr(
+        second._agent_job_store,  # noqa: SLF001
+        "deliver_publication_to_inbox",
+        deliver,
+    )
+    worker = AgentPublicationRecoveryWorker(
+        manager=second,
+        policy=AgentPublicationWorkerPolicy(
+            scan_limit=10,
+            max_attempts=1,
+            jitter_ratio=0,
+        ),
+    )
+    try:
+        recovered = await worker.run_once()
+        quarantine = await second._agent_job_store.get_publication_quarantine(  # noqa: SLF001
+            poison_id
+        )
+        backlog = await second._agent_job_store.publication_backlog()  # noqa: SLF001
+        inbox = await second._agent_job_store.list_result_inbox("")  # noqa: SLF001
+        snapshot = await second_engine.agent_control.snapshot()
+        database_bytes = second._agent_job_store._db_path.read_bytes()  # noqa: SLF001
+    finally:
+        await second_engine.shutdown()
+
+    assert recovered.scanned == 2
+    assert recovered.delivered == 1
+    assert recovered.quarantined == 1
+    assert recovered.failed == 0
+    assert worker.snapshot().quarantined_count == 1
+    assert quarantine is not None
+    assert quarantine.failure_code == "agent_publication_recovery_delivery_failed"
+    assert backlog.quarantined == 1
+    assert backlog.pending == 0
+    assert len(inbox) == 1
+    assert snapshot.schema_version == 5
+    assert snapshot.summary.durable_publications_quarantined == 1
+    isolated = [
+        item for item in snapshot.recovery_catalog.items
+        if item.recovery_state == "publication_quarantined"
+    ]
+    assert len(isolated) == 1
+    assert isolated[0].publication_id == poison_id
+    assert isolated[0].reason_code == (
+        "agent_publication_recovery_delivery_failed"
+    )
+    assert b"raw secret poison" not in database_bytes

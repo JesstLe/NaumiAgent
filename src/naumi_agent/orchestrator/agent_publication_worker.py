@@ -29,6 +29,7 @@ class AgentPublicationWorkerPolicy:
     max_empty_backoff_seconds: float = 300.0
     max_failure_backoff_seconds: float = 300.0
     scan_limit: int = 100
+    max_attempts: int = 5
     jitter_ratio: float = 0.1
 
     def __post_init__(self) -> None:
@@ -52,6 +53,12 @@ class AgentPublicationWorkerPolicy:
             or not 1 <= self.scan_limit <= 1000
         ):
             raise ValueError("Agent publication worker scan limit 无效。")
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or not 1 <= self.max_attempts <= 1000
+        ):
+            raise ValueError("Agent publication worker retry budget 无效。")
         if not _finite_number(self.jitter_ratio, minimum=0, maximum=0.5):
             raise ValueError("Agent publication worker jitter 无效。")
 
@@ -63,6 +70,7 @@ class AgentPublicationWorkerSnapshot:
     scanned_count: int
     delivered_count: int
     notification_failure_count: int
+    quarantined_count: int
     failure_count: int
     consecutive_empty_passes: int
     consecutive_failure_passes: int
@@ -100,6 +108,7 @@ class AgentPublicationRecoveryWorker:
         self._scanned_count = 0
         self._delivered_count = 0
         self._notification_failure_count = 0
+        self._quarantined_count = 0
         self._failure_count = 0
         self._consecutive_empty_passes = 0
         self._consecutive_failure_passes = 0
@@ -150,6 +159,7 @@ class AgentPublicationRecoveryWorker:
         try:
             result = await self._manager.recover_pending_publications(
                 limit=self._policy.scan_limit,
+                max_attempts=self._policy.max_attempts,
             )
         except asyncio.CancelledError:
             raise
@@ -163,6 +173,7 @@ class AgentPublicationRecoveryWorker:
         self._scanned_count += result.scanned
         self._delivered_count += result.delivered
         self._notification_failure_count += result.notification_failures
+        self._quarantined_count += result.quarantined
         self._failure_count += result.failed
         self._last_failure_codes = result.failure_codes
 
@@ -202,6 +213,7 @@ class AgentPublicationRecoveryWorker:
             scanned_count=self._scanned_count,
             delivered_count=self._delivered_count,
             notification_failure_count=self._notification_failure_count,
+            quarantined_count=self._quarantined_count,
             failure_count=self._failure_count,
             consecutive_empty_passes=self._consecutive_empty_passes,
             consecutive_failure_passes=self._consecutive_failure_passes,
