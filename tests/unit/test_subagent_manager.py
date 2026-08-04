@@ -3,7 +3,7 @@
 import asyncio
 import hashlib
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -960,6 +960,8 @@ class TestSubAgentManager:
             "_deliver_execution_publication",
             fail_live_delivery,
         )
+        wake = MagicMock(return_value=True)
+        first.set_publication_recovery_wake(wake)
         result = await first.delegate(
             SubTask("restart-publication", "work", "coder")
         )
@@ -971,6 +973,7 @@ class TestSubAgentManager:
         assert first_record.worker_job_failure_code == (
             "agent_job_publication_delivery_failed"
         )
+        wake.assert_called_once_with()
         pending = await first._agent_job_store.get_job_publication(
             first_record.worker_job_id,
         )

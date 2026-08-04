@@ -20,6 +20,10 @@ HAR-10.8d 已增加内容寻址、哈希链保护的 recovery attempt 账本；�
 下都先绑定持久权限回执，重复 ToolCall 不会重复恢复，requested/admitted/terminal 事实可在重开后复验。
 HAR-10.8e 已补齐显式 terminal reconciliation：健康 heartbeat/有效 lease 失败关闭，只有取得更高
 RunLease epoch 并复验准入后的 checkpoint、机械裁判与 run 状态后，才原子收口 attempt 并保存不可变回执。
+HAR-10.7f 已把 Agent terminal publication 从 startup-only 恢复升级为默认启用的周期 worker：共享既有
+加密 outbox/claim epoch/result inbox，提供串行 pass、有界空闲/失败退避、live failure wake 和 Engine
+shutdown drain；最大重试预算、poison-record quarantine/dead-letter 与独立 Agent Worker 仍未完成。详见
+`HAR-10-7f-periodic-agent-publication-recovery.md`。
 HAR-10.8f1 又把完整终态 checkpoint 与 pending outbox、attempt 收口与 delivered 分别放入同一
 PursuitStore 事务，并提供有界认证恢复目录。
 HAR-10.8f2a 已在该边界上补齐 durable claim/expiry/takeover/backoff、默认 startup/periodic worker 与
@@ -59,8 +63,9 @@ claim renewal、终态发布屏障和双端 job state/epoch 证据。HAR-10.7c/A
 共用 active 上限、有界 FIFO、等待取消与 recovery-blocking 计数；HAR-10.7d 又交付逐条认证、最多
 50 项的恢复目录，并通过 Agent Control schema v4 同步两端 claimed/running/unknown 与
 pending/expired publication；HAR-10.7e 进一步以 request/session/receipt/epoch/expiry 五重 fence
-提供 expired running → unknown 的显式 `u` 裁决，且不重放模型。独立 Worker、跨 workspace/provider
-fairness 和自动 recovery scheduler 仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session
+提供 expired running → unknown 的显式 `u` 裁决，且不重放模型；HAR-10.7f 已增加 publication
+startup/periodic recovery、有界退避、失败唤醒与 shutdown drain。独立 Agent Worker、跨 workspace/provider
+fairness、自动 Job recovery scheduler 和 publication dead-letter 仍未完成；ARC-04.5d2c 已让双端 Agent Control 查看当前 session
 的认证、脱敏 response 摘录，但分页、
 read/ack 与完整结果导出仍未完成。
 HAR-08.5a 已交付显式、有成本和时限上限的单次 Live 模型传输评测；HAR-08.5b 又增加 Profile 声明的

@@ -289,6 +289,12 @@ from naumi_agent.memory.lifecycle import SessionDeletePreview
 from naumi_agent.memory.long_term import LongTermMemory, MemoryEntry
 from naumi_agent.memory.session import Session
 from naumi_agent.model.router import ModelTier, TokenUsage
+from naumi_agent.orchestrator.agent_publication_worker import (
+    AgentPublicationRecoverySummary,
+    AgentPublicationRecoveryWorker,
+    AgentPublicationWorkerPolicy,
+    AgentPublicationWorkerSnapshot,
+)
 from naumi_agent.orchestrator.context_assembly import (
     HARNESS_CONTEXT_MARKER,
     HarnessContextAssembler,
@@ -1685,6 +1691,26 @@ class AgentEngine:
             heartbeat_factory=self.agent_execution_heartbeat_factory,
             agent_job_store=self._resources.agent_job_store,
         )
+        publication_config = self._config.harness.agent_publication_recovery
+        self._agent_publication_recovery_worker = (
+            AgentPublicationRecoveryWorker(
+                manager=self.subagent_manager,
+                policy=AgentPublicationWorkerPolicy(
+                    interval_seconds=publication_config.interval_seconds,
+                    max_empty_backoff_seconds=(
+                        publication_config.max_empty_backoff_seconds
+                    ),
+                    max_failure_backoff_seconds=(
+                        publication_config.max_failure_backoff_seconds
+                    ),
+                    scan_limit=publication_config.scan_limit,
+                    jitter_ratio=publication_config.jitter_ratio,
+                ),
+            )
+        )
+        self.subagent_manager.set_publication_recovery_wake(
+            self._agent_publication_recovery_worker.wake
+        )
         self.agent_control = AgentControlService(
             self,
             session_id_getter=lambda: self._session.id if self._session else "",
@@ -2137,6 +2163,11 @@ class AgentEngine:
             "pursuit_terminal_outbox_worker",
             self._pursuit_terminal_outbox_worker.stop,
         )
+        if hasattr(self, "_agent_publication_recovery_worker"):
+            await self._shutdown_component(
+                "agent_publication_recovery_worker",
+                self._agent_publication_recovery_worker.stop,
+            )
         if self.workspace_file_index.building:
             await self._shutdown_component(
                 "workspace_file_index",
@@ -2673,7 +2704,11 @@ class AgentEngine:
             await self.evolution_patch_recovery.recover_pending()
         )
         recovered = await self.recover_session_reconciliations()
-        await self.subagent_manager.recover_pending_publications()
+        if self._config.harness.agent_publication_recovery.enabled:
+            await self._agent_publication_recovery_worker.run_once()
+            self._agent_publication_recovery_worker.start()
+        else:
+            await self.subagent_manager.recover_pending_publications()
         if self._config.harness.pursuit_terminal_outbox.enabled:
             await self._pursuit_terminal_outbox_worker.run_once()
             self._pursuit_terminal_outbox_worker.start()
@@ -2685,6 +2720,32 @@ class AgentEngine:
     ) -> PursuitTerminalOutboxPassResult:
         """Run one explicit bounded terminal recovery pass."""
         return await self._pursuit_terminal_outbox_worker.run_once()
+
+    async def run_agent_publication_recovery_once(
+        self,
+    ) -> AgentPublicationRecoverySummary:
+        """Run one explicit bounded Agent publication recovery pass."""
+        return await self._agent_publication_recovery_worker.run_once()
+
+    def start_agent_publication_recovery_worker(self) -> bool:
+        if not self._config.harness.agent_publication_recovery.enabled:
+            return False
+        return self._agent_publication_recovery_worker.start()
+
+    async def stop_agent_publication_recovery_worker(self) -> bool:
+        return await self._agent_publication_recovery_worker.stop()
+
+    def wake_agent_publication_recovery_worker(self) -> bool:
+        return self._agent_publication_recovery_worker.wake()
+
+    def agent_publication_recovery_worker_snapshot(
+        self,
+    ) -> AgentPublicationWorkerSnapshot:
+        return self._agent_publication_recovery_worker.snapshot()
+
+    @property
+    def agent_publication_recovery_enabled(self) -> bool:
+        return self._config.harness.agent_publication_recovery.enabled
 
     def start_pursuit_terminal_outbox_worker(self) -> bool:
         if not self._config.harness.pursuit_terminal_outbox.enabled:

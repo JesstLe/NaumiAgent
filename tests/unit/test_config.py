@@ -27,6 +27,8 @@ class TestAppConfig:
         assert config.harness.runtime_heartbeat_retention.retention_days == 7
         assert config.harness.pursuit_terminal_outbox.enabled is True
         assert config.harness.pursuit_terminal_outbox.scan_limit == 20
+        assert config.harness.agent_publication_recovery.enabled is True
+        assert config.harness.agent_publication_recovery.scan_limit == 100
         assert config.browser_daemon.base_url == "http://127.0.0.1:3005"
         assert config.browser_daemon.project_dir.endswith("browser-debugging-daemon")
         assert config.browser.max_concurrent_runs == 2
@@ -76,6 +78,29 @@ class TestAppConfig:
                 "pursuit_terminal_outbox": {
                     "retry_base_seconds": 20,
                     "retry_max_seconds": 10,
+                }
+            })
+
+    def test_agent_publication_recovery_config_is_bounded(self) -> None:
+        config = AppConfig(harness={
+            "agent_publication_recovery": {
+                "enabled": False,
+                "interval_seconds": 10,
+                "max_empty_backoff_seconds": 60,
+                "max_failure_backoff_seconds": 120,
+                "scan_limit": 5,
+            }
+        })
+        policy = config.harness.agent_publication_recovery
+        assert policy.enabled is False
+        assert policy.interval_seconds == 10
+        assert policy.scan_limit == 5
+
+        with pytest.raises(ValueError, match="max_failure_backoff_seconds"):
+            AppConfig(harness={
+                "agent_publication_recovery": {
+                    "interval_seconds": 20,
+                    "max_failure_backoff_seconds": 10,
                 }
             })
 

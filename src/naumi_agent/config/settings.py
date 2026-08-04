@@ -433,6 +433,31 @@ class PursuitTerminalOutboxConfig(BaseSettings):
         return self
 
 
+class AgentPublicationRecoveryConfig(BaseSettings):
+    """Bounded periodic recovery for durable Agent result publications."""
+
+    enabled: bool = True
+    interval_seconds: float = Field(default=30.0, ge=0.1, le=86_400)
+    max_empty_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    max_failure_backoff_seconds: float = Field(default=300.0, ge=0.1, le=604_800)
+    scan_limit: int = Field(default=100, ge=1, le=1000)
+    jitter_ratio: float = Field(default=0.1, ge=0, le=0.5)
+
+    @model_validator(mode="after")
+    def _validate_agent_publication_recovery(
+        self,
+    ) -> AgentPublicationRecoveryConfig:
+        if self.max_empty_backoff_seconds < self.interval_seconds:
+            raise ValueError(
+                "Agent publication max_empty_backoff_seconds 不能小于 interval_seconds"
+            )
+        if self.max_failure_backoff_seconds < self.interval_seconds:
+            raise ValueError(
+                "Agent publication max_failure_backoff_seconds 不能小于 interval_seconds"
+            )
+        return self
+
+
 class HarnessConfig(BaseSettings):
     """Harness runtime policy configuration."""
 
@@ -443,6 +468,9 @@ class HarnessConfig(BaseSettings):
     )
     pursuit_terminal_outbox: PursuitTerminalOutboxConfig = Field(
         default_factory=PursuitTerminalOutboxConfig
+    )
+    agent_publication_recovery: AgentPublicationRecoveryConfig = Field(
+        default_factory=AgentPublicationRecoveryConfig
     )
 
 

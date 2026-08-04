@@ -88,8 +88,10 @@
   exact fence 将当前会话的 expired running Job 人工收口为 `unknown`；该动作不重放模型，也不是
   ARC-04.6 Supervisor。详见 `../harness/HAR-10-7e-exact-agent-recovery-action.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
-  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费与
-  startup recovery 和只读 UI projection，但周期 retry、UI read/ack、retention 和外部 sink 仍未完成。
+  Windows 隔离后端仍未完成；Agent 仍是 embedded 执行而非独立 daemon。结果 outbox 已有在线消费、
+  startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
+  唤醒与 shutdown drain。最大 attempt、poison-record quarantine/dead-letter、UI read/ack、retention
+  和外部 sink 仍未完成。
   因此 ARC-04 保持 partial。
 
 ## 验收标准
