@@ -2191,6 +2191,16 @@ async def _run_doctor_command(engine: Any, arg: str) -> None:
             arg="",
         )
         return
+    if tokens and tokens[0] == "trace":
+        query = " ".join(tokens[1:])
+        await _run_tool_slash_command(
+            engine,
+            slash_command="/doctor",
+            tool_name="doctor_trace_index",
+            parse_args=lambda _arg: {"query": query, "limit": 80},
+            arg="",
+        )
+        return
     expected_snapshot_sha256 = ""
     if tokens == ["export"]:
         action = "preview"
@@ -2203,7 +2213,8 @@ async def _run_doctor_command(engine: Any, arg: str) -> None:
         expected_snapshot_sha256 = tokens[1].lower()
     else:
         console.print(
-            "[yellow]用法: /doctor、/doctor probe [timeout-ms] 或 /doctor export "
+            "[yellow]用法: /doctor、/doctor trace [筛选]、/doctor probe [timeout-ms] "
+            "或 /doctor export "
             "[preview 返回的 snapshot-sha256][/yellow]"
         )
         return
@@ -2951,7 +2962,10 @@ def _print_help() -> None:
         ("/style", "显示当前主题和输出风格"),
         ("/reasoning [on|off|toggle]", "显示或隐藏模型思考文本"),
         ("/effort [auto|none|minimal|low|medium|high|xhigh|max|reset]", "查看或切换模型思考强度"),
-        ("/doctor", "运行环境诊断或预览/导出脱敏诊断包"),
+        (
+            "/doctor [trace [筛选]|probe [timeout-ms]|export]",
+            "运行诊断、查看折叠正文的 Trace、受控在线探测或脱敏导出",
+        ),
         (
             "/harness [status|doctor|explain|replay|detail|evidence|eval|baseline|"
             "knowledge|check|trust|untrust]",

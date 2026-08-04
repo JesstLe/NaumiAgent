@@ -59,7 +59,7 @@ def _build_commands() -> list[CommandMeta]:
             "/doctor",
             "运行本地诊断、受控在线探测或预览/导出脱敏诊断包",
             takes_arg=True,
-            arg_hint="[probe [timeout-ms|cancel]|export [snapshot-sha256]]",
+            arg_hint="[trace [筛选]|probe [timeout-ms|cancel]|export [snapshot-sha256]]",
             readonly=False,
             category="基础",
         ),

@@ -120,6 +120,11 @@ const DOCTOR_HEALTH_DOMAINS = new Set([
 const DOCTOR_HEALTH_RESPONSIBILITIES = new Set([
   "user_config", "local_environment", "external_service", "product_runtime", "unknown",
 ]);
+const DOCTOR_TRACE_STATUSES = new Set(["ready", "degraded"]);
+const DOCTOR_TRACE_SEVERITIES = new Set(["info", "warning", "error"]);
+const DOCTOR_TRACE_IDENTIFIER_KEYS = new Set([
+  "run_id", "request_id", "call_id", "task_id", "session_id", "agent_id",
+]);
 const PERMISSION_RUNTIME_MODES = new Set(["default", "plan", "bypass"]);
 const PERMISSION_MODES = new Set(["bypass", "permissive", "moderate", "strict", "lockdown"]);
 const PERMISSION_RISKS = new Set(["", "low", "medium", "high"]);
@@ -830,6 +835,9 @@ function normalizeServerPayload(type, payload) {
   }
   if (type === "doctor/health") {
     return normalizeDoctorHealth(payload);
+  }
+  if (type === "doctor/trace/result") {
+    return normalizeDoctorTraceResult(payload);
   }
   if (type === "doctor/export/result") {
     return normalizeDoctorExportResult(payload);
@@ -3541,6 +3549,128 @@ function normalizeDoctorHealth(payload) {
     live_probe: harnessBoolean(payload.live_probe, "doctor/health live_probe"),
     snapshot_sha256: snapshotSha256,
     items: normalizedItems,
+  };
+}
+
+function normalizeDoctorTraceResult(payload) {
+  const body = harnessObject(payload, "doctor/trace");
+  if (Number(body.schema_version) !== 1) {
+    throw new Error(`doctor/trace schema_version 不兼容: ${body.schema_version}`);
+  }
+  const entries = harnessObjectArray(body.entries, "doctor/trace entries", 201);
+  if (entries.length > 200) throw new Error("doctor/trace entries 超过 200 项");
+  const normalizedEntries = entries.map((entry) => {
+    const eventType = harnessText(entry.event_type, "doctor/trace entry.event_type");
+    if (!/^[a-zA-Z0-9_.:/-]{1,128}$/.test(eventType)) {
+      throw new Error("doctor/trace entry.event_type 无效");
+    }
+    const summary = harnessText(entry.summary, "doctor/trace entry.summary");
+    if (!summary || summary.length > 240) {
+      throw new Error("doctor/trace entry.summary 必须为 1..240 字符");
+    }
+    const rawIdentifiers = harnessObject(entry.identifiers, "doctor/trace identifiers");
+    const identifiers = {};
+    for (const [key, value] of Object.entries(rawIdentifiers)) {
+      if (!DOCTOR_TRACE_IDENTIFIER_KEYS.has(key)) {
+        throw new Error("doctor/trace identifiers 包含未知键");
+      }
+      const normalized = harnessText(value, `doctor/trace identifiers.${key}`);
+      if (!/^[a-zA-Z0-9_.:@/-]{1,128}$/.test(normalized)) {
+        throw new Error(`doctor/trace identifiers.${key} 无效`);
+      }
+      identifiers[key] = normalized;
+    }
+    return {
+      cursor: doctorExportInteger(
+        entry.cursor,
+        "doctor/trace entry.cursor",
+        0,
+        Number.MAX_SAFE_INTEGER,
+      ),
+      timestamp: harnessText(entry.timestamp ?? "", "doctor/trace entry.timestamp").slice(0, 64),
+      event_type: eventType,
+      severity: harnessChoice(
+        entry.severity,
+        "doctor/trace entry.severity",
+        DOCTOR_TRACE_SEVERITIES,
+      ),
+      summary,
+      identifiers,
+    };
+  });
+  const query = harnessText(body.query ?? "", "doctor/trace query");
+  if (query.length > 128) throw new Error("doctor/trace query 超过 128 字符");
+  const privacyNotice = harnessText(body.privacy_notice, "doctor/trace privacy_notice");
+  if (!privacyNotice || privacyNotice.length > 500) {
+    throw new Error("doctor/trace privacy_notice 必须为 1..500 字符");
+  }
+  const windowEventCount = doctorExportInteger(
+    body.window_event_count,
+    "doctor/trace window_event_count",
+    0,
+    100_000,
+  );
+  const matchedEventCount = doctorExportInteger(
+    body.matched_event_count,
+    "doctor/trace matched_event_count",
+    0,
+    windowEventCount,
+  );
+  if (normalizedEntries.length > matchedEventCount) {
+    throw new Error("doctor/trace entries 超过 matched_event_count");
+  }
+  const runId = harnessText(body.run_id, "doctor/trace run_id");
+  const interfaceName = harnessText(body.interface, "doctor/trace interface");
+  if (!/^[a-zA-Z0-9_.:@/-]{1,128}$/.test(runId)) {
+    throw new Error("doctor/trace run_id 无效");
+  }
+  if (!/^[a-zA-Z0-9_.:/-]{1,128}$/.test(interfaceName)) {
+    throw new Error("doctor/trace interface 无效");
+  }
+  const diagnosticCode = harnessText(
+    body.diagnostic_code,
+    "doctor/trace diagnostic_code",
+  );
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(diagnosticCode)) {
+    throw new Error("doctor/trace diagnostic_code 无效");
+  }
+  const assessedAt = harnessText(body.assessed_at, "doctor/trace assessed_at");
+  if (!assessedAt || assessedAt.length > 64) {
+    throw new Error("doctor/trace assessed_at 必须为 1..64 字符");
+  }
+  return {
+    schema_version: 1,
+    status: harnessChoice(body.status, "doctor/trace status", DOCTOR_TRACE_STATUSES),
+    diagnostic_code: diagnosticCode,
+    run_id: runId,
+    interface: interfaceName,
+    assessed_at: assessedAt,
+    query,
+    limit: doctorExportInteger(body.limit, "doctor/trace limit", 1, 200),
+    source_size_bytes: doctorExportInteger(
+      body.source_size_bytes,
+      "doctor/trace source_size_bytes",
+      0,
+      1_000_000_000_000,
+    ),
+    window_size_bytes: doctorExportInteger(
+      body.window_size_bytes,
+      "doctor/trace window_size_bytes",
+      0,
+      2 * 1024 * 1024,
+    ),
+    window_event_count: windowEventCount,
+    matched_event_count: matchedEventCount,
+    malformed_line_count: doctorExportInteger(
+      body.malformed_line_count,
+      "doctor/trace malformed_line_count",
+      0,
+      100_000,
+    ),
+    truncated: harnessBoolean(body.truncated, "doctor/trace truncated"),
+    entries: normalizedEntries,
+    snapshot_sha256: harnessSha256(body.snapshot_sha256, "doctor/trace snapshot_sha256"),
+    privacy_notice: privacyNotice,
   };
 }
 

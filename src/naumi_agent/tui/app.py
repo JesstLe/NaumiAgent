@@ -2699,6 +2699,9 @@ class NaumiApp(App):
         command = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
         if command == "/doctor":
+            if re.fullmatch(r"trace(?:\s+.{1,128})?", arg.strip(), re.DOTALL):
+                self._run_cli_slash_command(raw)
+                return
             export_match = re.fullmatch(
                 r"export(?:\s+([0-9a-fA-F]{64}))?",
                 arg.strip(),
@@ -2762,12 +2765,13 @@ class NaumiApp(App):
                 )
             else:
                 self.query_one(StatusBar).status_text = (
-                    "用法：/doctor、/doctor probe [timeout-ms|cancel] "
+                    "用法：/doctor、/doctor trace [筛选]、"
+                    "/doctor probe [timeout-ms|cancel] "
                     "或 /doctor export [snapshot-sha256]"
                 )
                 self.query_one(ChatPanel).mount(
                     Markdown(
-                        "Doctor 用法：`/doctor`、"
+                        "Doctor 用法：`/doctor`、`/doctor trace [筛选]`、"
                         "`/doctor probe [timeout-ms|cancel]` 或 "
                         "`/doctor export [snapshot-sha256]`。",
                         classes="agent-msg",

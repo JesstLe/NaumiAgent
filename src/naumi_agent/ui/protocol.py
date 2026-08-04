@@ -25,6 +25,7 @@ PROTOCOL_MAXIMUM_VERSION = 1
 PROTOCOL_CAPABILITIES = (
     "doctor_export",
     "doctor_live_probe",
+    "doctor_trace_index",
     "evolution_evaluation_lane",
     "goal_snapshot",
     "heartbeat",
@@ -94,6 +95,7 @@ class ClientEventType(StrEnum):
     TASK_CANCEL = "task_cancel"
     PERMISSIONS_PANEL = "permissions_panel"
     DOCTOR = "doctor"
+    DOCTOR_TRACE = "doctor/trace"
     DOCTOR_EXPORT = "doctor/export"
     DOCTOR_PROBE = "doctor/probe"
     DOCTOR_PROBE_CANCEL = "doctor/probe/cancel"
@@ -130,6 +132,7 @@ class ServerEventType(StrEnum):
     HARNESS_EVAL_SANDBOX_RETRY_RESULT = "harness/eval-sandbox/retry-result"
     HARNESS_EVAL_PROMOTION = "harness/eval-promotion"
     DOCTOR_HEALTH = "doctor/health"
+    DOCTOR_TRACE_RESULT = "doctor/trace/result"
     DOCTOR_EXPORT_RESULT = "doctor/export/result"
     DOCTOR_PROBE_RESULT = "doctor/probe/result"
     INSPECTOR_SNAPSHOT = "inspector/snapshot"

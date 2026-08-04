@@ -324,6 +324,37 @@ function doctorHealthPayload() {
   };
 }
 
+function doctorTracePayload() {
+  return {
+    schema_version: 1,
+    status: "ready",
+    diagnostic_code: "trace_index_ready",
+    run_id: "run-1",
+    interface: "terminal-ui-bridge",
+    assessed_at: "2026-08-05T01:00:00+00:00",
+    query: "error",
+    limit: 80,
+    source_size_bytes: 1024,
+    window_size_bytes: 1024,
+    window_event_count: 2,
+    matched_event_count: 1,
+    malformed_line_count: 0,
+    truncated: false,
+    entries: [{
+      cursor: 12,
+      timestamp: "2026-08-05T01:00:00+00:00",
+      event_type: "exception",
+      severity: "error",
+      summary: "异常元数据 · RuntimeError（正文已折叠）",
+      identifiers: { call_id: "call-1" },
+      private_body: "must-drop",
+    }],
+    snapshot_sha256: "f".repeat(64),
+    privacy_notice: "正文、模型输出、reasoning、参数与 traceback 默认折叠。",
+    private_payload: "must-drop",
+  };
+}
+
 function doctorExportPayload(status = "preview") {
   const payload = {
     schema_version: 1,
@@ -622,6 +653,7 @@ test("protocol contract drives client and server event validation", () => {
     capabilities: [
       "doctor_export",
       "doctor_live_probe",
+      "doctor_trace_index",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -817,6 +849,7 @@ test("hello payload is generated from the embedded negotiation contract", () => 
     capabilities: [
       "doctor_export",
       "doctor_live_probe",
+      "doctor_trace_index",
       "evolution_evaluation_lane",
       "goal_snapshot",
       "heartbeat",
@@ -1318,6 +1351,32 @@ test("doctor health response is strict bounded and drops private fields", () => 
   assert.throws(
     () => normalizeServerRecord({ type: "doctor/health", payload: invalidCode }),
     /diagnostic_code/,
+  );
+});
+
+test("doctor trace response is bounded correlated metadata and drops bodies", () => {
+  const normalized = normalizeServerRecord({
+    type: "doctor/trace/result",
+    payload: doctorTracePayload(),
+  }).payload;
+
+  assert.equal(normalized.status, "ready");
+  assert.equal(normalized.entries[0].event_type, "exception");
+  assert.deepEqual(normalized.entries[0].identifiers, { call_id: "call-1" });
+  assert.equal(Object.hasOwn(normalized, "private_payload"), false);
+  assert.equal(Object.hasOwn(normalized.entries[0], "private_body"), false);
+
+  const tooMany = doctorTracePayload();
+  tooMany.entries = Array.from({ length: 201 }, () => tooMany.entries[0]);
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/trace/result", payload: tooMany }),
+    /超过 200/,
+  );
+  const unknownIdentifier = doctorTracePayload();
+  unknownIdentifier.entries[0].identifiers = { secret: "must-not-pass" };
+  assert.throws(
+    () => normalizeServerRecord({ type: "doctor/trace/result", payload: unknownIdentifier }),
+    /未知键/,
   );
 });
 

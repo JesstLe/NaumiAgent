@@ -46,10 +46,14 @@
   默认 15 秒超时且无自动重试；New UI 提供 `p/c` 启动与取消、Textual TUI 提供
   `/doctor probe [timeout-ms|cancel]`，CLI 与 Agent Tool 复用相同动作，详见
   `UI-13-3a-bounded-provider-live-probe.md`。
+- UI-13.4a Typed 隐私有界 Trace 索引：已实现。共享 authority 只读取单轮 DebugTrace 最近 2 MiB，
+  将正文、模型输出、reasoning、工具参数和异常内容折叠为 typed 元数据；New UI、TUI、CLI 与 Agent
+  Tool 复用同一筛选、限制和 Snapshot 语义，详见 `UI-13-4a-typed-trace-index.md`。
 - UI-13.5a Typed 脱敏诊断包导出：已实现。共享 authority 构建固定 3 文件、最大 512 KiB 的确定性 ZIP，
   先展示文件/大小/digest/隐私边界，再以进程内 Plan 和精确 Snapshot 摘要原子写入平台状态目录；
   New UI、TUI、CLI fallback 与 Agent Tool 复用同一实现，详见
   `UI-13-5a-typed-diagnostic-export.md`。
-- Provider 探测历史/SLO、Trace viewer、可选 trace attachment、Windows DACL 显式校验与修复动作仍为
+- Provider 探测历史/SLO、Trace 实时追尾/历史选择/授权展开、可选 trace attachment、Windows DACL
+  显式校验与修复动作仍为
   planned；不得把 UI-13
   整体标记为 implemented。

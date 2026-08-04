@@ -20,6 +20,7 @@ class _EngineToolCallFake:
         self.tool_registry = {
             "doctor_export_diagnostics": _FakeTool(),
             "doctor_live_probe": _FakeTool(),
+            "doctor_trace_index": _FakeTool(),
         }
         self.executed: list[tuple[ToolCall, str | None]] = []
 
@@ -100,3 +101,22 @@ async def test_run_doctor_probe_routes_through_engine_policy(
     assert agent_name == "cli"
     assert tool_call.name == "doctor_live_probe"
     assert json.loads(tool_call.arguments) == {"timeout_ms": timeout_ms}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("arg", "query"),
+    [("trace", ""), ("trace call-7", "call-7")],
+)
+async def test_run_doctor_trace_routes_through_engine_policy(
+    arg: str,
+    query: str,
+) -> None:
+    engine = _EngineToolCallFake()
+
+    await _run_doctor_command(engine, arg)
+
+    tool_call, agent_name = engine.executed[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "doctor_trace_index"
+    assert json.loads(tool_call.arguments) == {"query": query, "limit": 80}

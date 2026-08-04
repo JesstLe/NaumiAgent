@@ -1704,6 +1704,9 @@ class JsonlEngineBridge:
         if event_type == ClientEventType.DOCTOR:
             await self.show_doctor_report(request_id=request_id)
             return
+        if event_type == ClientEventType.DOCTOR_TRACE:
+            await self.show_doctor_trace(payload, request_id=request_id)
+            return
         if event_type == ClientEventType.DOCTOR_EXPORT:
             await self.export_doctor_report(payload, request_id=request_id)
             return
@@ -4850,6 +4853,47 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
         await self.emit(ServerEventType.STATUS, self.status_payload())
+
+    async def show_doctor_trace(
+        self,
+        payload: dict[str, Any],
+        *,
+        request_id: str,
+    ) -> None:
+        """Emit a bounded body-folded index for this exact Bridge run."""
+        from naumi_agent.ui.doctor_trace import (
+            DOCTOR_TRACE_DEFAULT_LIMIT,
+            DoctorTraceIndexError,
+            build_doctor_trace_index,
+            doctor_trace_payload,
+        )
+
+        if self.debug_trace is None or not self.debug_trace.enabled:
+            await self.emit_error(
+                "当前 Bridge 的结构化调试日志未启用，无法建立 Trace 索引。",
+                code="trace_disabled",
+                request_id=request_id,
+            )
+            return
+        try:
+            index = build_doctor_trace_index(
+                self.debug_trace.run_dir.parent,
+                query=str(payload.get("query") or ""),
+                limit=payload.get("limit", DOCTOR_TRACE_DEFAULT_LIMIT),
+                preferred_run_id=self.debug_trace.run_id,
+            )
+        except DoctorTraceIndexError as exc:
+            await self.emit_error(
+                str(exc),
+                code=exc.code,
+                request_id=request_id,
+            )
+            return
+        await self.emit(
+            ServerEventType.DOCTOR_TRACE_RESULT,
+            doctor_trace_payload(index),
+            request_id=request_id,
+        )
 
     async def start_doctor_live_probe(
         self,

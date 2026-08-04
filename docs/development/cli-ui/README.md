@@ -27,6 +27,8 @@ Composition 注入时明确标记不可观测，而不是伪造调度健康。UI
 UI-13.2a 已让 Provider 本地配置与显式 live probe 失败产生低基数稳定诊断码，并由 New UI/TUI/CLI 共用；
 UI-13.3a 已让 New UI、Textual TUI、CLI 与 Agent Tool 共享最多 1 请求、8 输出 token、默认 15 秒超时、
 无自动重试的显式 Provider 探测，并提供精确取消与 typed 终态；打开或刷新 Doctor 仍保持零 Provider 流量；
+UI-13.4a 已把当前 DebugTrace 的最近 2 MiB 投影为正文折叠、可筛选、带确定性 Snapshot 的 typed 索引，
+New UI/TUI/CLI/Agent Tool 共用相同 authority，旧 Bridge 未协商能力时不会误发请求；
 UI-13.5a 已让 New UI/TUI/CLI/Agent Tool 先预览固定 3 文件的脱敏诊断 ZIP，再以精确 Snapshot 摘要把
 同一 Bundle 原子写入平台 Naumi 状态目录；包不含聊天、reasoning、raw trace、环境变量全集、凭据或源码；
 UI-17.3c 已进一步让 New UI 在旧 Bridge 不声明 `doctor_export` 时保留 Health 页面、显示兼容提示并阻止
