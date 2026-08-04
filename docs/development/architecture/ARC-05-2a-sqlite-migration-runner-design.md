@@ -54,8 +54,9 @@ Workbench 等领域后续复用。它解决迁移计划、只读预检、排他�
 
 ## 6. 后续依赖
 
-- ARC-05.2b：多 Store 升级编排、持久化进度和进程崩溃后的启动判定。
-- ARC-05.3：升级前空间检查、原子 snapshot、digest manifest 与权限继承。
+- ARC-05.3a 已实现单 Store 空间检查、原子 SQLite snapshot、digest manifest 与 POSIX 私有权限，详见
+  `ARC-05-3a-sqlite-pre-migration-backup.md`。
+- ARC-05.2b：下一步把多 Store 升级编排、持久化进度、备份 receipt 和进程崩溃后的启动判定绑定。
 - ARC-05.4/05.5：迁移前后完整性检查、失败只读模式与恢复入口。
 - HAR-08 H5：声明 Harness Eval/Baseline 历史版本步骤并复用本内核；不得复制一套迁移器。
 
