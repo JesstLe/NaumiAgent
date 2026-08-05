@@ -48,6 +48,7 @@ class WorkerCapability(StrEnum):
     AGENT_CONTROL_TRANSPORT = "agent_control_transport"
     AGENT_JOB_OWNER_LEASE = "agent_job_owner_lease"
     AGENT_CONTEXT_SCOPE = "agent_context_scope"
+    AGENT_MODEL_EXECUTION = "agent_model_execution"
 
 
 class WorkerAdmissionDecision(StrEnum):
@@ -520,6 +521,7 @@ def _validate_capability_consistency(contract: WorkerContract) -> None:
         WorkerCapability.AGENT_CONTROL_TRANSPORT: WorkerKind.AGENT,
         WorkerCapability.AGENT_JOB_OWNER_LEASE: WorkerKind.AGENT,
         WorkerCapability.AGENT_CONTEXT_SCOPE: WorkerKind.AGENT,
+        WorkerCapability.AGENT_MODEL_EXECUTION: WorkerKind.AGENT,
     }
     incompatible = [
         capability.value
@@ -533,6 +535,14 @@ def _validate_capability_consistency(contract: WorkerContract) -> None:
         and WorkerCapability.AGENT_CONTROL_TRANSPORT not in capabilities
     ):
         raise ValueError("Agent Job owner lease 能力必须绑定认证控制通道。")
+    if WorkerCapability.AGENT_MODEL_EXECUTION in capabilities and not {
+        WorkerCapability.AGENT_CONTROL_TRANSPORT,
+        WorkerCapability.AGENT_JOB_OWNER_LEASE,
+        WorkerCapability.AGENT_CONTEXT_SCOPE,
+    }.issubset(capabilities):
+        raise ValueError(
+            "Agent model execution 能力必须绑定控制通道、Job owner lease 和 context scope。"
+        )
 
 
 def _require_identifier(value: str, *, field: str) -> None:

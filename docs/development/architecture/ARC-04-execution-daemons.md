@@ -102,12 +102,16 @@
   process + expired claim/slot 联合裁决，以及 HMAC fencing receipt 驱动的幂等 pre-start requeue；running
   副作用未知时 fail closed。Doctor/New UI/TUI 消费同一低敏聚合。详见
   `ARC-04-6a-agent-worker-supervisor-owner-fencing.md`。
-- 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
-  Windows 隔离后端仍未完成；Agent 已有独立 control-only 进程，但执行仍在 embedded Runtime。结果 outbox 已有在线消费、
+- ARC-04.5e3a / HAR-10.7h4 已让具备空 tool scope 的独立 Worker 通过两阶段 start fence 执行真实 Provider
+  调用，并将 AES-GCM terminal 在同一 AgentJob 事务提交到终态与 publication outbox；Provider 异常脱敏，
+  running 后进程丢失保持 recovery-required。详见 `ARC-04-5e3a-independent-agent-model-execution.md`。
+- 当前 Tool Worker 仍是每 Job 一个短寿命进程；Agent Worker 已是带 heartbeat 的常驻 model-only 进程，但
+  尚未接入生产 SubAgent 调度。PTY、完整 Supervisor、并发背压与 Windows 隔离后端仍未完成；带工具 Agent
+  执行仍在 embedded Runtime。结果 outbox 已有在线消费、
   startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
   唤醒与 shutdown drain；HAR-10.7g 已补齐 durable retry budget、HMAC quarantine receipt 和双端隔离
   投影。exact requeue/prune、UI read/ack、retention 和外部 sink 仍未完成。
-  因此 ARC-04 保持 partial；下一最小纵向切片为 ARC-04.5e3 独立 Agent 执行与认证终态发布。
+  因此 ARC-04 保持 partial；下一最小纵向切片为 ARC-04.5e3b 加密 Tool RPC 与生产 Agent 调度。
 
 ## 验收标准
 
@@ -145,4 +149,5 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c, 4.5e1, 4.5e2, 4.6a)。
+4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c, 4.5e1, 4.5e2, 4.5e3a,
+4.6a)。

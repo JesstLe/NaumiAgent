@@ -116,5 +116,7 @@ Composition 与 Doctor 小模块测试，不运行全量测试。
 PID/create-time、Job claim 与 physical reservation，只有在 control-only pre-start 副作用边界明确时才签发
 认证 receipt 并幂等 requeue，详见
 [`ARC-04-6a-agent-worker-supervisor-owner-fencing.md`](ARC-04-6a-agent-worker-supervisor-owner-fencing.md)。
-下一步进入独立 Worker `mark_running -> bounded model execution -> terminal publication` 纵向切片，不线性扩张
-完整 Supervisor。
+`ARC-04.5e3a / HAR-10.7h4` 已在该 owner lease 上完成 model-only 两阶段 start fence、真实独立 Provider
+调用、加密 terminal 与 AgentJob/outbox 原子提交，详见
+[`ARC-04-5e3a-independent-agent-model-execution.md`](ARC-04-5e3a-independent-agent-model-execution.md)。
+下一步补齐加密 Tool RPC 与生产调度，不线性扩张完整 Supervisor。

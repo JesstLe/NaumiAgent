@@ -156,11 +156,15 @@ class AgentWorkerSupervisor:
                 contract.kind is not WorkerKind.AGENT
                 or WorkerCapability.AGENT_CONTROL_TRANSPORT not in contract.capabilities
                 or WorkerCapability.AGENT_JOB_OWNER_LEASE not in contract.capabilities
-                or WorkerCapability.AGENT_CONTEXT_SCOPE in contract.capabilities
+                or (
+                    WorkerCapability.AGENT_CONTEXT_SCOPE in contract.capabilities
+                    and WorkerCapability.AGENT_MODEL_EXECUTION
+                    not in contract.capabilities
+                )
             ):
                 return self._result(
                     AgentWorkerSupervisorOutcome.EVIDENCE_INCOMPLETE,
-                    "worker_contract_not_control_only",
+                    "worker_contract_execution_boundary_invalid",
                     lease=lease,
                     worker_epoch=contract.epoch,
                     assessed_at=assessed_at,

@@ -123,10 +123,12 @@
     HAR-10.7h2 / ARC-04.5e2 已进一步完成 admitted-only AgentJob owner lease、物理 slot reservation、
     一次性进程密钥加密 staging、双续租和 pre-start release；HAR-10.7h3 / ARC-04.6a 又增加 exact
     PID/create-time witness、Supervisor owner lease 与认证 pre-start fencing/requeue。模型执行与完整
-    Supervisor 运维仍未完成。见
+    Supervisor 运维仍未完成；HAR-10.7h4 / ARC-04.5e3a 进一步完成 model-only 两阶段 start、真实
+    Provider 调用、加密 terminal 和 AgentJob/outbox 原子提交，但 Tool RPC 与生产调度仍未完成。见
     [Bootstrap](../architecture/ARC-04-5e1-independent-agent-worker-bootstrap.md) 与
     [Owner lease](../architecture/ARC-04-5e2-independent-agent-worker-owner-lease.md)、
-    [Supervisor fencing](../architecture/ARC-04-6a-agent-worker-supervisor-owner-fencing.md)。
+    [Supervisor fencing](../architecture/ARC-04-6a-agent-worker-supervisor-owner-fencing.md)、
+    [Model execution](../architecture/ARC-04-5e3a-independent-agent-model-execution.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
@@ -150,10 +152,10 @@
     [设计](../architecture/ARC-06-2b1-tool-job-capacity-queue-admission.md)。
   - ARC-06.2b2 已让 claimed ToolJob 进入真实 Shell dispatch/start/terminal 链，并在 start 前复验
     reservation、对 lost claim 做 no-side-effect reconcile；见
-    [设计](../architecture/ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。当前 Agent 尚未成为持久
-    Worker；pre-start claim owner lease 已由 ARC-04.5e2 接入，ARC-04.6a 已补齐最小 crash-before-start
-    fencing，自动 scheduler、`mark_running`、模型执行与完整 Supervisor 尚未完成，因此仍只是 HAR-10.7
-    集群调度前置。
+    [设计](../architecture/ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。当前 Agent Worker 已能跨 Job
+    常驻执行 model-only 请求，但尚未接入生产 SubAgent 调度；pre-start claim owner lease 已由 ARC-04.5e2 接入，ARC-04.6a 已补齐最小 crash-before-start
+    fencing，ARC-04.5e3a 已补齐 model-only `mark_running` 与 terminal publication。加密 Tool RPC、生产
+    scheduler、多轮执行与完整 Supervisor 尚未完成，因此仍只是 HAR-10.7 集群调度前置。
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。
