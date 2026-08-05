@@ -37,5 +37,5 @@ Receipt 冻结 Contract/Plan/Source、平台 identity、sample seed、两侧 H5a
 
 ## 5. 下一步
 
-EVO-05.3f2c2 将以 platform-scoped cohort Run Grant 执行连续样本并支持前缀恢复；EVO-05.3f2c3 聚合所有 required
+EVO-05.3f2c2 已以 platform-scoped cohort Run Grant 执行连续样本并支持前缀恢复；EVO-05.3f2c3 聚合所有 required
 platform lane，缺少对应 Worker 时保持 pending 而不是伪造完成；随后生成每个平台 H5c 与 matrix receipt。

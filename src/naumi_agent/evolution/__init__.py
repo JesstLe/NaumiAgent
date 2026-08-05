@@ -415,6 +415,14 @@ if TYPE_CHECKING:
         EvolutionReflectionSignal,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_adversarial_cohorts import (
+        EVOLUTION_REVALIDATION_ADVERSARIAL_COHORT_POLICY,
+        EvolutionRevalidationAdversarialCheckSummary,
+        EvolutionRevalidationAdversarialCohortError,
+        EvolutionRevalidationAdversarialCohortExecutor,
+        EvolutionRevalidationAdversarialCohortReceipt,
+        EvolutionRevalidationAdversarialCohortStore,
+    )
     from naumi_agent.evolution.revalidation_adversarial_samples import (
         EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER,
         EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY,
@@ -708,6 +716,12 @@ __all__ = [
     "EvolutionRevalidationRuntimeSourceError",
     "EvolutionRevalidationRuntimeSourcePair",
     "EvolutionRevalidationRuntimeSourceService",
+    "EVOLUTION_REVALIDATION_ADVERSARIAL_COHORT_POLICY",
+    "EvolutionRevalidationAdversarialCheckSummary",
+    "EvolutionRevalidationAdversarialCohortError",
+    "EvolutionRevalidationAdversarialCohortExecutor",
+    "EvolutionRevalidationAdversarialCohortReceipt",
+    "EvolutionRevalidationAdversarialCohortStore",
     "EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER",
     "EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY",
     "EvolutionRevalidationAdversarialSampleError",
@@ -1270,6 +1284,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationAdversarialSampleStore",
         "adversarial_batch_id",
     }
+    revalidation_adversarial_cohort_exports = {
+        "EVOLUTION_REVALIDATION_ADVERSARIAL_COHORT_POLICY",
+        "EvolutionRevalidationAdversarialCheckSummary",
+        "EvolutionRevalidationAdversarialCohortError",
+        "EvolutionRevalidationAdversarialCohortExecutor",
+        "EvolutionRevalidationAdversarialCohortReceipt",
+        "EvolutionRevalidationAdversarialCohortStore",
+    }
     revalidation_interventional_cohort_exports = {
         "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
         "EvolutionRevalidationInterventionalCheckSummary",
@@ -1777,6 +1799,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_validation_plans"
     elif name in revalidation_runtime_source_exports:
         module_name = "revalidation_runtime_sources"
+    elif name in revalidation_adversarial_cohort_exports:
+        module_name = "revalidation_adversarial_cohorts"
     elif name in revalidation_adversarial_sample_exports:
         module_name = "revalidation_adversarial_samples"
     elif name in revalidation_interventional_comparison_exports:

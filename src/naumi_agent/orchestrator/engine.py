@@ -212,6 +212,10 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_adversarial_cohorts import (
+    EvolutionRevalidationAdversarialCohortExecutor,
+    EvolutionRevalidationAdversarialCohortStore,
+)
 from naumi_agent.evolution.revalidation_adversarial_samples import (
     EvolutionRevalidationAdversarialSampleExecutor,
     EvolutionRevalidationAdversarialSampleStore,
@@ -1735,6 +1739,24 @@ class AgentEngine:
                 sandbox_eval_kernel=self.harness_sandbox_eval_kernel,
                 contract_service=self.evolution_revalidation_runtime_contract_service,
                 source_service=self.evolution_revalidation_runtime_source_service,
+            )
+        )
+        self.evolution_revalidation_adversarial_cohort_store = (
+            EvolutionRevalidationAdversarialCohortStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_adversarial_cohort_executor = (
+            EvolutionRevalidationAdversarialCohortExecutor(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                sample_store=self.evolution_revalidation_adversarial_sample_store,
+                receipt_store=self.evolution_revalidation_adversarial_cohort_store,
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                sample_executor=self.evolution_revalidation_adversarial_sample_executor,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                batch_admission=self.harness_sandbox_batch_admission,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

@@ -53,6 +53,8 @@
   从原始 H5a 重算 cohort summary，并形成 HAR-08 原生 H5b2/H5c comparison authority。
 - [EVO-05.3f2c1 Fresh Adversarial Sample](EVO-05-3f2c1-fresh-adversarial-sample.md)：已交付；在指定真实平台运行
   current-target RED 与 immutable-overlay GREEN probe pair，但尚未形成平台 cohort/matrix。
+- [EVO-05.3f2c2 Fresh Adversarial Cohort](EVO-05-3f2c2-fresh-adversarial-cohort.md)：已交付；形成单一真实平台的
+  连续 probe cohort、共享 Grant 和可恢复前缀，但尚未完成 required-platform matrix。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -69,7 +71,7 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2c1。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2c2。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Evaluation matrix、immutable GREEN source 与 current-target Validation Plan；
 Fresh Interventional cohort 与 paired comparison 已完成，但 Adversarial lanes 尚未完成，也没有新 Final Evaluation、
 reapproval、rollout、monitor、rollback executor 或最终发布 Outcome authority。任何界面和回执都不得把 cohort
