@@ -564,6 +564,20 @@ if TYPE_CHECKING:
         EvolutionRevalidationOutcomeView,
         render_evolution_revalidation_outcome,
     )
+    from naumi_agent.evolution.revalidation_platform_claims import (
+        EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN,
+        EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY,
+        EVOLUTION_REVALIDATION_WORKER_IDENTITY_POLICY,
+        EvolutionRevalidationPlatformClaimChallenge,
+        EvolutionRevalidationPlatformClaimError,
+        EvolutionRevalidationPlatformClaimPayload,
+        EvolutionRevalidationPlatformClaimReceipt,
+        EvolutionRevalidationPlatformClaimService,
+        EvolutionRevalidationPlatformClaimStore,
+        EvolutionRevalidationPlatformClaimView,
+        EvolutionRevalidationWorkerIdentity,
+        issue_evolution_revalidation_worker_identity,
+    )
     from naumi_agent.evolution.revalidation_platform_dispatches import (
         EVOLUTION_REVALIDATION_PLATFORM_DISPATCH_POLICY,
         EvolutionRevalidationPlatformDispatch,
@@ -820,6 +834,18 @@ __all__ = [
     "EvolutionRevalidationPlatformDispatchError",
     "EvolutionRevalidationPlatformDispatchService",
     "EvolutionRevalidationPlatformDispatchStore",
+    "EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN",
+    "EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY",
+    "EVOLUTION_REVALIDATION_WORKER_IDENTITY_POLICY",
+    "EvolutionRevalidationPlatformClaimChallenge",
+    "EvolutionRevalidationPlatformClaimError",
+    "EvolutionRevalidationPlatformClaimPayload",
+    "EvolutionRevalidationPlatformClaimReceipt",
+    "EvolutionRevalidationPlatformClaimService",
+    "EvolutionRevalidationPlatformClaimStore",
+    "EvolutionRevalidationPlatformClaimView",
+    "EvolutionRevalidationWorkerIdentity",
+    "issue_evolution_revalidation_worker_identity",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1532,6 +1558,20 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPlatformDispatchService",
         "EvolutionRevalidationPlatformDispatchStore",
     }
+    revalidation_platform_claim_exports = {
+        "EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN",
+        "EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY",
+        "EVOLUTION_REVALIDATION_WORKER_IDENTITY_POLICY",
+        "EvolutionRevalidationPlatformClaimChallenge",
+        "EvolutionRevalidationPlatformClaimError",
+        "EvolutionRevalidationPlatformClaimPayload",
+        "EvolutionRevalidationPlatformClaimReceipt",
+        "EvolutionRevalidationPlatformClaimService",
+        "EvolutionRevalidationPlatformClaimStore",
+        "EvolutionRevalidationPlatformClaimView",
+        "EvolutionRevalidationWorkerIdentity",
+        "issue_evolution_revalidation_worker_identity",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2088,6 +2128,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_promotion_inputs"
     elif name in revalidation_platform_dispatch_exports:
         module_name = "revalidation_platform_dispatches"
+    elif name in revalidation_platform_claim_exports:
+        module_name = "revalidation_platform_claims"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:

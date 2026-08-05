@@ -279,6 +279,10 @@ from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
 )
+from naumi_agent.evolution.revalidation_platform_claims import (
+    EvolutionRevalidationPlatformClaimService,
+    EvolutionRevalidationPlatformClaimStore,
+)
 from naumi_agent.evolution.revalidation_platform_dispatches import (
     EvolutionRevalidationPlatformDispatchService,
     EvolutionRevalidationPlatformDispatchStore,
@@ -1842,6 +1846,18 @@ class AgentEngine:
                 matrix_service=self.evolution_revalidation_adversarial_matrix_service,
                 worker_registry=resources.worker_registry_store,
                 store=self.evolution_revalidation_platform_dispatch_store,
+            )
+        )
+        self.evolution_revalidation_platform_claim_store = (
+            EvolutionRevalidationPlatformClaimStore(config.memory.session_db_path)
+        )
+        self.evolution_revalidation_platform_claim_service = (
+            EvolutionRevalidationPlatformClaimService(
+                workspace_root=paths.workspace_root,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                dispatch_store=self.evolution_revalidation_platform_dispatch_store,
+                worker_registry=resources.worker_registry_store,
+                store=self.evolution_revalidation_platform_claim_store,
             )
         )
         self.evolution_revalidation_adversarial_comparison_executor = (
