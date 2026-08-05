@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "manifest_kind": "claude_code_snapshot_semantic_mapping",
+  "behavior_matrix_sha256": "04b815f34ce6ed806c8c55affe8828d8d7e2fb097b5eff4a640748c43e7af13a",
+  "protocol_contract_sha256": "2c110d0b498136ca3887f29df0d57498abde4bf799af2c956e01e8129eac1db8",
+  "scope": "cc_03_2a_snapshot_semantics",
+  "responsibilities": [
+    {"cell_id": "doctor.cancel", "owner": "ui_local", "reason": "取消关联在线探测请求，属于前端控制态与独立终态事件。"},
+    {"cell_id": "doctor.detail", "owner": "bridge_snapshot", "reason": "诊断详情来自 doctor/health 的 typed items。"},
+    {"cell_id": "doctor.empty", "owner": "ui_local", "reason": "无 snapshot 与协议降级由前端视图状态区分。"},
+    {"cell_id": "doctor.error", "owner": "bridge_snapshot", "reason": "诊断错误由 snapshot status、item severity 与 diagnostic code 表达。"},
+    {"cell_id": "doctor.focus", "owner": "ui_local", "reason": "页面焦点和返回锚点不属于服务端健康快照。"},
+    {"cell_id": "doctor.keyboard", "owner": "ui_local", "reason": "刷新、Trace、探测、导出和退出键位由前端状态机处理。"},
+    {"cell_id": "doctor.loading", "owner": "ui_local", "reason": "请求发出至 doctor/health 到达前的 loading 是前端瞬态。"},
+    {"cell_id": "doctor.presentation", "owner": "bridge_snapshot", "reason": "领域、严重度、责任归属和稳定标签来自 typed snapshot。"},
+    {"cell_id": "permission.cancel", "owner": "not_applicable", "reason": "只读权限中心不承担待决权限交互的拒绝或取消。"},
+    {"cell_id": "permission.detail", "owner": "bridge_snapshot", "reason": "规则来源、风险、原因和历史回执来自 permissions/snapshot。"},
+    {"cell_id": "permission.empty", "owner": "bridge_snapshot", "reason": "pending、grants、history 的空数组是权威空态。"},
+    {"cell_id": "permission.error", "owner": "bridge_snapshot", "reason": "策略风险与决定状态由 snapshot 字段表达，传输错误另属前端请求态。"},
+    {"cell_id": "permission.focus", "owner": "ui_local", "reason": "权限中心瞬态路由和会话锚点属于前端。"},
+    {"cell_id": "permission.keyboard", "owner": "ui_local", "reason": "刷新、滚动和退出键位属于前端状态机。"},
+    {"cell_id": "permission.loading", "owner": "ui_local", "reason": "等待 permissions/snapshot 的 loading 不写入权威 payload。"},
+    {"cell_id": "permission.presentation", "owner": "bridge_snapshot", "reason": "模式、策略、待决项、授权和历史由 typed snapshot 驱动。"},
+    {"cell_id": "task.cancel", "owner": "ui_local", "reason": "取消是独立 task_cancel 控制请求，不是只读快照字段。"},
+    {"cell_id": "task.detail", "owner": "ui_local", "reason": "详情选择和请求关联属于前端控制态，详情内容仍复用 items。"},
+    {"cell_id": "task.empty", "owner": "bridge_snapshot", "reason": "items 与 timeline 的空数组构成权威任务空态。"},
+    {"cell_id": "task.error", "owner": "ui_local", "reason": "任务提交、传输和执行错误分层属于运行事件与前端关联态。"},
+    {"cell_id": "task.focus", "owner": "ui_local", "reason": "任务面板与 Inspector 的焦点仲裁属于前端。"},
+    {"cell_id": "task.keyboard", "owner": "ui_local", "reason": "选择、翻页、边界、详情和取消键位属于前端。"},
+    {"cell_id": "task.loading", "owner": "ui_local", "reason": "等待 tasks/snapshot 的 loading 是前端请求态。"},
+    {"cell_id": "task.presentation", "owner": "bridge_snapshot", "reason": "状态、来源、负责人、依赖和标题来自 typed task items。"}
+  ],
+  "projections": [
+    {
+      "area": "doctor",
+      "producer": "doctor_health_snapshot_v1",
+      "server_event": "doctor/health",
+      "matrix_cells": ["doctor.detail", "doctor.error", "doctor.presentation"],
+      "fields": [
+        {"field_path": "payload.items", "value_kind": "array", "required": true, "semantic": "有界诊断项目列表；空列表不等同于加载中。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].detail", "value_kind": "string", "required": true, "semantic": "经过边界控制的诊断详情，不包含原始异常对象。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].diagnostic_code", "value_kind": "string", "required": true, "semantic": "稳定机器诊断码；用户文案不得作为分支条件。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].domain", "value_kind": "enum", "required": true, "semantic": "诊断责任领域，用于稳定分组。", "allowed_values": ["browser", "git", "mcp", "model", "node", "provider", "runtime", "store", "terminal"], "source_values": []},
+        {"field_path": "payload.items[].responsibility", "value_kind": "enum", "required": true, "semantic": "问题责任归属，不从中文详情推断。", "allowed_values": ["external_service", "local_environment", "product_runtime", "unknown", "user_config"], "source_values": []},
+        {"field_path": "payload.items[].severity", "value_kind": "enum", "required": true, "semantic": "单项严重度由 Doctor check 状态归一化。", "allowed_values": ["degraded", "error", "ok", "unknown"], "source_values": [{"source_value": "error", "target_value": "error", "meaning": "Doctor error 保持错误语义。"}, {"source_value": "pass", "target_value": "ok", "meaning": "Doctor pass 归一化为 ok。"}, {"source_value": "warn", "target_value": "degraded", "meaning": "Doctor warn 归一化为 degraded。"}]},
+        {"field_path": "payload.schema_version", "value_kind": "literal", "required": true, "semantic": "Doctor Health payload schema 版本。", "allowed_values": ["1"], "source_values": []},
+        {"field_path": "payload.snapshot_sha256", "value_kind": "string", "required": true, "semantic": "内容绑定摘要，供导出预览和写入回执关联。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.status", "value_kind": "enum", "required": true, "semantic": "全局健康状态是全部 item 的最严重级别。", "allowed_values": ["degraded", "error", "ok", "unknown"], "source_values": []}
+      ],
+      "target_tests": [{"path": "tests/unit/test_doctor_health.py", "test_name": "test_doctor_health_snapshot_maps_domains_severity_and_responsibility"}]
+    },
+    {
+      "area": "permission",
+      "producer": "permission_panel_snapshot_v1",
+      "server_event": "permissions/snapshot",
+      "matrix_cells": ["permission.detail", "permission.empty", "permission.error", "permission.presentation"],
+      "fields": [
+        {"field_path": "payload.grants", "value_kind": "array", "required": true, "semantic": "当前会话有效授权的有界权威列表。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.history", "value_kind": "array", "required": true, "semantic": "最近权限终态回执的有界列表。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.pending", "value_kind": "array", "required": true, "semantic": "当前待决权限请求；空数组是明确空态。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.pending[].policy.risk", "value_kind": "enum", "required": true, "semantic": "工具策略风险等级，来自 Python PermissionRule。", "allowed_values": ["high", "low", "medium"], "source_values": [{"source_value": "high", "target_value": "high", "meaning": "高风险规则保持 high。"}, {"source_value": "low", "target_value": "low", "meaning": "低风险规则保持 low。"}, {"source_value": "medium", "target_value": "medium", "meaning": "中风险规则保持 medium。"}]},
+        {"field_path": "payload.pending[].policy.source", "value_kind": "string", "required": true, "semantic": "命中的 TOOL_PERMISSIONS、PREFIX_PERMISSIONS 或动态策略来源。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.pending[].reason", "value_kind": "string", "required": true, "semantic": "有界的人类可读确认原因；结构化策略仍以 policy 为准。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.pending[].status", "value_kind": "string", "required": true, "semantic": "待决请求状态；终态进入 history 而不是覆盖请求文本。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.schema_version", "value_kind": "literal", "required": true, "semantic": "Permission snapshot schema 版本。", "allowed_values": ["1"], "source_values": []},
+        {"field_path": "payload.warnings", "value_kind": "array", "required": true, "semantic": "读取部分权威来源失败时的有界告警。", "allowed_values": [], "source_values": []}
+      ],
+      "target_tests": [{"path": "tests/unit/test_permission_panel.py", "test_name": "test_permission_panel_payload_is_typed_bounded_and_private_field_free"}]
+    },
+    {
+      "area": "task",
+      "producer": "task_panel_snapshot_v1",
+      "server_event": "tasks/snapshot",
+      "matrix_cells": ["task.empty", "task.presentation"],
+      "fields": [
+        {"field_path": "payload.filters.detail_id", "value_kind": "string", "required": true, "semantic": "详情请求的稳定任务 ID，不从渲染文本反向解析。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items", "value_kind": "array", "required": true, "semantic": "跨 todo、subagent、background、browser 的统一有界任务列表。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].dependency_ids", "value_kind": "array", "required": true, "semantic": "稳定依赖 ID 列表，用于阻塞关系而非仅靠颜色。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].owner", "value_kind": "string", "required": true, "semantic": "任务负责人或子智能体名称。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].raw_status", "value_kind": "string", "required": true, "semantic": "保留来源原始状态用于详情和诊断，不驱动统一配色。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.items[].status", "value_kind": "enum", "required": true, "semantic": "跨来源统一状态，组件只按此字段决定状态语义。", "allowed_values": ["blocked", "cancelled", "completed", "failed", "pending", "running"], "source_values": [{"source_value": "completed", "target_value": "completed", "meaning": "Claude completed 保持完成。"}, {"source_value": "in_progress", "target_value": "running", "meaning": "Claude in_progress 归一化为 running。"}, {"source_value": "pending", "target_value": "pending", "meaning": "Claude pending 保持待处理。"}]},
+        {"field_path": "payload.items[].title", "value_kind": "string", "required": true, "semantic": "有界任务标题，属于敏感展示字段。", "allowed_values": [], "source_values": []},
+        {"field_path": "payload.schema_version", "value_kind": "literal", "required": true, "semantic": "Task snapshot schema 版本。", "allowed_values": ["1"], "source_values": []},
+        {"field_path": "payload.warnings", "value_kind": "array", "required": true, "semantic": "部分任务来源读取失败时的有界告警。", "allowed_values": [], "source_values": []}
+      ],
+      "target_tests": [{"path": "tests/unit/test_task_panel.py", "test_name": "test_build_task_panel_snapshot_normalizes_all_sources"}]
+    }
+  ]
+}
