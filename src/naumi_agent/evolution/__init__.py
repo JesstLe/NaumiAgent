@@ -704,6 +704,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationRolloutStage,
         EvolutionRevalidationRolloutStageName,
     )
+    from naumi_agent.evolution.revalidation_rollout_stage_advances import (
+        EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ADVANCE_POLICY,
+        EvolutionRevalidationRolloutStageAdvanceError,
+        EvolutionRevalidationRolloutStageAdvanceReceipt,
+        EvolutionRevalidationRolloutStageAdvanceService,
+        EvolutionRevalidationRolloutStageAdvanceStore,
+        EvolutionRevalidationRolloutStageAdvanceView,
+    )
     from naumi_agent.evolution.revalidation_rollout_stage_completions import (
         EVOLUTION_REVALIDATION_ROLLOUT_STAGE_COMPLETION_POLICY,
         EvolutionRevalidationRolloutStageCompletion,
@@ -1036,6 +1044,12 @@ __all__ = [
     "EvolutionRevalidationRolloutStageCompletionError",
     "EvolutionRevalidationRolloutStageCompletionService",
     "EvolutionRevalidationRolloutStageCompletionStore",
+    "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ADVANCE_POLICY",
+    "EvolutionRevalidationRolloutStageAdvanceError",
+    "EvolutionRevalidationRolloutStageAdvanceReceipt",
+    "EvolutionRevalidationRolloutStageAdvanceService",
+    "EvolutionRevalidationRolloutStageAdvanceStore",
+    "EvolutionRevalidationRolloutStageAdvanceView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1845,6 +1859,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRolloutStageCompletionService",
         "EvolutionRevalidationRolloutStageCompletionStore",
     }
+    revalidation_rollout_stage_advance_exports = {
+        "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ADVANCE_POLICY",
+        "EvolutionRevalidationRolloutStageAdvanceError",
+        "EvolutionRevalidationRolloutStageAdvanceReceipt",
+        "EvolutionRevalidationRolloutStageAdvanceService",
+        "EvolutionRevalidationRolloutStageAdvanceStore",
+        "EvolutionRevalidationRolloutStageAdvanceView",
+    }
     revalidation_runtime_observation_exports = {
         "EVOLUTION_REVALIDATION_RUNTIME_OBSERVATION_POLICY",
         "EvolutionRevalidationRuntimeObservation",
@@ -2442,6 +2464,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rollout_stage_entries"
     elif name in revalidation_rollout_stage_completion_exports:
         module_name = "revalidation_rollout_stage_completions"
+    elif name in revalidation_rollout_stage_advance_exports:
+        module_name = "revalidation_rollout_stage_advances"
     elif name in revalidation_runtime_observation_exports:
         module_name = "revalidation_runtime_observations"
     elif name in revalidation_rollback_request_exports:

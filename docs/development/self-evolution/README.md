@@ -138,6 +138,8 @@ Run Grant、runtime lease 与 ARC-04 sandbox Worker 下真实运行 local canary
 HMAC control signals 合并为 insufficient/passing/breached；breach 只开放 pause/rollback input，passing 不开放 stage advance。
 [EVO-05.5c](EVO-05-5c-rollout-stage-completion.md) 已把 current passing evidence 冻结为 local-canary completion，
 并机械区分 automatic-eligible 与 manual-interaction-required；next-stage/deployment authority 仍保持关闭。
+[EVO-05.5d](EVO-05-5d-stage-advance-authorization.md) 已复用 Harness durable interaction，把用户 advance/decline、
+Completion、control generation 与短期有效期冻结为 Stage Advance Receipt；只开放 opt-in entry，不执行部署。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

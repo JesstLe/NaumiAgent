@@ -137,6 +137,22 @@ class EvolutionRevalidationRolloutStageCompletionStore:
             ).fetchone()
         return None if row is None else _restore(row["completion_json"])
 
+    async def get(self, completion_id: str):
+        if not self.db_path.is_file():
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            row = await (
+                await db.execute(
+                    "SELECT completion_json FROM "
+                    "evolution_revalidation_rollout_stage_completions "
+                    "WHERE completion_id = ?",
+                    (completion_id,),
+                )
+            ).fetchone()
+        return None if row is None else _restore(row["completion_json"])
+
     async def record(self, completion):
         item = EvolutionRevalidationRolloutStageCompletion.model_validate_json(
             completion.model_dump_json()
