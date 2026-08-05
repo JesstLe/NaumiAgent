@@ -30,3 +30,6 @@
 - CC-01.2a 已为当前 Claude research source 建立逐路径受限 license scope；因为没有独立标准许可证，
   当前只允许 reference/reimplement，不能把 source copy/adapt 进入闭源产物。ARC-07 后续 artifact license
   inventory 必须消费每个实际第三方 source 的独立 scope/provenance，不能把一个来源的许可推及另一个来源。
+- [EVO-05.6b1](../self-evolution/EVO-05-6b1-immutable-rollback-source.md) 已能冻结 exact baseline rollback
+  bytes，但当前 rollout 尚无真实 installed-version target。ARC-07.5a 下一步应先实现 immutable version slot、原子 active
+  pointer 与 bootability receipt；EVO-05.6b2 再复用该能力执行真实回滚，不能直接覆盖开发 workspace。
