@@ -238,6 +238,10 @@ from naumi_agent.evolution.revalidation_approval_requirements import (
     EvolutionRevalidationApprovalRequirementService,
     EvolutionRevalidationApprovalRequirementStore,
 )
+from naumi_agent.evolution.revalidation_approval_signatures import (
+    EvolutionRevalidationApprovalSignatureService,
+    EvolutionRevalidationApprovalSignatureStore,
+)
 from naumi_agent.evolution.revalidation_evaluation_plans import (
     EvolutionRevalidationEvaluationPlanService,
     EvolutionRevalidationEvaluationPlanStore,
@@ -1937,6 +1941,23 @@ class AgentEngine:
                 interaction_store=self._harness_store,
                 response_store=self.evolution_revalidation_approval_response_store,
                 request_user_input=self.request_user_input,
+            )
+        )
+        self.evolution_revalidation_approval_signature_store = (
+            EvolutionRevalidationApprovalSignatureStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_approval_signature_service = (
+            EvolutionRevalidationApprovalSignatureService(
+                response_store=self.evolution_revalidation_approval_response_store,
+                requirement_service=(
+                    self.evolution_revalidation_approval_requirement_service
+                ),
+                principal_service=self.evolution_approval_principal_service,
+                signature_store=(
+                    self.evolution_revalidation_approval_signature_store
+                ),
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

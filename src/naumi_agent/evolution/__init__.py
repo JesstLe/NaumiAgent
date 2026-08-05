@@ -468,6 +468,19 @@ if TYPE_CHECKING:
         EvolutionRevalidationApprovalStep,
         EvolutionRevalidationApprovalTechnicalGate,
     )
+    from naumi_agent.evolution.revalidation_approval_signatures import (
+        EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY,
+        EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN,
+        EvolutionRevalidationApprovalSignatureChallenge,
+        EvolutionRevalidationApprovalSignatureChallengeView,
+        EvolutionRevalidationApprovalSignatureError,
+        EvolutionRevalidationApprovalSignaturePayload,
+        EvolutionRevalidationApprovalSignatureReceipt,
+        EvolutionRevalidationApprovalSignatureReceiptView,
+        EvolutionRevalidationApprovalSignatureService,
+        EvolutionRevalidationApprovalSignatureStatus,
+        EvolutionRevalidationApprovalSignatureStore,
+    )
     from naumi_agent.evolution.revalidation_evaluation_plans import (
         EVOLUTION_REVALIDATION_EVALUATION_PLAN_POLICY,
         EvolutionRevalidationEvaluationLane,
@@ -773,6 +786,17 @@ __all__ = [
     "EvolutionRevalidationApprovalResponseReceipt",
     "EvolutionRevalidationApprovalResponseStore",
     "EvolutionRevalidationApprovalResponseView",
+    "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
+    "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
+    "EvolutionRevalidationApprovalSignatureChallenge",
+    "EvolutionRevalidationApprovalSignatureChallengeView",
+    "EvolutionRevalidationApprovalSignatureError",
+    "EvolutionRevalidationApprovalSignaturePayload",
+    "EvolutionRevalidationApprovalSignatureReceipt",
+    "EvolutionRevalidationApprovalSignatureReceiptView",
+    "EvolutionRevalidationApprovalSignatureService",
+    "EvolutionRevalidationApprovalSignatureStatus",
+    "EvolutionRevalidationApprovalSignatureStore",
     "render_evolution_revalidation_rebase",
     "EVOLUTION_REVALIDATION_VALIDATION_POLICY",
     "EvolutionRevalidationCheckEvidence",
@@ -1486,6 +1510,19 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationApprovalResponseStore",
         "EvolutionRevalidationApprovalResponseView",
     }
+    revalidation_approval_signature_exports = {
+        "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
+        "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
+        "EvolutionRevalidationApprovalSignatureChallenge",
+        "EvolutionRevalidationApprovalSignatureChallengeView",
+        "EvolutionRevalidationApprovalSignatureError",
+        "EvolutionRevalidationApprovalSignaturePayload",
+        "EvolutionRevalidationApprovalSignatureReceipt",
+        "EvolutionRevalidationApprovalSignatureReceiptView",
+        "EvolutionRevalidationApprovalSignatureService",
+        "EvolutionRevalidationApprovalSignatureStatus",
+        "EvolutionRevalidationApprovalSignatureStore",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -2000,6 +2037,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
         module_name = "revalidation_approval_requests"
+    elif name in revalidation_approval_signature_exports:
+        module_name = "revalidation_approval_signatures"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
