@@ -704,6 +704,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationRolloutStage,
         EvolutionRevalidationRolloutStageName,
     )
+    from naumi_agent.evolution.revalidation_rollout_stage_completions import (
+        EVOLUTION_REVALIDATION_ROLLOUT_STAGE_COMPLETION_POLICY,
+        EvolutionRevalidationRolloutStageCompletion,
+        EvolutionRevalidationRolloutStageCompletionError,
+        EvolutionRevalidationRolloutStageCompletionService,
+        EvolutionRevalidationRolloutStageCompletionStore,
+    )
     from naumi_agent.evolution.revalidation_rollout_stage_entries import (
         EVOLUTION_REVALIDATION_ROLLOUT_CONTROL_POLICY,
         EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ENTRY_POLICY,
@@ -1024,6 +1031,11 @@ __all__ = [
     "EvolutionRevalidationRolloutStageEntryService",
     "EvolutionRevalidationRolloutStageEntryStore",
     "EvolutionRevalidationRolloutStageEntryView",
+    "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_COMPLETION_POLICY",
+    "EvolutionRevalidationRolloutStageCompletion",
+    "EvolutionRevalidationRolloutStageCompletionError",
+    "EvolutionRevalidationRolloutStageCompletionService",
+    "EvolutionRevalidationRolloutStageCompletionStore",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1826,6 +1838,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRolloutStageEntryStore",
         "EvolutionRevalidationRolloutStageEntryView",
     }
+    revalidation_rollout_stage_completion_exports = {
+        "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_COMPLETION_POLICY",
+        "EvolutionRevalidationRolloutStageCompletion",
+        "EvolutionRevalidationRolloutStageCompletionError",
+        "EvolutionRevalidationRolloutStageCompletionService",
+        "EvolutionRevalidationRolloutStageCompletionStore",
+    }
     revalidation_runtime_observation_exports = {
         "EVOLUTION_REVALIDATION_RUNTIME_OBSERVATION_POLICY",
         "EvolutionRevalidationRuntimeObservation",
@@ -2421,6 +2440,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rollout_plans"
     elif name in revalidation_rollout_stage_entry_exports:
         module_name = "revalidation_rollout_stage_entries"
+    elif name in revalidation_rollout_stage_completion_exports:
+        module_name = "revalidation_rollout_stage_completions"
     elif name in revalidation_runtime_observation_exports:
         module_name = "revalidation_runtime_observations"
     elif name in revalidation_rollback_request_exports:
