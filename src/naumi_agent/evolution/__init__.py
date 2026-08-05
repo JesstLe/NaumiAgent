@@ -482,6 +482,16 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_runtime_contracts import (
+        EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY,
+        EvolutionRevalidationRuntimeContract,
+        EvolutionRevalidationRuntimeContractBuilder,
+        EvolutionRevalidationRuntimeContractError,
+        EvolutionRevalidationRuntimeContractService,
+        EvolutionRevalidationRuntimeContractStore,
+        EvolutionRevalidationRuntimeContractView,
+        render_evolution_revalidation_runtime_contract,
+    )
     from naumi_agent.evolution.revalidation_runtime_sources import (
         EvolutionRevalidationRuntimeSourceError,
         EvolutionRevalidationRuntimeSourcePair,
@@ -668,6 +678,14 @@ __all__ = [
     "EvolutionRevalidationRuntimeSourceError",
     "EvolutionRevalidationRuntimeSourcePair",
     "EvolutionRevalidationRuntimeSourceService",
+    "EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY",
+    "EvolutionRevalidationRuntimeContract",
+    "EvolutionRevalidationRuntimeContractBuilder",
+    "EvolutionRevalidationRuntimeContractError",
+    "EvolutionRevalidationRuntimeContractService",
+    "EvolutionRevalidationRuntimeContractStore",
+    "EvolutionRevalidationRuntimeContractView",
+    "render_evolution_revalidation_runtime_contract",
     "EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY",
     "EvolutionRevalidationCheckCoverage",
     "EvolutionRevalidationValidationFile",
@@ -1183,6 +1201,16 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRuntimeSourcePair",
         "EvolutionRevalidationRuntimeSourceService",
     }
+    revalidation_runtime_contract_exports = {
+        "EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY",
+        "EvolutionRevalidationRuntimeContract",
+        "EvolutionRevalidationRuntimeContractBuilder",
+        "EvolutionRevalidationRuntimeContractError",
+        "EvolutionRevalidationRuntimeContractService",
+        "EvolutionRevalidationRuntimeContractStore",
+        "EvolutionRevalidationRuntimeContractView",
+        "render_evolution_revalidation_runtime_contract",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1667,6 +1695,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_validation_plans"
     elif name in revalidation_runtime_source_exports:
         module_name = "revalidation_runtime_sources"
+    elif name in revalidation_runtime_contract_exports:
+        module_name = "revalidation_runtime_contracts"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

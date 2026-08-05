@@ -30,6 +30,7 @@ Candidate Lease，不要求旧 worktree 存活，不运行项目代码，也不�
 
 ## 4. 后续边界
 
-本切片只建立共享 source pair，尚未改变旧 Interventional/Adversarial receipt schema 或执行器参数。EVO-05.3f2b2 将让
-两类 sample/cohort executor 显式消费 `EvolutionRevalidationRuntimeSourcePair` 与新 Validation Plan，并移除 fresh 路径对
+本切片只建立共享 source pair，尚未改变旧 Interventional/Adversarial receipt schema 或执行器参数。
+[EVO-05.3f2b2a](EVO-05-3f2b2a-fresh-runtime-contract.md) 已先补齐 metric runner 与 adversarial probe authority；
+EVO-05.3f2b2b/2c 再让两类 sample/cohort executor 显式消费 Runtime Contract 与 Source Pair，并移除 fresh 路径对
 active Candidate Lease 的依赖；之后才执行完整 lane matrix。

@@ -3228,6 +3228,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionRevalidationRequestError,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_runtime_contracts import (
+        EvolutionRevalidationRuntimeContractError,
+        render_evolution_revalidation_runtime_contract,
+    )
     from naumi_agent.evolution.revalidation_validation_plans import (
         EvolutionRevalidationValidationPlanError,
         render_evolution_revalidation_validation_plan,
@@ -3625,6 +3629,21 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 Markdown(render_evolution_revalidation_validation_plan(view))
             )
             return
+        if action == "revalidation-runtime-contract":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-runtime-contract 需要一个 Validation Plan ID。"
+                )
+            view = (
+                await engine.evolution_revalidation_runtime_contract_service.issue(
+                    workspace_root=engine.workspace_root,
+                    validation_plan_id=parts[1],
+                )
+            )
+            console.print(
+                Markdown(render_evolution_revalidation_runtime_contract(view))
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3840,6 +3859,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-evaluation-plan <revalidation-outcome-id>；"
             "/evolution revalidation-evaluation-source <fresh-evaluation-plan-id>；"
             "/evolution revalidation-validation-plan <immutable-source-id>；"
+            "/evolution revalidation-runtime-contract <validation-plan-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3877,6 +3897,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationValidationPlanError as exc:
         console.print(
             f"Evolution Revalidation Validation Plan 未签发：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationRuntimeContractError as exc:
+        console.print(
+            f"Evolution Fresh Runtime Contract 未签发：{exc}",
             style="yellow",
             markup=False,
         )
