@@ -342,6 +342,10 @@ from naumi_agent.evolution.revalidation_runtime_contracts import (
     EvolutionRevalidationRuntimeContractService,
     EvolutionRevalidationRuntimeContractStore,
 )
+from naumi_agent.evolution.revalidation_runtime_observations import (
+    EvolutionRevalidationRuntimeObservationService,
+    EvolutionRevalidationRuntimeObservationStore,
+)
 from naumi_agent.evolution.revalidation_runtime_sources import (
     EvolutionRevalidationRuntimeSourceService,
 )
@@ -2183,6 +2187,27 @@ class AgentEngine:
                 journal_store=(
                     self.evolution_revalidation_local_canary_journal_store
                 ),
+            )
+        )
+        self.evolution_revalidation_runtime_observation_store = (
+            EvolutionRevalidationRuntimeObservationStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_runtime_observation_service = (
+            EvolutionRevalidationRuntimeObservationService(
+                workspace_root=paths.workspace_root,
+                entry_service=(
+                    self.evolution_revalidation_rollout_stage_entry_service
+                ),
+                baseline_service=(
+                    self.evolution_revalidation_rollout_baseline_service
+                ),
+                journal_store=(
+                    self.evolution_revalidation_local_canary_journal_store
+                ),
+                control_store=self.evolution_revalidation_rollout_control_store,
+                store=self.evolution_revalidation_runtime_observation_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

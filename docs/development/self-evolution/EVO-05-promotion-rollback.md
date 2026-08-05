@@ -99,7 +99,8 @@
   通过 exact Profile、Run Grant、runtime lease 与 ARC-04 sandbox Worker 真实执行，并写入 crash-safe hash-chain journal。
 - [EVO-05.5a Rollout Monitor Baseline](EVO-05-5a-rollout-monitor-baseline.md)：已交付；从 Fresh Final 绑定的
   Interventional GREEN raw H5a 冻结 latency、completion/error 与可信 cost 基线。
-- EVO-05.5b Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
+- [EVO-05.5b Runtime Observation](EVO-05-5b-runtime-observation.md)：已交付；将 terminal journal、baseline、
+  frozen thresholds 与 HMAC control signals 聚合为 insufficient/passing/breached receipt。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
 - EVO-05.7 Outcome record：promoted/rolled_back/superseded 与长期指标。
 
@@ -119,5 +120,5 @@ Harness revalidation、旧证据失效、Fresh Interventional/Adversarial compar
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
 现可形成 exact Worker/capacity 绑定的 queued Dispatch，由持有 attested Ed25519 私钥的 Worker 领取，并从父权限派生短期远端执行授权；
 已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口、immutable rollout plan、fenced local-canary entry、
-真实 local-canary executor 与可信 monitor baseline，但尚未实现 runtime observation、rollback executor
+真实 local-canary executor、可信 monitor baseline 与 runtime observation，但尚未实现 automatic pause/rollback executor
 或最终 Outcome 回注。任何界面和回执都不得把平台评测完成宣称为自进化闭环完成。
