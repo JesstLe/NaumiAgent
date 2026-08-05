@@ -7,6 +7,7 @@ import contextlib
 import logging
 import re
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     from naumi_agent.orchestrator.pursuit import PursuitInteractionPort
     from naumi_agent.orchestrator.pursuit_lease import PursuitLeasePort
     from naumi_agent.orchestrator.pursuit_reconcile import BackgroundTaskLookup
+    from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+        PursuitTerminalOutboxRunReceipt,
+    )
     from naumi_agent.runtime.ports.model import ModelPort
 
 logger = logging.getLogger(__name__)
@@ -482,11 +486,87 @@ def _with_persisted_recovery_attempt(
     return result.rstrip() + f"\n\n- recovery attempt: `{attempt_id}`"
 
 
-def create_pursuit_tool() -> list[Tool]:
-    return [
+class PursuitTerminalOutboxRunNowTool(Tool):
+    """Run one explicit, bounded terminal publication recovery pass."""
+
+    def __init__(
+        self,
+        runner: Callable[[str], Awaitable[PursuitTerminalOutboxRunReceipt]],
+        *,
+        enabled: bool,
+    ) -> None:
+        self._runner = runner
+        self._enabled = enabled
+
+    @property
+    def name(self) -> str:
+        return "pursuit_terminal_outbox_run_now"
+
+    @property
+    def description(self) -> str:
+        return (
+            "立即执行一轮有界 Pursuit 终态 outbox 恢复；只处理已到期或 claim "
+            "已过期的记录，不绕过退避与 fencing，并返回持久化回执。"
+        )
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            destructive=True,
+            requires_confirmation=True,
+            requires_persistent_authorization=True,
+            user_facing_name="立即恢复 Pursuit 终态队列",
+            search_hint="pursuit terminal outbox recovery run now receipt",
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}, "additionalProperties": False}
+
+    async def execute(self, **kwargs: Any) -> str:
+        if not self._enabled:
+            raise RuntimeError("Pursuit 终态 outbox worker 当前未启用。")
+        permission_receipt = current_permission_receipt()
+        source_request_id = (
+            permission_receipt.call_id
+            if permission_receipt is not None
+            else f"local-tool-{uuid.uuid4()}"
+        )
+        receipt = await self._runner(source_request_id)
+        status_label = {
+            "completed": "已完成",
+            "partial": "部分完成",
+            "no_due": "暂无到期记录",
+            "failed": "执行失败",
+        }[receipt.status.value]
+        return "\n".join((
+            f"{status_label}：Pursuit 终态队列有界恢复。",
+            f"- 回执：`{receipt.receipt_id}`",
+            f"- 积压：{receipt.pending_before} → {receipt.pending_after}",
+            (
+                f"- 处理：claimed {receipt.claimed} · delivered {receipt.delivered} · "
+                f"retry {receipt.retry_scheduled} · failed {receipt.failures}"
+            ),
+        ))
+
+
+def create_pursuit_tool(
+    *,
+    terminal_outbox_runner: (
+        Callable[[str], Awaitable[PursuitTerminalOutboxRunReceipt]] | None
+    ) = None,
+    terminal_outbox_enabled: bool = False,
+) -> list[Tool]:
+    tools: list[Tool] = [
         PursueTool(),
         PursuitListTool(),
         PursuitStatusTool(),
         PursuitResumeTool(),
         PursuitReconcileTool(),
     ]
+    if terminal_outbox_runner is not None:
+        tools.append(PursuitTerminalOutboxRunNowTool(
+            terminal_outbox_runner,
+            enabled=terminal_outbox_enabled,
+        ))
+    return tools

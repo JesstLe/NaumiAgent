@@ -302,6 +302,11 @@ from naumi_agent.orchestrator.context_assembly import (
     is_harness_context_message,
 )
 from naumi_agent.orchestrator.planner import AdaptivePlanner, ExecutionMode, Plan
+from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalOutboxRunReceipt,
+    PursuitTerminalOutboxRunStatus,
+    new_terminal_outbox_run_receipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalOutboxPassResult,
     PursuitTerminalOutboxWorker,
@@ -1736,7 +1741,12 @@ class AgentEngine:
             interaction_port=self._harness_store,
         )
         from naumi_agent.tools.pursuit import create_pursuit_tool
-        for tool in create_pursuit_tool():
+        for tool in create_pursuit_tool(
+            terminal_outbox_runner=self.run_pursuit_terminal_outbox_now,
+            terminal_outbox_enabled=(
+                self._config.harness.pursuit_terminal_outbox.enabled
+            ),
+        ):
             self._tool_registry.register(tool)
 
         from naumi_agent.tools.goal import create_goal_tools
@@ -2724,6 +2734,57 @@ class AgentEngine:
     ) -> PursuitTerminalOutboxPassResult:
         """Run one explicit bounded terminal recovery pass."""
         return await self._pursuit_terminal_outbox_worker.run_once()
+
+    async def run_pursuit_terminal_outbox_now(
+        self,
+        source_request_id: str,
+    ) -> PursuitTerminalOutboxRunReceipt:
+        """Run one due-only pass and persist an identity-free immutable receipt."""
+        normalized_request = str(source_request_id or "").strip()
+        if not normalized_request or len(normalized_request) > 256:
+            raise ValueError("terminal outbox run request id 无效。")
+        request_sha256 = hashlib.sha256(normalized_request.encode("utf-8")).hexdigest()
+        existing = self.pursuit_store.get_terminal_outbox_run_receipt(request_sha256)
+        if existing is not None:
+            return existing
+        if not self._config.harness.pursuit_terminal_outbox.enabled:
+            raise RuntimeError("terminal_outbox_disabled")
+
+        assessed_at = datetime.now(UTC).timestamp()
+        before = self.pursuit_store.terminal_outbox_backlog(now=assessed_at)
+        try:
+            result = await self._pursuit_terminal_outbox_worker.run_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            result = PursuitTerminalOutboxPassResult(
+                failures=1,
+                failure_codes=("explicit_run_failed",),
+            )
+        completed_at = datetime.now(UTC).timestamp()
+        after = self.pursuit_store.terminal_outbox_backlog(now=completed_at)
+        if result.claimed == 0 and result.failures == 0:
+            status = PursuitTerminalOutboxRunStatus.NO_DUE
+        elif result.failures and result.delivered == 0 and result.retry_scheduled == 0:
+            status = PursuitTerminalOutboxRunStatus.FAILED
+        elif result.failures or result.retry_scheduled:
+            status = PursuitTerminalOutboxRunStatus.PARTIAL
+        else:
+            status = PursuitTerminalOutboxRunStatus.COMPLETED
+        receipt = new_terminal_outbox_run_receipt(
+            source_request_id=normalized_request,
+            status=status,
+            pending_before=before.total_pending,
+            pending_after=after.total_pending,
+            claimed=result.claimed,
+            delivered=result.delivered,
+            retry_scheduled=result.retry_scheduled,
+            failures=result.failures,
+            failure_codes=result.failure_codes,
+            created_at=completed_at,
+        )
+        persisted, _ = self.pursuit_store.save_terminal_outbox_run_receipt(receipt)
+        return persisted
 
     async def run_agent_publication_recovery_once(
         self,

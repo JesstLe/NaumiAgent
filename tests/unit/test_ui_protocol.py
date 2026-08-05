@@ -681,6 +681,15 @@ def test_protocol_normalizes_pursuit_recovery_resume() -> None:
             })
 
 
+def test_protocol_normalizes_terminal_outbox_run_now_to_empty_payload() -> None:
+    record = normalize_client_record({
+        "type": ClientEventType.PURSUIT_TERMINAL_OUTBOX_RUN_NOW,
+        "payload": {"force": True, "skip_backoff": True},
+    })
+
+    assert record["payload"] == {}
+
+
 @pytest.mark.parametrize(
     "payload",
     [

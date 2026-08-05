@@ -5239,7 +5239,7 @@ async def _run_pursue(engine: Any, goal: str) -> None:
     from rich.progress import Progress, SpinnerColumn, TextColumn
 
     parts = goal.strip().split(maxsplit=1)
-    if parts and parts[0] in {"list", "status", "resume", "reconcile"}:
+    if parts and parts[0] in {"list", "status", "resume", "reconcile", "outbox"}:
         await _run_pursue_meta(engine, parts[0], parts[1] if len(parts) > 1 else "")
         return
 
@@ -5297,6 +5297,7 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         "status": "pursuit_status",
         "resume": "pursuit_resume",
         "reconcile": "pursuit_reconcile",
+        "outbox": "pursuit_terminal_outbox_run_now",
     }
     tool_name = tool_map[subcommand]
     tool = engine.tool_registry.get(tool_name)
@@ -5307,7 +5308,12 @@ async def _run_pursue_meta(engine: Any, subcommand: str, arg: str) -> None:
         identifier = "恢复请求ID" if subcommand == "reconcile" else "运行ID"
         console.print(f"[yellow]用法: /pursue {subcommand} <{identifier}>[/yellow]")
         return
-    if subcommand == "list":
+    if subcommand == "outbox" and arg.strip() != "run-now":
+        console.print("[yellow]用法: /pursue outbox run-now[/yellow]")
+        return
+    if subcommand == "outbox":
+        kwargs = {}
+    elif subcommand == "list":
         kwargs = {"active_only": "--active" in arg.split()}
     elif subcommand == "reconcile":
         kwargs = {"attempt_id": arg.strip()}

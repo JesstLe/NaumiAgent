@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -633,6 +634,7 @@ class JsonlEngineBridge:
         self._harness_eval_retry_tasks: dict[str, asyncio.Task[None]] = {}
         self._harness_eval_promotion_tasks: dict[str, asyncio.Task[None]] = {}
         self._pursuit_recovery_tasks: dict[str, asyncio.Task[None]] = {}
+        self._pursuit_terminal_outbox_tasks: dict[str, asyncio.Task[None]] = {}
         self._workspace_file_search_task: asyncio.Task[None] | None = None
         self._queued_chat_submissions: deque[QueuedChatSubmission] = deque()
         self._queue_owner_id = f"queue-bridge-{uuid4().hex}"
@@ -1672,6 +1674,9 @@ class JsonlEngineBridge:
             return
         if event_type == ClientEventType.PURSUIT_RECOVERY_RESUME:
             await self.start_pursuit_recovery(payload, request_id=request_id)
+            return
+        if event_type == ClientEventType.PURSUIT_TERMINAL_OUTBOX_RUN_NOW:
+            await self.start_pursuit_terminal_outbox_run_now(request_id=request_id)
             return
         if event_type == ClientEventType.EVOLUTION_REVIEW_REQUEST:
             await self.show_evolution_review(payload, request_id=request_id)
@@ -4644,6 +4649,136 @@ class JsonlEngineBridge:
             request_id=request_id,
         )
 
+    async def start_pursuit_terminal_outbox_run_now(
+        self,
+        *,
+        request_id: str,
+    ) -> None:
+        """Execute one explicit outbox pass through ToolExecution authority."""
+        if request_id in self._pursuit_terminal_outbox_tasks:
+            return
+        if self._pursuit_terminal_outbox_tasks:
+            await self._emit_pursuit_terminal_outbox_action_result(
+                request_id=request_id,
+                status="blocked",
+                code="operation_busy",
+                message="已有一轮终态队列恢复正在执行，请等待其回执。",
+            )
+            return
+        if not bool(getattr(self.engine, "pursuit_terminal_outbox_enabled", False)):
+            await self._emit_pursuit_terminal_outbox_action_result(
+                request_id=request_id,
+                status="blocked",
+                code="terminal_outbox_disabled",
+                message="Pursuit 终态 outbox worker 当前未启用。",
+            )
+            return
+
+        async def publish_tool_event(
+            event: str,
+            data: dict[str, object],
+        ) -> None:
+            await self.handle_engine_event(event, dict(data))
+
+        async def run() -> None:
+            from naumi_agent.tools.base import ToolCall
+
+            tool_call_id = (
+                "new-ui-terminal-outbox-"
+                + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:32]
+            )
+            try:
+                await self.engine.get_or_create_session()
+                result = await self.engine.execute_tool(
+                    ToolCall(
+                        id=tool_call_id,
+                        name="pursuit_terminal_outbox_run_now",
+                        arguments="{}",
+                    ),
+                    on_event=publish_tool_event,
+                    agent_name="new-ui",
+                )
+                request_sha256 = hashlib.sha256(
+                    tool_call_id.encode("utf-8")
+                ).hexdigest()
+                receipt = self.engine.pursuit_store.get_terminal_outbox_run_receipt(
+                    request_sha256
+                )
+                if receipt is None:
+                    status = "blocked" if result.status == "error" else "error"
+                    code = (
+                        "tool_execution_rejected"
+                        if result.status == "error"
+                        else "receipt_authority_missing"
+                    )
+                else:
+                    status = receipt.status.value
+                    code = receipt.status.value
+                await self._emit_pursuit_terminal_outbox_action_result(
+                    request_id=request_id,
+                    status=status,
+                    code=code,
+                    message=_bounded_action_message(result.content),
+                    receipt=(
+                        receipt.model_dump(
+                            mode="json",
+                            exclude={"source_request_sha256"},
+                        )
+                        if receipt is not None
+                        else None
+                    ),
+                )
+                await self.show_goal_panel({}, request_id=request_id)
+            except asyncio.CancelledError:
+                if self._closed:
+                    raise
+                await self._emit_pursuit_terminal_outbox_action_result(
+                    request_id=request_id,
+                    status="error",
+                    code="cancelled",
+                    message="终态队列恢复请求已取消，请刷新 Goal 页面确认权威状态。",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Terminal outbox UI action failed (%s)",
+                    type(exc).__name__,
+                )
+                await self._emit_pursuit_terminal_outbox_action_result(
+                    request_id=request_id,
+                    status="error",
+                    code="internal_error",
+                    message="终态队列恢复未能安全完成，请刷新状态或运行 `/doctor`。",
+                )
+            finally:
+                self._pursuit_terminal_outbox_tasks.pop(request_id, None)
+
+        task = asyncio.create_task(
+            run(),
+            name=f"pursuit-terminal-outbox-{request_id}",
+        )
+        self._pursuit_terminal_outbox_tasks[request_id] = task
+
+    async def _emit_pursuit_terminal_outbox_action_result(
+        self,
+        *,
+        request_id: str,
+        status: str,
+        code: str,
+        message: str,
+        receipt: dict[str, Any] | None = None,
+    ) -> None:
+        await self.emit(
+            ServerEventType.PURSUIT_TERMINAL_OUTBOX_ACTION_RESULT,
+            {
+                "schema_version": 1,
+                "status": status,
+                "code": code,
+                "message": _bounded_action_message(message),
+                "receipt": receipt,
+            },
+            request_id=request_id,
+        )
+
     async def cancel_task(
         self,
         payload: dict[str, Any],
@@ -5958,6 +6093,12 @@ class JsonlEngineBridge:
         if pursuit_recovery_tasks:
             await asyncio.gather(*pursuit_recovery_tasks, return_exceptions=True)
         self._pursuit_recovery_tasks.clear()
+        terminal_outbox_tasks = tuple(self._pursuit_terminal_outbox_tasks.values())
+        for task in terminal_outbox_tasks:
+            task.cancel()
+        if terminal_outbox_tasks:
+            await asyncio.gather(*terminal_outbox_tasks, return_exceptions=True)
+        self._pursuit_terminal_outbox_tasks.clear()
         workspace_file_task = self._workspace_file_search_task
         self._workspace_file_search_task = None
         if workspace_file_task is not None and not workspace_file_task.done():

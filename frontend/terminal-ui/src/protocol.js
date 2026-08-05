@@ -884,6 +884,9 @@ function normalizeServerPayload(type, payload) {
   if (type === "pursuit/recovery/action_result") {
     return normalizePursuitRecoveryActionResult(payload);
   }
+  if (type === "pursuit/terminal-outbox/action_result") {
+    return normalizePursuitTerminalOutboxActionResult(payload);
+  }
   if (type === "tasks/snapshot") {
     return normalizeTaskSnapshot(payload);
   }
@@ -1349,6 +1352,88 @@ function normalizePursuitRecoveryActionResult(payload) {
     resume_action: payload.resume_action == null
       ? null
       : normalizePursuitRecoveryResumeAction(payload.resume_action, runId),
+  };
+}
+
+function normalizePursuitTerminalOutboxActionResult(payload) {
+  if (Number(payload.schema_version) !== 1) {
+    throw new Error("pursuit/terminal-outbox/action_result schema_version 不兼容");
+  }
+  const status = harnessChoice(
+    payload.status,
+    "pursuit/terminal-outbox/action_result status",
+    new Set(["completed", "partial", "no_due", "failed", "blocked", "error"]),
+  );
+  const code = harnessText(payload.code, "pursuit/terminal-outbox/action_result code");
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(code)) {
+    throw new Error("pursuit/terminal-outbox/action_result code 无效");
+  }
+  const receipt = payload.receipt == null
+    ? null
+    : normalizePursuitTerminalOutboxRunReceipt(payload.receipt);
+  const terminal = new Set(["completed", "partial", "no_due", "failed"]);
+  if ((terminal.has(status) && receipt == null) || (receipt && receipt.status !== status)) {
+    throw new Error("pursuit/terminal-outbox/action_result 回执与状态不一致");
+  }
+  return {
+    schema_version: 1,
+    status,
+    code,
+    message: workbenchText(
+      payload.message,
+      "pursuit/terminal-outbox/action_result message",
+      4_000,
+    ),
+    receipt,
+  };
+}
+
+function normalizePursuitTerminalOutboxRunReceipt(value) {
+  const item = harnessObject(value, "pursuit terminal outbox run receipt");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("pursuit terminal outbox run receipt schema_version 不兼容");
+  }
+  const receiptId = harnessText(item.receipt_id, "terminal outbox receipt_id");
+  const receiptSha256 = harnessText(item.receipt_sha256, "terminal outbox receipt_sha256");
+  if (!/^ptorun_[0-9a-f]{24}$/.test(receiptId) || !/^[0-9a-f]{64}$/.test(receiptSha256)) {
+    throw new Error("pursuit terminal outbox run receipt 标识无效");
+  }
+  const status = harnessChoice(
+    item.status,
+    "terminal outbox receipt status",
+    new Set(["completed", "partial", "no_due", "failed"]),
+  );
+  const count = (name, maximum = 10_000) => {
+    const value = harnessNonnegativeInteger(item[name], `terminal outbox receipt ${name}`);
+    if (value > maximum) throw new Error(`terminal outbox receipt ${name} 超出上限`);
+    return value;
+  };
+  if (!Array.isArray(item.failure_codes) || item.failure_codes.length > 64) {
+    throw new Error("terminal outbox receipt failure_codes 无效");
+  }
+  const failureCodes = item.failure_codes.map(
+    (entry) => harnessText(entry, "terminal outbox receipt failure_code"),
+  );
+  if (failureCodes.some((entry) => !/^[a-z][a-z0-9_]{0,63}$/.test(entry))) {
+    throw new Error("terminal outbox receipt failure_code 无效");
+  }
+  const createdAt = Number(item.created_at);
+  if (!Number.isFinite(createdAt) || createdAt <= 0) {
+    throw new Error("terminal outbox receipt created_at 无效");
+  }
+  return {
+    schema_version: 1,
+    receipt_id: receiptId,
+    status,
+    pending_before: count("pending_before"),
+    pending_after: count("pending_after"),
+    claimed: count("claimed", 1_000),
+    delivered: count("delivered", 1_000),
+    retry_scheduled: count("retry_scheduled", 1_000),
+    failures: count("failures", 1_000),
+    failure_codes: failureCodes,
+    created_at: createdAt,
+    receipt_sha256: receiptSha256,
   };
 }
 

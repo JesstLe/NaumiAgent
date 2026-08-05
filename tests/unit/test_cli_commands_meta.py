@@ -112,6 +112,22 @@ async def test_shared_pursue_reconcile_routes_attempt_identity(
 
 
 @pytest.mark.asyncio
+async def test_shared_pursue_outbox_routes_empty_bounded_action(
+    rendered_console: StringIO,
+) -> None:
+    engine = _EngineFacadeFake(content="暂无到期记录。")
+    engine.tool_registry = {"pursuit_terminal_outbox_run_now": engine.tool}
+
+    await commands_meta.run_pursue(engine, "outbox run-now")
+
+    tool_call, agent_name = engine.calls[0]
+    assert agent_name == "cli"
+    assert tool_call.name == "pursuit_terminal_outbox_run_now"
+    assert json.loads(tool_call.arguments) == {}
+    assert "暂无到期记录" in rendered_console.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_delete_session_command_reports_durable_retry_request(
     rendered_console: StringIO,
 ) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import math
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ from naumi_agent.orchestrator.pursuit_terminal_outbox import (
     PursuitTerminalDispatchState,
     PursuitTerminalOutboxDispatch,
     PursuitTerminalOutboxRecord,
+    PursuitTerminalOutboxRunReceipt,
     PursuitTerminalOutboxState,
     pursuit_terminal_outbox_id,
 )
@@ -1100,6 +1102,115 @@ class PursuitStore:
             expired_claimed=expired_claimed,
             assessed_at=now,
         )
+
+    def get_terminal_outbox_run_receipt(
+        self,
+        source_request_sha256: str,
+    ) -> PursuitTerminalOutboxRunReceipt | None:
+        """Read and authenticate an immutable explicit-run receipt."""
+        normalized = str(source_request_sha256 or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+            raise ValueError("terminal outbox run request digest 格式无效。")
+        if not self._db_path.exists():
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT receipt_id, source_request_sha256, payload_json, "
+                    "payload_sha256 "
+                    "FROM pursuit_terminal_outbox_run_receipts "
+                    "WHERE source_request_sha256 = ?",
+                    (normalized,),
+                ).fetchone()
+            if row is None:
+                return None
+            receipt = PursuitTerminalOutboxRunReceipt.model_validate_json(
+                str(row["payload_json"])
+            )
+            if (
+                not hmac.compare_digest(receipt.receipt_id, str(row["receipt_id"]))
+                or not hmac.compare_digest(
+                    receipt.source_request_sha256,
+                    str(row["source_request_sha256"]),
+                )
+                or not hmac.compare_digest(receipt.source_request_sha256, normalized)
+                or not hmac.compare_digest(
+                    receipt.receipt_sha256,
+                    str(row["payload_sha256"]),
+                )
+            ):
+                raise PursuitStoreError("terminal outbox run receipt 存储摘要不匹配。")
+            return receipt
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"terminal outbox run receipt 校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"读取 terminal outbox run receipt 失败：{exc}") from exc
+
+    def save_terminal_outbox_run_receipt(
+        self,
+        receipt: PursuitTerminalOutboxRunReceipt,
+    ) -> tuple[PursuitTerminalOutboxRunReceipt, bool]:
+        """Persist once; duplicate request ids return the first authenticated receipt."""
+        validated = PursuitTerminalOutboxRunReceipt.model_validate(
+            receipt.model_dump(mode="json")
+        )
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT receipt_id, source_request_sha256, payload_json, "
+                    "payload_sha256 "
+                    "FROM pursuit_terminal_outbox_run_receipts "
+                    "WHERE source_request_sha256 = ?",
+                    (validated.source_request_sha256,),
+                ).fetchone()
+                if row is not None:
+                    existing = PursuitTerminalOutboxRunReceipt.model_validate_json(
+                        str(row["payload_json"])
+                    )
+                    if (
+                        not hmac.compare_digest(
+                            existing.receipt_id,
+                            str(row["receipt_id"]),
+                        )
+                        or not hmac.compare_digest(
+                            existing.source_request_sha256,
+                            str(row["source_request_sha256"]),
+                        )
+                        or not hmac.compare_digest(
+                            existing.source_request_sha256,
+                            validated.source_request_sha256,
+                        )
+                        or not hmac.compare_digest(
+                            existing.receipt_sha256,
+                            str(row["payload_sha256"]),
+                        )
+                    ):
+                        raise PursuitStoreError(
+                            "terminal outbox run receipt 存储摘要不匹配。"
+                        )
+                    return existing, False
+                conn.execute(
+                    "INSERT INTO pursuit_terminal_outbox_run_receipts ("
+                    "receipt_id, source_request_sha256, payload_json, "
+                    "payload_sha256, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (
+                        validated.receipt_id,
+                        validated.source_request_sha256,
+                        validated.model_dump_json(),
+                        validated.receipt_sha256,
+                        validated.created_at,
+                    ),
+                )
+            return validated, True
+        except PursuitStoreError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise PursuitStoreError(f"terminal outbox run receipt 校验失败：{exc}") from exc
+        except sqlite3.Error as exc:
+            raise PursuitStoreError(f"保存 terminal outbox run receipt 失败：{exc}") from exc
 
     @staticmethod
     def _get_checkpoint_with_connection(
@@ -2747,6 +2858,17 @@ class PursuitStore:
                         FOREIGN KEY(outbox_id)
                             REFERENCES pursuit_terminal_outbox(outbox_id)
                             ON DELETE CASCADE
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS pursuit_terminal_outbox_run_receipts (
+                        receipt_id TEXT PRIMARY KEY,
+                        source_request_sha256 TEXT NOT NULL UNIQUE,
+                        payload_json TEXT NOT NULL,
+                        payload_sha256 TEXT NOT NULL,
+                        created_at REAL NOT NULL
                     )
                     """
                 )

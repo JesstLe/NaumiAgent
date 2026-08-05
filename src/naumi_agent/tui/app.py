@@ -4319,7 +4319,7 @@ class NaumiApp(App):
         status = self.query_one(StatusBar)
 
         parts = goal.strip().split(maxsplit=1)
-        if parts and parts[0] in {"list", "status", "resume", "reconcile"}:
+        if parts and parts[0] in {"list", "status", "resume", "reconcile", "outbox"}:
             await self._run_pursue_meta(parts[0], parts[1] if len(parts) > 1 else "")
             return
 
@@ -4386,6 +4386,7 @@ class NaumiApp(App):
             "status": "pursuit_status",
             "resume": "pursuit_resume",
             "reconcile": "pursuit_reconcile",
+            "outbox": "pursuit_terminal_outbox_run_now",
         }
         tool_name = tool_map[subcommand]
         tool = self.engine.tool_registry.get(tool_name)
@@ -4396,9 +4397,14 @@ class NaumiApp(App):
             identifier = "恢复请求ID" if subcommand == "reconcile" else "运行ID"
             status.status_text = f"用法: /pursue {subcommand} <{identifier}>"
             return
+        if subcommand == "outbox" and arg.strip() != "run-now":
+            status.status_text = "用法: /pursue outbox run-now"
+            return
         status.status_text = "目标追踪状态处理中..."
         try:
-            if subcommand == "list":
+            if subcommand == "outbox":
+                arguments = {}
+            elif subcommand == "list":
                 arguments = {"active_only": "--active" in arg.split()}
             elif subcommand == "reconcile":
                 arguments = {"attempt_id": arg.strip()}

@@ -2294,6 +2294,52 @@ test("Pursuit recovery action result is typed and attempt-bound", () => {
   );
 });
 
+test("Pursuit terminal outbox action requires a public immutable receipt", () => {
+  const receipt = {
+    schema_version: 1,
+    receipt_id: `ptorun_${"a".repeat(24)}`,
+    status: "no_due",
+    pending_before: 0,
+    pending_after: 0,
+    claimed: 0,
+    delivered: 0,
+    retry_scheduled: 0,
+    failures: 0,
+    failure_codes: [],
+    created_at: 10,
+    receipt_sha256: "b".repeat(64),
+    source_request_sha256: "must-drop",
+  };
+  const normalized = normalizeServerRecord({
+    v: PROTOCOL_VERSION,
+    type: "pursuit/terminal-outbox/action_result",
+    payload: {
+      schema_version: 1,
+      status: "no_due",
+      code: "no_due",
+      message: "暂无到期记录。",
+      receipt,
+    },
+  });
+
+  assert.equal(normalized.payload.receipt.receipt_id, receipt.receipt_id);
+  assert.equal("source_request_sha256" in normalized.payload.receipt, false);
+  assert.throws(
+    () => normalizeServerRecord({
+      v: PROTOCOL_VERSION,
+      type: "pursuit/terminal-outbox/action_result",
+      payload: {
+        schema_version: 1,
+        status: "completed",
+        code: "completed",
+        message: "伪造完成",
+        receipt: null,
+      },
+    }),
+    /回执与状态不一致/,
+  );
+});
+
 test("evolution review snapshot is strict and drops private fields", () => {
   const item = {
     candidate_id: `evc_${"a".repeat(24)}`, finding_code: "user_reported_defect",

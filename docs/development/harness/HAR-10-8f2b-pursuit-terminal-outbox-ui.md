@@ -101,3 +101,6 @@ Goal 页面新增“终态自动恢复”区块，使用颜色区分：
 - 当前是请求时 snapshot，不是 push stream；Goal 页通过 `r` 刷新。专用增量事件需先定义 revision/cursor。
 - 10000 条以上 backlog 失败关闭，不提供历史分页；cursor/retention 属于后续治理。
 - 尚未完成 kill-at-every-write-point、跨主机时钟漂移、三平台进程杀死和 24 小时 soak。
+
+后续 HAR-10.8f2c 已增加经 ToolExecution 授权、due-only 且带不可变回执的显式恢复动作；详见
+`HAR-10-8f2c-pursuit-terminal-outbox-run-now.md`。
