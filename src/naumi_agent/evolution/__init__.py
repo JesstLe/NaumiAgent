@@ -659,6 +659,17 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_rollout_plans import (
+        EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY,
+        EvolutionRevalidationRolloutExposure,
+        EvolutionRevalidationRolloutPlan,
+        EvolutionRevalidationRolloutPlanError,
+        EvolutionRevalidationRolloutPlanService,
+        EvolutionRevalidationRolloutPlanStore,
+        EvolutionRevalidationRolloutPlanView,
+        EvolutionRevalidationRolloutStage,
+        EvolutionRevalidationRolloutStageName,
+    )
     from naumi_agent.evolution.revalidation_runtime_contracts import (
         EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY,
         EvolutionRevalidationRuntimeContract,
@@ -900,6 +911,15 @@ __all__ = [
     "EvolutionRevalidationPlatformResultService",
     "EvolutionRevalidationPlatformResultStore",
     "issue_evolution_revalidation_platform_result_manifest",
+    "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
+    "EvolutionRevalidationRolloutExposure",
+    "EvolutionRevalidationRolloutPlan",
+    "EvolutionRevalidationRolloutPlanError",
+    "EvolutionRevalidationRolloutPlanService",
+    "EvolutionRevalidationRolloutPlanStore",
+    "EvolutionRevalidationRolloutPlanView",
+    "EvolutionRevalidationRolloutStage",
+    "EvolutionRevalidationRolloutStageName",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1656,6 +1676,17 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPlatformResultStore",
         "issue_evolution_revalidation_platform_result_manifest",
     }
+    revalidation_rollout_plan_exports = {
+        "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
+        "EvolutionRevalidationRolloutExposure",
+        "EvolutionRevalidationRolloutPlan",
+        "EvolutionRevalidationRolloutPlanError",
+        "EvolutionRevalidationRolloutPlanService",
+        "EvolutionRevalidationRolloutPlanStore",
+        "EvolutionRevalidationRolloutPlanView",
+        "EvolutionRevalidationRolloutStage",
+        "EvolutionRevalidationRolloutStageName",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2220,6 +2251,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_execution_authorizations"
     elif name in revalidation_platform_result_exports:
         module_name = "revalidation_platform_results"
+    elif name in revalidation_rollout_plan_exports:
+        module_name = "revalidation_rollout_plans"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
