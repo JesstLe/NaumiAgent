@@ -223,6 +223,10 @@ from naumi_agent.evolution.revalidation_evaluation_sources import (
 from naumi_agent.evolution.revalidation_execution import (
     EvolutionRevalidationExecutionService,
 )
+from naumi_agent.evolution.revalidation_interventional_cohorts import (
+    EvolutionRevalidationInterventionalCohortExecutor,
+    EvolutionRevalidationInterventionalCohortStore,
+)
 from naumi_agent.evolution.revalidation_interventional_samples import (
     EvolutionRevalidationInterventionalSampleExecutor,
     EvolutionRevalidationInterventionalSampleStore,
@@ -1668,6 +1672,32 @@ class AgentEngine:
                     self.evolution_revalidation_runtime_contract_service
                 ),
                 source_service=self.evolution_revalidation_runtime_source_service,
+            )
+        )
+        self.evolution_revalidation_interventional_cohort_store = (
+            EvolutionRevalidationInterventionalCohortStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_interventional_cohort_executor = (
+            EvolutionRevalidationInterventionalCohortExecutor(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                sample_store=(
+                    self.evolution_revalidation_interventional_sample_store
+                ),
+                receipt_store=(
+                    self.evolution_revalidation_interventional_cohort_store
+                ),
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                sample_executor=(
+                    self.evolution_revalidation_interventional_sample_executor
+                ),
+                contract_service=(
+                    self.evolution_revalidation_runtime_contract_service
+                ),
+                batch_admission=self.harness_sandbox_batch_admission,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

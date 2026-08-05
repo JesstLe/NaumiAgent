@@ -88,6 +88,7 @@ class EvolutionRevalidationInterventionalSampleReceipt(_StrictModel):
     source_snapshot_sha256: str = Field(pattern=_SHA256_RE)
     sample_index: int = Field(ge=0, le=99)
     sample_seed: int = Field(ge=0, le=9_223_372_036_854_775_807)
+    run_scope: Literal["sample", "cohort"]
     red_batch_id: str = Field(min_length=1, max_length=128)
     green_batch_id: str = Field(min_length=1, max_length=128)
     red_result_id: str = Field(min_length=1, max_length=128)
@@ -180,8 +181,8 @@ class EvolutionRevalidationInterventionalSampleStore:
                 await db.execute(
                     "SELECT receipt_json FROM "
                     "evolution_revalidation_interventional_samples "
-                    "WHERE contract_id = ? AND sample_index = ?",
-                    (receipt.contract_id, receipt.sample_index),
+                    "WHERE contract_id = ? AND sample_index = ? AND run_scope = ?",
+                    (receipt.contract_id, receipt.sample_index, receipt.run_scope),
                 )
             ).fetchone()
             if row is not None:
@@ -197,13 +198,14 @@ class EvolutionRevalidationInterventionalSampleStore:
                 return restored
             await db.execute(
                 "INSERT INTO evolution_revalidation_interventional_samples "
-                "(receipt_id, receipt_sha256, contract_id, sample_index, "
-                "receipt_json, completed_at) VALUES (?, ?, ?, ?, ?, ?)",
+                "(receipt_id, receipt_sha256, contract_id, sample_index, run_scope, "
+                "receipt_json, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     receipt.receipt_id,
                     receipt.receipt_sha256,
                     receipt.contract_id,
                     receipt.sample_index,
+                    receipt.run_scope,
                     receipt.model_dump_json(),
                     receipt.completed_at,
                 ),
@@ -211,7 +213,12 @@ class EvolutionRevalidationInterventionalSampleStore:
             await db.commit()
         return receipt
 
-    async def get_by_sample(self, contract_id: str, sample_index: int):
+    async def get_by_sample(
+        self,
+        contract_id: str,
+        sample_index: int,
+        run_scope: Literal["sample", "cohort"] = "sample",
+    ):
         if not self._db_path.exists():
             return None
         async with aiosqlite.connect(self._db_path) as db:
@@ -221,8 +228,8 @@ class EvolutionRevalidationInterventionalSampleStore:
                 await db.execute(
                     "SELECT receipt_json FROM "
                     "evolution_revalidation_interventional_samples "
-                    "WHERE contract_id = ? AND sample_index = ?",
-                    (contract_id, sample_index),
+                    "WHERE contract_id = ? AND sample_index = ? AND run_scope = ?",
+                    (contract_id, sample_index, run_scope),
                 )
             ).fetchone()
         return (
@@ -266,8 +273,21 @@ class EvolutionRevalidationInterventionalSampleExecutor:
         contract_id: str,
         parent_receipt_id: str,
         sample_index: int,
+        run_scope: Literal["sample", "cohort"] = "sample",
+        run_authority: HarnessSandboxEvalRunAuthority | None = None,
     ) -> EvolutionRevalidationInterventionalSampleReceipt:
-        existing = await self.receipt_store.get_by_sample(contract_id, sample_index)
+        if run_scope not in {"sample", "cohort"} or (
+            run_scope == "sample" and run_authority is not None
+        ):
+            raise EvolutionRevalidationInterventionalSampleError(
+                "fresh_sample_run_scope_invalid",
+                "Fresh sample run_scope/Run Grant 组合无效。",
+            )
+        existing = await self.receipt_store.get_by_sample(
+            contract_id,
+            sample_index,
+            run_scope,
+        )
         if existing is not None:
             await self._validate_existing(existing)
             return existing
@@ -303,6 +323,11 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                 "fresh_sample_parent_delegation_missing",
                 "父权限回执未授权 bash_run 运行委托。",
             )
+        if run_scope == "cohort" and run_authority is None:
+            raise EvolutionRevalidationInterventionalSampleError(
+                "fresh_sample_cohort_authority_missing",
+                "Fresh cohort sample 缺少 cohort-scoped Run Grant。",
+            )
         owner = f"evo-reval-{contract.contract_sha256[:16]}-{sample_index}"
         lease_seconds = min(
             3_600,
@@ -316,41 +341,48 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                 + 30,
             ),
         )
-        lease = await self.harness_store.acquire_run_lease(
-            workspace_root=self.workspace_root,
-            run_kind=HarnessRunKind.RUNTIME,
-            run_id=parent.run_id,
-            owner_id=owner,
-            now=self.now(),
-            lease_seconds=lease_seconds,
-        )
-        if lease is None:
-            raise EvolutionRevalidationInterventionalSampleError(
-                "fresh_sample_runtime_lease_unavailable",
-                "Fresh sample 无法取得独占 Runtime lease。",
-            )
+        lease = None
         grant = None
         try:
-            grant = await self.run_grant_authority.issue(
-                RunDelegationGrantRequest(
-                    idempotency_key=(
-                        f"evo-reval-{contract.contract_sha256[:20]}-{sample_index}-{lease.epoch}"
-                    ),
-                    parent_receipt_id=parent_receipt_id,
+            if run_authority is None:
+                lease = await self.harness_store.acquire_run_lease(
+                    workspace_root=self.workspace_root,
                     run_kind=HarnessRunKind.RUNTIME,
-                    lease_owner_id=owner,
-                    lease_epoch=lease.epoch,
-                    delegated_tool_names=("bash_run",),
-                ),
-                now=self.now(),
-                ttl_seconds=lease_seconds,
-            )
-            authority = HarnessSandboxEvalRunAuthority(
-                parent_receipt_id=parent_receipt_id,
-                run_id=parent.run_id,
-                grant_id=grant.contract.grant_id,
-                grant_sha256=grant.contract.grant_sha256,
-            )
+                    run_id=parent.run_id,
+                    owner_id=owner,
+                    now=self.now(),
+                    lease_seconds=lease_seconds,
+                )
+                if lease is None:
+                    raise EvolutionRevalidationInterventionalSampleError(
+                        "fresh_sample_runtime_lease_unavailable",
+                        "Fresh sample 无法取得独占 Runtime lease。",
+                    )
+                grant = await self.run_grant_authority.issue(
+                    RunDelegationGrantRequest(
+                        idempotency_key=(
+                            f"evo-reval-{contract.contract_sha256[:20]}-"
+                            f"{sample_index}-{lease.epoch}"
+                        ),
+                        parent_receipt_id=parent_receipt_id,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        lease_owner_id=owner,
+                        lease_epoch=lease.epoch,
+                        delegated_tool_names=("bash_run",),
+                    ),
+                    now=self.now(),
+                    ttl_seconds=lease_seconds,
+                )
+                authority = HarnessSandboxEvalRunAuthority(
+                    parent_receipt_id=parent_receipt_id,
+                    run_id=parent.run_id,
+                    grant_id=grant.contract.grant_id,
+                    grant_sha256=grant.contract.grant_sha256,
+                )
+            else:
+                authority = HarnessSandboxEvalRunAuthority.model_validate(
+                    run_authority.model_dump(mode="json")
+                )
             platform = capture_eval_platform_identity()
             configuration = _configuration(
                 contract,
@@ -379,6 +411,7 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                 authority=authority,
                 parent_receipt_id=parent_receipt_id,
                 sample_index=sample_index,
+                run_scope=run_scope,
             )
             green = await self._load_or_execute_phase(
                 phase="green",
@@ -389,6 +422,7 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                 authority=authority,
                 parent_receipt_id=parent_receipt_id,
                 sample_index=sample_index,
+                run_scope=run_scope,
             )
             if not await pair.red.source_is_current():
                 raise EvolutionRevalidationInterventionalSampleError(
@@ -399,6 +433,7 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                 contract=contract,
                 pair=pair,
                 sample_index=sample_index,
+                run_scope=run_scope,
                 red=red,
                 green=green,
                 completed_at=self.now(),
@@ -408,7 +443,7 @@ class EvolutionRevalidationInterventionalSampleExecutor:
             raise EvolutionRevalidationInterventionalSampleError(exc.code, str(exc)) from exc
         finally:
             cleanup_errors = []
-            if grant is not None:
+            if lease is not None and grant is not None:
                 try:
                     await self.run_grant_authority.revoke(
                         grant_id=grant.contract.grant_id,
@@ -417,19 +452,20 @@ class EvolutionRevalidationInterventionalSampleExecutor:
                     )
                 except BaseException as exc:
                     cleanup_errors.append(exc)
-            try:
-                released = await self.harness_store.release_run_lease(
-                    workspace_root=self.workspace_root,
-                    run_kind=HarnessRunKind.RUNTIME,
-                    run_id=parent.run_id,
-                    owner_id=owner,
-                    epoch=lease.epoch,
-                    now=self.now(),
-                )
-                if released is None:
-                    cleanup_errors.append(RuntimeError("Runtime lease 未释放。"))
-            except BaseException as exc:
-                cleanup_errors.append(exc)
+            if lease is not None:
+                try:
+                    released = await self.harness_store.release_run_lease(
+                        workspace_root=self.workspace_root,
+                        run_kind=HarnessRunKind.RUNTIME,
+                        run_id=parent.run_id,
+                        owner_id=owner,
+                        epoch=lease.epoch,
+                        now=self.now(),
+                    )
+                    if released is None:
+                        cleanup_errors.append(RuntimeError("Runtime lease 未释放。"))
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
             if cleanup_errors:
                 raise EvolutionRevalidationInterventionalSampleError(
                     "fresh_sample_authority_cleanup_failed",
@@ -482,13 +518,21 @@ class EvolutionRevalidationInterventionalSampleExecutor:
         authority,
         parent_receipt_id,
         sample_index,
+        run_scope,
     ):
-        batch_id = _batch_id(contract, phase)
+        batch_id = revalidation_interventional_batch_id(contract, phase, run_scope)
         existing = await self.harness_store.get_eval_result(
             self.workspace_root, batch_id, contract.suite_id, sample_index
         )
         if existing is not None:
-            _validate_phase_result(existing, phase, contract, checks, identity)
+            _validate_phase_result(
+                existing,
+                phase,
+                contract,
+                checks,
+                identity,
+                run_scope=run_scope,
+            )
             return existing
         results = await self.sandbox_eval_kernel.execute(
             lane=phase,
@@ -515,6 +559,7 @@ class EvolutionRevalidationInterventionalSampleExecutor:
             metric=metric,
             identity=identity,
             run_grant_sha256=authority.grant_sha256,
+            run_scope=run_scope,
         )
         return await self.harness_store.record_eval_result(
             workspace_root=self.workspace_root,
@@ -657,8 +702,17 @@ def _configuration(contract, *, profile_sha256):
     )
 
 
-def _build_suite(*, phase, contract, checks, metric, identity, run_grant_sha256):
-    check_cases = tuple(_check_case(item, run_grant_sha256=run_grant_sha256) for item in checks)
+def _build_suite(
+    *, phase, contract, checks, metric, identity, run_grant_sha256, run_scope
+):
+    check_cases = tuple(
+        _check_case(
+            item,
+            run_grant_sha256=run_grant_sha256,
+            run_scope=run_scope,
+        )
+        for item in checks
+    )
     cases = check_cases + metric.cases
     status = (
         EvalRunStatus.EVALUATION_ERROR
@@ -682,7 +736,7 @@ def _build_suite(*, phase, contract, checks, metric, identity, run_grant_sha256)
     )
 
 
-def _check_case(result, *, run_grant_sha256):
+def _check_case(result, *, run_grant_sha256, run_scope):
     status = (
         EvalCaseStatus.PASSED
         if result.status is HarnessSandboxCheckStatus.PASSED
@@ -698,13 +752,13 @@ def _check_case(result, *, run_grant_sha256):
         message=(
             f"{result.message} lifecycle_sha256="
             f"{result.lifecycle_receipt_sha256 or 'missing'} "
-            f"run_scope=sample run_grant_sha256={run_grant_sha256}"
+            f"run_scope={run_scope} run_grant_sha256={run_grant_sha256}"
         ),
         duration_ms=result.duration_ms,
     )
 
 
-def _validate_phase_result(stored, phase, contract, checks, identity):
+def _validate_phase_result(stored, phase, contract, checks, identity, *, run_scope):
     result = stored.result
     check_cases = tuple(item for item in result.cases if item.runner == "evolution_profile_check@1")
     metric_cases = tuple(
@@ -716,6 +770,7 @@ def _validate_phase_result(stored, phase, contract, checks, identity):
         and result.suite_path == f"evolution/revalidation/{phase}/interventional"
         and tuple(item.case_id for item in check_cases) == tuple(item.id for item in checks)
         and all(_lifecycle(item.message) for item in check_cases)
+        and all(_run_scope(item.message) == run_scope for item in check_cases)
         and len({_run_grant(item.message) for item in check_cases}) == 1
         and len(metric_cases) == len(contract.metric_entries)
         and tuple(
@@ -730,7 +785,9 @@ def _validate_phase_result(stored, phase, contract, checks, identity):
         )
 
 
-def _build_receipt(*, contract, pair, sample_index, red, green, completed_at):
+def _build_receipt(
+    *, contract, pair, sample_index, run_scope, red, green, completed_at
+):
     red_identity = red.result.baseline_identity
     green_identity = green.result.baseline_identity
     red_checks = tuple(
@@ -764,6 +821,7 @@ def _build_receipt(*, contract, pair, sample_index, red, green, completed_at):
         "source_snapshot_sha256": contract.source_snapshot_sha256,
         "sample_index": sample_index,
         "sample_seed": _sample_seed(contract.seed, sample_index),
+        "run_scope": run_scope,
         "red_batch_id": red.batch_id,
         "green_batch_id": green.batch_id,
         "red_result_id": red.id,
@@ -818,8 +876,10 @@ def _require_pair_matches_contract(pair, contract):
         )
 
 
-def _batch_id(contract, phase):
-    return f"evreval-{phase}-{contract.contract_sha256[:32]}"
+def revalidation_interventional_batch_id(contract, phase, run_scope):
+    if phase not in {"red", "green"} or run_scope not in {"sample", "cohort"}:
+        raise ValueError("Fresh Interventional batch phase/scope 无效。")
+    return f"evreval-{run_scope}-{phase}-{contract.contract_sha256[:24]}"
 
 
 def _sample_seed(seed, sample_index):
@@ -854,6 +914,12 @@ def _run_grant(message):
     return value
 
 
+def _run_scope(message):
+    marker = "run_scope="
+    value = message.split(marker, 1)[1].split(" ", 1)[0] if marker in message else ""
+    return value if value in {"sample", "cohort"} else None
+
+
 def _single_run_grant(cases):
     values = {_run_grant(item.message) for item in cases}
     if len(values) != 1:
@@ -869,9 +935,31 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS evolution_revalidation_interventional_samples ("
         "receipt_id TEXT PRIMARY KEY, receipt_sha256 TEXT NOT NULL UNIQUE, "
         "contract_id TEXT NOT NULL, sample_index INTEGER NOT NULL, "
+        "run_scope TEXT NOT NULL CHECK (run_scope IN ('sample', 'cohort')), "
         "receipt_json TEXT NOT NULL, completed_at TEXT NOT NULL, "
-        "UNIQUE (contract_id, sample_index))"
+        "UNIQUE (contract_id, sample_index, run_scope))"
     )
+    columns = {
+        row[1] for row in await (await db.execute(
+            "PRAGMA table_info(evolution_revalidation_interventional_samples)"
+        )).fetchall()
+    }
+    if "run_scope" not in columns:
+        # Legacy receipts did not bind run scope or scope-specific H5a batch IDs.
+        # Preserve them for audit, but never reinterpret them as current authority.
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute(
+            "ALTER TABLE evolution_revalidation_interventional_samples "
+            "RENAME TO evolution_revalidation_interventional_samples_legacy_v1"
+        )
+        await db.execute(
+            "CREATE TABLE evolution_revalidation_interventional_samples ("
+            "receipt_id TEXT PRIMARY KEY, receipt_sha256 TEXT NOT NULL UNIQUE, "
+            "contract_id TEXT NOT NULL, sample_index INTEGER NOT NULL, "
+            "run_scope TEXT NOT NULL CHECK (run_scope IN ('sample', 'cohort')), "
+            "receipt_json TEXT NOT NULL, completed_at TEXT NOT NULL, "
+            "UNIQUE (contract_id, sample_index, run_scope))"
+        )
     await db.commit()
 
 
@@ -894,4 +982,5 @@ __all__ = [
     "EvolutionRevalidationInterventionalSampleExecutor",
     "EvolutionRevalidationInterventionalSampleReceipt",
     "EvolutionRevalidationInterventionalSampleStore",
+    "revalidation_interventional_batch_id",
 ]
