@@ -59,6 +59,11 @@
   连续 probe cohort、共享 Grant 和可恢复前缀，但尚未完成 required-platform matrix。
 - [EVO-05.3f2c3a Fresh Adversarial Matrix Status](EVO-05-3f2c3a-fresh-adversarial-matrix-status.md)：已交付；动态区分
   completed/runnable/pending platform lane，只有全部 cohort 齐全才持久化完成矩阵，尚不授予远端调度或比较权威。
+- [EVO-05.3f2c3b1 Required-Platform Dispatch Outbox](EVO-05-3f2c3b1-platform-dispatch-outbox.md)：已交付；为 runnable
+  lane 形成 exact Worker/Job/Reservation 绑定的 durable queued Dispatch。
+- [EVO-05.3f2c3b2a Authenticated Worker Claim](EVO-05-3f2c3b2a-authenticated-worker-claim.md)：已交付；通过
+  supervisor-attested Ed25519 identity、一次性 challenge 和 lease hash chain 证明远端领取，并在 Worker epoch/Contract/reservation
+  漂移后动态 fencing；尚不接收结果或写入 H5a。
 - [EVO-05.3f2c4 Fresh Adversarial Comparison](EVO-05-3f2c4-fresh-adversarial-comparison.md)：已交付；完整 matrix 后
   对每个平台从原始 H5a 重算 probe/identity/summary，并持久化 HAR-08 原生 H5b2/H5c。
 - [EVO-05.3f2c5 Fresh Adversarial Attribution](EVO-05-3f2c5-fresh-adversarial-attribution.md)：已交付；逐平台复验
@@ -93,8 +98,8 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d、EVO-05.3a-3f3b5 与 required-platform dispatch outbox。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d、EVO-05.3a-3f3b5 与 required-platform dispatch/claim。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
-现可形成 exact Worker/capacity 绑定的 queued Dispatch，但尚未实现远端认证 claim、结果回传/H5a 摄取、rollout、monitor、
-rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 queued Dispatch 宣称为跨平台执行完成。
+现可形成 exact Worker/capacity 绑定的 queued Dispatch，并由持有 attested Ed25519 私钥的 Worker 领取和续租；但尚未实现 execution start、
+结果回传/H5a 摄取、rollout、monitor、rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 claim 宣称为跨平台执行完成。
