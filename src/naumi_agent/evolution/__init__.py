@@ -423,6 +423,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationAdversarialCohortReceipt,
         EvolutionRevalidationAdversarialCohortStore,
     )
+    from naumi_agent.evolution.revalidation_adversarial_matrices import (
+        EVOLUTION_REVALIDATION_ADVERSARIAL_MATRIX_POLICY,
+        EvolutionRevalidationAdversarialMatrixError,
+        EvolutionRevalidationAdversarialMatrixLane,
+        EvolutionRevalidationAdversarialMatrixService,
+        EvolutionRevalidationAdversarialMatrixStatus,
+        EvolutionRevalidationAdversarialMatrixStore,
+    )
     from naumi_agent.evolution.revalidation_adversarial_samples import (
         EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER,
         EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY,
@@ -717,11 +725,17 @@ __all__ = [
     "EvolutionRevalidationRuntimeSourcePair",
     "EvolutionRevalidationRuntimeSourceService",
     "EVOLUTION_REVALIDATION_ADVERSARIAL_COHORT_POLICY",
+    "EVOLUTION_REVALIDATION_ADVERSARIAL_MATRIX_POLICY",
     "EvolutionRevalidationAdversarialCheckSummary",
     "EvolutionRevalidationAdversarialCohortError",
     "EvolutionRevalidationAdversarialCohortExecutor",
     "EvolutionRevalidationAdversarialCohortReceipt",
     "EvolutionRevalidationAdversarialCohortStore",
+    "EvolutionRevalidationAdversarialMatrixError",
+    "EvolutionRevalidationAdversarialMatrixLane",
+    "EvolutionRevalidationAdversarialMatrixService",
+    "EvolutionRevalidationAdversarialMatrixStatus",
+    "EvolutionRevalidationAdversarialMatrixStore",
     "EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER",
     "EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY",
     "EvolutionRevalidationAdversarialSampleError",
@@ -1292,6 +1306,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationAdversarialCohortReceipt",
         "EvolutionRevalidationAdversarialCohortStore",
     }
+    revalidation_adversarial_matrix_exports = {
+        "EVOLUTION_REVALIDATION_ADVERSARIAL_MATRIX_POLICY",
+        "EvolutionRevalidationAdversarialMatrixError",
+        "EvolutionRevalidationAdversarialMatrixLane",
+        "EvolutionRevalidationAdversarialMatrixService",
+        "EvolutionRevalidationAdversarialMatrixStatus",
+        "EvolutionRevalidationAdversarialMatrixStore",
+    }
     revalidation_interventional_cohort_exports = {
         "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
         "EvolutionRevalidationInterventionalCheckSummary",
@@ -1801,6 +1823,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_runtime_sources"
     elif name in revalidation_adversarial_cohort_exports:
         module_name = "revalidation_adversarial_cohorts"
+    elif name in revalidation_adversarial_matrix_exports:
+        module_name = "revalidation_adversarial_matrices"
     elif name in revalidation_adversarial_sample_exports:
         module_name = "revalidation_adversarial_samples"
     elif name in revalidation_interventional_comparison_exports:

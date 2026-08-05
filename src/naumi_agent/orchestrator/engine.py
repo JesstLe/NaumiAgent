@@ -216,6 +216,10 @@ from naumi_agent.evolution.revalidation_adversarial_cohorts import (
     EvolutionRevalidationAdversarialCohortExecutor,
     EvolutionRevalidationAdversarialCohortStore,
 )
+from naumi_agent.evolution.revalidation_adversarial_matrices import (
+    EvolutionRevalidationAdversarialMatrixService,
+    EvolutionRevalidationAdversarialMatrixStore,
+)
 from naumi_agent.evolution.revalidation_adversarial_samples import (
     EvolutionRevalidationAdversarialSampleExecutor,
     EvolutionRevalidationAdversarialSampleStore,
@@ -1757,6 +1761,20 @@ class AgentEngine:
                 sample_executor=self.evolution_revalidation_adversarial_sample_executor,
                 contract_service=self.evolution_revalidation_runtime_contract_service,
                 batch_admission=self.harness_sandbox_batch_admission,
+            )
+        )
+        self.evolution_revalidation_adversarial_matrix_store = (
+            EvolutionRevalidationAdversarialMatrixStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_adversarial_matrix_service = (
+            EvolutionRevalidationAdversarialMatrixService(
+                workspace_root=paths.workspace_root,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                cohort_store=self.evolution_revalidation_adversarial_cohort_store,
+                matrix_store=self.evolution_revalidation_adversarial_matrix_store,
+                worker_registry=resources.worker_registry_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
