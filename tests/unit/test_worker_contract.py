@@ -163,6 +163,17 @@ def test_agent_model_execution_requires_context_and_owner_authorities() -> None:
     )
     assert verify_worker_contract(contract)
 
+    with pytest.raises(ValueError, match="model execution"):
+        issue_worker_contract(
+            **values,
+            capabilities=(
+                WorkerCapability.AGENT_CONTEXT_SCOPE,
+                WorkerCapability.AGENT_CONTROL_TRANSPORT,
+                WorkerCapability.AGENT_JOB_OWNER_LEASE,
+                WorkerCapability.AGENT_TOOL_RPC,
+            ),
+        )
+
 
 def _requirements(**updates):
     values = {

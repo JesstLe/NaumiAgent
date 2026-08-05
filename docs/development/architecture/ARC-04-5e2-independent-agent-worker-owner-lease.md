@@ -119,4 +119,5 @@ PID/create-time、Job claim 与 physical reservation，只有在 control-only pr
 `ARC-04.5e3a / HAR-10.7h4` 已在该 owner lease 上完成 model-only 两阶段 start fence、真实独立 Provider
 调用、加密 terminal 与 AgentJob/outbox 原子提交，详见
 [`ARC-04-5e3a-independent-agent-model-execution.md`](ARC-04-5e3a-independent-agent-model-execution.md)。
-下一步补齐加密 Tool RPC 与生产调度，不线性扩张完整 Supervisor。
+ARC-04.5e3b1 已补齐加密 Tool RPC 内核；下一步只接生产 SubAgent 路由与 Engine authority adapter，不线性
+扩张完整 Supervisor。

@@ -42,7 +42,8 @@ admitted AgentJob
 
 生产 Composition Root 将当前 `ModelConfig` 编码为私有内存载荷交给 Worker Factory；普通诊断对象不保存可
 直接展开的公开 config 属性。Worker 只有配置了该载荷才声明 model capability 和 `accepting_jobs=true`。
-Doctor/New UI/Textual TUI 共享显示“model-only 执行就绪、工具 RPC 未开放”，不把它称为完整 Agent Worker。
+本切片当时由 Doctor/New UI/Textual TUI 共享显示“model-only 执行就绪、工具 RPC 未开放”；后续
+ARC-04.5e3b1 已升级为“加密 Tool RPC 内核就绪、生产调度待接入”，仍不冒充默认生产路由。
 
 ## 3. 密钥与模型配置边界
 
@@ -137,6 +138,7 @@ Doctor 和文档治理小模块测试，不运行全量测试。
 - 没有自动 scheduler、跨 workspace/provider fairness、长期 Worker 池、upgrade drain 或跨主机 topology；
 - 真实进程/HTTP 验收来自当前 Darwin 主机，Linux/Windows 仍需平台矩阵。
 
-下一切片 `ARC-04.5e3b / HAR-10.7h5` 应实现加密 Tool RPC 与 parent-side exact permission/tool authority，随后
-才能把生产 SubAgentManager 的具备工具任务切到独立 Worker。不得在工具权限链完成前默认替换 embedded
-执行，也不应回头一次做完整 ARC-04.6。
+后续 `ARC-04.5e3b1 / HAR-10.7h5` 已实现加密 Tool RPC 与 parent-side exact authority callback 内核，见
+`ARC-04-5e3b1-encrypted-agent-tool-rpc.md`。下一步 `ARC-04.5e3b2 / HAR-10.7h6` 才把生产
+SubAgentManager 的具备工具任务切到独立 Worker，并复用完整 `Engine.execute_tool()` 权限链；不应回头
+一次做完整 ARC-04.6。
