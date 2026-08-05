@@ -520,6 +520,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationOutcomeView,
         render_evolution_revalidation_outcome,
     )
+    from naumi_agent.evolution.revalidation_reapproval_authorities import (
+        EVOLUTION_REVALIDATION_REAPPROVAL_AUTHORITY_POLICY,
+        EvolutionRevalidationReapprovalAuthority,
+        EvolutionRevalidationReapprovalAuthorityError,
+        EvolutionRevalidationReapprovalAuthorityService,
+        EvolutionRevalidationReapprovalAuthorityStore,
+    )
     from naumi_agent.evolution.revalidation_rebases import (
         EVOLUTION_REVALIDATION_REBASE_POLICY,
         EvolutionRevalidationRebaseError,
@@ -715,6 +722,11 @@ __all__ = [
     "EvolutionRevalidationRebaseOutcome",
     "EvolutionRevalidationRebaseStatus",
     "EvolutionRevalidationRebaseStore",
+    "EVOLUTION_REVALIDATION_REAPPROVAL_AUTHORITY_POLICY",
+    "EvolutionRevalidationReapprovalAuthority",
+    "EvolutionRevalidationReapprovalAuthorityError",
+    "EvolutionRevalidationReapprovalAuthorityService",
+    "EvolutionRevalidationReapprovalAuthorityStore",
     "render_evolution_revalidation_rebase",
     "EVOLUTION_REVALIDATION_VALIDATION_POLICY",
     "EvolutionRevalidationCheckEvidence",
@@ -1395,6 +1407,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationFinalEvaluationStore",
         "EvolutionRevalidationFinalInterventionalEvidence",
     }
+    revalidation_reapproval_authority_exports = {
+        "EVOLUTION_REVALIDATION_REAPPROVAL_AUTHORITY_POLICY",
+        "EvolutionRevalidationReapprovalAuthority",
+        "EvolutionRevalidationReapprovalAuthorityError",
+        "EvolutionRevalidationReapprovalAuthorityService",
+        "EvolutionRevalidationReapprovalAuthorityStore",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1901,6 +1920,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_runtime_contracts"
     elif name in revalidation_final_evaluation_exports:
         module_name = "revalidation_final_evaluations"
+    elif name in revalidation_reapproval_authority_exports:
+        module_name = "revalidation_reapproval_authorities"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
