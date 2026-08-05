@@ -415,6 +415,15 @@ if TYPE_CHECKING:
         EvolutionReflectionSignal,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_adversarial_samples import (
+        EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER,
+        EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY,
+        EvolutionRevalidationAdversarialSampleError,
+        EvolutionRevalidationAdversarialSampleExecutor,
+        EvolutionRevalidationAdversarialSampleReceipt,
+        EvolutionRevalidationAdversarialSampleStore,
+        adversarial_batch_id,
+    )
     from naumi_agent.evolution.revalidation_evaluation_plans import (
         EVOLUTION_REVALIDATION_EVALUATION_PLAN_POLICY,
         EvolutionRevalidationEvaluationLane,
@@ -699,6 +708,13 @@ __all__ = [
     "EvolutionRevalidationRuntimeSourceError",
     "EvolutionRevalidationRuntimeSourcePair",
     "EvolutionRevalidationRuntimeSourceService",
+    "EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER",
+    "EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY",
+    "EvolutionRevalidationAdversarialSampleError",
+    "EvolutionRevalidationAdversarialSampleExecutor",
+    "EvolutionRevalidationAdversarialSampleReceipt",
+    "EvolutionRevalidationAdversarialSampleStore",
+    "adversarial_batch_id",
     "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
     "EvolutionRevalidationInterventionalCheckSummary",
     "EvolutionRevalidationInterventionalCohortError",
@@ -1245,6 +1261,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationInterventionalSampleReceipt",
         "EvolutionRevalidationInterventionalSampleStore",
     }
+    revalidation_adversarial_sample_exports = {
+        "EVOLUTION_REVALIDATION_ADVERSARIAL_RUNNER",
+        "EVOLUTION_REVALIDATION_ADVERSARIAL_SAMPLE_POLICY",
+        "EvolutionRevalidationAdversarialSampleError",
+        "EvolutionRevalidationAdversarialSampleExecutor",
+        "EvolutionRevalidationAdversarialSampleReceipt",
+        "EvolutionRevalidationAdversarialSampleStore",
+        "adversarial_batch_id",
+    }
     revalidation_interventional_cohort_exports = {
         "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
         "EvolutionRevalidationInterventionalCheckSummary",
@@ -1752,6 +1777,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_validation_plans"
     elif name in revalidation_runtime_source_exports:
         module_name = "revalidation_runtime_sources"
+    elif name in revalidation_adversarial_sample_exports:
+        module_name = "revalidation_adversarial_samples"
     elif name in revalidation_interventional_comparison_exports:
         module_name = "revalidation_interventional_comparisons"
     elif name in revalidation_interventional_cohort_exports:

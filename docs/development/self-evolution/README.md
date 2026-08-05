@@ -99,3 +99,5 @@ cohort-scoped Run Grant 与共享 batch admission 下运行全部 RED/GREEN 样�
 paired comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成。
 [EVO-05.3f2b2b3](EVO-05-3f2b2b3-fresh-interventional-comparison.md) 已从 ordered H5a 重新验证 Identity、metric/check
 summary 并生成原生 H5b2/H5c；该 decision 仍不覆盖 Adversarial、attribution、Final Evaluation 或 promotion。
+[EVO-05.3f2c1](EVO-05-3f2c1-fresh-adversarial-sample.md) 已在 Contract 指定且与 Worker 实际一致的平台执行一个
+Fresh Adversarial RED/GREEN pair；platform cohort、跨平台 matrix 与 Adversarial H5c 尚未完成。
