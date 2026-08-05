@@ -22,9 +22,9 @@ from tests.unit.test_evolution_revalidation_validation_plans import (
 )
 
 
-async def _runtime_scenario(tmp_path: Path):
+async def _runtime_scenario(tmp_path: Path, **builder_options):
     package, fresh, source, contract, harness, target_files, now = (
-        await _builder_scenario(tmp_path)
+        await _builder_scenario(tmp_path, **builder_options)
     )
     plan = EvolutionRevalidationValidationPlanBuilder().build(
         workspace_root=tmp_path,

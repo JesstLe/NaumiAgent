@@ -138,7 +138,7 @@ class EvolutionRevalidationRuntimeContract(_StrictModel):
         expected_status = "ready" if not expected_codes else "blocked"
         if self.binding_status != expected_status:
             raise ValueError("Revalidation runtime binding status 不一致。")
-        expected_duration = self.requested_samples * (
+        expected_duration = 2 * self.requested_samples * (
             self.profile_timeout_seconds_per_sample
             + self.metric_timeout_seconds_per_sample
         )
@@ -249,7 +249,7 @@ class EvolutionRevalidationRuntimeContractBuilder:
             item.resolution.timeout_seconds_per_sample or 0
             for item in metric_entries
         )
-        required_duration = plan.requested_samples * (
+        required_duration = 2 * plan.requested_samples * (
             profile_timeout + metric_timeout
         )
         metric_codes = {

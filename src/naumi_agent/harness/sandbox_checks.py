@@ -218,8 +218,10 @@ class HarnessSandboxCheckRunner:
                     "source overlays 必须绑定 revision、source digest 与复验回调。"
                 )
             _require_sha256(overlay_source_sha256, field="overlay_source_sha256")
-        elif overlay_source_sha256 is not None or source_is_current is not None:
-            raise ValueError("无 source overlays 时不得提供 overlay source authority。")
+        elif overlay_source_sha256 is not None:
+            raise ValueError("无 source overlays 时不得提供 overlay source digest。")
+        if source_is_current is not None and source_revision is None:
+            raise ValueError("source 复验回调必须绑定 exact Git revision。")
         revision_snapshot: _GitRevisionSnapshot | None = None
         if not await profile_is_current():
             return _blocked(
@@ -325,7 +327,7 @@ class HarnessSandboxCheckRunner:
                     check=check,
                     run_id=run_id,
                     profile_digest=profile_digest,
-                    message="Candidate Snapshot 在 Sandbox admission 前已漂移，检查未执行。",
+                    message="Evaluation Source 在 Sandbox admission 前已漂移，检查未执行。",
                     source_revision=revision_snapshot.commit,
                     source_tree_sha256=source_before_sha256,
                     snapshot_manifest_sha256=manifest_sha256,
@@ -414,7 +416,7 @@ class HarnessSandboxCheckRunner:
                 manifest_sha256=manifest_sha256,
                 execution=execution,
                 status=HarnessSandboxCheckStatus.STALE,
-                message="Candidate Snapshot 在 Sandbox 执行期间发生变化；结果已作废。",
+                message="Evaluation Source 在 Sandbox 执行期间发生变化；结果已作废。",
             )
         if revision_snapshot is None:
             try:

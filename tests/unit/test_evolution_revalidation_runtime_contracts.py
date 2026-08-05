@@ -70,6 +70,10 @@ async def test_runtime_contract_binds_real_metric_runner_and_probe_coverage(
     assert contract.adversarial_coverage_complete
     assert contract.probe_requirements[0].probe_id == "boundary-v1"
     assert contract.probe_coverage[0].check_id == "targeted_boundary"
+    assert contract.required_duration_seconds == 2 * contract.requested_samples * (
+        contract.profile_timeout_seconds_per_sample
+        + contract.metric_timeout_seconds_per_sample
+    )
     assert not contract.execution_started
     assert not contract.promotion_authority
 

@@ -90,4 +90,7 @@ Harness Profile 唯一覆盖每个文件的 required checks；该 authority 尚�
 [EVO-05.3f2b1](EVO-05-3f2b1-runtime-source-pair.md) 已为 Harness Sandbox Eval 物化共享的同基线 RED/GREEN runtime
 source pair，并以动态回调持续复验 Plan、Snapshot 与 blob bytes；旧 Interventional/Adversarial executor 尚未接线。
 [EVO-05.3f2b2a](EVO-05-3f2b2a-fresh-runtime-contract.md) 已重新绑定真实 metric runner/version/fixture/timeout 与
-current Profile adversarial probe coverage，并对缺 runner、probe 或预算形成 blocker；尚未开始 sample execution。
+current Profile adversarial probe coverage，并对缺 runner、probe 或预算形成 blocker。
+[EVO-05.3f2b2b1](EVO-05-3f2b2b1-fresh-interventional-sample.md) 已真实执行一个 current-target RED/GREEN
+Interventional sample pair，持久化 ARC-04 lifecycle、metric 与 phase-specific Run Grant evidence；完整 cohort、
+comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成。

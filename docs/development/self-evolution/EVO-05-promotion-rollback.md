@@ -45,6 +45,8 @@
   current-target RED 与 immutable-overlay GREEN，并在执行前后动态复验 source authority。
 - [EVO-05.3f2b2a Fresh Runtime Contract](EVO-05-3f2b2a-fresh-runtime-contract.md)：已交付；重新绑定 metric runner、
   timeout、完整预算与 adversarial probe coverage，任何缺口均阻断真实 sample execution。
+- [EVO-05.3f2b2b1 Fresh Interventional Sample](EVO-05-3f2b2b1-fresh-interventional-sample.md)：已交付；真实执行并
+  持久化一对 RED/GREEN H5a sample，支持中断恢复且不授予 cohort/comparison/promotion authority。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

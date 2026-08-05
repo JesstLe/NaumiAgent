@@ -897,6 +897,13 @@ async def test_harness_profile_check_materializes_exact_git_revision(
     async def trusted() -> bool:
         return True
 
+    source_checks = 0
+
+    async def source_current() -> bool:
+        nonlocal source_checks
+        source_checks += 1
+        return True
+
     async def admit_job(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
         return await _sandbox_job(tmp_path / "revision-job", spec)
 
@@ -908,12 +915,14 @@ async def test_harness_profile_check_materializes_exact_git_revision(
         admit_job=admit_job,
         source_revision=baseline_commit,
         expected_source_tree_sha256=baseline_tree_sha256,
+        source_is_current=source_current,
     )
 
     assert result.status is HarnessSandboxCheckStatus.PASSED
     assert result.source_revision == baseline_commit
     assert result.source_tree_sha256 == baseline_tree_sha256
     assert "exact baseline revision" in result.output
+    assert source_checks == 2
     assert source.read_text(encoding="utf-8") == "VALUE = 99\n"
     assert (workspace / "candidate-only.py").is_file()
     assert not tuple((tmp_path / "revision-sandboxes").iterdir())

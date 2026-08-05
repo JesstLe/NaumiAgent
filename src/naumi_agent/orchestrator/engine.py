@@ -223,6 +223,10 @@ from naumi_agent.evolution.revalidation_evaluation_sources import (
 from naumi_agent.evolution.revalidation_execution import (
     EvolutionRevalidationExecutionService,
 )
+from naumi_agent.evolution.revalidation_interventional_samples import (
+    EvolutionRevalidationInterventionalSampleExecutor,
+    EvolutionRevalidationInterventionalSampleStore,
+)
 from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
@@ -1642,6 +1646,28 @@ class AgentEngine:
                     self.evolution_revalidation_validation_plan_service
                 ),
                 source_store=self.evolution_revalidation_evaluation_source_store,
+            )
+        )
+        self.evolution_revalidation_interventional_sample_store = (
+            EvolutionRevalidationInterventionalSampleStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_interventional_sample_executor = (
+            EvolutionRevalidationInterventionalSampleExecutor(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                receipt_store=(
+                    self.evolution_revalidation_interventional_sample_store
+                ),
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                profile_service=self.harness_service,
+                sandbox_eval_kernel=self.harness_sandbox_eval_kernel,
+                contract_service=(
+                    self.evolution_revalidation_runtime_contract_service
+                ),
+                source_service=self.evolution_revalidation_runtime_source_service,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
