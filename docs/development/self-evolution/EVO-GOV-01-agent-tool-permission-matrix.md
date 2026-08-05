@@ -59,6 +59,8 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_revalidation_validate` | Harness/ARC-04 new validation evidence | `evolution_isolated_validation` | 20 |
 | `evolution_revalidation_outcome` | invalidate old promotion authority and issue Outcome | `evolution_promotion_artifact` | 50 |
 | `evolution_revalidation_evaluation_plan` | freeze complete fresh evaluation coverage | `evolution_evaluation_artifact` | 50 |
+| `evolution_revalidation_validation_plan` | rebind RED/GREEN to current target and immutable source | `evolution_evaluation_artifact` | 50 |
+| `evolution_revalidation_runtime_contract` | bind fresh metric runners and adversarial probes | `evolution_evaluation_artifact` | 50 |
 | `evolution_revalidation_evaluation_source` | persist exact revalidation overlays for evaluation | `evolution_evaluation_artifact` | 20 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate

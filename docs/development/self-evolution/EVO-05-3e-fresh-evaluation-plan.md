@@ -61,6 +61,7 @@ evolution_revalidation_evaluation_plan(outcome_id=...)
 
 [EVO-05.3f1](EVO-05-3f1-immutable-evaluation-source.md) 已把 exact target + overlay 捕获为可脱离 Candidate Lease 的
 content-addressed immutable source；[EVO-05.3f2a](EVO-05-3f2a-revalidation-validation-plan.md) 已进一步重绑
-current-target RED baseline、immutable GREEN source、seed/metrics/checks/预算。EVO-05.3f2b 再让完整评估执行器消费它并重建 cohort/lane matrix，最终签发时间下界、target、
+current-target RED baseline、immutable GREEN source、seed/metrics/checks/预算；EVO-05.3f2b1/2a 也已补齐共享 runtime
+source pair 以及 metric runner/adversarial probe authority。EVO-05.3f2b2b/2c 再让完整评估执行器消费它们并重建 cohort/lane matrix，最终签发时间下界、target、
 overlay 和 Plan digest 全部匹配的新 Final Evaluation Receipt。随后才允许重新走
 Decision/Reflection/Package/专业签名与 Approval，EVO-05.4 staged rollout 仍未开放。

@@ -657,7 +657,6 @@ def _require_sources(fresh, source, package, contract, harness_plan) -> None:
 
 
 def _coverage(files, harness_plan):
-    used = set()
     coverage = []
     for file in files:
         selected_ids = set(
@@ -678,10 +677,8 @@ def _coverage(files, harness_plan):
                     "revalidation_validation_plan_check_coverage_invalid",
                     f"{file.path} 的 {kind} 必须由唯一 current Profile check 覆盖。",
                 )
-            used.add(matches[0].id)
             coverage.append((file.path, kind, matches[0].id))
-    checks = tuple(item for item in harness_plan.checks if item.id in used)
-    return checks, tuple(
+    return harness_plan.checks, tuple(
         EvolutionRevalidationCheckCoverage(
             order=index,
             path=path,

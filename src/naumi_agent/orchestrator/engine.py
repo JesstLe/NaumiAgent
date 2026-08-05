@@ -240,6 +240,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_runtime_contracts import (
+    EvolutionRevalidationRuntimeContractService,
+    EvolutionRevalidationRuntimeContractStore,
+)
 from naumi_agent.evolution.revalidation_runtime_sources import (
     EvolutionRevalidationRuntimeSourceService,
 )
@@ -1619,6 +1623,17 @@ class AgentEngine:
                 final_evaluation_store=self.evolution_final_evaluation_receipt_store,
                 harness=self.harness_service,
                 store=self.evolution_revalidation_validation_plan_store,
+            )
+        )
+        self.evolution_revalidation_runtime_contract_store = (
+            EvolutionRevalidationRuntimeContractStore(config.memory.session_db_path)
+        )
+        self.evolution_revalidation_runtime_contract_service = (
+            EvolutionRevalidationRuntimeContractService(
+                validation_plan_service=(
+                    self.evolution_revalidation_validation_plan_service
+                ),
+                store=self.evolution_revalidation_runtime_contract_store,
             )
         )
         self.evolution_revalidation_runtime_source_service = (

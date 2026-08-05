@@ -43,6 +43,8 @@
   绑定为相同 RED/GREEN baseline，将 immutable overlay 仅绑定 GREEN，并冻结原 seed/预算/指标/样本与 current checks。
 - [EVO-05.3f2b1 Runtime Source Pair](EVO-05-3f2b1-runtime-source-pair.md)：已交付；为两类 Harness Eval 统一提供
   current-target RED 与 immutable-overlay GREEN，并在执行前后动态复验 source authority。
+- [EVO-05.3f2b2a Fresh Runtime Contract](EVO-05-3f2b2a-fresh-runtime-contract.md)：已交付；重新绑定 metric runner、
+  timeout、完整预算与 adversarial probe coverage，任何缺口均阻断真实 sample execution。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

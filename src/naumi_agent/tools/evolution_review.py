@@ -104,6 +104,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
 )
+from naumi_agent.evolution.revalidation_runtime_contracts import (
+    EvolutionRevalidationRuntimeContractError,
+    render_evolution_revalidation_runtime_contract,
+)
 from naumi_agent.evolution.revalidation_validation_plans import (
     EvolutionRevalidationValidationPlanError,
     render_evolution_revalidation_validation_plan,
@@ -2338,6 +2342,66 @@ class EvolutionRevalidationValidationPlanTool(Tool):
         return render_evolution_revalidation_validation_plan(view)
 
 
+class EvolutionRevalidationRuntimeContractTool(Tool):
+    """Bind fresh metric runners and adversarial probes without execution."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_runtime_contract"
+
+    @property
+    def description(self) -> str:
+        return (
+            "为 current-target Fresh Evaluation 绑定可执行 metric runner、timeout、"
+            "预算与 adversarial probe coverage；缺口会形成机械 blocker。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "validation_plan_id": {
+                    "type": "string",
+                    "pattern": "^evrevalvplan_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["validation_plan_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            command_argument_names=(),
+            user_facing_name="Evolution Fresh Runtime Contract",
+            search_hint="evolution fresh metric runner adversarial probe runtime contract",
+        )
+
+    async def execute(self, validation_plan_id: str) -> str:
+        try:
+            view = (
+                await self._engine.evolution_revalidation_runtime_contract_service.issue(
+                    workspace_root=self._engine.workspace_root,
+                    validation_plan_id=validation_plan_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationRuntimeContractError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Fresh Runtime Contract 未完成：{exc}"
+        return render_evolution_revalidation_runtime_contract(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2376,6 +2440,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationEvaluationPlanTool(engine),
         EvolutionRevalidationEvaluationSourceTool(engine),
         EvolutionRevalidationValidationPlanTool(engine),
+        EvolutionRevalidationRuntimeContractTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2411,6 +2476,7 @@ __all__ = [
     "EvolutionRevalidationEvaluationPlanTool",
     "EvolutionRevalidationEvaluationSourceTool",
     "EvolutionRevalidationValidationPlanTool",
+    "EvolutionRevalidationRuntimeContractTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

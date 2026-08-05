@@ -35,8 +35,12 @@ from tests.unit.test_evolution_revalidation_evaluation_sources import (
 )
 
 
-def _checks(path: str) -> tuple[HarnessCheckSpec, ...]:
-    return tuple(
+def _checks(
+    path: str,
+    *,
+    include_boundary: bool = True,
+) -> tuple[HarnessCheckSpec, ...]:
+    required = tuple(
         HarnessCheckSpec(
             id=f"targeted_{kind}",
             argv=("verify", kind, path),
@@ -46,6 +50,20 @@ def _checks(path: str) -> tuple[HarnessCheckSpec, ...]:
             provides=(kind,),
         )
         for kind in ("lint", "compile", "unit", "contract")
+    )
+    boundary = (
+        HarnessCheckSpec(
+            id="targeted_boundary",
+            argv=("verify", "boundary", path),
+            timeout_seconds=20,
+            when_changed=(path,),
+            required_for=("change",),
+            adversarial_probes=("boundary",),
+        ),
+    )
+    return (
+        *required,
+        *(boundary if include_boundary else ()),
     )
 
 
@@ -67,7 +85,15 @@ def _rehash_source(source, *, profile_sha256: str, plan_sha256: str):
     )
 
 
-async def _builder_scenario(tmp_path: Path):
+async def _builder_scenario(
+    tmp_path: Path,
+    *,
+    metric_name: str = "targeted.correctness",
+    metric_direction: str = "increase",
+    metric_target: float = 1.0,
+    metric_verifier: str = "harness_replay",
+    include_boundary: bool = True,
+):
     package, _old_harness, fresh_view, _store, source_service = (
         await _source_scenario(tmp_path)
     )
@@ -79,7 +105,7 @@ async def _builder_scenario(tmp_path: Path):
     harness = build_harness_evolution_revalidation_plan(
         profile_sha256="d" * 64,
         changed_paths=(path,),
-        checks=_checks(path),
+        checks=_checks(path, include_boundary=include_boundary),
     )
     source = _rehash_source(
         original,
@@ -101,15 +127,15 @@ async def _builder_scenario(tmp_path: Path):
             max_changed_files=1,
             max_changed_lines=100,
             max_tool_calls=20,
-            max_duration_seconds=300,
+            max_duration_seconds=3_600,
             max_attempts=2,
         ),
         allowed_checks=(
             ExperimentCheck(
-                metric_name="targeted.correctness",
-                direction="increase",
-                target=1.0,
-                verifier="harness_replay",
+                metric_name=metric_name,
+                direction=metric_direction,
+                target=metric_target,
+                verifier=metric_verifier,
                 procedure="运行固定输入的窄范围回归并比较 RED/GREEN。",
             ),
         ),
@@ -156,6 +182,7 @@ async def test_plan_rebinds_exact_current_red_and_immutable_green(tmp_path: Path
         "unit",
         "contract",
     }
+    assert any(item.adversarial_probes == ("boundary",) for item in plan.checks)
     assert not plan.evaluation_execution_started
     assert not plan.promotion_authority
 

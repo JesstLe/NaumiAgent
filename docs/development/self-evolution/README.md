@@ -89,3 +89,5 @@ Final Evaluation 的 suite/sample/platform 策略重绑到 current-target RED �
 Harness Profile 唯一覆盖每个文件的 required checks；该 authority 尚不执行评测或授予 promotion。
 [EVO-05.3f2b1](EVO-05-3f2b1-runtime-source-pair.md) 已为 Harness Sandbox Eval 物化共享的同基线 RED/GREEN runtime
 source pair，并以动态回调持续复验 Plan、Snapshot 与 blob bytes；旧 Interventional/Adversarial executor 尚未接线。
+[EVO-05.3f2b2a](EVO-05-3f2b2a-fresh-runtime-contract.md) 已重新绑定真实 metric runner/version/fixture/timeout 与
+current Profile adversarial probe coverage，并对缺 runner、probe 或预算形成 blocker；尚未开始 sample execution。
