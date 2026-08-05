@@ -3207,6 +3207,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionReflectionMemoryError,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_evaluation_plans import (
+        EvolutionRevalidationEvaluationPlanError,
+        render_evolution_revalidation_evaluation_plan,
+    )
     from naumi_agent.evolution.revalidation_execution import (
         render_evolution_revalidation_execution,
     )
@@ -3570,6 +3574,19 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evolution_revalidation_outcome(view)))
             return
+        if action == "revalidation-evaluation-plan":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-evaluation-plan 需要一个 Revalidation Outcome ID。"
+                )
+            view = await engine.evolution_revalidation_evaluation_plan_service.issue(
+                workspace_root=engine.workspace_root,
+                outcome_id=parts[1],
+            )
+            console.print(
+                Markdown(render_evolution_revalidation_evaluation_plan(view))
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3782,6 +3799,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-replay <revalidation-request-id>；"
             "/evolution revalidation-validate <revalidation-request-id>；"
             "/evolution revalidation-outcome <revalidation-request-id>；"
+            "/evolution revalidation-evaluation-plan <revalidation-outcome-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3952,6 +3970,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationOutcomeError as exc:
         console.print(
             f"Evolution Revalidation Outcome 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationEvaluationPlanError as exc:
+        console.print(
+            f"Evolution Fresh Evaluation Plan 未完成：{exc}",
             style="yellow",
             markup=False,
         )

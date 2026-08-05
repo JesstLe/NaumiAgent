@@ -35,6 +35,8 @@
   overlay，经 Harness Sandbox 与 ARC-04 Worker 执行匹配检查并签发新证据；
 - [EVO-05.3d Revalidation Outcome](EVO-05-3d-revalidation-outcome.md)：已交付；原子失效旧 evidence，形成可动态
   stale 的 rollout 候选结论，并强制 Final Evaluation、专业签名与 Approval 重新签发/聚合。
+- [EVO-05.3e Fresh Evaluation Plan](EVO-05-3e-fresh-evaluation-plan.md)：已交付；从 current validated Outcome
+  冻结完整 Interventional + 跨平台 Adversarial 重评矩阵，禁止用 Harness check 替代 Final Evaluation。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

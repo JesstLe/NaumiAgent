@@ -57,6 +57,8 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_revalidation_request` | deterministic non-executable Revalidation Request | `evolution_promotion_artifact` | 50 |
 | `evolution_revalidation_replay` | detached exact/rebase source replay | `evolution_isolated_replay` | 50 |
 | `evolution_revalidation_validate` | Harness/ARC-04 new validation evidence | `evolution_isolated_validation` | 20 |
+| `evolution_revalidation_outcome` | invalidate old promotion authority and issue Outcome | `evolution_promotion_artifact` | 50 |
+| `evolution_revalidation_evaluation_plan` | freeze complete fresh evaluation coverage | `evolution_evaluation_artifact` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
