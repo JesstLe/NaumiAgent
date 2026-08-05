@@ -475,6 +475,10 @@ if TYPE_CHECKING:
         EvolutionRevalidationExecutionService,
         render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_interventional_attributions import (
+        EvolutionRevalidationInterventionalAttributionError,
+        EvolutionRevalidationInterventionalAttributionExecutor,
+    )
     from naumi_agent.evolution.revalidation_interventional_cohorts import (
         EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY,
         EvolutionRevalidationInterventionalCheckSummary,
@@ -763,6 +767,8 @@ __all__ = [
     "EvolutionRevalidationInterventionalCohortExecutor",
     "EvolutionRevalidationInterventionalCohortReceipt",
     "EvolutionRevalidationInterventionalCohortStore",
+    "EvolutionRevalidationInterventionalAttributionError",
+    "EvolutionRevalidationInterventionalAttributionExecutor",
     "EvolutionRevalidationInterventionalMetricSummary",
     "EvolutionRevalidationInterventionalComparisonError",
     "EvolutionRevalidationInterventionalComparisonExecutor",
@@ -1346,6 +1352,10 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationInterventionalCohortStore",
         "EvolutionRevalidationInterventionalMetricSummary",
     }
+    revalidation_interventional_attribution_exports = {
+        "EvolutionRevalidationInterventionalAttributionError",
+        "EvolutionRevalidationInterventionalAttributionExecutor",
+    }
     revalidation_interventional_comparison_exports = {
         "EvolutionRevalidationInterventionalComparisonError",
         "EvolutionRevalidationInterventionalComparisonExecutor",
@@ -1858,6 +1868,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_interventional_comparisons"
     elif name in revalidation_interventional_cohort_exports:
         module_name = "revalidation_interventional_cohorts"
+    elif name in revalidation_interventional_attribution_exports:
+        module_name = "revalidation_interventional_attributions"
     elif name in revalidation_interventional_sample_exports:
         module_name = "revalidation_interventional_samples"
     elif name in revalidation_runtime_contract_exports:
