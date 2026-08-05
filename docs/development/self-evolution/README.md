@@ -125,3 +125,5 @@ target branch 来自原 Request，revision/tree 来自 Fresh Plan/Outcome，所�
 签名绑定全新 Requirement/Response、current Principal event/key generation，换钥、撤销、角色或 target authority 漂移均失败关闭。
 [EVO-05.3f3b5](EVO-05-3f3b5-fresh-decision-aggregation.md) 已聚合新 user consent、全部专业签名与五个 current technical
 gates，形成 append-only Fresh Decision；只有动态 current 的 approved Decision 才开放 staged rollout 输入资格。
+[EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
+queued dispatch，并在 exact Worker incarnation 上预留容量；远端领取、结果回传和 H5a 摄取仍未完成。
