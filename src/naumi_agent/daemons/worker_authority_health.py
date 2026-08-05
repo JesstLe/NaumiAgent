@@ -10,6 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from naumi_agent.daemons.agent_worker_supervisor_contract import (
+    supervisor_fence_receipt_from_json,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerContract,
     normalize_worker_timestamp,
@@ -87,6 +90,9 @@ class WorkerAuthoritySnapshot:
     active_count: int
     workers: tuple[WorkerAuthorityEntry, ...]
     truncated: bool
+    supervisor_fence_count: int
+    latest_supervisor_fenced_at: str
+    latest_supervisor_job_id: str
 
 
 def inspect_worker_authority_health(
@@ -110,7 +116,7 @@ def inspect_worker_authority_health(
 
     registry_kind = _file_kind(registry_path)
     if registry_kind == "absent":
-        return WorkerAuthoritySnapshot("absent", "not_needed", 0, (), False)
+        return WorkerAuthoritySnapshot("absent", "not_needed", 0, (), False, 0, "", "")
     if registry_kind != "file":
         raise WorkerAuthorityHealthError("registry_wrong_type", "Worker registry 路径不是文件。")
 
@@ -154,6 +160,9 @@ def inspect_worker_authority_health(
                 )
                 for item in registrations
             }
+            supervisor_fence_count, latest_supervisor_fenced_at, latest_supervisor_job_id = (
+                _read_supervisor_fences(db)
+            )
     except WorkerAuthorityHealthError:
         raise
     except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
@@ -162,7 +171,16 @@ def inspect_worker_authority_health(
         ) from exc
 
     if not registrations:
-        return WorkerAuthoritySnapshot("ready", "not_needed", active_count, (), False)
+        return WorkerAuthoritySnapshot(
+            "ready",
+            "not_needed",
+            active_count,
+            (),
+            False,
+            supervisor_fence_count,
+            latest_supervisor_fenced_at,
+            latest_supervisor_job_id,
+        )
 
     heartbeat_store_health, heartbeats = _read_heartbeats(
         harness_path,
@@ -186,7 +204,36 @@ def inspect_worker_authority_health(
         active_count,
         workers,
         active_count > len(workers),
+        supervisor_fence_count,
+        latest_supervisor_fenced_at,
+        latest_supervisor_job_id,
     )
+
+
+def _read_supervisor_fences(db: sqlite3.Connection) -> tuple[int, str, str]:
+    count = int(
+        db.execute("SELECT COUNT(*) FROM worker_supervisor_fence_receipts").fetchone()[0]
+    )
+    if count == 0:
+        return 0, "", ""
+    row = db.execute(
+        """
+        SELECT * FROM worker_supervisor_fence_receipts
+        ORDER BY decided_at DESC, operation_id DESC LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        raise ValueError("Supervisor fencing count 与历史不一致。")
+    receipt = supervisor_fence_receipt_from_json(str(row["receipt_json"]))
+    if (
+        receipt.evidence.operation_id != str(row["operation_id"])
+        or receipt.evidence.worker_id != str(row["worker_id"])
+        or receipt.evidence.worker_epoch != int(row["worker_epoch"])
+        or receipt.receipt_sha256 != str(row["receipt_sha256"])
+        or receipt.authentication_sha256 != str(row["authentication_sha256"])
+    ):
+        raise ValueError("Supervisor fencing 索引列与 receipt 不一致。")
+    return count, receipt.evidence.decided_at, receipt.evidence.job_id
 
 
 def _read_heartbeats(

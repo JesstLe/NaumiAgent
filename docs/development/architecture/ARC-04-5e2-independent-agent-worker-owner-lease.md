@@ -112,6 +112,9 @@ Composition 与 Doctor 小模块测试，不运行全量测试。
 - dispatch key 尚无长时间运行的 rotation；内存引用清除不能声明物理内存安全擦除；
 - Windows named pipe 代码路径保持同协议，但本轮真实进程证据来自 darwin/arm64。
 
-下一步应实现 `ARC-04.6a` 最小 Supervisor owner/fencing，先消费现有 heartbeat、registration、Job claim 与
-physical reservation 事实，形成合法 stale takeover 决策。Supervisor 仍不得直接执行模型；只有其 fencing
-闭环完成后，才进入独立 Worker `mark_running -> model/tool -> terminal publication` 纵向切片。
+`ARC-04.6a / HAR-10.7h3` 已完成最小 Supervisor owner/fencing：它消费 heartbeat、registration、精确
+PID/create-time、Job claim 与 physical reservation，只有在 control-only pre-start 副作用边界明确时才签发
+认证 receipt 并幂等 requeue，详见
+[`ARC-04-6a-agent-worker-supervisor-owner-fencing.md`](ARC-04-6a-agent-worker-supervisor-owner-fencing.md)。
+下一步进入独立 Worker `mark_running -> bounded model execution -> terminal publication` 纵向切片，不线性扩张
+完整 Supervisor。

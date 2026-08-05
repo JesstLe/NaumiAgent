@@ -310,6 +310,19 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
             "尚未启动隔离 Worker；注册中心会在首次真实注册时按需创建。",
         )
     if snapshot.active_count == 0:
+        if snapshot.supervisor_fence_count:
+            job_detail = (
+                f"；最近安全退回 Job {snapshot.latest_supervisor_job_id[:12]}"
+                if snapshot.latest_supervisor_job_id
+                else ""
+            )
+            return DoctorCheck(
+                "Worker authority",
+                "pass",
+                "注册中心 schema 正常，当前没有 active Worker；"
+                f"Supervisor 已完成 {snapshot.supervisor_fence_count} 次显式 fencing"
+                f"（最近 {snapshot.latest_supervisor_fenced_at}）{job_detail}。",
+            )
         return DoctorCheck(
             "Worker authority",
             "pass",
@@ -354,6 +367,8 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
     detail = (
         f"active Worker {snapshot.active_count} 个；心跳 Store {heartbeat_store}。"
     )
+    if snapshot.supervisor_fence_count:
+        detail += f" Supervisor 历史 fencing {snapshot.supervisor_fence_count} 次。"
     summaries = [_worker_authority_summary(worker) for worker in snapshot.workers[:3]]
     if summaries:
         detail += " " + "；".join(summaries)

@@ -30,6 +30,13 @@ from naumi_agent.daemons.agent_jobs import (
     decode_agent_job_dispatch_payload,
     encode_agent_job_dispatch_payload,
 )
+from naumi_agent.daemons.agent_worker_supervisor import (
+    AgentWorkerSupervisor,
+    AgentWorkerSupervisorError,
+    AgentWorkerSupervisorFactory,
+    AgentWorkerSupervisorOutcome,
+    AgentWorkerSupervisorResult,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
     WorkerAdmissionReason,
@@ -89,6 +96,11 @@ __all__ = [
     "AgentJobStore",
     "AgentJobTerminalPayload",
     "AgentJobTransitionResult",
+    "AgentWorkerSupervisor",
+    "AgentWorkerSupervisorError",
+    "AgentWorkerSupervisorFactory",
+    "AgentWorkerSupervisorOutcome",
+    "AgentWorkerSupervisorResult",
     "StoredAgentJob",
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",

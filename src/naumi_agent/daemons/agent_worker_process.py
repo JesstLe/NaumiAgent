@@ -311,6 +311,14 @@ class AuthenticatedAgentWorkerProcess:
                 self._required_contract(),
                 registered_at=registered_at,
             )
+            await self._registry.register_process_witness(
+                worker_id=self._required_contract().worker_id,
+                instance_id=self._required_contract().instance_id,
+                epoch=self._required_contract().epoch,
+                contract_sha256=self._required_contract().contract_sha256,
+                process_id=self._required_process().pid,
+                witnessed_at=self._timestamp("process_witnessed_at"),
+            )
             await self._record_heartbeat(
                 sequence=1,
                 phase=HarnessHeartbeatPhase.STARTING,
@@ -1648,6 +1656,13 @@ def _job_owner_id_values(
     return f"agent-worker-owner:{digest}"
 
 
+def agent_worker_job_owner_id(contract: WorkerContract) -> str:
+    """Return the durable Job owner identity bound to one Worker incarnation."""
+    if not isinstance(contract, WorkerContract):
+        raise TypeError("contract 必须是 WorkerContract。")
+    return _job_owner_id(contract)
+
+
 def _job_reservation_id(contract: WorkerContract, job_id: str) -> str:
     return _job_reservation_id_values(
         worker_id=contract.worker_id,
@@ -1673,6 +1688,15 @@ def _job_reservation_id_values(
         ).encode()
     ).hexdigest()
     return f"agent-job-slot:{digest}"
+
+
+def agent_worker_job_reservation_id(contract: WorkerContract, job_id: str) -> str:
+    """Return the physical slot identity bound to one Worker Job."""
+    if not isinstance(contract, WorkerContract):
+        raise TypeError("contract 必须是 WorkerContract。")
+    if not isinstance(job_id, str) or not _IDENTIFIER_RE.fullmatch(job_id):
+        raise ValueError("job_id 格式无效。")
+    return _job_reservation_id(contract, job_id)
 
 
 def _job_dispatch_aad(
@@ -1750,4 +1774,6 @@ __all__ = [
     "AgentWorkerProcessSnapshot",
     "AgentWorkerProcessState",
     "AuthenticatedAgentWorkerProcess",
+    "agent_worker_job_owner_id",
+    "agent_worker_job_reservation_id",
 ]

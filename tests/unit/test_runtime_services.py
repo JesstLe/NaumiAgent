@@ -8,6 +8,7 @@ import pytest
 from naumi_agent.config.settings import AppConfig, RuntimeHeartbeatRetentionConfig
 from naumi_agent.daemons.agent_jobs import AgentJobStore
 from naumi_agent.daemons.agent_worker_process import AgentWorkerProcessFactory
+from naumi_agent.daemons.agent_worker_supervisor import AgentWorkerSupervisorFactory
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.store import HarnessStore
@@ -99,6 +100,22 @@ def _agent_worker_factory(tmp_path) -> AgentWorkerProcessFactory:
     )
 
 
+def _agent_worker_supervisor_factory(tmp_path) -> AgentWorkerSupervisorFactory:
+    key = b"j" * 32
+    return AgentWorkerSupervisorFactory(
+        worker_registry=WorkerRegistryStore(
+            tmp_path / "supervisor-worker-registry.db",
+            supervisor_key_provider=lambda: key,
+        ),
+        heartbeat_store=HarnessStore(tmp_path / "supervisor-harness.db"),
+        agent_job_store=AgentJobStore(
+            tmp_path / "supervisor-agent-jobs.db",
+            key_provider=lambda: key,
+        ),
+        workspace_root=tmp_path,
+    )
+
+
 def test_composition_builds_service_from_exact_resources_and_copies_policy(
     tmp_path,
     monkeypatch,
@@ -129,6 +146,15 @@ def test_composition_builds_service_from_exact_resources_and_copies_policy(
     assert services.agent_worker_process_factory.heartbeat_store is resources.harness_store
     assert services.agent_worker_process_factory.agent_job_store is resources.agent_job_store
     assert services.agent_worker_process_factory.runtime_dir == paths.agent_worker_runtime_dir
+    assert services.agent_worker_supervisor_factory.worker_registry is (
+        resources.worker_registry_store
+    )
+    assert services.agent_worker_supervisor_factory.heartbeat_store is (
+        resources.harness_store
+    )
+    assert services.agent_worker_supervisor_factory.agent_job_store is (
+        resources.agent_job_store
+    )
     assert not paths.harness_db_path.exists()
     assert not paths.agent_worker_runtime_dir.exists()
 
@@ -141,6 +167,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
     agent_factory = _agent_factory(tmp_path)
     browser_factory = _browser_factory(tmp_path)
     agent_worker_factory = _agent_worker_factory(tmp_path)
+    supervisor_factory = _agent_worker_supervisor_factory(tmp_path)
 
     services = build_runtime_services(
         config,
@@ -151,12 +178,14 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_execution_heartbeat_factory=agent_factory,
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
         ),
     )
     assert services.terminal_runtime_lifecycle_factory is factory
     assert services.agent_execution_heartbeat_factory is agent_factory
     assert services.browser_execution_heartbeat_factory is browser_factory
     assert services.agent_worker_process_factory is agent_worker_factory
+    assert services.agent_worker_supervisor_factory is supervisor_factory
 
     with pytest.raises(TypeError, match="TerminalRuntimeLifecycleFactory"):
         RuntimeServices(
@@ -164,6 +193,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_execution_heartbeat_factory=agent_factory,
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
         )
     with pytest.raises(TypeError, match="AgentExecutionHeartbeatFactory"):
         RuntimeServices(
@@ -171,6 +201,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_execution_heartbeat_factory=object(),  # type: ignore[arg-type]
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
         )
     with pytest.raises(TypeError, match="BrowserExecutionHeartbeatFactory"):
         RuntimeServices(
@@ -178,6 +209,7 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_execution_heartbeat_factory=agent_factory,
             browser_execution_heartbeat_factory=object(),  # type: ignore[arg-type]
             agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
         )
     with pytest.raises(TypeError, match="AgentWorkerProcessFactory"):
         RuntimeServices(
@@ -185,6 +217,15 @@ def test_service_override_identity_and_invalid_bundle_fail_closed(tmp_path) -> N
             agent_execution_heartbeat_factory=agent_factory,
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=object(),  # type: ignore[arg-type]
+            agent_worker_supervisor_factory=supervisor_factory,
+        )
+    with pytest.raises(TypeError, match="AgentWorkerSupervisorFactory"):
+        RuntimeServices(
+            terminal_runtime_lifecycle_factory=factory,
+            agent_execution_heartbeat_factory=agent_factory,
+            browser_execution_heartbeat_factory=browser_factory,
+            agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=object(),  # type: ignore[arg-type]
         )
     with pytest.raises(TypeError, match="RuntimeServiceOverrides"):
         build_runtime_services(
@@ -200,6 +241,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     agent_factory = _agent_factory(tmp_path)
     browser_factory = _browser_factory(tmp_path)
     agent_worker_factory = _agent_worker_factory(tmp_path)
+    supervisor_factory = _agent_worker_supervisor_factory(tmp_path)
     engine = create_agent_engine(
         _config(tmp_path),
         service_overrides=RuntimeServiceOverrides(
@@ -207,6 +249,7 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
             agent_execution_heartbeat_factory=agent_factory,
             browser_execution_heartbeat_factory=browser_factory,
             agent_worker_process_factory=agent_worker_factory,
+            agent_worker_supervisor_factory=supervisor_factory,
         ),
     )
 
@@ -218,6 +261,8 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     assert engine.task_runner._heartbeat_factory is browser_factory
     assert engine.agent_worker_process_factory is agent_worker_factory
     assert engine._services.agent_worker_process_factory is agent_worker_factory
+    assert engine.agent_worker_supervisor_factory is supervisor_factory
+    assert engine._services.agent_worker_supervisor_factory is supervisor_factory
 
 
 @pytest.mark.asyncio
