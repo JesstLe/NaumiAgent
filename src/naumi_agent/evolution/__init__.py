@@ -475,6 +475,15 @@ if TYPE_CHECKING:
         EvolutionRevalidationExecutionService,
         render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_final_evaluations import (
+        EVOLUTION_REVALIDATION_FINAL_EVALUATION_POLICY,
+        EvolutionRevalidationFinalAdversarialEvidence,
+        EvolutionRevalidationFinalEvaluationError,
+        EvolutionRevalidationFinalEvaluationExecutor,
+        EvolutionRevalidationFinalEvaluationReceipt,
+        EvolutionRevalidationFinalEvaluationStore,
+        EvolutionRevalidationFinalInterventionalEvidence,
+    )
     from naumi_agent.evolution.revalidation_interventional_attributions import (
         EvolutionRevalidationInterventionalAttributionError,
         EvolutionRevalidationInterventionalAttributionExecutor,
@@ -691,6 +700,13 @@ __all__ = [
     "render_evolution_revalidation_replay",
     "EvolutionRevalidationExecutionOutcome",
     "EvolutionRevalidationExecutionService",
+    "EVOLUTION_REVALIDATION_FINAL_EVALUATION_POLICY",
+    "EvolutionRevalidationFinalAdversarialEvidence",
+    "EvolutionRevalidationFinalEvaluationError",
+    "EvolutionRevalidationFinalEvaluationExecutor",
+    "EvolutionRevalidationFinalEvaluationReceipt",
+    "EvolutionRevalidationFinalEvaluationStore",
+    "EvolutionRevalidationFinalInterventionalEvidence",
     "render_evolution_revalidation_execution",
     "EVOLUTION_REVALIDATION_REBASE_POLICY",
     "EvolutionRevalidationRebaseError",
@@ -1370,6 +1386,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRuntimeContractView",
         "render_evolution_revalidation_runtime_contract",
     }
+    revalidation_final_evaluation_exports = {
+        "EVOLUTION_REVALIDATION_FINAL_EVALUATION_POLICY",
+        "EvolutionRevalidationFinalAdversarialEvidence",
+        "EvolutionRevalidationFinalEvaluationError",
+        "EvolutionRevalidationFinalEvaluationExecutor",
+        "EvolutionRevalidationFinalEvaluationReceipt",
+        "EvolutionRevalidationFinalEvaluationStore",
+        "EvolutionRevalidationFinalInterventionalEvidence",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1874,6 +1899,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_interventional_samples"
     elif name in revalidation_runtime_contract_exports:
         module_name = "revalidation_runtime_contracts"
+    elif name in revalidation_final_evaluation_exports:
+        module_name = "revalidation_final_evaluations"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

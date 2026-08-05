@@ -110,3 +110,5 @@ completed/runnable/pending 状态权威，且仅在全部 cohort 齐全后持久
 probe/identity/summary 后生成原生 H5b2/H5c；跨平台归因与新的 Final Evaluation 尚未完成。
 [EVO-05.3f2c5](EVO-05-3f2c5-fresh-adversarial-attribution.md) 已逐平台复验 H5c 并持久化机械归因，且将
 `passed + unchanged` 正确解释为 adversarial guardrail preserved；新的 Final Evaluation 尚未完成。
+[EVO-05.3f2d](EVO-05-3f2d-fresh-final-evaluation.md) 已签发覆盖 current source、Fresh Interventional 与全部平台
+Adversarial cohort/H5c/attribution 的新 Final Evaluation，并将证据完整与重新审批资格严格分离。
