@@ -35,6 +35,10 @@ CC-03.1a 已建立首批机器可校验的核心行为清单：固定 source ide
 Naumi extension 追踪到目标实现与目标测试。详见
 `CC-03-1a-core-behavior-inventory.md`。
 
-因此 CC-03 现为 `partial`，但只完成 CC-03.1 的核心子集。完整键位、焦点、loading、empty、error、
-detail、cancel 矩阵、CC-03.2 protocol 字段语义映射、CC-03.4 完整 divergence log 与 CC-03.5
-同 fixture golden scenarios 仍未实现。
+CC-03.1b 已在 1a 治理边界上补齐 `3 × 8` 完整矩阵，覆盖 loading、empty、error、detail、cancel、
+keyboard、focus、presentation；24 个单元格分别标记 aligned、Naumi extension 或明确 N/A，并由同一
+失败关闭 verifier 校验真实 source/target/test 锚点。详见
+`CC-03-1b-complete-behavior-matrix.md`。
+
+因此 CC-03 现为 `partial`，CC-03.1 已完成。CC-03.2 protocol 字段语义映射、CC-03.3 组件适配、
+CC-03.4 完整 divergence log、CC-03.5 同 fixture golden scenarios 与 CC-03.6 UX audit 仍未实现。

@@ -84,5 +84,5 @@ python3 -m naumi_agent.claude_source.behavior_inventory \
 - 当前 target test 证明 Naumi 行为存在，但 source-like fixture 与真实 Bridge 共用 golden 仍属于 CC-03.5。
 - 当前没有把行为 inventory 接入 CC-05 upstream diff；source 更新只会因 identity binding 变为 stale，
   尚不会生成逐行为差异。
-- 下一小切片应做 CC-03.1b：补齐三条链路的完整 source state/keyboard/focus/error 矩阵；完成后再进入
-  CC-03.2 protocol 字段语义映射。
+- CC-03.1b 已补齐三条链路的完整 source state/keyboard/focus/error 矩阵；后续进入 CC-03.2 protocol
+  字段语义映射，详见 `CC-03-1b-complete-behavior-matrix.md`。
