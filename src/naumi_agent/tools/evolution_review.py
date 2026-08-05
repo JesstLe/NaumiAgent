@@ -104,6 +104,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
 )
+from naumi_agent.evolution.revalidation_validation_plans import (
+    EvolutionRevalidationValidationPlanError,
+    render_evolution_revalidation_validation_plan,
+)
 from naumi_agent.evolution.revalidation_validations import (
     EvolutionRevalidationValidationError,
     render_evolution_revalidation_validation,
@@ -2272,6 +2276,68 @@ class EvolutionRevalidationEvaluationSourceTool(Tool):
         return render_evolution_revalidation_evaluation_source(snapshot)
 
 
+class EvolutionRevalidationValidationPlanTool(Tool):
+    """Bind fresh evaluation policy to current RED and immutable GREEN sources."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_validation_plan"
+
+    @property
+    def description(self) -> str:
+        return (
+            "将旧 Experiment Contract 的 seed、预算、指标和样本策略重新绑定到"
+            "current-target RED 与 immutable-overlay GREEN，签发不可执行的重评计划。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source_snapshot_id": {
+                    "type": "string",
+                    "pattern": "^evrevalsrc_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["source_snapshot_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            command_argument_names=(),
+            user_facing_name="Evolution Revalidation Validation Plan",
+            search_hint=(
+                "evolution revalidation validation plan RED GREEN immutable source"
+            ),
+        )
+
+    async def execute(self, source_snapshot_id: str) -> str:
+        try:
+            view = (
+                await self._engine.evolution_revalidation_validation_plan_service.issue(
+                    workspace_root=self._engine.workspace_root,
+                    source_snapshot_id=source_snapshot_id.strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationValidationPlanError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Revalidation Validation Plan 未完成：{exc}"
+        return render_evolution_revalidation_validation_plan(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2309,6 +2375,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationOutcomeTool(engine),
         EvolutionRevalidationEvaluationPlanTool(engine),
         EvolutionRevalidationEvaluationSourceTool(engine),
+        EvolutionRevalidationValidationPlanTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2343,6 +2410,7 @@ __all__ = [
     "EvolutionRevalidationOutcomeTool",
     "EvolutionRevalidationEvaluationPlanTool",
     "EvolutionRevalidationEvaluationSourceTool",
+    "EvolutionRevalidationValidationPlanTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",
