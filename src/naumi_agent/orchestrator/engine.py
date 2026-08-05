@@ -263,6 +263,10 @@ from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
 )
+from naumi_agent.evolution.revalidation_reapproval_authorities import (
+    EvolutionRevalidationReapprovalAuthorityService,
+    EvolutionRevalidationReapprovalAuthorityStore,
+)
 from naumi_agent.evolution.revalidation_rebases import (
     EvolutionRevalidationRebaseExecutor,
     EvolutionRevalidationRebaseStore,
@@ -1853,6 +1857,19 @@ class AgentEngine:
                     self.evolution_revalidation_adversarial_attribution_executor
                 ),
                 receipt_store=self.evolution_revalidation_final_evaluation_store,
+            )
+        )
+        self.evolution_revalidation_reapproval_authority_store = (
+            EvolutionRevalidationReapprovalAuthorityStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_reapproval_authority_service = (
+            EvolutionRevalidationReapprovalAuthorityService(
+                workspace_root=paths.workspace_root,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                final_store=self.evolution_revalidation_final_evaluation_store,
+                store=self.evolution_revalidation_reapproval_authority_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

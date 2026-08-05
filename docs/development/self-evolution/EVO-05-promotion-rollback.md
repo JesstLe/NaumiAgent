@@ -65,6 +65,8 @@
   H5c 并持久化领域正确的故障归因，安全 guardrail 保持不变不再被误判为候选无改善。
 - [EVO-05.3f2d Fresh Final Evaluation](EVO-05-3f2d-fresh-final-evaluation.md)：已交付；覆盖 current source、Fresh
   Interventional 与 required-platform Adversarial 全部 cohort/H5c/attribution，负向结果不会开放重新审批。
+- [EVO-05.3f3a Fresh Reapproval Authority](EVO-05-3f3a-fresh-reapproval-authority.md)：已交付；动态复验 eligible
+  Fresh Final，禁止复用旧审批/签名，并要求专业角色重新签名和创建新交互。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -81,7 +83,7 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2d。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f3a。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Evaluation matrix、immutable GREEN source 与 current-target Validation Plan；
 Fresh Interventional cohort 与 paired comparison 已完成，但 Adversarial lanes 尚未完成，也没有新 Final Evaluation、
 reapproval、rollout、monitor、rollback executor 或最终发布 Outcome authority。任何界面和回执都不得把 cohort
