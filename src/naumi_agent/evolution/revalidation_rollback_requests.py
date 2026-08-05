@@ -132,6 +132,20 @@ class EvolutionRevalidationRollbackRequestStore:
             return None
         return _restore_request(row["request_json"])
 
+    async def get(self, request_id: str):
+        if not self.db_path.is_file():
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            row = await (await db.execute(
+                "SELECT request_json FROM evolution_revalidation_rollback_requests "
+                "WHERE request_id = ?", (request_id,)
+            )).fetchone()
+        if row is None:
+            return None
+        return _restore_request(row["request_json"])
+
     async def record(self, request):
         item = EvolutionRevalidationRollbackRequest.model_validate_json(
             request.model_dump_json()
@@ -255,7 +269,6 @@ class EvolutionRevalidationRollbackRequestService:
                     "rollback_request_plan_missing",
                     "Fresh Promotion Input 未携带 exact Rollback Plan。",
                 )
-            before = await self.control_service.store.latest(self.workspace_root)
             pause = await self.control_service.pause(
                 reason_code="runtime_guardrail_breach",
                 actor=EvolutionRevalidationRolloutControlActor.MONITOR,
@@ -289,7 +302,10 @@ class EvolutionRevalidationRollbackRequestService:
                 "breach_reasons": list(observation.breach_reasons),
                 "data_restore_required": rollback.data_restore_required,
                 "automatic_pause_satisfied": True,
-                "monitor_pause_created": before is None or before.event_id != pause.event_id,
+                "monitor_pause_created": (
+                    pause.actor is EvolutionRevalidationRolloutControlActor.MONITOR
+                    and pause.reason_code == "runtime_guardrail_breach"
+                ),
                 "rollback_request_authority": True,
                 "rollback_execution_authority": False,
                 "workspace_write_executed": False,

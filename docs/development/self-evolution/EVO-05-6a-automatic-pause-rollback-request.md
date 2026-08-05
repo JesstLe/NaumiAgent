@@ -21,6 +21,7 @@ rollout kill switch，并冻结只读 Rollback Request。该 Request 是 EVO-05.
 
 - 未暂停时以 `monitor/runtime_guardrail_breach` 创建 HMAC-attested control event；
 - 已被用户、安全或数据事件暂停时复用原 pause event，保留原 actor/reason，不伪造 monitor 来源；
+- `monitor_pause_created` 是持久化 pause 的 monitor/breach provenance 投影，不记录某个并发调用是否恰好抢先创建；
 - 同一 Observation 在并发和重试下只产生一个 content-addressed Request；
 - pause 会立即使原 local-canary entry 动态失去执行资格。
 
@@ -46,8 +47,9 @@ breach reasons。artifact 最大 512 KiB，使用 canonical workspace、排序�
 - Engine 与公共 lazy exports 已接线；
 - 只运行相关小模块测试，未运行全量测试。
 
-## 下一切片与真实闭环边界
+## 下游状态与真实闭环边界
 
-EVO-05.6b 必须消费本 Request，在 crash-safe journal 和兼容性门禁下真实恢复 binary/config/schema/patch，并验证至少
-一个版本可启动。EVO-05.7 随后写入 `promoted|rolled_back|superseded` Outcome，并把长期效果反馈回 Candidate/Eval。
+[EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已消费本 Request，从 exact Git baseline 冻结
+content-addressed rollback bytes。ARC-07.5a 仍需建立真实 version slot，EVO-05.6b2 再执行原子切换与启动验证。
+EVO-05.7 随后写入 `promoted|rolled_back|superseded` Outcome，并把长期效果反馈回 Candidate/Eval。
 完成二者及一次真实端到端演练前，不得宣称自进化真实闭环完成。
