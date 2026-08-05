@@ -93,12 +93,17 @@
   声明 `agent_control_transport`，不声明 `agent_context_scope`，并固定 `accepting_jobs=false`；Doctor
   明确显示“控制通道就绪、任务调度未开放”。详见
   `ARC-04-5e1-independent-agent-worker-bootstrap.md`。
+- ARC-04.5e2 / HAR-10.7h2 已将 exact Worker incarnation、物理 slot reservation 与 admitted-only
+  AgentJob owner lease 绑定，以独立一次性密钥完成 AES-GCM request/context staging，并对 claim/slot
+  双续租；密文篡改、子进程崩溃和 release 均按 control-only pre-start 语义 fail closed。它仍不声明
+  `agent_context_scope`、不 `mark_running`、不调用模型。详见
+  `ARC-04-5e2-independent-agent-worker-owner-lease.md`。
 - 当前 Worker 是每 Job 一个短寿命进程，不是带 heartbeat 的长寿命 daemon；PTY、Supervisor、并发背压与
   Windows 隔离后端仍未完成；Agent 已有独立 control-only 进程，但执行仍在 embedded Runtime。结果 outbox 已有在线消费、
   startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
   唤醒与 shutdown drain；HAR-10.7g 已补齐 durable retry budget、HMAC quarantine receipt 和双端隔离
   投影。exact requeue/prune、UI read/ack、retention 和外部 sink 仍未完成。
-  因此 ARC-04 保持 partial。
+  因此 ARC-04 保持 partial；下一前置为 ARC-04.6a 最小 Supervisor owner/fencing。
 
 ## 验收标准
 
@@ -136,4 +141,4 @@ crash-loop/quarantine/drain 或 supervisor 动作；在 ARC-04.1a 交付前，AR
 ARC-04.1a 在该 heartbeat 之上增加了能力、平台、资源、隔离和容量合同，并验证 worker/instance/epoch 与
 heartbeat generation 一致。它没有复制 liveness 状态机，也没有放宽上述 daemon producer 与 supervisor 缺口；
 ARC-04 当前状态为 partial (4.1a, 4.1b, 4.2a, 4.2b, 4.2c, 4.3a, 4.3b, 4.3c, 4.5a, 4.5b1,
-4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c, 4.5e1)。
+4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a, 4.5d2b, 4.5d2c, 4.5e1, 4.5e2)。

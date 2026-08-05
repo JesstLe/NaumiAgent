@@ -27,6 +27,8 @@ from naumi_agent.daemons.agent_jobs import (
     StoredAgentJob,
     StoredAgentJobPublication,
     StoredAgentJobPublicationDelivery,
+    decode_agent_job_dispatch_payload,
+    encode_agent_job_dispatch_payload,
 )
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
@@ -90,6 +92,8 @@ __all__ = [
     "StoredAgentJob",
     "StoredAgentJobPublication",
     "StoredAgentJobPublicationDelivery",
+    "decode_agent_job_dispatch_payload",
+    "encode_agent_job_dispatch_payload",
     "TERMINAL_AGENT_JOB_STATES",
     "WorkerAdmissionDecision",
     "WorkerAdmissionReason",

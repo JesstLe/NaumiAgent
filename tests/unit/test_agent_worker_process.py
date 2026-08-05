@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+import naumi_agent.daemons.agent_worker_process as agent_worker_process_module
+from naumi_agent.daemons.agent_jobs import AgentJobPayload, AgentJobState, AgentJobStore
+from naumi_agent.daemons.agent_worker_contract import issue_agent_worker_request
 from naumi_agent.daemons.agent_worker_process import (
     AgentWorkerProcessError,
     AgentWorkerProcessState,
@@ -25,7 +29,10 @@ from naumi_agent.daemons.worker_contract import (
     WorkerIsolationContract,
     WorkerKind,
 )
-from naumi_agent.daemons.worker_registry import WorkerRegistryStore
+from naumi_agent.daemons.worker_registry import (
+    WorkerCapacityReservationState,
+    WorkerRegistryStore,
+)
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
 from naumi_agent.harness.store import HarnessStore
 from naumi_agent.ui.doctor import _worker_authority_check
@@ -35,6 +42,10 @@ def _process(tmp_path: Path, **overrides: object) -> AuthenticatedAgentWorkerPro
     values: dict[str, object] = {
         "worker_registry": WorkerRegistryStore(tmp_path / "worker-registry.db"),
         "heartbeat_store": HarnessStore(tmp_path / "harness.db"),
+        "agent_job_store": AgentJobStore(
+            tmp_path / "agent-jobs.db",
+            key_provider=lambda: b"j" * 32,
+        ),
         "workspace_root": tmp_path / "workspace",
         "runtime_dir": tmp_path / "runtime" / "agent-worker",
         "software_version": "0.1.214",
@@ -43,9 +54,38 @@ def _process(tmp_path: Path, **overrides: object) -> AuthenticatedAgentWorkerPro
         "heartbeat_timeout_seconds": 3,
         "handshake_timeout_seconds": 5,
         "shutdown_timeout_seconds": 3,
+        "job_claim_lease_seconds": 3,
+        "job_claim_renewal_interval_seconds": 0.2,
     }
     values.update(overrides)
     return AuthenticatedAgentWorkerProcess(**values)  # type: ignore[arg-type]
+
+
+async def _admit_job(process: AuthenticatedAgentWorkerProcess) -> str:
+    payload = AgentJobPayload(
+        task_id="task-independent-worker",
+        session_id="session-independent-worker",
+        task="审查一个真实模块",
+        context="仅在认证子进程内暂存",
+        message_topic="agent.result.independent-worker",
+    )
+    request = issue_agent_worker_request(
+        task_id=payload.task_id,
+        session_id=payload.session_id,
+        agent_name="Explore",
+        task=payload.task,
+        context=payload.context,
+        tool_scope=("file_read",),
+        permission_mode="moderate",
+        model_tier="capable",
+        max_turns=50,
+        max_budget_usd=None,
+        timeout_seconds=60,
+        message_topic=payload.message_topic,
+        issued_at=datetime.now(UTC).isoformat(),
+    )
+    job = await process._agent_jobs.admit(request=request, payload=payload)
+    return job.job_id
 
 
 def test_constructor_is_lazy_and_rejects_unsafe_configuration(tmp_path: Path) -> None:
@@ -55,6 +95,7 @@ def test_constructor_is_lazy_and_rejects_unsafe_configuration(tmp_path: Path) ->
     assert not (tmp_path / "runtime").exists()
     assert not (tmp_path / "worker-registry.db").exists()
     assert not (tmp_path / "harness.db").exists()
+    assert not (tmp_path / "agent-jobs.db").exists()
 
     with pytest.raises(ValueError, match="interval 必须小于 timeout"):
         _process(
@@ -109,7 +150,10 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
     assert started.accepting_jobs is False
     assert process.contract is not None
     assert process.contract.kind is WorkerKind.AGENT
-    assert process.contract.capabilities == (WorkerCapability.AGENT_CONTROL_TRANSPORT,)
+    assert process.contract.capabilities == (
+        WorkerCapability.AGENT_CONTROL_TRANSPORT,
+        WorkerCapability.AGENT_JOB_OWNER_LEASE,
+    )
     registration = await process._registry.get_active(started.worker_id)
     assert registration is not None
     assert registration.contract.contract_sha256 == started.contract_sha256
@@ -168,7 +212,7 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
     )
     check = _worker_authority_check(authority)
     assert check.status == "warn"
-    assert "控制通道就绪、任务调度未开放" in check.detail
+    assert "Job owner lease 就绪、模型执行未开放" in check.detail
     assert "embedded Runtime" in check.suggestion
 
     stopped = await process.close()
@@ -188,6 +232,159 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
         assert stat.S_IMODE(
             (tmp_path / "runtime" / "agent-worker").stat().st_mode
         ) == 0o700
+
+
+@pytest.mark.asyncio
+async def test_real_process_binds_renews_and_releases_exact_prestart_job(
+    tmp_path: Path,
+) -> None:
+    process = _process(tmp_path)
+    await process.start()
+    job_id = await _admit_job(process)
+
+    binding = await process.bind_job(job_id)
+
+    assert binding.job_id == job_id
+    assert binding.claim_epoch == 1
+    assert process.snapshot().bound_job_id == job_id
+    assert process.health_report().active_jobs == 1
+    claimed = await process._agent_jobs.get(job_id)
+    assert claimed is not None
+    assert claimed.state is AgentJobState.CLAIMED
+    assert claimed.claim_owner_id == binding.owner_id
+    assert claimed.claim_epoch == binding.claim_epoch
+    reservation = await process._registry.get_capacity_reservation(
+        binding.reservation_id,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert reservation is not None
+    assert reservation.state is WorkerCapacityReservationState.ACTIVE
+    initial_expiry = reservation.expires_at
+
+    await asyncio.sleep(0.35)
+
+    renewed = await process._agent_jobs.get(job_id)
+    assert renewed is not None
+    assert renewed.latest_receipt.reason_code == "agent_job_claim_renewed"
+    reservation = await process._registry.get_capacity_reservation(
+        binding.reservation_id,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert reservation is not None
+    assert reservation.expires_at > initial_expiry
+
+    await process.release_job()
+
+    released = await process._agent_jobs.get(job_id)
+    assert released is not None
+    assert released.state is AgentJobState.ADMITTED
+    assert released.claim_owner_id is None
+    assert released.latest_receipt.reason_code == "agent_worker_job_released"
+    reservation = await process._registry.get_capacity_reservation(
+        binding.reservation_id,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert reservation is not None
+    assert reservation.state is WorkerCapacityReservationState.RELEASED
+    assert process.health_report().active_jobs == 0
+    await process.close()
+
+
+@pytest.mark.asyncio
+async def test_bound_child_loss_requeues_only_control_only_prestart_job(
+    tmp_path: Path,
+) -> None:
+    process = _process(tmp_path)
+    await process.start()
+    job_id = await _admit_job(process)
+    binding = await process.bind_job(job_id)
+    assert process._process is not None
+
+    process._process.terminate()
+    process._process.join(timeout=2)
+    await asyncio.wait_for(process._terminal_event.wait(), timeout=3)
+
+    assert process.snapshot().state is AgentWorkerProcessState.FAILED
+    recovered = await process._agent_jobs.get(job_id)
+    assert recovered is not None
+    assert recovered.state is AgentJobState.ADMITTED
+    reservation = await process._registry.get_capacity_reservation(
+        binding.reservation_id,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert reservation is not None
+    assert reservation.state is WorkerCapacityReservationState.RELEASED
+
+
+@pytest.mark.asyncio
+async def test_tampered_encrypted_dispatch_fails_child_and_requeues_job(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = _process(tmp_path, handshake_timeout_seconds=2)
+    await process.start()
+    job_id = await _admit_job(process)
+    original = agent_worker_process_module._parent_job_message
+
+    def tampered_message(*args: object, **kwargs: object) -> dict[str, object]:
+        message = original(*args, **kwargs)  # type: ignore[arg-type]
+        if message.get("type") == "bind_job":
+            envelope = dict(message["dispatch_envelope"])  # type: ignore[arg-type]
+            ciphertext = str(envelope["ciphertext_base64"])
+            envelope["ciphertext_base64"] = (
+                ciphertext[:-1] + ("A" if ciphertext[-1] != "A" else "B")
+            )
+            message["dispatch_envelope"] = envelope
+        return message
+
+    monkeypatch.setattr(
+        agent_worker_process_module,
+        "_parent_job_message",
+        tampered_message,
+    )
+
+    with pytest.raises(AgentWorkerProcessError):
+        await process.bind_job(job_id)
+    await asyncio.wait_for(process._terminal_event.wait(), timeout=3)
+
+    assert process.snapshot().state is AgentWorkerProcessState.FAILED
+    recovered = await process._agent_jobs.get(job_id)
+    assert recovered is not None
+    assert recovered.state is AgentJobState.ADMITTED
+
+
+@pytest.mark.asyncio
+async def test_incarnation_fence_breaks_dual_renewal_and_requeues_prestart_job(
+    tmp_path: Path,
+) -> None:
+    process = _process(tmp_path)
+    started = await process.start()
+    job_id = await _admit_job(process)
+    binding = await process.bind_job(job_id)
+
+    await process._registry.revoke(
+        worker_id=started.worker_id,
+        instance_id=started.instance_id,
+        epoch=started.epoch,
+        reason_code="test_incarnation_fenced",
+        revoked_at=datetime.now(UTC).isoformat(),
+    )
+    await asyncio.wait_for(process._terminal_event.wait(), timeout=3)
+
+    assert process.snapshot().state is AgentWorkerProcessState.FAILED
+    assert (
+        process.snapshot().failure_code
+        == "agent_worker_job_owner_lease_renewal_failed"
+    )
+    recovered = await process._agent_jobs.get(job_id)
+    assert recovered is not None
+    assert recovered.state is AgentJobState.ADMITTED
+    reservation = await process._registry.get_capacity_reservation(
+        binding.reservation_id,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert reservation is not None
+    assert reservation.state is WorkerCapacityReservationState.FENCED
 
 
 @pytest.mark.asyncio

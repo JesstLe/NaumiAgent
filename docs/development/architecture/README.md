@@ -43,7 +43,8 @@ schema v4 投影 claimed/running/unknown 与 pending/expired publication 的恢�
 以 exact fence 人工把当前 session 的 expired running Job 收口为 unknown，不重放模型；HAR-10.7f 又增加
 publication startup/periodic recovery、有界退避、失败唤醒与 shutdown drain；HAR-10.7g 又增加 durable
 retry budget、HMAC quarantine receipt 和双端隔离投影；ARC-04.5e1/HAR-10.7h1 又建立真实独立
-control-only Agent 进程、认证本机传输、注册/心跳/排空/撤销，并让双端明确显示任务调度尚未开放。
-Agent Job 仍由 embedded Runtime 执行，quarantine requeue/prune、Agent owner lease/dispatch、
+control-only Agent 进程、认证本机传输、注册/心跳/排空/撤销；ARC-04.5e2/HAR-10.7h2 进一步把
+exact Worker incarnation、物理 slot 和 admitted-only AgentJob owner lease 绑定，并完成进程级一次性密钥
+加密 staging 与双续租。Agent Job 模型执行仍由 embedded Runtime 完成，quarantine requeue/prune、Supervisor、
 Agent/Browser 完整持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

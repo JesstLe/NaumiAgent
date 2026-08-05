@@ -98,6 +98,36 @@ def _heartbeat(
     )
 
 
+def test_agent_job_owner_lease_requires_authenticated_control_transport() -> None:
+    values = {
+        "worker_id": "agent-worker-a",
+        "instance_id": "agent-process-a",
+        "epoch": 1,
+        "kind": WorkerKind.AGENT,
+        "protocol_min": 1,
+        "protocol_max": 1,
+        "software_version": "0.1.214",
+        "platform": detect_worker_platform(),
+        "resources": _resources(),
+        "isolation": _isolation(strict=False),
+        "issued_at": T0,
+    }
+    with pytest.raises(ValueError, match="必须绑定认证控制通道"):
+        issue_worker_contract(
+            **values,
+            capabilities=(WorkerCapability.AGENT_JOB_OWNER_LEASE,),
+        )
+
+    contract = issue_worker_contract(
+        **values,
+        capabilities=(
+            WorkerCapability.AGENT_CONTROL_TRANSPORT,
+            WorkerCapability.AGENT_JOB_OWNER_LEASE,
+        ),
+    )
+    assert verify_worker_contract(contract)
+
+
 def _requirements(**updates):
     values = {
         "kind": WorkerKind.TOOL,

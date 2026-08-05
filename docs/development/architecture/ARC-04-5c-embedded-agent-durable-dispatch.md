@@ -126,8 +126,8 @@ Textual formatter 都只消费该 authority：
 
 本切片没有完成：
 
-- ARC-04.5e1 已完成独立 control-only 进程、认证 transport 与 Worker Registry incarnation；AgentJob
-  owner lease/dispatch、Supervisor 和完整执行能力仍未完成；
+- ARC-04.5e1 已完成独立 control-only 进程，ARC-04.5e2 又完成 admitted-only AgentJob owner lease、
+  物理 slot 和加密 staging；Supervisor、`mark_running` 与完整独立执行能力仍未完成；
 - 跨进程 capacity reservation、durable waiting fairness、priority/affinity；
 - claimed job 的自动 scheduler、重启接管和显式人工恢复动作；
 - publication outbox、幂等 durable result inbox、生产在线消费与 startup recovery 已完成；周期
