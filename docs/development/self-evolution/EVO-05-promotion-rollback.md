@@ -93,8 +93,8 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f3b3。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d、EVO-05.3a-3f3b5 与 required-platform dispatch outbox。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
-Authority、版本化 Fresh Promotion Input、新的 Approval Requirement 与 HAR-10.6 role Response。尚未实现新的专业角色
-Principal/签名 challenge、Decision 聚合、跨机器 platform Worker transport、rollout、monitor、rollback executor 或
-最终发布 Outcome authority。任何界面和回执都不得把单个 Fresh Response 宣称为已审批、promotion、merge、push 或发布。
+Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
+现可形成 exact Worker/capacity 绑定的 queued Dispatch，但尚未实现远端认证 claim、结果回传/H5a 摄取、rollout、monitor、
+rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 queued Dispatch 宣称为跨平台执行完成。
