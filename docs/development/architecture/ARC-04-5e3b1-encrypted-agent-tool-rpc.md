@@ -116,6 +116,7 @@ deadline，不按轮重置；Provider timeout、畸形 usage 或预算超限都�
 - running 后失败依赖既有人工 recovery，不做自动重放；
 - 真实进程/HTTP 验收仅覆盖当前 Darwin，Linux/Windows 仍需 CI/终端矩阵。
 
-下一切片命名为 `ARC-04.5e3b2 / HAR-10.7h6`：只接生产 `SubAgentManager` 路由和
-`Engine.execute_tool()` exact authority adapter，并完成 New UI/TUI permission/status 纵向验收。之后再比较
-streaming、并行 Tool RPC、scheduler fairness 与 ARC-04.6 运维的依赖，不线性做完整 ARC。
+后续 `ARC-04.5e3b2 / HAR-10.7h6` 已完成生产 `SubAgentManager` 路由、
+`Engine.execute_tool()` exact authority adapter 与 New UI/TUI permission/status 纵向验收，见
+`ARC-04-5e3b2-production-agent-worker-routing.md`。下一步重新比较 streaming、并行 Tool RPC、长驻池、
+scheduler fairness 与其他 Harness 用户闭环的依赖，不线性做完整 ARC。

@@ -403,6 +403,12 @@ async def test_real_child_tool_loop_uses_parent_authority_and_encrypts_payloads(
         job_id = await _admit_model_job(process, tool_scope=(tool_name,))
         binding = await process.bind_job(job_id)
         authorized: list[tuple[ToolCall, str]] = []
+        observed_running: list[AgentJobState] = []
+
+        async def on_running() -> None:
+            stored = await process._agent_jobs.get(job_id)
+            assert stored is not None
+            observed_running.append(stored.state)
 
         async def execute_authoritatively(
             call: ToolCall,
@@ -419,6 +425,7 @@ async def test_real_child_tool_loop_uses_parent_authority_and_encrypts_payloads(
         outcome = await process.execute_bound_agent_job(
             tool_schemas=[_tool_schema(tool_name)],
             tool_executor=execute_authoritatively,
+            on_running=on_running,
         )
 
         assert outcome.transition.job.state is AgentJobState.COMPLETED
@@ -426,6 +433,7 @@ async def test_real_child_tool_loop_uses_parent_authority_and_encrypts_payloads(
         assert outcome.result.turns == 2
         assert outcome.result.total_tokens == 18
         assert outcome.tool_calls == 1
+        assert observed_running == [AgentJobState.RUNNING]
         assert len(authorized) == 1
         assert authorized[0][0].name == tool_name
         assert authorized[0][0].arguments == (

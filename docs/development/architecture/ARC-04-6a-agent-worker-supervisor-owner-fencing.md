@@ -123,5 +123,5 @@ Doctor 与文档治理小模块测试，不运行全量测试。
 `prepare -> mark_running -> Provider call -> encrypted terminal -> publication`，并把 running 后进程丢失明确
 留在 recovery-required，详见
 [`ARC-04-5e3a-independent-agent-model-execution.md`](ARC-04-5e3a-independent-agent-model-execution.md)。
-ARC-04.5e3b1 已补齐加密 Tool RPC 内核；下一步只接生产 SubAgent 路由与 Engine authority adapter，不应
-先把 ARC-04.6 的所有运维能力一次做完。
+ARC-04.5e3b1 已补齐加密 Tool RPC 内核；ARC-04.5e3b2 已继续完成生产 SubAgent 路由与 Engine authority
+adapter。下一步仍不应线性做完 ARC-04.6，而应与 Harness、流式事件和公平调度依赖重新比较。

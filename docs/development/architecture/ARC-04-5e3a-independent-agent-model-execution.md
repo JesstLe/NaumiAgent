@@ -139,6 +139,6 @@ Doctor 和文档治理小模块测试，不运行全量测试。
 - 真实进程/HTTP 验收来自当前 Darwin 主机，Linux/Windows 仍需平台矩阵。
 
 后续 `ARC-04.5e3b1 / HAR-10.7h5` 已实现加密 Tool RPC 与 parent-side exact authority callback 内核，见
-`ARC-04-5e3b1-encrypted-agent-tool-rpc.md`。下一步 `ARC-04.5e3b2 / HAR-10.7h6` 才把生产
-SubAgentManager 的具备工具任务切到独立 Worker，并复用完整 `Engine.execute_tool()` 权限链；不应回头
-一次做完整 ARC-04.6。
+`ARC-04-5e3b1-encrypted-agent-tool-rpc.md`。后续 `ARC-04.5e3b2 / HAR-10.7h6` 又把生产
+SubAgentManager 的具备工具任务切到独立 Worker，并复用完整 `Engine.execute_tool()` 权限链，见
+`ARC-04-5e3b2-production-agent-worker-routing.md`。下一步重新比较跨路线依赖，不回头一次做完整 ARC-04.6。

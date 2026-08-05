@@ -18,9 +18,11 @@ from naumi_agent.orchestrator.agent_publication_worker import (
 )
 from naumi_agent.orchestrator.subagent_manager import (
     AgentPublicationRecoverySummary,
+    SubAgentManager,
     SubTask,
 )
 from naumi_agent.runtime.composition import create_agent_engine
+from naumi_agent.tools.analysis import set_analysis_subagent_manager
 
 pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 
@@ -39,7 +41,14 @@ def _manager(tmp_path):
             },
         )
     )
-    return engine, engine.subagent_manager
+    manager = SubAgentManager(
+        engine,
+        heartbeat_factory=engine.agent_execution_heartbeat_factory,
+        agent_job_store=engine._resources.agent_job_store,
+    )
+    engine.subagent_manager = manager
+    set_analysis_subagent_manager(manager)
+    return engine, manager
 
 
 def test_policy_rejects_unbounded_or_inconsistent_values() -> None:
@@ -346,7 +355,7 @@ async def test_real_recovery_quarantines_poison_and_continues_fifo(
     assert backlog.quarantined == 1
     assert backlog.pending == 0
     assert len(inbox) == 1
-    assert snapshot.schema_version == 5
+    assert snapshot.schema_version == 6
     assert snapshot.summary.durable_publications_quarantined == 1
     isolated = [
         item for item in snapshot.recovery_catalog.items

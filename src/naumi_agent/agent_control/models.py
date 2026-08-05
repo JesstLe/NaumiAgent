@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
-AGENT_CONTROL_SCHEMA_VERSION = 5
+AGENT_CONTROL_SCHEMA_VERSION = 6
 AGENT_CONTROL_SECTIONS = (
     "summary",
     "agents",
@@ -35,6 +35,7 @@ _EXECUTION_PHASES = frozenset({
     "starting", "waiting_capacity", "running", "preparing_tool",
     "running_tool", "stopping", "finished",
 })
+_WORKER_BACKENDS = frozenset({"embedded", "independent"})
 _HEARTBEAT_PHASES = frozenset({
     "starting", "running", "waiting", "draining", "stopped", "failed",
 })
@@ -292,6 +293,7 @@ class ExecutionDescriptor:
     description: str
     status: str
     phase: str
+    worker_backend: str
     started_at: float
     finished_at: float | None = None
     elapsed_ms: int = 0
@@ -321,6 +323,7 @@ class ExecutionDescriptor:
         data = _mapping(value, "execution")
         _only(data, {
             "task_id", "session_id", "agent_name", "description", "status", "phase",
+            "worker_backend",
             "started_at", "finished_at", "elapsed_ms", "heartbeat_age_ms", "current_tool",
             "heartbeat_subject_id", "heartbeat_phase", "heartbeat_failure_code",
             "worker_request_sha256", "worker_result_sha256", "worker_tool_scope",
@@ -338,6 +341,11 @@ class ExecutionDescriptor:
             description=_text(data.get("description"), "execution.description"),
             status=_choice(data.get("status"), "execution.status", _EXECUTION_STATUSES),
             phase=_choice(data.get("phase"), "execution.phase", _EXECUTION_PHASES),
+            worker_backend=_choice(
+                data.get("worker_backend"),
+                "execution.worker_backend",
+                _WORKER_BACKENDS,
+            ),
             started_at=_number(data.get("started_at", 0), "execution.started_at"),
             finished_at=(
                 None if finished is None else _number(finished, "execution.finished_at")
