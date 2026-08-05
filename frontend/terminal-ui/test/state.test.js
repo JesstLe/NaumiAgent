@@ -33,6 +33,7 @@ import {
   promoteQueuedUserMessage,
   reduceServerEvent,
   requestRunCancel,
+  requestTaskPanelRefresh,
   selectTaskPanelBoundary,
   selectTaskPanelOffset,
   selectTaskPanelPage,
@@ -3079,6 +3080,9 @@ test("task panel can be pinned, refreshed, and updated in place", () => {
 
   assert.equal(state.taskPanel.pinned, true);
   assert.equal(state.taskPanel.limit, 7);
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.error, "");
+  assert.equal(state.taskPanel.requestId, "1");
   assert.deepEqual(sent, [{ type: "task_panel", payload: { limit: 7, source: "all", status: "all", pinned: true, refresh: false } }]);
 
   reduceServerEvent(state, {
@@ -3087,6 +3091,8 @@ test("task panel can be pinned, refreshed, and updated in place", () => {
   });
   const firstPanel = state.messages.at(-1);
   assert.equal(firstPanel.title, "tasks");
+  assert.equal(state.taskPanel.loading, false);
+  assert.equal(state.taskPanel.requestId, "");
 
   reduceServerEvent(state, {
     type: "ui/message",
@@ -3108,6 +3114,127 @@ test("task panel can be pinned, refreshed, and updated in place", () => {
   assert.equal(state.messages.filter((message) => message.title === "tasks").length, 0);
   assert.equal(state.messages.at(-1).title, "任务面板");
   assert.equal(state.messages.at(-1).content, "已取消钉住。");
+});
+
+test("task panel request state is correlated and preserves the last good snapshot", () => {
+  const state = createInitialState();
+  let request = 0;
+  const send = () => `task-panel-${request += 1}`;
+
+  handleSubmitText(state, "/tasks", send);
+
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.requestId, "task-panel-1");
+  assert.equal(state.messages.at(-1).content, "正在加载任务权威快照…");
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "unrelated-request",
+    payload: { code: "task_panel_failed", message: "不相关错误" },
+  });
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.requestId, "task-panel-1");
+
+  const snapshot = {
+    filters: { source: "all", status: "all", detail_id: "", history: false },
+    items: [{
+      view_id: "background:job-1",
+      source: "background",
+      task_id: "job-1",
+      status: "running",
+      title: "索引工作区",
+      owner: "main",
+      detail: "phase=running",
+      artifact_refs: [],
+    }],
+    timeline: [],
+    warnings: [],
+  };
+  reduceServerEvent(state, {
+    type: "tasks/snapshot",
+    request_id: "stale-task-panel-request",
+    payload: { ...snapshot, items: [] },
+  });
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.snapshot, null);
+
+  reduceServerEvent(state, {
+    type: "tasks/snapshot",
+    request_id: "task-panel-1",
+    payload: snapshot,
+  });
+
+  assert.equal(state.taskPanel.loading, false);
+  assert.equal(state.taskPanel.requestId, "");
+  assert.equal(state.taskPanel.error, "");
+  assert.equal(state.taskPanel.snapshot, snapshot);
+
+  handleSubmitText(state, "/tasks refresh", send);
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.requestId, "task-panel-2");
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "task-panel-2",
+    payload: { code: "task_panel_failed", message: "Bridge 暂时不可用" },
+  });
+
+  assert.equal(state.taskPanel.loading, false);
+  assert.equal(state.taskPanel.requestId, "");
+  assert.equal(state.taskPanel.error, "Bridge 暂时不可用");
+  assert.equal(state.taskPanel.snapshot, snapshot);
+  assert.equal(
+    state.messages.find((message) => message.title === "tasks").taskSnapshot,
+    snapshot,
+  );
+});
+
+test("task panel automatic refresh uses the same correlated request state", () => {
+  const state = createInitialState();
+  const snapshot = {
+    filters: { source: "background", status: "running", detail_id: "job-1", history: false },
+    items: [],
+    timeline: [],
+    warnings: [],
+  };
+  state.taskPanel.snapshot = snapshot;
+  state.taskPanel.pinned = true;
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "auto-refresh-1";
+  };
+
+  requestTaskPanelRefresh(state, send, {
+    limit: 6,
+    source: "background",
+    status: "running",
+    detailId: "job-1",
+  });
+
+  assert.deepEqual(sent, [{
+    type: "task_panel",
+    payload: {
+      limit: 6,
+      source: "background",
+      status: "running",
+      detail_id: "job-1",
+      pinned: true,
+      refresh: true,
+    },
+  }]);
+  assert.equal(state.taskPanel.loading, true);
+  assert.equal(state.taskPanel.requestId, "auto-refresh-1");
+  assert.equal(state.taskPanel.snapshot, snapshot);
+
+  reduceServerEvent(state, {
+    type: "error",
+    request_id: "auto-refresh-1",
+    payload: { message: "自动刷新失败" },
+  });
+  assert.equal(state.taskPanel.loading, false);
+  assert.equal(state.taskPanel.error, "自动刷新失败");
+  assert.equal(state.taskPanel.snapshot, snapshot);
 });
 
 test("task panel command parses source and status filters", () => {

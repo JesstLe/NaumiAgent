@@ -502,6 +502,9 @@ export function createInitialState() {
     todo: null,
     taskPanel: {
       pinned: false,
+      loading: false,
+      error: "",
+      requestId: "",
       limit: 12,
       source: "all",
       status: "all",
@@ -936,6 +939,13 @@ export function reduceServerEvent(state, record) {
       break;
     case "tasks/snapshot":
       if (!applyCommandQuickOpenTaskSnapshot(state, record.request_id, payload)) {
+        const snapshotRequestId = String(record.request_id || "");
+        if (
+          state.taskPanel.loading
+          && state.taskPanel.requestId
+          && snapshotRequestId
+          && snapshotRequestId !== state.taskPanel.requestId
+        ) break;
         applyTaskSnapshot(state, payload);
       }
       break;
@@ -1481,6 +1491,27 @@ export function reduceServerEvent(state, record) {
         record.request_id,
         payload.message,
       )) break;
+      if (
+        state.taskPanel.loading
+        && state.taskPanel.requestId
+        && state.taskPanel.requestId === String(record.request_id || "")
+      ) {
+        state.taskPanel.loading = false;
+        state.taskPanel.error = boundedText(
+          payload.message || "任务权威快照暂不可用，请稍后刷新。",
+          240,
+        );
+        state.taskPanel.requestId = "";
+        const taskMessage = state.messages.find(
+          (message) => message.id === state.taskPanel.messageId,
+        );
+        if (taskMessage && !taskMessage.taskSnapshot) {
+          taskMessage.content = state.taskPanel.error;
+          taskMessage.level = "error";
+        }
+        clearRenderCache(state.renderCache);
+        break;
+      }
       if (
         state.harnessEvalBatch.cancelPending
         && state.harnessEvalBatch.cancelRequestId
@@ -5536,6 +5567,9 @@ export function pushSystemMessage(state, title, content, level, options = {}) {
   if (!content) return;
   if (options.dismissWelcome === true) dismissWelcome(state);
   if (title === "tasks" && state.taskPanel) {
+    state.taskPanel.loading = false;
+    state.taskPanel.error = "";
+    state.taskPanel.requestId = "";
     const existing = state.messages.find((message) => message.id === state.taskPanel.messageId);
     if (existing) {
       existing.content = content;
@@ -5558,6 +5592,9 @@ export function pushSystemMessage(state, title, content, level, options = {}) {
 
 function applyTaskSnapshot(state, snapshot) {
   dismissWelcome(state);
+  state.taskPanel.loading = false;
+  state.taskPanel.error = "";
+  state.taskPanel.requestId = "";
   state.taskPanel.snapshot = snapshot;
   let message = state.messages.find((item) => item.id === state.taskPanel.messageId);
   if (!message) {
@@ -6162,6 +6199,9 @@ function parseTaskPanelLimit(raw, fallback = 12) {
 
 function closeTaskPanel(state) {
   state.taskPanel.pinned = false;
+  state.taskPanel.loading = false;
+  state.taskPanel.error = "";
+  state.taskPanel.requestId = "";
   state.taskPanel.lastStatusSignature = "";
   state.taskPanel.detailId = "";
   state.taskPanel.history = false;
@@ -6383,7 +6423,39 @@ function sendCurrentTaskPanelRequest(state, send, overrides = {}) {
   };
   if (state.taskPanel.detailId) payload.detail_id = state.taskPanel.detailId;
   if (state.taskPanel.history) payload.history = true;
-  send("task_panel", payload);
+  beginTaskPanelRequest(state, send, payload);
+}
+
+export function requestTaskPanelRefresh(state, send, request = {}) {
+  const payload = {
+    limit: request.limit ?? state.taskPanel.limit,
+    source: request.source ?? state.taskPanel.source,
+    status: request.status ?? state.taskPanel.status,
+    ...(request.detailId ? { detail_id: request.detailId } : {}),
+    ...(request.history ? { history: true } : {}),
+    pinned: true,
+    refresh: true,
+  };
+  beginTaskPanelRequest(state, send, payload);
+}
+
+function beginTaskPanelRequest(state, send, payload) {
+  state.taskPanel.loading = true;
+  state.taskPanel.error = "";
+  state.taskPanel.requestId = String(send("task_panel", payload) || "");
+  if (!state.taskPanel.messageId) {
+    dismissWelcome(state);
+    const message = {
+      kind: "system",
+      id: nextMessageId(state, "system"),
+      title: "tasks",
+      content: "正在加载任务权威快照…",
+      level: "info",
+    };
+    state.messages.push(message);
+    state.taskPanel.messageId = message.id;
+  }
+  clearRenderCache(state.renderCache);
 }
 
 function setTaskPanelSearch(state, query) {

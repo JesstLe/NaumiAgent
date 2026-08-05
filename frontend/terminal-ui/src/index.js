@@ -100,6 +100,7 @@ import {
   applyUiSnapshot,
   failQueuedUserMessages,
   requestRunCancel,
+  requestTaskPanelRefresh,
   toggleComposerIntent,
   toggleRuntimeInspector,
   updateBridgeHeartbeat,
@@ -912,15 +913,7 @@ function processBridgeRecord(record) {
   }
   for (const action of actions) {
     if (action.type === "refresh_task_panel") {
-      send("task_panel", {
-        limit: action.limit ?? 12,
-        source: action.source ?? "all",
-        status: action.status ?? "all",
-        ...(action.detailId ? { detail_id: action.detailId } : {}),
-        ...(action.history ? { history: true } : {}),
-        pinned: true,
-        refresh: true,
-      });
+      requestTaskPanelRefresh(state, send, action);
     }
     if (action.type === "request_completion_receipt") {
       send("receipt/request", {

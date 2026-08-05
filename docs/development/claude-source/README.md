@@ -23,8 +23,9 @@ event/keybinding 的 typed 符号差异；后续行为 fixture、影响路由与
 approval。CC-03 的 Naumi Doctor export 产品合同已由 UI-13.5a 提供；
 CC-03.1a 已增加绑定 source identity、license scope、source symbol、target symbol 与 target test 的
 核心行为清单；CC-03.1b 又以严格 24 格矩阵补齐 Task、Permission、Doctor 的八个行为维度，因此
-CC-03.1 已完成；CC-03.2a 已为三个 typed snapshot 的 27 个字段建立真实 producer 语义校验，但
-CC-03 整体仍为 `partial`。CC-04.1a 又把真实 Skill Loader 的 workspace/user/
+CC-03.1 已完成；CC-03.2a 已为三个 typed snapshot 的 27 个字段建立真实 producer 语义校验，
+CC-03.2b 又用 14 个真实 JavaScript transition probe 锁定 UI-local 状态、事件和相关性，因此 CC-03.2
+已完成，但 CC-03 整体仍为 `partial`。CC-04.1a 又把真实 Skill Loader 的 workspace/user/
 configured 来源、同名遮蔽与无效 manifest 形成 typed snapshot，并由 `/extensions skills` 和 Agent Tool
 共享读取；Plugin/MCP provenance、信任、安装、隔离与管理 UI 尚未完成。protocol 语义迁移和 golden
 对齐仍未完成，不得把 CC-03 或 CC-04 标记为 implemented。
