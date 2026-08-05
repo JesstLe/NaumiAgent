@@ -75,6 +75,8 @@
   role-scoped interaction/Response，专业回答只开放新签名资格，不复用旧 response/signature。
 - [EVO-05.3f3b4 Fresh Professional Signatures](EVO-05-3f3b4-fresh-professional-signatures.md)：已交付；使用独立
   domain 的真实 Ed25519 challenge/receipt 绑定 Fresh Requirement/Response 与 current Principal event/key，旧签名不可复用。
+- [EVO-05.3f3b5 Fresh Decision Aggregation](EVO-05-3f3b5-fresh-decision-aggregation.md)：已交付；机械聚合新 user consent、
+  current 专业签名与 Fresh technical gates，形成 hash-chained Decision，只开放 staged rollout 输入资格。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

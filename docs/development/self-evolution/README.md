@@ -123,3 +123,5 @@ target branch 来自原 Request，revision/tree 来自 Fresh Plan/Outcome，所�
 可形成 session-bound consent，专业角色回答只开放新签名资格，不能直接计入最终聚合。
 [EVO-05.3f3b4](EVO-05-3f3b4-fresh-professional-signatures.md) 已为专业角色建立独立 domain 的真实 Ed25519 challenge/receipt；
 签名绑定全新 Requirement/Response、current Principal event/key generation，换钥、撤销、角色或 target authority 漂移均失败关闭。
+[EVO-05.3f3b5](EVO-05-3f3b5-fresh-decision-aggregation.md) 已聚合新 user consent、全部专业签名与五个 current technical
+gates，形成 append-only Fresh Decision；只有动态 current 的 approved Decision 才开放 staged rollout 输入资格。
