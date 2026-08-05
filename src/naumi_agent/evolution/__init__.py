@@ -578,6 +578,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationWorkerIdentity,
         issue_evolution_revalidation_worker_identity,
     )
+    from naumi_agent.evolution.revalidation_platform_completions import (
+        EVOLUTION_REVALIDATION_PLATFORM_COMPLETION_POLICY,
+        EvolutionRevalidationPlatformCompletionError,
+        EvolutionRevalidationPlatformCompletionReceipt,
+        EvolutionRevalidationPlatformCompletionService,
+        EvolutionRevalidationPlatformCompletionStore,
+        EvolutionRevalidationPlatformCompletionView,
+    )
     from naumi_agent.evolution.revalidation_platform_dispatches import (
         EVOLUTION_REVALIDATION_PLATFORM_DISPATCH_POLICY,
         EvolutionRevalidationPlatformDispatch,
@@ -868,6 +876,12 @@ __all__ = [
     "EvolutionRevalidationPlatformClaimView",
     "EvolutionRevalidationWorkerIdentity",
     "issue_evolution_revalidation_worker_identity",
+    "EVOLUTION_REVALIDATION_PLATFORM_COMPLETION_POLICY",
+    "EvolutionRevalidationPlatformCompletionError",
+    "EvolutionRevalidationPlatformCompletionReceipt",
+    "EvolutionRevalidationPlatformCompletionService",
+    "EvolutionRevalidationPlatformCompletionStore",
+    "EvolutionRevalidationPlatformCompletionView",
     "EVOLUTION_REVALIDATION_PLATFORM_EXECUTION_AUTHORIZATION_POLICY",
     "EvolutionRevalidationPlatformExecutionAuthorization",
     "EvolutionRevalidationPlatformExecutionAuthorizationError",
@@ -1612,6 +1626,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationWorkerIdentity",
         "issue_evolution_revalidation_worker_identity",
     }
+    revalidation_platform_completion_exports = {
+        "EVOLUTION_REVALIDATION_PLATFORM_COMPLETION_POLICY",
+        "EvolutionRevalidationPlatformCompletionError",
+        "EvolutionRevalidationPlatformCompletionReceipt",
+        "EvolutionRevalidationPlatformCompletionService",
+        "EvolutionRevalidationPlatformCompletionStore",
+        "EvolutionRevalidationPlatformCompletionView",
+    }
     revalidation_platform_execution_authorization_exports = {
         "EVOLUTION_REVALIDATION_PLATFORM_EXECUTION_AUTHORIZATION_POLICY",
         "EvolutionRevalidationPlatformExecutionAuthorization",
@@ -2192,6 +2214,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_dispatches"
     elif name in revalidation_platform_claim_exports:
         module_name = "revalidation_platform_claims"
+    elif name in revalidation_platform_completion_exports:
+        module_name = "revalidation_platform_completions"
     elif name in revalidation_platform_execution_authorization_exports:
         module_name = "revalidation_platform_execution_authorizations"
     elif name in revalidation_platform_result_exports:

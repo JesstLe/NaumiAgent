@@ -77,8 +77,9 @@ content-addressed 执行事实负责”。它尚未把远端 ToolJob 的完整 a
 
 ## 下一切片
 
-EVO-05.3f2c3b2b3 将从完整的本地 H5a/pair prefix 机械生成 required-platform cohort receipt，原子收口 Dispatch/Claim/Authorization，
-再推动 Matrix lane 从 queued 进入 completed。之后才能复用既有 H5b2/H5c、Attribution、Fresh Final 和 Decision 链。
+[EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已从完整的本地 H5a/pair prefix 机械生成
+required-platform cohort receipt，收口 Authorization/Worker capacity，并以 durable completion 门禁推动 Matrix lane 完成。下一步进入
+EVO-05.4 immutable staged rollout plan 与 local canary executor。
 
 整个真实自进化闭环仍需继续完成 staged rollout executor、运行监控、自动 rollback executor、Outcome 回注和 EVO-06 opportunity discovery；
 任何文档或 UI 不得把“result 已摄取”宣称为“自进化已完成”。

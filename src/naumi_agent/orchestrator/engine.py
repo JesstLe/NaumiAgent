@@ -283,6 +283,10 @@ from naumi_agent.evolution.revalidation_platform_claims import (
     EvolutionRevalidationPlatformClaimService,
     EvolutionRevalidationPlatformClaimStore,
 )
+from naumi_agent.evolution.revalidation_platform_completions import (
+    EvolutionRevalidationPlatformCompletionService,
+    EvolutionRevalidationPlatformCompletionStore,
+)
 from naumi_agent.evolution.revalidation_platform_dispatches import (
     EvolutionRevalidationPlatformDispatchService,
     EvolutionRevalidationPlatformDispatchStore,
@@ -1901,6 +1905,27 @@ class AgentEngine:
                 harness_store=self._harness_store,
                 sample_store=self.evolution_revalidation_adversarial_sample_store,
                 store=self.evolution_revalidation_platform_result_store,
+            )
+        )
+        self.evolution_revalidation_platform_completion_store = (
+            EvolutionRevalidationPlatformCompletionStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_platform_completion_service = (
+            EvolutionRevalidationPlatformCompletionService(
+                workspace_root=paths.workspace_root,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                dispatch_store=self.evolution_revalidation_platform_dispatch_store,
+                claim_store=self.evolution_revalidation_platform_claim_store,
+                authorization_service=(
+                    self.evolution_revalidation_platform_execution_authorization_service
+                ),
+                result_store=self.evolution_revalidation_platform_result_store,
+                cohort_executor=self.evolution_revalidation_adversarial_cohort_executor,
+                matrix_service=self.evolution_revalidation_adversarial_matrix_service,
+                worker_registry=resources.worker_registry_store,
+                store=self.evolution_revalidation_platform_completion_store,
             )
         )
         self.evolution_revalidation_adversarial_comparison_executor = (
