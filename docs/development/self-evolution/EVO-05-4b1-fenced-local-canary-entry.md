@@ -46,14 +46,9 @@ Store 在 `BEGIN IMMEDIATE` 中重读 Plan、最新 control event 与 entry chai
 - expiry 到达后失去 canary execution authority，且不能获得后续 stage 权限；
 - 2 个真实 Approval/Plan/SQLite/HMAC 场景通过；未运行全量测试。
 
-## 当前不足与下一切片
+## 后续状态
 
-本切片是执行前权威，不是执行日志，也没有运行 canary。EVO-05.4b2 必须：
+[EVO-05.4b2](EVO-05-4b2-local-canary-executor.md) 已消费本 entry，在 immutable GREEN、exact Profile、Run Grant、
+runtime lease 与 ARC-04 sandbox Worker 上完成真实 local-canary 执行，并写入 crash-safe hash-chain journal。
 
-1. 从 immutable GREEN source 在受管 ephemeral root 真实物化候选；
-2. 使用本 entry 的 operation/network/workspace/time/run scope 执行 local workload；
-3. 将 admission→materialized→running→terminal 状态写入 crash-safe journal；
-4. 每次状态推进前动态读取 kill switch 和 Plan；
-5. 中断后通过 content digest 恢复或清理，不把启动回执当成完成回执。
-
-直到 EVO-05.5 monitor、EVO-05.6 automatic rollback 和 EVO-05.7 Outcome 回注完成，仍不得宣称自进化真实闭环完成。
+EVO-05.5 monitor、EVO-05.6 automatic rollback 和 EVO-05.7 Outcome 回注仍未完成，因此仍不得宣称自进化真实闭环完成。

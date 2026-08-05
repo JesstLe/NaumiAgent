@@ -55,7 +55,7 @@ class EvolutionRevalidationRolloutStage(_StrictModel):
     exposure: EvolutionRevalidationRolloutExposure
     exposure_percent: int = Field(ge=0, le=100)
     minimum_observation_seconds: int = Field(ge=300, le=604_800)
-    minimum_completed_runs: int = Field(ge=10, le=100_000)
+    minimum_completed_runs: int = Field(ge=10, le=100)
     max_error_rate_basis_points: int = Field(ge=0, le=10_000)
     max_p95_latency_regression_basis_points: int = Field(ge=0, le=10_000)
     max_completion_rate_drop_basis_points: int = Field(ge=0, le=10_000)
@@ -462,10 +462,10 @@ def _dependencies_match(plan, decision, promotion_input):
 
 def _stages(risk_level, *, data_backup_required):
     profiles = {
-        "low": (25, 900, 20, 200, 2_000, 500, 2_000),
-        "medium": (10, 1_800, 40, 100, 1_500, 300, 1_500),
-        "high": (5, 3_600, 80, 50, 1_000, 200, 1_000),
-        "critical": (1, 7_200, 160, 25, 500, 100, 500),
+        "low": (25, 900, 10, 200, 2_000, 500, 2_000),
+        "medium": (10, 1_800, 15, 100, 1_500, 300, 1_500),
+        "high": (5, 3_600, 20, 50, 1_000, 200, 1_000),
+        "critical": (1, 7_200, 25, 25, 500, 100, 500),
     }
     percentage, base_seconds, base_runs, error, latency, completion, cost = profiles[
         risk_level
@@ -474,8 +474,8 @@ def _stages(risk_level, *, data_backup_required):
     specifications = (
         ("local_canary", None, "synthetic", 0, 1, 1),
         ("opt_in", "local_canary", "opt_in", 1, 2, 2),
-        ("percentage", "opt_in", "limited", percentage, 4, 5),
-        ("stable", "percentage", "stable", 100, 8, 10),
+        ("percentage", "opt_in", "limited", percentage, 4, 3),
+        ("stable", "percentage", "stable", 100, 8, 4),
     )
     return tuple(
         EvolutionRevalidationRolloutStage(

@@ -150,7 +150,7 @@ class EvolutionRevalidationRolloutStageEntryReceipt(_StrictModel):
     network_mode: Literal["deny"] = "deny"
     process_tree_cancel_required: Literal[True] = True
     max_wall_seconds: int = Field(ge=300, le=604_800)
-    max_completed_runs: int = Field(ge=10, le=100_000)
+    max_completed_runs: int = Field(ge=10, le=100)
     issued_at: str = Field(min_length=1, max_length=100)
     expires_at: str = Field(min_length=1, max_length=100)
     control_plane_attestation_algorithm: Literal["hmac-sha256"] = "hmac-sha256"
