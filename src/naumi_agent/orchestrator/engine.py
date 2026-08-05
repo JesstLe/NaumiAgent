@@ -212,9 +212,15 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_execution import (
+    EvolutionRevalidationExecutionService,
+)
+from naumi_agent.evolution.revalidation_rebases import (
+    EvolutionRevalidationRebaseExecutor,
+    EvolutionRevalidationRebaseStore,
+)
 from naumi_agent.evolution.revalidation_replays import (
     EvolutionRevalidationReplayExecutor,
-    EvolutionRevalidationReplayService,
     EvolutionRevalidationReplayStore,
 )
 from naumi_agent.evolution.revalidation_requests import (
@@ -1511,11 +1517,21 @@ class AgentEngine:
                 worktree_storage_dir=self._worktree_storage_dir,
             )
         )
-        self.evolution_revalidation_replay_service = EvolutionRevalidationReplayService(
+        self.evolution_revalidation_rebase_store = EvolutionRevalidationRebaseStore(
+            config.memory.session_db_path
+        )
+        self.evolution_revalidation_rebase_executor = (
+            EvolutionRevalidationRebaseExecutor(
+                store=self.evolution_revalidation_rebase_store,
+                worktree_storage_dir=self._worktree_storage_dir,
+            )
+        )
+        self.evolution_revalidation_replay_service = EvolutionRevalidationExecutionService(
             request_service=self.evolution_revalidation_request_service,
             package_input_store=self.evolution_promotion_package_input_store,
             lease_store=self.evolution_experiment_lease_store,
-            replay_executor=self.evolution_revalidation_replay_executor,
+            exact_executor=self.evolution_revalidation_replay_executor,
+            rebase_executor=self.evolution_revalidation_rebase_executor,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

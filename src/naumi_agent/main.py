@@ -3207,10 +3207,11 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionReflectionMemoryError,
         render_evolution_reflection_memory,
     )
-    from naumi_agent.evolution.revalidation_replays import (
-        EvolutionRevalidationReplayError,
-        render_evolution_revalidation_replay,
+    from naumi_agent.evolution.revalidation_execution import (
+        render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_rebases import EvolutionRevalidationRebaseError
+    from naumi_agent.evolution.revalidation_replays import EvolutionRevalidationReplayError
     from naumi_agent.evolution.revalidation_requests import (
         EvolutionRevalidationRequestError,
         render_evolution_revalidation_request,
@@ -3529,7 +3530,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 workspace_root=engine.workspace_root,
                 request_id=parts[1],
             )
-            console.print(Markdown(render_evolution_revalidation_replay(receipt)))
+            console.print(Markdown(render_evolution_revalidation_execution(receipt)))
             return
         service = engine.evolution_review_service
         if action == "detail":
@@ -3890,6 +3891,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationReplayError as exc:
         console.print(
             f"Evolution Revalidation Replay 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationRebaseError as exc:
+        console.print(
+            f"Evolution Revalidation Rebase 未完成：{exc}",
             style="yellow",
             markup=False,
         )

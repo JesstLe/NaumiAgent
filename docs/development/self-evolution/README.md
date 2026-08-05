@@ -71,4 +71,6 @@ exact Package 冻结为 deterministic、可动态失效的 Revalidation Request�
 worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。
 [EVO-05.3b2a](EVO-05-3b2a-target-advance-authority.md) 已关闭 target 前进后 Request 永久不可执行的 authority 死锁：
 仅 target 线性前进且审批/签名/Input/Reflection 其余部分仍 current 时授予隔离 rebase 资格；diverged 或任何非 target
-证据失效仍阻断。三方执行、冲突/恢复、重新验证与 Outcome 仍未实现。
+证据失效仍阻断。[EVO-05.3b2b](EVO-05-3b2b-fenced-three-way-rebase.md) 已在 current target 的一次性 detached
+worktree 执行真实三方合并，持久化 success/conflict/failure Outcome，并加入 claim、epoch fencing、过期恢复和残留
+worktree 清理。Harness 重新验证、新证据签发与旧证据失效仍未实现。

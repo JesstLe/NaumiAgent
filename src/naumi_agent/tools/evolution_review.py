@@ -83,10 +83,11 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionRevocationReason,
     render_evolution_reflection_memory,
 )
-from naumi_agent.evolution.revalidation_replays import (
-    EvolutionRevalidationReplayError,
-    render_evolution_revalidation_replay,
+from naumi_agent.evolution.revalidation_execution import (
+    render_evolution_revalidation_execution,
 )
+from naumi_agent.evolution.revalidation_rebases import EvolutionRevalidationRebaseError
+from naumi_agent.evolution.revalidation_replays import EvolutionRevalidationReplayError
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
@@ -2003,13 +2004,14 @@ class EvolutionRevalidationReplayTool(Tool):
             )
         except (
             AttributeError,
+            EvolutionRevalidationRebaseError,
             EvolutionRevalidationReplayError,
             OSError,
             TypeError,
             ValueError,
         ) as exc:
             return f"Evolution Revalidation Replay 未完成：{exc}"
-        return render_evolution_revalidation_replay(receipt)
+        return render_evolution_revalidation_execution(receipt)
 
 
 def create_evolution_review_tools(
