@@ -3216,6 +3216,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionRevalidationRequestError,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_validations import (
+        EvolutionRevalidationValidationError,
+        render_evolution_revalidation_validation,
+    )
     from naumi_agent.evolution.review import (
         EvolutionReviewFilter,
         render_evolution_review,
@@ -3532,6 +3536,25 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             )
             console.print(Markdown(render_evolution_revalidation_execution(receipt)))
             return
+        if action == "revalidation-validate":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-validate 需要一个 Revalidation Request ID。"
+                )
+            slash_executor = getattr(
+                engine,
+                "run_evolution_revalidation_validation_slash",
+                None,
+            )
+            if callable(slash_executor):
+                receipt = await slash_executor(parts[1])
+            else:
+                receipt = await engine.evolution_revalidation_validation_service.execute(
+                    workspace_root=engine.workspace_root,
+                    request_id=parts[1],
+                )
+            console.print(Markdown(render_evolution_revalidation_validation(receipt)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3742,6 +3765,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-request <approval-decision-id>；"
             "/evolution revalidation-request show <revalidation-request-id>；"
             "/evolution revalidation-replay <revalidation-request-id>；"
+            "/evolution revalidation-validate <revalidation-request-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3898,6 +3922,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationRebaseError as exc:
         console.print(
             f"Evolution Revalidation Rebase 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationValidationError as exc:
+        console.print(
+            f"Evolution Harness Revalidation 未完成：{exc}",
             style="yellow",
             markup=False,
         )

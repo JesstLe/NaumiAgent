@@ -31,7 +31,9 @@
 - EVO-05.3b2a Target-advance authority：已证明 target-only stale 与线性前进关系，形成合法隔离 rebase 输入；
 - [EVO-05.3b2b Fenced three-way rebase](EVO-05-3b2b-fenced-three-way-rebase.md)：已在隔离 current-target
   worktree 真实三方重放，持久化冲突/失败、claim、epoch fencing 与恢复；
-- EVO-05.3c-05.3d Harness revalidation/outcome：重新验证成功 replay/rebase，并使旧结果明确失效。
+- [EVO-05.3c Harness revalidation evidence](EVO-05-3c-harness-revalidation-evidence.md)：已重新构造 exact/rebase
+  overlay，经 Harness Sandbox 与 ARC-04 Worker 执行匹配检查并签发新证据；
+- EVO-05.3d Revalidation Outcome：使旧结果明确失效并形成新的 promotion 前置结论。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -48,8 +50,8 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3b2b。已有经用户确认的 Principal/role/public-key authority、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3c。已有经用户确认的 Principal/role/public-key authority、
 真实外部 Ed25519 Challenge/Signature Receipt、append-only Approval Decision，以及 deterministic Revalidation
-Request、exact replay 与 fenced three-way rebase；但尚无 Harness revalidation/new evidence、rollout、monitor、rollback
-executor 或最终 Outcome authority。Replay/Rebase success 只表示候选结果已在隔离目录形成，任何界面和回执都不得宣称
-已验证、promotion、merge、push 或发布。
+Request、exact replay、fenced three-way rebase 与新 Harness Worker evidence；但尚无旧证据失效/final Revalidation
+Outcome、rollout、monitor、rollback executor 或最终发布 Outcome authority。Harness Revalidation passed 只表示本轮
+Profile checks 通过，任何界面和回执都不得宣称 promotion、merge、push 或发布。

@@ -228,6 +228,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_validations import (
+    EvolutionRevalidationValidationService,
+    EvolutionRevalidationValidationStore,
+)
 from naumi_agent.evolution.review import EvolutionReviewService
 from naumi_agent.evolution.reward_hacking_evidence import (
     EvolutionRewardHackingEvidenceBuilder,
@@ -1533,6 +1537,19 @@ class AgentEngine:
             exact_executor=self.evolution_revalidation_replay_executor,
             rebase_executor=self.evolution_revalidation_rebase_executor,
         )
+        self.evolution_revalidation_validation_store = (
+            EvolutionRevalidationValidationStore(config.memory.session_db_path)
+        )
+        self.evolution_revalidation_validation_service = (
+            EvolutionRevalidationValidationService(
+                execution_service=self.evolution_revalidation_replay_service,
+                request_service=self.evolution_revalidation_request_service,
+                package_input_store=self.evolution_promotion_package_input_store,
+                lease_store=self.evolution_experiment_lease_store,
+                harness=self.harness_service,
+                store=self.evolution_revalidation_validation_store,
+            )
+        )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,
             patch_set_store=self.evolution_patch_set_store,
@@ -1954,6 +1971,50 @@ class AgentEngine:
     def permission_mode(self) -> PermissionMode:
         """Return the active permission mode."""
         return self._permission_port.mode
+
+    async def run_evolution_revalidation_validation_slash(
+        self,
+        request_id: str,
+    ) -> Any:
+        """Give an explicit slash command the same durable authority as Tool use."""
+        if self._session is None:
+            raise RuntimeError("当前没有活动会话，无法签发再验证执行权限。")
+        arguments = {"request_id": request_id}
+        call_id = f"slash-evo-{uuid.uuid4().hex[:24]}"
+        run_id = "evslash-" + hashlib.sha256(
+            f"{self._session.id}:{request_id}:{call_id}".encode()
+        ).hexdigest()[:24]
+        bypass = self._permission_port.mode is PermissionMode.BYPASS
+        receipt = await self._permission_decision_store.issue(
+            request_id=call_id,
+            session_id=self._session.id,
+            run_id=run_id,
+            call_id=call_id,
+            agent_name="main",
+            tool_name="evolution_revalidation_validate",
+            tool_family="evolution_isolated_validation",
+            arguments=arguments,
+            outcome=(
+                PermissionDecisionOutcome.BYPASS_ENABLED
+                if bypass
+                else PermissionDecisionOutcome.POLICY_ALLOWED
+            ),
+            actor=PermissionDecisionActor.RUNTIME,
+            source=(
+                PermissionDecisionSource.BYPASS
+                if bypass
+                else PermissionDecisionSource.POLICY
+            ),
+            permission_mode=self._permission_port.mode,
+            risk_level="medium",
+            delegated_tool_names=("bash_run",),
+            decided_at=datetime.now().astimezone().isoformat(),
+        )
+        with bind_permission_receipt(receipt):
+            return await self.evolution_revalidation_validation_service.execute(
+                workspace_root=self.workspace_root,
+                request_id=request_id,
+            )
 
     @property
     def runtime_mode(self) -> AgentRuntimeMode:
