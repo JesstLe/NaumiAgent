@@ -45,7 +45,7 @@ Baseline 只提供 monitor input authority，不授予 stage advance、rollback 
 
 ## 下一切片
 
-EVO-05.5b Runtime Monitor 将把本 Baseline 与 EVO-05.4b2 terminal canary journal 比较，形成
+[EVO-05.5b](EVO-05-5b-runtime-observation.md) 已将本 Baseline 与 EVO-05.4b2 terminal canary journal 比较，形成
 `insufficient|passing|breached` observation receipt。它必须同时处理最小样本数、最短观察窗口、错误率、p95 latency、
-completion-rate drop、cost regression、用户撤回和安全/数据完整性信号。passing 仍不得直接进入下一阶段；breached 只开放
-EVO-05.6 的自动 pause/rollback 输入。
+completion-rate drop、cost regression、用户撤回和安全/数据完整性信号。passing 不直接进入下一阶段；breached 只开放
+EVO-05.6a 的自动 pause/rollback 输入。

@@ -236,6 +236,47 @@ class EvolutionRevalidationLocalCanaryJournalStore:
             ).fetchone()
         return None if row is None else _event(row["event_json"])
 
+    async def terminal_for_entry(self, entry_receipt_id: str):
+        history = await self.history_for_entry(entry_receipt_id)
+        return tuple(item for item in history if item.terminal)
+
+    async def history_for_entry(self, entry_receipt_id: str):
+        if not self.db_path.is_file():
+            return ()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            rows = await (
+                await db.execute(
+                    "SELECT event_json FROM evolution_revalidation_local_canary_events "
+                    "WHERE entry_receipt_id = ? ORDER BY run_index ASC, sequence ASC",
+                    (entry_receipt_id,),
+                )
+            ).fetchall()
+        events = tuple(_event(row["event_json"]) for row in rows)
+        previous = None
+        previous_run_index = -1
+        for item in events:
+            if item.run_index != previous_run_index:
+                if item.run_index != previous_run_index + 1 or item.sequence != 1:
+                    raise EvolutionRevalidationLocalCanaryRunError(
+                        "local_canary_journal_chain_broken",
+                        "Local canary journal run prefix 不连续。",
+                    )
+                previous = None
+                previous_run_index = item.run_index
+            if previous is not None and not (
+                item.sequence == previous.sequence + 1
+                and item.previous_event_id == previous.event_id
+                and item.previous_event_sha256 == previous.event_sha256
+            ):
+                raise EvolutionRevalidationLocalCanaryRunError(
+                    "local_canary_journal_chain_broken",
+                    "Local canary journal event chain 不连续。",
+                )
+            previous = item
+        return events
+
     async def admit(self, entry, *, observed_at: str):
         receipt = EvolutionRevalidationRolloutStageEntryReceipt.model_validate_json(
             entry.model_dump_json()

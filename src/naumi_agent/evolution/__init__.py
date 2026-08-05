@@ -715,6 +715,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationRuntimeContractView,
         render_evolution_revalidation_runtime_contract,
     )
+    from naumi_agent.evolution.revalidation_runtime_observations import (
+        EVOLUTION_REVALIDATION_RUNTIME_OBSERVATION_POLICY,
+        EvolutionRevalidationRuntimeObservation,
+        EvolutionRevalidationRuntimeObservationError,
+        EvolutionRevalidationRuntimeObservationService,
+        EvolutionRevalidationRuntimeObservationStatus,
+        EvolutionRevalidationRuntimeObservationStore,
+    )
     from naumi_agent.evolution.revalidation_runtime_sources import (
         EvolutionRevalidationRuntimeSourceError,
         EvolutionRevalidationRuntimeSourcePair,
@@ -961,6 +969,12 @@ __all__ = [
     "EvolutionRevalidationRolloutBaselineStore",
     "EvolutionRevalidationRolloutBaselineView",
     "EvolutionRevalidationRolloutCostSource",
+    "EVOLUTION_REVALIDATION_RUNTIME_OBSERVATION_POLICY",
+    "EvolutionRevalidationRuntimeObservation",
+    "EvolutionRevalidationRuntimeObservationError",
+    "EvolutionRevalidationRuntimeObservationService",
+    "EvolutionRevalidationRuntimeObservationStatus",
+    "EvolutionRevalidationRuntimeObservationStore",
     "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
     "EvolutionRevalidationRolloutExposure",
     "EvolutionRevalidationRolloutPlan",
@@ -1786,6 +1800,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRolloutStageEntryStore",
         "EvolutionRevalidationRolloutStageEntryView",
     }
+    revalidation_runtime_observation_exports = {
+        "EVOLUTION_REVALIDATION_RUNTIME_OBSERVATION_POLICY",
+        "EvolutionRevalidationRuntimeObservation",
+        "EvolutionRevalidationRuntimeObservationError",
+        "EvolutionRevalidationRuntimeObservationService",
+        "EvolutionRevalidationRuntimeObservationStatus",
+        "EvolutionRevalidationRuntimeObservationStore",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2358,6 +2380,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rollout_plans"
     elif name in revalidation_rollout_stage_entry_exports:
         module_name = "revalidation_rollout_stage_entries"
+    elif name in revalidation_runtime_observation_exports:
+        module_name = "revalidation_runtime_observations"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:

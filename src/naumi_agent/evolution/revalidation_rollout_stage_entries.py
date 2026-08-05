@@ -258,6 +258,54 @@ class EvolutionRevalidationRolloutControlStore:
         _verify_attestation(item, self._key())
         return item
 
+    async def history(self, workspace_root: str | Path, *, after_sequence: int = 0):
+        workspace = str(Path(workspace_root).expanduser().resolve())
+        if not 0 <= after_sequence <= 1_000_000:
+            raise ValueError("Rollout control after_sequence 无效。")
+        if not self.db_path.is_file():
+            return ()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            start_sequence = max(1, after_sequence)
+            rows = await (
+                await db.execute(
+                    "SELECT event_json FROM evolution_revalidation_rollout_control_events "
+                    "WHERE workspace_root = ? AND sequence >= ? ORDER BY sequence ASC",
+                    (workspace, start_sequence),
+                )
+            ).fetchall()
+        events = tuple(
+            EvolutionRevalidationRolloutControlEvent.model_validate_json(
+                row["event_json"]
+            )
+            for row in rows
+        )
+        previous = None
+        if after_sequence > 0 and not events:
+            raise EvolutionRevalidationRolloutStageEntryError(
+                "rollout_control_history_broken",
+                "Rollout control history 缺少 entry 绑定的 event。",
+            )
+        if events and events[0].sequence != start_sequence:
+            raise EvolutionRevalidationRolloutStageEntryError(
+                "rollout_control_history_broken",
+                "Rollout control history 缺少起始 event。",
+            )
+        for item in events:
+            _verify_attestation(item, self._key())
+            if previous is not None and not (
+                item.sequence == previous.sequence + 1
+                and item.previous_event_id == previous.event_id
+                and item.previous_event_sha256 == previous.event_sha256
+            ):
+                raise EvolutionRevalidationRolloutStageEntryError(
+                    "rollout_control_history_broken",
+                    "Rollout control history chain 不连续。",
+                )
+            previous = item
+        return tuple(item for item in events if item.sequence > after_sequence)
+
     async def record(self, event):
         item = EvolutionRevalidationRolloutControlEvent.model_validate_json(
             event.model_dump_json()
