@@ -106,3 +106,5 @@ Fresh Adversarial RED/GREEN pair；platform cohort、跨平台 matrix 与 Advers
 completed/runnable/pending 状态权威，且仅在全部 cohort 齐全后持久化完成矩阵；远端调度与各平台 H5c 尚未完成。
 [EVO-05.3f2c4](EVO-05-3f2c4-fresh-adversarial-comparison.md) 已要求完整 matrix，并从各平台原始 H5a 重算
 probe/identity/summary 后生成原生 H5b2/H5c；跨平台归因与新的 Final Evaluation 尚未完成。
+[EVO-05.3f2c5](EVO-05-3f2c5-fresh-adversarial-attribution.md) 已逐平台复验 H5c 并持久化机械归因，且将
+`passed + unchanged` 正确解释为 adversarial guardrail preserved；新的 Final Evaluation 尚未完成。
