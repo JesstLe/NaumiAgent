@@ -53,6 +53,7 @@ Plan 明确区分：
 
 ## 下一切片
 
-EVO-05.4b 实现 local canary 的隔离 materialization、stage-entry receipt、kill switch 与 crash-safe execution journal；它只能执行第一阶段，
-不能直接进入 percentage/stable。随后 EVO-05.5 采集真实运行信号，EVO-05.6 根据本计划阈值自动 pause/rollback，EVO-05.7 才形成
+EVO-05.4b1 已实现 [fenced local-canary stage entry 与 kill switch](EVO-05-4b1-fenced-local-canary-entry.md)，但不运行 canary。
+EVO-05.4b2 继续实现隔离 materialization 与 crash-safe execution journal；它只能执行第一阶段，不能直接进入 percentage/stable。
+随后 EVO-05.5 采集真实运行信号，EVO-05.6 根据本计划阈值自动 pause/rollback，EVO-05.7 才形成
 accept/rollback Outcome 并回注下一轮 Candidate。

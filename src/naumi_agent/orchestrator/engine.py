@@ -324,6 +324,12 @@ from naumi_agent.evolution.revalidation_rollout_plans import (
     EvolutionRevalidationRolloutPlanService,
     EvolutionRevalidationRolloutPlanStore,
 )
+from naumi_agent.evolution.revalidation_rollout_stage_entries import (
+    EvolutionRevalidationRolloutControlService,
+    EvolutionRevalidationRolloutControlStore,
+    EvolutionRevalidationRolloutStageEntryService,
+    EvolutionRevalidationRolloutStageEntryStore,
+)
 from naumi_agent.evolution.revalidation_runtime_contracts import (
     EvolutionRevalidationRuntimeContractService,
     EvolutionRevalidationRuntimeContractStore,
@@ -2103,6 +2109,30 @@ class AgentEngine:
                     self.evolution_revalidation_promotion_input_service
                 ),
                 store=self.evolution_revalidation_rollout_plan_store,
+            )
+        )
+        self.evolution_revalidation_rollout_control_store = (
+            EvolutionRevalidationRolloutControlStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_rollout_control_service = (
+            EvolutionRevalidationRolloutControlService(
+                workspace_root=paths.workspace_root,
+                store=self.evolution_revalidation_rollout_control_store,
+            )
+        )
+        self.evolution_revalidation_rollout_stage_entry_store = (
+            EvolutionRevalidationRolloutStageEntryStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_rollout_stage_entry_service = (
+            EvolutionRevalidationRolloutStageEntryService(
+                workspace_root=paths.workspace_root,
+                plan_service=self.evolution_revalidation_rollout_plan_service,
+                control_store=self.evolution_revalidation_rollout_control_store,
+                store=self.evolution_revalidation_rollout_stage_entry_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
