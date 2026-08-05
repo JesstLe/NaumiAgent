@@ -227,6 +227,9 @@ from naumi_agent.evolution.revalidation_interventional_cohorts import (
     EvolutionRevalidationInterventionalCohortExecutor,
     EvolutionRevalidationInterventionalCohortStore,
 )
+from naumi_agent.evolution.revalidation_interventional_comparisons import (
+    EvolutionRevalidationInterventionalComparisonExecutor,
+)
 from naumi_agent.evolution.revalidation_interventional_samples import (
     EvolutionRevalidationInterventionalSampleExecutor,
     EvolutionRevalidationInterventionalSampleStore,
@@ -1698,6 +1701,18 @@ class AgentEngine:
                     self.evolution_revalidation_runtime_contract_service
                 ),
                 batch_admission=self.harness_sandbox_batch_admission,
+            )
+        )
+        self.evolution_revalidation_interventional_comparison_executor = (
+            EvolutionRevalidationInterventionalComparisonExecutor(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                cohort_store=(
+                    self.evolution_revalidation_interventional_cohort_store
+                ),
+                contract_service=(
+                    self.evolution_revalidation_runtime_contract_service
+                ),
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

@@ -46,6 +46,6 @@ Receipt 自身使用 canonical JSON SHA-256 校验并事务持久化。相同 Co
 
 ## 6. 当前边界与下一步
 
-EVO-05.3f2b2b3 必须从该 receipt 与原始 H5a 重算 paired comparison，不能相信 receipt 中预先给出的结论。随后才能
+EVO-05.3f2b2b3 已从该 receipt 与原始 H5a 重算 paired comparison，没有相信 receipt 中预先给出的结论。随后才能
 实现跨平台 Adversarial cohort、failure attribution、新 Final Evaluation、重新审批、staged rollout、监控与自动回滚。
 因此本切片仍不是完整自进化闭环。
