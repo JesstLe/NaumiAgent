@@ -117,3 +117,5 @@ Adversarial cohort/H5c/attribution 的新 Final Evaluation，并将证据完整�
 [EVO-05.3f3b1](EVO-05-3f3b1-fresh-promotion-input.md) 已生成版本化 Fresh Promotion Input；它把旧 input 降为
 patch/rollback 的只读基线，并原子绑定 current Contract、Fresh Final 与 Reapproval Authority，旧 Decision、Approval
 和签名均不可复用。
+[EVO-05.3f3b2](EVO-05-3f3b2-fresh-approval-requirement.md) 已从 current target authority 生成新的 Approval Requirement；
+target branch 来自原 Request，revision/tree 来自 Fresh Plan/Outcome，所有角色必须创建新交互且专业角色重新签名。

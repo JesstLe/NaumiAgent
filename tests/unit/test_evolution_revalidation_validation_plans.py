@@ -139,6 +139,7 @@ async def _builder_scenario(
                 procedure="运行固定输入的窄范围回归并比较 RED/GREEN。",
             ),
         ),
+        revalidation_request=source_service._test_request,
     )
     target_files = {
         path: ((tmp_path / path).read_bytes(), (tmp_path / path).stat().st_mode & 0o111 > 0)

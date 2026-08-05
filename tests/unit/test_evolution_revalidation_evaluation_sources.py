@@ -68,6 +68,7 @@ async def _source_scenario(tmp_path: Path):
         store=store,
         clock=lambda: datetime.fromisoformat(validation_receipt.created_at),
     )
+    service._test_request = request_view.request
     return package, harness, plan, store, service
 
 
