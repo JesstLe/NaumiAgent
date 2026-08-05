@@ -482,6 +482,11 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_runtime_sources import (
+        EvolutionRevalidationRuntimeSourceError,
+        EvolutionRevalidationRuntimeSourcePair,
+        EvolutionRevalidationRuntimeSourceService,
+    )
     from naumi_agent.evolution.revalidation_validation_plans import (
         EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY,
         EvolutionRevalidationCheckCoverage,
@@ -660,6 +665,9 @@ __all__ = [
     "EvolutionRevalidationEvaluationSourceStore",
     "EvolutionRevalidationSourceProvider",
     "render_evolution_revalidation_evaluation_source",
+    "EvolutionRevalidationRuntimeSourceError",
+    "EvolutionRevalidationRuntimeSourcePair",
+    "EvolutionRevalidationRuntimeSourceService",
     "EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY",
     "EvolutionRevalidationCheckCoverage",
     "EvolutionRevalidationValidationFile",
@@ -1170,6 +1178,11 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationValidationPlanView",
         "render_evolution_revalidation_validation_plan",
     }
+    revalidation_runtime_source_exports = {
+        "EvolutionRevalidationRuntimeSourceError",
+        "EvolutionRevalidationRuntimeSourcePair",
+        "EvolutionRevalidationRuntimeSourceService",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1652,6 +1665,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_evaluation_sources"
     elif name in revalidation_validation_plan_exports:
         module_name = "revalidation_validation_plans"
+    elif name in revalidation_runtime_source_exports:
+        module_name = "revalidation_runtime_sources"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

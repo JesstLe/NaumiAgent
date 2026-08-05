@@ -87,3 +87,5 @@ size、digest 和 regular-file 防护的 content-addressed immutable blobs；后
 [EVO-05.3f2a](EVO-05-3f2a-revalidation-validation-plan.md) 已把旧 Experiment Contract 的 seed、预算、metrics 与旧
 Final Evaluation 的 suite/sample/platform 策略重绑到 current-target RED 和 immutable-overlay GREEN，并以 current
 Harness Profile 唯一覆盖每个文件的 required checks；该 authority 尚不执行评测或授予 promotion。
+[EVO-05.3f2b1](EVO-05-3f2b1-runtime-source-pair.md) 已为 Harness Sandbox Eval 物化共享的同基线 RED/GREEN runtime
+source pair，并以动态回调持续复验 Plan、Snapshot 与 blob bytes；旧 Interventional/Adversarial executor 尚未接线。

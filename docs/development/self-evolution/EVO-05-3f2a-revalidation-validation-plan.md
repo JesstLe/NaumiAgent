@@ -58,6 +58,7 @@ promotion authority。
 ## 6. 当前边界与后续
 
 本切片没有执行 RED/GREEN、没有生成 cohort/lane/comparison/attribution，也没有签发新的 Final Evaluation。下一最小切片
-EVO-05.3f2b 必须让 Interventional 与 Adversarial GREEN source adapter 消费本 Plan 和 immutable blobs，同时让 RED
-从同一 current target 运行；之后才能复用现有 aggregation/final-evaluation kernel 形成新的完整证据链。重新审批、灰度、
+EVO-05.3f2b1 已交付 [Shared Runtime RED/GREEN Source Pair](EVO-05-3f2b1-runtime-source-pair.md)，统一物化同基线
+RED 与 immutable-overlay GREEN。EVO-05.3f2b2 仍需让 Interventional 与 Adversarial executor 显式消费它；之后才能
+复用现有 aggregation/final-evaluation kernel 形成新的完整证据链。重新审批、灰度、
 监控和回滚必须继续等待新 Final Evaluation 与决策 authority。
