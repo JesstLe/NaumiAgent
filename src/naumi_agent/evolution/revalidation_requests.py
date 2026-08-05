@@ -27,6 +27,7 @@ from naumi_agent.evolution.promotion_packages import (
     EvolutionPromotionPackageError,
     EvolutionPromotionPackageExecutor,
     EvolutionPromotionPackageView,
+    EvolutionPromotionTargetProbe,
     EvolutionPromotionTargetRelation,
 )
 from naumi_agent.evolution.promotion_packages import (
@@ -115,9 +116,7 @@ class EvolutionRevalidationRequest(_StrictModel):
         if self.workspace_root != str(Path(self.workspace_root).expanduser().resolve()):
             raise ValueError("Revalidation Request workspace 必须是 canonical 路径。")
         target_moved = self.target_head != self.baseline_commit
-        if target_moved is (
-            self.target_relation is EvolutionPromotionTargetRelation.SAME
-        ):
+        if target_moved is (self.target_relation is EvolutionPromotionTargetRelation.SAME):
             raise ValueError("Revalidation Request target relation 与 commit 不一致。")
         expected_operation = {
             EvolutionPromotionTargetRelation.SAME: "validate_exact_tree",
@@ -146,13 +145,35 @@ class EvolutionRevalidationRequestView(_StrictModel):
     request: EvolutionRevalidationRequest
     source_readable: bool
     decision_current: bool
+    decision_rebase_eligible: bool = False
     package_current: bool
     target_current: bool
+    current_target_head: str | None = Field(default=None, pattern=_GIT_OBJECT_RE)
+    current_target_relation: Literal["same", "advanced", "diverged", "unavailable"] = "unavailable"
     current_status: Literal["ready", "stale", "ineligible"]
     execution_eligible: bool
 
     @model_validator(mode="after")
     def _view_is_exact(self) -> Self:
+        exact_eligible = bool(
+            self.source_readable
+            and self.decision_current
+            and self.package_current
+            and self.target_current
+            and self.current_target_relation == "same"
+        )
+        rebase_eligible = bool(
+            self.source_readable
+            and not self.decision_current
+            and self.decision_rebase_eligible
+            and self.package_current
+            and not self.target_current
+            and self.current_target_relation == "advanced"
+        )
+        if self.target_current is not (self.current_target_relation == "same"):
+            raise ValueError("Revalidation Request target relation 投影不一致。")
+        if (self.current_target_head is None) is (self.current_target_relation != "unavailable"):
+            raise ValueError("Revalidation Request current target head 投影不一致。")
         expected_status: Literal["ready", "stale", "ineligible"]
         if not self.source_readable:
             expected_status = "ineligible"
@@ -164,7 +185,7 @@ class EvolutionRevalidationRequestView(_StrictModel):
             expected_status = "ready"
         if self.current_status != expected_status:
             raise ValueError("Revalidation Request current status 投影不一致。")
-        if self.execution_eligible is not (expected_status == "ready"):
+        if self.execution_eligible is not (exact_eligible or rebase_eligible):
             raise ValueError("Revalidation Request eligibility 投影不一致。")
         return self
 
@@ -257,8 +278,7 @@ class EvolutionRevalidationRequestBuilder:
                 EvolutionPromotionTargetRelation.DIVERGED: "block_for_reconciliation",
             }[package.target.relation_to_baseline],
             "manual_reconciliation_required": (
-                package.target.relation_to_baseline
-                is EvolutionPromotionTargetRelation.DIVERGED
+                package.target.relation_to_baseline is EvolutionPromotionTargetRelation.DIVERGED
             ),
             "patch_manifest_sha256": envelope.patch_manifest_sha256,
             "baseline_sha256": envelope.baseline_sha256,
@@ -454,6 +474,7 @@ class EvolutionRevalidationRequestService:
         package_executor: EvolutionPromotionPackageExecutor,
         request_store: EvolutionRevalidationRequestStore,
         builder: EvolutionRevalidationRequestBuilder | None = None,
+        target_probe: EvolutionPromotionTargetProbe | None = None,
     ) -> None:
         if not isinstance(decision_service, EvolutionPromotionApprovalDecisionService):
             raise TypeError("Revalidation Request service 需要 Decision Service。")
@@ -465,6 +486,7 @@ class EvolutionRevalidationRequestService:
         self._package_executor = package_executor
         self._request_store = request_store
         self._builder = builder or EvolutionRevalidationRequestBuilder()
+        self._target_probe = target_probe or EvolutionPromotionTargetProbe()
 
     async def issue(
         self,
@@ -544,8 +566,11 @@ class EvolutionRevalidationRequestService:
                 request=request,
                 source_readable=False,
                 decision_current=False,
+                decision_rebase_eligible=False,
                 package_current=False,
                 target_current=False,
+                current_target_head=None,
+                current_target_relation="unavailable",
                 current_status="ineligible",
                 execution_eligible=False,
             )
@@ -556,13 +581,29 @@ class EvolutionRevalidationRequestService:
             and decision_view.receipt.decision_sha256 == request.decision_sha256
             and decision_view.receipt.source_set_sha256 == request.decision_source_set_sha256
         )
+        decision_rebase_eligible = bool(
+            decision_view.target_only_stale
+            and decision_view.current_rebase_revalidation_eligible
+            and decision_view.receipt.decision_sha256 == request.decision_sha256
+            and decision_view.receipt.source_set_sha256 == request.decision_source_set_sha256
+        )
         package_current = bool(
-            package_view.package_review_eligible
+            package_view.promotion_input_active
+            and package_view.reflection_active
             and package_view.package.package_sha256 == request.package_sha256
         )
-        target_current = bool(
-            package_view.target_current and package_view.current_target_head == request.target_head
-        )
+        try:
+            target = self._target_probe.capture(
+                workspace_root=request.workspace_root,
+                target_branch=request.target_branch,
+                baseline_commit=request.target_head,
+            )
+            current_target_head = target.target_head
+            current_target_relation = target.relation_to_baseline.value
+        except (EvolutionPromotionPackageError, OSError, TypeError, ValueError):
+            current_target_head = None
+            current_target_relation = "unavailable"
+        target_current = current_target_relation == "same"
         status: Literal["ready", "stale", "ineligible"]
         if not package_current or not target_current:
             status = "stale"
@@ -574,10 +615,21 @@ class EvolutionRevalidationRequestService:
             request=request,
             source_readable=True,
             decision_current=decision_current,
+            decision_rebase_eligible=decision_rebase_eligible,
             package_current=package_current,
             target_current=target_current,
+            current_target_head=current_target_head,
+            current_target_relation=current_target_relation,
             current_status=status,
-            execution_eligible=status == "ready",
+            execution_eligible=(
+                status == "ready"
+                or (
+                    status == "stale"
+                    and decision_rebase_eligible
+                    and package_current
+                    and current_target_relation == "advanced"
+                )
+            ),
         )
 
 
@@ -592,6 +644,8 @@ def render_evolution_revalidation_request(
             "",
             f"- 当前状态：`{view.current_status}`",
             f"- 执行资格：`{str(view.execution_eligible).lower()}`",
+            f"- 当前目标关系：`{view.current_target_relation}`",
+            "- 隔离 rebase 资格：" + ("是" if view.decision_rebase_eligible else "否"),
             f"- Approval Decision：`{item.decision_id}`",
             f"- Promotion Package：`{item.package_id}`",
             f"- Candidate：`{item.candidate_id}` revision {item.candidate_revision}",

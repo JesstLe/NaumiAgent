@@ -60,9 +60,7 @@ async def _approved(authority):
 
 def _rehash_request(payload: dict) -> dict:
     artifact = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"request_id", "request_sha256"}
+        key: value for key, value in payload.items() if key not in {"request_id", "request_sha256"}
     }
     digest = hashlib.sha256(
         json.dumps(
@@ -179,9 +177,7 @@ async def test_target_relation_selects_exact_rebase_or_manual_reconciliation(
         operation="rebase_then_validate",
         manual_reconciliation_required=False,
     )
-    advanced = EvolutionRevalidationRequest.model_validate(
-        _rehash_request(advanced_payload)
-    )
+    advanced = EvolutionRevalidationRequest.model_validate(_rehash_request(advanced_payload))
     assert advanced.operation == "rebase_then_validate"
 
     diverged_payload = advanced.model_dump(mode="json")
@@ -190,17 +186,13 @@ async def test_target_relation_selects_exact_rebase_or_manual_reconciliation(
         operation="block_for_reconciliation",
         manual_reconciliation_required=True,
     )
-    diverged = EvolutionRevalidationRequest.model_validate(
-        _rehash_request(diverged_payload)
-    )
+    diverged = EvolutionRevalidationRequest.model_validate(_rehash_request(diverged_payload))
     assert diverged.operation == "block_for_reconciliation"
     assert diverged.manual_reconciliation_required
 
     diverged_payload["manual_reconciliation_required"] = False
     with pytest.raises(ValueError, match="reconciliation"):
-        EvolutionRevalidationRequest.model_validate(
-            _rehash_request(diverged_payload)
-        )
+        EvolutionRevalidationRequest.model_validate(_rehash_request(diverged_payload))
 
 
 @pytest.mark.asyncio
@@ -240,7 +232,7 @@ async def test_pending_or_rejected_decision_cannot_issue_request(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_target_move_makes_existing_request_stale(tmp_path: Path) -> None:
+async def test_linear_target_move_grants_only_isolated_rebase_execution(tmp_path: Path) -> None:
     authority = await _setup(tmp_path)
     approved = await _approved(authority)
     service = _service(authority)
@@ -256,11 +248,46 @@ async def test_target_move_makes_existing_request_stale(tmp_path: Path) -> None:
         workspace_root=tmp_path,
         request_id=issued.request.request_id,
     )
+    decision = await authority.decision_service.inspect(
+        workspace_root=tmp_path,
+        decision_id=approved.receipt.decision_id,
+    )
 
+    assert decision.target_only_stale
+    assert decision.current_rebase_revalidation_eligible
     assert stale.current_status == "stale"
-    assert not stale.package_current
+    assert stale.package_current
     assert not stale.target_current
-    assert not stale.execution_eligible
+    assert stale.current_target_relation == "advanced"
+    assert stale.decision_rebase_eligible
+    assert stale.execution_eligible
+
+
+@pytest.mark.asyncio
+async def test_diverged_target_never_grants_automatic_rebase_execution(
+    tmp_path: Path,
+) -> None:
+    authority = await _setup(tmp_path)
+    approved = await _approved(authority)
+    service = _service(authority)
+    issued = await service.issue(
+        workspace_root=tmp_path,
+        decision_id=approved.receipt.decision_id,
+    )
+    tree = _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    unrelated = _git(tmp_path, "commit-tree", tree, "-m", "unrelated target root")
+    _git(tmp_path, "update-ref", "refs/heads/main", unrelated)
+
+    current = await service.inspect(
+        workspace_root=tmp_path,
+        request_id=issued.request.request_id,
+    )
+
+    assert current.current_status == "stale"
+    assert current.package_current
+    assert current.decision_rebase_eligible
+    assert current.current_target_relation == "diverged"
+    assert not current.execution_eligible
 
 
 @pytest.mark.asyncio
