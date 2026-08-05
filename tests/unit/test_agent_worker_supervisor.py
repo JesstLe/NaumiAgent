@@ -59,7 +59,18 @@ class _Clock:
         self.value += timedelta(seconds=seconds)
 
 
-def _contract(clock: _Clock):
+def _contract(clock: _Clock, *, model_execution: bool = False):
+    capabilities = [
+        WorkerCapability.AGENT_CONTROL_TRANSPORT,
+        WorkerCapability.AGENT_JOB_OWNER_LEASE,
+    ]
+    if model_execution:
+        capabilities.extend(
+            (
+                WorkerCapability.AGENT_CONTEXT_SCOPE,
+                WorkerCapability.AGENT_MODEL_EXECUTION,
+            )
+        )
     return issue_worker_contract(
         worker_id="agent-worker-local",
         instance_id="agent-process-supervisor-test",
@@ -69,10 +80,7 @@ def _contract(clock: _Clock):
         protocol_max=1,
         software_version="0.1.214",
         platform=detect_worker_platform(),
-        capabilities=(
-            WorkerCapability.AGENT_CONTROL_TRANSPORT,
-            WorkerCapability.AGENT_JOB_OWNER_LEASE,
-        ),
+        capabilities=tuple(sorted(capabilities, key=str)),
         resources=WorkerResourceEnvelope(
             max_concurrent_jobs=1,
             max_memory_bytes=16 * 1024 * 1024,
@@ -97,6 +105,8 @@ def _child() -> subprocess.Popen[bytes]:
 async def _authority(
     tmp_path: Path,
     clock: _Clock,
+    *,
+    model_execution: bool = False,
 ) -> tuple[
     WorkerRegistryStore,
     HarnessStore,
@@ -115,7 +125,7 @@ async def _authority(
         key_provider=lambda: key,
         clock=clock.datetime,
     )
-    contract = _contract(clock)
+    contract = _contract(clock, model_execution=model_execution)
     process = _child()
     await registry.register(contract, registered_at=clock.iso())
     await registry.register_process_witness(
@@ -356,3 +366,31 @@ async def test_supervisor_stands_by_while_another_owner_holds_live_lease(
     finally:
         process.terminate()
         process.wait(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_requeues_model_capable_worker_only_while_job_is_prestart(
+    tmp_path: Path,
+) -> None:
+    clock = _Clock(datetime(2026, 8, 5, 16, 0, tzinfo=UTC))
+    registry, heartbeats, jobs, contract, process = await _authority(
+        tmp_path,
+        clock,
+        model_execution=True,
+    )
+    process.terminate()
+    process.wait(timeout=5)
+    clock.advance(10)
+
+    result = await AgentWorkerSupervisor(
+        worker_registry=registry,
+        heartbeat_store=heartbeats,
+        agent_job_store=jobs,
+        workspace_root=tmp_path,
+        owner_id="supervisor-model-prestart",
+        now_provider=clock.iso,
+    ).reconcile_once()
+
+    assert WorkerCapability.AGENT_MODEL_EXECUTION in contract.capabilities
+    assert result.outcome is AgentWorkerSupervisorOutcome.FENCED
+    assert result.job_requeued is True

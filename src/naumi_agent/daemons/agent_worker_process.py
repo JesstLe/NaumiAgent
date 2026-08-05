@@ -4,8 +4,9 @@ This module establishes the OS-process, local-credential, registration, and
 heartbeat boundary required before durable Agent jobs may move out of the
 embedded Runtime. The process can reserve and claim one admitted durable Job,
 authenticate an ephemeral AES-GCM dispatch into child memory, and renew both
-authorities. It still cannot mark a Job running or invoke a model, so its
-health report remains ``accepting_jobs=False``.
+authorities. When an encrypted model profile is configured it can also execute
+one tool-free model call behind a two-phase running fence and commit an
+authenticated terminal payload. Tool execution remains disabled.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ import json
 import math
 import multiprocessing
 import os
+import queue
 import re
 import secrets
 import stat
+import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,13 +32,33 @@ from enum import StrEnum
 from multiprocessing.connection import Client, Connection, Listener
 from pathlib import Path
 
+from naumi_agent.config.settings import ModelConfig
 from naumi_agent.daemons.agent_jobs import (
     AgentJobError,
     AgentJobPayload,
     AgentJobState,
     AgentJobStore,
+    AgentJobTerminalPayload,
+    AgentJobTransitionResult,
     decode_agent_job_dispatch_payload,
     encode_agent_job_dispatch_payload,
+)
+from naumi_agent.daemons.agent_worker_contract import (
+    AgentWorkerRequest,
+    AgentWorkerResult,
+    issue_agent_worker_result,
+)
+from naumi_agent.daemons.agent_worker_model_execution import (
+    MAX_AGENT_MODEL_RESPONSE_BYTES,
+    AgentWorkerModelExecutionPreparation,
+    AgentWorkerModelExecutionResult,
+    decode_model_execution_result,
+    decode_model_profile,
+    encode_model_execution_result,
+    encode_model_profile,
+    execute_model_only,
+    issue_model_execution_preparation,
+    model_profile_sha256,
 )
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
@@ -66,7 +89,11 @@ from naumi_agent.safety.payload_envelope import (
 _PROTOCOL_VERSION = 1
 _CONTROL_CAPABILITY = WorkerCapability.AGENT_CONTROL_TRANSPORT
 _OWNER_LEASE_CAPABILITY = WorkerCapability.AGENT_JOB_OWNER_LEASE
+_CONTEXT_SCOPE_CAPABILITY = WorkerCapability.AGENT_CONTEXT_SCOPE
+_MODEL_EXECUTION_CAPABILITY = WorkerCapability.AGENT_MODEL_EXECUTION
 _JOB_DISPATCH_AAD_PREFIX = b"NAUMI_AGENT_WORKER_JOB_DISPATCH_V1\x00"
+_MODEL_PROFILE_AAD_PREFIX = b"NAUMI_AGENT_WORKER_MODEL_PROFILE_V1\x00"
+_MODEL_TERMINAL_AAD_PREFIX = b"NAUMI_AGENT_WORKER_MODEL_TERMINAL_V1\x00"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -131,6 +158,31 @@ class AgentWorkerJobBinding:
             raise ValueError("Agent Worker Job claim_expires_at 必须包含时区。")
 
 
+@dataclass(frozen=True, slots=True)
+class AgentWorkerModelExecutionOutcome:
+    transition: AgentJobTransitionResult
+    result: AgentWorkerResult
+    model: str
+    provider_model: str
+    provider_response_id_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.transition, AgentJobTransitionResult):
+            raise TypeError("transition 类型无效。")
+        if not isinstance(self.result, AgentWorkerResult):
+            raise TypeError("result 类型无效。")
+        for value, field_name in (
+            (self.model, "model"),
+            (self.provider_model, "provider_model"),
+        ):
+            if not isinstance(value, str) or len(value.encode("utf-8")) > 1024:
+                raise ValueError(f"{field_name} 大小无效。")
+        if self.provider_response_id_sha256 and not _SHA256_RE.fullmatch(
+            self.provider_response_id_sha256
+        ):
+            raise ValueError("provider_response_id_sha256 格式无效。")
+
+
 NowProvider = Callable[[], str]
 
 
@@ -146,6 +198,7 @@ class AuthenticatedAgentWorkerProcess:
         workspace_root: str | Path,
         runtime_dir: str | Path,
         software_version: str,
+        model_config: ModelConfig | None = None,
         worker_id: str = "agent-worker-local",
         max_concurrent_jobs: int = 1,
         heartbeat_interval_seconds: float = 10.0,
@@ -206,6 +259,8 @@ class AuthenticatedAgentWorkerProcess:
             raise ValueError("Agent Worker Job renewal interval 必须大于 0 且小于 lease。")
         if not callable(now_provider):
             raise TypeError("now_provider 必须可调用。")
+        if model_config is not None and not isinstance(model_config, ModelConfig):
+            raise TypeError("model_config 必须是 ModelConfig 或 None。")
 
         self._registry = worker_registry
         self._heartbeats = heartbeat_store
@@ -213,6 +268,9 @@ class AuthenticatedAgentWorkerProcess:
         self._workspace_root = workspace.resolve(strict=False)
         self._runtime_dir = runtime.resolve(strict=False)
         self._software_version = software_version
+        self._model_profile = (
+            encode_model_profile(model_config) if model_config is not None else None
+        )
         self._worker_id = worker_id
         self._max_concurrent_jobs = max_concurrent_jobs
         self._heartbeat_interval_seconds = interval
@@ -239,6 +297,7 @@ class AuthenticatedAgentWorkerProcess:
         self._monitor_task: asyncio.Task[None] | None = None
         self._job_renewal_task: asyncio.Task[None] | None = None
         self._job_ack: asyncio.Future[str] | None = None
+        self._execution_ack: asyncio.Future[dict[str, object]] | None = None
         self._job_binding: AgentWorkerJobBinding | None = None
         self._dispatch_key: RuntimePayloadKey | None = None
         self._terminal_event = asyncio.Event()
@@ -347,7 +406,11 @@ class AuthenticatedAgentWorkerProcess:
             await self._record_heartbeat(
                 sequence=2,
                 phase=HarnessHeartbeatPhase.RUNNING,
-                detail_code="agent_worker_control_ready_dispatch_disabled",
+                detail_code=(
+                    "agent_worker_model_execution_ready"
+                    if self._model_profile is not None
+                    else "agent_worker_control_ready_dispatch_disabled"
+                ),
             )
             async with self._lifecycle_lock:
                 self._state = AgentWorkerProcessState.RUNNING
@@ -598,8 +661,201 @@ class AuthenticatedAgentWorkerProcess:
             else:
                 self._job_binding = None
 
+    async def execute_bound_model_job(self) -> AgentWorkerModelExecutionOutcome:
+        """Run and durably commit one tool-free model request in the child process."""
+        async with self._command_lock:
+            binding = self._job_binding
+            profile = self._model_profile
+            if self._state is not AgentWorkerProcessState.RUNNING:
+                raise AgentWorkerProcessError("Agent Worker 尚未处于可执行状态。")
+            if binding is None:
+                raise AgentWorkerProcessError("Agent Worker 尚未绑定 AgentJob。")
+            if profile is None:
+                raise AgentWorkerProcessError("Agent Worker 未配置独立模型执行能力。")
+            stored = await self._agent_jobs.get(binding.job_id)
+            if (
+                stored is None
+                or stored.state is not AgentJobState.CLAIMED
+                or stored.claim_owner_id != binding.owner_id
+                or stored.claim_epoch != binding.claim_epoch
+                or stored.request_sha256 != binding.request_sha256
+            ):
+                raise AgentWorkerProcessError("Agent Worker pre-start Job fence 已变化。")
+            if stored.request.tool_scope:
+                raise AgentWorkerProcessError(
+                    "独立 Agent model-only Worker 尚不接受工具调用任务。"
+                )
+            preparation = issue_model_execution_preparation(
+                job_id=binding.job_id,
+                request_sha256=binding.request_sha256,
+                claim_epoch=binding.claim_epoch,
+                model_profile_sha256=model_profile_sha256(profile),
+            )
+            profile_envelope = seal_runtime_payload(
+                profile,
+                aad=_model_profile_aad(
+                    contract=self._required_contract(),
+                    binding=binding,
+                    preparation=preparation,
+                ),
+                key=self._required_dispatch_key(),
+            )
+            try:
+                prepared = await self._send_execution_command(
+                    _parent_execution_prepare_message(
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        binding=binding,
+                        preparation=preparation,
+                        profile_envelope=profile_envelope,
+                    ),
+                    expected_type="model_prepared",
+                    timeout=self._handshake_timeout_seconds,
+                )
+                _validate_child_execution_message(
+                    prepared,
+                    expected_type="model_prepared",
+                    nonce=self._nonce,
+                    contract=self._required_contract(),
+                    process_id=self._required_process().pid,
+                    expected_sequence=int(prepared["sequence"]),
+                    binding=binding,
+                    preparation=preparation,
+                )
+                running = await self._agent_jobs.mark_running(
+                    binding.job_id,
+                    owner_id=binding.owner_id,
+                    claim_epoch=binding.claim_epoch,
+                )
+                terminal = await self._send_execution_command(
+                    _parent_execution_start_message(
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        binding=binding,
+                        preparation=preparation,
+                        running_receipt_sha256=(
+                            running.job.latest_receipt.receipt_sha256
+                        ),
+                    ),
+                    expected_type="model_terminal",
+                    timeout=(
+                        stored.request.timeout_milliseconds / 1000
+                        + self._handshake_timeout_seconds * 2
+                    ),
+                )
+                model_result = _open_child_model_terminal_message(
+                    terminal,
+                    nonce=self._nonce,
+                    contract=self._required_contract(),
+                    process_id=self._required_process().pid,
+                    binding=binding,
+                    preparation=preparation,
+                    running_receipt_sha256=(
+                        running.job.latest_receipt.receipt_sha256
+                    ),
+                    dispatch_key=self._required_dispatch_key(),
+                )
+                result = issue_agent_worker_result(
+                    request=stored.request,
+                    status=model_result.status.value,
+                    response=model_result.response,
+                    error=model_result.error or None,
+                    total_tokens=model_result.total_tokens,
+                    total_cost_usd=model_result.total_cost_usd,
+                    turns=model_result.turns,
+                    completed_at=self._timestamp("completed_at"),
+                )
+                transition = await self._agent_jobs.finish(
+                    binding.job_id,
+                    owner_id=binding.owner_id,
+                    claim_epoch=binding.claim_epoch,
+                    result=result,
+                    terminal_payload=AgentJobTerminalPayload(
+                        response=model_result.response,
+                        error=model_result.error,
+                    ),
+                )
+                await self._stop_job_renewal()
+                committed = await self._send_execution_command(
+                    _parent_execution_commit_message(
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        binding=binding,
+                        preparation=preparation,
+                        result_sha256=result.result_sha256,
+                        terminal_receipt_sha256=(
+                            transition.job.latest_receipt.receipt_sha256
+                        ),
+                    ),
+                    expected_type="model_committed",
+                    timeout=self._shutdown_timeout_seconds,
+                )
+                _validate_child_execution_commit_message(
+                    committed,
+                    nonce=self._nonce,
+                    contract=self._required_contract(),
+                    process_id=self._required_process().pid,
+                    binding=binding,
+                    preparation=preparation,
+                    result_sha256=result.result_sha256,
+                    terminal_receipt_sha256=(
+                        transition.job.latest_receipt.receipt_sha256
+                    ),
+                )
+                await self._registry.release_capacity(
+                    reservation_id=binding.reservation_id,
+                    worker_id=self._required_contract().worker_id,
+                    instance_id=self._required_contract().instance_id,
+                    epoch=self._required_contract().epoch,
+                    reason_code="agent_worker_model_terminal_committed",
+                    released_at=self._timestamp("released_at"),
+                    accept_terminal=True,
+                )
+                self._job_binding = None
+                return AgentWorkerModelExecutionOutcome(
+                    transition=transition,
+                    result=result,
+                    model=model_result.model,
+                    provider_model=model_result.provider_model,
+                    provider_response_id_sha256=(
+                        model_result.provider_response_id_sha256
+                    ),
+                )
+            except BaseException as exc:
+                self._execution_ack = None
+                await self._mark_failed("agent_worker_model_execution_failed")
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                if isinstance(exc, AgentWorkerProcessError):
+                    raise
+                raise AgentWorkerProcessError(
+                    f"独立 Agent 模型执行收口失败：{type(exc).__name__}。"
+                ) from exc
+
+    async def _send_execution_command(
+        self,
+        message: dict[str, object],
+        *,
+        expected_type: str,
+        timeout: float,
+    ) -> dict[str, object]:
+        if self._execution_ack is not None:
+            raise AgentWorkerProcessError("已有等待中的 Agent model 命令。")
+        ack: asyncio.Future[dict[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._execution_ack = ack
+        try:
+            await asyncio.to_thread(self._required_connection().send, message)
+            response = await asyncio.wait_for(asyncio.shield(ack), timeout=timeout)
+            if str(response.get("type")) != expected_type:
+                raise AgentWorkerProcessError("Agent model 回执类型无效。")
+            return response
+        finally:
+            self._execution_ack = None
+
     def health_report(self) -> WorkerHealthReport:
-        """Return authenticated liveness while keeping dispatch fail-closed."""
+        """Return authenticated liveness and exact execution readiness."""
         contract = self._required_contract()
         heartbeat = self._last_heartbeat
         if heartbeat is None:
@@ -608,7 +864,7 @@ class AuthenticatedAgentWorkerProcess:
             contract=contract,
             heartbeat=heartbeat,
             active_jobs=1 if self._job_binding is not None else 0,
-            accepting_jobs=False,
+            accepting_jobs=self._model_profile is not None,
         )
 
     def snapshot(self) -> AgentWorkerProcessSnapshot:
@@ -622,7 +878,7 @@ class AuthenticatedAgentWorkerProcess:
             state=self._state,
             process_id=process_id,
             contract_sha256=digest,
-            accepting_jobs=False,
+            accepting_jobs=self._model_profile is not None,
             heartbeat_sequence=self._sequence,
             failure_code=self._failure_code,
             bound_job_id=binding.job_id if binding is not None else "",
@@ -652,7 +908,15 @@ class AuthenticatedAgentWorkerProcess:
                     await self._record_heartbeat(
                         sequence=expected_sequence,
                         phase=HarnessHeartbeatPhase.RUNNING,
-                        detail_code="agent_worker_control_alive_dispatch_disabled",
+                        detail_code=(
+                            "agent_worker_model_execution_alive"
+                            if self._execution_ack is not None
+                            else (
+                                "agent_worker_model_execution_idle"
+                                if self._model_profile is not None
+                                else "agent_worker_control_alive_dispatch_disabled"
+                            )
+                        ),
                     )
                 elif message_type == "draining":
                     await self._record_heartbeat(
@@ -700,6 +964,34 @@ class AuthenticatedAgentWorkerProcess:
                             "Agent Worker Job 回执没有等待中的命令。"
                         )
                     ack.set_result(message_type)
+                elif message_type in {
+                    "model_prepared",
+                    "model_terminal",
+                    "model_committed",
+                }:
+                    _validate_child_execution_identity(
+                        message,
+                        expected_type=message_type,
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        process_id=self._required_process().pid,
+                        expected_sequence=expected_sequence,
+                    )
+                    await self._record_heartbeat(
+                        sequence=expected_sequence,
+                        phase=HarnessHeartbeatPhase.RUNNING,
+                        detail_code={
+                            "model_prepared": "agent_worker_model_prepared",
+                            "model_terminal": "agent_worker_model_terminal_ready",
+                            "model_committed": "agent_worker_model_terminal_committed",
+                        }[message_type],
+                    )
+                    execution_ack = self._execution_ack
+                    if execution_ack is None or execution_ack.done():
+                        raise AgentWorkerProcessError(
+                            "Agent model 回执没有等待中的命令。"
+                        )
+                    execution_ack.set_result(message)
                 else:
                     raise AgentWorkerProcessError("Agent Worker 返回未知生命周期消息。")
         except asyncio.CancelledError:
@@ -803,6 +1095,11 @@ class AuthenticatedAgentWorkerProcess:
             if ack is not None and not ack.done():
                 ack.set_exception(
                     AgentWorkerProcessError("Agent Worker Job 控制通道已失败。")
+                )
+            execution_ack = self._execution_ack
+            if execution_ack is not None and not execution_ack.done():
+                execution_ack.set_exception(
+                    AgentWorkerProcessError("Agent Worker model 控制通道已失败。")
                 )
             await self._stop_job_renewal()
             await self._terminate_process()
@@ -954,6 +1251,11 @@ class AuthenticatedAgentWorkerProcess:
 
     def _spawn_child(self) -> None:
         issued_at = self._timestamp("issued_at")
+        capabilities = [_CONTROL_CAPABILITY, _OWNER_LEASE_CAPABILITY]
+        if self._model_profile is not None:
+            capabilities.extend(
+                (_CONTEXT_SCOPE_CAPABILITY, _MODEL_EXECUTION_CAPABILITY)
+            )
         self._contract = issue_worker_contract(
             worker_id=self._worker_id,
             instance_id=self._instance_id,
@@ -963,16 +1265,17 @@ class AuthenticatedAgentWorkerProcess:
             protocol_max=_PROTOCOL_VERSION,
             software_version=self._software_version,
             platform=detect_worker_platform(),
-            capabilities=tuple(sorted(
-                (_CONTROL_CAPABILITY, _OWNER_LEASE_CAPABILITY),
-                key=str,
-            )),
+            capabilities=tuple(sorted(capabilities, key=str)),
             resources=WorkerResourceEnvelope(
                 max_concurrent_jobs=self._max_concurrent_jobs,
                 max_memory_bytes=16 * 1024 * 1024,
                 max_cpu_seconds=7 * 24 * 60 * 60,
                 max_wall_seconds=7 * 24 * 60 * 60,
-                max_output_bytes=1024,
+                max_output_bytes=(
+                    MAX_AGENT_MODEL_RESPONSE_BYTES
+                    if self._model_profile is not None
+                    else 1024
+                ),
             ),
             isolation=WorkerIsolationContract(
                 ephemeral_workspace=False,
@@ -1006,6 +1309,7 @@ class AuthenticatedAgentWorkerProcess:
                 self._contract.contract_sha256,
                 self._heartbeat_interval_seconds,
                 self._dispatch_key.key_bytes,
+                self._model_profile is not None,
             ),
             name=f"naumi-agent-worker-{self._epoch}",
             daemon=False,
@@ -1057,6 +1361,7 @@ class AgentWorkerProcessFactory:
         runtime_dir: str | Path,
         software_version: str,
         max_concurrent_jobs: int,
+        model_config: ModelConfig | None = None,
     ) -> None:
         self.worker_registry = worker_registry
         self.heartbeat_store = heartbeat_store
@@ -1065,6 +1370,9 @@ class AgentWorkerProcessFactory:
         self.runtime_dir = Path(runtime_dir).expanduser().resolve(strict=False)
         self.software_version = software_version
         self.max_concurrent_jobs = max_concurrent_jobs
+        self._model_profile_payload = (
+            encode_model_profile(model_config) if model_config is not None else None
+        )
         # Reuse constructor validation without causing filesystem or process side effects.
         AuthenticatedAgentWorkerProcess(
             worker_registry=worker_registry,
@@ -1074,6 +1382,7 @@ class AgentWorkerProcessFactory:
             runtime_dir=self.runtime_dir,
             software_version=software_version,
             max_concurrent_jobs=max_concurrent_jobs,
+            model_config=model_config,
         )
 
     def create(
@@ -1095,6 +1404,11 @@ class AgentWorkerProcessFactory:
             workspace_root=self.workspace_root,
             runtime_dir=self.runtime_dir,
             software_version=self.software_version,
+            model_config=(
+                decode_model_profile(self._model_profile_payload)
+                if self._model_profile_payload is not None
+                else None
+            ),
             worker_id=worker_id,
             max_concurrent_jobs=self.max_concurrent_jobs,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
@@ -1120,9 +1434,18 @@ def _agent_worker_child_main(
     contract_sha256: str,
     interval_seconds: float,
     dispatch_key_bytes: bytes,
+    model_execution_enabled: bool,
 ) -> None:
     connection: Connection | None = None
-    bound_job: tuple[AgentWorkerJobBinding, AgentJobPayload] | None = None
+    bound_job: tuple[
+        AgentWorkerJobBinding,
+        AgentWorkerRequest,
+        AgentJobPayload,
+    ] | None = None
+    prepared_execution: tuple[
+        AgentWorkerModelExecutionPreparation,
+        bytes,
+    ] | None = None
     try:
         dispatch_key = RuntimePayloadKey.from_bytes(dispatch_key_bytes)
         connection = Client(address=address, family=family, authkey=authkey)
@@ -1181,7 +1504,7 @@ def _agent_worker_child_main(
                         raise AgentWorkerProcessError(
                             "Agent Worker 子进程不能重复绑定 Job。"
                         )
-                    binding, payload = _open_parent_job_message(
+                    binding, request, payload = _open_parent_job_message(
                         control,
                         expected_type="bind_job",
                         nonce=nonce,
@@ -1191,7 +1514,7 @@ def _agent_worker_child_main(
                         contract_sha256=contract_sha256,
                         dispatch_key=dispatch_key,
                     )
-                    bound_job = (binding, payload)
+                    bound_job = (binding, request, payload)
                     sequence += 1
                     connection.send(
                         _child_job_message(
@@ -1204,6 +1527,189 @@ def _agent_worker_child_main(
                             process_id=process_id,
                             sequence=sequence,
                             binding=binding,
+                        )
+                    )
+                    continue
+                if control_type == "prepare_model":
+                    if not model_execution_enabled or bound_job is None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 子进程未开放模型执行。"
+                        )
+                    if prepared_execution is not None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 子进程已有 prepared model execution。"
+                        )
+                    preparation, profile = _open_parent_model_prepare_message(
+                        control,
+                        nonce=nonce,
+                        worker_id=worker_id,
+                        instance_id=instance_id,
+                        epoch=epoch,
+                        contract_sha256=contract_sha256,
+                        binding=bound_job[0],
+                        request=bound_job[1],
+                        dispatch_key=dispatch_key,
+                    )
+                    prepared_execution = (preparation, profile)
+                    sequence += 1
+                    connection.send(
+                        _child_execution_message(
+                            "model_prepared",
+                            nonce=nonce,
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            process_id=process_id,
+                            sequence=sequence,
+                            binding=bound_job[0],
+                            preparation=preparation,
+                        )
+                    )
+                    continue
+                if control_type == "start_model":
+                    if bound_job is None or prepared_execution is None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker model execution 尚未 prepare。"
+                        )
+                    preparation, profile = prepared_execution
+                    running_receipt_sha256 = _validate_parent_model_start_message(
+                        control,
+                        nonce=nonce,
+                        worker_id=worker_id,
+                        instance_id=instance_id,
+                        epoch=epoch,
+                        contract_sha256=contract_sha256,
+                        binding=bound_job[0],
+                        preparation=preparation,
+                    )
+                    result_queue: queue.Queue[
+                        AgentWorkerModelExecutionResult | BaseException
+                    ] = queue.Queue(maxsize=1)
+                    execution_thread = threading.Thread(
+                        target=_run_model_execution_thread,
+                        args=(
+                            result_queue,
+                            preparation,
+                            bound_job[1],
+                            bound_job[2],
+                            profile,
+                        ),
+                        name=f"naumi-agent-model-{preparation.execution_id[-12:]}",
+                        daemon=True,
+                    )
+                    execution_thread.start()
+                    while execution_thread.is_alive():
+                        if connection.poll(interval_seconds):
+                            raise AgentWorkerProcessError(
+                                "model execution 期间收到未授权控制消息。"
+                            )
+                        sequence += 1
+                        connection.send(
+                            _child_message(
+                                "pulse",
+                                nonce=nonce,
+                                worker_id=worker_id,
+                                instance_id=instance_id,
+                                epoch=epoch,
+                                contract_sha256=contract_sha256,
+                                process_id=process_id,
+                                sequence=sequence,
+                            )
+                        )
+                    execution_thread.join(timeout=1)
+                    result_value = result_queue.get_nowait()
+                    if isinstance(result_value, BaseException):
+                        raise AgentWorkerProcessError(
+                            "Agent Worker model execution kernel 失败。"
+                        )
+                    terminal_plaintext = encode_model_execution_result(result_value)
+                    terminal_envelope = seal_runtime_payload(
+                        terminal_plaintext,
+                        aad=_model_terminal_aad_values(
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            binding=bound_job[0],
+                            preparation=preparation,
+                            running_receipt_sha256=running_receipt_sha256,
+                        ),
+                        key=dispatch_key,
+                    )
+                    sequence += 1
+                    connection.send(
+                        _child_execution_message(
+                            "model_terminal",
+                            nonce=nonce,
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            process_id=process_id,
+                            sequence=sequence,
+                            binding=bound_job[0],
+                            preparation=preparation,
+                            extra={
+                                "running_receipt_sha256": running_receipt_sha256,
+                                "terminal_envelope": terminal_envelope.to_dict(),
+                                "terminal_envelope_sha256": (
+                                    terminal_envelope.envelope_sha256
+                                ),
+                            },
+                        )
+                    )
+                    while True:
+                        if connection.poll(interval_seconds):
+                            commit = connection.recv()
+                            result_sha256, terminal_receipt_sha256 = (
+                                _validate_parent_model_commit_message(
+                                    commit,
+                                    nonce=nonce,
+                                    worker_id=worker_id,
+                                    instance_id=instance_id,
+                                    epoch=epoch,
+                                    contract_sha256=contract_sha256,
+                                    binding=bound_job[0],
+                                    preparation=preparation,
+                                )
+                            )
+                            break
+                        sequence += 1
+                        connection.send(
+                            _child_message(
+                                "pulse",
+                                nonce=nonce,
+                                worker_id=worker_id,
+                                instance_id=instance_id,
+                                epoch=epoch,
+                                contract_sha256=contract_sha256,
+                                process_id=process_id,
+                                sequence=sequence,
+                            )
+                        )
+                    bound_binding = bound_job[0]
+                    bound_job = None
+                    prepared_execution = None
+                    sequence += 1
+                    connection.send(
+                        _child_execution_message(
+                            "model_committed",
+                            nonce=nonce,
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            process_id=process_id,
+                            sequence=sequence,
+                            binding=bound_binding,
+                            preparation=preparation,
+                            extra={
+                                "result_sha256": result_sha256,
+                                "terminal_receipt_sha256": (
+                                    terminal_receipt_sha256
+                                ),
+                            },
                         )
                     )
                     continue
@@ -1222,6 +1728,7 @@ def _agent_worker_child_main(
                         expected_binding=bound_job[0],
                     )
                     bound_job = None
+                    prepared_execution = None
                     sequence += 1
                     connection.send(
                         _child_job_message(
@@ -1338,6 +1845,444 @@ def _parent_job_message(
     return message
 
 
+def _preparation_message_fields(
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> dict[str, object]:
+    return {
+        "execution_id": preparation.execution_id,
+        "execution_job_id": preparation.job_id,
+        "execution_request_sha256": preparation.request_sha256,
+        "execution_claim_epoch": preparation.claim_epoch,
+        "model_profile_sha256": preparation.model_profile_sha256,
+    }
+
+
+def _preparation_from_message(
+    message: dict[str, object],
+) -> AgentWorkerModelExecutionPreparation:
+    try:
+        return AgentWorkerModelExecutionPreparation(
+            execution_id=str(message["execution_id"]),
+            job_id=str(message["execution_job_id"]),
+            request_sha256=str(message["execution_request_sha256"]),
+            claim_epoch=int(message["execution_claim_epoch"]),
+            model_profile_sha256=str(message["model_profile_sha256"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker model preparation 字段无效。"
+        ) from exc
+
+
+def _parent_execution_prepare_message(
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    profile_envelope: PayloadEnvelope,
+) -> dict[str, object]:
+    return {
+        **_parent_message("prepare_model", nonce=nonce, contract=contract),
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "model_profile_envelope": profile_envelope.to_dict(),
+        "model_profile_envelope_sha256": profile_envelope.envelope_sha256,
+    }
+
+
+def _open_parent_model_prepare_message(
+    message: object,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    request: AgentWorkerRequest,
+    dispatch_key: RuntimePayloadKey,
+) -> tuple[AgentWorkerModelExecutionPreparation, bytes]:
+    if not isinstance(message, dict):
+        raise AgentWorkerProcessError("Agent Worker model prepare 消息形状无效。")
+    preparation = _preparation_from_message(message)
+    if (
+        preparation.job_id != binding.job_id
+        or preparation.request_sha256 != binding.request_sha256
+        or preparation.claim_epoch != binding.claim_epoch
+        or request.request_sha256 != binding.request_sha256
+        or request.tool_scope
+    ):
+        raise AgentWorkerProcessError("Agent Worker model prepare fence 无效。")
+    try:
+        envelope = PayloadEnvelope.from_dict(message["model_profile_envelope"])  # type: ignore[arg-type]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker model profile envelope 无效。"
+        ) from exc
+    expected = {
+        "type": "prepare_model",
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "model_profile_envelope": envelope.to_dict(),
+        "model_profile_envelope_sha256": envelope.envelope_sha256,
+    }
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker model prepare 消息认证失败。")
+    try:
+        profile = open_runtime_payload(
+            envelope,
+            aad=_model_profile_aad_values(
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                binding=binding,
+                preparation=preparation,
+            ),
+            key=dispatch_key,
+        )
+        decode_model_profile(profile)
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker model profile 无法认证。"
+        ) from exc
+    if not hmac.compare_digest(
+        model_profile_sha256(profile),
+        preparation.model_profile_sha256,
+    ):
+        raise AgentWorkerProcessError("Agent Worker model profile digest 无效。")
+    return preparation, profile
+
+
+def _parent_execution_start_message(
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+) -> dict[str, object]:
+    if not _SHA256_RE.fullmatch(running_receipt_sha256):
+        raise AgentWorkerProcessError("running_receipt_sha256 格式无效。")
+    return {
+        **_parent_message("start_model", nonce=nonce, contract=contract),
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "running_receipt_sha256": running_receipt_sha256,
+    }
+
+
+def _validate_parent_model_start_message(
+    message: object,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> str:
+    if not isinstance(message, dict):
+        raise AgentWorkerProcessError("Agent Worker model start 消息形状无效。")
+    running_receipt_sha256 = str(message.get("running_receipt_sha256", ""))
+    if not _SHA256_RE.fullmatch(running_receipt_sha256):
+        raise AgentWorkerProcessError("Agent Worker model running receipt 无效。")
+    expected = {
+        "type": "start_model",
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "running_receipt_sha256": running_receipt_sha256,
+    }
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker model start 消息认证失败。")
+    return running_receipt_sha256
+
+
+def _parent_execution_commit_message(
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    result_sha256: str,
+    terminal_receipt_sha256: str,
+) -> dict[str, object]:
+    for value, field_name in (
+        (result_sha256, "result_sha256"),
+        (terminal_receipt_sha256, "terminal_receipt_sha256"),
+    ):
+        if not _SHA256_RE.fullmatch(value):
+            raise AgentWorkerProcessError(f"{field_name} 格式无效。")
+    return {
+        **_parent_message("commit_model", nonce=nonce, contract=contract),
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "result_sha256": result_sha256,
+        "terminal_receipt_sha256": terminal_receipt_sha256,
+    }
+
+
+def _validate_parent_model_commit_message(
+    message: object,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> tuple[str, str]:
+    if not isinstance(message, dict):
+        raise AgentWorkerProcessError("Agent Worker model commit 消息形状无效。")
+    result_sha256 = str(message.get("result_sha256", ""))
+    terminal_receipt_sha256 = str(message.get("terminal_receipt_sha256", ""))
+    expected = {
+        "type": "commit_model",
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "result_sha256": result_sha256,
+        "terminal_receipt_sha256": terminal_receipt_sha256,
+    }
+    if (
+        not _SHA256_RE.fullmatch(result_sha256)
+        or not _SHA256_RE.fullmatch(terminal_receipt_sha256)
+        or not _secure_exact_message_matches(message, expected)
+    ):
+        raise AgentWorkerProcessError("Agent Worker model commit 消息认证失败。")
+    return result_sha256, terminal_receipt_sha256
+
+
+def _child_execution_message(
+    message_type: str,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if message_type not in {"model_prepared", "model_terminal", "model_committed"}:
+        raise AgentWorkerProcessError("Agent Worker model child 消息类型无效。")
+    return {
+        **_child_message(
+            message_type,
+            nonce=nonce,
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            sequence=sequence,
+        ),
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        **(extra or {}),
+    }
+
+
+def _validate_child_execution_identity(
+    message: object,
+    *,
+    expected_type: str,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    expected_sequence: int,
+) -> None:
+    if not isinstance(message, dict) or process_id is None or process_id < 1:
+        raise AgentWorkerProcessError("Agent Worker model child identity 无效。")
+    expected = _child_message(
+        expected_type,
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=expected_sequence,
+    )
+    if any(
+        not hmac.compare_digest(str(message.get(key)), str(value))
+        for key, value in expected.items()
+    ):
+        raise AgentWorkerProcessError("Agent Worker model child identity 认证失败。")
+
+
+def _validate_child_execution_message(
+    message: object,
+    *,
+    expected_type: str,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    expected_sequence: int,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> None:
+    if process_id is None or process_id < 1:
+        raise AgentWorkerProcessError("Agent Worker model child PID 无效。")
+    expected = _child_execution_message(
+        expected_type,
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=expected_sequence,
+        binding=binding,
+        preparation=preparation,
+    )
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker model child 回执认证失败。")
+
+
+def _open_child_model_terminal_message(
+    message: object,
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    dispatch_key: RuntimePayloadKey,
+) -> AgentWorkerModelExecutionResult:
+    if not isinstance(message, dict) or process_id is None or process_id < 1:
+        raise AgentWorkerProcessError("Agent Worker model terminal 形状无效。")
+    try:
+        envelope = PayloadEnvelope.from_dict(message["terminal_envelope"])  # type: ignore[arg-type]
+        sequence = int(message["sequence"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError("Agent Worker model terminal envelope 无效。") from exc
+    expected = _child_execution_message(
+        "model_terminal",
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=sequence,
+        binding=binding,
+        preparation=preparation,
+        extra={
+            "running_receipt_sha256": running_receipt_sha256,
+            "terminal_envelope": envelope.to_dict(),
+            "terminal_envelope_sha256": envelope.envelope_sha256,
+        },
+    )
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker model terminal 认证失败。")
+    try:
+        plaintext = open_runtime_payload(
+            envelope,
+            aad=_model_terminal_aad(
+                contract=contract,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+            ),
+            key=dispatch_key,
+        )
+        result = decode_model_execution_result(plaintext)
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker model terminal payload 无法认证。"
+        ) from exc
+    if (
+        result.execution_id != preparation.execution_id
+        or result.request_sha256 != binding.request_sha256
+    ):
+        raise AgentWorkerProcessError("Agent Worker model terminal result fence 无效。")
+    return result
+
+
+def _validate_child_execution_commit_message(
+    message: object,
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    result_sha256: str,
+    terminal_receipt_sha256: str,
+) -> None:
+    if not isinstance(message, dict) or process_id is None or process_id < 1:
+        raise AgentWorkerProcessError("Agent Worker model committed 形状无效。")
+    try:
+        sequence = int(message["sequence"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError("Agent Worker model committed sequence 无效。") from exc
+    expected = _child_execution_message(
+        "model_committed",
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=sequence,
+        binding=binding,
+        preparation=preparation,
+        extra={
+            "result_sha256": result_sha256,
+            "terminal_receipt_sha256": terminal_receipt_sha256,
+        },
+    )
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker model committed 回执认证失败。")
+
+
+def _run_model_execution_thread(
+    result_queue: queue.Queue[AgentWorkerModelExecutionResult | BaseException],
+    preparation: AgentWorkerModelExecutionPreparation,
+    request: AgentWorkerRequest,
+    payload: AgentJobPayload,
+    profile: bytes,
+) -> None:
+    try:
+        result = asyncio.run(
+            execute_model_only(
+                preparation=preparation,
+                request=request,
+                payload=payload,
+                model_profile=profile,
+            )
+        )
+    except BaseException as exc:
+        result_queue.put(exc)
+    else:
+        result_queue.put(result)
+
+
 def _child_job_message(
     message_type: str,
     *,
@@ -1377,7 +2322,7 @@ def _open_parent_job_message(
     epoch: int,
     contract_sha256: str,
     dispatch_key: RuntimePayloadKey,
-) -> tuple[AgentWorkerJobBinding, AgentJobPayload]:
+) -> tuple[AgentWorkerJobBinding, AgentWorkerRequest, AgentJobPayload]:
     if expected_type != "bind_job" or not isinstance(message, dict):
         raise AgentWorkerProcessError("Agent Worker bind 消息形状无效。")
     binding = _binding_from_message(message)
@@ -1442,7 +2387,7 @@ def _open_parent_job_message(
         ) from exc
     if not hmac.compare_digest(request.request_sha256, binding.request_sha256):
         raise AgentWorkerProcessError("Agent Worker dispatch request fence 无效。")
-    return binding, payload
+    return binding, request, payload
 
 
 def _validate_parent_job_release_message(
@@ -1757,6 +2702,111 @@ def _job_dispatch_aad_values(
     return _JOB_DISPATCH_AAD_PREFIX + payload
 
 
+def _model_profile_aad(
+    *,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> bytes:
+    return _model_profile_aad_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        binding=binding,
+        preparation=preparation,
+    )
+
+
+def _model_profile_aad_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> bytes:
+    return _MODEL_PROFILE_AAD_PREFIX + _canonical_execution_aad(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        binding=binding,
+        preparation=preparation,
+    )
+
+
+def _model_terminal_aad(
+    *,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+) -> bytes:
+    return _model_terminal_aad_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        binding=binding,
+        preparation=preparation,
+        running_receipt_sha256=running_receipt_sha256,
+    )
+
+
+def _model_terminal_aad_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+) -> bytes:
+    if not _SHA256_RE.fullmatch(running_receipt_sha256):
+        raise AgentWorkerProcessError("running_receipt_sha256 格式无效。")
+    return (
+        _MODEL_TERMINAL_AAD_PREFIX
+        + _canonical_execution_aad(
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            binding=binding,
+            preparation=preparation,
+        )
+        + b"\x00"
+        + running_receipt_sha256.encode("ascii")
+    )
+
+
+def _canonical_execution_aad(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> bytes:
+    return json.dumps(
+        {
+            "protocol_version": _PROTOCOL_VERSION,
+            "worker_id": worker_id,
+            "instance_id": instance_id,
+            "epoch": epoch,
+            "contract_sha256": contract_sha256,
+            **_job_binding_message_fields(binding),
+            **_preparation_message_fields(preparation),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
 def _transport_address(runtime_dir: Path) -> tuple[object, str]:
     token = secrets.token_hex(12)
     if os.name == "nt":
@@ -1769,6 +2819,7 @@ def _transport_address(runtime_dir: Path) -> tuple[object, str]:
 
 __all__ = [
     "AgentWorkerJobBinding",
+    "AgentWorkerModelExecutionOutcome",
     "AgentWorkerProcessError",
     "AgentWorkerProcessFactory",
     "AgentWorkerProcessSnapshot",

@@ -119,6 +119,8 @@ Doctor 与文档治理小模块测试，不运行全量测试。
   后续需通过统一 key 配置或运维修复；
 - 当前真实 OS 进程证据来自 Darwin，Linux/Windows 仍需平台矩阵。
 
-下一最小纵向切片应回到 `ARC-04.5e3`：在已具备 pre-start owner lease 与 Supervisor fencing 的基础上，
-实现 exact `mark_running -> bounded model execution -> authenticated terminal publication`。它仍需先定义
-running 后的取消与 unknown recovery 边界，不应先把 ARC-04.6 的所有运维能力一次做完。
+`ARC-04.5e3a / HAR-10.7h4` 已在该基础上完成 model-only 的 exact
+`prepare -> mark_running -> Provider call -> encrypted terminal -> publication`，并把 running 后进程丢失明确
+留在 recovery-required，详见
+[`ARC-04-5e3a-independent-agent-model-execution.md`](ARC-04-5e3a-independent-agent-model-execution.md)。
+下一步补齐加密 Tool RPC 与生产调度，不应先把 ARC-04.6 的所有运维能力一次做完。

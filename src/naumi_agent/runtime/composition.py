@@ -324,6 +324,7 @@ def build_runtime_services(
             runtime_dir=paths.agent_worker_runtime_dir,
             software_version=__version__,
             max_concurrent_jobs=config.safety.max_parallel_agents,
+            model_config=config.models,
         )
     agent_worker_supervisor_factory = resolved.agent_worker_supervisor_factory
     if agent_worker_supervisor_factory is not None and not isinstance(

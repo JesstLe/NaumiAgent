@@ -128,6 +128,42 @@ def test_agent_job_owner_lease_requires_authenticated_control_transport() -> Non
     assert verify_worker_contract(contract)
 
 
+def test_agent_model_execution_requires_context_and_owner_authorities() -> None:
+    values = {
+        "worker_id": "agent-worker-model",
+        "instance_id": "agent-process-model",
+        "epoch": 1,
+        "kind": WorkerKind.AGENT,
+        "protocol_min": 1,
+        "protocol_max": 1,
+        "software_version": "0.1.214",
+        "platform": detect_worker_platform(),
+        "resources": _resources(),
+        "isolation": _isolation(strict=False),
+        "issued_at": T0,
+    }
+    with pytest.raises(ValueError, match="context scope"):
+        issue_worker_contract(
+            **values,
+            capabilities=(
+                WorkerCapability.AGENT_CONTROL_TRANSPORT,
+                WorkerCapability.AGENT_JOB_OWNER_LEASE,
+                WorkerCapability.AGENT_MODEL_EXECUTION,
+            ),
+        )
+
+    contract = issue_worker_contract(
+        **values,
+        capabilities=(
+            WorkerCapability.AGENT_CONTEXT_SCOPE,
+            WorkerCapability.AGENT_CONTROL_TRANSPORT,
+            WorkerCapability.AGENT_JOB_OWNER_LEASE,
+            WorkerCapability.AGENT_MODEL_EXECUTION,
+        ),
+    )
+    assert verify_worker_contract(contract)
+
+
 def _requirements(**updates):
     values = {
         "kind": WorkerKind.TOOL,

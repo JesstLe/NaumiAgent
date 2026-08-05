@@ -476,6 +476,16 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
             else "控制通道就绪、任务调度未开放 "
         )
         return identity + readiness + f"心跳{health}{age}"
+    if (
+        worker.kind == "agent"
+        and "agent_model_execution" in worker.capabilities
+    ):
+        return (
+            identity
+            + "model-only 执行就绪、工具 RPC 未开放 "
+            + f"容量占用 {worker.reserved_jobs}/{worker.max_concurrent_jobs}、"
+            + f"可用 {worker.available_jobs} 心跳{health}{age}"
+        )
     return (
         identity
         + f"容量占用 {worker.reserved_jobs}/{worker.max_concurrent_jobs}、"

@@ -46,6 +46,7 @@ retry budget、HMAC quarantine receipt 和双端隔离投影；ARC-04.5e1/HAR-10
 control-only Agent 进程、认证本机传输、注册/心跳/排空/撤销；ARC-04.5e2/HAR-10.7h2 进一步把
 exact Worker incarnation、物理 slot 和 admitted-only AgentJob owner lease 绑定，并完成进程级一次性密钥
 加密 staging 与双续租；ARC-04.6a/HAR-10.7h3 又补齐 PID/create-time witness、Supervisor owner lease 和
-认证 pre-start fencing/requeue。Agent Job 模型执行仍由 embedded Runtime 完成，quarantine requeue/prune、完整 Supervisor、
+认证 pre-start fencing/requeue；ARC-04.5e3a/HAR-10.7h4 又完成 model-only 两阶段 running fence、真实独立
+Provider 调用和加密 terminal/outbox 提交。带工具 Agent 执行仍由 embedded Runtime 完成，quarantine requeue/prune、完整 Supervisor、
 Agent/Browser 完整持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

@@ -146,6 +146,7 @@ def test_composition_builds_service_from_exact_resources_and_copies_policy(
     assert services.agent_worker_process_factory.heartbeat_store is resources.harness_store
     assert services.agent_worker_process_factory.agent_job_store is resources.agent_job_store
     assert services.agent_worker_process_factory.runtime_dir == paths.agent_worker_runtime_dir
+    assert services.agent_worker_process_factory._model_profile_payload is not None
     assert services.agent_worker_supervisor_factory.worker_registry is (
         resources.worker_registry_store
     )

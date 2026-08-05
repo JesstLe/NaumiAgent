@@ -945,7 +945,8 @@ codex/terminal-completion-receipt
 
 ```text
 M6 `/agents` Agent Control Center 已完成；`/workbench` 的 New UI Overview、Worktrees tab 与 Textual
-TUI fallback 已完成。下一切片不顺序堆叠 UI-10，而是重新核对 Harness、Future Architecture、
-Claude Source 与自进化依赖，选择能解锁下一项用户能力的最小前置；跨终端兼容实测、性能基准和真实
+TUI fallback 已完成。ARC-04.5e3a/HAR-10.7h4 已按上述依赖完成 model-only 独立 Agent 模型执行内核，
+Doctor/New UI/TUI 共用“工具 RPC 未开放”的精确能力投影。下一切片继续补齐加密 Tool RPC 与生产调度；
+跨终端兼容实测、性能基准和真实
 终端截图回归仍需继续。
 ```

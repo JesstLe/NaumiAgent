@@ -821,6 +821,10 @@ frontends/cli-ink/
 
 ## Phase E：执行层 daemon 化，1-2 月
 
+当前进展：ARC-04.5e1/e2、ARC-04.6a 已建立独立 Agent 控制进程、Job owner lease 和 Supervisor fencing；
+ARC-04.5e3a/HAR-10.7h4 已完成 model-only 真实 Provider 调用与加密 terminal/outbox 提交。加密 Tool RPC、
+生产 SubAgent 调度、长期 Worker 池与跨平台矩阵仍未完成，因此 Phase E 仍为 partial。
+
 目标：
 
 将高风险、高并发、长生命周期执行能力从 runtime 拆出去。
