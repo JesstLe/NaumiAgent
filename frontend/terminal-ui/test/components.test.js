@@ -96,6 +96,23 @@ test("typed task snapshot renders an authoritative empty state", () => {
   assert(!rendered.includes("浏览器"));
 });
 
+test("typed task snapshot distinguishes refresh loading and failure", () => {
+  const snapshot = { filters: {}, warnings: [], items: [], timeline: [] };
+  const loading = renderTaskSnapshot(snapshot, 80, {
+    width: 80,
+    taskPanel: { loading: true, error: "" },
+  }).map(stripAnsi).join("\n");
+  const failed = renderTaskSnapshot(snapshot, 80, {
+    width: 80,
+    taskPanel: { loading: false, error: "Bridge 暂时不可用" },
+  }).map(stripAnsi).join("\n");
+
+  assert.match(loading, /正在刷新任务权威快照/);
+  assert.doesNotMatch(loading, /刷新失败/);
+  assert.match(failed, /刷新失败: Bridge 暂时不可用/);
+  assert.doesNotMatch(failed, /正在刷新任务权威快照/);
+});
+
 test("interaction card and footer expose choices, custom input, and answered state", () => {
   const payload = {
     header: "实现策略",

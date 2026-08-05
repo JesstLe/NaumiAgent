@@ -26,7 +26,13 @@ export function renderTaskSnapshot(snapshot, width, ctx = { width }) {
   }
   const children = [
     line(`${color(ANSI.cyan, "tasks")} ${taskSnapshotSummary(visibleItems)}`),
-  ];
+    taskPanel.loading
+      ? line(color(ANSI.cyan, "正在刷新任务权威快照…"))
+      : null,
+    taskPanel.error
+      ? line(color(ANSI.red, `刷新失败: ${compactText(taskPanel.error, 180)}`))
+      : null,
+  ].filter(Boolean);
   for (const source of ["todo", "subagent", "background", "browser"]) {
     const items = grouped.get(source) ?? [];
     if (!items.length) continue;
@@ -142,6 +148,12 @@ export function renderTaskPanel(content, width, ctx = { width }) {
   const issuesByTaskId = issueByTaskId(workbenchIssues);
   const children = [
     line(`${color(ANSI.cyan, "tasks")} ${searchQuery ? `search ${searchQuery} | ` : ""}${model.summary}`),
+    taskPanel.loading
+      ? line(color(ANSI.cyan, "正在刷新任务权威快照…"))
+      : null,
+    taskPanel.error
+      ? line(color(ANSI.red, `刷新失败: ${compactText(taskPanel.error, 180)}`))
+      : null,
     ...renderSection("Timeline", model.sections.Timeline, ANSI.green, taskPanel),
     ...renderSection("Detail", model.sections.Detail, ANSI.green, taskPanel),
     ...renderSection("Todo", model.sections.Todo, ANSI.cyan, taskPanel, issuesByTaskId),
@@ -149,7 +161,7 @@ export function renderTaskPanel(content, width, ctx = { width }) {
     ...renderSection("Background", model.sections.Background, ANSI.yellow, taskPanel),
     ...renderSection("Browser Runs", model.sections["Browser Runs"], ANSI.blue, taskPanel),
     ...renderSection("面板警告", model.sections["面板警告"], ANSI.red, taskPanel),
-  ];
+  ].filter(Boolean);
   const rendered = renderComponent(boxComponent("tasks", children), ctx);
   const maxRenderLines = taskPanel.maxRenderLines ?? ctx.bodyHeight ?? DEFAULT_MAX_RENDER_LINES;
   return clampTaskPanelLines(rendered, width, maxRenderLines);

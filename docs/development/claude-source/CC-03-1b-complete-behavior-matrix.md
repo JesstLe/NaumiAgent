@@ -97,5 +97,5 @@ python3 -m naumi_agent.claude_source.behavior_matrix \
 - `deferred=0` 表示当前范围没有只观察 source 却完全缺失 target 的行为，不表示 CC-03 已完成。
 - source-like fixture 与真实 Bridge fixture 共用 golden、无色彩/窄屏/TUI 审计、上游行为影响路由仍分别属于
   CC-03.5、CC-03.6 和 CC-05。
-- CC-03.2a 已完成三个 Bridge snapshot 的字段和值域映射；下一小切片是 CC-03.2b UI-local 状态映射，
-  详见 `CC-03-2a-snapshot-semantic-mapping.md`。
+- CC-03.2a 已完成三个 Bridge snapshot 的字段和值域映射，CC-03.2b 随后完成 14 个 UI-local 状态的
+  可执行映射；详见 `CC-03-2a-snapshot-semantic-mapping.md` 与 `CC-03-2b-ui-local-state-mapping.md`。

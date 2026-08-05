@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "manifest_kind": "claude_code_ui_state_mapping",
+  "scope": "cc_03_2b_ui_local_semantics",
+  "semantic_mapping_sha256": "49ff4d7b5bb4eb16393a708c87b150ce6b2bceb99f22c14ddd4b887c398a9510",
+  "protocol_contract_sha256": "2c110d0b498136ca3887f29df0d57498abde4bf799af2c956e01e8129eac1db8",
+  "state_module_sha256": "59ecb45a490fcddd23f4c25ae85995790516e33c0b18535f7f015d08784f8c4e",
+  "mappings": [
+    {
+      "cell_id": "doctor.cancel",
+      "probe_id": "doctor_cancel_correlated_probe",
+      "state_paths": ["doctorHealth.probeCancelRequestId", "doctorHealth.probeLoading", "doctorHealth.probeNotice", "doctorHealth.probeRequestId"],
+      "trigger": {"kind": "key", "value": "c"},
+      "client_events": ["doctor/probe/cancel"],
+      "server_events": ["doctor/probe/result", "error"],
+      "correlation": "request_id",
+      "semantic": "取消只针对当前在线探测请求，并等待相同 request_id 的独立终态。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "doctor live probe is explicit bounded cancellable and correlated"}]
+    },
+    {
+      "cell_id": "doctor.empty",
+      "probe_id": "doctor_empty_is_not_loading_probe",
+      "state_paths": ["doctorHealth.error", "doctorHealth.loading", "doctorHealth.snapshot"],
+      "trigger": {"kind": "initial_state", "value": "createInitialState"},
+      "client_events": [],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "尚无权威快照、正在加载和加载失败是三个互斥且可辨识的前端状态。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "doctor command opens typed health route refreshes and restores origin"}]
+    },
+    {
+      "cell_id": "doctor.focus",
+      "probe_id": "doctor_focus_anchor_probe",
+      "state_paths": ["followTail", "route.name", "route.originAnchor", "scrollOffset"],
+      "trigger": {"kind": "command", "value": "/doctor"},
+      "client_events": ["doctor"],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "Doctor 使用瞬态路由保存会话锚点，Escape 返回原滚动位置和跟随状态。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "doctor command opens typed health route refreshes and restores origin"}]
+    },
+    {
+      "cell_id": "doctor.keyboard",
+      "probe_id": "doctor_refresh_key_probe",
+      "state_paths": ["doctorHealth.error", "doctorHealth.loading", "route.name"],
+      "trigger": {"kind": "key", "value": "r"},
+      "client_events": ["doctor"],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "Doctor 路由内的刷新键只更新本地请求态并发送 doctor 事件。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "doctor command opens typed health route refreshes and restores origin"}]
+    },
+    {
+      "cell_id": "doctor.loading",
+      "probe_id": "doctor_loading_terminal_probe",
+      "state_paths": ["doctorHealth.error", "doctorHealth.loading", "doctorHealth.snapshot"],
+      "trigger": {"kind": "command", "value": "/doctor"},
+      "client_events": ["doctor"],
+      "server_events": ["doctor/health"],
+      "correlation": "none",
+      "semantic": "doctor 请求发出后进入 loading，权威 doctor/health 到达后原子退出并保存快照。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "doctor command opens typed health route refreshes and restores origin"}]
+    },
+    {
+      "cell_id": "permission.focus",
+      "probe_id": "permission_focus_anchor_probe",
+      "state_paths": ["followTail", "route.name", "route.originAnchor", "scrollOffset"],
+      "trigger": {"kind": "command", "value": "/permissions"},
+      "client_events": ["permissions_panel"],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "权限中心使用瞬态路由保存会话锚点，Escape 返回原展示位置。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "permissions command opens transient policy route and restores conversation anchor"}]
+    },
+    {
+      "cell_id": "permission.keyboard",
+      "probe_id": "permission_refresh_key_probe",
+      "state_paths": ["permissionCenter.error", "permissionCenter.limit", "permissionCenter.loading", "route.name"],
+      "trigger": {"kind": "key", "value": "r"},
+      "client_events": ["permissions_panel"],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "权限中心刷新键复用当前 limit 并明确重置错误、进入 loading。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "permissions command opens transient policy route and restores conversation anchor"}]
+    },
+    {
+      "cell_id": "permission.loading",
+      "probe_id": "permission_loading_terminal_probe",
+      "state_paths": ["permissionCenter.error", "permissionCenter.loading", "permissionCenter.snapshot"],
+      "trigger": {"kind": "command", "value": "/permissions"},
+      "client_events": ["permissions_panel"],
+      "server_events": ["permissions/snapshot"],
+      "correlation": "none",
+      "semantic": "permissions_panel 请求发出后进入 loading，typed snapshot 到达后退出并替换权威快照。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "permissions command opens transient policy route and restores conversation anchor"}]
+    },
+    {
+      "cell_id": "task.cancel",
+      "probe_id": "task_cancel_selection_probe",
+      "state_paths": ["taskPanel.items", "taskPanel.selectedId", "taskPanel.selectedIndex"],
+      "trigger": {"kind": "function", "value": "cancelTaskPanelItem"},
+      "client_events": ["task_cancel"],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "取消请求使用结构化选中项的 task_id 和 source，不从渲染文本反向解析。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel extracts selectable items and opens selected detail locally"}]
+    },
+    {
+      "cell_id": "task.detail",
+      "probe_id": "task_detail_correlated_probe",
+      "state_paths": ["taskPanel.detailId", "taskPanel.loading", "taskPanel.requestId", "taskPanel.selectedId"],
+      "trigger": {"kind": "function", "value": "openSelectedTaskPanelItem"},
+      "client_events": ["task_panel"],
+      "server_events": ["error", "tasks/snapshot"],
+      "correlation": "request_id",
+      "semantic": "详情操作以结构化选中项设置 detail_id，并把刷新终态与请求身份关联。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel extracts selectable items and opens selected detail locally"}]
+    },
+    {
+      "cell_id": "task.error",
+      "probe_id": "task_execution_error_probe",
+      "state_paths": ["activeTaskSubmission.requestId", "activeTaskSubmission.state", "messages[].taskStatus"],
+      "trigger": {"kind": "server_event", "value": "error"},
+      "client_events": ["task_submit"],
+      "server_events": ["error", "task/created"],
+      "correlation": "request_id",
+      "semantic": "任务执行错误只阻断匹配的已接纳任务，不把它退回为可重复创建的发送失败。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task execution error blocks the accepted task instead of making it retry-create"}]
+    },
+    {
+      "cell_id": "task.focus",
+      "probe_id": "task_focus_arbitration_probe",
+      "state_paths": ["inspector.focused", "taskPanel.focused", "taskPanel.items", "taskPanel.messageId"],
+      "trigger": {"kind": "function", "value": "setTaskPanelFocus"},
+      "client_events": [],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "任务面板获得焦点时必须同步释放 Inspector 焦点，避免两个键盘消费者并存。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel and runtime inspector never retain focus simultaneously"}]
+    },
+    {
+      "cell_id": "task.keyboard",
+      "probe_id": "task_keyboard_selection_probe",
+      "state_paths": ["taskPanel.items", "taskPanel.selectedId", "taskPanel.selectedIndex"],
+      "trigger": {"kind": "function", "value": "selectTaskPanelOffset"},
+      "client_events": [],
+      "server_events": [],
+      "correlation": "none",
+      "semantic": "键盘导航只改变结构化选择身份，并在列表边界循环而不依赖展示文本。",
+      "target_tests": [{"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel supports bounded page and boundary navigation"}]
+    },
+    {
+      "cell_id": "task.loading",
+      "probe_id": "task_loading_correlated_terminal_probe",
+      "state_paths": ["taskPanel.error", "taskPanel.loading", "taskPanel.requestId", "taskPanel.snapshot"],
+      "trigger": {"kind": "command", "value": "/tasks"},
+      "client_events": ["task_panel"],
+      "server_events": ["error", "tasks/snapshot"],
+      "correlation": "request_id",
+      "semantic": "任务快照刷新具有独立关联请求态；成功或匹配错误结束 loading，失败时保留最后一份好快照。",
+      "target_tests": [
+        {"path": "frontend/terminal-ui/test/components.test.js", "test_name": "typed task snapshot distinguishes refresh loading and failure"},
+        {"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel automatic refresh uses the same correlated request state"},
+        {"path": "frontend/terminal-ui/test/state.test.js", "test_name": "task panel request state is correlated and preserves the last good snapshot"}
+      ]
+    }
+  ]
+}

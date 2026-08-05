@@ -139,8 +139,9 @@ uv run python -m naumi_agent.claude_source.semantic_mapping \
 - 2a 已验证真实 producer 输出，但只使用一个确定性非空 probe；极端 payload 组合仍由各 producer 的模块测试负责。
 - Permission status 当前是开放 string，而不是严格 enum；在后续版本收紧前不能宣称完整值域稳定。
 - Permission hook/classifier 的结构化来源在 Naumi snapshot 中尚无等价字段，必须在 CC-03.4 明示语义损失。
-- loading/error transport、focus、keyboard、detail selection、cancel correlation 的 UI-local 路径仍需 CC-03.2b。
+- loading/error transport、focus、keyboard、detail selection、cancel correlation 已由后续 CC-03.2b 建立
+  独立 UI-local manifest 与真实 JavaScript transition probe；不回填进本切片的服务端 snapshot。
 - 组件是否只消费这些字段属于 CC-03.3；本切片不以字段存在替代消费边界证明。
 
-下一小切片：CC-03.2b，为 14 个 UI-local 单元格建立状态字段、事件触发、键位和相关性映射，并保持
-Permission cancel 的 N/A 边界。
+后续切片：`CC-03-2b-ui-local-state-mapping.md` 已完成 14 格 UI-local 映射并保持 Permission cancel 的
+N/A 边界；下一步进入 CC-03.3 组件消费边界适配。

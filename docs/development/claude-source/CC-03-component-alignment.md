@@ -45,5 +45,9 @@ CC-03.2a 已将 24 格先分责为 Bridge snapshot、UI-local 与 N/A，并为 `
 focus、keyboard、cancel 等前端瞬态明确留给 CC-03.2b，不污染后端协议。详见
 `CC-03-2a-snapshot-semantic-mapping.md`。
 
-因此 CC-03 现为 `partial`，CC-03.1 与 CC-03.2a 已完成。CC-03.2b UI-local 状态语义映射、CC-03.3 组件适配、
-CC-03.4 完整 divergence log、CC-03.5 同 fixture golden scenarios 与 CC-03.6 UX audit 仍未实现。
+CC-03.2b 已精确覆盖 14 个 UI-local 单元格，并通过真实 JavaScript 状态转移 probe 校验命令、键位、焦点、
+取消、详情、错误和 loading。Task 面板同时补齐关联 `requestId`、保留最后好快照和卡片内刷新失败展示。
+详见 `CC-03-2b-ui-local-state-mapping.md`。
+
+因此 CC-03 现为 `partial`，CC-03.1 与 CC-03.2 已完成。CC-03.3 组件消费边界适配、CC-03.4 完整
+divergence log、CC-03.5 同 fixture golden scenarios 与 CC-03.6 UX audit 仍未实现。
