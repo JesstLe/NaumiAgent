@@ -82,7 +82,8 @@ active 执行显示“结果待生成”，不会伪造终态。两端都不重�
 - ARC-04.5d1 已将 response/error 加密绑定到 terminal result，并要求生产发布前重新认证恢复；
 - ARC-04.5d2a 已建立 durable publication outbox authority；ARC-04.5d2b 已补齐幂等 result inbox、
   生产在线消费与 startup recovery，周期 retry/UI read-ack 仍未完成；
-- Agent 仍由 embedded Runtime 直接调用模型，不是注册到 Worker Registry 的持久 incarnation；
+- Agent 模型调用仍由 embedded Runtime 执行；ARC-04.5e1 只新增已注册的 control-only incarnation，
+  其合同不含 `agent_context_scope` 且不接受 Job；
 - 尚未消费 Worker capacity reservation/FIFO、claim owner lease 或 workspace/provider fairness；
 - message bus 仍是 session-scoped 内存实现；
 - 没有 Supervisor、crash takeover、跨主机身份或 100 并发 soak 证据。

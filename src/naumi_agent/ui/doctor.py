@@ -319,7 +319,14 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
     unhealthy = [
         worker for worker in snapshot.workers if worker.heartbeat_health != "healthy"
     ]
-    status: DoctorStatus = "pass" if not unhealthy and not snapshot.truncated else "warn"
+    dispatch_disabled = [
+        worker for worker in snapshot.workers if not worker.dispatch_ready
+    ]
+    status: DoctorStatus = (
+        "pass"
+        if not unhealthy and not dispatch_disabled and not snapshot.truncated
+        else "warn"
+    )
     if any(
         worker.heartbeat_health
         in {
@@ -356,7 +363,13 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
     if status == "error":
         suggestion = "暂停新任务派发，核对 Worker instance/epoch 与 Harness heartbeat 后再恢复。"
     elif status == "warn":
-        suggestion = "等待启动或排空完成后刷新；若状态持续不变，请检查 Worker 日志。"
+        if dispatch_disabled:
+            suggestion = (
+                "独立 Agent 控制进程已就绪，但任务仍由 embedded Runtime 执行；"
+                "完成 durable dispatch 接入前不要向该 Worker 派发任务。"
+            )
+        else:
+            suggestion = "等待启动或排空完成后刷新；若状态持续不变，请检查 Worker 日志。"
     return DoctorCheck("Worker authority", status, detail, suggestion)
 
 
@@ -425,12 +438,16 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
     )
     worker_id = worker.worker_id if len(worker.worker_id) <= 48 else worker.worker_id[:47] + "…"
     machine = worker.machine if len(worker.machine) <= 32 else worker.machine[:31] + "…"
-    return (
+    identity = (
         f"{worker_id} {worker.kind} epoch {worker.epoch} "
-        f"{worker.platform}/{machine} 容量占用 "
-        f"{worker.reserved_jobs}/{worker.max_concurrent_jobs}、"
-        f"可用 {worker.available_jobs} "
-        f"心跳{health}{age}"
+        f"{worker.platform}/{machine} "
+    )
+    if not worker.dispatch_ready:
+        return identity + f"控制通道就绪、任务调度未开放 心跳{health}{age}"
+    return (
+        identity
+        + f"容量占用 {worker.reserved_jobs}/{worker.max_concurrent_jobs}、"
+        + f"可用 {worker.available_jobs} 心跳{health}{age}"
     )
 
 

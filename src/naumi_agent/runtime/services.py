@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from naumi_agent.daemons.agent_worker_process import AgentWorkerProcessFactory
 from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
 from naumi_agent.runtime.browser_heartbeat import BrowserExecutionHeartbeatFactory
 from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
@@ -16,6 +17,7 @@ class RuntimeServices:
     terminal_runtime_lifecycle_factory: TerminalRuntimeLifecycleFactory
     agent_execution_heartbeat_factory: AgentExecutionHeartbeatFactory
     browser_execution_heartbeat_factory: BrowserExecutionHeartbeatFactory
+    agent_worker_process_factory: AgentWorkerProcessFactory
 
     def __post_init__(self) -> None:
         if not isinstance(
@@ -42,6 +44,13 @@ class RuntimeServices:
                 "browser_execution_heartbeat_factory 必须是 "
                 "BrowserExecutionHeartbeatFactory。"
             )
+        if not isinstance(
+            self.agent_worker_process_factory,
+            AgentWorkerProcessFactory,
+        ):
+            raise TypeError(
+                "agent_worker_process_factory 必须是 AgentWorkerProcessFactory。"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +60,7 @@ class RuntimeServiceOverrides:
     terminal_runtime_lifecycle_factory: TerminalRuntimeLifecycleFactory | None = None
     agent_execution_heartbeat_factory: AgentExecutionHeartbeatFactory | None = None
     browser_execution_heartbeat_factory: BrowserExecutionHeartbeatFactory | None = None
+    agent_worker_process_factory: AgentWorkerProcessFactory | None = None
 
 
 __all__ = ["RuntimeServiceOverrides", "RuntimeServices"]

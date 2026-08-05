@@ -134,7 +134,8 @@ expired running 不能因为 lease 到期就自动释放容量。模型或外部
 
 本切片真实解决了 embedded 多 Runtime 超卖和无界共享等待，但没有完成：
 
-- 独立 Agent Worker 注册、认证 transport、Supervisor、drain/upgrade；
+- ARC-04.5e1 已完成独立 Agent control-only 注册、认证 transport 与 drain；AgentJob owner lease、
+  dispatch、Supervisor 和 upgrade 仍未完成；
 - Worker Registry 物理 slot reservation；未来独立 Worker dispatch 仍必须叠加 ARC-06.1 authority；
 - 自动接管 expired claimed Job；当前仅计数并允许 exact owner/caller takeover；
 - running recovery UI 动作、自动 unknown 裁决，以及 result inbox 的 UI read/ack、周期 retry；

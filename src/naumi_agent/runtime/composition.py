@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from naumi_agent import __version__
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.agent_jobs import AgentJobStore
+from naumi_agent.daemons.agent_worker_process import AgentWorkerProcessFactory
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
@@ -127,6 +129,7 @@ def build_runtime_paths(config: AppConfig) -> RuntimePaths:
         permission_decision_db_path=runtime_data_dir / "permission-decisions.db",
         tool_job_db_path=runtime_data_dir / "tool-jobs.db",
         agent_job_db_path=runtime_data_dir / "agent-jobs.db",
+        agent_worker_runtime_dir=runtime_data_dir / "agent-worker" / "transport",
         shell_worker_runtime_dir=runtime_data_dir / "shell-worker" / "transport",
         shell_worker_sandbox_dir=runtime_data_dir / "shell-worker" / "sandboxes",
         shell_worker_artifact_dir=runtime_data_dir / "shell-worker" / "artifacts",
@@ -303,10 +306,28 @@ def build_runtime_services(
             store=resources.harness_store,
             workspace_root=paths.workspace_root,
         )
+    agent_worker_factory = resolved.agent_worker_process_factory
+    if agent_worker_factory is not None and not isinstance(
+        agent_worker_factory,
+        AgentWorkerProcessFactory,
+    ):
+        raise TypeError(
+            "agent_worker_process_factory 必须是 AgentWorkerProcessFactory。"
+        )
+    if agent_worker_factory is None:
+        agent_worker_factory = AgentWorkerProcessFactory(
+            worker_registry=resources.worker_registry_store,
+            heartbeat_store=resources.harness_store,
+            workspace_root=paths.workspace_root,
+            runtime_dir=paths.agent_worker_runtime_dir,
+            software_version=__version__,
+            max_concurrent_jobs=config.safety.max_parallel_agents,
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
         browser_execution_heartbeat_factory=browser_factory,
+        agent_worker_process_factory=agent_worker_factory,
     )
 
 

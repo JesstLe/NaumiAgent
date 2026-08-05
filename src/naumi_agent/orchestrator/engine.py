@@ -811,6 +811,7 @@ class AgentEngine:
         self.browser_execution_heartbeat_factory = (
             services.browser_execution_heartbeat_factory
         )
+        self.agent_worker_process_factory = services.agent_worker_process_factory
         self.workspace_root = paths.workspace_root
         self.workspace_file_index = WorkspaceFileIndex(paths.workspace_root)
         self._runtime_data_dir = paths.runtime_data_dir
