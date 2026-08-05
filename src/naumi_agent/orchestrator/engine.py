@@ -241,6 +241,10 @@ from naumi_agent.evolution.revalidation_evaluation_sources import (
 from naumi_agent.evolution.revalidation_execution import (
     EvolutionRevalidationExecutionService,
 )
+from naumi_agent.evolution.revalidation_final_evaluations import (
+    EvolutionRevalidationFinalEvaluationExecutor,
+    EvolutionRevalidationFinalEvaluationStore,
+)
 from naumi_agent.evolution.revalidation_interventional_attributions import (
     EvolutionRevalidationInterventionalAttributionExecutor,
 )
@@ -1818,6 +1822,37 @@ class AgentEngine:
                 ),
                 contract_service=self.evolution_revalidation_runtime_contract_service,
                 attribution_store=self.evolution_failure_attribution_store,
+            )
+        )
+        self.evolution_revalidation_final_evaluation_store = (
+            EvolutionRevalidationFinalEvaluationStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_final_evaluation_executor = (
+            EvolutionRevalidationFinalEvaluationExecutor(
+                workspace_root=paths.workspace_root,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                matrix_service=self.evolution_revalidation_adversarial_matrix_service,
+                interventional_cohort_store=(
+                    self.evolution_revalidation_interventional_cohort_store
+                ),
+                adversarial_cohort_store=(
+                    self.evolution_revalidation_adversarial_cohort_store
+                ),
+                interventional_comparison_executor=(
+                    self.evolution_revalidation_interventional_comparison_executor
+                ),
+                adversarial_comparison_executor=(
+                    self.evolution_revalidation_adversarial_comparison_executor
+                ),
+                interventional_attribution_executor=(
+                    self.evolution_revalidation_interventional_attribution_executor
+                ),
+                adversarial_attribution_executor=(
+                    self.evolution_revalidation_adversarial_attribution_executor
+                ),
+                receipt_store=self.evolution_revalidation_final_evaluation_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
