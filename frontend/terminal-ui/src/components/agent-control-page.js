@@ -256,6 +256,7 @@ function renderDetail(view, snapshot, width) {
       `任务 · ${item.task_id}`,
       `Agent · ${item.agent_name}`,
       `状态 · ${item.status} / ${item.phase}`,
+      `执行后端 · ${item.worker_backend === "independent" ? "独立 Agent Worker" : "内嵌降级"}`,
       `当前工具 · ${item.current_tool || "-"}`,
       `最近工具 · ${array(item.recent_tools).join(", ") || "-"}`,
       `Worker 工具范围 · ${workerToolScope(item.worker_tool_scope)}`,

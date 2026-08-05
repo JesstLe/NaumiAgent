@@ -12,7 +12,7 @@
 | HAR-07 | Completion Receipt UI 与恢复 | partial (7.1a, 7.1b, 7.2, 7.3, 7.4a, 7.4b1, 7.4b2, 7.5a, 7.5b, 7.5c1, 7.5c2, 7.6) | HAR-05 | `harness/HAR-07-completion-ui.md` |
 | HAR-08 | Eval Suite、Baseline 与回归比较 | partial (8.1a, 8.3a, 8.4a-8.4o3j, 8.5a-8.5c2, 8.6a, 8.6b, 8.7a-8.7e, H5a-H5c, H5b2, 8.8a-8.8e3) | HAR-05, ARC-03, ARC-04 | `harness/HAR-08-eval-baseline.md` |
 | HAR-09 | Feedback Candidate 与受控提升 | partial (9.1a-9.5c) | HAR-08, EVO-01.3a | `harness/HAR-09-feedback-promotion.md` |
-| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2h, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a, 10.6b, 10.7a-10.7c, 10.8a-10.8f2b) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
+| HAR-10 | 长周期 Harness Orchestration | partial (10.1a, 10.1b, 10.2a-10.2h, 10.3a, 10.3b1-10.3b5, 10.4a, 10.4b, 10.5a-10.5c, 10.6a, 10.6b, 10.7a-10.7h6, 10.8a-10.8f2b) | HAR-06, HAR-08, ARC-06 | `harness/HAR-10-long-running.md` |
 
 ## CLI/TUI/New UI
 
@@ -45,7 +45,7 @@
 | ARC-01 | Domain Boundary 与依赖防火墙 | partial (1.1-1.3, 1.4a, 1.4b1, 1.4b2a-1.4b2j, 1.4c1-1.4c3) | 当前 Python 单体 | `architecture/ARC-01-domain-boundaries.md` |
 | ARC-02 | Runtime Service 化 | partial (2.5a, 2.5b) | ARC-01, ARC-03 | `architecture/ARC-02-runtime-service.md` |
 | ARC-03 | 协议版本与兼容治理 | partial (3.2a, 3.2b1, 3.2b2, 3.3a, 3.4a, 3.5a) | 当前 JSONL | `architecture/ARC-03-protocol-versioning.md` |
-| ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3c, 4.5a, 4.5b1, 4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a-4.5d2b) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
+| ARC-04 | Tool/Browser/Agent Daemon | partial (4.1a, 4.1b, 4.2a-4.2c, 4.3a-4.3c, 4.5a, 4.5b1, 4.5b1a, 4.5b2, 4.5c, 4.5d1, 4.5d2a-4.5d2c, 4.5e1-4.5e3b2, 4.6a) | ARC-02, ARC-03 | `architecture/ARC-04-execution-daemons.md` |
 | ARC-05 | 状态 Schema 与迁移平台 | partial (5.1, 5.2a, 5.3a) | ARC-01 | `architecture/ARC-05-state-migrations.md` |
 | ARC-06 | 高并发、背压与集群调度 | partial (6.1a, 6.1b, 6.2a, 6.2b1, 6.2b2, 6.2c) | ARC-02, ARC-04 | `architecture/ARC-06-concurrency-cluster.md` |
 | ARC-07 | 跨平台闭源打包与更新 | planned | ARC-02, UI-17 | `architecture/ARC-07-packaging-update.md` |

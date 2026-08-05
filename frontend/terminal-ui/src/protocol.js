@@ -33,6 +33,7 @@ const AGENT_RECOVERY_STATES = new Set([
 ]);
 const AGENT_RECOVERY_SESSION_SCOPES = new Set(["current", "other", "unknown"]);
 const EXECUTION_PHASES = new Set(["starting", "waiting_capacity", "running", "preparing_tool", "running_tool", "stopping", "finished"]);
+const WORKER_BACKENDS = new Set(["embedded", "independent"]);
 const HEARTBEAT_PHASES = new Set(["starting", "running", "waiting", "draining", "stopped", "failed"]);
 const WORKER_JOB_STATES = new Set(["admitted", "claimed", "running", "completed", "error", "timeout", "max_turns", "cancelled", "unknown"]);
 const TEAM_PRIORITIES = new Set(["low", "normal", "high", "critical"]);
@@ -6028,11 +6029,11 @@ function normalizeAgentControlUpdate(payload) {
 }
 
 function normalizeAgentControlHeader(payload) {
-  if (payload.schema_version !== 5) {
+  if (payload.schema_version !== 6) {
     throw new Error(`Agent Control schema_version 不兼容: ${payload.schema_version}`);
   }
   return {
-    schema_version: 5,
+    schema_version: 6,
     session_id: agentText(payload.session_id),
     revision: strictAgentNonnegativeInteger(payload.revision, "Agent Control revision"),
     generated_at: agentText(payload.generated_at),
@@ -6125,6 +6126,11 @@ function normalizeExecutionDescriptor(item) {
     description: agentText(item.description),
     status: strictChoice(item.status, "execution.status", EXECUTION_STATUSES),
     phase: strictChoice(item.phase, "execution.phase", EXECUTION_PHASES),
+    worker_backend: strictChoice(
+      item.worker_backend,
+      "execution.worker_backend",
+      WORKER_BACKENDS,
+    ),
     started_at: strictNonnegativeNumber(item.started_at, "execution.started_at"),
     finished_at: finishedAt == null ? null : strictNonnegativeNumber(finishedAt, "execution.finished_at"),
     elapsed_ms: strictAgentNonnegativeInteger(item.elapsed_ms ?? 0, "execution.elapsed_ms"),

@@ -57,6 +57,7 @@ def test_agent_control_formatter_covers_all_authoritative_tabs() -> None:
     assert "running_tool" in executions
     assert "可停止" in executions
     assert "Worker 合同" in executions
+    assert "执行后端：独立 Agent Worker" in executions
     assert "aaaaaaaaaaaa" in executions
     assert "file_read" in executions
     assert "持久任务" in executions
@@ -96,6 +97,14 @@ def test_agent_control_formatter_states_empty_data_and_warnings() -> None:
     team = format_agent_control_markdown(snapshot, "team", "")
     assert "暂无团队消息或黑板记录" in team
     assert "消息总线暂时不可用" in team
+
+
+def test_agent_control_snapshot_rejects_unknown_worker_backend() -> None:
+    payload = _snapshot().to_dict()
+    payload["executions"][0]["worker_backend"] = "guessed"
+
+    with pytest.raises(ValueError, match="execution.worker_backend"):
+        AgentControlSnapshot.from_dict(payload)
 
 
 def test_agent_control_formatter_highlights_quarantined_publication() -> None:
@@ -359,7 +368,7 @@ async def test_textual_bypass_confirmation_enables_full_permission_mode() -> Non
 
 def _snapshot() -> AgentControlSnapshot:
     return AgentControlSnapshot.from_dict({
-        "schema_version": 5,
+        "schema_version": 6,
         "session_id": "session-tui-agents",
         "revision": 1,
         "generated_at": "2026-07-13T00:00:00+00:00",
@@ -443,6 +452,7 @@ def _snapshot() -> AgentControlSnapshot:
             "description": "实现 Textual 控制中心",
             "status": "running",
             "phase": "running_tool",
+            "worker_backend": "independent",
             "started_at": 1,
             "finished_at": None,
             "elapsed_ms": 1000,

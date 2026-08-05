@@ -959,7 +959,7 @@ function inspectorSnapshot(revision) {
 function agentControlSnapshot(revision) {
   const stopped = revision > 1;
   return {
-    schema_version: 5,
+    schema_version: 6,
     session_id: sessionId,
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -993,6 +993,7 @@ function agentControlSnapshot(revision) {
       description: "验证 Agent 控制中心",
       status: stopped ? "cancelled" : "running",
       phase: stopped ? "finished" : "running_tool",
+      worker_backend: "independent",
       started_at: 1,
       finished_at: stopped ? 2 : null,
       elapsed_ms: 1000,

@@ -151,7 +151,7 @@ class FakeAgentControl:
         stopped = self._engine.agent_stopped
         return AgentControlSnapshot.from_dict(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "session_id": "session-python",
                 "revision": 2 if stopped else 1,
                 "generated_at": "2026-07-13T00:00:01+00:00",
@@ -190,6 +190,7 @@ class FakeAgentControl:
                         "description": "验证 Python Bridge Agent 控制",
                         "status": "cancelled" if stopped else "running",
                         "phase": "finished" if stopped else "running_tool",
+                        "worker_backend": "independent",
                         "started_at": 1.0,
                         "finished_at": 2.0 if stopped else None,
                         "elapsed_ms": 1000,

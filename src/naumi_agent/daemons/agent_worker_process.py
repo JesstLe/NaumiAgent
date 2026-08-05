@@ -215,6 +215,7 @@ class AgentWorkerModelExecutionOutcome:
 
 NowProvider = Callable[[], str]
 AgentWorkerToolExecutor = Callable[[ToolCall, str], Awaitable[ToolResult]]
+AgentWorkerRunningObserver = Callable[[], Awaitable[None]]
 
 
 class AuthenticatedAgentWorkerProcess:
@@ -704,6 +705,7 @@ class AuthenticatedAgentWorkerProcess:
         *,
         tool_schemas: list[dict[str, object]] | tuple[dict[str, object], ...],
         tool_executor: AgentWorkerToolExecutor | None,
+        on_running: AgentWorkerRunningObserver | None = None,
     ) -> AgentWorkerModelExecutionOutcome:
         """Run one bounded Agent loop while all tools remain parent-authorized."""
         async with self._command_lock:
@@ -726,6 +728,8 @@ class AuthenticatedAgentWorkerProcess:
                 raise AgentWorkerProcessError("Agent Worker pre-start Job fence 已变化。")
             if tool_executor is not None and not callable(tool_executor):
                 raise TypeError("tool_executor 必须可调用。")
+            if on_running is not None and not callable(on_running):
+                raise TypeError("on_running 必须可调用。")
             try:
                 manifest = issue_tool_manifest(
                     tool_scope=stored.request.tool_scope,
@@ -797,6 +801,8 @@ class AuthenticatedAgentWorkerProcess:
                     claim_epoch=binding.claim_epoch,
                 )
                 running_receipt_sha256 = running.job.latest_receipt.receipt_sha256
+                if on_running is not None:
+                    await on_running()
                 loop = asyncio.get_running_loop()
                 work_deadline = (
                     loop.time() + stored.request.timeout_milliseconds / 1000
@@ -1536,10 +1542,16 @@ class AgentWorkerProcessFactory:
             model_config=model_config,
         )
 
+    @property
+    def model_execution_enabled(self) -> bool:
+        """Report capability without exposing the serialized model profile."""
+        return self._model_profile_payload is not None
+
     def create(
         self,
         *,
         worker_id: str = "agent-worker-local",
+        max_concurrent_jobs: int | None = None,
         heartbeat_interval_seconds: float = 10.0,
         heartbeat_timeout_seconds: int = 30,
         handshake_timeout_seconds: float = 15.0,
@@ -1548,6 +1560,19 @@ class AgentWorkerProcessFactory:
         job_claim_renewal_interval_seconds: float = 30.0,
         now_provider: NowProvider = lambda: datetime.now(UTC).isoformat(),
     ) -> AuthenticatedAgentWorkerProcess:
+        resolved_max_concurrent_jobs = (
+            self.max_concurrent_jobs
+            if max_concurrent_jobs is None
+            else max_concurrent_jobs
+        )
+        if (
+            isinstance(resolved_max_concurrent_jobs, bool)
+            or not isinstance(resolved_max_concurrent_jobs, int)
+            or not 1 <= resolved_max_concurrent_jobs <= self.max_concurrent_jobs
+        ):
+            raise ValueError(
+                "Agent Worker 实例并发上限必须在 1 到 Factory 上限之间。"
+            )
         return AuthenticatedAgentWorkerProcess(
             worker_registry=self.worker_registry,
             heartbeat_store=self.heartbeat_store,
@@ -1561,7 +1586,7 @@ class AgentWorkerProcessFactory:
                 else None
             ),
             worker_id=worker_id,
-            max_concurrent_jobs=self.max_concurrent_jobs,
+            max_concurrent_jobs=resolved_max_concurrent_jobs,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
             heartbeat_timeout_seconds=heartbeat_timeout_seconds,
             handshake_timeout_seconds=handshake_timeout_seconds,

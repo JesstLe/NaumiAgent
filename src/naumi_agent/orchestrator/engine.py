@@ -1692,6 +1692,7 @@ class AgentEngine:
             self,
             heartbeat_factory=self.agent_execution_heartbeat_factory,
             agent_job_store=self._resources.agent_job_store,
+            agent_worker_process_factory=self.agent_worker_process_factory,
         )
         publication_config = self._config.harness.agent_publication_recovery
         self._agent_publication_recovery_worker = (

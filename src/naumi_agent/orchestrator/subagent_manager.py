@@ -50,12 +50,18 @@ from naumi_agent.daemons.agent_worker_contract import (
     issue_agent_worker_request,
     issue_agent_worker_result,
 )
+from naumi_agent.daemons.agent_worker_process import (
+    AgentWorkerProcessError,
+    AgentWorkerProcessFactory,
+    AgentWorkerProcessState,
+)
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.runtime.agent_heartbeat import (
     AgentExecutionHeartbeatFactory,
     AgentExecutionHeartbeatLifecycle,
 )
 from naumi_agent.runtime.ports.events import LegacyEventCallback, RuntimeEventType
+from naumi_agent.tools.base import ToolCall, ToolResult
 
 if TYPE_CHECKING:
     from naumi_agent.orchestrator.engine import AgentEngine
@@ -148,6 +154,7 @@ class AgentExecutionRecord:
     description: str
     status: str
     phase: str
+    worker_backend: str
     started_at: float
     finished_at: float | None = None
     elapsed_ms: int = 0
@@ -244,6 +251,7 @@ class _ActiveExecution:
     worker_claim_epoch: int = 0
     worker_job_failure_code: str = ""
     worker_job_renewal_task: asyncio.Task[None] | None = None
+    worker_backend: str = "embedded"
 
 
 class SubAgentManager:
@@ -255,6 +263,7 @@ class SubAgentManager:
         *,
         heartbeat_factory: AgentExecutionHeartbeatFactory | None = None,
         agent_job_store: AgentJobStore | None = None,
+        agent_worker_process_factory: AgentWorkerProcessFactory | None = None,
     ) -> None:
         if heartbeat_factory is not None and not isinstance(
             heartbeat_factory,
@@ -275,6 +284,14 @@ class SubAgentManager:
         if not isinstance(resolved_agent_job_store, AgentJobStore):
             raise TypeError("agent_job_store 必须是 AgentJobStore。")
         self._agent_job_store = resolved_agent_job_store
+        if agent_worker_process_factory is not None and not isinstance(
+            agent_worker_process_factory,
+            AgentWorkerProcessFactory,
+        ):
+            raise TypeError(
+                "agent_worker_process_factory 必须是 AgentWorkerProcessFactory。"
+            )
+        self._agent_worker_process_factory = agent_worker_process_factory
         self._agent_job_owner_id = f"embedded-agent-{uuid4().hex}"
         self._agent_publication_owner_id = (
             f"embedded-agent-publisher-{uuid4().hex}"
@@ -847,7 +864,11 @@ class SubAgentManager:
         task: SubTask,
         agent_name: str,
         worker_request: AgentWorkerRequest,
+        *,
+        worker_backend: str = "embedded",
     ) -> bool:
+        if worker_backend not in {"embedded", "independent"}:
+            raise ValueError("worker_backend 无效。")
         async with self._execution_lock:
             if task.id in self._active_executions:
                 return False
@@ -859,8 +880,26 @@ class SubAgentManager:
                 agent_name=agent_name,
                 description=task.description,
                 worker_request=worker_request,
+                worker_backend=worker_backend,
             )
             return True
+
+    async def _admit_independent_agent_job(
+        self,
+        task_id: str,
+        *,
+        request: AgentWorkerRequest,
+        payload: AgentJobPayload,
+    ) -> None:
+        admitted = await self._agent_job_store.admit(
+            request=request,
+            payload=payload,
+        )
+        if admitted.state is not AgentJobState.ADMITTED:
+            raise AgentJobError(
+                "独立 Agent Worker 只接受 admitted Job；现有 Job 已进入其他 owner。"
+            )
+        await self._record_agent_job_transition(task_id, admitted)
 
     async def _admit_and_claim_agent_job(
         self,
@@ -996,6 +1035,248 @@ class SubAgentManager:
                 execution.last_updated_mono = time.monotonic()
         if execution is None:
             await asyncio.gather(renewal, return_exceptions=True)
+
+    async def _execute_independent_agent_job(
+        self,
+        *,
+        task_id: str,
+        agent: BaseAgent,
+        event_callback: LegacyEventCallback | None,
+    ) -> AgentResult:
+        factory = self._agent_worker_process_factory
+        if factory is None or not factory.model_execution_enabled:
+            raise AgentWorkerProcessError(
+                "独立 Agent Worker 模型执行能力未配置。"
+            )
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None or not execution.worker_job_id:
+                raise AgentJobError("独立 Agent Worker 缺少 admitted Job。")
+            job_id = execution.worker_job_id
+            request = execution.worker_request
+            agent_name = execution.agent_name
+
+        process = factory.create(
+            worker_id=f"agent-worker-local-{uuid4().hex}",
+            max_concurrent_jobs=1,
+        )
+        try:
+            await process.start()
+            await process.bind_job(job_id)
+            await self._sync_independent_agent_job(task_id, job_id)
+
+            async def observed_event(
+                event: str,
+                data: dict[str, Any],
+            ) -> None:
+                try:
+                    event_type = RuntimeEventType(event)
+                except ValueError as exc:
+                    raise ValueError(f"未知 Runtime 事件：{event}") from exc
+                await self._observe_execution_event(
+                    task_id,
+                    event_type.value,
+                    data,
+                )
+                if event_callback is not None:
+                    await event_callback(event_type.value, data)
+
+            async def execute_authoritatively(
+                call: ToolCall,
+                requested_agent_name: str,
+            ) -> ToolResult:
+                if requested_agent_name != agent_name:
+                    raise AgentWorkerProcessError(
+                        "Agent Worker Tool RPC agent identity fence 无效。"
+                    )
+                hook_ctx = await self._hooks.fire(
+                    HookContext(
+                        point=HookPoint.TOOL_EXECUTE_START,
+                        data={
+                            "tool_name": call.name,
+                            "arguments": call.arguments,
+                        },
+                        agent_name=agent_name,
+                    )
+                )
+                if hook_ctx.should_abort:
+                    return ToolResult(
+                        call_id=call.id,
+                        status="aborted",
+                        content=(
+                            "被 Hook 中止："
+                            f"{hook_ctx.data.get('abort_reason', '')}"
+                        ),
+                    )
+                tool_event = {
+                    "name": call.name,
+                    "call_id": call.id,
+                    "agent_name": agent_name,
+                    "worker_backend": "independent",
+                }
+                await observed_event(
+                    RuntimeEventType.TOOL_START.value,
+                    tool_event,
+                )
+                try:
+                    result = await self._engine.execute_tool(
+                        call,
+                        on_event=observed_event,
+                        agent_name=agent_name,
+                    )
+                except BaseException:
+                    await observed_event(
+                        RuntimeEventType.TOOL_ERROR.value,
+                        tool_event,
+                    )
+                    raise
+                await observed_event(
+                    RuntimeEventType.TOOL_END.value,
+                    {
+                        **tool_event,
+                        "status": result.status,
+                        "duration_ms": result.duration_ms,
+                    },
+                )
+                await self._hooks.fire(
+                    HookContext(
+                        point=HookPoint.TOOL_EXECUTE_END,
+                        data={
+                            "tool_name": call.name,
+                            "agent": agent_name,
+                            "status": result.status,
+                            "duration_ms": result.duration_ms,
+                            "permission_bubble": True,
+                            "worker_backend": "independent",
+                        },
+                        agent_name=agent_name,
+                    )
+                )
+                return result
+
+            tool_schemas: list[dict[str, object]] = []
+            for tool_name in request.tool_scope:
+                tool = self._engine.tool_registry.get(tool_name)
+                if tool is None:
+                    raise AgentWorkerProcessError(
+                        "Agent Worker request scope 中的工具已不再注册。"
+                    )
+                tool_schemas.append(tool.to_openai_tool())
+
+            outcome = await process.execute_bound_agent_job(
+                tool_schemas=tool_schemas,
+                tool_executor=(
+                    execute_authoritatively if request.tool_scope else None
+                ),
+                on_running=lambda: self._sync_independent_agent_job(
+                    task_id,
+                    job_id,
+                ),
+            )
+            async with self._execution_lock:
+                execution = self._active_executions.get(task_id)
+                if execution is None:
+                    raise AgentJobError("独立 Agent Worker 活动执行已消失。")
+                execution.worker_job_state = outcome.transition.job.state.value
+                execution.worker_claim_epoch = outcome.transition.job.claim_epoch
+                execution.worker_result = outcome.result
+                # Keep the public phase inside the Agent Control closed set until
+                # _finish_execution publishes the terminal "finished" record.
+                execution.phase = "running"
+                execution.last_updated_mono = time.monotonic()
+            terminal = await self._agent_job_store.recover_terminal_payload(
+                job_id,
+                expected_result_sha256=outcome.result.result_sha256,
+            )
+            result = AgentResult(
+                status=outcome.result.status.value,
+                response=terminal.response,
+                total_tokens=outcome.result.total_tokens,
+                total_cost_usd=(
+                    outcome.result.total_cost_microusd / 1_000_000
+                ),
+                turns=outcome.result.turns,
+                error=terminal.error or None,
+            )
+            try:
+                await self._deliver_execution_publication(execution)
+            except Exception as exc:
+                logger.warning(
+                    "Independent AgentJob publication delivery failed [%s]: %s",
+                    task_id,
+                    type(exc).__name__,
+                )
+                await self._set_agent_job_failure(
+                    task_id,
+                    "agent_job_publication_delivery_failed",
+                )
+                self._wake_publication_recovery()
+            return result
+        except asyncio.CancelledError:
+            await self._sync_independent_agent_job(
+                task_id,
+                job_id,
+                failure_code="agent_worker_interrupted_recovery_required",
+            )
+            raise
+        except Exception:
+            await self._sync_independent_agent_job(
+                task_id,
+                job_id,
+                failure_code="agent_worker_execution_failed",
+            )
+            raise
+        finally:
+            if (
+                process.snapshot().state is AgentWorkerProcessState.RUNNING
+                and process.snapshot().bound_job_id
+            ):
+                try:
+                    await process.release_job()
+                except Exception as exc:
+                    logger.warning(
+                        "Independent Agent Worker pre-start release failed [%s]: %s",
+                        task_id,
+                        type(exc).__name__,
+                    )
+            await self._sync_independent_agent_job(task_id, job_id)
+            if process.snapshot().state is AgentWorkerProcessState.RUNNING:
+                try:
+                    await process.close()
+                except Exception as exc:
+                    logger.warning(
+                        "Independent Agent Worker shutdown failed [%s]: %s",
+                        task_id,
+                        type(exc).__name__,
+                    )
+
+    async def _sync_independent_agent_job(
+        self,
+        task_id: str,
+        job_id: str,
+        *,
+        failure_code: str = "",
+    ) -> None:
+        try:
+            stored = await self._agent_job_store.get(job_id)
+        except Exception as exc:
+            logger.warning(
+                "Independent AgentJob state sync failed [%s]: %s",
+                task_id,
+                type(exc).__name__,
+            )
+            return
+        if stored is None:
+            return
+        async with self._execution_lock:
+            execution = self._active_executions.get(task_id)
+            if execution is None:
+                return
+            execution.worker_job_state = stored.state.value
+            execution.worker_claim_epoch = stored.claim_epoch
+            if failure_code:
+                execution.worker_job_failure_code = failure_code
+            execution.last_updated_mono = time.monotonic()
 
     async def _agent_job_renewal_loop(
         self,
@@ -1202,28 +1483,34 @@ class SubAgentManager:
                         "已停止本地执行，请在 Agent Control 中检查恢复状态。"
                     ),
                 )
-        try:
-            execution.worker_result = issue_agent_worker_result(
-                request=execution.worker_request,
-                status=effective_result.status,
-                response=effective_result.response,
-                error=effective_result.error,
-                total_tokens=effective_result.total_tokens,
-                total_cost_usd=effective_result.total_cost_usd,
-                turns=effective_result.turns,
-                completed_at=datetime.now(UTC).isoformat(),
-            )
-        except (TypeError, ValueError) as exc:
-            execution.worker_contract_failure_code = "agent_worker_result_invalid"
-            logger.warning(
-                "Agent Worker terminal contract rejected [%s]: %s",
-                task_id,
-                type(exc).__name__,
-            )
+        independent_recovery_required = (
+            execution.worker_backend == "independent"
+            and execution.worker_job_state == AgentJobState.RUNNING.value
+        )
+        if execution.worker_result is None and not independent_recovery_required:
+            try:
+                execution.worker_result = issue_agent_worker_result(
+                    request=execution.worker_request,
+                    status=effective_result.status,
+                    response=effective_result.response,
+                    error=effective_result.error,
+                    total_tokens=effective_result.total_tokens,
+                    total_cost_usd=effective_result.total_cost_usd,
+                    turns=effective_result.turns,
+                    completed_at=datetime.now(UTC).isoformat(),
+                )
+            except (TypeError, ValueError) as exc:
+                execution.worker_contract_failure_code = "agent_worker_result_invalid"
+                logger.warning(
+                    "Agent Worker terminal contract rejected [%s]: %s",
+                    task_id,
+                    type(exc).__name__,
+                )
 
         if (
             execution.worker_job_id
             and execution.worker_job_state == AgentJobState.RUNNING.value
+            and execution.worker_backend == "embedded"
         ):
             if execution.worker_result is None:
                 execution.worker_job_failure_code = (
@@ -1459,6 +1746,11 @@ class SubAgentManager:
             )
             return AgentResult(status="error", error=f"Agent not found: {agent_name}")
 
+        independent_worker = bool(
+            self._agent_worker_process_factory is not None
+            and self._agent_worker_process_factory.model_execution_enabled
+        )
+
         context_parts = []
         if task.context:
             context_parts.append(task.context)
@@ -1497,6 +1789,11 @@ class SubAgentManager:
             context_parts.append("\n".join(msg_lines))
 
         context = "\n\n".join(context_parts) if context_parts else ""
+        worker_context = (
+            _agent_model_system_context(agent, context)
+            if independent_worker
+            else context
+        )
 
         try:
             worker_request = issue_agent_worker_request(
@@ -1506,7 +1803,7 @@ class SubAgentManager:
                 ),
                 agent_name=agent_name,
                 task=task.description,
-                context=context,
+                context=worker_context,
                 tool_scope=agent.tool_names,
                 permission_mode=agent.config.permission_level,
                 model_tier=agent.config.model_tier,
@@ -1536,7 +1833,12 @@ class SubAgentManager:
             )
             return result
 
-        if not await self._register_execution(task, agent_name, worker_request):
+        if not await self._register_execution(
+            task,
+            agent_name,
+            worker_request,
+            worker_backend=("independent" if independent_worker else "embedded"),
+        ):
             await self._emit_subagent_event(
                 event_callback,
                 status="failed",
@@ -1556,15 +1858,22 @@ class SubAgentManager:
                 getattr(getattr(self._engine, "_session", None), "id", "") or ""
             ),
             task=task.description,
-            context=context,
+            context=worker_context,
             message_topic=f"task.{task.id}.completed",
         )
         try:
-            await self._admit_and_claim_agent_job(
-                task.id,
-                request=worker_request,
-                payload=job_payload,
-            )
+            if independent_worker:
+                await self._admit_independent_agent_job(
+                    task.id,
+                    request=worker_request,
+                    payload=job_payload,
+                )
+            else:
+                await self._admit_and_claim_agent_job(
+                    task.id,
+                    request=worker_request,
+                    payload=job_payload,
+                )
         except asyncio.CancelledError:
             result = AgentResult(
                 status="cancelled",
@@ -1658,32 +1967,33 @@ class SubAgentManager:
             )
             return result
 
-        try:
-            await self._mark_agent_job_running(task.id)
-        except Exception as exc:
-            logger.warning(
-                "AgentJob start fence failed [%s]: %s",
-                task.id,
-                type(exc).__name__,
-            )
-            await self._set_agent_job_failure(
-                task.id,
-                "agent_job_start_fenced",
-            )
-            result = AgentResult(
-                status="error",
-                error="Agent 持久执行 start fence 失败，模型尚未调用。",
-            )
-            result = await self._finish_execution(task.id, result)
-            await self._emit_subagent_event(
-                event_callback,
-                status="failed",
-                task_id=task.id,
-                agent_name=agent_name,
-                description=task.description,
-                message=result.error,
-            )
-            return result
+        if not independent_worker:
+            try:
+                await self._mark_agent_job_running(task.id)
+            except Exception as exc:
+                logger.warning(
+                    "AgentJob start fence failed [%s]: %s",
+                    task.id,
+                    type(exc).__name__,
+                )
+                await self._set_agent_job_failure(
+                    task.id,
+                    "agent_job_start_fenced",
+                )
+                result = AgentResult(
+                    status="error",
+                    error="Agent 持久执行 start fence 失败，模型尚未调用。",
+                )
+                result = await self._finish_execution(task.id, result)
+                await self._emit_subagent_event(
+                    event_callback,
+                    status="failed",
+                    task_id=task.id,
+                    agent_name=agent_name,
+                    description=task.description,
+                    message=result.error,
+                )
+                return result
 
         await self._start_execution_heartbeat(task.id)
         preflight_failure = await self._agent_job_preflight_failure(task.id)
@@ -1713,7 +2023,11 @@ class SubAgentManager:
                 task_id=task.id,
                 agent_name=agent_name,
                 description=task.description,
-                message="子 Agent 已开始执行。",
+                message=(
+                    "独立 Agent Worker 已开始执行。"
+                    if independent_worker
+                    else "子 Agent 已开始执行。"
+                ),
             )
         except BaseException as exc:
             startup_result = AgentResult(
@@ -1770,10 +2084,23 @@ class SubAgentManager:
                     error=preflight_failure,
                 )
             else:
-                execute_task = asyncio.create_task(agent.execute(**execute_kwargs))
+                execution_operation = (
+                    self._execute_independent_agent_job(
+                        task_id=task.id,
+                        agent=agent,
+                        event_callback=event_callback,
+                    )
+                    if independent_worker
+                    else agent.execute(**execute_kwargs)
+                )
+                execute_task = asyncio.create_task(execution_operation)
                 await self._attach_execution_task(task.id, execute_task)
                 timeout_seconds = _agent_timeout_seconds(agent)
-                if timeout_seconds > 0 and math.isfinite(timeout_seconds):
+                if (
+                    not independent_worker
+                    and timeout_seconds > 0
+                    and math.isfinite(timeout_seconds)
+                ):
                     result = await asyncio.wait_for(
                         execute_task,
                         timeout=timeout_seconds,
@@ -2256,6 +2583,16 @@ def _agent_timeout_seconds(agent: Any) -> float:
     return float(timeout) if isinstance(timeout, int | float) else 300.0
 
 
+def _agent_model_system_context(agent: BaseAgent, context: str) -> str:
+    """Build the exact system content that BaseAgent would send to the model."""
+    parts: list[str] = []
+    if context:
+        parts.append(f"## 前置上下文\n{context}")
+    if agent.config.system_prompt:
+        parts.append(agent.config.system_prompt)
+    return "\n\n".join(parts)
+
+
 def _agent_result_message(result: AgentResult) -> str:
     if result.status == "completed":
         return "子 Agent 已完成任务。"
@@ -2346,6 +2683,7 @@ def _execution_record(
         description=execution.description,
         status=status,
         phase="finished" if finished_at is not None else execution.phase,
+        worker_backend=execution.worker_backend,
         started_at=execution.started_at,
         finished_at=finished_at,
         elapsed_ms=elapsed_ms,

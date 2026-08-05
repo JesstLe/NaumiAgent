@@ -566,6 +566,11 @@ def _format_execution(snapshot: AgentControlSnapshot, selected_id: str) -> list[
         f"### 执行 `{_code(item.task_id)}`",
         f"- Agent：`{_code(item.agent_name)}`",
         f"- 状态：{item.status} · 阶段：{item.phase}",
+        (
+            "- 执行后端：独立 Agent Worker"
+            if item.worker_backend == "independent"
+            else "- 执行后端：内嵌降级"
+        ),
         f"- 当前工具：`{_code(item.current_tool or '-')}`",
         f"- 最近工具：{', '.join(f'`{_code(value)}`' for value in item.recent_tools) or '-'}",
         (

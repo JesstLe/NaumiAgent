@@ -2448,6 +2448,7 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   assert.equal(normalized.revision, 3);
   assert.equal(normalized.agents[0].name, "coder");
   assert.equal(normalized.executions[0].stop_supported, true);
+  assert.equal(normalized.executions[0].worker_backend, "independent");
   assert.equal(normalized.executions[0].heartbeat_phase, "running");
   assert.equal(normalized.executions[0].heartbeat_subject_id, "agent-execution-test");
   assert.equal(normalized.executions[0].worker_request_sha256, "a".repeat(64));
@@ -2470,7 +2471,7 @@ test("normalizes strict agent control snapshots updates and actions", () => {
   const update = normalizeServerRecord({
     type: "agents/update",
     payload: {
-      schema_version: 5,
+      schema_version: 6,
       session_id: "session-1",
       revision: 4,
       generated_at: "2026-07-13T00:00:01+00:00",
@@ -2584,6 +2585,16 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     /worker_job_state 无效/,
   );
 
+  const invalidWorkerBackend = agentControlSnapshotFixture(1);
+  invalidWorkerBackend.executions[0].worker_backend = "guessed";
+  assert.throws(
+    () => normalizeServerRecord({
+      type: "agents/snapshot",
+      payload: invalidWorkerBackend,
+    }),
+    /worker_backend 无效/,
+  );
+
   const invalidWorkerClaimEpoch = agentControlSnapshotFixture(1);
   invalidWorkerClaimEpoch.executions[0].worker_claim_epoch = -1;
   assert.throws(
@@ -2664,7 +2675,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
     () => normalizeServerRecord({
       type: "agents/update",
       payload: {
-        schema_version: 5,
+        schema_version: 6,
         session_id: "session-1",
         revision: 2,
         generated_at: "now",
@@ -2677,7 +2688,7 @@ test("rejects malformed agent control payloads and unknown sections", () => {
 
 function agentControlSnapshotFixture(revision) {
   return {
-    schema_version: 5,
+    schema_version: 6,
     session_id: "session-1",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -2777,6 +2788,7 @@ function agentControlSnapshotFixture(revision) {
       description: "实现功能",
       status: "running",
       phase: "running_tool",
+      worker_backend: "independent",
       started_at: 1,
       finished_at: null,
       elapsed_ms: 10,

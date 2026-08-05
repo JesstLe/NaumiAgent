@@ -612,7 +612,7 @@ test("only explicit infrastructure notices dismiss welcome", () => {
 
 function agentSnapshot(revision = 1) {
   return {
-    schema_version: 5,
+    schema_version: 6,
     session_id: "session-agents",
     revision,
     generated_at: "2026-07-13T00:00:00+00:00",
@@ -671,6 +671,7 @@ function agentSnapshot(revision = 1) {
       description: "实现控制中心",
       status: "running",
       phase: "running_tool",
+      worker_backend: "independent",
       started_at: 1,
       finished_at: null,
       elapsed_ms: 1000,

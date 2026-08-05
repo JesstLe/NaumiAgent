@@ -293,7 +293,7 @@
     }
   },
   "agent_control": {
-    "schema_version": 5,
+    "schema_version": 6,
     "summary_capacity_fields": [
       "durable_capacity_configured",
       "durable_active_jobs",
@@ -395,6 +395,10 @@
       "running_tool",
       "stopping",
       "finished"
+    ],
+    "execution_worker_backends": [
+      "embedded",
+      "independent"
     ],
     "execution_heartbeat_fields": [
       "heartbeat_subject_id",

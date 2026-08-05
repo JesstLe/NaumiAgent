@@ -48,7 +48,8 @@ exact Worker incarnation、物理 slot 和 admitted-only AgentJob owner lease �
 加密 staging 与双续租；ARC-04.6a/HAR-10.7h3 又补齐 PID/create-time witness、Supervisor owner lease 和
 认证 pre-start fencing/requeue；ARC-04.5e3a/HAR-10.7h4 又完成 model-only 两阶段 running fence、真实独立
 Provider 调用和加密 terminal/outbox 提交；ARC-04.5e3b1/HAR-10.7h5 又完成精确 manifest、加密 Tool
-RPC、多轮模型循环、重复副作用阻断与父 Runtime authority callback 内核。生产 SubAgentManager 尚未切换，
-带工具 Agent 默认执行仍由 embedded Runtime 完成。quarantine requeue/prune、完整 Supervisor、
+RPC、多轮模型循环、重复副作用阻断与父 Runtime authority callback 内核；ARC-04.5e3b2/HAR-10.7h6
+进一步把生产 SubAgentManager 默认路由到独立 Worker，复用 `Engine.execute_tool()` 权限链，并以 Agent
+Control schema v6 在 New UI/TUI 区分独立执行与内嵌降级。当前仍是一任务一进程；quarantine requeue/prune、完整 Supervisor、
 Agent/Browser 完整持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

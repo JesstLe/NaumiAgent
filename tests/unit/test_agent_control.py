@@ -17,7 +17,8 @@ from naumi_agent.agents.base import AgentCapability, AgentConfig, AgentResult
 from naumi_agent.agents.message_bus import AgentMessage, MessagePriority
 from naumi_agent.config.settings import AppConfig, MemoryConfig
 from naumi_agent.orchestrator.engine import AgentEngine
-from naumi_agent.orchestrator.subagent_manager import SubTask
+from naumi_agent.orchestrator.subagent_manager import SubAgentManager, SubTask
+from naumi_agent.tools.analysis import set_analysis_subagent_manager
 
 pytestmark = pytest.mark.usefixtures("runtime_payload_key")
 
@@ -34,6 +35,18 @@ def _engine(tmp_path: Path) -> AgentEngine:
             long_term_enabled=False,
         ),
     ))
+
+
+def _use_embedded_manager(engine: AgentEngine) -> SubAgentManager:
+    """Select the explicit in-process fallback for tests that patch BaseAgent."""
+    manager = SubAgentManager(
+        engine,
+        heartbeat_factory=engine.agent_execution_heartbeat_factory,
+        agent_job_store=engine._resources.agent_job_store,
+    )
+    engine.subagent_manager = manager
+    set_analysis_subagent_manager(manager)
+    return manager
 
 
 def test_snapshot_round_trip_is_strict_and_bounded() -> None:
@@ -151,7 +164,7 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
     delegated: asyncio.Task[AgentResult] | None = None
     try:
         session = await engine.get_or_create_session(title="Agent Control")
-        manager = engine.subagent_manager
+        manager = _use_embedded_manager(engine)
         manager.spawn(AgentConfig(
             name="observer",
             description="observes a real execution",
@@ -249,6 +262,7 @@ async def test_service_builds_authoritative_snapshot_and_stable_revision(
         assert "file_read" in coder.tools
         assert "bash_run" in coder.tools
         assert execution.task_id == "execution-1"
+        assert execution.worker_backend == "embedded"
         assert execution.session_id == session.id
         assert execution.stop_supported is True
         assert execution.heartbeat_subject_id.startswith("agent-execution-")
@@ -291,7 +305,7 @@ async def test_service_isolates_execution_and_team_evidence_after_session_change
     engine = _engine(tmp_path)
     try:
         first_session = await engine.get_or_create_session(title="first")
-        manager = engine.subagent_manager
+        manager = _use_embedded_manager(engine)
         agent = manager.get_agent("coder")
         assert agent is not None
 
@@ -332,7 +346,7 @@ async def test_service_projects_authenticated_session_result_with_bounded_public
     engine = _engine(tmp_path)
     try:
         await engine.get_or_create_session(title="result inbox")
-        manager = engine.subagent_manager
+        manager = _use_embedded_manager(engine)
         agent = manager.get_agent("coder")
         assert agent is not None
         secret = "sk-proj-1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJ"

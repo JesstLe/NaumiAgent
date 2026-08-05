@@ -947,8 +947,8 @@ codex/terminal-completion-receipt
 M6 `/agents` Agent Control Center 已完成；`/workbench` 的 New UI Overview、Worktrees tab 与 Textual
 TUI fallback 已完成。ARC-04.5e3a/HAR-10.7h4 已按上述依赖完成独立 Agent 模型执行，
 ARC-04.5e3b1/HAR-10.7h5 已完成加密 Tool RPC、多轮循环与父 Runtime authority callback 内核；
-Doctor/New UI/TUI 共用“内核就绪、生产调度待接入”的精确能力投影。下一切片只接生产 SubAgent 路由与
-permission/tool authority；
+ARC-04.5e3b2/HAR-10.7h6 又完成生产 SubAgent 默认独立路由、Engine permission/tool authority 和 Agent
+Control schema v6 后端投影。下一步需比较长驻池/公平调度、流式事件与并行 Tool RPC 的用户收益；
 跨终端兼容实测、性能基准和真实
 终端截图回归仍需继续。
 ```

@@ -116,6 +116,18 @@ def _agent_worker_supervisor_factory(tmp_path) -> AgentWorkerSupervisorFactory:
     )
 
 
+def test_agent_worker_factory_bounds_per_process_capacity(tmp_path) -> None:
+    factory = _agent_worker_factory(tmp_path)
+
+    assert factory.model_execution_enabled is False
+    process = factory.create(max_concurrent_jobs=1)
+    assert process._max_concurrent_jobs == 1
+    with pytest.raises(ValueError, match="Factory 上限"):
+        factory.create(max_concurrent_jobs=5)
+    with pytest.raises(ValueError, match="Factory 上限"):
+        factory.create(max_concurrent_jobs=0)
+
+
 def test_composition_builds_service_from_exact_resources_and_copies_policy(
     tmp_path,
     monkeypatch,
@@ -262,6 +274,10 @@ def test_root_factory_preserves_service_override_in_engine(tmp_path) -> None:
     assert engine.task_runner._heartbeat_factory is browser_factory
     assert engine.agent_worker_process_factory is agent_worker_factory
     assert engine._services.agent_worker_process_factory is agent_worker_factory
+    assert (
+        engine.subagent_manager._agent_worker_process_factory
+        is agent_worker_factory
+    )
     assert engine.agent_worker_supervisor_factory is supervisor_factory
     assert engine._services.agent_worker_supervisor_factory is supervisor_factory
 

@@ -108,13 +108,17 @@
 - ARC-04.5e3b1 / HAR-10.7h5 已补齐 exact Tool manifest、加密 call/result RPC、多轮模型循环、跨轮重复
   副作用阻断与父 Runtime authority callback；越权调用不触达执行器，执行中断保持 running unknown。详见
   `ARC-04-5e3b1-encrypted-agent-tool-rpc.md`。
-- 当前 Tool Worker 仍是每 Job 一个短寿命进程；Agent Worker 已是带 heartbeat 的常驻工具循环内核，但
-  尚未接入生产 SubAgent 调度。PTY、完整 Supervisor、并发背压与 Windows 隔离后端仍未完成；默认带工具
-  Agent 执行仍在 embedded Runtime。结果 outbox 已有在线消费、
+- ARC-04.5e3b2 / HAR-10.7h6 已把生产 `SubAgentManager` 默认路由到独立 Worker，并让 ToolCall 复用
+  `Engine.execute_tool()` 权限事件链；Agent Control schema v6 在 New UI/TUI 显示独立/内嵌后端。
+  详见 `ARC-04-5e3b2-production-agent-worker-routing.md`。
+- 当前 Tool Worker 与生产 Agent Worker 都仍是每 Job 一个短寿命进程。PTY、长驻池、完整 Supervisor、
+  全局公平调度、并发背压与 Windows 隔离后端仍未完成；未注入 model-capable factory 时保留显式 embedded
+  fallback。结果 outbox 已有在线消费、
   startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
   唤醒与 shutdown drain；HAR-10.7g 已补齐 durable retry budget、HMAC quarantine receipt 和双端隔离
   投影。exact requeue/prune、UI read/ack、retention 和外部 sink 仍未完成。
-  因此 ARC-04 保持 partial；下一最小纵向切片为 ARC-04.5e3b2 生产 SubAgent 路由与 exact Engine tool authority 接入。
+  因此 ARC-04 保持 partial；下一切片需重新比较长驻池/公平调度、流式事件、并行 Tool RPC 与 Harness
+  可恢复性需求，不能仅按 ARC 编号线性扩张。
 
 ## 验收标准
 
