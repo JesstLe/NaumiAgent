@@ -24,8 +24,9 @@ import re
 import secrets
 import stat
 import threading
+import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -52,13 +53,30 @@ from naumi_agent.daemons.agent_worker_model_execution import (
     MAX_AGENT_MODEL_RESPONSE_BYTES,
     AgentWorkerModelExecutionPreparation,
     AgentWorkerModelExecutionResult,
+    AgentWorkerModelExecutionStatus,
+    AgentWorkerModelTurnResult,
     decode_model_execution_result,
     decode_model_profile,
     encode_model_execution_result,
     encode_model_profile,
-    execute_model_only,
+    execute_model_turn,
     issue_model_execution_preparation,
     model_profile_sha256,
+)
+from naumi_agent.daemons.agent_worker_tool_rpc import (
+    AgentWorkerToolCallBatch,
+    AgentWorkerToolManifest,
+    AgentWorkerToolResultBatch,
+    decode_tool_call_batch,
+    decode_tool_manifest,
+    decode_tool_result_batch,
+    encode_tool_call_batch,
+    encode_tool_manifest,
+    encode_tool_result_batch,
+    issue_tool_call_batch,
+    issue_tool_manifest,
+    issue_tool_result_batch,
+    tool_call_signature,
 )
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
@@ -85,15 +103,20 @@ from naumi_agent.safety.payload_envelope import (
     open_runtime_payload,
     seal_runtime_payload,
 )
+from naumi_agent.tools.base import ToolCall, ToolResult
 
 _PROTOCOL_VERSION = 1
 _CONTROL_CAPABILITY = WorkerCapability.AGENT_CONTROL_TRANSPORT
 _OWNER_LEASE_CAPABILITY = WorkerCapability.AGENT_JOB_OWNER_LEASE
 _CONTEXT_SCOPE_CAPABILITY = WorkerCapability.AGENT_CONTEXT_SCOPE
 _MODEL_EXECUTION_CAPABILITY = WorkerCapability.AGENT_MODEL_EXECUTION
+_TOOL_RPC_CAPABILITY = WorkerCapability.AGENT_TOOL_RPC
 _JOB_DISPATCH_AAD_PREFIX = b"NAUMI_AGENT_WORKER_JOB_DISPATCH_V1\x00"
 _MODEL_PROFILE_AAD_PREFIX = b"NAUMI_AGENT_WORKER_MODEL_PROFILE_V1\x00"
 _MODEL_TERMINAL_AAD_PREFIX = b"NAUMI_AGENT_WORKER_MODEL_TERMINAL_V1\x00"
+_TOOL_MANIFEST_AAD_PREFIX = b"NAUMI_AGENT_WORKER_TOOL_MANIFEST_V1\x00"
+_TOOL_CALL_AAD_PREFIX = b"NAUMI_AGENT_WORKER_TOOL_CALL_V1\x00"
+_TOOL_RESULT_AAD_PREFIX = b"NAUMI_AGENT_WORKER_TOOL_RESULT_V1\x00"
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -165,6 +188,7 @@ class AgentWorkerModelExecutionOutcome:
     model: str
     provider_model: str
     provider_response_id_sha256: str
+    tool_calls: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.transition, AgentJobTransitionResult):
@@ -181,9 +205,16 @@ class AgentWorkerModelExecutionOutcome:
             self.provider_response_id_sha256
         ):
             raise ValueError("provider_response_id_sha256 格式无效。")
+        if (
+            isinstance(self.tool_calls, bool)
+            or not isinstance(self.tool_calls, int)
+            or not 0 <= self.tool_calls <= 64_000
+        ):
+            raise ValueError("tool_calls 必须在 0 到 64000 之间。")
 
 
 NowProvider = Callable[[], str]
+AgentWorkerToolExecutor = Callable[[ToolCall, str], Awaitable[ToolResult]]
 
 
 class AuthenticatedAgentWorkerProcess:
@@ -663,6 +694,18 @@ class AuthenticatedAgentWorkerProcess:
 
     async def execute_bound_model_job(self) -> AgentWorkerModelExecutionOutcome:
         """Run and durably commit one tool-free model request in the child process."""
+        return await self.execute_bound_agent_job(
+            tool_schemas=(),
+            tool_executor=None,
+        )
+
+    async def execute_bound_agent_job(
+        self,
+        *,
+        tool_schemas: list[dict[str, object]] | tuple[dict[str, object], ...],
+        tool_executor: AgentWorkerToolExecutor | None,
+    ) -> AgentWorkerModelExecutionOutcome:
+        """Run one bounded Agent loop while all tools remain parent-authorized."""
         async with self._command_lock:
             binding = self._job_binding
             profile = self._model_profile
@@ -681,19 +724,44 @@ class AuthenticatedAgentWorkerProcess:
                 or stored.request_sha256 != binding.request_sha256
             ):
                 raise AgentWorkerProcessError("Agent Worker pre-start Job fence 已变化。")
-            if stored.request.tool_scope:
+            if tool_executor is not None and not callable(tool_executor):
+                raise TypeError("tool_executor 必须可调用。")
+            try:
+                manifest = issue_tool_manifest(
+                    tool_scope=stored.request.tool_scope,
+                    tools=list(tool_schemas),
+                )
+            except (TypeError, ValueError) as exc:
                 raise AgentWorkerProcessError(
-                    "独立 Agent model-only Worker 尚不接受工具调用任务。"
+                    "Agent Worker 工具 manifest 与 request scope 不一致。"
+                ) from exc
+            if manifest.tool_scope and tool_executor is None:
+                raise AgentWorkerProcessError(
+                    "独立 Agent 工具任务缺少父 Runtime 权威执行入口。"
+                )
+            if not manifest.tool_scope and tool_executor is not None:
+                raise AgentWorkerProcessError(
+                    "无工具 AgentJob 不得注入额外工具执行入口。"
                 )
             preparation = issue_model_execution_preparation(
                 job_id=binding.job_id,
                 request_sha256=binding.request_sha256,
                 claim_epoch=binding.claim_epoch,
                 model_profile_sha256=model_profile_sha256(profile),
+                tool_manifest_sha256=manifest.manifest_sha256,
             )
             profile_envelope = seal_runtime_payload(
                 profile,
                 aad=_model_profile_aad(
+                    contract=self._required_contract(),
+                    binding=binding,
+                    preparation=preparation,
+                ),
+                key=self._required_dispatch_key(),
+            )
+            manifest_envelope = seal_runtime_payload(
+                encode_tool_manifest(manifest),
+                aad=_tool_manifest_aad(
                     contract=self._required_contract(),
                     binding=binding,
                     preparation=preparation,
@@ -708,8 +776,9 @@ class AuthenticatedAgentWorkerProcess:
                         binding=binding,
                         preparation=preparation,
                         profile_envelope=profile_envelope,
+                        manifest_envelope=manifest_envelope,
                     ),
-                    expected_type="model_prepared",
+                    expected_types=("model_prepared",),
                     timeout=self._handshake_timeout_seconds,
                 )
                 _validate_child_execution_message(
@@ -727,22 +796,99 @@ class AuthenticatedAgentWorkerProcess:
                     owner_id=binding.owner_id,
                     claim_epoch=binding.claim_epoch,
                 )
-                terminal = await self._send_execution_command(
+                running_receipt_sha256 = running.job.latest_receipt.receipt_sha256
+                loop = asyncio.get_running_loop()
+                work_deadline = (
+                    loop.time() + stored.request.timeout_milliseconds / 1000
+                )
+                transport_deadline = (
+                    work_deadline + self._handshake_timeout_seconds * 2
+                )
+
+                def remaining_work_timeout() -> float:
+                    remaining = work_deadline - loop.time()
+                    if remaining <= 0:
+                        raise TimeoutError("Agent Worker 工具循环总超时。")
+                    return remaining
+
+                def remaining_transport_timeout() -> float:
+                    remaining = transport_deadline - loop.time()
+                    if remaining <= 0:
+                        raise TimeoutError("Agent Worker Tool RPC 传输总超时。")
+                    return remaining
+
+                response = await self._send_execution_command(
                     _parent_execution_start_message(
                         nonce=self._nonce,
                         contract=self._required_contract(),
                         binding=binding,
                         preparation=preparation,
-                        running_receipt_sha256=(
-                            running.job.latest_receipt.receipt_sha256
-                        ),
+                        running_receipt_sha256=running_receipt_sha256,
                     ),
-                    expected_type="model_terminal",
-                    timeout=(
-                        stored.request.timeout_milliseconds / 1000
-                        + self._handshake_timeout_seconds * 2
-                    ),
+                    expected_types=("tool_request", "model_terminal"),
+                    timeout=remaining_transport_timeout(),
                 )
+                tool_call_count = 0
+                while str(response.get("type")) == "tool_request":
+                    if tool_executor is None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 收到未授权 Tool RPC。"
+                        )
+                    call_batch = _open_child_tool_request_message(
+                        response,
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        process_id=self._required_process().pid,
+                        binding=binding,
+                        preparation=preparation,
+                        running_receipt_sha256=running_receipt_sha256,
+                        tool_scope=manifest.tool_scope,
+                        dispatch_key=self._required_dispatch_key(),
+                    )
+                    results: list[ToolResult] = []
+                    for call in call_batch.calls:
+                        async with asyncio.timeout(remaining_work_timeout()):
+                            result_value = await tool_executor(
+                                call,
+                                stored.request.agent_name,
+                            )
+                        if not isinstance(result_value, ToolResult):
+                            raise AgentWorkerProcessError(
+                                "父 Runtime Tool authority 返回类型无效。"
+                            )
+                        results.append(result_value)
+                    result_batch = issue_tool_result_batch(
+                        call_batch=call_batch,
+                        results=results,
+                    )
+                    result_envelope = seal_runtime_payload(
+                        encode_tool_result_batch(result_batch),
+                        aad=_tool_result_aad(
+                            contract=self._required_contract(),
+                            binding=binding,
+                            preparation=preparation,
+                            running_receipt_sha256=running_receipt_sha256,
+                            call_batch=call_batch,
+                            result_batch=result_batch,
+                        ),
+                        key=self._required_dispatch_key(),
+                    )
+                    tool_call_count += len(call_batch.calls)
+                    response = await self._send_execution_command(
+                        _parent_tool_result_message(
+                            nonce=self._nonce,
+                            contract=self._required_contract(),
+                            binding=binding,
+                            preparation=preparation,
+                            running_receipt_sha256=running_receipt_sha256,
+                            call_batch=call_batch,
+                            result_batch=result_batch,
+                            result_envelope=result_envelope,
+                        ),
+                        expected_types=("tool_request", "model_terminal"),
+                        timeout=remaining_transport_timeout(),
+                    )
+                terminal = response
                 model_result = _open_child_model_terminal_message(
                     terminal,
                     nonce=self._nonce,
@@ -750,9 +896,7 @@ class AuthenticatedAgentWorkerProcess:
                     process_id=self._required_process().pid,
                     binding=binding,
                     preparation=preparation,
-                    running_receipt_sha256=(
-                        running.job.latest_receipt.receipt_sha256
-                    ),
+                    running_receipt_sha256=running_receipt_sha256,
                     dispatch_key=self._required_dispatch_key(),
                 )
                 result = issue_agent_worker_result(
@@ -787,7 +931,7 @@ class AuthenticatedAgentWorkerProcess:
                             transition.job.latest_receipt.receipt_sha256
                         ),
                     ),
-                    expected_type="model_committed",
+                    expected_types=("model_committed",),
                     timeout=self._shutdown_timeout_seconds,
                 )
                 _validate_child_execution_commit_message(
@@ -820,6 +964,7 @@ class AuthenticatedAgentWorkerProcess:
                     provider_response_id_sha256=(
                         model_result.provider_response_id_sha256
                     ),
+                    tool_calls=tool_call_count,
                 )
             except BaseException as exc:
                 self._execution_ack = None
@@ -836,7 +981,7 @@ class AuthenticatedAgentWorkerProcess:
         self,
         message: dict[str, object],
         *,
-        expected_type: str,
+        expected_types: tuple[str, ...],
         timeout: float,
     ) -> dict[str, object]:
         if self._execution_ack is not None:
@@ -848,7 +993,7 @@ class AuthenticatedAgentWorkerProcess:
         try:
             await asyncio.to_thread(self._required_connection().send, message)
             response = await asyncio.wait_for(asyncio.shield(ack), timeout=timeout)
-            if str(response.get("type")) != expected_type:
+            if str(response.get("type")) not in expected_types:
                 raise AgentWorkerProcessError("Agent model 回执类型无效。")
             return response
         finally:
@@ -966,6 +1111,7 @@ class AuthenticatedAgentWorkerProcess:
                     ack.set_result(message_type)
                 elif message_type in {
                     "model_prepared",
+                    "tool_request",
                     "model_terminal",
                     "model_committed",
                 }:
@@ -982,6 +1128,7 @@ class AuthenticatedAgentWorkerProcess:
                         phase=HarnessHeartbeatPhase.RUNNING,
                         detail_code={
                             "model_prepared": "agent_worker_model_prepared",
+                            "tool_request": "agent_worker_tool_authority_waiting",
                             "model_terminal": "agent_worker_model_terminal_ready",
                             "model_committed": "agent_worker_model_terminal_committed",
                         }[message_type],
@@ -1254,7 +1401,11 @@ class AuthenticatedAgentWorkerProcess:
         capabilities = [_CONTROL_CAPABILITY, _OWNER_LEASE_CAPABILITY]
         if self._model_profile is not None:
             capabilities.extend(
-                (_CONTEXT_SCOPE_CAPABILITY, _MODEL_EXECUTION_CAPABILITY)
+                (
+                    _CONTEXT_SCOPE_CAPABILITY,
+                    _MODEL_EXECUTION_CAPABILITY,
+                    _TOOL_RPC_CAPABILITY,
+                )
             )
         self._contract = issue_worker_contract(
             worker_id=self._worker_id,
@@ -1445,6 +1596,7 @@ def _agent_worker_child_main(
     prepared_execution: tuple[
         AgentWorkerModelExecutionPreparation,
         bytes,
+        AgentWorkerToolManifest,
     ] | None = None
     try:
         dispatch_key = RuntimePayloadKey.from_bytes(dispatch_key_bytes)
@@ -1539,7 +1691,8 @@ def _agent_worker_child_main(
                         raise AgentWorkerProcessError(
                             "Agent Worker 子进程已有 prepared model execution。"
                         )
-                    preparation, profile = _open_parent_model_prepare_message(
+                    preparation, profile, manifest = (
+                        _open_parent_model_prepare_message(
                         control,
                         nonce=nonce,
                         worker_id=worker_id,
@@ -1549,8 +1702,9 @@ def _agent_worker_child_main(
                         binding=bound_job[0],
                         request=bound_job[1],
                         dispatch_key=dispatch_key,
+                        )
                     )
-                    prepared_execution = (preparation, profile)
+                    prepared_execution = (preparation, profile, manifest)
                     sequence += 1
                     connection.send(
                         _child_execution_message(
@@ -1572,7 +1726,7 @@ def _agent_worker_child_main(
                         raise AgentWorkerProcessError(
                             "Agent Worker model execution 尚未 prepare。"
                         )
-                    preparation, profile = prepared_execution
+                    preparation, profile, manifest = prepared_execution
                     running_receipt_sha256 = _validate_parent_model_start_message(
                         control,
                         nonce=nonce,
@@ -1583,46 +1737,25 @@ def _agent_worker_child_main(
                         binding=bound_job[0],
                         preparation=preparation,
                     )
-                    result_queue: queue.Queue[
-                        AgentWorkerModelExecutionResult | BaseException
-                    ] = queue.Queue(maxsize=1)
-                    execution_thread = threading.Thread(
-                        target=_run_model_execution_thread,
-                        args=(
-                            result_queue,
-                            preparation,
-                            bound_job[1],
-                            bound_job[2],
-                            profile,
-                        ),
-                        name=f"naumi-agent-model-{preparation.execution_id[-12:]}",
-                        daemon=True,
+                    result_value, sequence = _run_child_agent_execution(
+                        connection=connection,
+                        interval_seconds=interval_seconds,
+                        nonce=nonce,
+                        worker_id=worker_id,
+                        instance_id=instance_id,
+                        epoch=epoch,
+                        contract_sha256=contract_sha256,
+                        process_id=process_id,
+                        sequence=sequence,
+                        dispatch_key=dispatch_key,
+                        binding=bound_job[0],
+                        request=bound_job[1],
+                        payload=bound_job[2],
+                        preparation=preparation,
+                        profile=profile,
+                        manifest=manifest,
+                        running_receipt_sha256=running_receipt_sha256,
                     )
-                    execution_thread.start()
-                    while execution_thread.is_alive():
-                        if connection.poll(interval_seconds):
-                            raise AgentWorkerProcessError(
-                                "model execution 期间收到未授权控制消息。"
-                            )
-                        sequence += 1
-                        connection.send(
-                            _child_message(
-                                "pulse",
-                                nonce=nonce,
-                                worker_id=worker_id,
-                                instance_id=instance_id,
-                                epoch=epoch,
-                                contract_sha256=contract_sha256,
-                                process_id=process_id,
-                                sequence=sequence,
-                            )
-                        )
-                    execution_thread.join(timeout=1)
-                    result_value = result_queue.get_nowait()
-                    if isinstance(result_value, BaseException):
-                        raise AgentWorkerProcessError(
-                            "Agent Worker model execution kernel 失败。"
-                        )
                     terminal_plaintext = encode_model_execution_result(result_value)
                     terminal_envelope = seal_runtime_payload(
                         terminal_plaintext,
@@ -1854,6 +1987,7 @@ def _preparation_message_fields(
         "execution_request_sha256": preparation.request_sha256,
         "execution_claim_epoch": preparation.claim_epoch,
         "model_profile_sha256": preparation.model_profile_sha256,
+        "tool_manifest_sha256": preparation.tool_manifest_sha256,
     }
 
 
@@ -1867,6 +2001,7 @@ def _preparation_from_message(
             request_sha256=str(message["execution_request_sha256"]),
             claim_epoch=int(message["execution_claim_epoch"]),
             model_profile_sha256=str(message["model_profile_sha256"]),
+            tool_manifest_sha256=str(message["tool_manifest_sha256"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise AgentWorkerProcessError(
@@ -1881,6 +2016,7 @@ def _parent_execution_prepare_message(
     binding: AgentWorkerJobBinding,
     preparation: AgentWorkerModelExecutionPreparation,
     profile_envelope: PayloadEnvelope,
+    manifest_envelope: PayloadEnvelope,
 ) -> dict[str, object]:
     return {
         **_parent_message("prepare_model", nonce=nonce, contract=contract),
@@ -1888,6 +2024,8 @@ def _parent_execution_prepare_message(
         **_preparation_message_fields(preparation),
         "model_profile_envelope": profile_envelope.to_dict(),
         "model_profile_envelope_sha256": profile_envelope.envelope_sha256,
+        "tool_manifest_envelope": manifest_envelope.to_dict(),
+        "tool_manifest_envelope_sha256": manifest_envelope.envelope_sha256,
     }
 
 
@@ -1902,7 +2040,11 @@ def _open_parent_model_prepare_message(
     binding: AgentWorkerJobBinding,
     request: AgentWorkerRequest,
     dispatch_key: RuntimePayloadKey,
-) -> tuple[AgentWorkerModelExecutionPreparation, bytes]:
+) -> tuple[
+    AgentWorkerModelExecutionPreparation,
+    bytes,
+    AgentWorkerToolManifest,
+]:
     if not isinstance(message, dict):
         raise AgentWorkerProcessError("Agent Worker model prepare 消息形状无效。")
     preparation = _preparation_from_message(message)
@@ -1911,11 +2053,11 @@ def _open_parent_model_prepare_message(
         or preparation.request_sha256 != binding.request_sha256
         or preparation.claim_epoch != binding.claim_epoch
         or request.request_sha256 != binding.request_sha256
-        or request.tool_scope
     ):
         raise AgentWorkerProcessError("Agent Worker model prepare fence 无效。")
     try:
         envelope = PayloadEnvelope.from_dict(message["model_profile_envelope"])  # type: ignore[arg-type]
+        manifest_envelope = PayloadEnvelope.from_dict(message["tool_manifest_envelope"])  # type: ignore[arg-type]
     except (KeyError, TypeError, ValueError) as exc:
         raise AgentWorkerProcessError(
             "Agent Worker model profile envelope 无效。"
@@ -1932,6 +2074,8 @@ def _open_parent_model_prepare_message(
         **_preparation_message_fields(preparation),
         "model_profile_envelope": envelope.to_dict(),
         "model_profile_envelope_sha256": envelope.envelope_sha256,
+        "tool_manifest_envelope": manifest_envelope.to_dict(),
+        "tool_manifest_envelope_sha256": manifest_envelope.envelope_sha256,
     }
     if not _secure_exact_message_matches(message, expected):
         raise AgentWorkerProcessError("Agent Worker model prepare 消息认证失败。")
@@ -1949,6 +2093,19 @@ def _open_parent_model_prepare_message(
             key=dispatch_key,
         )
         decode_model_profile(profile)
+        manifest_plaintext = open_runtime_payload(
+            manifest_envelope,
+            aad=_tool_manifest_aad_values(
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                binding=binding,
+                preparation=preparation,
+            ),
+            key=dispatch_key,
+        )
+        manifest = decode_tool_manifest(manifest_plaintext)
     except (PayloadEnvelopeError, TypeError, ValueError) as exc:
         raise AgentWorkerProcessError(
             "Agent Worker model profile 无法认证。"
@@ -1958,7 +2115,15 @@ def _open_parent_model_prepare_message(
         preparation.model_profile_sha256,
     ):
         raise AgentWorkerProcessError("Agent Worker model profile digest 无效。")
-    return preparation, profile
+    if (
+        not hmac.compare_digest(
+            manifest.manifest_sha256,
+            preparation.tool_manifest_sha256,
+        )
+        or manifest.tool_scope != request.tool_scope
+    ):
+        raise AgentWorkerProcessError("Agent Worker tool manifest fence 无效。")
+    return preparation, profile, manifest
 
 
 def _parent_execution_start_message(
@@ -2073,6 +2238,221 @@ def _validate_parent_model_commit_message(
     return result_sha256, terminal_receipt_sha256
 
 
+def _parent_tool_result_message(
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+    result_batch: AgentWorkerToolResultBatch,
+    result_envelope: PayloadEnvelope,
+) -> dict[str, object]:
+    if not isinstance(result_batch, AgentWorkerToolResultBatch):
+        raise TypeError("result_batch 类型无效。")
+    return {
+        **_parent_message("tool_result", nonce=nonce, contract=contract),
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "running_receipt_sha256": running_receipt_sha256,
+        "tool_turn": call_batch.turn,
+        "tool_call_batch_sha256": call_batch.batch_sha256,
+        "tool_result_batch_sha256": result_batch.batch_sha256,
+        "tool_result_envelope": result_envelope.to_dict(),
+        "tool_result_envelope_sha256": result_envelope.envelope_sha256,
+    }
+
+
+def _child_tool_request_message(
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+    call_envelope: PayloadEnvelope,
+) -> dict[str, object]:
+    return _child_execution_message(
+        "tool_request",
+        nonce=nonce,
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        process_id=process_id,
+        sequence=sequence,
+        binding=binding,
+        preparation=preparation,
+        extra={
+            "running_receipt_sha256": running_receipt_sha256,
+            "tool_turn": call_batch.turn,
+            "tool_call_batch_sha256": call_batch.batch_sha256,
+            "tool_call_envelope": call_envelope.to_dict(),
+            "tool_call_envelope_sha256": call_envelope.envelope_sha256,
+        },
+    )
+
+
+def _open_child_tool_request_message(
+    message: object,
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    tool_scope: tuple[str, ...],
+    dispatch_key: RuntimePayloadKey,
+) -> AgentWorkerToolCallBatch:
+    if not isinstance(message, dict) or process_id is None or process_id < 1:
+        raise AgentWorkerProcessError("Agent Worker tool request 形状无效。")
+    try:
+        envelope = PayloadEnvelope.from_dict(message["tool_call_envelope"])  # type: ignore[arg-type]
+        sequence = int(message["sequence"])
+        turn = int(message["tool_turn"])
+        batch_sha256 = str(message["tool_call_batch_sha256"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker tool request envelope 无效。"
+        ) from exc
+    expected = _child_execution_message(
+        "tool_request",
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=sequence,
+        binding=binding,
+        preparation=preparation,
+        extra={
+            "running_receipt_sha256": running_receipt_sha256,
+            "tool_turn": turn,
+            "tool_call_batch_sha256": batch_sha256,
+            "tool_call_envelope": envelope.to_dict(),
+            "tool_call_envelope_sha256": envelope.envelope_sha256,
+        },
+    )
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker tool request 认证失败。")
+    try:
+        plaintext = open_runtime_payload(
+            envelope,
+            aad=_tool_call_aad_identity(
+                contract=contract,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+                turn=turn,
+                batch_sha256=batch_sha256,
+            ),
+            key=dispatch_key,
+        )
+        batch = decode_tool_call_batch(plaintext)
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker tool request payload 无法认证。"
+        ) from exc
+    if (
+        batch.execution_id != preparation.execution_id
+        or batch.turn != turn
+        or not hmac.compare_digest(batch.batch_sha256, batch_sha256)
+        or any(call.name not in tool_scope for call in batch.calls)
+    ):
+        raise AgentWorkerProcessError("Agent Worker tool request scope fence 无效。")
+    return batch
+
+
+def _open_parent_tool_result_message(
+    message: object,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+    dispatch_key: RuntimePayloadKey,
+) -> AgentWorkerToolResultBatch:
+    if not isinstance(message, dict):
+        raise AgentWorkerProcessError("Agent Worker tool result 形状无效。")
+    try:
+        envelope = PayloadEnvelope.from_dict(message["tool_result_envelope"])  # type: ignore[arg-type]
+        result_batch_sha256 = str(message["tool_result_batch_sha256"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker tool result envelope 无效。"
+        ) from exc
+    expected = {
+        "type": "tool_result",
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(binding),
+        **_preparation_message_fields(preparation),
+        "running_receipt_sha256": running_receipt_sha256,
+        "tool_turn": call_batch.turn,
+        "tool_call_batch_sha256": call_batch.batch_sha256,
+        "tool_result_batch_sha256": result_batch_sha256,
+        "tool_result_envelope": envelope.to_dict(),
+        "tool_result_envelope_sha256": envelope.envelope_sha256,
+    }
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker tool result 认证失败。")
+    try:
+        plaintext = open_runtime_payload(
+            envelope,
+            aad=_tool_result_aad_identity_values(
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+                call_batch=call_batch,
+                result_batch_sha256=result_batch_sha256,
+            ),
+            key=dispatch_key,
+        )
+        result_batch = decode_tool_result_batch(plaintext)
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker tool result payload 无法认证。"
+        ) from exc
+    if (
+        result_batch.execution_id != preparation.execution_id
+        or result_batch.turn != call_batch.turn
+        or not hmac.compare_digest(
+            result_batch.call_batch_sha256,
+            call_batch.batch_sha256,
+        )
+        or not hmac.compare_digest(
+            result_batch.batch_sha256,
+            result_batch_sha256,
+        )
+        or tuple(result.call_id for result in result_batch.results)
+        != tuple(call.id for call in call_batch.calls)
+    ):
+        raise AgentWorkerProcessError("Agent Worker tool result fence 无效。")
+    return result_batch
+
+
 def _child_execution_message(
     message_type: str,
     *,
@@ -2087,7 +2467,12 @@ def _child_execution_message(
     preparation: AgentWorkerModelExecutionPreparation,
     extra: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    if message_type not in {"model_prepared", "model_terminal", "model_committed"}:
+    if message_type not in {
+        "model_prepared",
+        "tool_request",
+        "model_terminal",
+        "model_committed",
+    }:
         raise AgentWorkerProcessError("Agent Worker model child 消息类型无效。")
     return {
         **_child_message(
@@ -2261,26 +2646,437 @@ def _validate_child_execution_commit_message(
         raise AgentWorkerProcessError("Agent Worker model committed 回执认证失败。")
 
 
-def _run_model_execution_thread(
-    result_queue: queue.Queue[AgentWorkerModelExecutionResult | BaseException],
+def _run_model_turn_thread(
+    result_queue: queue.Queue[AgentWorkerModelTurnResult | BaseException],
     preparation: AgentWorkerModelExecutionPreparation,
     request: AgentWorkerRequest,
-    payload: AgentJobPayload,
     profile: bytes,
+    messages: list[dict[str, object]],
+    tools: list[dict[str, object]] | None,
+    timeout_milliseconds: int,
 ) -> None:
     try:
         result = asyncio.run(
-            execute_model_only(
+            execute_model_turn(
                 preparation=preparation,
                 request=request,
-                payload=payload,
                 model_profile=profile,
+                messages=messages,
+                tools=tools,
+                timeout_milliseconds=timeout_milliseconds,
             )
         )
     except BaseException as exc:
         result_queue.put(exc)
     else:
         result_queue.put(result)
+
+
+def _run_child_agent_execution(
+    *,
+    connection: Connection,
+    interval_seconds: float,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+    dispatch_key: RuntimePayloadKey,
+    binding: AgentWorkerJobBinding,
+    request: AgentWorkerRequest,
+    payload: AgentJobPayload,
+    preparation: AgentWorkerModelExecutionPreparation,
+    profile: bytes,
+    manifest: AgentWorkerToolManifest,
+    running_receipt_sha256: str,
+) -> tuple[AgentWorkerModelExecutionResult, int]:
+    messages: list[dict[str, object]] = []
+    if payload.context:
+        messages.append({"role": "system", "content": payload.context})
+    messages.append({"role": "user", "content": payload.task})
+    tools = list(manifest.tools) if manifest.tools else None
+    deadline = time.monotonic() + request.timeout_milliseconds / 1000
+    total_tokens = 0
+    total_cost_microusd = 0
+    model = ""
+    provider_model = ""
+    response_id_sha256 = ""
+    executed_tool_signatures: set[str] = set()
+
+    for turn in range(1, request.max_turns + 1):
+        remaining_milliseconds = max(0, round((deadline - time.monotonic()) * 1000))
+        if remaining_milliseconds < 1:
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.TIMEOUT,
+                    error="独立 Agent 总执行时间已耗尽，未获得可信终态响应。",
+                    error_code="agent_model_timeout",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=max(0, turn - 1),
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        result_queue: queue.Queue[AgentWorkerModelTurnResult | BaseException] = (
+            queue.Queue(maxsize=1)
+        )
+        execution_thread = threading.Thread(
+            target=_run_model_turn_thread,
+            args=(
+                result_queue,
+                preparation,
+                request,
+                profile,
+                messages,
+                tools,
+                min(remaining_milliseconds, request.timeout_milliseconds),
+            ),
+            name=f"naumi-agent-model-{preparation.execution_id[-12:]}-{turn}",
+            daemon=True,
+        )
+        execution_thread.start()
+        while execution_thread.is_alive():
+            if connection.poll(interval_seconds):
+                raise AgentWorkerProcessError(
+                    "model execution 期间收到未授权控制消息。"
+                )
+            sequence = _send_child_pulse(
+                connection=connection,
+                nonce=nonce,
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                process_id=process_id,
+                sequence=sequence,
+            )
+        execution_thread.join(timeout=1)
+        result_value = result_queue.get_nowait()
+        if isinstance(result_value, BaseException):
+            raise AgentWorkerProcessError(
+                "Agent Worker model execution kernel 失败。"
+            )
+        try:
+            total_tokens = _bounded_sum(
+                total_tokens,
+                result_value.total_tokens,
+                maximum=2**63 - 1,
+                field_name="total_tokens",
+            )
+            total_cost_microusd = _bounded_sum(
+                total_cost_microusd,
+                result_value.total_cost_microusd,
+                maximum=10**18,
+                field_name="total_cost_microusd",
+            )
+        except ValueError:
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.ERROR,
+                    error="Provider 累计用量超过安全范围，结果未发布。",
+                    error_code="agent_model_usage_invalid",
+                    total_tokens=0,
+                    total_cost_microusd=0,
+                    turns=turn,
+                ),
+                sequence,
+            )
+        model = result_value.model or model
+        provider_model = result_value.provider_model or provider_model
+        response_id_sha256 = (
+            result_value.provider_response_id_sha256 or response_id_sha256
+        )
+        if result_value.status is not AgentWorkerModelExecutionStatus.COMPLETED:
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=result_value.status,
+                    error=result_value.error,
+                    error_code=result_value.error_code,
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        if (
+            request.max_cost_microusd is not None
+            and total_cost_microusd > request.max_cost_microusd
+        ):
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.ERROR,
+                    error="独立 Agent 模型调用已超过本次预算，响应内容未发布。",
+                    error_code="agent_model_budget_exceeded",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        if not result_value.tool_calls:
+            return (
+                AgentWorkerModelExecutionResult(
+                    schema_version=1,
+                    execution_id=preparation.execution_id,
+                    request_sha256=request.request_sha256,
+                    status=AgentWorkerModelExecutionStatus.COMPLETED,
+                    response=result_value.response,
+                    error="",
+                    error_code="",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        if turn == request.max_turns:
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.MAX_TURNS,
+                    error="独立 Agent 已达到最大轮数，未继续执行待处理工具。",
+                    error_code="agent_model_max_turns",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        try:
+            call_batch = issue_tool_call_batch(
+                execution_id=preparation.execution_id,
+                turn=turn,
+                raw_calls=list(result_value.tool_calls),
+                tool_scope=manifest.tool_scope,
+            )
+        except (TypeError, ValueError):
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.ERROR,
+                    error="Provider 返回了无效或越权工具调用，未执行任何工具。",
+                    error_code="agent_model_unexpected_tool_call",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        call_signatures = {tool_call_signature(call) for call in call_batch.calls}
+        if executed_tool_signatures.intersection(call_signatures):
+            return (
+                _child_terminal_result(
+                    preparation=preparation,
+                    status=AgentWorkerModelExecutionStatus.ERROR,
+                    error="Provider 重复请求了相同工具操作，为避免重复副作用已停止。",
+                    error_code="agent_model_repeated_tool_call",
+                    total_tokens=total_tokens,
+                    total_cost_microusd=total_cost_microusd,
+                    turns=turn,
+                    model=model,
+                    provider_model=provider_model,
+                    provider_response_id_sha256=response_id_sha256,
+                ),
+                sequence,
+            )
+        executed_tool_signatures.update(call_signatures)
+        messages.append(
+            {
+                "role": "assistant",
+                "content": result_value.response or None,
+                "tool_calls": list(result_value.tool_calls),
+            }
+        )
+        call_envelope = seal_runtime_payload(
+            encode_tool_call_batch(call_batch),
+            aad=_tool_call_aad_values(
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+                call_batch=call_batch,
+            ),
+            key=dispatch_key,
+        )
+        sequence += 1
+        connection.send(
+            _child_tool_request_message(
+                nonce=nonce,
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                process_id=process_id,
+                sequence=sequence,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+                call_batch=call_batch,
+                call_envelope=call_envelope,
+            )
+        )
+        result_batch, sequence = _wait_for_parent_tool_result(
+            connection=connection,
+            interval_seconds=interval_seconds,
+            nonce=nonce,
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            sequence=sequence,
+            dispatch_key=dispatch_key,
+            binding=binding,
+            preparation=preparation,
+            running_receipt_sha256=running_receipt_sha256,
+            call_batch=call_batch,
+        )
+        for result in result_batch.results:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": result.call_id,
+                    "content": result.content,
+                }
+            )
+    raise AgentWorkerProcessError("Agent Worker model loop 未产生终态。")
+
+
+def _child_terminal_result(
+    *,
+    preparation: AgentWorkerModelExecutionPreparation,
+    status: AgentWorkerModelExecutionStatus,
+    error: str,
+    error_code: str,
+    total_tokens: int,
+    total_cost_microusd: int,
+    turns: int,
+    model: str = "",
+    provider_model: str = "",
+    provider_response_id_sha256: str = "",
+) -> AgentWorkerModelExecutionResult:
+    return AgentWorkerModelExecutionResult(
+        schema_version=1,
+        execution_id=preparation.execution_id,
+        request_sha256=preparation.request_sha256,
+        status=status,
+        response="",
+        error=error,
+        error_code=error_code,
+        total_tokens=total_tokens,
+        total_cost_microusd=total_cost_microusd,
+        turns=turns,
+        model=model,
+        provider_model=provider_model,
+        provider_response_id_sha256=provider_response_id_sha256,
+    )
+
+
+def _bounded_sum(left: int, right: int, *, maximum: int, field_name: str) -> int:
+    value = left + right
+    if value < 0 or value > maximum:
+        raise ValueError(f"{field_name} 累计值无效。")
+    return value
+
+
+def _send_child_pulse(
+    *,
+    connection: Connection,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+) -> int:
+    next_sequence = sequence + 1
+    connection.send(
+        _child_message(
+            "pulse",
+            nonce=nonce,
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            sequence=next_sequence,
+        )
+    )
+    return next_sequence
+
+
+def _wait_for_parent_tool_result(
+    *,
+    connection: Connection,
+    interval_seconds: float,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+    dispatch_key: RuntimePayloadKey,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+) -> tuple[AgentWorkerToolResultBatch, int]:
+    while True:
+        if connection.poll(interval_seconds):
+            message = connection.recv()
+            result = _open_parent_tool_result_message(
+                message,
+                nonce=nonce,
+                worker_id=worker_id,
+                instance_id=instance_id,
+                epoch=epoch,
+                contract_sha256=contract_sha256,
+                binding=binding,
+                preparation=preparation,
+                running_receipt_sha256=running_receipt_sha256,
+                call_batch=call_batch,
+                dispatch_key=dispatch_key,
+            )
+            return result, sequence
+        sequence = _send_child_pulse(
+            connection=connection,
+            nonce=nonce,
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            sequence=sequence,
+        )
 
 
 def _child_job_message(
@@ -2734,6 +3530,177 @@ def _model_profile_aad_values(
         contract_sha256=contract_sha256,
         binding=binding,
         preparation=preparation,
+    )
+
+
+def _tool_manifest_aad(
+    *,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> bytes:
+    return _tool_manifest_aad_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        binding=binding,
+        preparation=preparation,
+    )
+
+
+def _tool_manifest_aad_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+) -> bytes:
+    return _TOOL_MANIFEST_AAD_PREFIX + _canonical_execution_aad(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        binding=binding,
+        preparation=preparation,
+    )
+
+
+def _tool_call_aad_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+) -> bytes:
+    return _tool_call_aad_identity_values(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        binding=binding,
+        preparation=preparation,
+        running_receipt_sha256=running_receipt_sha256,
+        turn=call_batch.turn,
+        batch_sha256=call_batch.batch_sha256,
+    )
+
+
+def _tool_call_aad_identity(
+    *,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    turn: int,
+    batch_sha256: str,
+) -> bytes:
+    return _tool_call_aad_identity_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        binding=binding,
+        preparation=preparation,
+        running_receipt_sha256=running_receipt_sha256,
+        turn=turn,
+        batch_sha256=batch_sha256,
+    )
+
+
+def _tool_call_aad_identity_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    turn: int,
+    batch_sha256: str,
+) -> bytes:
+    if not _SHA256_RE.fullmatch(running_receipt_sha256):
+        raise AgentWorkerProcessError("running_receipt_sha256 格式无效。")
+    if not _SHA256_RE.fullmatch(batch_sha256):
+        raise AgentWorkerProcessError("tool call batch digest 格式无效。")
+    if isinstance(turn, bool) or not isinstance(turn, int) or turn < 1:
+        raise AgentWorkerProcessError("tool turn 格式无效。")
+    return (
+        _TOOL_CALL_AAD_PREFIX
+        + _canonical_execution_aad(
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            binding=binding,
+            preparation=preparation,
+        )
+        + b"\x00"
+        + running_receipt_sha256.encode("ascii")
+        + b"\x00"
+        + str(turn).encode("ascii")
+        + b"\x00"
+        + batch_sha256.encode("ascii")
+    )
+
+
+def _tool_result_aad(
+    *,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+    result_batch: AgentWorkerToolResultBatch,
+) -> bytes:
+    return _tool_result_aad_identity_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        binding=binding,
+        preparation=preparation,
+        running_receipt_sha256=running_receipt_sha256,
+        call_batch=call_batch,
+        result_batch_sha256=result_batch.batch_sha256,
+    )
+
+
+def _tool_result_aad_identity_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    binding: AgentWorkerJobBinding,
+    preparation: AgentWorkerModelExecutionPreparation,
+    running_receipt_sha256: str,
+    call_batch: AgentWorkerToolCallBatch,
+    result_batch_sha256: str,
+) -> bytes:
+    if not _SHA256_RE.fullmatch(result_batch_sha256):
+        raise AgentWorkerProcessError("tool result batch digest 格式无效。")
+    return (
+        _TOOL_RESULT_AAD_PREFIX
+        + _tool_call_aad_values(
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            binding=binding,
+            preparation=preparation,
+            running_receipt_sha256=running_receipt_sha256,
+            call_batch=call_batch,
+        )
+        + b"\x00"
+        + result_batch_sha256.encode("ascii")
     )
 
 

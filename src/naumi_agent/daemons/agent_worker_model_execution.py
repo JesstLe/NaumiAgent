@@ -22,6 +22,8 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _MAX_MODEL_PROFILE_BYTES = 2 * 1024**2
 MAX_AGENT_MODEL_RESPONSE_BYTES = 16 * 1024**2
+MAX_AGENT_MODEL_MESSAGES_BYTES = 64 * 1024**2
+MAX_AGENT_MODEL_TOOLS_BYTES = 4 * 1024**2
 _MAX_ERROR_BYTES = 4096
 _MAX_MODEL_NAME_BYTES = 1024
 
@@ -30,6 +32,7 @@ class AgentWorkerModelExecutionStatus(StrEnum):
     COMPLETED = "completed"
     ERROR = "error"
     TIMEOUT = "timeout"
+    MAX_TURNS = "max_turns"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,7 @@ class AgentWorkerModelExecutionPreparation:
     request_sha256: str
     claim_epoch: int
     model_profile_sha256: str
+    tool_manifest_sha256: str
 
     def __post_init__(self) -> None:
         for name in ("execution_id", "job_id"):
@@ -48,6 +52,10 @@ class AgentWorkerModelExecutionPreparation:
         _require_sha256(
             self.model_profile_sha256,
             field="model_profile_sha256",
+        )
+        _require_sha256(
+            self.tool_manifest_sha256,
+            field="tool_manifest_sha256",
         )
 
 
@@ -105,8 +113,8 @@ class AgentWorkerModelExecutionResult:
             minimum=0,
             maximum=10**18,
         )
-        if not 0 <= self.turns <= 1:
-            raise ValueError("model-only execution turns 必须为 0 或 1。")
+        if not 0 <= self.turns <= 1_000:
+            raise ValueError("Agent model execution turns 必须在 0 到 1000 之间。")
         _require_bounded_text(
             self.model,
             field="model",
@@ -130,12 +138,87 @@ class AgentWorkerModelExecutionResult:
         return self.total_cost_microusd / 1_000_000
 
 
+@dataclass(frozen=True, slots=True)
+class AgentWorkerModelTurnResult:
+    status: AgentWorkerModelExecutionStatus
+    response: str = field(repr=False)
+    tool_calls: tuple[dict[str, Any], ...] = field(repr=False)
+    error: str = field(repr=False)
+    error_code: str
+    total_tokens: int
+    total_cost_microusd: int
+    model: str
+    provider_model: str
+    provider_response_id_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, AgentWorkerModelExecutionStatus):
+            raise TypeError("Agent Worker model turn status 类型无效。")
+        _require_bounded_text(
+            self.response,
+            field="response",
+            maximum=MAX_AGENT_MODEL_RESPONSE_BYTES,
+            allow_empty=True,
+        )
+        if not isinstance(self.tool_calls, tuple) or any(
+            not isinstance(item, dict) for item in self.tool_calls
+        ):
+            raise TypeError("Agent Worker model turn tool_calls 类型无效。")
+        _bounded_json_bytes(
+            self.tool_calls,
+            maximum=MAX_AGENT_MODEL_TOOLS_BYTES,
+            label="model turn tool_calls",
+            allow_empty=True,
+        )
+        _require_bounded_text(
+            self.error,
+            field="error",
+            maximum=_MAX_ERROR_BYTES,
+            allow_empty=True,
+        )
+        if self.status is AgentWorkerModelExecutionStatus.COMPLETED:
+            if self.error or self.error_code:
+                raise ValueError("成功的 model turn 不得包含错误。")
+        else:
+            if self.response or self.tool_calls or not self.error:
+                raise ValueError("失败的 model turn 内容无效。")
+            _require_identifier(self.error_code, field="error_code")
+        _require_int_range(
+            self.total_tokens,
+            field="total_tokens",
+            minimum=0,
+            maximum=2**63 - 1,
+        )
+        _require_int_range(
+            self.total_cost_microusd,
+            field="total_cost_microusd",
+            minimum=0,
+            maximum=10**18,
+        )
+        _validated_model_name(
+            self.model,
+            field="model",
+            allow_empty=self.status is not AgentWorkerModelExecutionStatus.COMPLETED,
+        )
+        _validated_model_name(
+            self.provider_model,
+            field="provider_model",
+            allow_empty=True,
+        )
+        if self.provider_response_id_sha256:
+            _require_sha256(
+                self.provider_response_id_sha256,
+                field="provider_response_id_sha256",
+            )
+
+
 def issue_model_execution_preparation(
     *,
     job_id: str,
     request_sha256: str,
     claim_epoch: int,
     model_profile_sha256: str,
+    tool_manifest_sha256: str,
 ) -> AgentWorkerModelExecutionPreparation:
     identity = "\x00".join(
         (
@@ -143,6 +226,7 @@ def issue_model_execution_preparation(
             request_sha256,
             str(claim_epoch),
             model_profile_sha256,
+            tool_manifest_sha256,
         )
     ).encode("utf-8")
     return AgentWorkerModelExecutionPreparation(
@@ -151,6 +235,7 @@ def issue_model_execution_preparation(
         request_sha256=request_sha256,
         claim_epoch=claim_epoch,
         model_profile_sha256=model_profile_sha256,
+        tool_manifest_sha256=tool_manifest_sha256,
     )
 
 
@@ -349,6 +434,102 @@ async def execute_model_only(
     )
 
 
+async def execute_model_turn(
+    *,
+    preparation: AgentWorkerModelExecutionPreparation,
+    request: AgentWorkerRequest,
+    model_profile: bytes,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    timeout_milliseconds: int,
+) -> AgentWorkerModelTurnResult:
+    """Execute one bounded provider turn for the child-owned Agent loop."""
+    if not isinstance(preparation, AgentWorkerModelExecutionPreparation):
+        raise TypeError("preparation 类型无效。")
+    if not isinstance(request, AgentWorkerRequest):
+        raise TypeError("request 类型无效。")
+    if preparation.request_sha256 != request.request_sha256:
+        raise ValueError("Agent Worker model turn request fence 不一致。")
+    if model_profile_sha256(model_profile) != preparation.model_profile_sha256:
+        raise ValueError("Agent Worker model profile 摘要不一致。")
+    try:
+        _validate_model_messages(messages)
+        _validate_model_tools(tools)
+    except (TypeError, ValueError):
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.ERROR,
+            error="独立 Agent 上下文或工具 schema 超过安全边界，未发起 Provider 请求。",
+            error_code="agent_model_input_invalid",
+        )
+    _require_int_range(
+        timeout_milliseconds,
+        field="timeout_milliseconds",
+        minimum=1,
+        maximum=request.timeout_milliseconds,
+    )
+    if request.max_cost_microusd == 0:
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.ERROR,
+            error="Agent 模型预算为 0，未发起 Provider 请求。",
+            error_code="agent_model_budget_zero",
+        )
+    config = decode_model_profile(model_profile)
+    catalog = None
+    if config.catalog_path:
+        catalog_path = Path(config.catalog_path).expanduser()
+        if not catalog_path.is_absolute():
+            raise ValueError("Agent Worker model catalog_path 必须是绝对路径。")
+        catalog = load_provider_catalog(catalog_path)
+    router = ModelRouter(config, catalog=catalog)
+    tier = {
+        "fast": ModelTier.FAST,
+        "capable": ModelTier.CAPABLE,
+        "reasoning": ModelTier.REASONING,
+    }[request.model_tier]
+    try:
+        async with asyncio.timeout(timeout_milliseconds / 1000):
+            response = await router.call(messages=messages, tier=tier, tools=tools)
+    except TimeoutError:
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.TIMEOUT,
+            error="独立 Agent 模型请求超时，未获得可信终态响应。",
+            error_code="agent_model_timeout",
+        )
+    except Exception:
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.ERROR,
+            error="独立 Agent 模型传输失败；详细异常已隔离。",
+            error_code="agent_model_transport_failed",
+        )
+    try:
+        evidence = _normalize_provider_response(response)
+    except (TypeError, ValueError):
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.ERROR,
+            error="Provider 返回了无法认证的模型响应，内容未发布。",
+            error_code="agent_model_response_invalid",
+        )
+    if len(evidence.response.encode("utf-8")) > MAX_AGENT_MODEL_RESPONSE_BYTES:
+        return _safe_turn_failure(
+            status=AgentWorkerModelExecutionStatus.ERROR,
+            error="独立 Agent 模型响应超过安全大小上限，内容未发布。",
+            error_code="agent_model_response_too_large",
+            evidence=evidence,
+        )
+    return AgentWorkerModelTurnResult(
+        status=AgentWorkerModelExecutionStatus.COMPLETED,
+        response=evidence.response,
+        tool_calls=evidence.tool_calls,
+        error="",
+        error_code="",
+        total_tokens=evidence.total_tokens,
+        total_cost_microusd=evidence.total_cost_microusd,
+        model=evidence.model,
+        provider_model=evidence.provider_model,
+        provider_response_id_sha256=evidence.provider_response_id_sha256,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _NormalizedProviderResponse:
     response: str
@@ -358,6 +539,31 @@ class _NormalizedProviderResponse:
     model: str
     provider_model: str
     provider_response_id_sha256: str
+
+
+def _safe_turn_failure(
+    *,
+    status: AgentWorkerModelExecutionStatus,
+    error: str,
+    error_code: str,
+    evidence: _NormalizedProviderResponse | None = None,
+) -> AgentWorkerModelTurnResult:
+    return AgentWorkerModelTurnResult(
+        status=status,
+        response="",
+        tool_calls=(),
+        error=error,
+        error_code=error_code,
+        total_tokens=evidence.total_tokens if evidence is not None else 0,
+        total_cost_microusd=(
+            evidence.total_cost_microusd if evidence is not None else 0
+        ),
+        model=evidence.model if evidence is not None else "",
+        provider_model=evidence.provider_model if evidence is not None else "",
+        provider_response_id_sha256=(
+            evidence.provider_response_id_sha256 if evidence is not None else ""
+        ),
+    )
 
 
 def _normalize_provider_response(response: ModelResponse) -> _NormalizedProviderResponse:
@@ -371,6 +577,12 @@ def _normalize_provider_response(response: ModelResponse) -> _NormalizedProvider
         not isinstance(item, dict) for item in response.tool_calls
     ):
         raise TypeError("Provider tool_calls 类型无效。")
+    _bounded_json_bytes(
+        response.tool_calls,
+        maximum=MAX_AGENT_MODEL_TOOLS_BYTES,
+        label="provider tool_calls",
+        allow_empty=True,
+    )
     _require_int_range(
         response.usage.total_tokens,
         field="total_tokens",
@@ -449,6 +661,57 @@ def _validated_model_name(value: str, *, field: str, allow_empty: bool) -> str:
     return value
 
 
+def _validate_model_messages(messages: list[dict[str, Any]]) -> None:
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 2_100:
+        raise ValueError("Agent Worker model messages 数量无效。")
+    if any(not isinstance(item, dict) for item in messages):
+        raise TypeError("Agent Worker model message 必须是对象。")
+    roles = {str(item.get("role", "")) for item in messages}
+    if not roles.issubset({"system", "user", "assistant", "tool"}):
+        raise ValueError("Agent Worker model message role 无效。")
+    _bounded_json_bytes(
+        messages,
+        maximum=MAX_AGENT_MODEL_MESSAGES_BYTES,
+        label="model messages",
+    )
+
+
+def _validate_model_tools(tools: list[dict[str, Any]] | None) -> None:
+    if tools is None:
+        return
+    if not isinstance(tools, list) or not tools:
+        raise ValueError("Agent Worker model tools 必须是非空数组或 None。")
+    if any(not isinstance(item, dict) for item in tools):
+        raise TypeError("Agent Worker model tool schema 必须是对象。")
+    _bounded_json_bytes(
+        tools,
+        maximum=MAX_AGENT_MODEL_TOOLS_BYTES,
+        label="model tools",
+    )
+
+
+def _bounded_json_bytes(
+    value: Any,
+    *,
+    maximum: int,
+    label: str,
+    allow_empty: bool = False,
+) -> bytes:
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Agent Worker {label} JSON 无效。") from exc
+    if (not allow_empty and not encoded) or len(encoded) > maximum:
+        raise ValueError(f"Agent Worker {label} 大小无效。")
+    return encoded
+
+
 def _json_value(value: Any) -> Any:
     if isinstance(value, StrEnum):
         return value.value
@@ -507,7 +770,9 @@ __all__ = [
     "AgentWorkerModelExecutionPreparation",
     "AgentWorkerModelExecutionResult",
     "AgentWorkerModelExecutionStatus",
+    "AgentWorkerModelTurnResult",
     "MAX_AGENT_MODEL_RESPONSE_BYTES",
+    "execute_model_turn",
     "decode_model_execution_result",
     "decode_model_profile",
     "encode_model_execution_result",

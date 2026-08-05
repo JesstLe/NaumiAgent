@@ -105,13 +105,16 @@
 - ARC-04.5e3a / HAR-10.7h4 已让具备空 tool scope 的独立 Worker 通过两阶段 start fence 执行真实 Provider
   调用，并将 AES-GCM terminal 在同一 AgentJob 事务提交到终态与 publication outbox；Provider 异常脱敏，
   running 后进程丢失保持 recovery-required。详见 `ARC-04-5e3a-independent-agent-model-execution.md`。
-- 当前 Tool Worker 仍是每 Job 一个短寿命进程；Agent Worker 已是带 heartbeat 的常驻 model-only 进程，但
-  尚未接入生产 SubAgent 调度。PTY、完整 Supervisor、并发背压与 Windows 隔离后端仍未完成；带工具 Agent
-  执行仍在 embedded Runtime。结果 outbox 已有在线消费、
+- ARC-04.5e3b1 / HAR-10.7h5 已补齐 exact Tool manifest、加密 call/result RPC、多轮模型循环、跨轮重复
+  副作用阻断与父 Runtime authority callback；越权调用不触达执行器，执行中断保持 running unknown。详见
+  `ARC-04-5e3b1-encrypted-agent-tool-rpc.md`。
+- 当前 Tool Worker 仍是每 Job 一个短寿命进程；Agent Worker 已是带 heartbeat 的常驻工具循环内核，但
+  尚未接入生产 SubAgent 调度。PTY、完整 Supervisor、并发背压与 Windows 隔离后端仍未完成；默认带工具
+  Agent 执行仍在 embedded Runtime。结果 outbox 已有在线消费、
   startup recovery 和只读 UI projection；HAR-10.7f 已增加周期 publication recovery、有界退避、失败
   唤醒与 shutdown drain；HAR-10.7g 已补齐 durable retry budget、HMAC quarantine receipt 和双端隔离
   投影。exact requeue/prune、UI read/ack、retention 和外部 sink 仍未完成。
-  因此 ARC-04 保持 partial；下一最小纵向切片为 ARC-04.5e3b 加密 Tool RPC 与生产 Agent 调度。
+  因此 ARC-04 保持 partial；下一最小纵向切片为 ARC-04.5e3b2 生产 SubAgent 路由与 exact Engine tool authority 接入。
 
 ## 验收标准
 

@@ -480,9 +480,14 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
         worker.kind == "agent"
         and "agent_model_execution" in worker.capabilities
     ):
+        execution = (
+            "加密 Tool RPC 内核就绪、生产调度待接入 "
+            if "agent_tool_rpc" in worker.capabilities
+            else "model-only 执行就绪、工具 RPC 未开放 "
+        )
         return (
             identity
-            + "model-only 执行就绪、工具 RPC 未开放 "
+            + execution
             + f"容量占用 {worker.reserved_jobs}/{worker.max_concurrent_jobs}、"
             + f"可用 {worker.available_jobs} 心跳{health}{age}"
         )
