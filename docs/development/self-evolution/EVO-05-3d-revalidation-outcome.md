@@ -53,5 +53,6 @@ Agent Tool：`evolution_revalidation_outcome(request_id=...)`
 
 ## 6. 当前边界
 
-本切片只形成 staged rollout 的安全前置，不重签 Final Evaluation/Approval，也不执行 rollout。EVO-05.4 必须消费
-current `validated` Outcome，并在真正 rollout 前完成新 evidence 聚合和专业审批闭环。
+本切片只形成 staged rollout 的安全前置，不重签 Final Evaluation/Approval，也不执行 rollout。
+[EVO-05.3e](EVO-05-3e-fresh-evaluation-plan.md) 已先把 current `validated` Outcome 转为完整 fresh evaluation matrix；
+后续必须执行该 Plan、重新形成 Final Evaluation 和专业审批后，EVO-05.4 才能开放。

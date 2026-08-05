@@ -78,3 +78,6 @@ source overlays，并通过 Harness Sandbox + ARC-04 Worker 执行当前受信�
 验证证据。[EVO-05.3d](EVO-05-3d-revalidation-outcome.md) 已原子写入旧 promotion authority 失效账本并签发
 可动态 stale 的 Revalidation Outcome；通过只获得 staged-rollout candidate 资格，失败与来源漂移均 fail closed，
 且 Final Evaluation、专业签名和 Approval 必须重新签发/聚合。
+[EVO-05.3e](EVO-05-3e-fresh-evaluation-plan.md) 已把 current validated Outcome 机械转换成完整 fresh evaluation
+matrix，明确要求重跑 Interventional、跨平台 Adversarial RED/GREEN、comparison、attribution 与 lane receipts；尚未
+执行重评或开放 rollout。

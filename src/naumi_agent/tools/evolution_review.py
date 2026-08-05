@@ -83,6 +83,10 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionRevocationReason,
     render_evolution_reflection_memory,
 )
+from naumi_agent.evolution.revalidation_evaluation_plans import (
+    EvolutionRevalidationEvaluationPlanError,
+    render_evolution_revalidation_evaluation_plan,
+)
 from naumi_agent.evolution.revalidation_execution import (
     render_evolution_revalidation_execution,
 )
@@ -2142,6 +2146,66 @@ class EvolutionRevalidationOutcomeTool(Tool):
         return render_evolution_revalidation_outcome(view)
 
 
+class EvolutionRevalidationEvaluationPlanTool(Tool):
+    """Plan the complete fresh evaluation matrix required after revalidation."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_evaluation_plan"
+
+    @property
+    def description(self) -> str:
+        return (
+            "从 current validated Revalidation Outcome 重建完整 Interventional 与"
+            "跨平台 Adversarial 重评覆盖，签发 fresh evaluation authority。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "outcome_id": {
+                    "type": "string",
+                    "pattern": "^evrevalout_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["outcome_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            command_argument_names=(),
+            user_facing_name="Evolution Fresh Evaluation Plan",
+            search_hint=(
+                "evolution revalidation fresh evaluation lanes matrix 重新评估 覆盖"
+            ),
+        )
+
+    async def execute(self, outcome_id: str) -> str:
+        try:
+            view = await self._engine.evolution_revalidation_evaluation_plan_service.issue(
+                workspace_root=self._engine.workspace_root,
+                outcome_id=outcome_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationEvaluationPlanError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Fresh Evaluation Plan 未完成：{exc}"
+        return render_evolution_revalidation_evaluation_plan(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2177,6 +2241,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationReplayTool(engine),
         EvolutionRevalidationValidationTool(engine),
         EvolutionRevalidationOutcomeTool(engine),
+        EvolutionRevalidationEvaluationPlanTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2209,6 +2274,7 @@ __all__ = [
     "EvolutionRevalidationRequestTool",
     "EvolutionRevalidationValidationTool",
     "EvolutionRevalidationOutcomeTool",
+    "EvolutionRevalidationEvaluationPlanTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",
