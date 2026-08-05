@@ -101,6 +101,8 @@
   Interventional GREEN raw H5a 冻结 latency、completion/error 与可信 cost 基线。
 - [EVO-05.5b Runtime Observation](EVO-05-5b-runtime-observation.md)：已交付；将 terminal journal、baseline、
   frozen thresholds 与 HMAC control signals 聚合为 insufficient/passing/breached receipt。
+- [EVO-05.5c Rollout Stage Completion Evidence](EVO-05-5c-rollout-stage-completion.md)：已交付；重验 current
+  passing terminal prefix、Plan/Entry 与 control state，冻结 local-canary completion，但不授予 next-stage authority。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
