@@ -102,9 +102,7 @@ class EvolutionRevalidationReplayReceipt(_StrictModel):
 
     @model_validator(mode="after")
     def _receipt_is_exact(self) -> Self:
-        if tuple(item.order for item in self.files) != tuple(
-            range(1, len(self.files) + 1)
-        ):
+        if tuple(item.order for item in self.files) != tuple(range(1, len(self.files) + 1)):
             raise ValueError("Replay files 顺序不连续。")
         paths = tuple(item.path for item in self.files)
         if paths != tuple(sorted(paths)) or len(paths) != len(set(paths)):
@@ -267,9 +265,7 @@ class EvolutionRevalidationReplayExecutor:
         package = EvolutionPromotionPackageInput.model_validate(
             package_input.model_dump(mode="json")
         )
-        candidate_lease = ExperimentWorktreeLease.model_validate(
-            lease.model_dump(mode="json")
-        )
+        candidate_lease = ExperimentWorktreeLease.model_validate(lease.model_dump(mode="json"))
         _require_authority(request_view, package, candidate_lease, self._storage, self._clock())
         workspace = Path(request.workspace_root).resolve(strict=True)
         source = Path(candidate_lease.worktree_path).resolve(strict=True)
@@ -391,17 +387,13 @@ class EvolutionRevalidationReplayService:
             workspace_root=workspace_root,
             request_id=request_id,
         )
-        package_view = await self._package_input_store.get(
-            view.request.promotion_input_id
-        )
+        package_view = await self._package_input_store.get(view.request.promotion_input_id)
         if package_view is None or not package_view.promotion_review_eligible:
             raise EvolutionRevalidationReplayError(
                 "revalidation_replay_package_input_ineligible",
                 "Promotion Package Input 不存在、已撤销或不可读取。",
             )
-        lease = await self._lease_store.get(
-            package_view.package_input.experiment_contract_id
-        )
+        lease = await self._lease_store.get(package_view.package_input.experiment_contract_id)
         if lease is None:
             raise EvolutionRevalidationReplayError(
                 "revalidation_replay_lease_missing",
@@ -442,15 +434,24 @@ def _require_authority(
     now: datetime,
 ) -> None:
     request = view.request
-    if not (view.current_status == "ready" and view.execution_eligible):
+    if not view.execution_eligible:
         raise EvolutionRevalidationReplayError(
             "revalidation_replay_request_ineligible",
             "Revalidation Request 已失效或不具备执行资格。",
         )
-    if request.operation != "validate_exact_tree":
+    if view.current_target_relation == "advanced":
         raise EvolutionRevalidationReplayError(
             "revalidation_replay_rebase_not_implemented",
             "目标已前进；当前切片拒绝伪重放，需由后续三方 rebase executor 处理。",
+        )
+    if not (
+        view.current_status == "ready"
+        and view.current_target_relation == "same"
+        and request.operation == "validate_exact_tree"
+    ):
+        raise EvolutionRevalidationReplayError(
+            "revalidation_replay_request_ineligible",
+            "Revalidation Request 不满足 exact-target replay 条件。",
         )
     if not (
         request.promotion_input_id == package.input_id
@@ -494,9 +495,7 @@ def _capture_candidate(
         )
     status = _git_bytes(source, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     expected = b"".join(
-        (b"?? " if item.operation == "create" else b" M ")
-        + item.path.encode("utf-8")
-        + b"\x00"
+        (b"?? " if item.operation == "create" else b" M ") + item.path.encode("utf-8") + b"\x00"
         for item in patch_files
     )
     if status != expected:
@@ -683,9 +682,7 @@ def _validated_receipt(
     receipt: EvolutionRevalidationReplayReceipt,
 ) -> EvolutionRevalidationReplayReceipt:
     try:
-        return EvolutionRevalidationReplayReceipt.model_validate_json(
-            receipt.model_dump_json()
-        )
+        return EvolutionRevalidationReplayReceipt.model_validate_json(receipt.model_dump_json())
     except (AttributeError, TypeError, ValueError) as exc:
         raise EvolutionRevalidationReplayError(
             "revalidation_replay_receipt_invalid", "Replay Receipt 无法验证。"

@@ -28,7 +28,8 @@
 - [EVO-05.3a Revalidation Request Authority](EVO-05-3a-revalidation-request-authority.md)：已交付；只把 current
   approved Decision 与 exact Package 冻结为可动态失效、非执行型隔离请求。
 - EVO-05.3b1 Exact-target replay：已在 disposable detached worktree 真实重放 Candidate bytes 并签发 durable Receipt；
-- EVO-05.3b2-05.3d Rebase/revalidate executor/outcome：目标 main 变化后隔离三方重放 patch、重新验证并使旧结果失效。
+- EVO-05.3b2a Target-advance authority：已证明 target-only stale 与线性前进关系，形成合法隔离 rebase 输入；
+- EVO-05.3b2b-05.3d Rebase/revalidate executor/outcome：隔离三方重放 patch、冲突/恢复、重新验证并使旧结果失效。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

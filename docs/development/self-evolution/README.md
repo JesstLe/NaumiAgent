@@ -68,5 +68,7 @@ append-only 的 `approved|rejected|changes_requested|pending|stale` Decision Rec
 rebase/revalidate。[EVO-05.3a](EVO-05-3a-revalidation-request-authority.md) 已把仍 current 的 approved Decision 与
 exact Package 冻结为 deterministic、可动态失效的 Revalidation Request；
 [EVO-05.3b1](EVO-05-3b1-exact-target-replay.md) 已从 active Lease 重读真实 Candidate bytes，并在一次性 detached
-worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。它尚不支持目标前进后的 rebase，也不运行验证
-命令或形成 Promotion authority；EVO-05.3b2-05.3d 的 rebase/recovery、重新验证与 Outcome 仍未实现。
+worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。
+[EVO-05.3b2a](EVO-05-3b2a-target-advance-authority.md) 已关闭 target 前进后 Request 永久不可执行的 authority 死锁：
+仅 target 线性前进且审批/签名/Input/Reflection 其余部分仍 current 时授予隔离 rebase 资格；diverged 或任何非 target
+证据失效仍阻断。三方执行、冲突/恢复、重新验证与 Outcome 仍未实现。

@@ -63,9 +63,7 @@ def _rehash_input(payload: dict) -> EvolutionPromotionPackageInput:
 
 def _rehash_request(payload: dict) -> EvolutionRevalidationRequest:
     artifact = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"request_id", "request_sha256"}
+        key: value for key, value in payload.items() if key not in {"request_id", "request_sha256"}
     }
     digest = _sha256_payload(artifact)
     return EvolutionRevalidationRequest.model_validate(
@@ -99,9 +97,7 @@ def _fixture(root: Path):
         mutation_receipt_id=f"evmr_{'6' * 24}",
         receipt_sha256="6" * 64,
         files=(fact,),
-        files_sha256=_sha256_payload(
-            [{**vars(fact), "fact_sha256": fact.fact_sha256}]
-        ),
+        files_sha256=_sha256_payload([{**vars(fact), "fact_sha256": fact.fact_sha256}]),
         total_added_lines=2,
         total_deleted_lines=1,
     )
@@ -207,8 +203,11 @@ def _fixture(root: Path):
         request=request,
         source_readable=True,
         decision_current=True,
+        decision_rebase_eligible=False,
         package_current=True,
         target_current=True,
+        current_target_head=baseline,
+        current_target_relation="same",
         current_status="ready",
         execution_eligible=True,
     )
@@ -249,9 +248,7 @@ async def test_exact_candidate_is_replayed_detached_and_persisted_once(tmp_path:
         workspace_root=tmp_path,
         evolution_revalidation_replay_service=_ReplayService(receipt),
     )
-    tool_output = await EvolutionRevalidationReplayTool(engine).execute(
-        view.request.request_id
-    )
+    tool_output = await EvolutionRevalidationReplayTool(engine).execute(view.request.request_id)
     slash_output = await execute_slash_command(
         engine,
         f"/evolution revalidation-replay {view.request.request_id}",
@@ -279,6 +276,8 @@ async def test_stale_rebase_and_source_drift_fail_closed(tmp_path: Path) -> None
     stale = view.model_copy(
         update={
             "target_current": False,
+            "current_target_head": None,
+            "current_target_relation": "unavailable",
             "current_status": "stale",
             "execution_eligible": False,
         }
@@ -295,7 +294,18 @@ async def test_stale_rebase_and_source_drift_fail_closed(tmp_path: Path) -> None
             "operation": "rebase_then_validate",
         }
     )
-    rebase = view.model_copy(update={"request": rebase_request})
+    rebase = view.model_copy(
+        update={
+            "request": rebase_request,
+            "decision_current": False,
+            "decision_rebase_eligible": True,
+            "target_current": False,
+            "current_target_head": "a" * 40,
+            "current_target_relation": "advanced",
+            "current_status": "stale",
+            "execution_eligible": True,
+        }
+    )
     with pytest.raises(EvolutionRevalidationReplayError) as unsupported:
         await executor.execute(request_view=rebase, package_input=package, lease=lease)
     assert unsupported.value.code == "revalidation_replay_rebase_not_implemented"

@@ -124,17 +124,20 @@ class EvolutionPromotionApprovalRoleDecision(_StrictModel):
         if self.response_present is not response_ids or self.signature_present is not signature_ids:
             raise ValueError("Approval role source presence 投影不一致。")
         if not self.response_present:
-            if any(
-                (
-                    self.response,
-                    self.response_current,
-                    self.identity_verified,
-                    self.signature_present,
-                    self.signature_verified,
-                    self.signature_current,
-                    self.counts_toward_quorum,
+            if (
+                any(
+                    (
+                        self.response,
+                        self.response_current,
+                        self.identity_verified,
+                        self.signature_present,
+                        self.signature_verified,
+                        self.signature_current,
+                        self.counts_toward_quorum,
+                    )
                 )
-            ) or self.outcome is not EvolutionPromotionApprovalRoleOutcome.RESPONSE_MISSING:
+                or self.outcome is not EvolutionPromotionApprovalRoleOutcome.RESPONSE_MISSING
+            ):
                 raise ValueError("Missing Approval Response 的 role outcome 无效。")
             return self
         if not self.response or not self.response_current:
@@ -159,9 +162,7 @@ class EvolutionPromotionApprovalRoleDecision(_StrictModel):
         expected_counts = expected is EvolutionPromotionApprovalRoleOutcome.APPROVED
         if self.outcome is not expected or self.counts_toward_quorum is not expected_counts:
             raise ValueError("Approval role outcome/quorum 投影不一致。")
-        if not self.signature_present and any(
-            (self.signature_verified, self.signature_current)
-        ):
+        if not self.signature_present and any((self.signature_verified, self.signature_current)):
             raise ValueError("缺失 Signature Receipt 不能声明 signature verified/current。")
         return self
 
@@ -250,9 +251,7 @@ class EvolutionPromotionApprovalDecisionReceipt(_StrictModel):
             raise ValueError("Approval Decision sequence/previous link 不一致。")
         roles = tuple(item.role for item in self.role_decisions)
         orders = tuple(item.order for item in self.role_decisions)
-        if len(roles) != len(set(roles)) or orders != tuple(
-            range(1, len(self.role_decisions) + 1)
-        ):
+        if len(roles) != len(set(roles)) or orders != tuple(range(1, len(self.role_decisions) + 1)):
             raise ValueError("Approval Decision role 顺序或唯一性无效。")
         gates = tuple(item.gate for item in self.technical_gate_decisions)
         if len(gates) != len(set(gates)):
@@ -344,14 +343,21 @@ class EvolutionPromotionApprovalDecisionView(_StrictModel):
     receipt: EvolutionPromotionApprovalDecisionReceipt
     source_current: bool
     current_status: EvolutionPromotionApprovalDecisionStatus
+    target_only_stale: bool = False
     current_rebase_revalidation_eligible: bool
 
     @model_validator(mode="after")
     def _view_projection_is_exact(self) -> Self:
         if self.source_current and self.current_status is not self.receipt.status:
             raise ValueError("Current Approval Decision 与 source-current Receipt 不一致。")
+        if self.target_only_stale and (
+            self.source_current
+            or self.current_status is not EvolutionPromotionApprovalDecisionStatus.STALE
+        ):
+            raise ValueError("Approval Decision target-only stale 投影不一致。")
         if self.current_rebase_revalidation_eligible is not (
             self.current_status is EvolutionPromotionApprovalDecisionStatus.APPROVED
+            or self.target_only_stale
         ):
             raise ValueError("Approval Decision current eligibility 投影不一致。")
         return self
@@ -390,9 +396,7 @@ class EvolutionPromotionApprovalDecisionBuilder:
                 for item in responses
             )
             signatures = tuple(
-                EvolutionApprovalSignatureReceiptView.model_validate_json(
-                    item.model_dump_json()
-                )
+                EvolutionApprovalSignatureReceiptView.model_validate_json(item.model_dump_json())
                 for item in signatures
             )
             timestamp = _aware_datetime(decided_at, "Approval Decision clock")
@@ -470,9 +474,7 @@ class EvolutionPromotionApprovalDecisionBuilder:
             "target_current": package_view.target_current,
             "requirement_expired": requirement_view.expired,
             "role_decisions": [item.model_dump(mode="json") for item in role_decisions],
-            "technical_gate_decisions": [
-                item.model_dump(mode="json") for item in gate_decisions
-            ],
+            "technical_gate_decisions": [item.model_dump(mode="json") for item in gate_decisions],
             "required_approvals": len(role_decisions),
             "approvals_collected": sum(item.counts_toward_quorum for item in role_decisions),
             "required_signatures": sum(item.signature_required for item in role_decisions),
@@ -490,8 +492,7 @@ class EvolutionPromotionApprovalDecisionBuilder:
                 EvolutionPromotionApprovalDecisionStatus.REJECTED,
                 EvolutionPromotionApprovalDecisionStatus.CHANGES_REQUESTED,
             },
-            "final_quorum_reached": status
-            is EvolutionPromotionApprovalDecisionStatus.APPROVED,
+            "final_quorum_reached": status is EvolutionPromotionApprovalDecisionStatus.APPROVED,
             "rebase_revalidation_eligible": status
             is EvolutionPromotionApprovalDecisionStatus.APPROVED,
             "decided_at": timestamp.isoformat(),
@@ -770,9 +771,7 @@ class EvolutionPromotionApprovalDecisionService:
                     **sources,
                     sequence=sequence,
                     previous_decision_id="" if latest is None else latest.decision_id,
-                    previous_decision_sha256=""
-                    if latest is None
-                    else latest.decision_sha256,
+                    previous_decision_sha256="" if latest is None else latest.decision_sha256,
                     decided_at=decided_at,
                 )
                 refreshed = await self._collect_sources(workspace_root, requirement_id)
@@ -780,9 +779,7 @@ class EvolutionPromotionApprovalDecisionService:
                     **refreshed,
                     sequence=sequence,
                     previous_decision_id="" if latest is None else latest.decision_id,
-                    previous_decision_sha256=""
-                    if latest is None
-                    else latest.decision_sha256,
+                    previous_decision_sha256="" if latest is None else latest.decision_sha256,
                     decided_at=decided_at,
                 )
                 if proposed.source_set_sha256 != expected.source_set_sha256:
@@ -808,12 +805,19 @@ class EvolutionPromotionApprovalDecisionService:
                     decided_at=_aware(stored.decided_at),
                 )
                 source_current = current.source_set_sha256 == stored.source_set_sha256
+                target_only_stale = _target_only_stale(
+                    approved=stored,
+                    current=current,
+                    sources=current_sources,
+                )
                 return EvolutionPromotionApprovalDecisionView(
                     receipt=stored,
                     source_current=source_current,
                     current_status=current.status,
+                    target_only_stale=target_only_stale,
                     current_rebase_revalidation_eligible=(
                         current.status is EvolutionPromotionApprovalDecisionStatus.APPROVED
+                        or target_only_stale
                     ),
                 )
             raise EvolutionPromotionApprovalDecisionError(
@@ -842,12 +846,19 @@ class EvolutionPromotionApprovalDecisionService:
             decided_at=_aware(receipt.decided_at),
         )
         source_current = current.source_set_sha256 == receipt.source_set_sha256
+        target_only_stale = _target_only_stale(
+            approved=receipt,
+            current=current,
+            sources=sources,
+        )
         return EvolutionPromotionApprovalDecisionView(
             receipt=receipt,
             source_current=source_current,
             current_status=current.status,
+            target_only_stale=target_only_stale,
             current_rebase_revalidation_eligible=(
                 current.status is EvolutionPromotionApprovalDecisionStatus.APPROVED
+                or target_only_stale
             ),
         )
 
@@ -932,15 +943,14 @@ def render_evolution_promotion_approval_decision(
         "",
         f"- Status：`{item.status.value}` · current `{view.current_status.value}`",
         f"- Source current：{'是' if view.source_current else '否'}",
+        f"- Target-only stale：{'是' if view.target_only_stale else '否'}",
         f"- Sequence：{item.sequence}",
         f"- Requirement：`{item.requirement_id}`",
         f"- Package：`{item.package_id}`",
         f"- Approvals：{item.approvals_collected}/{item.required_approvals}",
         f"- Signatures：{item.signatures_collected}/{item.required_signatures}",
-        "- Missing roles："
-        + (", ".join(role.value for role in item.missing_roles) or "none"),
-        "- Blocking gates："
-        + (", ".join(gate.value for gate in item.blocking_gates) or "none"),
+        "- Missing roles：" + (", ".join(role.value for role in item.missing_roles) or "none"),
+        "- Blocking gates：" + (", ".join(gate.value for gate in item.blocking_gates) or "none"),
         "- Rebase/revalidate eligible："
         + ("是" if view.current_rebase_revalidation_eligible else "否"),
         "- Git/Merge/Push/Publish/Promotion：`false`",
@@ -949,11 +959,7 @@ def render_evolution_promotion_approval_decision(
     ]
     lines.extend(
         f"- `{role.role.value}`：`{role.outcome.value}`"
-        + (
-            f" · response `{role.response_receipt_id}`"
-            if role.response_receipt_id
-            else ""
-        )
+        + (f" · response `{role.response_receipt_id}`" if role.response_receipt_id else "")
         for role in item.role_decisions
     )
     return "\n".join(lines)
@@ -1015,16 +1021,10 @@ def _role_decision(
         identity_verified=identity_verified,
         signature_present=signature is not None,
         signature_receipt_id="" if signature is None else signature.receipt.receipt_id,
-        signature_receipt_sha256=""
-        if signature is None
-        else signature.receipt.receipt_sha256,
+        signature_receipt_sha256="" if signature is None else signature.receipt.receipt_sha256,
         signature_verified=verified_signature,
-        signature_current=bool(
-            signature is not None and signature.eligible_for_future_aggregation
-        ),
-        counts_toward_quorum=(
-            outcome is EvolutionPromotionApprovalRoleOutcome.APPROVED
-        ),
+        signature_current=bool(signature is not None and signature.eligible_for_future_aggregation),
+        counts_toward_quorum=(outcome is EvolutionPromotionApprovalRoleOutcome.APPROVED),
         outcome=outcome,
     )
 
@@ -1115,8 +1115,7 @@ def _decision_status(
     ):
         return EvolutionPromotionApprovalDecisionStatus.STALE
     if any(
-        item.outcome is EvolutionPromotionApprovalRoleOutcome.REJECTED
-        for item in role_decisions
+        item.outcome is EvolutionPromotionApprovalRoleOutcome.REJECTED for item in role_decisions
     ):
         return EvolutionPromotionApprovalDecisionStatus.REJECTED
     if any(
@@ -1133,11 +1132,65 @@ def _decision_status(
         item.outcome is not EvolutionPromotionApprovalRoleOutcome.APPROVED
         for item in role_decisions
     ) or any(
-        item.state is not EvolutionPromotionTechnicalGateState.SATISFIED
-        for item in gate_decisions
+        item.state is not EvolutionPromotionTechnicalGateState.SATISFIED for item in gate_decisions
     ):
         return EvolutionPromotionApprovalDecisionStatus.PENDING
     return EvolutionPromotionApprovalDecisionStatus.APPROVED
+
+
+def _target_only_stale(
+    *,
+    approved: EvolutionPromotionApprovalDecisionReceipt,
+    current: EvolutionPromotionApprovalDecisionReceipt,
+    sources: Mapping[str, object],
+) -> bool:
+    """Return whether only target movement invalidated an approved authority set."""
+    if not (
+        approved.status is EvolutionPromotionApprovalDecisionStatus.APPROVED
+        and current.status is EvolutionPromotionApprovalDecisionStatus.STALE
+        and current.package_current
+        and current.input_active
+        and current.reflection_active
+        and not current.target_current
+        and not current.requirement_expired
+    ):
+        return False
+    current_roles = {item.role: item for item in current.role_decisions}
+    for original in approved.role_decisions:
+        observed = current_roles.get(original.role)
+        if original.outcome is not EvolutionPromotionApprovalRoleOutcome.APPROVED:
+            return False
+        allowed = {EvolutionPromotionApprovalRoleOutcome.APPROVED}
+        if original.signature_required:
+            allowed.add(EvolutionPromotionApprovalRoleOutcome.SIGNATURE_STALE)
+        if observed is None or observed.outcome not in allowed:
+            return False
+    signatures = tuple(sources.get("signatures", ()))
+    if any(
+        not isinstance(item, EvolutionApprovalSignatureReceiptView)
+        or not (
+            item.requirement_current
+            and not item.target_current
+            and not item.requirement_expired
+            and item.response_current
+            and item.principal_active
+            and item.principal_key_current
+            and item.role_binding_current
+        )
+        for item in signatures
+    ):
+        return False
+    if len(signatures) != approved.required_signatures:
+        return False
+    target_gate_seen = False
+    for gate in current.technical_gate_decisions:
+        if gate.gate is EvolutionPromotionTechnicalGate.TARGET_CURRENT:
+            target_gate_seen = True
+            if gate.state is not EvolutionPromotionTechnicalGateState.STALE:
+                return False
+        elif gate.state is not EvolutionPromotionTechnicalGateState.SATISFIED:
+            return False
+    return target_gate_seen
 
 
 def _responses_by_role(
@@ -1237,8 +1290,7 @@ def _require_response_matches(
         and response.reasons == step.reasons
         and response.signature_entry.role is step.role
         and response.signature_entry.required is step.signature_required
-        and response.signature_entry.signable_payload_sha256
-        == requirement.signable_payload_sha256
+        and response.signature_entry.signable_payload_sha256 == requirement.signable_payload_sha256
         and response.requirement_expires_at == requirement.expires_at
     ):
         raise EvolutionPromotionApprovalDecisionError(

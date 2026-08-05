@@ -60,11 +60,12 @@ LLM generated。任何字段、ID 或摘要篡改都会使 Pydantic artifact 校
 | 状态 | 条件 | execution eligible |
 | --- | --- | --- |
 | `ready` | source 可读，Decision、Package、target 全部 exact/current | true |
-| `stale` | source 可读，且 Package/Input/Reflection 或 target 已变化 | false |
+| `stale` | source 可读，且 Package/Input/Reflection 或 target 已变化 | 仅 target 线性前进且其余 authority current 时为 true |
 | `ineligible` | source 不可读，或 target 仍相同但审批、签名、Principal、Requirement 已失效 | false |
 
-状态优先级先判断 Package/target 漂移，再判断审批资格。因此 main 前进会明确显示 `stale`，Principal key 轮换或
-Requirement 失效则显示 `ineligible`。上游 authority 无法读取时 fail closed 为不可执行。
+状态优先级先判断 Package/target 漂移，再判断审批资格。因此 main 前进仍明确显示 `stale`，但 EVO-05.3b2a 会额外
+证明 target-only stale 与线性祖先关系后，只授予隔离 rebase 执行资格；Principal key 轮换、Requirement 失效、target
+diverged 或 authority 无法读取仍 fail closed 为不可执行。
 
 ## 6. 双通道入口
 
@@ -88,7 +89,7 @@ Requirement 失效则显示 `ineligible`。上游 authority 无法读取时 fail
 - 真实临时 Git repository、SQLite 与 Ed25519 keypair 完整构造 approved Decision，再签发 request；
 - 8 路并发签发只保留一行，返回完全相同的 request/view；
 - pending 与显式 reject Decision 都被阻断，且无持久化副作用；
-- target commit 前进后历史 request 变为 `stale`；
+- target commit 线性前进后历史 request 保持 `stale`，但仅在其余 authority current 时获得隔离 rebase 资格；
 - independent reviewer Principal key 轮换后 request 变为 `ineligible`；
 - Request digest、SQLite index、完整 Package JSON 和 workspace mismatch 全部 fail closed；
 - Slash、写 Tool、只读 Authority、Engine composition、lazy export 与 PermissionRule 使用同一实现；
@@ -98,7 +99,8 @@ Requirement 失效则显示 `ineligible`。上游 authority 无法读取时 fail
 
 本切片关闭了“approved Decision 如何安全进入再验证阶段”的 authority 缺口，但没有完成 EVO-05.3：
 
-- EVO-05.3b 仍需创建隔离 worktree/replay executor，并证明绝不写 main worktree 或 target branch；
+- EVO-05.3b1 已完成 exact-target 隔离 replay；EVO-05.3b2a 已关闭 target movement authority 死锁；
+- EVO-05.3b2b 仍需三方 rebase、冲突 artifact、跨进程 fencing 与崩溃恢复；
 - EVO-05.3c 仍需把 request 映射到重新绑定的 Validation Plan/Eval cohort，并签发新 receipt；
 - EVO-05.3d 仍需形成 Revalidation Outcome，比较 replay 后生产文件树并使旧 Eval receipt 确定性 stale；
 - 任何 rebase conflict、validation failure、取消、崩溃恢复与清理都必须有 durable receipt；
