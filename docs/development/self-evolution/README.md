@@ -75,4 +75,6 @@ worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。
 worktree 执行真实三方合并，持久化 success/conflict/failure Outcome，并加入 claim、epoch fencing、过期恢复和残留
 worktree 清理。[EVO-05.3c](EVO-05-3c-harness-revalidation-evidence.md) 已按 Replay/Rebase identity 重新构造受摘要约束的
 source overlays，并通过 Harness Sandbox + ARC-04 Worker 执行当前受信任 Profile 的匹配检查，持久化新的 job/lifecycle
-验证证据。旧证据显式失效与最终 Revalidation Outcome 仍未实现。
+验证证据。[EVO-05.3d](EVO-05-3d-revalidation-outcome.md) 已原子写入旧 promotion authority 失效账本并签发
+可动态 stale 的 Revalidation Outcome；通过只获得 staged-rollout candidate 资格，失败与来源漂移均 fail closed，
+且 Final Evaluation、专业签名和 Approval 必须重新签发/聚合。

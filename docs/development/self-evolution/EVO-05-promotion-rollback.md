@@ -33,7 +33,8 @@
   worktree 真实三方重放，持久化冲突/失败、claim、epoch fencing 与恢复；
 - [EVO-05.3c Harness revalidation evidence](EVO-05-3c-harness-revalidation-evidence.md)：已重新构造 exact/rebase
   overlay，经 Harness Sandbox 与 ARC-04 Worker 执行匹配检查并签发新证据；
-- EVO-05.3d Revalidation Outcome：使旧结果明确失效并形成新的 promotion 前置结论。
+- [EVO-05.3d Revalidation Outcome](EVO-05-3d-revalidation-outcome.md)：已交付；原子失效旧 evidence，形成可动态
+  stale 的 rollout 候选结论，并强制 Final Evaluation、专业签名与 Approval 重新签发/聚合。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

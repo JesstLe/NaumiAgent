@@ -86,6 +86,10 @@ from naumi_agent.evolution.reflection_memories import (
 from naumi_agent.evolution.revalidation_execution import (
     render_evolution_revalidation_execution,
 )
+from naumi_agent.evolution.revalidation_outcomes import (
+    EvolutionRevalidationOutcomeError,
+    render_evolution_revalidation_outcome,
+)
 from naumi_agent.evolution.revalidation_rebases import EvolutionRevalidationRebaseError
 from naumi_agent.evolution.revalidation_replays import EvolutionRevalidationReplayError
 from naumi_agent.evolution.revalidation_requests import (
@@ -2080,6 +2084,64 @@ class EvolutionRevalidationValidationTool(Tool):
         return render_evolution_revalidation_validation(receipt)
 
 
+class EvolutionRevalidationOutcomeTool(Tool):
+    """Invalidate old promotion evidence and issue one durable outcome."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_outcome"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费持久化 Harness Revalidation Receipt，原子失效旧 promotion evidence，"
+            "并签发要求重新评估与重新审批的 Revalidation Outcome。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrevalidation_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            command_argument_names=(),
+            user_facing_name="Evolution 再验证结论",
+            search_hint="evolution revalidation outcome stale invalidation 自进化 证据失效",
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = await self._engine.evolution_revalidation_outcome_service.issue(
+                workspace_root=self._engine.workspace_root,
+                request_id=request_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationOutcomeError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Revalidation Outcome 未完成：{exc}"
+        return render_evolution_revalidation_outcome(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2114,6 +2176,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationRequestTool(engine),
         EvolutionRevalidationReplayTool(engine),
         EvolutionRevalidationValidationTool(engine),
+        EvolutionRevalidationOutcomeTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2145,6 +2208,7 @@ __all__ = [
     "EvolutionRevalidationRequestAuthorityTool",
     "EvolutionRevalidationRequestTool",
     "EvolutionRevalidationValidationTool",
+    "EvolutionRevalidationOutcomeTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

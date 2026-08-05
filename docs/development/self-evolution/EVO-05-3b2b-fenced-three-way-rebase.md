@@ -80,4 +80,5 @@ evolution_revalidation_replay(request_id=...)
   Candidate blob authority，不能把临时 worktree 当永久归档。
 - [EVO-05.3c](EVO-05-3c-harness-revalidation-evidence.md) 已消费成功 Outcome，在同一 result identity 上运行
   Harness Profile checks 并签发新 Worker evidence。
-- EVO-05.3d 必须使旧 validation/decision evidence 明确 stale，并形成可审计 Revalidation Outcome；在此之前禁止 promotion。
+- [EVO-05.3d](EVO-05-3d-revalidation-outcome.md) 已使旧 validation/decision evidence 明确失效并形成可审计
+  Revalidation Outcome；Outcome 本身仍不授予 promotion authority。

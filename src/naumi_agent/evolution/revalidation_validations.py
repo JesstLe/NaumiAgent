@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import subprocess
 from collections.abc import Awaitable, Callable
@@ -318,6 +319,32 @@ class EvolutionRevalidationValidationStore:
                 )
             await db.commit()
         return receipt
+
+    async def get_by_request(
+        self,
+        request_id: str,
+    ) -> EvolutionRevalidationValidationReceipt | None:
+        """Return the terminal receipt for one request without claiming execution."""
+        if re.fullmatch(r"evrevalidation_[0-9a-f]{24}", str(request_id)) is None:
+            raise ValueError("Revalidation Request ID 格式无效。")
+        if not self._db_path.exists():
+            return None
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            row = await (
+                await db.execute(
+                    "SELECT receipt_json FROM evolution_revalidation_validations "
+                    "WHERE request_id = ? AND receipt_json != '' "
+                    "ORDER BY updated_at DESC, rowid DESC LIMIT 1",
+                    (request_id,),
+                )
+            ).fetchone()
+        if row is None:
+            return None
+        return EvolutionRevalidationValidationReceipt.model_validate_json(
+            row["receipt_json"]
+        )
 
 
 class EvolutionRevalidationValidationService:

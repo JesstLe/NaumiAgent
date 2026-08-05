@@ -65,8 +65,7 @@ lockdown 可调用、每会话最多 50 次；bypass 不做二次确认，但不
 
 - EVO-05.3b2：目标前进后的三方 rebase、冲突 artifact、跨进程 fencing 与崩溃残留恢复；
 - EVO-05.3c：为 replay tree 重绑 Validation Plan，运行 Harness checks/Eval cohorts 并签发新 receipts；
-- EVO-05.3d：形成 durable Outcome，机械使旧验证结果 stale；
+- [EVO-05.3d](EVO-05-3d-revalidation-outcome.md)：已形成 durable Outcome，并机械失效旧 promotion evidence；
 - EVO-05.4-05.7：rollout、监控、自动回滚和最终 Outcome/Feedback。
 
 当前 Receipt 只证明“批准源码可安全重放”，不能证明 Candidate 正确，更不能授权 Promotion。
-
