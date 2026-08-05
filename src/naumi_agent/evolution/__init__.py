@@ -423,6 +423,10 @@ if TYPE_CHECKING:
         EvolutionRevalidationAdversarialCohortReceipt,
         EvolutionRevalidationAdversarialCohortStore,
     )
+    from naumi_agent.evolution.revalidation_adversarial_comparisons import (
+        EvolutionRevalidationAdversarialComparisonError,
+        EvolutionRevalidationAdversarialComparisonExecutor,
+    )
     from naumi_agent.evolution.revalidation_adversarial_matrices import (
         EVOLUTION_REVALIDATION_ADVERSARIAL_MATRIX_POLICY,
         EvolutionRevalidationAdversarialMatrixError,
@@ -731,6 +735,8 @@ __all__ = [
     "EvolutionRevalidationAdversarialCohortExecutor",
     "EvolutionRevalidationAdversarialCohortReceipt",
     "EvolutionRevalidationAdversarialCohortStore",
+    "EvolutionRevalidationAdversarialComparisonError",
+    "EvolutionRevalidationAdversarialComparisonExecutor",
     "EvolutionRevalidationAdversarialMatrixError",
     "EvolutionRevalidationAdversarialMatrixLane",
     "EvolutionRevalidationAdversarialMatrixService",
@@ -1306,6 +1312,10 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationAdversarialCohortReceipt",
         "EvolutionRevalidationAdversarialCohortStore",
     }
+    revalidation_adversarial_comparison_exports = {
+        "EvolutionRevalidationAdversarialComparisonError",
+        "EvolutionRevalidationAdversarialComparisonExecutor",
+    }
     revalidation_adversarial_matrix_exports = {
         "EVOLUTION_REVALIDATION_ADVERSARIAL_MATRIX_POLICY",
         "EvolutionRevalidationAdversarialMatrixError",
@@ -1823,6 +1833,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_runtime_sources"
     elif name in revalidation_adversarial_cohort_exports:
         module_name = "revalidation_adversarial_cohorts"
+    elif name in revalidation_adversarial_comparison_exports:
+        module_name = "revalidation_adversarial_comparisons"
     elif name in revalidation_adversarial_matrix_exports:
         module_name = "revalidation_adversarial_matrices"
     elif name in revalidation_adversarial_sample_exports:

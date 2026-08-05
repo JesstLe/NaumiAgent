@@ -216,6 +216,9 @@ from naumi_agent.evolution.revalidation_adversarial_cohorts import (
     EvolutionRevalidationAdversarialCohortExecutor,
     EvolutionRevalidationAdversarialCohortStore,
 )
+from naumi_agent.evolution.revalidation_adversarial_comparisons import (
+    EvolutionRevalidationAdversarialComparisonExecutor,
+)
 from naumi_agent.evolution.revalidation_adversarial_matrices import (
     EvolutionRevalidationAdversarialMatrixService,
     EvolutionRevalidationAdversarialMatrixStore,
@@ -1775,6 +1778,15 @@ class AgentEngine:
                 cohort_store=self.evolution_revalidation_adversarial_cohort_store,
                 matrix_store=self.evolution_revalidation_adversarial_matrix_store,
                 worker_registry=resources.worker_registry_store,
+            )
+        )
+        self.evolution_revalidation_adversarial_comparison_executor = (
+            EvolutionRevalidationAdversarialComparisonExecutor(
+                workspace_root=paths.workspace_root,
+                harness_store=self._harness_store,
+                cohort_store=self.evolution_revalidation_adversarial_cohort_store,
+                matrix_service=self.evolution_revalidation_adversarial_matrix_service,
+                contract_service=self.evolution_revalidation_runtime_contract_service,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
