@@ -41,6 +41,8 @@
   target + overlay 固化为 content-addressed blobs，评测不再依赖旧 Candidate worktree 存活。
 - [EVO-05.3f2a Revalidation Validation Plan](EVO-05-3f2a-revalidation-validation-plan.md)：已交付；将 current target
   绑定为相同 RED/GREEN baseline，将 immutable overlay 仅绑定 GREEN，并冻结原 seed/预算/指标/样本与 current checks。
+- [EVO-05.3f2b1 Runtime Source Pair](EVO-05-3f2b1-runtime-source-pair.md)：已交付；为两类 Harness Eval 统一提供
+  current-target RED 与 immutable-overlay GREEN，并在执行前后动态复验 source authority。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。

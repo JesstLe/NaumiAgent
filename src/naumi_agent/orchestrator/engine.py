@@ -240,6 +240,9 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_runtime_sources import (
+    EvolutionRevalidationRuntimeSourceService,
+)
 from naumi_agent.evolution.revalidation_validation_plans import (
     EvolutionRevalidationValidationPlanService,
     EvolutionRevalidationValidationPlanStore,
@@ -1616,6 +1619,14 @@ class AgentEngine:
                 final_evaluation_store=self.evolution_final_evaluation_receipt_store,
                 harness=self.harness_service,
                 store=self.evolution_revalidation_validation_plan_store,
+            )
+        )
+        self.evolution_revalidation_runtime_source_service = (
+            EvolutionRevalidationRuntimeSourceService(
+                validation_plan_service=(
+                    self.evolution_revalidation_validation_plan_service
+                ),
+                source_store=self.evolution_revalidation_evaluation_source_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
