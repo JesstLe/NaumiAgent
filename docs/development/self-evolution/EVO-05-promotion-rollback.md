@@ -39,6 +39,8 @@
   冻结完整 Interventional + 跨平台 Adversarial 重评矩阵，禁止用 Harness check 替代 Final Evaluation。
 - [EVO-05.3f1 Immutable Evaluation Source](EVO-05-3f1-immutable-evaluation-source.md)：已交付；把 rebase 后 exact
   target + overlay 固化为 content-addressed blobs，评测不再依赖旧 Candidate worktree 存活。
+- [EVO-05.3f2a Revalidation Validation Plan](EVO-05-3f2a-revalidation-validation-plan.md)：已交付；将 current target
+  绑定为相同 RED/GREEN baseline，将 immutable overlay 仅绑定 GREEN，并冻结原 seed/预算/指标/样本与 current checks。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -55,8 +57,7 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3c。已有经用户确认的 Principal/role/public-key authority、
-真实外部 Ed25519 Challenge/Signature Receipt、append-only Approval Decision，以及 deterministic Revalidation
-Request、exact replay、fenced three-way rebase 与新 Harness Worker evidence；但尚无旧证据失效/final Revalidation
-Outcome、rollout、monitor、rollback executor 或最终发布 Outcome authority。Harness Revalidation passed 只表示本轮
-Profile checks 通过，任何界面和回执都不得宣称 promotion、merge、push 或发布。
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2a。已有真实签名审批、target 前进后的隔离 replay/rebase、
+Harness revalidation、旧证据失效、Fresh Evaluation matrix、immutable GREEN source 与 current-target Validation Plan；
+但尚未执行新的完整 Interventional/Adversarial lanes，也没有新 Final Evaluation、reapproval、rollout、monitor、rollback
+executor 或最终发布 Outcome authority。任何界面和回执都不得把 Validation Plan 宣称为 promotion、merge、push 或发布。

@@ -482,6 +482,18 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_validation_plans import (
+        EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY,
+        EvolutionRevalidationCheckCoverage,
+        EvolutionRevalidationValidationFile,
+        EvolutionRevalidationValidationPlan,
+        EvolutionRevalidationValidationPlanBuilder,
+        EvolutionRevalidationValidationPlanError,
+        EvolutionRevalidationValidationPlanService,
+        EvolutionRevalidationValidationPlanStore,
+        EvolutionRevalidationValidationPlanView,
+        render_evolution_revalidation_validation_plan,
+    )
     from naumi_agent.evolution.revalidation_validations import (
         EVOLUTION_REVALIDATION_VALIDATION_POLICY,
         EvolutionRevalidationCheckEvidence,
@@ -648,6 +660,16 @@ __all__ = [
     "EvolutionRevalidationEvaluationSourceStore",
     "EvolutionRevalidationSourceProvider",
     "render_evolution_revalidation_evaluation_source",
+    "EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY",
+    "EvolutionRevalidationCheckCoverage",
+    "EvolutionRevalidationValidationFile",
+    "EvolutionRevalidationValidationPlan",
+    "EvolutionRevalidationValidationPlanBuilder",
+    "EvolutionRevalidationValidationPlanError",
+    "EvolutionRevalidationValidationPlanService",
+    "EvolutionRevalidationValidationPlanStore",
+    "EvolutionRevalidationValidationPlanView",
+    "render_evolution_revalidation_validation_plan",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -1136,6 +1158,18 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationSourceProvider",
         "render_evolution_revalidation_evaluation_source",
     }
+    revalidation_validation_plan_exports = {
+        "EVOLUTION_REVALIDATION_VALIDATION_PLAN_POLICY",
+        "EvolutionRevalidationCheckCoverage",
+        "EvolutionRevalidationValidationFile",
+        "EvolutionRevalidationValidationPlan",
+        "EvolutionRevalidationValidationPlanBuilder",
+        "EvolutionRevalidationValidationPlanError",
+        "EvolutionRevalidationValidationPlanService",
+        "EvolutionRevalidationValidationPlanStore",
+        "EvolutionRevalidationValidationPlanView",
+        "render_evolution_revalidation_validation_plan",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1616,6 +1650,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_evaluation_plans"
     elif name in revalidation_evaluation_source_exports:
         module_name = "revalidation_evaluation_sources"
+    elif name in revalidation_validation_plan_exports:
+        module_name = "revalidation_validation_plans"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

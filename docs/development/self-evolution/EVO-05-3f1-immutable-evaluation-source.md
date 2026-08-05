@@ -51,8 +51,8 @@ Agent Tool：`evolution_revalidation_evaluation_source(plan_id=...)`
 
 ## 6. 后续依赖
 
-EVO-05.3f2a 必须先签发 Revalidation Validation Plan：把 RED baseline 从原 Candidate baseline 改绑 current target，
-把 GREEN source 改绑本 immutable Snapshot，并从 durable Experiment/Mutation authority 继承及重验 seed、metrics、
-checks、预算和 Candidate identity。随后 EVO-05.3f2b 才能让 Interventional/Adversarial source adapter 消费新 Plan，
+EVO-05.3f2a 已签发 [Revalidation Validation Plan](EVO-05-3f2a-revalidation-validation-plan.md)：把 RED baseline
+从原 Candidate baseline 改绑 current target，把 GREEN source 改绑本 immutable Snapshot，并从 durable authority
+继承及重验 seed、metrics、checks、预算和 Candidate identity。随后 EVO-05.3f2b 才能让 Interventional/Adversarial source adapter 消费新 Plan，
 同时保持 ARC-04、H5a/H5c 与恢复语义。在完整 lanes、Attribution 和新 Final Evaluation 签发前，仍不开放 reapproval
 或 rollout。

@@ -84,3 +84,6 @@ matrix，明确要求重跑 Interventional、跨平台 Adversarial RED/GREEN、c
 [EVO-05.3f1](EVO-05-3f1-immutable-evaluation-source.md) 已把 exact target + revalidation overlay 捕获为经过 symlink、
 size、digest 和 regular-file 防护的 content-addressed immutable blobs；后续 GREEN 评测可脱离旧 Lease worktree，
 但完整重评仍未执行。
+[EVO-05.3f2a](EVO-05-3f2a-revalidation-validation-plan.md) 已把旧 Experiment Contract 的 seed、预算、metrics 与旧
+Final Evaluation 的 suite/sample/platform 策略重绑到 current-target RED 和 immutable-overlay GREEN，并以 current
+Harness Profile 唯一覆盖每个文件的 required checks；该 authority 尚不执行评测或授予 promotion。
