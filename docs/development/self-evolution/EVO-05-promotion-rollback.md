@@ -103,6 +103,9 @@
   frozen thresholds 与 HMAC control signals 聚合为 insufficient/passing/breached receipt。
 - [EVO-05.5c Rollout Stage Completion Evidence](EVO-05-5c-rollout-stage-completion.md)：已交付；重验 current
   passing terminal prefix、Plan/Entry 与 control state，冻结 local-canary completion，但不授予 next-stage authority。
+- [EVO-05.5d Durable Stage Advance Authorization](EVO-05-5d-stage-advance-authorization.md)：已交付；high/critical
+  通过 durable user interaction 决定推进或拒绝，automatic path 只接受计划显式资格；短期 authority 绑定 control generation，
+  仍不部署 candidate。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
