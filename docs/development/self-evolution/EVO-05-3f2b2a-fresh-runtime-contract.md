@@ -13,7 +13,8 @@
   digest 与单样本 timeout；
 - `harness_replay` 在没有精确 replay fixture 时返回 `replay_fixture_required`；
 - `feedback_recurrence` 在没有 observation-window runner 时返回明确 blocker；
-- Profile check timeout 与 metric timeout 按 requested samples 汇总，超过原 Experiment budget 时阻断。
+- Profile check timeout 与 metric timeout 按 `2 × requested samples`（RED + GREEN）汇总，超过原 Experiment
+  budget 时阻断；不能用单 phase 预算冒充完整 paired evaluation 预算。
 
 ## 3. Adversarial probe 绑定
 
@@ -46,6 +47,8 @@ SQLite Contract 以 Validation Plan 为唯一键，事务内验证 plan ID/diges
 
 ## 6. 后续边界
 
-本 Contract 仍是不可执行 authority。EVO-05.3f2b2b 将先让 Interventional sample/cohort 消费 Runtime Contract 与共享
-RED/GREEN Source Pair，真实运行 Profile checks 和 ready metric runners；EVO-05.3f2b2c 再接 Adversarial probes 与平台
-lane。两者完成前不能签发新的 comparison、attribution 或 Final Evaluation。
+本 Contract 本身仍是不执行命令的 authority。
+[EVO-05.3f2b2b1](EVO-05-3f2b2b1-fresh-interventional-sample.md) 已让单个 Interventional RED/GREEN pair 消费
+Contract 与共享 Source Pair，真实运行 Profile checks 和 ready metric runners；EVO-05.3f2b2b2/2b3 仍需形成完整
+cohort 与 paired comparison，EVO-05.3f2b2c 再接 Adversarial probes 与平台 lane。它们完成前不能签发新的
+attribution 或 Final Evaluation。

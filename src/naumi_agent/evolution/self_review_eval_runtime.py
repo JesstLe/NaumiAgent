@@ -19,6 +19,7 @@ from naumi_agent.evolution.validation_cohorts import EvolutionBaselineCohortRequ
 from naumi_agent.evolution.validation_metric_bindings import (
     EvolutionMetricRunnerBinding,
     EvolutionMetricRunnerRegistry,
+    MetricRunnerBindingEntry,
 )
 from naumi_agent.evolution.validation_plans import EvolutionValidationPlan
 from naumi_agent.harness.eval_identity import (
@@ -241,6 +242,71 @@ async def run_self_review_static_sample(
             "self_review_timeout_mismatch",
             "Self-Review metric sample timeout 与可信 Binding 不一致。",
         )
+    return await run_bound_self_review_static_sample(
+        files=files,
+        scan_root=scan_root,
+        phase=phase,
+        suite_id=request.suite_id,
+        validation_plan_id=plan.validation_plan_id,
+        metric_entries=binding.entries,
+        configuration=configuration,
+        identity=identity,
+        timeout_seconds=effective_timeout,
+    )
+
+
+async def run_bound_self_review_static_sample(
+    *,
+    files: list[Path],
+    scan_root: Path,
+    phase: SelfReviewCohortPhase,
+    suite_id: str,
+    validation_plan_id: str,
+    metric_entries: tuple[MetricRunnerBindingEntry, ...],
+    configuration: HarnessEvalConfigurationIdentity,
+    identity: HarnessEvalBaselineIdentity,
+    timeout_seconds: int,
+) -> HarnessEvalSuiteResult:
+    """Run one already-authorized Self-Review metric binding on exact files."""
+    if any(not item.is_file() for item in files):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_files_invalid",
+            "Self-Review metric runtime 文件集合不完整。",
+        )
+    root = scan_root.expanduser().resolve(strict=True)
+    if any(not item.resolve(strict=True).is_relative_to(root) for item in files):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_files_outside_root",
+            "Self-Review metric 文件必须位于隔离 scan root 内。",
+        )
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, int)
+        or not 1 <= timeout_seconds <= 3_600
+    ):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_timeout_invalid",
+            "Self-Review metric sample timeout 格式无效。",
+        )
+    if not metric_entries or any(
+        item.resolution.status != "ready"
+        or item.resolution.runner_version != SELF_REVIEW_STATIC_RUNNER_VERSION
+        or item.resolution.finding_code is None
+        for item in metric_entries
+    ):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_metric_binding_invalid",
+            "Self-Review metric runner binding 不完整或不属于当前 runner。",
+        )
+    if not (
+        configuration.suite_id == suite_id
+        and identity.configuration == configuration
+        and identity.profile_trusted
+    ):
+        raise SelfReviewEvalRuntimeError(
+            "self_review_sample_identity_mismatch",
+            "Self-Review metric sample runtime identity 与可信配置不一致。",
+        )
     started = time.perf_counter()
     try:
         scan = await asyncio.wait_for(
@@ -249,7 +315,7 @@ async def run_self_review_static_sample(
                 files,
                 workspace_root=scan_root,
             ),
-            timeout=effective_timeout,
+            timeout=timeout_seconds,
         )
     except TimeoutError as exc:
         raise SelfReviewEvalRuntimeError(
@@ -261,11 +327,11 @@ async def run_self_review_static_sample(
             "self_review_static_scan_failed",
             f"Self-Review 静态 {phase.upper()} 未完整扫描全部可信文件。",
         )
-    return _build_result(
+    return _build_bound_result(
         phase=phase,
-        request=request,
-        binding=binding,
-        plan=plan,
+        suite_id=suite_id,
+        validation_plan_id=validation_plan_id,
+        metric_entries=metric_entries,
         configuration=configuration,
         identity=identity,
         findings=scan.findings,
@@ -298,6 +364,29 @@ def _build_result(
     findings: tuple[SelfReviewStaticFinding, ...],
     duration_ms: float,
 ) -> HarnessEvalSuiteResult:
+    return _build_bound_result(
+        phase=phase,
+        suite_id=request.suite_id,
+        validation_plan_id=plan.validation_plan_id,
+        metric_entries=binding.entries,
+        configuration=configuration,
+        identity=identity,
+        findings=findings,
+        duration_ms=duration_ms,
+    )
+
+
+def _build_bound_result(
+    *,
+    phase: SelfReviewCohortPhase,
+    suite_id: str,
+    validation_plan_id: str,
+    metric_entries: tuple[MetricRunnerBindingEntry, ...],
+    configuration: HarnessEvalConfigurationIdentity,
+    identity: HarnessEvalBaselineIdentity,
+    findings: tuple[SelfReviewStaticFinding, ...],
+    duration_ms: float,
+) -> HarnessEvalSuiteResult:
     counts = {
         code.value: sum(
             1
@@ -307,7 +396,7 @@ def _build_result(
         for code in SelfReviewFindingCode
     }
     cases: list[HarnessEvalCaseResult] = []
-    for entry in binding.entries:
+    for entry in metric_entries:
         finding_code = entry.resolution.finding_code
         if finding_code is None or finding_code not in counts:
             raise SelfReviewEvalRuntimeError(
@@ -356,9 +445,9 @@ def _build_result(
     )
     title_phase = "RED baseline" if phase == "red" else "GREEN candidate"
     return HarnessEvalSuiteResult(
-        suite_id=request.suite_id,
+        suite_id=suite_id,
         title=f"Self-Review 静态 {title_phase}",
-        suite_path=f"evolution:{plan.validation_plan_id}",
+        suite_path=f"evolution:{validation_plan_id}",
         suite_sha256=configuration.suite_sha256,
         status=suite_status,
         cases=tuple(cases),
@@ -382,6 +471,7 @@ __all__ = [
     "SelfReviewEvalRuntimeError",
     "build_self_review_eval_configuration",
     "require_continuous_eval_prefix",
+    "run_bound_self_review_static_sample",
     "run_self_review_static_sample",
     "run_self_review_static_repetitions",
     "validate_self_review_cohort_authority",
