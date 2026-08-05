@@ -42,6 +42,8 @@ schema v3 将当前 session 的认证、脱敏、有界结果同步到 New UI/TU
 schema v4 投影 claimed/running/unknown 与 pending/expired publication 的恢复目录；HAR-10.7e 已让双端
 以 exact fence 人工把当前 session 的 expired running Job 收口为 unknown，不重放模型；HAR-10.7f 又增加
 publication startup/periodic recovery、有界退避、失败唤醒与 shutdown drain；HAR-10.7g 又增加 durable
-retry budget、HMAC quarantine receipt 和双端隔离投影。Agent 仍不是 daemon，quarantine requeue/prune、
-Agent/Browser 持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
+retry budget、HMAC quarantine receipt 和双端隔离投影；ARC-04.5e1/HAR-10.7h1 又建立真实独立
+control-only Agent 进程、认证本机传输、注册/心跳/排空/撤销，并让双端明确显示任务调度尚未开放。
+Agent Job 仍由 embedded Runtime 执行，quarantine requeue/prune、Agent owner lease/dispatch、
+Agent/Browser 完整持久 Worker、priority/公平调度与跨主机 topology 尚未实现，因此
 ARC-06 保持 partial。

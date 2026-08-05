@@ -21,6 +21,7 @@ class RuntimePaths:
     permission_decision_db_path: Path
     tool_job_db_path: Path
     agent_job_db_path: Path
+    agent_worker_runtime_dir: Path
     shell_worker_runtime_dir: Path
     shell_worker_sandbox_dir: Path
     shell_worker_artifact_dir: Path
@@ -50,6 +51,7 @@ class RuntimePaths:
             "permission_decision_db_path",
             "tool_job_db_path",
             "agent_job_db_path",
+            "agent_worker_runtime_dir",
             "shell_worker_runtime_dir",
             "shell_worker_sandbox_dir",
             "shell_worker_artifact_dir",

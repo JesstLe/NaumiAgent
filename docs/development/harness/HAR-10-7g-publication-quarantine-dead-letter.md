@@ -103,8 +103,9 @@ Agent Control 升级为 schema v5：
 - 尚无隔离 retention、历史分页、导出和告警 sink；
 - `max_attempts` 是全局 worker policy，尚无 provider/sink/failure class 级预算；
 - quarantine catalog 当前有 10000 条硬上限，未完成大规模分片/认证 root；
-- Agent 仍是 embedded 执行，独立 Worker、Supervisor、跨 workspace 公平与跨主机 topology 未完成；
+- Agent 执行仍在 embedded Runtime；ARC-04.5e1 只完成 control-only Worker，AgentJob dispatch、
+  Supervisor、跨 workspace 公平与跨主机 topology 未完成；
 - A5 kill-at-every-write-point、磁盘满、锁竞争和长时间 soak 仍需独立验收。
 
-下一步应比较 `HAR-10.7h` exact quarantine requeue 与独立 Agent Worker owner lease。若没有用户可恢复需求，
-优先推进独立 Worker 的最小注册/认证 transport；不得直接扩张完整 scheduler。
+后续依赖裁决已选择 `HAR-10.7h1 / ARC-04.5e1`，完成独立 Worker 的最小注册/认证 transport 与
+control-only 生命周期；下一步比较 exact AgentJob owner lease 与最小 Supervisor，不得直接扩张完整 scheduler。

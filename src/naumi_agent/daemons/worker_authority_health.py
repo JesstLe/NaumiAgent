@@ -65,6 +65,8 @@ class WorkerAuthorityEntry:
     epoch: int
     platform: str
     machine: str
+    capabilities: tuple[str, ...]
+    dispatch_ready: bool
     max_concurrent_jobs: int
     reserved_jobs: int
     available_jobs: int
@@ -517,6 +519,13 @@ def _entry(
         epoch=contract.epoch,
         platform=contract.platform.system,
         machine=contract.platform.machine,
+        capabilities=tuple(item.value for item in contract.capabilities),
+        dispatch_ready=(
+            contract.kind.value != "agent"
+            or "agent_context_scope" in {
+                item.value for item in contract.capabilities
+            }
+        ),
         max_concurrent_jobs=contract.resources.max_concurrent_jobs,
         reserved_jobs=capacity[0],
         available_jobs=capacity[1],

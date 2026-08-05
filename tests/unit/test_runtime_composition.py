@@ -149,6 +149,9 @@ def test_build_runtime_paths_resolves_one_absolute_snapshot(
     )
     assert paths.tool_job_db_path == paths.runtime_data_dir / "tool-jobs.db"
     assert paths.agent_job_db_path == paths.runtime_data_dir / "agent-jobs.db"
+    assert paths.agent_worker_runtime_dir == (
+        paths.runtime_data_dir / "agent-worker" / "transport"
+    )
     assert paths.shell_worker_runtime_dir == (
         paths.runtime_data_dir / "shell-worker" / "transport"
     )
@@ -183,6 +186,7 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
         "permission_decision_db_path": absolute / "data" / "permission-decisions.db",
         "tool_job_db_path": absolute / "data" / "tool-jobs.db",
         "agent_job_db_path": absolute / "data" / "agent-jobs.db",
+        "agent_worker_runtime_dir": absolute / "data" / "agent-worker" / "transport",
         "shell_worker_runtime_dir": absolute / "data" / "shell-worker" / "transport",
         "shell_worker_sandbox_dir": absolute / "data" / "shell-worker" / "sandboxes",
         "shell_worker_artifact_dir": absolute / "data" / "shell-worker" / "artifacts",
@@ -268,6 +272,13 @@ def test_runtime_paths_reject_relative_or_escaped_owned_paths(tmp_path: Path) ->
             **{
                 **values,
                 "shell_worker_sandbox_dir": absolute / "outside" / "sandboxes",
+            }
+        )
+    with pytest.raises(ValueError, match="agent_worker_runtime_dir 必须位于"):
+        RuntimePaths(
+            **{
+                **values,
+                "agent_worker_runtime_dir": absolute / "outside" / "agent-worker",
             }
         )
 

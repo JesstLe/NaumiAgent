@@ -117,6 +117,11 @@
   - HAR-10.7g 已增加 Store schema v6 的 HMAC 认证 quarantine receipt、durable retry budget 和 FIFO
     poison-record 隔离；Agent Control schema v5 将隔离计数/事实同步到 New UI/TUI。exact requeue、
     放弃和 prune 尚未完成。见 [设计](HAR-10-7g-publication-quarantine-dead-letter.md)。
+  - HAR-10.7h1 / ARC-04.5e1 已建立真实 spawned Agent 控制进程、一次性 authkey/nonce 本机认证、
+    注册前 PID/合同握手、child-driven heartbeat、drain/stop/revoke 与隐式 takeover 阻断；合同只声明
+    `agent_control_transport` 且 `accepting_jobs=false`，Doctor/New UI/TUI 明确显示“任务调度未开放”。
+    AgentJob owner lease、加密 dispatch、capacity reservation 和 Supervisor 仍未完成。见
+    [设计](../architecture/ARC-04-5e1-independent-agent-worker-bootstrap.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。

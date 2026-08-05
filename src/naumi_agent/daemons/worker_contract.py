@@ -45,6 +45,7 @@ class WorkerCapability(StrEnum):
     RESOURCE_LIMITS = "resource_limits"
     ARTIFACT_DIGEST = "artifact_digest"
     BROWSER_PROFILE_ISOLATION = "browser_profile_isolation"
+    AGENT_CONTROL_TRANSPORT = "agent_control_transport"
     AGENT_CONTEXT_SCOPE = "agent_context_scope"
 
 
@@ -515,6 +516,7 @@ def _validate_capability_consistency(contract: WorkerContract) -> None:
         WorkerCapability.SHELL_NON_PTY: WorkerKind.TOOL,
         WorkerCapability.SHELL_PTY: WorkerKind.TOOL,
         WorkerCapability.BROWSER_PROFILE_ISOLATION: WorkerKind.BROWSER,
+        WorkerCapability.AGENT_CONTROL_TRANSPORT: WorkerKind.AGENT,
         WorkerCapability.AGENT_CONTEXT_SCOPE: WorkerKind.AGENT,
     }
     incompatible = [
