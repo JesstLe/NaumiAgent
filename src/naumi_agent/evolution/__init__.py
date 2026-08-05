@@ -449,6 +449,18 @@ if TYPE_CHECKING:
         EvolutionRevalidationAdversarialSampleStore,
         adversarial_batch_id,
     )
+    from naumi_agent.evolution.revalidation_approval_decisions import (
+        EVOLUTION_REVALIDATION_APPROVAL_DECISION_POLICY,
+        EvolutionRevalidationApprovalDecisionError,
+        EvolutionRevalidationApprovalDecisionReceipt,
+        EvolutionRevalidationApprovalDecisionService,
+        EvolutionRevalidationApprovalDecisionStatus,
+        EvolutionRevalidationApprovalDecisionStore,
+        EvolutionRevalidationApprovalDecisionView,
+        EvolutionRevalidationApprovalGateDecision,
+        EvolutionRevalidationApprovalRoleDecision,
+        EvolutionRevalidationApprovalRoleOutcome,
+    )
     from naumi_agent.evolution.revalidation_approval_requests import (
         EVOLUTION_REVALIDATION_APPROVAL_REQUEST_POLICY,
         EvolutionRevalidationApprovalRequestError,
@@ -786,6 +798,16 @@ __all__ = [
     "EvolutionRevalidationApprovalResponseReceipt",
     "EvolutionRevalidationApprovalResponseStore",
     "EvolutionRevalidationApprovalResponseView",
+    "EVOLUTION_REVALIDATION_APPROVAL_DECISION_POLICY",
+    "EvolutionRevalidationApprovalDecisionError",
+    "EvolutionRevalidationApprovalDecisionReceipt",
+    "EvolutionRevalidationApprovalDecisionService",
+    "EvolutionRevalidationApprovalDecisionStatus",
+    "EvolutionRevalidationApprovalDecisionStore",
+    "EvolutionRevalidationApprovalDecisionView",
+    "EvolutionRevalidationApprovalGateDecision",
+    "EvolutionRevalidationApprovalRoleDecision",
+    "EvolutionRevalidationApprovalRoleOutcome",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1510,6 +1532,18 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationApprovalResponseStore",
         "EvolutionRevalidationApprovalResponseView",
     }
+    revalidation_approval_decision_exports = {
+        "EVOLUTION_REVALIDATION_APPROVAL_DECISION_POLICY",
+        "EvolutionRevalidationApprovalDecisionError",
+        "EvolutionRevalidationApprovalDecisionReceipt",
+        "EvolutionRevalidationApprovalDecisionService",
+        "EvolutionRevalidationApprovalDecisionStatus",
+        "EvolutionRevalidationApprovalDecisionStore",
+        "EvolutionRevalidationApprovalDecisionView",
+        "EvolutionRevalidationApprovalGateDecision",
+        "EvolutionRevalidationApprovalRoleDecision",
+        "EvolutionRevalidationApprovalRoleOutcome",
+    }
     revalidation_approval_signature_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
         "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
@@ -2037,6 +2071,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
         module_name = "revalidation_approval_requests"
+    elif name in revalidation_approval_decision_exports:
+        module_name = "revalidation_approval_decisions"
     elif name in revalidation_approval_signature_exports:
         module_name = "revalidation_approval_signatures"
     elif name in approval_requirement_exports:

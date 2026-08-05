@@ -650,8 +650,11 @@ def _build_response(requirement, step, interaction):
 
 def _approval_interaction_request(requirement, step, *, timeout_seconds):
     reasons = "、".join(item.value for item in step.reasons)
+    header_role = {
+        EvolutionPromotionApprovalRole.INDEPENDENT_REVIEWER: "独立审查人",
+    }.get(step.role, step.role.value)
     return normalize_interaction_request({
-        "header": f"Fresh Evolution 审批 · {step.role.value}",
+        "header": f"Fresh Evolution 审批 · {header_role}",
         "question": (
             f"请以 {step.role.value} 角色审查 Fresh Requirement "
             f"{requirement.requirement_id}（target "
