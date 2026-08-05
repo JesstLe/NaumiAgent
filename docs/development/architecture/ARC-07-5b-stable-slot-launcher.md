@@ -47,7 +47,8 @@ Launch Resolution 只保存参数数量，不保存用户参数正文。`--launc
 
 ## 当前边界与下一步
 
-- archive 目前仍只有 SHA-256；ARC-07.4 必须增加可信签名、provenance、SBOM 和平台 notarization；
+- archive 目前仍只有 SHA-256；[ARC-07.4a](ARC-07-4a-exact-source-provenance.md) 已绑定 exact source
+  commit/tree，但 ARC-07.4 仍必须增加可信签名、SBOM 和平台 notarization；
 - Windows 脚本完成静态契约与共同 Python 核心覆盖，但仍需 Windows runner 的真实安装/进程演练；
 - ARC-07.6 必须在涉及 config/schema/data 的升级前建立 snapshot 与兼容性 gate；
 - 下一最小闭环切片是 EVO-05.6b2：只消费 exact Rollback Request、Immutable Rollback Source 和已验证

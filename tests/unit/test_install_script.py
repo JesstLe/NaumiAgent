@@ -8,6 +8,8 @@ from pathlib import Path
 from naumi_agent.release.artifact import assemble_release_artifact
 
 ROOT = Path(__file__).resolve().parents[2]
+SOURCE_COMMIT = "a" * 40
+SOURCE_TREE_SHA256 = "b" * 64
 
 
 def _unix_script() -> str:
@@ -110,6 +112,8 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
         output_dir=tmp_path / "fixture-release",
         version="1.2.3",
         target="macos-arm64",
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="tar.gz",
     )
     fixture_dir = tmp_path / "downloads"

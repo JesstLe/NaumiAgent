@@ -11,6 +11,9 @@ from naumi_agent.release.artifact import assemble_release_artifact
 from naumi_agent.release.launcher import _resolve_and_record, main, resolve_launch
 from naumi_agent.release.slots import ReleaseSlotError, ReleaseSlotStore, host_release_target
 
+SOURCE_COMMIT = "a" * 40
+SOURCE_TREE_SHA256 = "b" * 64
+
 
 def _executable(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -40,6 +43,8 @@ def _active_store(tmp_path: Path) -> ReleaseSlotStore:
         output_dir=tmp_path / "release",
         version="2.0.0",
         target=target,
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="tar.gz",
     )
     store = ReleaseSlotStore(tmp_path / "installed")

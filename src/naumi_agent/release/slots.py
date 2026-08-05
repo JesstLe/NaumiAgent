@@ -49,6 +49,8 @@ class ReleaseInstalledSlot(_StrictModel):
     manifest_sha256: str = Field(pattern=_SHA256_RE)
     version: str = Field(pattern=_SAFE_LABEL_RE)
     target: str = Field(pattern=_SAFE_LABEL_RE)
+    source_commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+    source_tree_sha256: str = Field(pattern=_SHA256_RE)
     bundle_dir: str = Field(min_length=1, max_length=4096)
     backend_path: str = Field(pattern=r"^naumi-runtime(?:\.exe)?$")
     ui_path: str = Field(pattern=r"^naumi-ui(?:\.exe)?$")
@@ -186,6 +188,8 @@ class ReleaseSlotStore:
             "manifest_sha256": manifest_sha,
             "version": manifest["version"],
             "target": target,
+            "source_commit": manifest["source_commit"],
+            "source_tree_sha256": manifest["source_tree_sha256"],
             "bundle_dir": str(slot_dir),
             "backend_path": "naumi-runtime.exe" if windows else "naumi-runtime",
             "ui_path": "naumi-ui.exe" if windows else "naumi-ui",
@@ -695,11 +699,24 @@ def _verify_bundle(bundle: Path, *, expected_manifest_sha256: str | None = None)
         ) from exc
     if not (
         isinstance(manifest, dict)
-        and set(manifest) == {"schema_version", "product", "version", "target", "files"}
+        and set(manifest)
+        == {
+            "schema_version",
+            "product",
+            "version",
+            "target",
+            "source_commit",
+            "source_tree_sha256",
+            "files",
+        }
         and manifest["schema_version"] == 1
         and manifest["product"] == "NaumiAgent"
         and isinstance(manifest["version"], str)
         and isinstance(manifest["target"], str)
+        and isinstance(manifest["source_commit"], str)
+        and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", manifest["source_commit"])
+        and isinstance(manifest["source_tree_sha256"], str)
+        and re.fullmatch(_SHA256_RE, manifest["source_tree_sha256"])
         and isinstance(manifest["files"], list)
         and 1 <= len(manifest["files"]) <= _MAX_FILES
     ):

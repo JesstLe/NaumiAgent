@@ -15,6 +15,9 @@ from naumi_agent.release.slots import (
     host_release_target,
 )
 
+SOURCE_COMMIT = "a" * 40
+SOURCE_TREE_SHA256 = "b" * 64
+
 
 def _binary(path: Path, content: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -53,6 +56,8 @@ def _bundle(root: Path, *, version: str, output_name: str, reported=None) -> Pat
         output_dir=root / output_name,
         version=version,
         target=target,
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="zip" if windows else "tar.gz",
     ).bundle_dir
 
@@ -75,6 +80,8 @@ def test_install_boot_activate_upgrade_and_atomic_rollback(tmp_path: Path) -> No
     rolled_back = store.rollback(activated_at="2026-08-06T02:03:00+00:00")
 
     assert boot1.bootable and boot1.version_matched
+    assert v1.source_commit == SOURCE_COMMIT
+    assert v1.source_tree_sha256 == SOURCE_TREE_SHA256
     assert boot1.arguments == ("--version",)
     assert boot1.version_output == "naumi 1.0.0"
     assert active1.generation == 1 and active1.previous_slot_id is None

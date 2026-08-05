@@ -19,6 +19,8 @@ from typing import Literal
 ArchiveFormat = Literal["tar.gz", "zip"]
 
 _SAFE_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_GIT_OBJECT = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FORBIDDEN_COMPONENTS = frozenset({".git", "__pycache__", "docs", "frontend", "src", "tests"})
 _FORBIDDEN_NAMES = frozenset({"package.json", "pyproject.toml", "manifest.in", "uv.lock"})
 _FORBIDDEN_SUFFIXES = (
@@ -55,11 +57,19 @@ def assemble_release_artifact(
     output_dir: Path,
     version: str,
     target: str,
+    source_commit: str,
+    source_tree_sha256: str,
     archive_format: ArchiveFormat,
 ) -> ReleaseArtifact:
     """Build and validate one platform bundle without replacing existing output."""
     version = _safe_label(version, "version")
     target = _safe_label(target, "target")
+    source_commit = source_commit.strip().casefold()
+    source_tree_sha256 = source_tree_sha256.strip().casefold()
+    if _GIT_OBJECT.fullmatch(source_commit) is None:
+        raise ArtifactError("source_commit 不是完整 Git commit object ID。")
+    if _SHA256.fullmatch(source_tree_sha256) is None:
+        raise ArtifactError("source_tree_sha256 不是 SHA-256。")
     if archive_format not in {"tar.gz", "zip"}:
         raise ArtifactError("archive_format 仅支持 tar.gz 或 zip。")
     backend_dir = backend_dir.resolve()
@@ -127,6 +137,8 @@ def assemble_release_artifact(
                     "product": "NaumiAgent",
                     "version": version,
                     "target": target,
+                    "source_commit": source_commit,
+                    "source_tree_sha256": source_tree_sha256,
                     "files": _manifest_files(staged_bundle),
                 },
                 ensure_ascii=False,
