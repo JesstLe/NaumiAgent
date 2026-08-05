@@ -235,3 +235,56 @@ async def test_wrong_key_and_rotated_principal_fail_closed(tmp_path: Path) -> No
             signature_base64=wrong_signature,
         )
     assert rotated.value.code == "fresh_signature_authority_changed"
+
+
+@pytest.mark.asyncio
+async def test_historical_signature_loses_current_eligibility_after_key_rotation(
+    tmp_path: Path,
+) -> None:
+    (
+        contract,
+        requirement,
+        _response,
+        principal,
+        private,
+        _clock,
+        _store,
+        service,
+        principal_service,
+    ) = await _setup(tmp_path)
+    challenge = (
+        await service.prepare(
+            workspace_root=tmp_path,
+            contract_id=contract.contract_id,
+            requirement_id=requirement.requirement_id,
+            role="security_reviewer",
+            principal_id=principal.principal_id,
+        )
+    ).challenge
+    signature = base64.b64encode(private.sign(challenge.payload.canonical_bytes())).decode("ascii")
+    receipt = await service.submit(
+        workspace_root=tmp_path,
+        contract_id=contract.contract_id,
+        challenge_id=challenge.challenge_id,
+        signature_base64=signature,
+    )
+    _new_private, new_public = _keypair()
+    await principal_service.rotate_key(
+        workspace_root=tmp_path,
+        principal_id=principal.principal_id,
+        public_key_base64=new_public,
+    )
+
+    historical = await service.inspect(
+        workspace_root=tmp_path,
+        contract_id=contract.contract_id,
+        receipt_id=receipt.receipt.receipt_id,
+    )
+
+    assert historical.receipt.signature_verified
+    assert historical.requirement_current
+    assert historical.response_current
+    assert historical.principal_active
+    assert not historical.principal_key_current
+    assert historical.role_binding_current
+    assert not historical.eligible_for_decision_aggregation

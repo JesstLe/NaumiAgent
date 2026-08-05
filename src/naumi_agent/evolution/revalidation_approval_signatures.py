@@ -605,10 +605,28 @@ class EvolutionRevalidationApprovalSignatureService:
                 "fresh_signature_receipt_missing", "Fresh Signature receipt 不存在。"
             )
         payload = receipt.challenge.payload
-        response, requirement, principal = await self._sources(
-            workspace_root, contract_id, payload.requirement_id, payload.role, payload.principal_id
+        requirement = await self.requirement_service.issue(contract_id=contract_id)
+        response = await self.response_store.get_by_requirement_role(
+            payload.requirement_id,
+            payload.role,
         )
-        return _receipt_view(receipt, response, requirement, principal, self._now())
+        try:
+            principal_view = await self.principal_service.inspect(
+                workspace_root=workspace_root,
+                principal_id=payload.principal_id,
+            )
+        except (EvolutionApprovalPrincipalError, OSError, TypeError, ValueError) as exc:
+            raise EvolutionRevalidationApprovalSignatureError(
+                "fresh_signature_principal_unavailable",
+                "无法读取 Fresh Signature 的 current Principal。",
+            ) from exc
+        return _receipt_view(
+            receipt,
+            response,
+            requirement,
+            principal_view.principal,
+            self._now(),
+        )
 
     async def _sources(self, workspace_root, contract_id, requirement_id, role, principal_id):
         requirement = await self.requirement_service.issue(contract_id=contract_id)
@@ -765,9 +783,14 @@ def _match(challenge, response, requirement, principal):
 
 def _receipt_view(receipt, response, requirement, principal, now):
     payload = receipt.challenge.payload
-    current = _aware(requirement.expires_at) > now
+    requirement_current = bool(
+        requirement.requirement_id == payload.requirement_id
+        and requirement.requirement_sha256 == payload.requirement_sha256
+    )
+    current = requirement_current and _aware(requirement.expires_at) > now
     response_current = (
-        response.receipt_id == payload.approval_response_id
+        response is not None
+        and response.receipt_id == payload.approval_response_id
         and response.receipt_sha256 == payload.approval_response_sha256
     )
     principal_active = principal.state is EvolutionApprovalPrincipalState.ACTIVE
@@ -779,7 +802,7 @@ def _receipt_view(receipt, response, requirement, principal, now):
     role_current = payload.role in principal.roles
     return EvolutionRevalidationApprovalSignatureReceiptView(
         receipt=receipt,
-        requirement_current=True,
+        requirement_current=requirement_current,
         requirement_expired=not current,
         response_current=response_current,
         principal_active=principal_active,
