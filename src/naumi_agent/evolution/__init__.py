@@ -520,6 +520,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationOutcomeView,
         render_evolution_revalidation_outcome,
     )
+    from naumi_agent.evolution.revalidation_promotion_inputs import (
+        EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
+        EvolutionRevalidationPromotionInput,
+        EvolutionRevalidationPromotionInputError,
+        EvolutionRevalidationPromotionInputService,
+        EvolutionRevalidationPromotionInputStore,
+    )
     from naumi_agent.evolution.revalidation_reapproval_authorities import (
         EVOLUTION_REVALIDATION_REAPPROVAL_AUTHORITY_POLICY,
         EvolutionRevalidationReapprovalAuthority,
@@ -727,6 +734,11 @@ __all__ = [
     "EvolutionRevalidationReapprovalAuthorityError",
     "EvolutionRevalidationReapprovalAuthorityService",
     "EvolutionRevalidationReapprovalAuthorityStore",
+    "EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY",
+    "EvolutionRevalidationPromotionInput",
+    "EvolutionRevalidationPromotionInputError",
+    "EvolutionRevalidationPromotionInputService",
+    "EvolutionRevalidationPromotionInputStore",
     "render_evolution_revalidation_rebase",
     "EVOLUTION_REVALIDATION_VALIDATION_POLICY",
     "EvolutionRevalidationCheckEvidence",
@@ -1414,6 +1426,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationReapprovalAuthorityService",
         "EvolutionRevalidationReapprovalAuthorityStore",
     }
+    revalidation_promotion_input_exports = {
+        "EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY",
+        "EvolutionRevalidationPromotionInput",
+        "EvolutionRevalidationPromotionInputError",
+        "EvolutionRevalidationPromotionInputService",
+        "EvolutionRevalidationPromotionInputStore",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1922,6 +1941,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_final_evaluations"
     elif name in revalidation_reapproval_authority_exports:
         module_name = "revalidation_reapproval_authorities"
+    elif name in revalidation_promotion_input_exports:
+        module_name = "revalidation_promotion_inputs"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
