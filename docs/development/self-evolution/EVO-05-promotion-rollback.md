@@ -51,6 +51,8 @@
   cohort Run Grant 下执行连续 RED/GREEN 样本、验证可恢复前缀并冻结原始 metric/check evidence。
 - [EVO-05.3f2b2b3 Fresh Interventional Comparison](EVO-05-3f2b2b3-fresh-interventional-comparison.md)：已交付；
   从原始 H5a 重算 cohort summary，并形成 HAR-08 原生 H5b2/H5c comparison authority。
+- [EVO-05.3f2b2b4 Fresh Interventional Attribution](EVO-05-3f2b2b4-fresh-interventional-attribution.md)：已交付；
+  复验 Fresh H5c 并持久化目标指标归因，unchanged 不会误获 reflection eligibility。
 - [EVO-05.3f2c1 Fresh Adversarial Sample](EVO-05-3f2c1-fresh-adversarial-sample.md)：已交付；在指定真实平台运行
   current-target RED 与 immutable-overlay GREEN probe pair，但尚未形成平台 cohort/matrix。
 - [EVO-05.3f2c2 Fresh Adversarial Cohort](EVO-05-3f2c2-fresh-adversarial-cohort.md)：已交付；形成单一真实平台的
