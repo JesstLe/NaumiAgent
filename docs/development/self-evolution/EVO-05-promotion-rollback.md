@@ -91,7 +91,9 @@
   domain 的真实 Ed25519 challenge/receipt 绑定 Fresh Requirement/Response 与 current Principal event/key，旧签名不可复用。
 - [EVO-05.3f3b5 Fresh Decision Aggregation](EVO-05-3f3b5-fresh-decision-aggregation.md)：已交付；机械聚合新 user consent、
   current 专业签名与 Fresh technical gates，形成 hash-chained Decision，只开放 staged rollout 输入资格。
-- EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
+- [EVO-05.4a Immutable Rollout Plan](EVO-05-4a-immutable-rollout-plan.md)：已交付；冻结 local canary、opt-in、
+  percentage、stable 阶段 DAG、风险阈值和 rollback 约束，但不授予 stage-entry/执行权限。
+- EVO-05.4b Staged rollout execution：local canary materialization、stage-entry authority、kill switch 与 crash-safe journal。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
 - EVO-05.7 Outcome record：promoted/rolled_back/superseded 与长期指标。
@@ -111,5 +113,5 @@
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
 现可形成 exact Worker/capacity 绑定的 queued Dispatch，由持有 attested Ed25519 私钥的 Worker 领取，并从父权限派生短期远端执行授权；
-已实现签名 result manifest、本地 H5a/pair prefix 摄取以及 remote cohort/Matrix 收口，但尚未实现 rollout、monitor、rollback executor
+已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口与 immutable rollout plan，但尚未实现 local canary 执行、monitor、rollback executor
 或最终 Outcome 回注。任何界面和回执都不得把平台评测完成宣称为自进化闭环完成。

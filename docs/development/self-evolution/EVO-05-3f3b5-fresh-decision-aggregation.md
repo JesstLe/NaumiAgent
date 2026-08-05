@@ -51,6 +51,6 @@ push 或 publish。
 
 ## 后续依赖
 
-本 Decision 只开放 staged rollout 的输入资格。EVO-05.4 必须再建立不可变 rollout plan、local canary、分阶段 promotion
-authority 和 kill switch；随后 EVO-05.5/05.6 才能用运行信号触发自动回滚，EVO-05.7/06 才把 outcome 重新注入下一轮候选、
+本 Decision 只开放 staged rollout 的输入资格。[EVO-05.4a](EVO-05-4a-immutable-rollout-plan.md) 已建立不可变 rollout plan，
+但 local canary、分阶段 promotion authority 和 kill switch 仍由 EVO-05.4b 实现；随后 EVO-05.5/05.6 才能用运行信号触发自动回滚，EVO-05.7/06 才把 outcome 重新注入下一轮候选、
 评测和策略选择，形成真实自进化闭环。
