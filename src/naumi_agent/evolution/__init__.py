@@ -449,6 +449,17 @@ if TYPE_CHECKING:
         EvolutionRevalidationAdversarialSampleStore,
         adversarial_batch_id,
     )
+    from naumi_agent.evolution.revalidation_approval_requirements import (
+        EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY,
+        EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN,
+        EvolutionRevalidationApprovalReason,
+        EvolutionRevalidationApprovalRequirement,
+        EvolutionRevalidationApprovalRequirementError,
+        EvolutionRevalidationApprovalRequirementService,
+        EvolutionRevalidationApprovalRequirementStore,
+        EvolutionRevalidationApprovalStep,
+        EvolutionRevalidationApprovalTechnicalGate,
+    )
     from naumi_agent.evolution.revalidation_evaluation_plans import (
         EVOLUTION_REVALIDATION_EVALUATION_PLAN_POLICY,
         EvolutionRevalidationEvaluationLane,
@@ -739,6 +750,15 @@ __all__ = [
     "EvolutionRevalidationPromotionInputError",
     "EvolutionRevalidationPromotionInputService",
     "EvolutionRevalidationPromotionInputStore",
+    "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
+    "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
+    "EvolutionRevalidationApprovalReason",
+    "EvolutionRevalidationApprovalRequirement",
+    "EvolutionRevalidationApprovalRequirementError",
+    "EvolutionRevalidationApprovalRequirementService",
+    "EvolutionRevalidationApprovalRequirementStore",
+    "EvolutionRevalidationApprovalStep",
+    "EvolutionRevalidationApprovalTechnicalGate",
     "render_evolution_revalidation_rebase",
     "EVOLUTION_REVALIDATION_VALIDATION_POLICY",
     "EvolutionRevalidationCheckEvidence",
@@ -1433,6 +1453,17 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPromotionInputService",
         "EvolutionRevalidationPromotionInputStore",
     }
+    revalidation_approval_requirement_exports = {
+        "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
+        "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
+        "EvolutionRevalidationApprovalReason",
+        "EvolutionRevalidationApprovalRequirement",
+        "EvolutionRevalidationApprovalRequirementError",
+        "EvolutionRevalidationApprovalRequirementService",
+        "EvolutionRevalidationApprovalRequirementStore",
+        "EvolutionRevalidationApprovalStep",
+        "EvolutionRevalidationApprovalTechnicalGate",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1943,6 +1974,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_reapproval_authorities"
     elif name in revalidation_promotion_input_exports:
         module_name = "revalidation_promotion_inputs"
+    elif name in revalidation_approval_requirement_exports:
+        module_name = "revalidation_approval_requirements"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

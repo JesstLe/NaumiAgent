@@ -230,6 +230,10 @@ from naumi_agent.evolution.revalidation_adversarial_samples import (
     EvolutionRevalidationAdversarialSampleExecutor,
     EvolutionRevalidationAdversarialSampleStore,
 )
+from naumi_agent.evolution.revalidation_approval_requirements import (
+    EvolutionRevalidationApprovalRequirementService,
+    EvolutionRevalidationApprovalRequirementStore,
+)
 from naumi_agent.evolution.revalidation_evaluation_plans import (
     EvolutionRevalidationEvaluationPlanService,
     EvolutionRevalidationEvaluationPlanStore,
@@ -1892,6 +1896,27 @@ class AgentEngine:
                 ),
                 prior_input_store=self.evolution_promotion_package_input_store,
                 store=self.evolution_revalidation_promotion_input_store,
+            )
+        )
+        self.evolution_revalidation_approval_requirement_store = (
+            EvolutionRevalidationApprovalRequirementStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_approval_requirement_service = (
+            EvolutionRevalidationApprovalRequirementService(
+                workspace_root=paths.workspace_root,
+                promotion_input_service=(
+                    self.evolution_revalidation_promotion_input_service
+                ),
+                contract_service=self.evolution_revalidation_runtime_contract_service,
+                validation_plan_store=self.evolution_revalidation_validation_plan_store,
+                outcome_store=self.evolution_revalidation_outcome_store,
+                request_store=self.evolution_revalidation_request_store,
+                reapproval_store=(
+                    self.evolution_revalidation_reapproval_authority_store
+                ),
+                store=self.evolution_revalidation_approval_requirement_store,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

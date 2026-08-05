@@ -69,6 +69,8 @@
   Fresh Final，禁止复用旧审批/签名，并要求专业角色重新签名和创建新交互。
 - [EVO-05.3f3b1 Fresh Promotion Input](EVO-05-3f3b1-fresh-promotion-input.md)：已交付；版本化绑定 current Contract、
   Fresh Final 与 Reapproval Authority，只从旧 input 携带 patch/rollback 事实，不携带旧审批权威。
+- [EVO-05.3f3b2 Fresh Approval Requirement](EVO-05-3f3b2-fresh-approval-requirement.md)：已交付；绑定原 Request 的
+  target branch 与 Fresh Plan/Outcome 的 current revision/tree，强制新交互和专业角色新签名。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -85,8 +87,8 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f3b1。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f3b2。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
-Authority 和版本化 Fresh Promotion Input。尚未实现新的 Approval Requirement、角色交互、签名 challenge、Decision
-聚合、跨机器 platform Worker transport、rollout、monitor、rollback executor 或最终发布 Outcome authority。任何界面
-和回执都不得把 Fresh Promotion Input 宣称为已审批、promotion、merge、push 或发布。
+Authority、版本化 Fresh Promotion Input 和新的 Approval Requirement。尚未实现新的角色交互、签名 challenge、
+Decision 聚合、跨机器 platform Worker transport、rollout、monitor、rollback executor 或最终发布 Outcome authority。
+任何界面和回执都不得把 Fresh Approval Requirement 宣称为已审批、promotion、merge、push 或发布。

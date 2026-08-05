@@ -50,7 +50,11 @@ async def _runtime_scenario(tmp_path: Path, **builder_options):
         db_path,
         storage_dir=tmp_path / ".naumi" / "evolution" / "evaluation-sources",
     )
-    state = SimpleNamespace(current=True, package=package)
+    state = SimpleNamespace(
+        current=True,
+        package=package,
+        request=contract.revalidation_request,
+    )
 
     class _PlanService:
         async def inspect(self, **_kwargs):
