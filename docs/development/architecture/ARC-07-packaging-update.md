@@ -12,6 +12,8 @@
 - ARC-07.3 Source exposure audit：wheel/sdist/cache/debug/source map 中的源码和 secret。
 - ARC-07.4 Signing/notarization：macOS codesign/notary、Windows signing、checksums/SBOM。
 - ARC-07.5 Updater：channel、manifest、signature、download、atomic switch、rollback。
+  - [ARC-07.5a Immutable Installed-Version Slots](ARC-07-5a-installed-version-slots.md)：已交付本地 bundle
+    校验、真实 boot receipt、SQLite atomic pointer 与 previous-slot rollback；launcher、下载和签名仍未实现。
 - ARC-07.6 Config/data compatibility：用户 `.naumi` 与 state 不被覆盖，迁移前备份。
 - ARC-07.7 Offline/enterprise：离线包、代理、镜像、禁用自动更新。
 - ARC-07.8 Crash/diagnostic symbols：保护源码与可诊断性的平衡。
@@ -31,5 +33,5 @@
   当前只允许 reference/reimplement，不能把 source copy/adapt 进入闭源产物。ARC-07 后续 artifact license
   inventory 必须消费每个实际第三方 source 的独立 scope/provenance，不能把一个来源的许可推及另一个来源。
 - [EVO-05.6b1](../self-evolution/EVO-05-6b1-immutable-rollback-source.md) 已能冻结 exact baseline rollback
-  bytes，但当前 rollout 尚无真实 installed-version target。ARC-07.5a 下一步应先实现 immutable version slot、原子 active
-  pointer 与 bootability receipt；EVO-05.6b2 再复用该能力执行真实回滚，不能直接覆盖开发 workspace。
+  bytes；[ARC-07.5a](ARC-07-5a-installed-version-slots.md) 已补齐 immutable version slot、原子 active pointer 与
+  bootability receipt。ARC-07.5b 下一步接入稳定 launcher；EVO-05.6b2 再消费真实 slot，不能覆盖开发 workspace。

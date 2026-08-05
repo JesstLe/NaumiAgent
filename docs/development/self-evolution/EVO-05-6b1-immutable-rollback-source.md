@@ -43,5 +43,6 @@ Source 固定 `rollback_execution_authority=false`、`workspace_write_executed=f
 
 ## 下一切片
 
-最小 ARC-07.5a 必须建立可验证的 installed-version slot 与原子 active pointer，并保证旧 slot 始终可启动。随后
-EVO-05.6b2 才能把本 Source 物化为 recovery slot、运行 Harness startup checks，并原子切换真实部署目标。
+[ARC-07.5a](../architecture/ARC-07-5a-installed-version-slots.md) 已建立可验证的 installed-version slot、真实 boot
+receipt 与原子 active pointer。ARC-07.5b 仍需让稳定 launcher 消费 pointer；随后 EVO-05.6b2 才能把本 Source
+物化为 recovery slot、运行 Harness startup checks，并原子切换真实部署目标。
