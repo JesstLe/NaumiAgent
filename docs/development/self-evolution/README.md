@@ -101,3 +101,5 @@ paired comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未�
 summary 并生成原生 H5b2/H5c；该 decision 仍不覆盖 Adversarial、attribution、Final Evaluation 或 promotion。
 [EVO-05.3f2c1](EVO-05-3f2c1-fresh-adversarial-sample.md) 已在 Contract 指定且与 Worker 实际一致的平台执行一个
 Fresh Adversarial RED/GREEN pair；platform cohort、跨平台 matrix 与 Adversarial H5c 尚未完成。
+[EVO-05.3f2c2](EVO-05-3f2c2-fresh-adversarial-cohort.md) 已形成当前平台的连续 probe cohort，并支持中断后只恢复
+缺失后缀；required-platform matrix 与各平台 H5c 尚未完成。
