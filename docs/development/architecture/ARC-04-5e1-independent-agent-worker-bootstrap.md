@@ -143,5 +143,6 @@ python3 -m pytest -q \
 `ARC-04.5e2 / HAR-10.7h2` 已完成 exact AgentJob owner lease、物理 slot reservation、进程级一次性密钥
 加密 staging、双续租和 pre-start 安全释放，见
 [`ARC-04-5e2-independent-agent-worker-owner-lease.md`](ARC-04-5e2-independent-agent-worker-owner-lease.md)。
-下一步进入 `ARC-04.6a` 最小 Supervisor owner/fencing；在合法 takeover 与 crash 收口完成前，仍不开放
-`mark_running` 或完整多 Worker scheduler。
+`ARC-04.6a / HAR-10.7h3` 已完成最小 Supervisor owner/fencing，见
+[`ARC-04-6a-agent-worker-supervisor-owner-fencing.md`](ARC-04-6a-agent-worker-supervisor-owner-fencing.md)。
+下一步进入 ARC-04.5e3 独立执行纵向切片；在 running 副作用恢复边界完成前，不扩张完整多 Worker scheduler。

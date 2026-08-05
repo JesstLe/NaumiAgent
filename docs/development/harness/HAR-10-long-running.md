@@ -121,9 +121,12 @@
     注册前 PID/合同握手、child-driven heartbeat、drain/stop/revoke 与隐式 takeover 阻断；合同只声明
     `agent_control_transport` 且 `accepting_jobs=false`，Doctor/New UI/TUI 明确显示“任务调度未开放”。
     HAR-10.7h2 / ARC-04.5e2 已进一步完成 admitted-only AgentJob owner lease、物理 slot reservation、
-    一次性进程密钥加密 staging、双续租和 pre-start release；模型执行与 Supervisor 仍未完成。见
+    一次性进程密钥加密 staging、双续租和 pre-start release；HAR-10.7h3 / ARC-04.6a 又增加 exact
+    PID/create-time witness、Supervisor owner lease 与认证 pre-start fencing/requeue。模型执行与完整
+    Supervisor 运维仍未完成。见
     [Bootstrap](../architecture/ARC-04-5e1-independent-agent-worker-bootstrap.md) 与
-    [Owner lease](../architecture/ARC-04-5e2-independent-agent-worker-owner-lease.md)。
+    [Owner lease](../architecture/ARC-04-5e2-independent-agent-worker-owner-lease.md)、
+    [Supervisor fencing](../architecture/ARC-04-6a-agent-worker-supervisor-owner-fencing.md)。
   - ARC-04.5a 已让每次真实 Agent 委派在模型调用前绑定 task/context 摘要、精确工具/权限/模型/轮数/
     预算/超时，并在终态产生低敏 result receipt；New UI/TUI Agent Control 显示同一合同证据。见
     [设计](../architecture/ARC-04-5a-agent-worker-contract.md)。合同当前仍为进程内事实，不代表持久 Worker。
@@ -148,8 +151,9 @@
   - ARC-06.2b2 已让 claimed ToolJob 进入真实 Shell dispatch/start/terminal 链，并在 start 前复验
     reservation、对 lost claim 做 no-side-effect reconcile；见
     [设计](../architecture/ARC-06-2b2-claimed-tool-job-dispatch-reconcile.md)。当前 Agent 尚未成为持久
-    Worker；pre-start claim owner lease 已由 ARC-04.5e2 接入，自动 scheduler、`mark_running` 与
-    Supervisor 尚未完成，因此仍只是 HAR-10.7 集群调度前置。
+    Worker；pre-start claim owner lease 已由 ARC-04.5e2 接入，ARC-04.6a 已补齐最小 crash-before-start
+    fencing，自动 scheduler、`mark_running`、模型执行与完整 Supervisor 尚未完成，因此仍只是 HAR-10.7
+    集群调度前置。
   - UI-13.1d 已把每个 active Worker 的 reservation 占用/可用槽位投影到 New UI 与 TUI Doctor，且严格
     只读、不把 reservation 冒充实际进程负载；见
     [设计](../cli-ui/UI-13-1d-worker-capacity-health.md)。

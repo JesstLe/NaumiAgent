@@ -9,6 +9,7 @@ from naumi_agent import __version__
 from naumi_agent.config.settings import AppConfig
 from naumi_agent.daemons.agent_jobs import AgentJobStore
 from naumi_agent.daemons.agent_worker_process import AgentWorkerProcessFactory
+from naumi_agent.daemons.agent_worker_supervisor import AgentWorkerSupervisorFactory
 from naumi_agent.daemons.execution_grants import ExecutionGrantStore
 from naumi_agent.daemons.permission_decisions import PermissionDecisionReceiptStore
 from naumi_agent.daemons.run_delegation_grants import RunDelegationGrantStore
@@ -324,11 +325,28 @@ def build_runtime_services(
             software_version=__version__,
             max_concurrent_jobs=config.safety.max_parallel_agents,
         )
+    agent_worker_supervisor_factory = resolved.agent_worker_supervisor_factory
+    if agent_worker_supervisor_factory is not None and not isinstance(
+        agent_worker_supervisor_factory,
+        AgentWorkerSupervisorFactory,
+    ):
+        raise TypeError(
+            "agent_worker_supervisor_factory 必须是 "
+            "AgentWorkerSupervisorFactory。"
+        )
+    if agent_worker_supervisor_factory is None:
+        agent_worker_supervisor_factory = AgentWorkerSupervisorFactory(
+            worker_registry=resources.worker_registry_store,
+            heartbeat_store=resources.harness_store,
+            agent_job_store=resources.agent_job_store,
+            workspace_root=paths.workspace_root,
+        )
     return RuntimeServices(
         terminal_runtime_lifecycle_factory=factory,
         agent_execution_heartbeat_factory=agent_factory,
         browser_execution_heartbeat_factory=browser_factory,
         agent_worker_process_factory=agent_worker_factory,
+        agent_worker_supervisor_factory=agent_worker_supervisor_factory,
     )
 
 

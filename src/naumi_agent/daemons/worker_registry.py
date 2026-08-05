@@ -8,7 +8,7 @@ import json
 import math
 import os
 import stat
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -17,7 +17,21 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import psutil
 
+from naumi_agent.config.credentials import resolve_runtime_payload_key
+from naumi_agent.daemons.agent_worker_supervisor_contract import (
+    AgentWorkerProcessObservation,
+    AgentWorkerProcessObservationState,
+    AgentWorkerProcessWitness,
+    AgentWorkerSupervisorFenceEvidence,
+    AgentWorkerSupervisorFenceReceipt,
+    AgentWorkerSupervisorLease,
+    AgentWorkerSupervisorLeaseState,
+    issue_agent_worker_supervisor_fence_receipt,
+    supervisor_fence_receipt_from_json,
+    supervisor_fence_receipt_json,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerAdmissionDecision,
     WorkerAdmissionReason,
@@ -35,7 +49,7 @@ from naumi_agent.daemons.worker_contract import (
     verify_worker_contract,
 )
 
-WORKER_REGISTRY_SCHEMA_VERSION = 3
+WORKER_REGISTRY_SCHEMA_VERSION = 4
 _MAX_CONTRACT_JSON_BYTES = 64 * 1024
 _MAX_CAPACITY_WAITERS = 10_000
 
@@ -132,12 +146,20 @@ class WorkerCapacityClaim:
 class WorkerRegistryStore:
     """SQLite-backed source of truth for the active incarnation of each worker."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        supervisor_key_provider: Callable[[], bytes] = resolve_runtime_payload_key,
+    ) -> None:
         unresolved = Path(db_path).expanduser()
         if not unresolved.is_absolute():
             raise ValueError("Worker registry 路径必须是绝对路径。")
         path = unresolved.resolve(strict=False)
+        if not callable(supervisor_key_provider):
+            raise TypeError("supervisor_key_provider 必须可调用。")
         self._db_path = path
+        self._supervisor_key_provider = supervisor_key_provider
         self._schema_lock = asyncio.Lock()
         self._schema_ready = False
 
@@ -348,6 +370,510 @@ class WorkerRegistryStore:
                 return tuple(_registration_from_row(row) for row in await cursor.fetchall())
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise WorkerRegistryStoreError("无法读取 Worker 注册历史。") from exc
+
+    async def register_process_witness(
+        self,
+        *,
+        worker_id: str,
+        instance_id: str,
+        epoch: int,
+        contract_sha256: str,
+        process_id: int,
+        witnessed_at: str,
+    ) -> AgentWorkerProcessWitness:
+        """Bind an exact OS process birth identity to one active incarnation."""
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(instance_id, field="instance_id")
+        _validate_sha256(contract_sha256, field="contract_sha256")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        if isinstance(process_id, bool) or not isinstance(process_id, int) or process_id < 1:
+            raise ValueError("process_id 必须是正整数。")
+        timestamp = normalize_worker_timestamp(witnessed_at, field="witnessed_at")
+        process_started_at_us = _live_process_started_at_us(process_id)
+        witness = AgentWorkerProcessWitness(
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            process_started_at_us=process_started_at_us,
+            witnessed_at=timestamp,
+        )
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                row = await _select_registration(db, worker_id, epoch)
+                if row is None:
+                    raise WorkerRegistryConflictError("Worker incarnation 不存在。")
+                registration = _registration_from_row(row)
+                if (
+                    registration.state is not WorkerRegistrationState.ACTIVE
+                    or registration.contract.instance_id != instance_id
+                    or registration.contract.contract_sha256 != contract_sha256
+                ):
+                    raise WorkerRegistryConflictError(
+                        "Process witness 对应的 Worker incarnation 已被 fencing。"
+                    )
+                if datetime.fromisoformat(timestamp) < datetime.fromisoformat(
+                    registration.registered_at
+                ):
+                    raise WorkerRegistryConflictError(
+                        "process witnessed_at 早于 Worker registered_at。"
+                    )
+                existing_row = await _select_process_witness(db, worker_id, epoch)
+                if existing_row is not None:
+                    existing = _process_witness_from_row(existing_row)
+                    if existing != witness:
+                        raise WorkerRegistryConflictError(
+                            "Worker incarnation 已绑定其他 OS process witness。"
+                        )
+                    await db.commit()
+                    return existing
+                await db.execute(
+                    """
+                    INSERT INTO worker_process_witnesses (
+                        worker_id, epoch, instance_id, contract_sha256,
+                        process_id, process_started_at_us, witnessed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        worker_id,
+                        epoch,
+                        instance_id,
+                        contract_sha256,
+                        process_id,
+                        process_started_at_us,
+                        timestamp,
+                    ),
+                )
+                await db.commit()
+                return witness
+        except WorkerRegistryConflictError:
+            raise
+        except aiosqlite.IntegrityError as exc:
+            raise WorkerRegistryConflictError(
+                "Worker process witness 与现有事实冲突。"
+            ) from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法持久化 Worker process witness。") from exc
+
+    async def get_process_witness(
+        self,
+        *,
+        worker_id: str,
+        epoch: int,
+    ) -> AgentWorkerProcessWitness | None:
+        _validate_identifier(worker_id, field="worker_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("epoch 必须是正整数。")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                row = await _select_process_witness(db, worker_id, epoch)
+                return _process_witness_from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 Worker process witness。") from exc
+
+    async def observe_process_witness(
+        self,
+        *,
+        worker_id: str,
+        epoch: int,
+        assessed_at: str,
+    ) -> AgentWorkerProcessObservation | None:
+        timestamp = normalize_worker_timestamp(assessed_at, field="assessed_at")
+        witness = await self.get_process_witness(worker_id=worker_id, epoch=epoch)
+        if witness is None:
+            return None
+        return _observe_process_witness(witness, assessed_at=timestamp)
+
+    async def acquire_supervisor_lease(
+        self,
+        *,
+        worker_id: str,
+        owner_id: str,
+        acquired_at: str,
+        lease_seconds: int,
+    ) -> AgentWorkerSupervisorLease | None:
+        """Acquire the unique per-worker Supervisor owner epoch."""
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(owner_id, field="owner_id")
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 3 <= lease_seconds <= 86_400
+        ):
+            raise ValueError("Supervisor lease_seconds 必须在 3 到 86400 之间。")
+        timestamp = normalize_worker_timestamp(acquired_at, field="acquired_at")
+        expires_at = (
+            datetime.fromisoformat(timestamp) + timedelta(seconds=lease_seconds)
+        ).isoformat()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    INSERT INTO worker_supervisor_leases (
+                        worker_id, owner_id, epoch, state,
+                        acquired_at, expires_at, updated_at
+                    ) VALUES (?, ?, 1, 'active', ?, ?, ?)
+                    ON CONFLICT(worker_id) DO UPDATE SET
+                        owner_id = excluded.owner_id,
+                        epoch = CASE
+                            WHEN worker_supervisor_leases.state = 'active'
+                             AND worker_supervisor_leases.owner_id = excluded.owner_id
+                             AND worker_supervisor_leases.expires_at > excluded.updated_at
+                            THEN worker_supervisor_leases.epoch
+                            ELSE worker_supervisor_leases.epoch + 1
+                        END,
+                        state = 'active',
+                        acquired_at = CASE
+                            WHEN worker_supervisor_leases.state = 'active'
+                             AND worker_supervisor_leases.owner_id = excluded.owner_id
+                             AND worker_supervisor_leases.expires_at > excluded.updated_at
+                            THEN worker_supervisor_leases.acquired_at
+                            ELSE excluded.acquired_at
+                        END,
+                        expires_at = CASE
+                            WHEN worker_supervisor_leases.state = 'active'
+                             AND worker_supervisor_leases.owner_id = excluded.owner_id
+                             AND worker_supervisor_leases.expires_at > excluded.updated_at
+                             AND worker_supervisor_leases.expires_at > excluded.expires_at
+                            THEN worker_supervisor_leases.expires_at
+                            ELSE excluded.expires_at
+                        END,
+                        updated_at = excluded.updated_at
+                    WHERE excluded.updated_at >= worker_supervisor_leases.updated_at
+                      AND (
+                          worker_supervisor_leases.state = 'released'
+                          OR worker_supervisor_leases.expires_at <= excluded.updated_at
+                          OR worker_supervisor_leases.owner_id = excluded.owner_id
+                      )
+                    """,
+                    (worker_id, owner_id, timestamp, expires_at, timestamp),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_supervisor_lease(db, worker_id)
+                await db.commit()
+                assert row is not None
+                return _supervisor_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法获取 Agent Worker Supervisor lease。") from exc
+
+    async def renew_supervisor_lease(
+        self,
+        *,
+        worker_id: str,
+        owner_id: str,
+        epoch: int,
+        renewed_at: str,
+        lease_seconds: int,
+    ) -> AgentWorkerSupervisorLease | None:
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(owner_id, field="owner_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("Supervisor epoch 必须是正整数。")
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 3 <= lease_seconds <= 86_400
+        ):
+            raise ValueError("Supervisor lease_seconds 必须在 3 到 86400 之间。")
+        timestamp = normalize_worker_timestamp(renewed_at, field="renewed_at")
+        expires_at = (
+            datetime.fromisoformat(timestamp) + timedelta(seconds=lease_seconds)
+        ).isoformat()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    UPDATE worker_supervisor_leases
+                    SET expires_at = CASE WHEN expires_at > ? THEN expires_at ELSE ? END,
+                        updated_at = ?
+                    WHERE worker_id = ? AND owner_id = ? AND epoch = ?
+                      AND state = 'active' AND expires_at > ? AND updated_at <= ?
+                    """,
+                    (
+                        expires_at,
+                        expires_at,
+                        timestamp,
+                        worker_id,
+                        owner_id,
+                        epoch,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_supervisor_lease(db, worker_id)
+                await db.commit()
+                assert row is not None
+                return _supervisor_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法续期 Agent Worker Supervisor lease。") from exc
+
+    async def release_supervisor_lease(
+        self,
+        *,
+        worker_id: str,
+        owner_id: str,
+        epoch: int,
+        released_at: str,
+    ) -> AgentWorkerSupervisorLease | None:
+        _validate_identifier(worker_id, field="worker_id")
+        _validate_identifier(owner_id, field="owner_id")
+        if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 1:
+            raise ValueError("Supervisor epoch 必须是正整数。")
+        timestamp = normalize_worker_timestamp(released_at, field="released_at")
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                cursor = await db.execute(
+                    """
+                    UPDATE worker_supervisor_leases
+                    SET state = 'released', expires_at = ?, updated_at = ?
+                    WHERE worker_id = ? AND owner_id = ? AND epoch = ?
+                      AND state = 'active' AND expires_at > ? AND updated_at <= ?
+                    """,
+                    (
+                        timestamp,
+                        timestamp,
+                        worker_id,
+                        owner_id,
+                        epoch,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                if cursor.rowcount <= 0:
+                    await db.rollback()
+                    return None
+                row = await _select_supervisor_lease(db, worker_id)
+                await db.commit()
+                assert row is not None
+                return _supervisor_lease_from_row(row)
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法释放 Agent Worker Supervisor lease。") from exc
+
+    async def fence_agent_worker_for_supervisor(
+        self,
+        *,
+        evidence: AgentWorkerSupervisorFenceEvidence,
+        supervisor_owner_id: str,
+        supervisor_epoch: int,
+    ) -> AgentWorkerSupervisorFenceReceipt:
+        """Atomically re-probe and fence one exact dead Agent Worker incarnation."""
+        if not isinstance(evidence, AgentWorkerSupervisorFenceEvidence):
+            raise TypeError("evidence 必须是 AgentWorkerSupervisorFenceEvidence。")
+        _validate_identifier(supervisor_owner_id, field="supervisor_owner_id")
+        if (
+            isinstance(supervisor_epoch, bool)
+            or not isinstance(supervisor_epoch, int)
+            or supervisor_epoch < 1
+        ):
+            raise ValueError("supervisor_epoch 必须是正整数。")
+        authentication_key = self._supervisor_key_provider()
+        if not isinstance(authentication_key, bytes) or len(authentication_key) < 32:
+            raise WorkerRegistryStoreError(
+                "Supervisor receipt authentication key 不可用。"
+            )
+
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                existing_row = await _select_supervisor_fence_receipt(
+                    db,
+                    evidence.operation_id,
+                )
+                if existing_row is not None:
+                    existing = _supervisor_fence_receipt_from_row(existing_row)
+                    if existing.evidence != evidence:
+                        raise WorkerRegistryConflictError(
+                            "Supervisor operation_id 已绑定其他 fencing evidence。"
+                        )
+                    await db.commit()
+                    return existing
+                lease_row = await _select_supervisor_lease(db, evidence.worker_id)
+                if lease_row is None:
+                    raise WorkerRegistryConflictError("Supervisor lease 不存在。")
+                lease = _supervisor_lease_from_row(lease_row)
+                decided = datetime.fromisoformat(evidence.decided_at)
+                if (
+                    lease.state is not AgentWorkerSupervisorLeaseState.ACTIVE
+                    or lease.owner_id != supervisor_owner_id
+                    or lease.epoch != supervisor_epoch
+                    or datetime.fromisoformat(lease.expires_at) <= decided
+                    or datetime.fromisoformat(lease.updated_at) > decided
+                ):
+                    raise WorkerRegistryConflictError(
+                        "Supervisor lease owner/epoch/expiry fence 已失效。"
+                    )
+                registration_row = await _select_registration(
+                    db,
+                    evidence.worker_id,
+                    evidence.worker_epoch,
+                )
+                if registration_row is None:
+                    raise WorkerRegistryConflictError("Worker incarnation 不存在。")
+                registration = _registration_from_row(registration_row)
+                if (
+                    registration.state is not WorkerRegistrationState.ACTIVE
+                    or registration.contract.instance_id != evidence.instance_id
+                    or registration.contract.contract_sha256 != evidence.contract_sha256
+                ):
+                    raise WorkerRegistryConflictError(
+                        "Supervisor Worker incarnation fence 已变化。"
+                    )
+                witness_row = await _select_process_witness(
+                    db,
+                    evidence.worker_id,
+                    evidence.worker_epoch,
+                )
+                if witness_row is None:
+                    raise WorkerRegistryConflictError(
+                        "Supervisor 缺少精确 OS process witness。"
+                    )
+                witness = _process_witness_from_row(witness_row)
+                observation = _observe_process_witness(
+                    witness,
+                    assessed_at=evidence.decided_at,
+                )
+                if observation.state not in {
+                    AgentWorkerProcessObservationState.DEAD,
+                    AgentWorkerProcessObservationState.REUSED,
+                    AgentWorkerProcessObservationState.ZOMBIE,
+                }:
+                    raise WorkerRegistryConflictError(
+                        "原 Agent Worker 进程仍存活或无法证明死亡，拒绝 fencing。"
+                    )
+                if evidence.job_id:
+                    await _expire_capacity_reservations(
+                        db,
+                        worker_id=evidence.worker_id,
+                        now=evidence.decided_at,
+                    )
+                    reservation_row = await _select_capacity_reservation(
+                        db,
+                        evidence.reservation_id,
+                    )
+                    if reservation_row is None:
+                        raise WorkerRegistryConflictError(
+                            "Supervisor Job 缺少物理 capacity reservation。"
+                        )
+                    reservation = _capacity_reservation_from_row(reservation_row)
+                    if (
+                        reservation.worker_id != evidence.worker_id
+                        or reservation.instance_id != evidence.instance_id
+                        or reservation.epoch != evidence.worker_epoch
+                        or reservation.job_id != evidence.job_id
+                        or reservation.state.value != evidence.reservation_state
+                        or reservation.expires_at != evidence.reservation_expires_at
+                    ):
+                        raise WorkerRegistryConflictError(
+                            "Supervisor capacity reservation fence 已变化。"
+                        )
+                receipt = issue_agent_worker_supervisor_fence_receipt(
+                    evidence=evidence,
+                    supervisor_owner_id=supervisor_owner_id,
+                    supervisor_epoch=supervisor_epoch,
+                    witness=witness,
+                    process_observation=observation.state,
+                    authentication_key=authentication_key,
+                )
+                await db.execute(
+                    """
+                    UPDATE worker_registrations
+                    SET state = 'revoked', terminal_at = ?, reason_code = ?
+                    WHERE worker_id = ? AND epoch = ? AND state = 'active'
+                    """,
+                    (
+                        evidence.decided_at,
+                        receipt.registry_reason_code,
+                        evidence.worker_id,
+                        evidence.worker_epoch,
+                    ),
+                )
+                await _fence_capacity_reservations(
+                    db,
+                    worker_id=evidence.worker_id,
+                    epoch=evidence.worker_epoch,
+                    fenced_at=evidence.decided_at,
+                    reason_code=receipt.registry_reason_code,
+                )
+                await _fence_capacity_waiters(
+                    db,
+                    worker_id=evidence.worker_id,
+                    epoch=evidence.worker_epoch,
+                    fenced_at=evidence.decided_at,
+                    reason_code=receipt.registry_reason_code,
+                )
+                await db.execute(
+                    """
+                    INSERT INTO worker_supervisor_fence_receipts (
+                        operation_id, worker_id, worker_epoch, supervisor_owner_id,
+                        supervisor_epoch, decided_at, receipt_sha256,
+                        authentication_sha256, receipt_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        evidence.operation_id,
+                        evidence.worker_id,
+                        evidence.worker_epoch,
+                        supervisor_owner_id,
+                        supervisor_epoch,
+                        evidence.decided_at,
+                        receipt.receipt_sha256,
+                        receipt.authentication_sha256,
+                        supervisor_fence_receipt_json(receipt),
+                    ),
+                )
+                await db.commit()
+                return receipt
+        except WorkerRegistryConflictError:
+            raise
+        except aiosqlite.IntegrityError as exc:
+            raise WorkerRegistryConflictError(
+                "Supervisor fencing 与现有 durable evidence 冲突。"
+            ) from exc
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法 fencing Agent Worker。") from exc
+
+    async def get_latest_supervisor_fence(
+        self,
+        *,
+        worker_id: str,
+    ) -> AgentWorkerSupervisorFenceReceipt | None:
+        _validate_identifier(worker_id, field="worker_id")
+        if not _registry_file_exists(self._db_path):
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM worker_supervisor_fence_receipts
+                    WHERE worker_id = ? ORDER BY decided_at DESC, operation_id DESC LIMIT 1
+                    """,
+                    (worker_id,),
+                )
+                row = await cursor.fetchone()
+                return _supervisor_fence_receipt_from_row(row) if row is not None else None
+        except (aiosqlite.Error, OSError, ValueError) as exc:
+            raise WorkerRegistryStoreError("无法读取 Supervisor fencing receipt。") from exc
 
     async def reserve_capacity(
         self,
@@ -1226,15 +1752,25 @@ class WorkerRegistryStore:
                             await db.execute(statement)
                         for statement in _SCHEMA_V3_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V4_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 1:
                         for statement in _SCHEMA_V2_STATEMENTS:
                             await db.execute(statement)
                         for statement in _SCHEMA_V3_STATEMENTS:
                             await db.execute(statement)
+                        for statement in _SCHEMA_V4_STATEMENTS:
+                            await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version == 2:
                         for statement in _SCHEMA_V3_STATEMENTS:
+                            await db.execute(statement)
+                        for statement in _SCHEMA_V4_STATEMENTS:
+                            await db.execute(statement)
+                        await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
+                    elif version == 3:
+                        for statement in _SCHEMA_V4_STATEMENTS:
                             await db.execute(statement)
                         await db.execute(f"PRAGMA user_version = {WORKER_REGISTRY_SCHEMA_VERSION}")
                     elif version != WORKER_REGISTRY_SCHEMA_VERSION:
@@ -1372,6 +1908,103 @@ def _capacity_reservation_from_row(row: aiosqlite.Row) -> WorkerCapacityReservat
 
 def _capacity_waiter_from_row(row: aiosqlite.Row) -> WorkerCapacityWaiter:
     return deserialize_worker_capacity_waiter(dict(row))
+
+
+def _process_witness_from_row(row: aiosqlite.Row) -> AgentWorkerProcessWitness:
+    return AgentWorkerProcessWitness(
+        worker_id=str(row["worker_id"]),
+        instance_id=str(row["instance_id"]),
+        epoch=int(row["epoch"]),
+        contract_sha256=str(row["contract_sha256"]),
+        process_id=int(row["process_id"]),
+        process_started_at_us=int(row["process_started_at_us"]),
+        witnessed_at=str(row["witnessed_at"]),
+    )
+
+
+def _supervisor_lease_from_row(row: aiosqlite.Row) -> AgentWorkerSupervisorLease:
+    return AgentWorkerSupervisorLease(
+        worker_id=str(row["worker_id"]),
+        owner_id=str(row["owner_id"]),
+        epoch=int(row["epoch"]),
+        state=AgentWorkerSupervisorLeaseState(str(row["state"])),
+        acquired_at=str(row["acquired_at"]),
+        expires_at=str(row["expires_at"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _supervisor_fence_receipt_from_row(
+    row: aiosqlite.Row,
+) -> AgentWorkerSupervisorFenceReceipt:
+    receipt = supervisor_fence_receipt_from_json(str(row["receipt_json"]))
+    if (
+        receipt.evidence.operation_id != str(row["operation_id"])
+        or receipt.evidence.worker_id != str(row["worker_id"])
+        or receipt.evidence.worker_epoch != int(row["worker_epoch"])
+        or receipt.supervisor_owner_id != str(row["supervisor_owner_id"])
+        or receipt.supervisor_epoch != int(row["supervisor_epoch"])
+        or receipt.evidence.decided_at != str(row["decided_at"])
+        or receipt.receipt_sha256 != str(row["receipt_sha256"])
+        or receipt.authentication_sha256 != str(row["authentication_sha256"])
+    ):
+        raise ValueError("Supervisor fence receipt 索引列与认证内容不一致。")
+    return receipt
+
+
+def _live_process_started_at_us(process_id: int) -> int:
+    try:
+        process = psutil.Process(process_id)
+        started_at_us = int(round(process.create_time() * 1_000_000))
+        status = process.status()
+    except psutil.NoSuchProcess as exc:
+        raise WorkerRegistryConflictError("Worker OS process 已不存在。") from exc
+    except psutil.AccessDenied as exc:
+        raise WorkerRegistryStoreError("无法读取 Worker OS process identity。") from exc
+    except (OSError, ValueError) as exc:
+        raise WorkerRegistryStoreError("无法读取 Worker OS process birth time。") from exc
+    if status == psutil.STATUS_ZOMBIE or not process.is_running():
+        raise WorkerRegistryConflictError("Worker OS process 已终止。")
+    if started_at_us < 1:
+        raise WorkerRegistryStoreError("Worker OS process birth time 无效。")
+    return started_at_us
+
+
+def _observe_process_witness(
+    witness: AgentWorkerProcessWitness,
+    *,
+    assessed_at: str,
+) -> AgentWorkerProcessObservation:
+    observed_started_at_us: int | None = None
+    try:
+        process = psutil.Process(witness.process_id)
+        observed_started_at_us = int(round(process.create_time() * 1_000_000))
+        if observed_started_at_us != witness.process_started_at_us:
+            state = AgentWorkerProcessObservationState.REUSED
+        elif process.status() == psutil.STATUS_ZOMBIE:
+            state = AgentWorkerProcessObservationState.ZOMBIE
+        elif process.is_running():
+            state = AgentWorkerProcessObservationState.ALIVE
+        else:
+            state = AgentWorkerProcessObservationState.DEAD
+    except psutil.ZombieProcess:
+        state = AgentWorkerProcessObservationState.ZOMBIE
+        observed_started_at_us = witness.process_started_at_us
+    except psutil.NoSuchProcess:
+        state = AgentWorkerProcessObservationState.DEAD
+        observed_started_at_us = None
+    except psutil.AccessDenied:
+        state = AgentWorkerProcessObservationState.UNVERIFIABLE
+        observed_started_at_us = None
+    except (OSError, ValueError):
+        state = AgentWorkerProcessObservationState.UNVERIFIABLE
+        observed_started_at_us = None
+    return AgentWorkerProcessObservation(
+        witness=witness,
+        state=state,
+        observed_process_started_at_us=observed_started_at_us,
+        assessed_at=assessed_at,
+    )
 
 
 def deserialize_worker_capacity_reservation(
@@ -1577,6 +2210,40 @@ async def _select_registration(
     cursor = await db.execute(
         "SELECT * FROM worker_registrations WHERE worker_id = ? AND epoch = ?",
         (worker_id, epoch),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_process_witness(
+    db: aiosqlite.Connection,
+    worker_id: str,
+    epoch: int,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_process_witnesses WHERE worker_id = ? AND epoch = ?",
+        (worker_id, epoch),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_supervisor_lease(
+    db: aiosqlite.Connection,
+    worker_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_supervisor_leases WHERE worker_id = ?",
+        (worker_id,),
+    )
+    return await cursor.fetchone()
+
+
+async def _select_supervisor_fence_receipt(
+    db: aiosqlite.Connection,
+    operation_id: str,
+) -> aiosqlite.Row | None:
+    cursor = await db.execute(
+        "SELECT * FROM worker_supervisor_fence_receipts WHERE operation_id = ?",
+        (operation_id,),
     )
     return await cursor.fetchone()
 
@@ -2016,7 +2683,67 @@ WHERE state = 'waiting'
 )
 
 
+_SCHEMA_V4_STATEMENTS = (
+    """
+CREATE TABLE IF NOT EXISTS worker_process_witnesses (
+    worker_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    instance_id TEXT NOT NULL,
+    contract_sha256 TEXT NOT NULL CHECK (length(contract_sha256) = 64),
+    process_id INTEGER NOT NULL CHECK (process_id >= 1),
+    process_started_at_us INTEGER NOT NULL CHECK (process_started_at_us >= 1),
+    witnessed_at TEXT NOT NULL,
+    PRIMARY KEY (worker_id, epoch),
+    UNIQUE (process_id, process_started_at_us),
+    FOREIGN KEY (worker_id, epoch) REFERENCES worker_registrations(worker_id, epoch)
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS worker_supervisor_leases (
+    worker_id TEXT PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+    acquired_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    CHECK (updated_at >= acquired_at),
+    CHECK (
+        (state = 'active' AND expires_at > updated_at)
+        OR (state = 'released' AND expires_at = updated_at)
+    )
+)
+""",
+    """
+CREATE TABLE IF NOT EXISTS worker_supervisor_fence_receipts (
+    operation_id TEXT PRIMARY KEY,
+    worker_id TEXT NOT NULL,
+    worker_epoch INTEGER NOT NULL CHECK (worker_epoch >= 1),
+    supervisor_owner_id TEXT NOT NULL,
+    supervisor_epoch INTEGER NOT NULL CHECK (supervisor_epoch >= 1),
+    decided_at TEXT NOT NULL,
+    receipt_sha256 TEXT NOT NULL UNIQUE CHECK (length(receipt_sha256) = 64),
+    authentication_sha256 TEXT NOT NULL CHECK (length(authentication_sha256) = 64),
+    receipt_json TEXT NOT NULL,
+    FOREIGN KEY (worker_id, worker_epoch)
+        REFERENCES worker_registrations(worker_id, epoch)
+)
+""",
+    """
+CREATE INDEX IF NOT EXISTS worker_supervisor_fence_history
+ON worker_supervisor_fence_receipts (worker_id, decided_at DESC, operation_id DESC)
+""",
+)
+
+
 __all__ = [
+    "AgentWorkerProcessObservation",
+    "AgentWorkerProcessObservationState",
+    "AgentWorkerProcessWitness",
+    "AgentWorkerSupervisorFenceEvidence",
+    "AgentWorkerSupervisorFenceReceipt",
+    "AgentWorkerSupervisorLease",
+    "AgentWorkerSupervisorLeaseState",
     "WORKER_REGISTRY_SCHEMA_VERSION",
     "WorkerCapacityClaim",
     "WorkerCapacityExhaustedError",

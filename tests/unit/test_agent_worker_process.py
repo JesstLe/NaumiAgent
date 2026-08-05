@@ -19,6 +19,9 @@ from naumi_agent.daemons.agent_worker_process import (
     _transport_address,
     _validate_child_message,
 )
+from naumi_agent.daemons.agent_worker_supervisor_contract import (
+    AgentWorkerProcessObservationState,
+)
 from naumi_agent.daemons.worker_authority_health import (
     inspect_worker_authority_health,
 )
@@ -157,6 +160,18 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
     registration = await process._registry.get_active(started.worker_id)
     assert registration is not None
     assert registration.contract.contract_sha256 == started.contract_sha256
+    witness = await process._registry.get_process_witness(
+        worker_id=started.worker_id,
+        epoch=started.epoch,
+    )
+    observation = await process._registry.observe_process_witness(
+        worker_id=started.worker_id,
+        epoch=started.epoch,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert witness is not None and witness.process_id == started.process_id
+    assert observation is not None
+    assert observation.state is AgentWorkerProcessObservationState.ALIVE
 
     await asyncio.sleep(0.14)
     pulse = await process._heartbeats.get_heartbeat(
@@ -227,6 +242,16 @@ async def test_real_process_registers_pulses_stays_dispatch_disabled_and_revokes
     assert terminal.phase is HarnessHeartbeatPhase.STOPPED
     assert terminal.sequence > pulse.sequence
     assert process._process is not None and not process._process.is_alive()
+    stopped_observation = await process._registry.observe_process_witness(
+        worker_id=started.worker_id,
+        epoch=started.epoch,
+        assessed_at=datetime.now(UTC).isoformat(),
+    )
+    assert stopped_observation is not None
+    assert stopped_observation.state in {
+        AgentWorkerProcessObservationState.DEAD,
+        AgentWorkerProcessObservationState.ZOMBIE,
+    }
     assert not tuple((tmp_path / "runtime" / "agent-worker").glob("*.sock"))
     if os.name != "nt":
         assert stat.S_IMODE(

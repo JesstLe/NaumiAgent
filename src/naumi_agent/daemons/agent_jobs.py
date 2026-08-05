@@ -26,6 +26,10 @@ from naumi_agent.daemons.agent_worker_contract import (
     AgentWorkerResult,
     AgentWorkerResultStatus,
 )
+from naumi_agent.daemons.agent_worker_supervisor_contract import (
+    AgentWorkerSupervisorFenceReceipt,
+    verify_agent_worker_supervisor_fence_receipt,
+)
 from naumi_agent.safety.payload_envelope import (
     PayloadEnvelope,
     PayloadEnvelopeError,
@@ -1101,6 +1105,151 @@ class AgentJobStore:
             raise
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法释放独立 Agent Worker pre-start claim。") from exc
+
+    async def get_worker_prestart_claim(
+        self,
+        *,
+        owner_id: str,
+    ) -> StoredAgentJob | None:
+        """Read the unique claimed/running Job bound to one Worker owner.
+
+        Returning ``running`` is deliberate: the control-only Supervisor must
+        refuse automatic fencing when the side-effect boundary is no longer
+        provably pre-start.
+        """
+        _require_identifier(owner_id, field="owner_id")
+        if not _regular_file_exists(self._db_path):
+            return None
+        key = self._runtime_key()
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN")
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM agent_jobs
+                    WHERE state IN (?, ?) AND claim_owner_id = ?
+                    ORDER BY admitted_at, job_id LIMIT 2
+                    """,
+                    (
+                        AgentJobState.CLAIMED.value,
+                        AgentJobState.RUNNING.value,
+                        owner_id,
+                    ),
+                )
+                rows = await cursor.fetchall()
+                if len(rows) > 1:
+                    raise AgentJobError(
+                        "一个独立 Agent Worker owner 持有多个 active Job。"
+                    )
+                stored = (
+                    await _stored_from_row(db, rows[0], key=key)
+                    if rows
+                    else None
+                )
+                await db.commit()
+                return stored
+        except AgentJobError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法读取独立 Agent Worker pre-start claim。") from exc
+
+    async def requeue_expired_prestart_worker_claim(
+        self,
+        receipt: AgentWorkerSupervisorFenceReceipt,
+    ) -> AgentJobTransitionResult:
+        """Consume an authenticated Supervisor fence and requeue exact pre-start work."""
+        if not isinstance(receipt, AgentWorkerSupervisorFenceReceipt):
+            raise TypeError("receipt 必须是 AgentWorkerSupervisorFenceReceipt。")
+        if not receipt.has_job:
+            raise ValueError("Supervisor receipt 未绑定 AgentJob。")
+        key = self._runtime_key()
+        if not verify_agent_worker_supervisor_fence_receipt(
+            receipt,
+            authentication_key=key.key_bytes,
+        ):
+            raise AgentJobLifecycleConflictError(
+                "Supervisor fencing receipt 认证失败。"
+            )
+        evidence = receipt.evidence
+        now = self._now()
+        decided_at = _aware_time(evidence.decided_at, field="decided_at")
+        if decided_at > now:
+            raise AgentJobLifecycleConflictError(
+                "Supervisor fencing decided_at 晚于 AgentJob authority 时钟。"
+            )
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                stored = await _require_stored(db, evidence.job_id, key=key)
+                if stored.state is AgentJobState.ADMITTED:
+                    if (
+                        stored.latest_receipt.reason_code
+                        != "agent_worker_supervisor_prestart_requeued"
+                        or stored.latest_receipt.previous_receipt_sha256
+                        != evidence.latest_job_receipt_sha256
+                        or stored.claim_epoch != evidence.claim_epoch
+                    ):
+                        raise AgentJobLifecycleConflictError(
+                            "AgentJob 已由其他 transition 返回 admitted。"
+                        )
+                    await db.commit()
+                    return AgentJobTransitionResult(stored, False)
+                if stored.state is not AgentJobState.CLAIMED:
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor 只能 requeue pre-start claimed AgentJob。"
+                    )
+                if not hmac.compare_digest(
+                    stored.request_sha256,
+                    evidence.request_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob request fence 已变化。"
+                    )
+                if stored.claim_owner_id != evidence.job_owner_id:
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob owner fence 已变化。"
+                    )
+                if stored.claim_epoch != evidence.claim_epoch:
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob epoch fence 已变化。"
+                    )
+                if stored.claim_expires_at != evidence.claim_expires_at:
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob expiry fence 已变化。"
+                    )
+                if not hmac.compare_digest(
+                    stored.latest_receipt.receipt_sha256,
+                    evidence.latest_job_receipt_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob receipt fence 已变化。"
+                    )
+                if _required_claim_expiry(stored) > decided_at:
+                    raise AgentJobLifecycleConflictError(
+                        "Supervisor AgentJob claim 尚未到期。"
+                    )
+                result = await _append_transition(
+                    db,
+                    stored=stored,
+                    target_state=AgentJobState.ADMITTED,
+                    owner_id=None,
+                    claim_epoch=stored.claim_epoch,
+                    claim_expires_at=None,
+                    result=None,
+                    reason_code="agent_worker_supervisor_prestart_requeued",
+                    occurred_at=decided_at.isoformat(),
+                    key=key,
+                )
+                await db.commit()
+                return result
+        except (AgentJobError, AgentJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError(
+                "无法消费 Supervisor fencing 并 requeue AgentJob。"
+            ) from exc
 
     async def recover_payload(
         self,
@@ -4841,6 +4990,11 @@ def _validate_receipt_semantics(receipt: AgentJobLifecycleReceipt) -> None:
             AgentJobState.CLAIMED,
             AgentJobState.ADMITTED,
             "agent_worker_job_released",
+        ),
+        (
+            AgentJobState.CLAIMED,
+            AgentJobState.ADMITTED,
+            "agent_worker_supervisor_prestart_requeued",
         ),
     }
     result_transitions = {
