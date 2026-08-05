@@ -74,7 +74,7 @@ Engine 新增独立 `set_user_interaction_handler()` 和 `request_user_input()`�
 - Server `interaction/request`
 - Server `interaction/resolved`
 
-request payload 只含公开字段：request_id、session_id、run_id、agent_name、header、question、options、allow_custom、custom_label、status。
+request payload 只含公开字段：request_id、session_id、run_id、agent_name、header、question、options、allow_custom、custom_label、timeout_seconds、priority、expires_at、status。
 
 response：
 

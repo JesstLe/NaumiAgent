@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.user_interaction import (
+    InteractionPriority,
     UserInteractionOption,
     UserInteractionRequest,
     normalize_interaction_response,
@@ -41,7 +42,7 @@ class HarnessInteractionOption(_StrictInteractionModel):
 class HarnessInteractionRecord(_StrictInteractionModel):
     """Authenticated latest state; Store also preserves every transition."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 2
     interaction_id: str = Field(pattern=r"^ask-[A-Za-z0-9._:-]{1,128}$")
     subject_kind: InteractionSubjectKind
     subject_id: str = Field(
@@ -58,6 +59,7 @@ class HarnessInteractionRecord(_StrictInteractionModel):
     options: tuple[HarnessInteractionOption, ...] = Field(min_length=2, max_length=3)
     allow_custom: bool
     custom_label: str = Field(min_length=1, max_length=80)
+    priority: InteractionPriority = "normal"
     created_at: str = Field(min_length=1, max_length=64)
     expires_at: str = Field(max_length=64)
     owner_id: str = Field(
@@ -77,6 +79,8 @@ class HarnessInteractionRecord(_StrictInteractionModel):
 
     @model_validator(mode="after")
     def _validate_state(self) -> HarnessInteractionRecord:
+        if self.schema_version == 1 and self.priority != "normal":
+            raise ValueError("schema 1 interaction 只能使用兼容优先级 normal。")
         _aware(self.created_at, "created_at")
         _aware(self.owner_lease_expires_at, "owner_lease_expires_at")
         _aware(self.updated_at, "updated_at")
@@ -137,8 +141,11 @@ class HarnessInteractionRecord(_StrictInteractionModel):
         return self
 
     def canonical_json(self) -> str:
+        payload = self.model_dump(mode="json")
+        if self.schema_version == 1:
+            payload.pop("priority", None)
         return json.dumps(
-            self.model_dump(mode="json"),
+            payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -168,6 +175,7 @@ class HarnessInteractionRecord(_StrictInteractionModel):
             allow_custom=self.allow_custom,
             custom_label=self.custom_label,
             timeout_seconds=timeout_seconds,
+            priority=self.priority,
         )
 
 
@@ -190,6 +198,7 @@ def new_interaction_record(
     if timeout_seconds is not None and not 3 <= timeout_seconds <= 604_800:
         raise ValueError("timeout_seconds 必须在 3..604800 之间。")
     return HarnessInteractionRecord(
+        schema_version=2,
         interaction_id=interaction_id or f"ask-{uuid4().hex}",
         subject_kind=subject_kind,
         subject_id=_safe(subject_id),
@@ -209,6 +218,7 @@ def new_interaction_record(
         ),
         allow_custom=request.allow_custom,
         custom_label=_safe(request.custom_label),
+        priority=request.priority,
         created_at=created.isoformat(),
         expires_at=(
             (created + timedelta(seconds=timeout_seconds)).isoformat()

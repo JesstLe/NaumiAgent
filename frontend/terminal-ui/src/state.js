@@ -546,6 +546,7 @@ export function createInitialState() {
     permission: null,
     interaction: null,
     interactionQueue: [],
+    interactionPriorityCursor: 0,
     running: false,
     scrollOffset: 0,
     followTail: true,
@@ -2745,7 +2746,7 @@ export function handleInteractionResolved(state, payload) {
   );
   if (card) card.message = { ...(card.message ?? {}), ...payload, status: payload.status };
   if (state.interaction?.requestId === requestId) {
-    state.interaction = state.interactionQueue.shift() ?? null;
+    state.interaction = takeNextInteraction(state);
     if (state.interaction) {
       const nextCard = state.messages.find(
         (message) => message.kind === "interaction"
@@ -2760,6 +2761,29 @@ export function handleInteractionResolved(state, payload) {
   }
   updateRunActivityPhase(state, state.interaction ? "awaiting_input" : "executing");
   clearRenderCache(state.renderCache);
+}
+
+const INTERACTION_PRIORITY_SCHEDULE = [
+  "critical", "high", "critical", "normal",
+  "critical", "high", "critical", "low",
+];
+
+function takeNextInteraction(state) {
+  if (!state.interactionQueue.length) return null;
+  const cursor = Number(state.interactionPriorityCursor ?? 0)
+    % INTERACTION_PRIORITY_SCHEDULE.length;
+  for (let offset = 0; offset < INTERACTION_PRIORITY_SCHEDULE.length; offset += 1) {
+    const index = (cursor + offset) % INTERACTION_PRIORITY_SCHEDULE.length;
+    const priority = INTERACTION_PRIORITY_SCHEDULE[index];
+    const queueIndex = state.interactionQueue.findIndex(
+      (item) => String(item.payload?.priority ?? "normal") === priority,
+    );
+    if (queueIndex >= 0) {
+      state.interactionPriorityCursor = (index + 1) % INTERACTION_PRIORITY_SCHEDULE.length;
+      return state.interactionQueue.splice(queueIndex, 1)[0] ?? null;
+    }
+  }
+  return state.interactionQueue.shift() ?? null;
 }
 
 export function handleInteractionKey(state, chunk, send) {
@@ -2858,6 +2882,7 @@ function clearPendingInteractions(state, status) {
   }
   state.interaction = null;
   state.interactionQueue = [];
+  state.interactionPriorityCursor = 0;
   clearRenderCache(state.renderCache);
 }
 

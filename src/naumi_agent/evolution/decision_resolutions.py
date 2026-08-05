@@ -433,6 +433,7 @@ class EvolutionDecisionResolutionService:
         interaction_id = _next_interaction_id(decision, records)
         payload = {
             **decision.escalation.to_public_dict(),
+            "priority": "high",
             "_interaction_id": interaction_id,
             "_durable_subject_kind": "tool",
             "_durable_subject_id": decision.decision_id,
@@ -583,11 +584,16 @@ def _interaction_matches_decision(
     record: HarnessInteractionRecord,
     decision: EvolutionDecisionState,
 ) -> bool:
+    actual = record.request().to_public_dict()
+    expected = decision.escalation.to_public_dict() if decision.escalation else {}
+    if record.schema_version == 1:
+        actual.pop("priority", None)
+        expected.pop("priority", None)
     return bool(
         decision.escalation is not None
         and record.subject_kind == "tool"
         and record.subject_id == decision.decision_id
-        and record.request().to_public_dict() == decision.escalation.to_public_dict()
+        and actual == expected
         and _INTERACTION_PREFIX_RE.fullmatch(record.interaction_id) is not None
         and _INTERACTION_PREFIX_RE.fullmatch(record.interaction_id).group(1)
         == decision.decision_id.removeprefix("evdecision_")

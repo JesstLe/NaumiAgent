@@ -118,7 +118,6 @@ def test_custom_answer_remains_follow_up_and_cannot_accept() -> None:
         reason=EvolutionDecisionReason.EVIDENCE_INCONCLUSIVE,
         response={"kind": "custom", "custom_text": "先补充 Windows 实机证据"},
     )
-
     assert resolve_escalation_answer(decision, record) == (
         EvolutionDecisionResolutionAction.CUSTOM_INSTRUCTION,
         EvolutionDecisionResolutionOutcome.CUSTOM_FOLLOW_UP,
@@ -126,6 +125,20 @@ def test_custom_answer_remains_follow_up_and_cannot_accept() -> None:
         False,
     )
 
+
+def test_schema_v1_answer_remains_compatible_with_high_priority_escalation() -> None:
+    decision, record = _answered(
+        reason=EvolutionDecisionReason.EVIDENCE_INCONCLUSIVE,
+        response={"kind": "option", "value": "revise_candidate"},
+    )
+    payload = record.model_dump(mode="python")
+    payload["schema_version"] = 1
+    payload.pop("priority")
+    legacy = HarnessInteractionRecord.model_validate(payload)
+
+    assert resolve_escalation_answer(decision, legacy)[0] == (
+        EvolutionDecisionResolutionAction.REVISE_CANDIDATE
+    )
 
 def test_pending_interaction_cannot_form_resolution() -> None:
     escalation = _build_escalation((EvolutionDecisionReason.EVIDENCE_INCONCLUSIVE,))

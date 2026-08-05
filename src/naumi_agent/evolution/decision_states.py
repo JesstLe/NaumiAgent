@@ -103,6 +103,7 @@ class EvolutionDecisionEscalationRequest(_StrictModel):
     allow_custom: Literal[True] = True
     custom_label: str = Field(min_length=1, max_length=80)
     timeout_seconds: None = None
+    priority: Literal["high"] = "high"
 
     @field_validator("header", "question", "custom_label")
     @classmethod
@@ -126,6 +127,7 @@ class EvolutionDecisionEscalationRequest(_StrictModel):
             "allow_custom": self.allow_custom,
             "custom_label": self.custom_label,
             "timeout_seconds": self.timeout_seconds,
+            "priority": self.priority,
         }
 
 

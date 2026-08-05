@@ -64,6 +64,7 @@ from naumi_agent.tui.app import (
     _captured_terminal_text,
     _find_latest_user_session_id,
     _format_tool_output_markdown,
+    _scheduled_interaction_slot,
     _TuiSlashCommandFrontend,
 )
 from naumi_agent.tui.completion_receipt import (
@@ -80,6 +81,47 @@ from naumi_agent.user_interaction import (
 )
 
 _ASYNC_UI_TIMEOUT_SECONDS = 10.0
+
+
+@pytest.mark.asyncio
+async def test_tui_interaction_slots_are_weighted_and_do_not_preempt_active() -> None:
+    app = SimpleNamespace()
+    entered: list[str] = []
+    release_active = asyncio.Event()
+
+    async def worker(name: str, priority: str, *, hold: bool = False) -> None:
+        async with _scheduled_interaction_slot(app, priority):
+            entered.append(name)
+            if hold:
+                await release_active.wait()
+
+    active = asyncio.create_task(worker("active", "low", hold=True))
+    while entered != ["active"]:
+        await asyncio.sleep(0)
+    queued = [
+        asyncio.create_task(worker(name, priority))
+        for name, priority in (
+            ("low", "low"),
+            ("normal", "normal"),
+            ("high-1", "high"),
+            ("critical-1", "critical"),
+            ("critical-2", "critical"),
+            ("high-2", "high"),
+            ("critical-3", "critical"),
+            ("critical-4", "critical"),
+        )
+    ]
+    while len(app._interaction_waiters) != len(queued):
+        await asyncio.sleep(0)
+
+    assert entered == ["active"]
+    release_active.set()
+    await asyncio.gather(active, *queued)
+
+    assert entered == [
+        "active", "critical-1", "high-1", "critical-2", "normal",
+        "critical-3", "high-2", "critical-4", "low",
+    ]
 
 
 async def _wait_for_ui_condition(

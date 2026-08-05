@@ -5,9 +5,21 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, cast
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+InteractionPriority = Literal["critical", "high", "normal", "low"]
+INTERACTION_PRIORITY_SCHEDULE: tuple[InteractionPriority, ...] = (
+    "critical",
+    "high",
+    "critical",
+    "normal",
+    "critical",
+    "high",
+    "critical",
+    "low",
+)
 
 
 class UserInteractionUnavailableError(RuntimeError):
@@ -36,6 +48,7 @@ class UserInteractionRequest:
     allow_custom: bool = True
     custom_label: str = "其他"
     timeout_seconds: int | None = None
+    priority: InteractionPriority = "normal"
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +58,7 @@ class UserInteractionRequest:
             "allow_custom": self.allow_custom,
             "custom_label": self.custom_label,
             "timeout_seconds": self.timeout_seconds,
+            "priority": self.priority,
         }
 
 
@@ -100,6 +114,9 @@ def normalize_interaction_request(payload: Mapping[str, Any]) -> UserInteraction
         if not 3 <= raw_timeout <= 604_800:
             raise ValueError("交互超时必须在 3..604800 秒之间")
         timeout_seconds = raw_timeout
+    priority = str(payload.get("priority") or "normal").strip().lower()
+    if priority not in {"critical", "high", "normal", "low"}:
+        raise ValueError("交互优先级只能是 critical、high、normal 或 low")
     return UserInteractionRequest(
         header=header,
         question=question,
@@ -107,6 +124,7 @@ def normalize_interaction_request(payload: Mapping[str, Any]) -> UserInteraction
         allow_custom=allow_custom,
         custom_label=custom_label,
         timeout_seconds=timeout_seconds,
+        priority=cast(InteractionPriority, priority),
     )
 
 

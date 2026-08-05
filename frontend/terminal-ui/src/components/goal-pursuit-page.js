@@ -175,7 +175,8 @@ function renderInteractionLedger(snapshot, selectedIndex) {
       pending: "等待回答", answered: "已回答", expired: "已超时", cancelled: "已取消",
     }[item.state] || item.state;
     const marker = index === selectedIndex ? "›" : " ";
-    const row = `${marker} ${item.interaction_id} · ${label} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`;
+    const priority = { critical: "紧急", high: "重要", normal: "常规", low: "可延后" }[item.priority] || "常规";
+    const row = `${marker} ${item.interaction_id} · ${label} · ${priority} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`;
     lines.push(color(index === selectedIndex ? ANSI.cyan : style, row));
     lines.push(color(ANSI.dim, `    Pursuit · ${item.pursuit_run_id}`));
     lines.push(color(ANSI.dim, `    详情 · /goal interaction detail ${item.interaction_id}`));
@@ -198,6 +199,7 @@ function renderInteractionLedger(snapshot, selectedIndex) {
 function renderInteractionDetail(item) {
   const lines = [
     color(ANSI.cyan, `── 交互详情 · ${item.interaction_id}`),
+    color(ANSI.dim, `优先级 · ${{ critical: "紧急", high: "重要", normal: "常规", low: "可延后" }[item.priority] || "常规"}`),
     color(
       item.state === "pending" ? ANSI.yellow : item.state === "answered" ? ANSI.green : ANSI.dim,
       `${item.state} · ${compactText(item.header, 40)} · ${compactText(item.question, 2_000)}`,

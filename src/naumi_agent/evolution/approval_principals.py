@@ -714,6 +714,7 @@ class EvolutionApprovalPrincipalService:
         interaction_id = _next_interaction_id(principal_id, action, history)
         payload = {
             **request.to_public_dict(),
+            "priority": "high",
             "_interaction_id": interaction_id,
             "_durable_subject_kind": "tool",
             "_durable_subject_id": principal_id,
@@ -932,6 +933,7 @@ def _governance_request(
             "allow_custom": False,
             "custom_label": "不允许自定义治理文本",
             "timeout_seconds": timeout_seconds,
+            "priority": "high",
         }
     )
 
@@ -950,7 +952,13 @@ def _interaction_matches(
         and interaction.subject_id == principal_id
         and match.group(1) == principal_id.removeprefix("evprincipal_")
         and match.group(2) == action.value
-        and _static_request_payload(interaction.request()) == _static_request_payload(request)
+        and _static_request_payload(
+            interaction.request(),
+            include_priority=interaction.schema_version != 1,
+        ) == _static_request_payload(
+            request,
+            include_priority=interaction.schema_version != 1,
+        )
         and interaction.request().timeout_seconds is not None
         and interaction.request().timeout_seconds <= 86_400
     )
@@ -1200,8 +1208,15 @@ def _decode_public_key(value: str) -> bytes:
         raise ValueError("Ed25519 public key 无效。") from exc
 
 
-def _static_request_payload(request: UserInteractionRequest) -> dict[str, object]:
-    return {**request.to_public_dict(), "timeout_seconds": None}
+def _static_request_payload(
+    request: UserInteractionRequest,
+    *,
+    include_priority: bool = True,
+) -> dict[str, object]:
+    payload = {**request.to_public_dict(), "timeout_seconds": None}
+    if not include_priority:
+        payload.pop("priority", None)
+    return payload
 
 
 def _view(event: EvolutionApprovalPrincipalEvent) -> EvolutionApprovalPrincipalView:

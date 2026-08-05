@@ -37,6 +37,19 @@ def test_interaction_request_normalizes_public_fields_and_control_text() -> None
     assert request.question == "请选择方案"
     assert request.options[0].value == "safe"
     assert request.allow_custom is True
+    assert request.priority == "normal"
+
+
+def test_interaction_request_accepts_and_publishes_closed_priority() -> None:
+    request = normalize_interaction_request({
+        "header": "发布阻塞",
+        "question": "请选择发布策略",
+        "options": _options(),
+        "priority": "HIGH",
+    })
+
+    assert request.priority == "high"
+    assert request.to_public_dict()["priority"] == "high"
 
 
 @pytest.mark.parametrize(
@@ -50,6 +63,7 @@ def test_interaction_request_normalizes_public_fields_and_control_text() -> None
         ({"allow_custom": "false"}, "allow_custom 必须是布尔值"),
         ({"timeout_seconds": 2}, "交互超时必须在"),
         ({"timeout_seconds": True}, "交互超时必须是整数秒"),
+        ({"priority": "urgent"}, "交互优先级只能是"),
     ],
 )
 def test_interaction_request_rejects_invalid_boundaries(

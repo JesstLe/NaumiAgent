@@ -70,6 +70,15 @@ class RequestUserInputTool(Tool):
                     "maximum": 604800,
                     "description": "可选等待时限（秒）；省略表示不自动超时",
                 },
+                "priority": {
+                    "type": "string",
+                    "enum": ["critical", "high", "normal", "low"],
+                    "default": "normal",
+                    "description": (
+                        "排队提示：critical 仅用于阻塞全局进展的决定；"
+                        "high 用于关键决策；normal 为默认；low 用于可延后问题"
+                    ),
+                },
             },
             "required": ["header", "question", "options"],
             "additionalProperties": False,
@@ -84,6 +93,7 @@ class RequestUserInputTool(Tool):
         allow_custom: bool = True,
         custom_label: str = "其他",
         timeout_seconds: int | None = None,
+        priority: str = "normal",
         **kwargs: Any,
     ) -> str:
         try:
@@ -95,6 +105,7 @@ class RequestUserInputTool(Tool):
                     "allow_custom": allow_custom,
                     "custom_label": custom_label,
                     "timeout_seconds": timeout_seconds,
+                    "priority": priority,
                 }
             )
             raw_response = await self._engine.request_user_input(request.to_public_dict())

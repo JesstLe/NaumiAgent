@@ -3020,6 +3020,7 @@ test("normalizeServerRecord stabilizes bridge payloads", () => {
     allow_custom: true,
     custom_label: "其他",
     timeout_seconds: null,
+    priority: "normal",
     expires_at: "",
     status: "needs_input",
   });
