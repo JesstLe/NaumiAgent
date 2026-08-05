@@ -94,3 +94,6 @@ current Profile adversarial probe coverage，并对缺 runner、probe 或预算�
 [EVO-05.3f2b2b1](EVO-05-3f2b2b1-fresh-interventional-sample.md) 已真实执行一个 current-target RED/GREEN
 Interventional sample pair，持久化 ARC-04 lifecycle、metric 与 phase-specific Run Grant evidence；完整 cohort、
 comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成。
+[EVO-05.3f2b2b2](EVO-05-3f2b2b2-fresh-interventional-cohort.md) 已将 pair 扩展为连续 Fresh cohort，在一个
+cohort-scoped Run Grant 与共享 batch admission 下运行全部 RED/GREEN 样本，并支持复验连续前缀后只恢复缺失后缀；
+paired comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成。

@@ -441,6 +441,15 @@ if TYPE_CHECKING:
         EvolutionRevalidationExecutionService,
         render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_interventional_cohorts import (
+        EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY,
+        EvolutionRevalidationInterventionalCheckSummary,
+        EvolutionRevalidationInterventionalCohortError,
+        EvolutionRevalidationInterventionalCohortExecutor,
+        EvolutionRevalidationInterventionalCohortReceipt,
+        EvolutionRevalidationInterventionalCohortStore,
+        EvolutionRevalidationInterventionalMetricSummary,
+    )
     from naumi_agent.evolution.revalidation_interventional_samples import (
         EVOLUTION_REVALIDATION_INTERVENTIONAL_RUNNER,
         EVOLUTION_REVALIDATION_INTERVENTIONAL_SAMPLE_POLICY,
@@ -686,6 +695,13 @@ __all__ = [
     "EvolutionRevalidationRuntimeSourceError",
     "EvolutionRevalidationRuntimeSourcePair",
     "EvolutionRevalidationRuntimeSourceService",
+    "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
+    "EvolutionRevalidationInterventionalCheckSummary",
+    "EvolutionRevalidationInterventionalCohortError",
+    "EvolutionRevalidationInterventionalCohortExecutor",
+    "EvolutionRevalidationInterventionalCohortReceipt",
+    "EvolutionRevalidationInterventionalCohortStore",
+    "EvolutionRevalidationInterventionalMetricSummary",
     "EVOLUTION_REVALIDATION_INTERVENTIONAL_RUNNER",
     "EVOLUTION_REVALIDATION_INTERVENTIONAL_SAMPLE_POLICY",
     "EvolutionRevalidationInterventionalSampleError",
@@ -1223,6 +1239,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationInterventionalSampleReceipt",
         "EvolutionRevalidationInterventionalSampleStore",
     }
+    revalidation_interventional_cohort_exports = {
+        "EVOLUTION_REVALIDATION_INTERVENTIONAL_COHORT_POLICY",
+        "EvolutionRevalidationInterventionalCheckSummary",
+        "EvolutionRevalidationInterventionalCohortError",
+        "EvolutionRevalidationInterventionalCohortExecutor",
+        "EvolutionRevalidationInterventionalCohortReceipt",
+        "EvolutionRevalidationInterventionalCohortStore",
+        "EvolutionRevalidationInterventionalMetricSummary",
+    }
     revalidation_runtime_contract_exports = {
         "EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY",
         "EvolutionRevalidationRuntimeContract",
@@ -1717,6 +1742,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_validation_plans"
     elif name in revalidation_runtime_source_exports:
         module_name = "revalidation_runtime_sources"
+    elif name in revalidation_interventional_cohort_exports:
+        module_name = "revalidation_interventional_cohorts"
     elif name in revalidation_interventional_sample_exports:
         module_name = "revalidation_interventional_samples"
     elif name in revalidation_runtime_contract_exports:

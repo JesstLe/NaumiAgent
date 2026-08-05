@@ -47,6 +47,8 @@
   timeout、完整预算与 adversarial probe coverage，任何缺口均阻断真实 sample execution。
 - [EVO-05.3f2b2b1 Fresh Interventional Sample](EVO-05-3f2b2b1-fresh-interventional-sample.md)：已交付；真实执行并
   持久化一对 RED/GREEN H5a sample，支持中断恢复且不授予 cohort/comparison/promotion authority。
+- [EVO-05.3f2b2b2 Fresh Interventional Cohort](EVO-05-3f2b2b2-fresh-interventional-cohort.md)：已交付；在共享
+  cohort Run Grant 下执行连续 RED/GREEN 样本、验证可恢复前缀并冻结原始 metric/check evidence。
 - EVO-05.4 Staged rollout：local canary、opt-in channel、percentage、stable。
 - EVO-05.5 Runtime monitor：错误、性能、completion、用户撤回信号与阈值。
 - EVO-05.6 Rollback：binary/config/schema/patch 的兼容回滚和数据保护。
@@ -63,7 +65,8 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2a。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d 与 EVO-05.3a-3f2b2b2。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Evaluation matrix、immutable GREEN source 与 current-target Validation Plan；
-但尚未执行新的完整 Interventional/Adversarial lanes，也没有新 Final Evaluation、reapproval、rollout、monitor、rollback
-executor 或最终发布 Outcome authority。任何界面和回执都不得把 Validation Plan 宣称为 promotion、merge、push 或发布。
+Fresh Interventional cohort 已真实执行，但 paired comparison 与 Adversarial lanes 尚未完成，也没有新 Final Evaluation、
+reapproval、rollout、monitor、rollback executor 或最终发布 Outcome authority。任何界面和回执都不得把 cohort
+宣称为 promotion、merge、push 或发布。

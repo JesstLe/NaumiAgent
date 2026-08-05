@@ -50,6 +50,6 @@ RED/GREEN 共享 suite configuration、Profile 和同一次捕获的平台身份
 
 ## 6. 后续
 
-EVO-05.3f2b2b2 将用该 sample executor 构造连续 `0..N-1` cohort，加入共享 batch admission、恢复前缀复验、
+EVO-05.3f2b2b2 已用该 sample executor 构造连续 `0..N-1` cohort，加入共享 batch admission、恢复前缀复验、
 总预算与 cohort receipt；随后才允许 EVO-05.3f2b2b3 生成 paired comparison。Adversarial lane 仍由
 EVO-05.3f2b2c 单独实现。

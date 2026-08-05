@@ -49,6 +49,7 @@ SQLite Contract 以 Validation Plan 为唯一键，事务内验证 plan ID/diges
 
 本 Contract 本身仍是不执行命令的 authority。
 [EVO-05.3f2b2b1](EVO-05-3f2b2b1-fresh-interventional-sample.md) 已让单个 Interventional RED/GREEN pair 消费
-Contract 与共享 Source Pair，真实运行 Profile checks 和 ready metric runners；EVO-05.3f2b2b2/2b3 仍需形成完整
-cohort 与 paired comparison，EVO-05.3f2b2c 再接 Adversarial probes 与平台 lane。它们完成前不能签发新的
+Contract 与共享 Source Pair，真实运行 Profile checks 和 ready metric runners；
+[EVO-05.3f2b2b2](EVO-05-3f2b2b2-fresh-interventional-cohort.md) 已形成完整连续 cohort，EVO-05.3f2b2b3 仍需生成
+paired comparison，EVO-05.3f2b2c 再接 Adversarial probes 与平台 lane。它们完成前不能签发新的
 attribution 或 Final Evaluation。

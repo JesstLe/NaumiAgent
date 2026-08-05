@@ -209,6 +209,11 @@ async def test_fresh_sample_executes_real_red_green_metrics_and_persists_pair(
     )
 
     assert repeated == receipt
+    assert await executor.receipt_store.get_by_sample(
+        contract.contract_id,
+        0,
+        "cohort",
+    ) is None
     assert kernel.calls == ["red", "green"]
     assert receipt.pair_complete and not receipt.cohort_complete
     assert receipt.project_code_executed and receipt.metrics_executed
@@ -234,6 +239,41 @@ async def test_fresh_sample_executes_real_red_green_metrics_and_persists_pair(
         assert db.execute("SELECT state, revoke_reason FROM run_delegation_grants").fetchall() == [
             ("revoked", "fresh_sample_finished")
         ]
+
+
+@pytest.mark.asyncio
+async def test_fresh_sample_store_archives_unscoped_legacy_receipts(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "state.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute(
+            "CREATE TABLE evolution_revalidation_interventional_samples ("
+            "receipt_id TEXT PRIMARY KEY, receipt_sha256 TEXT NOT NULL UNIQUE, "
+            "contract_id TEXT NOT NULL, sample_index INTEGER NOT NULL, "
+            "receipt_json TEXT NOT NULL, completed_at TEXT NOT NULL, "
+            "UNIQUE (contract_id, sample_index))"
+        )
+        db.execute(
+            "INSERT INTO evolution_revalidation_interventional_samples VALUES "
+            "(?, ?, ?, ?, ?, ?)",
+            ("legacy", "a" * 64, "contract", 0, "{}", "2026-08-05T00:00:00+00:00"),
+        )
+
+    store = EvolutionRevalidationInterventionalSampleStore(db_path)
+    assert await store.get_by_sample("contract", 0, "sample") is None
+    with sqlite3.connect(db_path) as db:
+        assert db.execute(
+            "SELECT receipt_id FROM "
+            "evolution_revalidation_interventional_samples_legacy_v1"
+        ).fetchall() == [("legacy",)]
+        columns = {
+            row[1]
+            for row in db.execute(
+                "PRAGMA table_info(evolution_revalidation_interventional_samples)"
+            )
+        }
+    assert "run_scope" in columns
 
 
 @pytest.mark.asyncio
