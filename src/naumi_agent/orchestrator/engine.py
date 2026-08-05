@@ -275,6 +275,10 @@ from naumi_agent.evolution.revalidation_interventional_samples import (
     EvolutionRevalidationInterventionalSampleExecutor,
     EvolutionRevalidationInterventionalSampleStore,
 )
+from naumi_agent.evolution.revalidation_local_canary_runs import (
+    EvolutionRevalidationLocalCanaryExecutor,
+    EvolutionRevalidationLocalCanaryJournalStore,
+)
 from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
@@ -2133,6 +2137,31 @@ class AgentEngine:
                 plan_service=self.evolution_revalidation_rollout_plan_service,
                 control_store=self.evolution_revalidation_rollout_control_store,
                 store=self.evolution_revalidation_rollout_stage_entry_store,
+            )
+        )
+        self.evolution_revalidation_local_canary_journal_store = (
+            EvolutionRevalidationLocalCanaryJournalStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_local_canary_executor = (
+            EvolutionRevalidationLocalCanaryExecutor(
+                workspace_root=paths.workspace_root,
+                entry_service=(
+                    self.evolution_revalidation_rollout_stage_entry_service
+                ),
+                contract_service=(
+                    self.evolution_revalidation_runtime_contract_service
+                ),
+                source_service=self.evolution_revalidation_runtime_source_service,
+                profile_service=self.harness_service,
+                permission_store=resources.permission_decision_store,
+                run_grant_authority=self.run_delegation_grant_authority,
+                harness_store=self._harness_store,
+                sandbox_eval_kernel=self.harness_sandbox_eval_kernel,
+                journal_store=(
+                    self.evolution_revalidation_local_canary_journal_store
+                ),
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

@@ -129,6 +129,9 @@ gates，形成 append-only Fresh Decision；只有动态 current 的 approved De
 冻结为 local-canary→opt-in→percentage→stable 的风险分级计划；计划不授予 stage-entry 或执行权限。
 [EVO-05.4b1](EVO-05-4b1-fenced-local-canary-entry.md) 已增加 HMAC-attested local-canary stage-entry 与 workspace kill switch；
 pause/resume、expiry 或 Decision 漂移会动态 fence entry，且后续 stage/Git/publish 权限保持关闭。
+[EVO-05.4b2](EVO-05-4b2-local-canary-executor.md) 已消费 immutable GREEN，在 exact current Profile、父权限、
+Run Grant、runtime lease 与 ARC-04 sandbox Worker 下真实运行 local canary；append-only journal 支持 running 恢复、kill-switch
+取消与 task cancellation 清理，但只开放 monitor authority。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -136,4 +139,4 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 可撤销 Run Grant 和 exact evaluation scope 绑定。[EVO-05.3f2c3b2b2](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md)
 已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store。
 [EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已原子收口 authorization/capacity、生成 cohort，
-并以 completion 门禁推动 Matrix lane 完成；local canary 执行、monitor、rollback 和 Outcome 回注仍未完成。
+并以 completion 门禁推动 Matrix lane 完成；runtime monitor、rollback 和 Outcome 回注仍未完成。
