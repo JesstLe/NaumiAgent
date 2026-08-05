@@ -82,6 +82,20 @@ test("typed task snapshot renders source, owner, status, and dependencies", () =
   assert.doesNotMatch(filtered, /探索项目结构/);
 });
 
+test("typed task snapshot renders an authoritative empty state", () => {
+  const rendered = renderTaskSnapshot(
+    { filters: {}, warnings: [], items: [], timeline: [] },
+    80,
+    { width: 80, taskPanel: {} },
+  ).map(stripAnsi).join("\n");
+
+  assert(rendered.includes("0 项 · 活动 0"));
+  assert(!rendered.includes("Todo"));
+  assert(!rendered.includes("子智能体"));
+  assert(!rendered.includes("后台任务"));
+  assert(!rendered.includes("浏览器"));
+});
+
 test("interaction card and footer expose choices, custom input, and answered state", () => {
   const payload = {
     header: "实现策略",

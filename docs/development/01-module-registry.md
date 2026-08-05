@@ -34,7 +34,7 @@
 | --- | --- | --- | --- | --- |
 | CC-01 | 源码采纳治理与映射更新 | partial (1.1a, 1.1b, 1.2a) | 当前 source map | `claude-source/CC-01-source-governance.md` |
 | CC-02 | React/Ink Renderer 可替换性实验 | partial (2.1a, 2.2a, 2.4a) | ARC-03, UI-15 | `claude-source/CC-02-ink-spike.md` |
-| CC-03 | Task/Permission/Doctor 组件迁入 | partial (3.1a) | CC-01, UI-11..13 | `claude-source/CC-03-component-alignment.md` |
+| CC-03 | Task/Permission/Doctor 组件迁入 | partial (3.1a, 3.1b) | CC-01, UI-11..13 | `claude-source/CC-03-component-alignment.md` |
 | CC-04 | Plugin/Skill/MCP 机制对齐 | partial (4.1a) | ARC-01 | `claude-source/CC-04-extension-alignment.md` |
 | CC-05 | 上游差异监控与行为回归 | partial (5.1, 5.2a, 5.2b) | CC-01 | `claude-source/CC-05-upstream-regression.md` |
 

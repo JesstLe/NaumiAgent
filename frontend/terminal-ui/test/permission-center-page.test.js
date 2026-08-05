@@ -41,3 +41,20 @@ test("permission center distinguishes loading and unavailable state", () => {
   assert(failed.includes("权限快照暂不可用"));
   assert(!failed.includes("暂无待确认"));
 });
+
+test("permission center renders explicit empty sections", () => {
+  const empty = snapshot();
+  empty.pending = [];
+  empty.grants = [];
+  empty.history = [];
+  const rendered = renderPermissionCenterPage(
+    { snapshot: empty, loading: false, error: "", scrollOffset: 0 },
+    90,
+    18,
+  ).map(stripAnsi).join("\n");
+
+  assert(rendered.includes("暂无待确认请求"));
+  assert(rendered.includes("暂无本会话有效授权"));
+  assert(rendered.includes("暂无权限决定历史"));
+  assert(!rendered.includes("权限快照暂不可用"));
+});
