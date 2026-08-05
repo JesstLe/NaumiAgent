@@ -18,7 +18,7 @@ export function renderGoalPursuitPage(view, width, height) {
     color(ANSI.cyan, "Goal / Pursuit"),
     color(
       ANSI.dim,
-      "r 刷新 · x 恢复当前 Pursuit · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
+      "r 刷新 · x 恢复当前 Pursuit · o 恢复终态队列 · ↑/↓ 滚动 · j/k 选择交互 · Enter 详情 · f 筛选 · n/p 翻页 · Esc 返回",
     ),
   ];
   if (value.recoveryActionPending) {
@@ -29,6 +29,15 @@ export function renderGoalPursuitPage(view, width, height) {
   }
   if (value.recoveryActionError) {
     logical.push(color(ANSI.red, compactText(value.recoveryActionError, 4_000)));
+  }
+  if (value.terminalOutboxActionPending) {
+    logical.push(color(ANSI.yellow, "正在通过 ToolExecution 恢复到期的终态队列记录…"));
+  }
+  if (value.terminalOutboxActionNotice) {
+    logical.push(color(ANSI.green, compactText(value.terminalOutboxActionNotice, 4_000)));
+  }
+  if (value.terminalOutboxActionError) {
+    logical.push(color(ANSI.red, compactText(value.terminalOutboxActionError, 4_000)));
   }
   if (value.loading && !snapshot) {
     logical.push(color(ANSI.cyan, "正在读取 Goal / Pursuit 权威状态…"));

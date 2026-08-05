@@ -198,6 +198,9 @@
     `HAR-10-8f2a-pursuit-terminal-outbox-worker.md`。
   - HAR-10.8f2b 已实现：有界 typed backlog/worker snapshot 进入 Bridge `goals/snapshot`、New UI 和
     Goal Tool/Textual TUI fallback；详见 `HAR-10-8f2b-pursuit-terminal-outbox-ui.md`。
+  - HAR-10.8f2c 已实现：显式 due-only 恢复通过 Agent Tool/权限链进入 New UI `o` 键与
+    `/pursue outbox run-now`，并持久化 identity-free 不可变 pass 回执；详见
+    `HAR-10-8f2c-pursuit-terminal-outbox-run-now.md`。
   - 未完成：恢复控制动作、push stream、dead-letter/retention、跨 Store 原子 terminal commit 与 A5
     故障/soak。
 

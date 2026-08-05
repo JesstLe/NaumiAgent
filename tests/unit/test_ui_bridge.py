@@ -78,6 +78,10 @@ from naumi_agent.orchestrator.pursuit_recovery_attempt import (
     new_recovery_attempt,
 )
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.orchestrator.pursuit_terminal_outbox import (
+    PursuitTerminalOutboxRunStatus,
+    new_terminal_outbox_run_receipt,
+)
 from naumi_agent.orchestrator.pursuit_terminal_outbox_worker import (
     PursuitTerminalOutboxWorkerSnapshot,
     PursuitTerminalWorkerState,
@@ -7888,6 +7892,68 @@ async def test_bridge_pursuit_recovery_blocks_before_tool_without_checkpoint(
     )
     engine.execute_tool.assert_not_awaited()
     assert bridge._pursuit_recovery_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_bridge_terminal_outbox_run_now_uses_tool_and_public_receipt(
+    tmp_path: Path,
+) -> None:
+    engine = _FakeEngine()
+    engine.pursuit_store = PursuitStore(tmp_path / "pursuit")
+    engine.pursuit_terminal_outbox_enabled = True
+    engine.get_or_create_session = AsyncMock(return_value=SimpleNamespace(id="session"))
+    tool_calls: list[ToolCall] = []
+
+    async def execute_tool(tool_call: ToolCall, **kwargs: Any) -> ToolResult:
+        assert tool_call.name == "pursuit_terminal_outbox_run_now"
+        assert json.loads(tool_call.arguments) == {}
+        assert kwargs["agent_name"] == "new-ui"
+        tool_calls.append(tool_call)
+        receipt = new_terminal_outbox_run_receipt(
+            source_request_id=tool_call.id,
+            status=PursuitTerminalOutboxRunStatus.NO_DUE,
+            pending_before=0,
+            pending_after=0,
+            claimed=0,
+            delivered=0,
+            retry_scheduled=0,
+            failures=0,
+            failure_codes=(),
+            created_at=10.0,
+        )
+        engine.pursuit_store.save_terminal_outbox_run_receipt(receipt)
+        return ToolResult(
+            call_id=tool_call.id,
+            status="success",
+            content="暂无到期记录。",
+        )
+
+    engine.execute_tool = execute_tool  # type: ignore[attr-defined]
+    writer = io.StringIO()
+    bridge = JsonlEngineBridge(engine, config_path="config.yaml")
+    bridge.bind_writer(writer)
+    bridge._client_capabilities = {"pursuit_recovery_actions"}
+    bridge._protocol_negotiated = True
+    bridge.show_goal_panel = AsyncMock()  # type: ignore[method-assign]
+
+    await bridge.handle_client_record({
+        "id": "outbox-run-request",
+        "type": ClientEventType.PURSUIT_TERMINAL_OUTBOX_RUN_NOW,
+        "payload": {"private": "drop"},
+    })
+    await asyncio.gather(*tuple(bridge._pursuit_terminal_outbox_tasks.values()))
+
+    result = next(
+        item
+        for item in _records(writer)
+        if item["type"] == "pursuit/terminal-outbox/action_result"
+    )
+    assert result["request_id"] == "outbox-run-request"
+    assert result["payload"]["status"] == "no_due"
+    assert result["payload"]["receipt"]["receipt_id"].startswith("ptorun_")
+    assert "source_request_sha256" not in str(result["payload"])
+    assert len(tool_calls) == 1
+    assert bridge._pursuit_terminal_outbox_tasks == {}
 
 
 @pytest.mark.asyncio

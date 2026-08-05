@@ -61,6 +61,7 @@ async def test_run_pursue_routes_goal_through_engine_tool_executor() -> None:
         ("list --active", "pursuit_list", {"active_only": True}),
         ("status run-1", "pursuit_status", {"run_id": "run-1"}),
         ("resume run-1", "pursuit_resume", {"run_id": "run-1"}),
+        ("outbox run-now", "pursuit_terminal_outbox_run_now", {}),
         (
             "reconcile recovery-" + "a" * 64,
             "pursuit_reconcile",

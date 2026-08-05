@@ -2444,6 +2444,42 @@ test("Goal recovery key fails locally when authority blocks or capability is abs
   assert.equal(sent.length, 0);
 });
 
+test("Goal terminal outbox key sends one typed action and consumes its receipt", () => {
+  const state = createInitialState();
+  state.route = { name: "goals", originAnchor: null };
+  state.protocolNegotiated = true;
+  state.protocolNegotiation = { capabilities: ["pursuit_recovery_actions"] };
+  state.goalPanel.snapshot = {
+    current_goal_id: "",
+    goals: [],
+    interactions: [],
+    terminal_outbox: { enabled: true, status: "backoff", warning: "" },
+  };
+  const sent = [];
+  const send = (type, payload) => {
+    sent.push({ type, payload });
+    return "outbox-request-1";
+  };
+
+  assert.equal(handleGoalPanelKey(state, "o", send), true);
+  assert.deepEqual(sent, [{ type: "pursuit/terminal-outbox/run_now", payload: {} }]);
+  assert.equal(state.goalPanel.terminalOutboxActionPending, true);
+
+  reduceServerEvent(state, {
+    type: "pursuit/terminal-outbox/action_result",
+    request_id: "outbox-request-1",
+    payload: {
+      schema_version: 1,
+      status: "no_due",
+      code: "no_due",
+      message: "暂无到期记录。",
+      receipt: { receipt_id: `ptorun_${"a".repeat(24)}` },
+    },
+  });
+  assert.equal(state.goalPanel.terminalOutboxActionPending, false);
+  assert.match(state.goalPanel.terminalOutboxActionNotice, /暂无到期记录/);
+});
+
 test("evolution command opens typed review route and navigates to detail", () => {
   const state = createInitialState();
   const sent = [];

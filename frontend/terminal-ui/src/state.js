@@ -474,6 +474,10 @@ export function createInitialState() {
       recoveryActionRequestId: "",
       recoveryActionNotice: "",
       recoveryActionError: "",
+      terminalOutboxActionPending: false,
+      terminalOutboxActionRequestId: "",
+      terminalOutboxActionNotice: "",
+      terminalOutboxActionError: "",
     },
     evolutionReview: {
       loading: false,
@@ -912,6 +916,9 @@ export function reduceServerEvent(state, record) {
       break;
     case "pursuit/recovery/action_result":
       applyPursuitRecoveryActionResult(state, record, payload);
+      break;
+    case "pursuit/terminal-outbox/action_result":
+      applyPursuitTerminalOutboxActionResult(state, record, payload);
       break;
     case "evolution/review":
       state.evolutionReview.snapshot = payload;
@@ -1390,6 +1397,10 @@ export function reduceServerEvent(state, record) {
         recoveryActionRequestId: "",
         recoveryActionNotice: "",
         recoveryActionError: "",
+        terminalOutboxActionPending: false,
+        terminalOutboxActionRequestId: "",
+        terminalOutboxActionNotice: "",
+        terminalOutboxActionError: "",
       };
       if (wasGoalRoute) {
         state.route = { name: "conversation", originAnchor: null };
@@ -4752,7 +4763,7 @@ export function handleGoalPanelKey(state, key, send) {
   const lower = String(key || "").toLowerCase();
   if (
     state.goalPanel.loading
-    && ["r", "x", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
+    && ["r", "x", "o", "j", "k", "f", "n", "p", "\r", "\n"].includes(lower)
   ) {
     return true;
   }
@@ -4762,6 +4773,10 @@ export function handleGoalPanelKey(state, key, send) {
   }
   if (lower === "x") {
     requestCurrentPursuitRecovery(state, send);
+    return true;
+  }
+  if (lower === "o") {
+    requestTerminalOutboxRunNow(state, send);
     return true;
   }
   const interactions = state.goalPanel.snapshot?.interactions ?? [];
@@ -4909,6 +4924,53 @@ function applyPursuitRecoveryActionResult(state, record, payload) {
       ].slice(0, 5);
     }
   }
+  return true;
+}
+
+function requestTerminalOutboxRunNow(state, send) {
+  const outbox = state.goalPanel.snapshot?.terminal_outbox;
+  state.goalPanel.terminalOutboxActionNotice = "";
+  state.goalPanel.terminalOutboxActionError = "";
+  if (!outbox?.enabled || ["disabled", "unavailable"].includes(outbox.status)) {
+    state.goalPanel.terminalOutboxActionError = String(
+      outbox?.warning || "Pursuit 终态 outbox worker 当前不可用。",
+    );
+    return false;
+  }
+  if (state.goalPanel.terminalOutboxActionPending) return false;
+  const capability = negotiatedEventCapabilityStatus(
+    state,
+    "client",
+    "pursuit/terminal-outbox/run_now",
+  );
+  if (capability.status !== "available") {
+    state.goalPanel.terminalOutboxActionNotice = (
+      capability.status === "pending"
+        ? "协议协商尚未完成，未发送终态队列恢复请求。"
+        : "当前 Bridge 不支持页内恢复；请使用 `/pursue outbox run-now`。"
+    );
+    return false;
+  }
+  const requestId = String(send("pursuit/terminal-outbox/run_now", {}) || "");
+  state.goalPanel.terminalOutboxActionPending = true;
+  state.goalPanel.terminalOutboxActionRequestId = requestId;
+  return true;
+}
+
+function applyPursuitTerminalOutboxActionResult(state, record, payload) {
+  const pendingRequestId = String(state.goalPanel.terminalOutboxActionRequestId || "");
+  if (
+    pendingRequestId
+    && String(record.request_id || "")
+    && pendingRequestId !== String(record.request_id)
+  ) return false;
+  state.goalPanel.terminalOutboxActionPending = false;
+  state.goalPanel.terminalOutboxActionRequestId = "";
+  const successful = ["completed", "partial", "no_due"].includes(payload.status);
+  state.goalPanel.terminalOutboxActionNotice = successful ? String(payload.message || "") : "";
+  state.goalPanel.terminalOutboxActionError = successful
+    ? ""
+    : String(payload.message || "终态队列恢复失败。");
   return true;
 }
 
