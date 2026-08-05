@@ -415,6 +415,11 @@ if TYPE_CHECKING:
         EvolutionReflectionSignal,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_adversarial_attributions import (
+        EvolutionRevalidationAdversarialAttributionError,
+        EvolutionRevalidationAdversarialAttributionExecutor,
+        EvolutionRevalidationAdversarialAttributionKernel,
+    )
     from naumi_agent.evolution.revalidation_adversarial_cohorts import (
         EVOLUTION_REVALIDATION_ADVERSARIAL_COHORT_POLICY,
         EvolutionRevalidationAdversarialCheckSummary,
@@ -735,6 +740,9 @@ __all__ = [
     "EvolutionRevalidationAdversarialCohortExecutor",
     "EvolutionRevalidationAdversarialCohortReceipt",
     "EvolutionRevalidationAdversarialCohortStore",
+    "EvolutionRevalidationAdversarialAttributionError",
+    "EvolutionRevalidationAdversarialAttributionExecutor",
+    "EvolutionRevalidationAdversarialAttributionKernel",
     "EvolutionRevalidationAdversarialComparisonError",
     "EvolutionRevalidationAdversarialComparisonExecutor",
     "EvolutionRevalidationAdversarialMatrixError",
@@ -1312,6 +1320,11 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationAdversarialCohortReceipt",
         "EvolutionRevalidationAdversarialCohortStore",
     }
+    revalidation_adversarial_attribution_exports = {
+        "EvolutionRevalidationAdversarialAttributionError",
+        "EvolutionRevalidationAdversarialAttributionExecutor",
+        "EvolutionRevalidationAdversarialAttributionKernel",
+    }
     revalidation_adversarial_comparison_exports = {
         "EvolutionRevalidationAdversarialComparisonError",
         "EvolutionRevalidationAdversarialComparisonExecutor",
@@ -1833,6 +1846,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_runtime_sources"
     elif name in revalidation_adversarial_cohort_exports:
         module_name = "revalidation_adversarial_cohorts"
+    elif name in revalidation_adversarial_attribution_exports:
+        module_name = "revalidation_adversarial_attributions"
     elif name in revalidation_adversarial_comparison_exports:
         module_name = "revalidation_adversarial_comparisons"
     elif name in revalidation_adversarial_matrix_exports:
