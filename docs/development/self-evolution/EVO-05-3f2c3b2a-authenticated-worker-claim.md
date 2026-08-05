@@ -86,6 +86,6 @@ current receipt 仅证明 Worker 已认证取得 Dispatch 并拥有当前 transp
 
 ## 下一切片
 
-EVO-05.3f2c3b2b 增加 claim-bound execution start、内容寻址 result manifest、artifact size/digest/provenance 校验和本地 H5a ingestion。
-只有本地验证器从返回的原始 RED/GREEN evidence 重建并接受连续 cohort 后，Matrix lane 才能成为 completed。网络 transport adapter、
-mTLS/HTTP 或队列实现可以消费本协议，但不得绕过 Ed25519 claim 与 lease fencing。
+[EVO-05.3f2c3b2b1](EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md) 已先将 current Claim 与父权限、Runtime lease、
+可撤销 Run Grant 和 exact evaluation scope 绑定，但仍不接受自报 execution start。EVO-05.3f2c3b2b2 再增加内容寻址 result manifest、
+artifact size/digest/provenance 校验和本地 H5a ingestion。只有本地验证器接受连续 cohort 后，Matrix lane 才能成为 completed。
