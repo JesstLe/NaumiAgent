@@ -136,6 +136,8 @@ Run Grant、runtime lease 与 ARC-04 sandbox Worker 下真实运行 local canary
 冻结 duration/p95、completion/error 与 cost 基线；缺 raw sample 或 live cost evidence 会动态阻断 monitor input。
 [EVO-05.5b](EVO-05-5b-runtime-observation.md) 已将 local-canary terminal journal 与 frozen baseline/threshold、
 HMAC control signals 合并为 insufficient/passing/breached；breach 只开放 pause/rollback input，passing 不开放 stage advance。
+[EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
+绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
@@ -143,4 +145,4 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 可撤销 Run Grant 和 exact evaluation scope 绑定。[EVO-05.3f2c3b2b2](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md)
 已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store。
 [EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已原子收口 authorization/capacity、生成 cohort，
-并以 completion 门禁推动 Matrix lane 完成；automatic pause/rollback 和 Outcome 回注仍未完成。
+并以 completion 门禁推动 Matrix lane 完成；rollback executor 和 Outcome 回注仍未完成。

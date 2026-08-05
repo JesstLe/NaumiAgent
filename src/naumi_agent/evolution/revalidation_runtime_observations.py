@@ -150,6 +150,20 @@ class EvolutionRevalidationRuntimeObservationStore:
             row["observation_json"]
         )
 
+    async def get(self, observation_id: str):
+        if not self.db_path.is_file():
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            row = await (await db.execute(
+                "SELECT observation_json FROM evolution_revalidation_runtime_observations "
+                "WHERE observation_id = ?", (observation_id,)
+            )).fetchone()
+        return None if row is None else EvolutionRevalidationRuntimeObservation.model_validate_json(
+            row["observation_json"]
+        )
+
     async def record(self, observation):
         item = EvolutionRevalidationRuntimeObservation.model_validate_json(
             observation.model_dump_json()

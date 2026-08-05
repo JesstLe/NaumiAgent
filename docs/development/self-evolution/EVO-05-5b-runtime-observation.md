@@ -39,7 +39,8 @@ stage advance 或 promotion。
 - Engine 与公共 lazy exports 已接线；
 - 只运行相关小模块测试，未运行全量测试。
 
-## 下一切片
+## 下游状态
 
-EVO-05.6a 自动暂停协调器必须消费 exact breached Observation，以 monitor actor 幂等触发 workspace kill switch，并签发只读
-rollback request；不能在本切片中把 breach 文本直接当作已回滚。随后 EVO-05.6b 才执行 rollback plan 并验证至少一个可启动版本。
+[EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已消费 exact breached Observation，幂等触发或复用
+workspace kill switch，并冻结只读 Rollback Request。EVO-05.6b 才执行 rollback plan 并验证至少一个可启动版本；
+EVO-05.7 仍需把结果回注长期效果记录。

@@ -669,6 +669,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_rollback_requests import (
+        EVOLUTION_REVALIDATION_ROLLBACK_REQUEST_POLICY,
+        EvolutionRevalidationRollbackRequest,
+        EvolutionRevalidationRollbackRequestError,
+        EvolutionRevalidationRollbackRequestService,
+        EvolutionRevalidationRollbackRequestStore,
+    )
     from naumi_agent.evolution.revalidation_rollout_baselines import (
         EVOLUTION_REVALIDATION_ROLLOUT_BASELINE_POLICY,
         EvolutionRevalidationRolloutBaseline,
@@ -975,6 +982,11 @@ __all__ = [
     "EvolutionRevalidationRuntimeObservationService",
     "EvolutionRevalidationRuntimeObservationStatus",
     "EvolutionRevalidationRuntimeObservationStore",
+    "EVOLUTION_REVALIDATION_ROLLBACK_REQUEST_POLICY",
+    "EvolutionRevalidationRollbackRequest",
+    "EvolutionRevalidationRollbackRequestError",
+    "EvolutionRevalidationRollbackRequestService",
+    "EvolutionRevalidationRollbackRequestStore",
     "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
     "EvolutionRevalidationRolloutExposure",
     "EvolutionRevalidationRolloutPlan",
@@ -1808,6 +1820,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRuntimeObservationStatus",
         "EvolutionRevalidationRuntimeObservationStore",
     }
+    revalidation_rollback_request_exports = {
+        "EVOLUTION_REVALIDATION_ROLLBACK_REQUEST_POLICY",
+        "EvolutionRevalidationRollbackRequest",
+        "EvolutionRevalidationRollbackRequestError",
+        "EvolutionRevalidationRollbackRequestService",
+        "EvolutionRevalidationRollbackRequestStore",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2382,6 +2401,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rollout_stage_entries"
     elif name in revalidation_runtime_observation_exports:
         module_name = "revalidation_runtime_observations"
+    elif name in revalidation_rollback_request_exports:
+        module_name = "revalidation_rollback_requests"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
