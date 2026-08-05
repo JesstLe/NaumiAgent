@@ -78,5 +78,6 @@ Receipt 明确区分：
 ## 6. 当前边界
 
 - 本切片运行 Profile checks，但不会把旧 Final Evaluation、Approval Decision 或 Promotion Package 自动改写为 current。
-- EVO-05.3d 必须签发新的 Revalidation Outcome，显式标记旧 evidence stale，并机械决定是否需要重新聚合专业审批。
+- [EVO-05.3d](EVO-05-3d-revalidation-outcome.md) 已消费本回执，原子标记旧 evidence
+  `superseded_for_promotion`，并要求重新签发 Final Evaluation、专业签名与 Approval。
 - Candidate 长期恢复仍依赖未来不可变、加密、受保留策略治理的 blob authority；active Lease 不是永久归档。

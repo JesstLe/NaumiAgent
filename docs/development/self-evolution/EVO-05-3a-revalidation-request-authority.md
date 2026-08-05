@@ -102,7 +102,8 @@ diverged 或 authority 无法读取仍 fail closed 为不可执行。
 - EVO-05.3b1 已完成 exact-target 隔离 replay；EVO-05.3b2a 已关闭 target movement authority 死锁；
 - EVO-05.3b2b 仍需三方 rebase、冲突 artifact、跨进程 fencing 与崩溃恢复；
 - EVO-05.3c 仍需把 request 映射到重新绑定的 Validation Plan/Eval cohort，并签发新 receipt；
-- EVO-05.3d 仍需形成 Revalidation Outcome，比较 replay 后生产文件树并使旧 Eval receipt 确定性 stale；
+- [EVO-05.3d](EVO-05-3d-revalidation-outcome.md) 已形成 Revalidation Outcome，并使旧 Eval/promotion authority
+  确定性失效；
 - 任何 rebase conflict、validation failure、取消、崩溃恢复与清理都必须有 durable receipt；
 - 完整 EVO-05 仍未实现 rollout、runtime monitor、rollback 与 Outcome authority。
 

@@ -3210,6 +3210,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     from naumi_agent.evolution.revalidation_execution import (
         render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_outcomes import (
+        EvolutionRevalidationOutcomeError,
+        render_evolution_revalidation_outcome,
+    )
     from naumi_agent.evolution.revalidation_rebases import EvolutionRevalidationRebaseError
     from naumi_agent.evolution.revalidation_replays import EvolutionRevalidationReplayError
     from naumi_agent.evolution.revalidation_requests import (
@@ -3555,6 +3559,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             console.print(Markdown(render_evolution_revalidation_validation(receipt)))
             return
+        if action == "revalidation-outcome":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-outcome 需要一个 Revalidation Request ID。"
+                )
+            view = await engine.evolution_revalidation_outcome_service.issue(
+                workspace_root=engine.workspace_root,
+                request_id=parts[1],
+            )
+            console.print(Markdown(render_evolution_revalidation_outcome(view)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3766,6 +3781,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-request show <revalidation-request-id>；"
             "/evolution revalidation-replay <revalidation-request-id>；"
             "/evolution revalidation-validate <revalidation-request-id>；"
+            "/evolution revalidation-outcome <revalidation-request-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3929,6 +3945,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationValidationError as exc:
         console.print(
             f"Evolution Harness Revalidation 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationOutcomeError as exc:
+        console.print(
+            f"Evolution Revalidation Outcome 未完成：{exc}",
             style="yellow",
             markup=False,
         )

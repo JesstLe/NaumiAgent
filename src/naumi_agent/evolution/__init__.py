@@ -420,6 +420,17 @@ if TYPE_CHECKING:
         EvolutionRevalidationExecutionService,
         render_evolution_revalidation_execution,
     )
+    from naumi_agent.evolution.revalidation_outcomes import (
+        EVOLUTION_REVALIDATION_OUTCOME_POLICY,
+        EvolutionInvalidatedAuthority,
+        EvolutionRevalidationOutcome,
+        EvolutionRevalidationOutcomeError,
+        EvolutionRevalidationOutcomeService,
+        EvolutionRevalidationOutcomeStatus,
+        EvolutionRevalidationOutcomeStore,
+        EvolutionRevalidationOutcomeView,
+        render_evolution_revalidation_outcome,
+    )
     from naumi_agent.evolution.revalidation_rebases import (
         EVOLUTION_REVALIDATION_REBASE_POLICY,
         EvolutionRevalidationRebaseError,
@@ -590,6 +601,15 @@ __all__ = [
     "EvolutionRevalidationValidationStatus",
     "EvolutionRevalidationValidationStore",
     "render_evolution_revalidation_validation",
+    "EVOLUTION_REVALIDATION_OUTCOME_POLICY",
+    "EvolutionInvalidatedAuthority",
+    "EvolutionRevalidationOutcome",
+    "EvolutionRevalidationOutcomeError",
+    "EvolutionRevalidationOutcomeService",
+    "EvolutionRevalidationOutcomeStatus",
+    "EvolutionRevalidationOutcomeStore",
+    "EvolutionRevalidationOutcomeView",
+    "render_evolution_revalidation_outcome",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -1045,6 +1065,17 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationValidationStatus",
         "EvolutionRevalidationValidationStore",
         "render_evolution_revalidation_validation",
+    }
+    revalidation_outcome_exports = {
+        "EVOLUTION_REVALIDATION_OUTCOME_POLICY",
+        "EvolutionInvalidatedAuthority",
+        "EvolutionRevalidationOutcome",
+        "EvolutionRevalidationOutcomeError",
+        "EvolutionRevalidationOutcomeService",
+        "EvolutionRevalidationOutcomeStatus",
+        "EvolutionRevalidationOutcomeStore",
+        "EvolutionRevalidationOutcomeView",
+        "render_evolution_revalidation_outcome",
     }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
@@ -1520,6 +1551,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_rebases"
     elif name in revalidation_validation_exports:
         module_name = "revalidation_validations"
+    elif name in revalidation_outcome_exports:
+        module_name = "revalidation_outcomes"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
