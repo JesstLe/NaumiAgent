@@ -12,6 +12,8 @@ import pytest
 from naumi_agent.release.artifact import ArtifactError, assemble_release_artifact
 
 ROOT = Path(__file__).resolve().parents[2]
+SOURCE_COMMIT = "a" * 40
+SOURCE_TREE_SHA256 = "b" * 64
 
 
 def _binary(path: Path, content: bytes) -> Path:
@@ -40,6 +42,8 @@ def test_assemble_release_artifact_creates_manifest_archive_and_checksum(
         output_dir=tmp_path / "release",
         version="1.2.3",
         target="macos-arm64",
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="tar.gz",
     )
 
@@ -49,6 +53,8 @@ def test_assemble_release_artifact_creates_manifest_archive_and_checksum(
     assert manifest["schema_version"] == 1
     assert manifest["version"] == "1.2.3"
     assert manifest["target"] == "macos-arm64"
+    assert manifest["source_commit"] == SOURCE_COMMIT
+    assert manifest["source_tree_sha256"] == SOURCE_TREE_SHA256
     files = {item["path"]: item for item in manifest["files"]}
     assert files["naumi-runtime"]["sha256"] == hashlib.sha256(b"frozen-backend").hexdigest()
     assert files["launcher/naumi"]["sha256"] == hashlib.sha256(b"stable-launcher").hexdigest()
@@ -59,6 +65,24 @@ def test_assemble_release_artifact_creates_manifest_archive_and_checksum(
     with tarfile.open(result.archive, "r:gz") as archive:
         names = archive.getnames()
     assert f"{result.bundle_dir.name}/manifest.json" in names
+
+
+def test_assemble_release_artifact_rejects_ambiguous_source_provenance(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ArtifactError, match="source_commit"):
+        assemble_release_artifact(
+            backend_dir=tmp_path,
+            launcher_dir=tmp_path,
+            ui_binary=tmp_path / "missing-ui",
+            config_example=tmp_path / "missing-config",
+            output_dir=tmp_path / "release",
+            version="1.2.3",
+            target="linux-x64",
+            source_commit="main",
+            source_tree_sha256=SOURCE_TREE_SHA256,
+            archive_format="tar.gz",
+        )
 
 
 def test_assemble_release_artifact_rejects_project_source_without_replacing_release(
@@ -85,6 +109,8 @@ def test_assemble_release_artifact_rejects_project_source_without_replacing_rele
             output_dir=tmp_path / "release",
             version="1.2.3",
             target="linux-x64",
+            source_commit=SOURCE_COMMIT,
+            source_tree_sha256=SOURCE_TREE_SHA256,
             archive_format="tar.gz",
         )
 
@@ -107,6 +133,8 @@ def test_assemble_windows_zip_renames_ui_and_is_reproducible(tmp_path: Path) -> 
         output_dir=tmp_path / "release-a",
         version="1.2.3",
         target="windows-x64",
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="zip",
     )
     second = assemble_release_artifact(
@@ -117,6 +145,8 @@ def test_assemble_windows_zip_renames_ui_and_is_reproducible(tmp_path: Path) -> 
         output_dir=tmp_path / "release-b",
         version="1.2.3",
         target="windows-x64",
+        source_commit=SOURCE_COMMIT,
+        source_tree_sha256=SOURCE_TREE_SHA256,
         archive_format="zip",
     )
 
@@ -153,6 +183,8 @@ def test_assembler_allows_declared_third_party_runtime_data_but_not_naumi_source
             output_dir=tmp_path / "release",
             version="1.2.3",
             target="linux-x64",
+            source_commit=SOURCE_COMMIT,
+            source_tree_sha256=SOURCE_TREE_SHA256,
             archive_format="tar.gz",
         )
 
@@ -177,6 +209,8 @@ def test_assembler_rejects_naumi_source_inside_launcher_runtime(tmp_path: Path) 
             output_dir=tmp_path / "release",
             version="1.2.3",
             target="linux-x64",
+            source_commit=SOURCE_COMMIT,
+            source_tree_sha256=SOURCE_TREE_SHA256,
             archive_format="tar.gz",
         )
 
@@ -202,6 +236,8 @@ def test_assemble_release_artifact_rejects_symlink_escape(tmp_path: Path) -> Non
             output_dir=tmp_path / "release",
             version="1.2.3",
             target="linux-x64",
+            source_commit=SOURCE_COMMIT,
+            source_tree_sha256=SOURCE_TREE_SHA256,
             archive_format="tar.gz",
         )
 
