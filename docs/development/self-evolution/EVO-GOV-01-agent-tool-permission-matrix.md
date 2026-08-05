@@ -2,7 +2,7 @@
 
 ## 问题与目标
 
-EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a 至 5.3b1 已注册二十一个非只读 Agent Tool。它们拥有真实的 durable
+EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a 至 5.3c 已注册二十二个非只读 Agent Tool。它们拥有真实的 durable
 写入，但此前没有精确 `PermissionRule`，因此 normal runtime 将其判为 `UNKNOWN_TOOL`，Engine 的“所有注册
 工具均受治理”门也会失败。
 
@@ -11,12 +11,13 @@ Store、Slash 命令或后续 decision 语义。
 
 ## 风险分类依据
 
-其中十八个 Tool 只能从已有 authority 派生并持久化不可变证据、决策、用户 Resolution、Reflection、
+大多数 Tool 只能从已有 authority 派生并持久化不可变证据、决策、用户 Resolution、Reflection、
 Promotion Input、review-only Package、不可执行 Approval Requirement 或 role response。新增 Principal 治理是
 独立 `HIGH` authority 动作：它变更未来签名验证的可信身份、公钥或角色，但必须经过 HAR 人工确认，且绝不接收
 私钥：
 
-- 不运行项目代码或 Shell；
+- 除 `evolution_revalidation_validate` 外不运行项目代码或 Shell；该 Tool 只能执行受信任 Profile 的匹配检查，
+  并通过 ARC-04 Worker 隔离；
 - 不修改 Candidate/worktree/main；
 - 不扩大 Experiment scope、budget、network 或 dependency 权限；
 - 只有 `evolution_decision_state` 可按固定机械 policy 标记 `accepted_experiment`，且仍不产生 promotion、
@@ -54,15 +55,16 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_approval_signature` | nonce Challenge / verified Ed25519 Receipt | `evolution_approval_signature` | 50 |
 | `evolution_promotion_approval_decision` | append-only non-executable Approval Decision | `evolution_promotion_artifact` | 50 |
 | `evolution_revalidation_request` | deterministic non-executable Revalidation Request | `evolution_promotion_artifact` | 50 |
-| `evolution_revalidation_replay` | detached exact-target source replay | `evolution_isolated_replay` | 50 |
+| `evolution_revalidation_replay` | detached exact/rebase source replay | `evolution_isolated_replay` | 50 |
+| `evolution_revalidation_validate` | Harness/ARC-04 new validation evidence | `evolution_isolated_validation` | 20 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
 
 ## 模式语义
 
-- permissive/moderate/strict：十八类派生创建允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
-- lockdown：阻断所有二十一类写入；已有只读 Authority Tool 仍按各自只读规则工作。
+- permissive/moderate/strict：派生创建及隔离再验证允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
+- lockdown：阻断所有二十二类写入；已有只读 Authority Tool 仍按各自只读规则工作。
 - bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制。
 
 bypass 只绕过交互 PermissionChecker；executor 仍必须重读 authority、验证 workspace/identity/digest/budget，

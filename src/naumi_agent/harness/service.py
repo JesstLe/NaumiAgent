@@ -90,6 +90,13 @@ from naumi_agent.harness.eval_surface import (
     build_eval_baseline_status,
 )
 from naumi_agent.harness.evidence import EvidenceCollector
+from naumi_agent.harness.evolution_revalidation import (
+    HarnessEvolutionRevalidationPlan,
+    HarnessEvolutionRevalidationRun,
+    HarnessEvolutionRevalidationRunError,
+    HarnessEvolutionRevalidationSource,
+    build_harness_evolution_revalidation_plan,
+)
 from naumi_agent.harness.explain import (
     HarnessExplainer,
     HarnessExplainLookup,
@@ -1675,6 +1682,138 @@ class HarnessService:
         await self._record_check_result(result)
         await self._persist_check_result(result, argv=check.argv)
         return result
+
+    async def prepare_evolution_revalidation(
+        self,
+        *,
+        changed_paths: tuple[str, ...],
+    ) -> HarnessEvolutionRevalidationPlan:
+        """Bind changed paths to the current trusted Profile check specs."""
+        if not changed_paths or changed_paths != tuple(sorted(set(changed_paths))):
+            raise ValueError("Evolution Revalidation changed_paths 必须排序且不得重复。")
+        status = await self.status()
+        if (
+            status.code is not HarnessStatusCode.TRUSTED
+            or not status.trusted
+            or status.snapshot.profile is None
+            or status.profile_digest is None
+        ):
+            raise ValueError("Harness Profile 当前未受信任，不能执行 Evolution 再验证。")
+        profile = status.snapshot.profile
+        selected_ids = select_required_check_ids(
+            profile.checks,
+            task_kind="change",
+            changed_paths=changed_paths,
+        )
+        if not selected_ids:
+            raise ValueError("Harness Profile 未为本次改动声明匹配的 change 检查。")
+        selected = set(selected_ids)
+        checks = tuple(item for item in profile.checks if item.id in selected)
+        return build_harness_evolution_revalidation_plan(
+            profile_sha256=status.profile_digest,
+            changed_paths=changed_paths,
+            checks=checks,
+        )
+
+    async def run_evolution_revalidation(
+        self,
+        *,
+        request_id: str,
+        authority_sha256: str,
+        plan: HarnessEvolutionRevalidationPlan,
+        source: HarnessEvolutionRevalidationSource,
+        source_is_current: Callable[[], Awaitable[bool]],
+    ) -> HarnessEvolutionRevalidationRun:
+        """Execute exact Profile checks over one immutable revision plus overlays."""
+        if re.fullmatch(r"[0-9a-f]{64}", authority_sha256) is None:
+            raise ValueError("Evolution Revalidation authority 必须是 SHA-256。")
+        if self._sandbox_check_runner is None or self._shell_admission_composer is None:
+            raise ValueError("当前 Runtime 尚未配置 Harness Sandbox/ARC-04 执行基础设施。")
+        if self._authorization_receipt_provider is None:
+            raise ValueError("Evolution 再验证缺少权限回执 provider。")
+        if not callable(source_is_current):
+            raise TypeError("source_is_current 必须可调用。")
+        current = await self.prepare_evolution_revalidation(
+            changed_paths=plan.changed_paths
+        )
+        if current != plan:
+            raise ValueError("Harness Profile 或检查计划已变化，旧 Revalidation Plan 失效。")
+        parent = self._authorization_receipt_provider()
+        expected_arguments = {"request_id": request_id}
+        if (
+            parent is None
+            or not parent.authorizes_execution
+            or parent.tool_name != "evolution_revalidation_validate"
+            or not parent.run_id
+            or "bash_run" not in parent.delegated_tool_names
+            or parent.arguments_sha256 != permission_arguments_sha256(expected_arguments)
+        ):
+            raise ValueError("Evolution 再验证缺少与当前 Request 精确匹配的执行权限回执。")
+
+        async def profile_is_current() -> bool:
+            status = await self.status()
+            return status.trusted and status.profile_digest == plan.profile_sha256
+
+        results: list[HarnessSandboxCheckResult] = []
+        for check in plan.checks:
+            composed: ComposedSandboxShellJob | None = None
+
+            async def admit(spec: ShellCommandSpec) -> AdmittedSandboxShellJob:
+                nonlocal composed
+                if composed is not None:
+                    raise RuntimeError("Evolution Revalidation 单项检查不得重复 admission。")
+                composed = await self._shell_admission_composer.compose(
+                    parent_receipt_id=parent.receipt_id,
+                    spec=spec,
+                )
+                return composed.admitted
+
+            try:
+                try:
+                    result = await self._sandbox_check_runner.run(
+                        run_id=parent.run_id,
+                        check=check,
+                        profile_digest=plan.profile_sha256,
+                        profile_is_current=profile_is_current,
+                        admit_job=admit,
+                        source_revision=source.revision,
+                        expected_source_tree_sha256=source.revision_tree_sha256,
+                        source_overlays=source.overlays,
+                        overlay_source_sha256=source.overlay_source_sha256,
+                        source_is_current=source_is_current,
+                    )
+                except Exception as exc:
+                    raise HarnessEvolutionRevalidationRunError(
+                        "harness_check_execution_failed",
+                        f"Harness 检查 {check.id} 执行异常。",
+                        run_id=parent.run_id,
+                        partial_results=tuple(results),
+                    ) from exc
+            finally:
+                if composed is not None:
+                    await composed.release()
+            if result.source_tree_sha256 != source.overlay_source_sha256:
+                raise ValueError("Harness Check result 未绑定当前 Revalidation overlay。")
+            results.append(result)
+            generic = _sandbox_result_to_check_result(result)
+            try:
+                await self._record_check_result(generic)
+                await self._persist_check_result(generic, argv=check.argv)
+            except Exception as exc:
+                raise HarnessEvolutionRevalidationRunError(
+                    "harness_check_persistence_failed",
+                    f"Harness 检查 {check.id} 已执行，但证据持久化失败。",
+                    run_id=parent.run_id,
+                    partial_results=tuple(results),
+                ) from exc
+        if not results or any(
+            not item.job_id or not item.lifecycle_receipt_sha256 for item in results
+        ):
+            raise ValueError("Evolution 再验证未形成完整 ARC-04 Worker 执行证据。")
+        return HarnessEvolutionRevalidationRun(
+            run_id=parent.run_id,
+            results=tuple(results),
+        )
 
     async def _run_sandbox_check(
         self,

@@ -92,6 +92,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
 )
+from naumi_agent.evolution.revalidation_validations import (
+    EvolutionRevalidationValidationError,
+    render_evolution_revalidation_validation,
+)
 from naumi_agent.evolution.review import (
     EvolutionReviewFilter,
     EvolutionReviewService,
@@ -2014,6 +2018,68 @@ class EvolutionRevalidationReplayTool(Tool):
         return render_evolution_revalidation_execution(receipt)
 
 
+class EvolutionRevalidationValidationTool(Tool):
+    """Run trusted Profile checks over one exact replay/rebase overlay."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_validate"
+
+    @property
+    def description(self) -> str:
+        return (
+            "重新构造成功 Replay/Rebase 的精确源码 overlay，经 Harness Sandbox 与 "
+            "ARC-04 Worker 执行当前受信任 Profile 的匹配检查并签发新证据。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrevalidation_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            command_argument_names=(),
+            user_facing_name="Evolution Harness 再验证",
+            search_hint=(
+                "evolution revalidation harness profile checks ARC-04 worker "
+                "自进化 再验证 新证据"
+            ),
+            delegated_tool_names=("bash_run",),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            receipt = await self._engine.evolution_revalidation_validation_service.execute(
+                workspace_root=self._engine.workspace_root,
+                request_id=request_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationValidationError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Harness Revalidation 未完成：{exc}"
+        return render_evolution_revalidation_validation(receipt)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2047,6 +2113,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationRequestAuthorityTool(engine),
         EvolutionRevalidationRequestTool(engine),
         EvolutionRevalidationReplayTool(engine),
+        EvolutionRevalidationValidationTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2077,6 +2144,7 @@ __all__ = [
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionRevalidationRequestAuthorityTool",
     "EvolutionRevalidationRequestTool",
+    "EvolutionRevalidationValidationTool",
     "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",

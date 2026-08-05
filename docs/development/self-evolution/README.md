@@ -73,4 +73,6 @@ worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。
 仅 target 线性前进且审批/签名/Input/Reflection 其余部分仍 current 时授予隔离 rebase 资格；diverged 或任何非 target
 证据失效仍阻断。[EVO-05.3b2b](EVO-05-3b2b-fenced-three-way-rebase.md) 已在 current target 的一次性 detached
 worktree 执行真实三方合并，持久化 success/conflict/failure Outcome，并加入 claim、epoch fencing、过期恢复和残留
-worktree 清理。Harness 重新验证、新证据签发与旧证据失效仍未实现。
+worktree 清理。[EVO-05.3c](EVO-05-3c-harness-revalidation-evidence.md) 已按 Replay/Rebase identity 重新构造受摘要约束的
+source overlays，并通过 Harness Sandbox + ARC-04 Worker 执行当前受信任 Profile 的匹配检查，持久化新的 job/lifecycle
+验证证据。旧证据显式失效与最终 Revalidation Outcome 仍未实现。
