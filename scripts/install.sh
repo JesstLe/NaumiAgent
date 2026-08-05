@@ -14,6 +14,7 @@ fail() { printf '\033[31m[naumi]\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v curl >/dev/null 2>&1 || fail "缺少 curl，无法下载安装包。"
 command -v tar >/dev/null 2>&1 || fail "缺少 tar，无法解压安装包。"
+command -v diff >/dev/null 2>&1 || fail "缺少 diff，无法校验已安装 Launcher。"
 
 case "$(uname -s)" in
     Darwin) platform=macos ;;
@@ -83,24 +84,37 @@ set -- "$tmp"/extract/naumi-*-$platform-$arch
 [ "$#" -eq 1 ] && [ -d "$1" ] || fail "安装包顶层目录不符合发行契约。"
 bundle=$1
 [ -f "$bundle/manifest.json" ] || fail "安装包缺少 manifest.json。"
-[ -x "$bundle/naumi" ] || fail "安装包缺少可执行后端。"
+[ -x "$bundle/launcher/naumi" ] || fail "安装包缺少稳定 Launcher。"
+[ -x "$bundle/naumi-runtime" ] || fail "安装包缺少可执行 Runtime。"
 [ -x "$bundle/naumi-ui" ] || fail "安装包缺少可执行 Terminal UI。"
 
-mkdir -p "$INSTALL_ROOT/releases" "$BIN_DIR"
-destination="$INSTALL_ROOT/releases/$(basename "$bundle")"
-[ ! -e "$destination" ] || fail "该版本已安装：$destination"
-staged="$INSTALL_ROOT/.install-$(basename "$bundle")-$$"
-mv "$bundle" "$staged"
-mv "$staged" "$destination"
-
-rm -f "$INSTALL_ROOT/current.new" "$BIN_DIR/naumi.new"
-ln -s "$destination" "$INSTALL_ROOT/current.new"
-mv -f "$INSTALL_ROOT/current.new" "$INSTALL_ROOT/current"
-ln -s "$INSTALL_ROOT/current/naumi" "$BIN_DIR/naumi.new"
+launchers_dir="$INSTALL_ROOT/launchers"
+launcher_destination="$launchers_dir/$(basename "$bundle")"
+launcher="$launcher_destination/naumi"
+mkdir -p "$launchers_dir" "$BIN_DIR"
+if [ -e "$launcher_destination" ]; then
+    diff -qr "$bundle/launcher" "$launcher_destination" >/dev/null \
+        || fail "同版本 Launcher 内容冲突，拒绝覆盖：$launcher_destination"
+else
+    launcher_staged="$launchers_dir/.install-$(basename "$bundle")-$$"
+    rm -rf "$launcher_staged"
+    cp -R "$bundle/launcher" "$launcher_staged"
+    mv "$launcher_staged" "$launcher_destination"
+    find "$launcher_destination" -type d -exec chmod 555 {} +
+    find "$launcher_destination" -type f -exec chmod 444 {} +
+    chmod 555 "$launcher"
+fi
+"$launcher" --launcher-self-test >/dev/null \
+    || fail "稳定 Launcher 自检失败，拒绝安装。"
+if ! NAUMI_INSTALL_ROOT="$INSTALL_ROOT" "$launcher" --launcher-install "$bundle"; then
+    fail "版本槽安装或激活失败，PATH 仍指向上一稳定 Launcher。"
+fi
+rm -f "$BIN_DIR/naumi.new"
+ln -s "$launcher" "$BIN_DIR/naumi.new"
 mv -f "$BIN_DIR/naumi.new" "$BIN_DIR/naumi"
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
     warn "$BIN_DIR 尚未在 PATH；请加入 shell 配置后重新打开终端。"
 fi
-info "安装完成：$destination"
+info "安装完成：active version slot 已原子切换。"
 info "运行：naumi"

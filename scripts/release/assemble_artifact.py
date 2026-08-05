@@ -12,6 +12,7 @@ from naumi_agent.release.artifact import assemble_release_artifact
 def main() -> None:
     parser = argparse.ArgumentParser(description="Assemble one source-free Naumi artifact")
     parser.add_argument("--backend-dir", type=Path, required=True)
+    parser.add_argument("--launcher-dir", type=Path, required=True)
     parser.add_argument("--ui-binary", type=Path, required=True)
     parser.add_argument("--config-example", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -21,6 +22,7 @@ def main() -> None:
     args = parser.parse_args()
     result = assemble_release_artifact(
         backend_dir=args.backend_dir,
+        launcher_dir=args.launcher_dir,
         ui_binary=args.ui_binary,
         config_example=args.config_example,
         output_dir=args.output_dir,

@@ -32,16 +32,21 @@ fi
 command -v bun >/dev/null 2>&1 || { printf '缺少 bun。\n' >&2; exit 1; }
 command -v pyinstaller >/dev/null 2>&1 || { printf '缺少 pyinstaller。\n' >&2; exit 1; }
 
-rm -rf build/naumi dist/naumi dist/naumi-ui
+rm -rf build/naumi build/naumi-runtime build/naumi_launcher \
+    dist/naumi-launcher dist/naumi-runtime dist/naumi-ui
 bun build frontend/terminal-ui/src/index.js --compile --outfile dist/naumi-ui
 dist/naumi-ui --self-test
 pyinstaller --noconfirm --clean packaging/naumi.spec
-dist/naumi/naumi --help >/dev/null
+pyinstaller --noconfirm --clean packaging/naumi_launcher.spec
+dist/naumi-runtime/naumi-runtime --help >/dev/null
+dist/naumi-launcher/naumi --launcher-self-test >/dev/null
 
 python_cmd=${PYTHON:-python3}
-"$python_cmd" scripts/release/verify_frozen_bridge.py dist/naumi/naumi
+"$python_cmd" scripts/release/verify_frozen_bridge.py \
+    dist/naumi-runtime/naumi-runtime
 "$python_cmd" scripts/release/assemble_artifact.py \
-    --backend-dir dist/naumi \
+    --backend-dir dist/naumi-runtime \
+    --launcher-dir dist/naumi-launcher \
     --ui-binary dist/naumi-ui \
     --config-example config.yaml.example \
     --output-dir "$OUTPUT_DIR" \

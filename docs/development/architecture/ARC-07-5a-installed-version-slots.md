@@ -13,7 +13,7 @@
 2. 文件集合必须与 manifest 完全一致，逐文件复算 size/SHA-256；
 3. symlink 必须留在 bundle 内，路径拒绝 absolute、`..`、反斜杠、NUL 和换行；
 4. 二次执行 source-exposure audit，拒绝 Naumi 自身 `.py/.pyc/.js/.ts`、开发目录和 manifest；
-5. 强制存在 target 对应的 `naumi[.exe]`、`naumi-ui[.exe]` 与配置示例；
+5. 强制存在 target 对应的 `naumi[.exe]` launcher、`naumi-runtime[.exe]`、`naumi-ui[.exe]` 与配置示例；
 6. 在同一 slots filesystem 内 staging、校验、rename、directory fsync，再把文件/目录改为只读；
 7. Slot ID 由 manifest digest 导出，SQLite `BEGIN IMMEDIATE` 保证并发幂等登记。
 
@@ -39,7 +39,8 @@ Active Pointer 和 append-only event 在同一 SQLite FULL-synchronous 事务中
 - rollback 只能选择 current pointer 的 exact previous slot，并用 expected pointer digest 防止并发误回滚；
 - 切换永不删除旧 slot，因此进程崩溃时数据库只会呈现完整旧 generation 或完整新 generation。
 
-SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；launcher 接线属于后续 ARC-07.5b。
+SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；
+[ARC-07.5b](ARC-07-5b-stable-slot-launcher.md) 已让稳定 launcher 消费该 pointer。
 
 ## 验收结果
 
@@ -53,6 +54,6 @@ SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；la
 ## 当前边界与下一步
 
 - ARC-07.4 仍需为 manifest/build provenance 增加发行签名；本切片的 SHA-256 只证明本地一致性；
-- ARC-07.5b 需让稳定 launcher 从 SQLite active pointer 启动 exact slot，并实现崩溃恢复诊断；
+- ARC-07.5b 已让稳定 launcher 从 SQLite active pointer 启动 exact slot，并失败关闭损坏状态；
 - ARC-07.6 仍需配置/数据 snapshot 与 migration compatibility；
-- 完成 launcher 前，EVO-05.6b2 不得把 pointer 切换宣称为用户进程已切换。
+- EVO-05.6b2 仍须把 exact rollback authority 与本启动链连接，并验证回滚后的新 Launch Resolution。

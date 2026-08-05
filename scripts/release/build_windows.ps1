@@ -15,16 +15,20 @@ $OutputDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "dist\release" }
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) { throw "缺少 bun。" }
 if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) { throw "缺少 pyinstaller。" }
 
-Remove-Item -Recurse -Force "build\naumi", "dist\naumi" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "build\naumi", "build\naumi-runtime", "build\naumi_launcher", "dist\naumi-runtime" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "dist\naumi-launcher" -ErrorAction SilentlyContinue
 Remove-Item -Force "dist\naumi-ui.exe" -ErrorAction SilentlyContinue
 bun build "frontend/terminal-ui/src/index.js" --compile --outfile "dist/naumi-ui.exe"
 & "dist/naumi-ui.exe" --self-test
 pyinstaller --noconfirm --clean "packaging/naumi.spec"
-& "dist/naumi/naumi.exe" --help | Out-Null
-python "scripts/release/verify_frozen_bridge.py" "dist/naumi/naumi.exe"
+pyinstaller --noconfirm --clean "packaging/naumi_launcher.spec"
+& "dist/naumi-runtime/naumi-runtime.exe" --help | Out-Null
+& "dist/naumi-launcher/naumi.exe" --launcher-self-test | Out-Null
+python "scripts/release/verify_frozen_bridge.py" "dist/naumi-runtime/naumi-runtime.exe"
 
 python "scripts/release/assemble_artifact.py" `
-    --backend-dir "dist/naumi" `
+    --backend-dir "dist/naumi-runtime" `
+    --launcher-dir "dist/naumi-launcher" `
     --ui-binary "dist/naumi-ui.exe" `
     --config-example "config.yaml.example" `
     --output-dir $OutputDir `

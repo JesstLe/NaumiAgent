@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
@@ -49,7 +50,7 @@ class ReleaseInstalledSlot(_StrictModel):
     version: str = Field(pattern=_SAFE_LABEL_RE)
     target: str = Field(pattern=_SAFE_LABEL_RE)
     bundle_dir: str = Field(min_length=1, max_length=4096)
-    backend_path: str = Field(pattern=r"^naumi(?:\.exe)?$")
+    backend_path: str = Field(pattern=r"^naumi-runtime(?:\.exe)?$")
     ui_path: str = Field(pattern=r"^naumi-ui(?:\.exe)?$")
     file_count: int = Field(ge=3, le=_MAX_FILES)
     total_bytes: int = Field(gt=0, le=_MAX_TOTAL_BYTES)
@@ -64,7 +65,7 @@ class ReleaseInstalledSlot(_StrictModel):
             raise ValueError("Release Slot bundle_dir 必须 canonical。")
         windows = self.target.casefold().startswith("windows-")
         if not (
-            self.backend_path == ("naumi.exe" if windows else "naumi")
+            self.backend_path == ("naumi-runtime.exe" if windows else "naumi-runtime")
             and self.ui_path == ("naumi-ui.exe" if windows else "naumi-ui")
         ):
             raise ValueError("Release Slot 入口与 target 不一致。")
@@ -150,6 +151,14 @@ class ReleaseSlotError(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True)
+class ResolvedReleaseSlot:
+    pointer: ReleaseActivePointer
+    slot: ReleaseInstalledSlot
+    boot_receipt: ReleaseSlotBootReceipt
+    backend: Path
+
+
 class ReleaseSlotStore:
     def __init__(self, release_root: str | Path) -> None:
         self.release_root = Path(release_root).expanduser().resolve()
@@ -178,7 +187,7 @@ class ReleaseSlotStore:
             "version": manifest["version"],
             "target": target,
             "bundle_dir": str(slot_dir),
-            "backend_path": "naumi.exe" if windows else "naumi",
+            "backend_path": "naumi-runtime.exe" if windows else "naumi-runtime",
             "ui_path": "naumi-ui.exe" if windows else "naumi-ui",
             "file_count": file_count,
             "total_bytes": total_bytes,
@@ -455,6 +464,96 @@ class ReleaseSlotStore:
         with self._connect() as db:
             return self._validated_active(db)
 
+    def resolve_active_backend(self) -> ResolvedReleaseSlot:
+        with self._connect() as db:
+            db.execute("BEGIN")
+            pointer = self._validated_active(db)
+            if pointer is None:
+                db.rollback()
+                raise ReleaseSlotError(
+                    "release_active_pointer_missing", "尚未激活任何 Naumi 版本槽。"
+                )
+            slot = self._slot_row(db, pointer.current_slot_id)
+            boot = self._boot_row(db, pointer.boot_receipt_id)
+            db.rollback()
+        if slot is None or slot.slot_sha256 != pointer.current_slot_sha256:
+            raise ReleaseSlotError(
+                "release_active_slot_missing", "Active pointer 绑定的版本槽不存在或摘要不符。"
+            )
+        _require_host_target(slot.target)
+        bundle = Path(slot.bundle_dir)
+        _verify_bundle(bundle, expected_manifest_sha256=slot.manifest_sha256)
+        _verify_immutable(bundle)
+        backend = bundle / slot.backend_path
+        if not (
+            boot is not None
+            and boot.slot_sha256 == slot.slot_sha256
+            and boot.manifest_sha256 == slot.manifest_sha256
+            and boot.receipt_sha256 == pointer.boot_receipt_sha256
+            and boot.binary_sha256 == _sha256_file(backend)
+        ):
+            raise ReleaseSlotError(
+                "release_active_boot_receipt_stale",
+                "Active slot 缺少与当前 runtime bytes 匹配的 Boot Receipt。",
+            )
+        return ResolvedReleaseSlot(
+            pointer=pointer,
+            slot=slot,
+            boot_receipt=boot,
+            backend=backend,
+        )
+
+    def record_launch_resolution(self, resolution) -> None:
+        encoded = resolution.model_dump_json()
+        if len(encoded.encode()) > 64 * 1024:
+            raise ReleaseSlotError(
+                "release_launch_resolution_oversized", "Launch Resolution 超过 64 KiB。"
+            )
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            dependency = self._validated_active(db)
+            slot = None if dependency is None else self._slot_row(db, dependency.current_slot_id)
+            boot = None if dependency is None else self._boot_row(db, dependency.boot_receipt_id)
+            if dependency is None or dependency.pointer_sha256 != resolution.pointer_sha256:
+                db.rollback()
+                raise ReleaseSlotError(
+                    "release_launch_pointer_stale",
+                    "Launch Resolution 绑定的 Active Pointer 已变化。",
+                )
+            backend = None if slot is None else Path(slot.bundle_dir) / slot.backend_path
+            if not (
+                slot is not None
+                and boot is not None
+                and resolution.pointer_id == dependency.pointer_id
+                and resolution.pointer_generation == dependency.generation
+                and resolution.slot_id == slot.slot_id
+                and resolution.slot_sha256 == slot.slot_sha256
+                and resolution.boot_receipt_id == boot.receipt_id
+                and resolution.boot_receipt_sha256 == boot.receipt_sha256
+                and boot.receipt_sha256 == dependency.boot_receipt_sha256
+                and resolution.binary_sha256 == boot.binary_sha256
+                and resolution.backend_path == str(backend.resolve())
+                and _sha256_file(backend) == boot.binary_sha256
+            ):
+                db.rollback()
+                raise ReleaseSlotError(
+                    "release_launch_dependency_mismatch",
+                    "Launch Resolution 与 active slot/boot dependency 不一致。",
+                )
+            db.execute(
+                "INSERT OR IGNORE INTO release_launch_resolutions "
+                "(resolution_id, resolution_sha256, pointer_sha256, resolution_json, "
+                "resolved_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    resolution.resolution_id,
+                    resolution.resolution_sha256,
+                    resolution.pointer_sha256,
+                    encoded,
+                    resolution.resolved_at,
+                ),
+            )
+            db.commit()
+
     def get_slot(self, slot_id: str) -> ReleaseInstalledSlot | None:
         if not self.db_path.is_file():
             return None
@@ -518,6 +617,16 @@ class ReleaseSlotStore:
             "SELECT receipt_json FROM release_boot_receipts WHERE slot_id = ? "
             "ORDER BY checked_at DESC, receipt_id DESC LIMIT 1",
             (slot_id,),
+        ).fetchone()
+        return (
+            None if row is None else ReleaseSlotBootReceipt.model_validate_json(row["receipt_json"])
+        )
+
+    @staticmethod
+    def _boot_row(db, receipt_id: str) -> ReleaseSlotBootReceipt | None:
+        row = db.execute(
+            "SELECT receipt_json FROM release_boot_receipts WHERE receipt_id = ?",
+            (receipt_id,),
         ).fetchone()
         return (
             None if row is None else ReleaseSlotBootReceipt.model_validate_json(row["receipt_json"])
@@ -663,7 +772,8 @@ def _verify_bundle(bundle: Path, *, expected_manifest_sha256: str | None = None)
         )
     windows = manifest["target"].casefold().startswith("windows-")
     for required in (
-        "naumi.exe" if windows else "naumi",
+        "launcher/naumi.exe" if windows else "launcher/naumi",
+        "naumi-runtime.exe" if windows else "naumi-runtime",
         "naumi-ui.exe" if windows else "naumi-ui",
         "config.yaml.example",
     ):
@@ -693,10 +803,12 @@ def _forbidden_release_path(value: str) -> bool:
     path = PurePosixPath(value)
     lowered_parts = {part.casefold() for part in path.parts}
     lowered_name = path.name.casefold()
-    inside_third_party_runtime = (
-        len(path.parts) >= 2
-        and path.parts[0].casefold() == "_internal"
-        and path.parts[1].casefold() != "naumi_agent"
+    parts = tuple(part.casefold() for part in path.parts)
+    inside_third_party_runtime = bool(
+        (len(parts) >= 2 and parts[0] == "_internal" and parts[1] != "naumi_agent")
+        or (
+            len(parts) >= 3 and parts[:2] == ("launcher", "_internal") and parts[2] != "naumi_agent"
+        )
     )
     return bool(
         not inside_third_party_runtime
@@ -804,6 +916,10 @@ def _ensure_schema(db: sqlite3.Connection) -> None:
         "activated_at TEXT NOT NULL);"
         "CREATE TABLE IF NOT EXISTS release_active_pointer ("
         "singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pointer_json TEXT NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS release_launch_resolutions ("
+        "resolution_id TEXT PRIMARY KEY, resolution_sha256 TEXT NOT NULL UNIQUE, "
+        "pointer_sha256 TEXT NOT NULL, resolution_json TEXT NOT NULL, "
+        "resolved_at TEXT NOT NULL);"
     )
 
 
@@ -816,5 +932,6 @@ __all__ = [
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
+    "ResolvedReleaseSlot",
     "host_release_target",
 ]

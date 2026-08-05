@@ -25,14 +25,16 @@ def test_assemble_release_artifact_creates_manifest_archive_and_checksum(
     tmp_path: Path,
 ) -> None:
     backend = tmp_path / "backend"
-    _binary(backend / "naumi", b"frozen-backend")
+    _binary(backend / "naumi-runtime", b"frozen-backend")
     _binary(backend / "_internal" / "libagent.dylib", b"runtime-library")
     ui = _binary(tmp_path / "naumi-ui", b"compiled-terminal-ui")
+    launcher = _binary(tmp_path / "launcher" / "naumi", b"stable-launcher")
     config = tmp_path / "config.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
 
     result = assemble_release_artifact(
         backend_dir=backend,
+        launcher_dir=launcher.parent,
         ui_binary=ui,
         config_example=config,
         output_dir=tmp_path / "release",
@@ -48,7 +50,8 @@ def test_assemble_release_artifact_creates_manifest_archive_and_checksum(
     assert manifest["version"] == "1.2.3"
     assert manifest["target"] == "macos-arm64"
     files = {item["path"]: item for item in manifest["files"]}
-    assert files["naumi"]["sha256"] == hashlib.sha256(b"frozen-backend").hexdigest()
+    assert files["naumi-runtime"]["sha256"] == hashlib.sha256(b"frozen-backend").hexdigest()
+    assert files["launcher/naumi"]["sha256"] == hashlib.sha256(b"stable-launcher").hexdigest()
     assert files["naumi-ui"]["sha256"] == hashlib.sha256(b"compiled-terminal-ui").hexdigest()
     assert all(not path.endswith((".py", ".pyc", ".js", ".ts")) for path in files)
     expected_checksum = hashlib.sha256(result.archive.read_bytes()).hexdigest()
@@ -62,9 +65,10 @@ def test_assemble_release_artifact_rejects_project_source_without_replacing_rele
     tmp_path: Path,
 ) -> None:
     backend = tmp_path / "backend"
-    _binary(backend / "naumi", b"backend")
+    _binary(backend / "naumi-runtime", b"backend")
     (backend / "secret.py").write_text("print('source leak')\n", encoding="utf-8")
     ui = _binary(tmp_path / "naumi-ui", b"ui")
+    launcher = _binary(tmp_path / "launcher" / "naumi", b"launcher")
     config = tmp_path / "config.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
     existing = tmp_path / "release" / "naumi-1.2.3-linux-x64"
@@ -75,6 +79,7 @@ def test_assemble_release_artifact_rejects_project_source_without_replacing_rele
     with pytest.raises(ArtifactError, match="源码泄漏"):
         assemble_release_artifact(
             backend_dir=backend,
+            launcher_dir=launcher.parent,
             ui_binary=ui,
             config_example=config,
             output_dir=tmp_path / "release",
@@ -88,13 +93,15 @@ def test_assemble_release_artifact_rejects_project_source_without_replacing_rele
 
 def test_assemble_windows_zip_renames_ui_and_is_reproducible(tmp_path: Path) -> None:
     backend = tmp_path / "backend"
-    _binary(backend / "naumi.exe", b"windows-backend")
+    _binary(backend / "naumi-runtime.exe", b"windows-backend")
     ui = _binary(tmp_path / "terminal-ui-build.exe", b"windows-ui")
+    launcher = _binary(tmp_path / "launcher" / "naumi.exe", b"windows-launcher")
     config = tmp_path / "config.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
 
     first = assemble_release_artifact(
         backend_dir=backend,
+        launcher_dir=launcher.parent,
         ui_binary=ui,
         config_example=config,
         output_dir=tmp_path / "release-a",
@@ -104,6 +111,7 @@ def test_assemble_windows_zip_renames_ui_and_is_reproducible(tmp_path: Path) -> 
     )
     second = assemble_release_artifact(
         backend_dir=backend,
+        launcher_dir=launcher.parent,
         ui_binary=ui,
         config_example=config,
         output_dir=tmp_path / "release-b",
@@ -115,7 +123,8 @@ def test_assemble_windows_zip_renames_ui_and_is_reproducible(tmp_path: Path) -> 
     assert first.archive.read_bytes() == second.archive.read_bytes()
     with zipfile.ZipFile(first.archive) as archive:
         names = archive.namelist()
-    assert f"{first.bundle_dir.name}/naumi.exe" in names
+    assert f"{first.bundle_dir.name}/launcher/naumi.exe" in names
+    assert f"{first.bundle_dir.name}/naumi-runtime.exe" in names
     assert f"{first.bundle_dir.name}/naumi-ui.exe" in names
 
 
@@ -123,7 +132,7 @@ def test_assembler_allows_declared_third_party_runtime_data_but_not_naumi_source
     tmp_path: Path,
 ) -> None:
     backend = tmp_path / "backend"
-    _binary(backend / "naumi", b"backend")
+    _binary(backend / "naumi-runtime", b"backend")
     third_party = backend / "_internal" / "vendor" / "runtime.py"
     third_party.parent.mkdir(parents=True)
     third_party.write_text("VENDOR_DATA = True\n", encoding="utf-8")
@@ -131,12 +140,38 @@ def test_assembler_allows_declared_third_party_runtime_data_but_not_naumi_source
     naumi_source.parent.mkdir(parents=True)
     naumi_source.write_text("SECRET = True\n", encoding="utf-8")
     ui = _binary(tmp_path / "naumi-ui", b"ui")
+    launcher = _binary(tmp_path / "launcher" / "naumi", b"launcher")
     config = tmp_path / "config.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
 
     with pytest.raises(ArtifactError, match="naumi_agent/secret.py"):
         assemble_release_artifact(
             backend_dir=backend,
+            launcher_dir=launcher.parent,
+            ui_binary=ui,
+            config_example=config,
+            output_dir=tmp_path / "release",
+            version="1.2.3",
+            target="linux-x64",
+            archive_format="tar.gz",
+        )
+
+
+def test_assembler_rejects_naumi_source_inside_launcher_runtime(tmp_path: Path) -> None:
+    backend = tmp_path / "backend"
+    _binary(backend / "naumi-runtime", b"backend")
+    launcher = _binary(tmp_path / "launcher" / "naumi", b"launcher")
+    source = launcher.parent / "_internal" / "naumi_agent" / "secret.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("SECRET = True\n", encoding="utf-8")
+    ui = _binary(tmp_path / "naumi-ui", b"ui")
+    config = tmp_path / "config.yaml.example"
+    config.write_text("models: {}\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactError, match="naumi_agent/secret.py"):
+        assemble_release_artifact(
+            backend_dir=backend,
+            launcher_dir=launcher.parent,
             ui_binary=ui,
             config_example=config,
             output_dir=tmp_path / "release",
@@ -149,17 +184,19 @@ def test_assembler_allows_declared_third_party_runtime_data_but_not_naumi_source
 @pytest.mark.skipif(os.name == "nt", reason="Windows symlink privileges vary")
 def test_assemble_release_artifact_rejects_symlink_escape(tmp_path: Path) -> None:
     backend = tmp_path / "backend"
-    _binary(backend / "naumi", b"backend")
+    _binary(backend / "naumi-runtime", b"backend")
     outside = tmp_path / "outside-secret"
     outside.write_text("secret", encoding="utf-8")
     (backend / "escape").symlink_to(outside)
     ui = _binary(tmp_path / "naumi-ui", b"ui")
+    launcher = _binary(tmp_path / "launcher" / "naumi", b"launcher")
     config = tmp_path / "config.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
 
     with pytest.raises(ArtifactError, match="符号链接越界"):
         assemble_release_artifact(
             backend_dir=backend,
+            launcher_dir=launcher.parent,
             ui_binary=ui,
             config_example=config,
             output_dir=tmp_path / "release",
@@ -171,23 +208,22 @@ def test_assemble_release_artifact_rejects_symlink_escape(tmp_path: Path) -> Non
 
 def test_release_builder_collects_runtime_plugins_and_runs_real_bridge_smoke() -> None:
     spec = (ROOT / "packaging" / "naumi.spec").read_text(encoding="utf-8")
-    unix = (ROOT / "scripts" / "release" / "build_unix.sh").read_text(
-        encoding="utf-8"
-    )
-    windows = (ROOT / "scripts" / "release" / "build_windows.ps1").read_text(
-        encoding="utf-8"
-    )
+    unix = (ROOT / "scripts" / "release" / "build_unix.sh").read_text(encoding="utf-8")
+    windows = (ROOT / "scripts" / "release" / "build_windows.ps1").read_text(encoding="utf-8")
+    launcher_spec = (ROOT / "packaging" / "naumi_launcher.spec").read_text(encoding="utf-8")
 
     assert '"tiktoken_ext"' in spec
     assert "collect_all" not in spec
     assert "verify_frozen_bridge.py" in unix
     assert "verify_frozen_bridge.py" in windows
+    assert "exclude_binaries=True" in launcher_spec
+    assert "COLLECT(" in launcher_spec
+    assert "dist/naumi-launcher/naumi" in unix
+    assert "dist/naumi-launcher/naumi.exe" in windows
 
 
 def test_release_workflow_covers_mainstream_targets_without_uploading_checkout() -> None:
-    workflow = (ROOT / ".github" / "workflows" / "release-binaries.yml").read_text(
-        encoding="utf-8"
-    )
+    workflow = (ROOT / ".github" / "workflows" / "release-binaries.yml").read_text(encoding="utf-8")
 
     for target in (
         "linux-x64",
