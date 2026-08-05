@@ -64,6 +64,9 @@
 - [EVO-05.3f2c3b2a Authenticated Worker Claim](EVO-05-3f2c3b2a-authenticated-worker-claim.md)：已交付；通过
   supervisor-attested Ed25519 identity、一次性 challenge 和 lease hash chain 证明远端领取，并在 Worker epoch/Contract/reservation
   漂移后动态 fencing；尚不接收结果或写入 H5a。
+- [EVO-05.3f2c3b2b1 Claim-Bound Execution Authorization](EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md)：
+  已交付；由父权限、current Claim、Runtime lease 和可撤销 Run Grant 派生完整远端执行范围，并支持 generation renewal、显式撤销
+  与失败补偿；尚未接受 execution/result 事实。
 - [EVO-05.3f2c4 Fresh Adversarial Comparison](EVO-05-3f2c4-fresh-adversarial-comparison.md)：已交付；完整 matrix 后
   对每个平台从原始 H5a 重算 probe/identity/summary，并持久化 HAR-08 原生 H5b2/H5c。
 - [EVO-05.3f2c5 Fresh Adversarial Attribution](EVO-05-3f2c5-fresh-adversarial-attribution.md)：已交付；逐平台复验
@@ -98,8 +101,9 @@
 
 ## 当前边界
 
-当前完成 EVO-05.1a/1b、EVO-05.2a-2d、EVO-05.3a-3f3b5 与 required-platform dispatch/claim。已有真实签名审批、target 前进后的隔离 replay/rebase、
+当前完成 EVO-05.1a/1b、EVO-05.2a-2d、EVO-05.3a-3f3b5 与 required-platform dispatch/claim/execution authorization。已有真实签名审批、target 前进后的隔离 replay/rebase、
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
-现可形成 exact Worker/capacity 绑定的 queued Dispatch，并由持有 attested Ed25519 私钥的 Worker 领取和续租；但尚未实现 execution start、
-结果回传/H5a 摄取、rollout、monitor、rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 claim 宣称为跨平台执行完成。
+现可形成 exact Worker/capacity 绑定的 queued Dispatch，由持有 attested Ed25519 私钥的 Worker 领取，并从父权限派生短期远端执行授权；
+但尚未实现 result manifest、H5a 摄取、rollout、monitor、rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 authorization
+宣称为跨平台执行完成。

@@ -585,6 +585,16 @@ if TYPE_CHECKING:
         EvolutionRevalidationPlatformDispatchService,
         EvolutionRevalidationPlatformDispatchStore,
     )
+    from naumi_agent.evolution.revalidation_platform_execution_authorizations import (
+        EVOLUTION_REVALIDATION_PLATFORM_EXECUTION_AUTHORIZATION_POLICY,
+        EvolutionRevalidationPlatformExecutionAuthorization,
+        EvolutionRevalidationPlatformExecutionAuthorizationError,
+        EvolutionRevalidationPlatformExecutionAuthorizationService,
+        EvolutionRevalidationPlatformExecutionAuthorizationStore,
+        EvolutionRevalidationPlatformExecutionAuthorizationView,
+        EvolutionRevalidationPlatformExecutionRevocation,
+        EvolutionRevalidationPlatformRunGrantEnvelope,
+    )
     from naumi_agent.evolution.revalidation_promotion_inputs import (
         EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
         EvolutionRevalidationPromotionInput,
@@ -846,6 +856,14 @@ __all__ = [
     "EvolutionRevalidationPlatformClaimView",
     "EvolutionRevalidationWorkerIdentity",
     "issue_evolution_revalidation_worker_identity",
+    "EVOLUTION_REVALIDATION_PLATFORM_EXECUTION_AUTHORIZATION_POLICY",
+    "EvolutionRevalidationPlatformExecutionAuthorization",
+    "EvolutionRevalidationPlatformExecutionAuthorizationError",
+    "EvolutionRevalidationPlatformExecutionAuthorizationService",
+    "EvolutionRevalidationPlatformExecutionAuthorizationStore",
+    "EvolutionRevalidationPlatformExecutionAuthorizationView",
+    "EvolutionRevalidationPlatformExecutionRevocation",
+    "EvolutionRevalidationPlatformRunGrantEnvelope",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1572,6 +1590,16 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationWorkerIdentity",
         "issue_evolution_revalidation_worker_identity",
     }
+    revalidation_platform_execution_authorization_exports = {
+        "EVOLUTION_REVALIDATION_PLATFORM_EXECUTION_AUTHORIZATION_POLICY",
+        "EvolutionRevalidationPlatformExecutionAuthorization",
+        "EvolutionRevalidationPlatformExecutionAuthorizationError",
+        "EvolutionRevalidationPlatformExecutionAuthorizationService",
+        "EvolutionRevalidationPlatformExecutionAuthorizationStore",
+        "EvolutionRevalidationPlatformExecutionAuthorizationView",
+        "EvolutionRevalidationPlatformExecutionRevocation",
+        "EvolutionRevalidationPlatformRunGrantEnvelope",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2130,6 +2158,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_dispatches"
     elif name in revalidation_platform_claim_exports:
         module_name = "revalidation_platform_claims"
+    elif name in revalidation_platform_execution_authorization_exports:
+        module_name = "revalidation_platform_execution_authorizations"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
