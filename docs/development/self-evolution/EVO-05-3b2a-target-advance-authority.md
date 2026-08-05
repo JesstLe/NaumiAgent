@@ -55,12 +55,11 @@ Package current 的动态判断拆分为两层：Input/Reflection 与 immutable 
 - Principal key 轮换后：relation same 也必须 ineligible；
 - target 指向无共同祖先的 commit：relation diverged、execution eligible false；
 - exact target 仍保持 ready/execution eligible；
-- 既有 exact Replay Executor 看到 advanced authority 时明确返回“rebase executor 尚未实现”，不会退化为文件覆盖；
+- 既有 exact Replay Executor 不直接消费 advanced authority；统一执行服务将其分派给 EVO-05.3b2b rebase executor；
 - 仅运行 Approval Decision、Request、Replay 相邻模块测试，未运行全量测试。
 
-## 5. 剩余工作
+## 5. 后续状态
 
-EVO-05.3b2b 需要消费本 authority，在 current target 的 detached worktree 中执行真实三方 merge，持久化 success/conflict
-artifact，并加入跨进程 claim、epoch fencing、崩溃恢复和残留 worktree 清理。完成前，`execution_eligible=true` 仅表示
-合法输入已形成，不表示 rebase 已发生。
-
+[EVO-05.3b2b](EVO-05-3b2b-fenced-three-way-rebase.md) 已消费本 authority，在 current target 的 detached worktree
+执行真实三方 merge，并持久化 success/conflict/failure、跨进程 claim、epoch fencing、过期恢复和残留 worktree 清理。
+`execution_eligible=true` 仍只表示可启动隔离执行；只有 durable Outcome 才证明 rebase 已发生，且它不代表验证或 promotion。

@@ -415,6 +415,21 @@ if TYPE_CHECKING:
         EvolutionReflectionSignal,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_execution import (
+        EvolutionRevalidationExecutionOutcome,
+        EvolutionRevalidationExecutionService,
+        render_evolution_revalidation_execution,
+    )
+    from naumi_agent.evolution.revalidation_rebases import (
+        EVOLUTION_REVALIDATION_REBASE_POLICY,
+        EvolutionRevalidationRebaseError,
+        EvolutionRevalidationRebaseExecutor,
+        EvolutionRevalidationRebaseFile,
+        EvolutionRevalidationRebaseOutcome,
+        EvolutionRevalidationRebaseStatus,
+        EvolutionRevalidationRebaseStore,
+        render_evolution_revalidation_rebase,
+    )
     from naumi_agent.evolution.revalidation_replays import (
         EVOLUTION_REVALIDATION_REPLAY_POLICY,
         EvolutionRevalidationReplayError,
@@ -546,6 +561,17 @@ __all__ = [
     "EvolutionRevalidationReplayService",
     "EvolutionRevalidationReplayStore",
     "render_evolution_revalidation_replay",
+    "EvolutionRevalidationExecutionOutcome",
+    "EvolutionRevalidationExecutionService",
+    "render_evolution_revalidation_execution",
+    "EVOLUTION_REVALIDATION_REBASE_POLICY",
+    "EvolutionRevalidationRebaseError",
+    "EvolutionRevalidationRebaseExecutor",
+    "EvolutionRevalidationRebaseFile",
+    "EvolutionRevalidationRebaseOutcome",
+    "EvolutionRevalidationRebaseStatus",
+    "EvolutionRevalidationRebaseStore",
+    "render_evolution_revalidation_rebase",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -976,6 +1002,21 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationReplayService",
         "EvolutionRevalidationReplayStore",
         "render_evolution_revalidation_replay",
+    }
+    revalidation_execution_exports = {
+        "EvolutionRevalidationExecutionOutcome",
+        "EvolutionRevalidationExecutionService",
+        "render_evolution_revalidation_execution",
+    }
+    revalidation_rebase_exports = {
+        "EVOLUTION_REVALIDATION_REBASE_POLICY",
+        "EvolutionRevalidationRebaseError",
+        "EvolutionRevalidationRebaseExecutor",
+        "EvolutionRevalidationRebaseFile",
+        "EvolutionRevalidationRebaseOutcome",
+        "EvolutionRevalidationRebaseStatus",
+        "EvolutionRevalidationRebaseStore",
+        "render_evolution_revalidation_rebase",
     }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
@@ -1445,6 +1486,10 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_requests"
     elif name in revalidation_replay_exports:
         module_name = "revalidation_replays"
+    elif name in revalidation_execution_exports:
+        module_name = "revalidation_execution"
+    elif name in revalidation_rebase_exports:
+        module_name = "revalidation_rebases"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
