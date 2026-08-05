@@ -3211,6 +3211,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionRevalidationEvaluationPlanError,
         render_evolution_revalidation_evaluation_plan,
     )
+    from naumi_agent.evolution.revalidation_evaluation_sources import (
+        EvolutionRevalidationEvaluationSourceError,
+        render_evolution_revalidation_evaluation_source,
+    )
     from naumi_agent.evolution.revalidation_execution import (
         render_evolution_revalidation_execution,
     )
@@ -3587,6 +3591,21 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 Markdown(render_evolution_revalidation_evaluation_plan(view))
             )
             return
+        if action == "revalidation-evaluation-source":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-evaluation-source 需要一个 Fresh Evaluation Plan ID。"
+                )
+            snapshot = (
+                await engine.evolution_revalidation_evaluation_source_service.capture(
+                    workspace_root=engine.workspace_root,
+                    plan_id=parts[1],
+                )
+            )
+            console.print(
+                Markdown(render_evolution_revalidation_evaluation_source(snapshot))
+            )
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3800,6 +3819,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution revalidation-validate <revalidation-request-id>；"
             "/evolution revalidation-outcome <revalidation-request-id>；"
             "/evolution revalidation-evaluation-plan <revalidation-outcome-id>；"
+            "/evolution revalidation-evaluation-source <fresh-evaluation-plan-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3977,6 +3997,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationEvaluationPlanError as exc:
         console.print(
             f"Evolution Fresh Evaluation Plan 未完成：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationEvaluationSourceError as exc:
+        console.print(
+            f"Evolution Evaluation Source Snapshot 未完成：{exc}",
             style="yellow",
             markup=False,
         )

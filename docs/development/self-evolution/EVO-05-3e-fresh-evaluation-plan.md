@@ -59,6 +59,8 @@ evolution_revalidation_evaluation_plan(outcome_id=...)
 
 ## 6. 后续依赖
 
-EVO-05.3f 必须让评估执行器消费本 Plan，重绑 Validation Plan 与完整 cohort/lane matrix，并签发时间下界、target、
-overlay 和 Plan digest 全部匹配的新 Final Evaluation Receipt。随后才允许重新走 Decision/Reflection/Package/专业签名与
-Approval，EVO-05.4 staged rollout 仍未开放。
+[EVO-05.3f1](EVO-05-3f1-immutable-evaluation-source.md) 已把 exact target + overlay 捕获为可脱离 Candidate Lease 的
+content-addressed immutable source。EVO-05.3f2a 仍需先重绑 current-target RED baseline、immutable GREEN source、
+seed/metrics/checks/预算，EVO-05.3f2b 再让完整评估执行器消费它并重建 cohort/lane matrix，最终签发时间下界、target、
+overlay 和 Plan digest 全部匹配的新 Final Evaluation Receipt。随后才允许重新走
+Decision/Reflection/Package/专业签名与 Approval，EVO-05.4 staged rollout 仍未开放。
