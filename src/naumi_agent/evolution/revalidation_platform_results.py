@@ -349,6 +349,31 @@ class EvolutionRevalidationPlatformResultStore:
             cursor += receipt.sample_count
         return cursor
 
+    async def list_receipts(self, contract_id: str, platform: str):
+        if not self.db_path.is_file():
+            return ()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            rows = await (
+                await db.execute(
+                    "SELECT manifest_id FROM "
+                    "evolution_revalidation_platform_result_receipts "
+                    "WHERE contract_id = ? AND platform = ? ORDER BY start_index",
+                    (contract_id, platform),
+                )
+            ).fetchall()
+        receipts = []
+        for row in rows:
+            receipt = await self.get_receipt(str(row["manifest_id"]))
+            if receipt is None:
+                raise EvolutionRevalidationPlatformResultError(
+                    "platform_result_receipt_missing",
+                    "Platform result receipt catalog 出现悬空引用。",
+                )
+            receipts.append(receipt)
+        return tuple(receipts)
+
     async def record_manifest(
         self,
         manifest,

@@ -130,5 +130,6 @@ queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
 [EVO-05.3f2c3b2b1](EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md) 已将 current Claim 与父权限、Runtime lease、
 可撤销 Run Grant 和 exact evaluation scope 绑定。[EVO-05.3f2c3b2b2](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md)
-已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store；cohort/Matrix 收口、rollout、monitor、
-rollback 和 Outcome 回注仍未完成。
+已接收 exact Worker Ed25519-signed typed result prefix，并在本地重算后幂等写入 H5a/pair Store。
+[EVO-05.3f2c3b2b3](EVO-05-3f2c3b2b3-remote-platform-completion.md) 已原子收口 authorization/capacity、生成 cohort，
+并以 completion 门禁推动 Matrix lane 完成；rollout、monitor、rollback 和 Outcome 回注仍未完成。

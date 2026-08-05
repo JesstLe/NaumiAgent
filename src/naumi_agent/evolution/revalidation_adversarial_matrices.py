@@ -178,6 +178,49 @@ class EvolutionRevalidationAdversarialMatrixStore:
             row["status_json"]
         )
 
+    async def platform_completion_gate(self, contract_id: str, platform: Platform):
+        if not self._db_path.exists():
+            return False, None, None
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            dispatch_table = await (
+                await db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                    "name = 'evolution_revalidation_platform_dispatches'"
+                )
+            ).fetchone()
+            dispatch = None
+            if dispatch_table is not None:
+                dispatch = await (
+                    await db.execute(
+                        "SELECT 1 FROM evolution_revalidation_platform_dispatches "
+                        "WHERE contract_id = ? AND platform = ?",
+                        (contract_id, platform),
+                    )
+                ).fetchone()
+            completion_table = await (
+                await db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                    "name = 'evolution_revalidation_platform_completions'"
+                )
+            ).fetchone()
+            completion = None
+            if completion_table is not None:
+                completion = await (
+                    await db.execute(
+                        "SELECT cohort_receipt_id, cohort_receipt_sha256 FROM "
+                        "evolution_revalidation_platform_completions "
+                        "WHERE contract_id = ? AND platform = ?",
+                        (contract_id, platform),
+                    )
+                ).fetchone()
+        return (
+            dispatch is not None,
+            None if completion is None else str(completion["cohort_receipt_id"]),
+            None if completion is None else str(completion["cohort_receipt_sha256"]),
+        )
+
     async def record_complete(self, status: EvolutionRevalidationAdversarialMatrixStatus):
         item = EvolutionRevalidationAdversarialMatrixStatus.model_validate_json(
             status.model_dump_json()
@@ -218,6 +261,48 @@ class EvolutionRevalidationAdversarialMatrixStore:
                         "fresh_adversarial_matrix_cohort_dependency_mismatch",
                         f"平台 {lane.platform} 的 cohort 持久化依赖不一致。",
                     )
+                dispatch_table = await (
+                    await db.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                        "name = 'evolution_revalidation_platform_dispatches'"
+                    )
+                ).fetchone()
+                dispatch = None
+                if dispatch_table is not None:
+                    dispatch = await (
+                        await db.execute(
+                            "SELECT 1 FROM evolution_revalidation_platform_dispatches "
+                            "WHERE contract_id = ? AND platform = ?",
+                            (item.contract_id, lane.platform),
+                        )
+                    ).fetchone()
+                if dispatch is not None:
+                    completion_table = await (
+                        await db.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND "
+                            "name = 'evolution_revalidation_platform_completions'"
+                        )
+                    ).fetchone()
+                    completion = None
+                    if completion_table is not None:
+                        completion = await (
+                            await db.execute(
+                                "SELECT cohort_receipt_id, cohort_receipt_sha256 FROM "
+                                "evolution_revalidation_platform_completions "
+                                "WHERE contract_id = ? AND platform = ?",
+                                (item.contract_id, lane.platform),
+                            )
+                        ).fetchone()
+                    if completion is None or (
+                        completion["cohort_receipt_id"] != lane.cohort_receipt_id
+                        or completion["cohort_receipt_sha256"]
+                        != lane.cohort_receipt_sha256
+                    ):
+                        await db.rollback()
+                        raise EvolutionRevalidationAdversarialMatrixError(
+                            "fresh_adversarial_matrix_platform_completion_missing",
+                            f"平台 {lane.platform} 的 remote completion 尚未收口。",
+                        )
             existing = await (await db.execute(
                 "SELECT status_json FROM evolution_revalidation_adversarial_matrices "
                 "WHERE contract_id = ?", (item.contract_id,)
@@ -294,6 +379,27 @@ class EvolutionRevalidationAdversarialMatrixService:
             cohort = await self.cohort_store.get(contract.contract_id, platform)
             if cohort is not None:
                 _validate_cohort(cohort, contract, platform)
+                required, completion_id, completion_sha256 = (
+                    await self.matrix_store.platform_completion_gate(
+                        contract.contract_id,
+                        platform,
+                    )
+                )
+                if required and completion_id is None:
+                    lanes.append(EvolutionRevalidationAdversarialMatrixLane(
+                        platform=platform,
+                        status="pending",
+                        reason_codes=("platform_completion_pending",),
+                    ))
+                    continue
+                if required and (
+                    completion_id != cohort.receipt_id
+                    or completion_sha256 != cohort.receipt_sha256
+                ):
+                    raise EvolutionRevalidationAdversarialMatrixError(
+                        "fresh_adversarial_matrix_platform_completion_changed",
+                        f"平台 {platform} completion 与 cohort 不一致。",
+                    )
                 lanes.append(EvolutionRevalidationAdversarialMatrixLane(
                     platform=platform,
                     status="completed",
@@ -394,6 +500,20 @@ class EvolutionRevalidationAdversarialMatrixService:
                 raise EvolutionRevalidationAdversarialMatrixError(
                     "fresh_adversarial_matrix_cohort_changed",
                     "完成 matrix 的 cohort identity 已变化。",
+                )
+            required, completion_id, completion_sha256 = (
+                await self.matrix_store.platform_completion_gate(
+                    contract.contract_id,
+                    lane.platform,
+                )
+            )
+            if required and (
+                completion_id != cohort.receipt_id
+                or completion_sha256 != cohort.receipt_sha256
+            ):
+                raise EvolutionRevalidationAdversarialMatrixError(
+                    "fresh_adversarial_matrix_platform_completion_missing",
+                    "完成 matrix 的 remote platform completion 已缺失。",
                 )
 
 

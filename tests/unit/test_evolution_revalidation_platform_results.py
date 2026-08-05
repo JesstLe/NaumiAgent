@@ -79,7 +79,7 @@ def _claim_signature(private_key, challenge) -> str:
     ).decode()
 
 
-async def _scenario(tmp_path: Path):
+async def _scenario(tmp_path: Path, *, sample_count: int = 1):
     base, contract, _old_parent, harness_store, _kernel, _state = (
         await _executor_scenario(tmp_path)
     )
@@ -150,25 +150,28 @@ async def _scenario(tmp_path: Path):
         decided_at=T2,
     )
     sample_executor.now = lambda: T3
-    local_pair = await sample_executor.execute(
-        contract_id=contract.contract_id,
-        platform=platform,
-        parent_receipt_id=parent.receipt_id,
-        sample_index=0,
-    )
-    red = await harness_store.get_eval_result(
-        tmp_path,
-        local_pair.red_batch_id,
-        contract.suite_id,
-        0,
-    )
-    green = await harness_store.get_eval_result(
-        tmp_path,
-        local_pair.green_batch_id,
-        contract.suite_id,
-        0,
-    )
-    assert red is not None and green is not None
+    local_pairs = []
+    for sample_index in range(sample_count):
+        local_pair = await sample_executor.execute(
+            contract_id=contract.contract_id,
+            platform=platform,
+            parent_receipt_id=parent.receipt_id,
+            sample_index=sample_index,
+        )
+        red = await harness_store.get_eval_result(
+            tmp_path,
+            local_pair.red_batch_id,
+            contract.suite_id,
+            sample_index,
+        )
+        green = await harness_store.get_eval_result(
+            tmp_path,
+            local_pair.green_batch_id,
+            contract.suite_id,
+            sample_index,
+        )
+        assert red is not None and green is not None
+        local_pairs.append((local_pair, red, green))
     authorization_store = EvolutionRevalidationPlatformExecutionAuthorizationStore(
         state_db
     )
@@ -194,11 +197,14 @@ async def _scenario(tmp_path: Path):
         _artifact(
             stored.result,
             phase=phase,
+            sample_index=sample_index,
             sample_seed=local_pair.sample_seed,
             grant_sha256=authority.run_grant.grant_sha256,
         )
+        for sample_index, (local_pair, red, green) in enumerate(local_pairs)
         for phase, stored in (("red", red), ("green", green))
     )
+    first_pair = local_pairs[0][0]
     payload = EvolutionRevalidationPlatformResultPayload(
         authorization_id=authority.authorization_id,
         authorization_sha256=authority.authorization_sha256,
@@ -215,12 +221,12 @@ async def _scenario(tmp_path: Path):
         source_snapshot_id=authority.source_snapshot_id,
         source_snapshot_sha256=authority.source_snapshot_sha256,
         platform=authority.platform,
-        platform_identity=local_pair.platform_identity,
-        platform_identity_sha256=local_pair.platform_sha256,
+        platform_identity=first_pair.platform_identity,
+        platform_identity_sha256=first_pair.platform_sha256,
         suite_id=authority.suite_id,
         requested_samples=authority.requested_samples,
         start_index=0,
-        sample_count=1,
+        sample_count=sample_count,
         artifacts=artifacts,
         result_bytes=sum(item.result_bytes for item in artifacts),
         run_grant_sha256=authority.run_grant.grant_sha256,
@@ -258,7 +264,7 @@ async def _scenario(tmp_path: Path):
     )
 
 
-def _artifact(result, *, phase, sample_seed, grant_sha256):
+def _artifact(result, *, phase, sample_index, sample_seed, grant_sha256):
     cases = tuple(
         case.model_copy(
             update={
@@ -274,7 +280,7 @@ def _artifact(result, *, phase, sample_seed, grant_sha256):
     updated = result.model_copy(update={"cases": cases})
     encoded = harness_eval_result_canonical_json(updated).encode("utf-8")
     return EvolutionRevalidationPlatformResultArtifact(
-        sample_index=0,
+        sample_index=sample_index,
         sample_seed=sample_seed,
         phase=phase,
         result_sha256=harness_eval_result_sha256(updated),
@@ -389,6 +395,7 @@ async def test_invalid_worker_signature_and_wrong_grant_leave_no_remote_evidence
         _artifact(
             artifact.result,
             phase=artifact.phase,
+            sample_index=artifact.sample_index,
             sample_seed=artifact.sample_seed,
             grant_sha256=wrong_grant,
         )
