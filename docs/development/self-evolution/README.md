@@ -119,3 +119,5 @@ patch/rollback 的只读基线，并原子绑定 current Contract、Fresh Final 
 和签名均不可复用。
 [EVO-05.3f3b2](EVO-05-3f3b2-fresh-approval-requirement.md) 已从 current target authority 生成新的 Approval Requirement；
 target branch 来自原 Request，revision/tree 来自 Fresh Plan/Outcome，所有角色必须创建新交互且专业角色重新签名。
+[EVO-05.3f3b3](EVO-05-3f3b3-fresh-role-interactions.md) 已将每个 Fresh Requirement step 接入 HAR-10.6；user 的新回答
+可形成 session-bound consent，专业角色回答只开放新签名资格，不能直接计入最终聚合。

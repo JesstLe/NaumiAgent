@@ -230,6 +230,10 @@ from naumi_agent.evolution.revalidation_adversarial_samples import (
     EvolutionRevalidationAdversarialSampleExecutor,
     EvolutionRevalidationAdversarialSampleStore,
 )
+from naumi_agent.evolution.revalidation_approval_requests import (
+    EvolutionRevalidationApprovalRequestService,
+    EvolutionRevalidationApprovalResponseStore,
+)
 from naumi_agent.evolution.revalidation_approval_requirements import (
     EvolutionRevalidationApprovalRequirementService,
     EvolutionRevalidationApprovalRequirementStore,
@@ -1917,6 +1921,22 @@ class AgentEngine:
                     self.evolution_revalidation_reapproval_authority_store
                 ),
                 store=self.evolution_revalidation_approval_requirement_store,
+            )
+        )
+        self.evolution_revalidation_approval_response_store = (
+            EvolutionRevalidationApprovalResponseStore(
+                config.memory.session_db_path,
+                interaction_store=self._harness_store,
+            )
+        )
+        self.evolution_revalidation_approval_request_service = (
+            EvolutionRevalidationApprovalRequestService(
+                requirement_service=(
+                    self.evolution_revalidation_approval_requirement_service
+                ),
+                interaction_store=self._harness_store,
+                response_store=self.evolution_revalidation_approval_response_store,
+                request_user_input=self.request_user_input,
             )
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(

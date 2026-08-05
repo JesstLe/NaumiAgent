@@ -449,6 +449,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationAdversarialSampleStore,
         adversarial_batch_id,
     )
+    from naumi_agent.evolution.revalidation_approval_requests import (
+        EVOLUTION_REVALIDATION_APPROVAL_REQUEST_POLICY,
+        EvolutionRevalidationApprovalRequestError,
+        EvolutionRevalidationApprovalRequestService,
+        EvolutionRevalidationApprovalResponseReceipt,
+        EvolutionRevalidationApprovalResponseStore,
+        EvolutionRevalidationApprovalResponseView,
+    )
     from naumi_agent.evolution.revalidation_approval_requirements import (
         EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY,
         EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN,
@@ -759,6 +767,12 @@ __all__ = [
     "EvolutionRevalidationApprovalRequirementStore",
     "EvolutionRevalidationApprovalStep",
     "EvolutionRevalidationApprovalTechnicalGate",
+    "EVOLUTION_REVALIDATION_APPROVAL_REQUEST_POLICY",
+    "EvolutionRevalidationApprovalRequestError",
+    "EvolutionRevalidationApprovalRequestService",
+    "EvolutionRevalidationApprovalResponseReceipt",
+    "EvolutionRevalidationApprovalResponseStore",
+    "EvolutionRevalidationApprovalResponseView",
     "render_evolution_revalidation_rebase",
     "EVOLUTION_REVALIDATION_VALIDATION_POLICY",
     "EvolutionRevalidationCheckEvidence",
@@ -1464,6 +1478,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationApprovalStep",
         "EvolutionRevalidationApprovalTechnicalGate",
     }
+    revalidation_approval_request_exports = {
+        "EVOLUTION_REVALIDATION_APPROVAL_REQUEST_POLICY",
+        "EvolutionRevalidationApprovalRequestError",
+        "EvolutionRevalidationApprovalRequestService",
+        "EvolutionRevalidationApprovalResponseReceipt",
+        "EvolutionRevalidationApprovalResponseStore",
+        "EvolutionRevalidationApprovalResponseView",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -1976,6 +1998,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_promotion_inputs"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
+    elif name in revalidation_approval_request_exports:
+        module_name = "revalidation_approval_requests"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
