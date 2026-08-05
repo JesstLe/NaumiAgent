@@ -29,7 +29,7 @@ Promotion/Rollback → Feedback`。
 ## Agent Tool 权限治理
 
 [EVO-GOV-01](EVO-GOV-01-agent-tool-permission-matrix.md) 已为 EVO-03.7、EVO-04.1-4.7 与
-EVO-05.1a-05.3a 的二十个 durable Tool 建立精确权限规则：十八类派生创建为中风险，append-only
+EVO-05.1a-05.3b1 的 durable Tool 建立精确权限规则：派生创建为中风险，append-only
 Reflection 撤销和 Principal 治理为高风险动作；lockdown 阻断，bypass 全权限且无二次确认。以后新增非只读 Evolution Tool 必须与
 权限规则和注册表门同一切片交付。
 
@@ -66,5 +66,7 @@ Challenge 验证真实外部 Ed25519 signature，并让轮换、撤销、过期�
 聚合资格。[EVO-05.2d](EVO-05-2d-approval-decision-aggregation.md) 已重读全部角色、签名、身份与技术门，形成
 append-only 的 `approved|rejected|changes_requested|pending|stale` Decision Receipt；approved 只允许进入未来
 rebase/revalidate。[EVO-05.3a](EVO-05-3a-revalidation-request-authority.md) 已把仍 current 的 approved Decision 与
-exact Package 冻结为 deterministic、可动态失效的 Revalidation Request；它仍不执行 rebase、验证命令、Git 写入、
-merge、push、publish 或 promotion。EVO-05.3b-05.3d 的隔离 replay、重新验证与 Outcome authority 尚未实现。
+exact Package 冻结为 deterministic、可动态失效的 Revalidation Request；
+[EVO-05.3b1](EVO-05-3b1-exact-target-replay.md) 已从 active Lease 重读真实 Candidate bytes，并在一次性 detached
+worktree 中完成 exact-target 写入、复核、清理和 durable Receipt。它尚不支持目标前进后的 rebase，也不运行验证
+命令或形成 Promotion authority；EVO-05.3b2-05.3d 的 rebase/recovery、重新验证与 Outcome 仍未实现。

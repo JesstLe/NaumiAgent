@@ -83,6 +83,10 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionRevocationReason,
     render_evolution_reflection_memory,
 )
+from naumi_agent.evolution.revalidation_replays import (
+    EvolutionRevalidationReplayError,
+    render_evolution_revalidation_replay,
+)
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestError,
     render_evolution_revalidation_request,
@@ -1947,6 +1951,67 @@ class EvolutionRevalidationRequestAuthorityTool(Tool):
         return render_evolution_revalidation_request(view)
 
 
+class EvolutionRevalidationReplayTool(Tool):
+    """Replay exact approved candidate bytes in an isolated detached worktree."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_revalidation_replay"
+
+    @property
+    def description(self) -> str:
+        return (
+            "消费 current Revalidation Request、Promotion Input 与 active Experiment "
+            "Lease，在 disposable detached worktree 中真实重放 exact Candidate 字节并"
+            "持久化回执。不会执行验证、merge、push、publish 或 Promotion。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrevalidation_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            concurrency_safe=True,
+            user_facing_name="Evolution 隔离源码重放",
+            search_hint=(
+                "evolution revalidation replay detached worktree exact source "
+                "自进化 再验证 隔离 源码 重放"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            receipt = await self._engine.evolution_revalidation_replay_service.execute(
+                workspace_root=self._engine.workspace_root,
+                request_id=request_id.strip(),
+            )
+        except (
+            AttributeError,
+            EvolutionRevalidationReplayError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"Evolution Revalidation Replay 未完成：{exc}"
+        return render_evolution_revalidation_replay(receipt)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -1979,6 +2044,7 @@ def create_evolution_review_tools(
         EvolutionPromotionApprovalDecisionTool(engine),
         EvolutionRevalidationRequestAuthorityTool(engine),
         EvolutionRevalidationRequestTool(engine),
+        EvolutionRevalidationReplayTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2009,6 +2075,7 @@ __all__ = [
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionRevalidationRequestAuthorityTool",
     "EvolutionRevalidationRequestTool",
+    "EvolutionRevalidationReplayTool",
     "EvolutionReflectionMemoryRevokeTool",
     "EvolutionReflectionMemoryTool",
     "create_evolution_review_tools",

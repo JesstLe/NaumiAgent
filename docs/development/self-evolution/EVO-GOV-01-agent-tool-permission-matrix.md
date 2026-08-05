@@ -2,7 +2,7 @@
 
 ## 问题与目标
 
-EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a 至 5.3a 已注册二十个非只读 Agent Tool。它们拥有真实的 durable
+EVO-03.7a/3.7b1/3.7b2、EVO-04.1a 至 4.7a 与 EVO-05.1a 至 5.3b1 已注册二十一个非只读 Agent Tool。它们拥有真实的 durable
 写入，但此前没有精确 `PermissionRule`，因此 normal runtime 将其判为 `UNKNOWN_TOOL`，Engine 的“所有注册
 工具均受治理”门也会失败。
 
@@ -54,6 +54,7 @@ authority 并保持所有 Git/Promotion 字段为 false；Revalidation Request T
 | `evolution_approval_signature` | nonce Challenge / verified Ed25519 Receipt | `evolution_approval_signature` | 50 |
 | `evolution_promotion_approval_decision` | append-only non-executable Approval Decision | `evolution_promotion_artifact` | 50 |
 | `evolution_revalidation_request` | deterministic non-executable Revalidation Request | `evolution_promotion_artifact` | 50 |
+| `evolution_revalidation_replay` | detached exact-target source replay | `evolution_isolated_replay` | 50 |
 
 Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 模型；durable single-flight 仍负责同一 Gate
 并发去重，权限上限负责限制一个会话内不同 Gate 的总调用面。
@@ -61,7 +62,7 @@ Independent Review 的上限更低，因为首次成功路径会调用 Reviewer 
 ## 模式语义
 
 - permissive/moderate/strict：十八类派生创建允许且无逐次确认；Reflection 撤销和 Principal 治理允许但要求确认。
-- lockdown：阻断所有二十类写入；已有只读 Authority Tool 仍按各自只读规则工作。
+- lockdown：阻断所有二十一类写入；已有只读 Authority Tool 仍按各自只读规则工作。
 - bypass：全权限直接通过，不要求确认，也不受本层 session call cap 限制。
 
 bypass 只绕过交互 PermissionChecker；executor 仍必须重读 authority、验证 workspace/identity/digest/budget，
