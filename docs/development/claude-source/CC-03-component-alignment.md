@@ -40,5 +40,10 @@ keyboard、focus、presentation；24 个单元格分别标记 aligned、Naumi ex
 失败关闭 verifier 校验真实 source/target/test 锚点。详见
 `CC-03-1b-complete-behavior-matrix.md`。
 
-因此 CC-03 现为 `partial`，CC-03.1 已完成。CC-03.2 protocol 字段语义映射、CC-03.3 组件适配、
+CC-03.2a 已将 24 格先分责为 Bridge snapshot、UI-local 与 N/A，并为 `tasks/snapshot`、
+`permissions/snapshot`、`doctor/health` 的 27 个字段建立真实 producer probe、类型和值域校验。loading、
+focus、keyboard、cancel 等前端瞬态明确留给 CC-03.2b，不污染后端协议。详见
+`CC-03-2a-snapshot-semantic-mapping.md`。
+
+因此 CC-03 现为 `partial`，CC-03.1 与 CC-03.2a 已完成。CC-03.2b UI-local 状态语义映射、CC-03.3 组件适配、
 CC-03.4 完整 divergence log、CC-03.5 同 fixture golden scenarios 与 CC-03.6 UX audit 仍未实现。
