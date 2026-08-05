@@ -130,6 +130,7 @@ from naumi_agent.ui.runtime_health import (
 from naumi_agent.ui.theme import UIStyleConfig, build_ui_style_config
 from naumi_agent.ui.tool_activity import format_tool_prepare_status
 from naumi_agent.user_interaction import (
+    INTERACTION_PRIORITY_SCHEDULE,
     UserInteractionUnavailableError,
     normalize_interaction_request,
     normalize_interaction_response,
@@ -137,6 +138,67 @@ from naumi_agent.user_interaction import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.asynccontextmanager
+async def _scheduled_interaction_slot(app: Any, priority: str):
+    """Serialize TUI modals with weighted priority and no active preemption."""
+    condition = getattr(app, "_interaction_condition", None)
+    if condition is None:
+        condition = asyncio.Condition()
+        app._interaction_condition = condition
+        app._interaction_waiters = []
+        app._interaction_active = False
+        app._interaction_priority_cursor = 0
+        app._interaction_waiter_sequence = 0
+    app._interaction_waiter_sequence += 1
+    ticket = {
+        "sequence": app._interaction_waiter_sequence,
+        "priority": priority,
+    }
+    acquired = False
+    async with condition:
+        app._interaction_waiters.append(ticket)
+        try:
+            next_cursor = app._interaction_priority_cursor
+            while True:
+                selected, next_cursor = _next_interaction_ticket(app)
+                if not app._interaction_active and selected is ticket:
+                    break
+                await condition.wait()
+            app._interaction_waiters.remove(ticket)
+            app._interaction_active = True
+            app._interaction_priority_cursor = next_cursor
+            acquired = True
+        except BaseException:
+            if ticket in app._interaction_waiters:
+                app._interaction_waiters.remove(ticket)
+                condition.notify_all()
+            raise
+    try:
+        yield
+    finally:
+        if acquired:
+            async with condition:
+                app._interaction_active = False
+                condition.notify_all()
+
+
+def _next_interaction_ticket(app: Any) -> tuple[dict[str, Any] | None, int]:
+    waiters = app._interaction_waiters
+    if not waiters:
+        return None, app._interaction_priority_cursor
+    cursor = app._interaction_priority_cursor % len(INTERACTION_PRIORITY_SCHEDULE)
+    for offset in range(len(INTERACTION_PRIORITY_SCHEDULE)):
+        index = (cursor + offset) % len(INTERACTION_PRIORITY_SCHEDULE)
+        priority = INTERACTION_PRIORITY_SCHEDULE[index]
+        candidates = [ticket for ticket in waiters if ticket["priority"] == priority]
+        if candidates:
+            return (
+                min(candidates, key=lambda ticket: ticket["sequence"]),
+                (index + 1) % len(INTERACTION_PRIORITY_SCHEDULE),
+            )
+    return min(waiters, key=lambda ticket: ticket["sequence"]), cursor
 
 _TERMINAL_NOISE_LOGGERS = ("litellm", "LiteLLM", "naumi_agent")
 _API_FORMAT_LABELS = {
@@ -1143,6 +1205,14 @@ class UserInteractionScreen(ModalScreen[dict[str, str]]):
         from textual.widgets import Label
 
         with Container():
+            priority = str(self.payload.get("priority") or "normal")
+            priority_label = {
+                "critical": "紧急",
+                "high": "重要",
+                "normal": "常规",
+                "low": "可延后",
+            }.get(priority, "常规")
+            yield Label(f"[dim]优先级：{priority_label}[/dim]")
             yield Label(f"[bold]{self.payload.get('header') or '需要你的选择'}[/bold]")
             yield Label(str(self.payload.get("question") or "请选择一个选项。"))
             for index, option in enumerate(self.payload.get("options") or []):
@@ -1782,7 +1852,11 @@ class NaumiApp(App):
         self._runtime_heartbeat_notice_emitted = False
         self._unmounting = False
         self._slash_frontend = _TuiSlashCommandFrontend(self)
-        self._interaction_lock = asyncio.Lock()
+        self._interaction_condition = asyncio.Condition()
+        self._interaction_waiters: list[dict[str, Any]] = []
+        self._interaction_active = False
+        self._interaction_priority_cursor = 0
+        self._interaction_waiter_sequence = 0
         self._interaction_claim_lock = asyncio.Lock()
         self._active_interaction_ids: set[str] = set()
         self._interaction_records: dict[str, HarnessInteractionRecord] = {}
@@ -2116,7 +2190,7 @@ class NaumiApp(App):
             pursuit_begin = payload.get("_pursuit_begin")
             if callable(pursuit_begin):
                 await pursuit_begin(interaction_id, request.to_public_dict())
-            async with self._interaction_lock:
+            async with _scheduled_interaction_slot(self, request.priority):
                 record = self._interaction_records.get(interaction_id, record)
                 raw_response = await self._present_user_interaction(
                     public_interaction_request_payload(
@@ -2420,7 +2494,7 @@ class NaumiApp(App):
             return "⚠️ 持久交互 authority 在展示前不可用。"
         interaction_id = record.interaction_id
         try:
-            async with self._interaction_lock:
+            async with _scheduled_interaction_slot(self, record.priority):
                 record = self._interaction_records.get(interaction_id, record)
                 raw_response = await self._present_user_interaction(
                     {

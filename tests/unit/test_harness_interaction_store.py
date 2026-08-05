@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from naumi_agent.harness.interaction_runtime import (
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import (
+    HARNESS_STORE_SCHEMA_VERSION,
     HarnessStore,
     HarnessStoreConflictError,
     HarnessStoreError,
@@ -30,7 +32,12 @@ T11 = "2026-07-18T00:00:11+00:00"
 T20 = "2026-07-18T00:00:20+00:00"
 
 
-def _record(*, interaction_id: str = "ask-durable-1", timeout: int = 20):
+def _record(
+    *,
+    interaction_id: str = "ask-durable-1",
+    timeout: int = 20,
+    priority: str = "normal",
+):
     request = normalize_interaction_request({
         "header": "执行策略",
         "question": "请选择恢复方式",
@@ -40,6 +47,7 @@ def _record(*, interaction_id: str = "ask-durable-1", timeout: int = 20):
         ],
         "allow_custom": True,
         "custom_label": "其他方案",
+        "priority": priority,
     })
     return new_interaction_record(
         request=request,
@@ -70,6 +78,29 @@ def test_interaction_record_rejects_noncanonical_timeout() -> None:
 
     with pytest.raises(ValidationError, match="3..604800"):
         HarnessInteractionRecord.model_validate(payload)
+
+
+def test_v1_interaction_digest_remains_byte_compatible_after_priority_upgrade() -> None:
+    payload = _record().model_dump(mode="python")
+    payload["schema_version"] = 1
+    payload.pop("priority")
+    legacy_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+    restored = HarnessInteractionRecord.model_validate_json(legacy_json)
+
+    assert restored.priority == "normal"
+    assert restored.canonical_json() == legacy_json
+
+    incompatible = dict(payload)
+    incompatible["priority"] = "high"
+    with pytest.raises(ValidationError, match="schema 1 interaction"):
+        HarnessInteractionRecord.model_validate(incompatible)
 
 
 @pytest.mark.asyncio
@@ -116,6 +147,39 @@ async def test_interaction_survives_new_store_and_create_is_idempotent(
             workspace_root=workspace,
             record=changed,
         )
+
+
+@pytest.mark.asyncio
+async def test_v23_database_migrates_v1_interaction_without_rehashing(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "harness.db"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload = _record(interaction_id="ask-legacy-priority").model_dump(mode="python")
+    payload["schema_version"] = 1
+    payload.pop("priority")
+    legacy = HarnessInteractionRecord.model_validate(payload)
+    await HarnessStore(db_path).create_interaction(
+        workspace_root=workspace,
+        record=legacy,
+    )
+    legacy_digest = legacy.digest()
+    with sqlite3.connect(db_path) as db:
+        db.execute("DROP INDEX idx_harness_interactions_priority")
+        db.execute("ALTER TABLE harness_interactions DROP COLUMN priority")
+        db.execute("PRAGMA user_version = 23")
+        db.commit()
+
+    restored = await HarnessStore(db_path).get_interaction(
+        workspace_root=workspace,
+        interaction_id=legacy.interaction_id,
+    )
+
+    assert restored is not None
+    assert restored.schema_version == 1
+    assert restored.priority == "normal"
+    assert restored.digest() == legacy_digest
 
 
 @pytest.mark.asyncio
@@ -387,6 +451,40 @@ async def test_cancel_is_sequence_fenced_and_visible_in_bounded_history(
 
 
 @pytest.mark.asyncio
+async def test_pending_interactions_use_weighted_priority_and_fifo_lanes(
+    tmp_path: Path,
+) -> None:
+    store = HarnessStore(tmp_path / "harness.db")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    priorities = (
+        "low", "normal", "high", "critical",
+        "critical", "high", "critical", "critical",
+    )
+    for index, priority in enumerate(priorities):
+        await store.create_interaction(
+            workspace_root=workspace,
+            record=_record(
+                interaction_id=f"ask-priority-{index}",
+                priority=priority,
+            ),
+        )
+
+    pending = await store.list_pending_interactions(
+        workspace_root=workspace,
+        limit=8,
+    )
+
+    assert [item.priority for item in pending] == [
+        "critical", "high", "critical", "normal",
+        "critical", "high", "critical", "low",
+    ]
+    assert [item.interaction_id for item in pending if item.priority == "critical"] == [
+        "ask-priority-3", "ask-priority-4", "ask-priority-6", "ask-priority-7",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_interaction_history_cursor_is_stable_filter_bound_and_opaque(
     tmp_path: Path,
 ) -> None:
@@ -589,7 +687,9 @@ async def test_v12_database_adds_interaction_tables_without_losing_heartbeat(
     assert heartbeat is not None
     assert heartbeat.instance_id == "worker-a"
     with sqlite3.connect(db_path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 21
+        assert db.execute("PRAGMA user_version").fetchone()[0] == (
+            HARNESS_STORE_SCHEMA_VERSION
+        )
         assert db.execute(
             "SELECT COUNT(*) FROM harness_interactions"
         ).fetchone()[0] == 1

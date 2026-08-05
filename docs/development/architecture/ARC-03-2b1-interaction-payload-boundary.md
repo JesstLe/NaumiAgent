@@ -12,7 +12,8 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 
 - request ID 必须是 `ask-` 前缀的稳定有界 ID；
 - request 必须包含 2..3 个唯一选项，标题、问题、label、value、description 和自定义标签均有独立上限；
-- `allow_custom` 必须是真实布尔值，request 状态只能是 `needs_input`；
+- `allow_custom` 必须是真实布尔值，request 状态只能是 `needs_input`；HAR-10.6c 增加的 priority
+  必须属于 `critical/high/normal/low`，缺省规范化为 normal；
 - option response 必须且只能携带 `value`；custom response 必须且只能携带非空 `custom_text`；
 - resolved 终态只能是 `answered` 或 `expired`；answered 必须有最终 label，expired 必须有有界原因且不能
   夹带答案字段；
@@ -31,7 +32,7 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 
 - option/custom 两种合法答案及 timeout expired 终态可完整往返；
 - 未知 kind、空 answer、option+custom 歧义组合、非法 request ID 在发送端或 Bridge 边界被拒绝；
-- request 少于 2 个选项、重复 value、非布尔 allow_custom 和非法状态被 Node 拒绝；
+- request 少于 2 个选项、重复 value、非布尔 allow_custom、未知 priority 和非法状态被 Node 拒绝；
 - private 字段不会进入规范化 request/response；
 - 并行问题仍按 request ID 隔离，排队、回答与取消行为不回归；
 - 仅运行 interaction Python 子集、Node protocol 单模块、Node interaction state 子集与 JS 语法检查。
@@ -47,4 +48,5 @@ pending state、Node UI state，后续也不得直接进入审计或恢复存储
 HAR-10.6a 已建立单一 durable interaction authority；HAR-10.6b 已让 Pursuit checkpoint 只引用稳定
 interaction ID，并由 New UI Bridge 消费 pending/timeout/takeover 事实。UI-18.4b 已让 TUI 复用相同
 authority adapter；UI-18.4c 已收口 Goal ledger/cancel，UI-18.4d1/18.4d2 已收口共享详情与
-宿主绑定手动 takeover；cursor 与页内详情继续由 UI-18.4 收口。
+宿主绑定手动 takeover；UI-18.4d3/HAR-10.6c 又补齐 cursor 页内详情与公平优先级；pending recovery
+cursor 继续由 UI-18.4/HAR-10.6 收口。

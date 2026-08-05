@@ -676,6 +676,7 @@ def _interaction_projection(record: HarnessInteractionRecord) -> dict[str, Any]:
         "pursuit_run_id": _bounded_text(record.subject_id, 128),
         "state": record.state,
         "sequence": record.sequence,
+        "priority": record.priority,
         "header": _bounded_text(record.header, 40),
         "question": _bounded_text(record.question, 2_000),
         "created_at": _bounded_text(record.created_at, 64),
@@ -724,6 +725,7 @@ def _render_interaction_detail_projection(item: dict[str, Any]) -> str:
         "#### 所选用户交互详情",
         f"- 交互 ID：`{item['interaction_id']}`",
         f"- 状态：{_interaction_status_label(str(item['state']))}",
+        f"- 优先级：{item['priority']}",
         f"- 问题：{item['header']} · {item['question']}",
         "- 选项：",
     ]

@@ -15,6 +15,13 @@ export function renderInteractionCard(interaction, width, ctx = { width }) {
   const expired = payload.status === "expired";
   const queued = payload.status === "queued";
   const cancelled = payload.status === "cancelled";
+  const priority = String(payload.priority ?? "normal");
+  const priorityLabel = {
+    critical: "紧急",
+    high: "重要",
+    normal: "常规",
+    low: "可延后",
+  }[priority] || "常规";
   let statusLabel = "等待你的选择";
   if (answered) statusLabel = "已回答";
   else if (expired) statusLabel = "已超时";
@@ -24,7 +31,7 @@ export function renderInteractionCard(interaction, width, ctx = { width }) {
   if (answered) statusStyle = ANSI.green;
   else if (cancelled || expired) statusStyle = ANSI.red;
   const children = [
-    line(color(statusStyle, statusLabel)),
+    line(`${color(statusStyle, statusLabel)} · ${color(priority === "critical" ? ANSI.red : priority === "high" ? ANSI.yellow : ANSI.dim, priorityLabel)}`),
     line(color(ANSI.cyan, compactText(payload.header || "需要确认", 80))),
     line(compactText(payload.question || "请选择一个选项。", 500)),
   ];

@@ -796,15 +796,23 @@ def _approval_interaction_request(
         "allow_custom": False,
         "custom_label": "不允许自定义审批文本",
         "timeout_seconds": timeout_seconds,
+        "priority": "high",
     }
     return normalize_interaction_request(payload)
 
 
-def _static_request_payload(request: UserInteractionRequest) -> dict[str, object]:
-    return {
+def _static_request_payload(
+    request: UserInteractionRequest,
+    *,
+    include_priority: bool = True,
+) -> dict[str, object]:
+    payload = {
         **request.to_public_dict(),
         "timeout_seconds": None,
     }
+    if not include_priority:
+        payload.pop("priority", None)
+    return payload
 
 
 def _interaction_matches(
@@ -821,7 +829,13 @@ def _interaction_matches(
         and interaction.subject_id == requirement.requirement_id
         and match.group(1) == requirement.requirement_id.removeprefix("evapprovalreq_")
         and match.group(2) == step.role.value
-        and _static_request_payload(interaction.request()) == _static_request_payload(request)
+        and _static_request_payload(
+            interaction.request(),
+            include_priority=interaction.schema_version != 1,
+        ) == _static_request_payload(
+            request,
+            include_priority=interaction.schema_version != 1,
+        )
         and interaction.request().timeout_seconds is not None
         and interaction.request().timeout_seconds <= requirement.validity_seconds
         and _aware(interaction.created_at) < _aware(requirement.expires_at)

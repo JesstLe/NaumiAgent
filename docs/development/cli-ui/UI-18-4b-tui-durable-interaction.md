@@ -26,7 +26,8 @@ Bridge 已改用此 adapter，TUI 不复制 Store 状态机。两端仍分别拥
 
 1. `AgentEngine` 提供 stable ID、subject 与 task-local Pursuit callback；
 2. TUI 先 create authority，随后调用 Pursuit begin checkpoint，再显示 Modal；
-3. 多个问题通过 `_interaction_lock` 串行显示，但每个问题在等待 UI 锁之前已经落盘并启动 owner keepalive；
+3. 多个问题通过 HAR-10.6c condition admission queue 串行显示；当前 Modal 不被抢占，后续问题按
+   `critical/high/normal/low` 的 4:2:1:1 周期公平选择，等待前已经落盘并启动 owner keepalive；
 4. 选项/自定义答案先提交 authority，再调用 Pursuit resolve checkpoint，最后返回工具；
 5. timeout 使用 durable deadline，dismiss Modal 并显式 expire；
 6. authority answer 失败时不伪装成功；answer 已保存但 checkpoint 失败时明确提示 `/pursue resume`。
@@ -60,12 +61,13 @@ TUI mount 后启动非阻塞 recovery worker：
 - Goal 页面已由 UI-18.4c/18.4d1 汇总有界 interaction 历史并提供显式 cancel/共享只读详情；
   UI-18.4d2 已补齐宿主绑定 takeover，UI-18.4d3 已补齐页内详情与分页筛选；
 - TUI recovered answer 不自动执行 `/pursue resume`，这是避免隐藏 owner 竞争的刻意边界；
-- interaction pending recovery 仍是 50 项有界批次，账本已有 cursor，但 recovery 没有优先级；HAR-10.3a 的普通对话
+- interaction pending recovery 仍是 50 项有界批次，账本已有 cursor，但 recovery 没有独立 cursor；优先级与
+  公平调度已由 HAR-10.6c 补齐；HAR-10.3a 的普通对话
   `/send-now` 不改变 interaction authority 的排序；
 - TUI Modal 只显示问题 deadline 结果，尚未显示倒计时；跨平台窄终端布局由 UI-16 继续验证。
 
 UI-18.4 仍保持 partial。HAR-10.3a、UI-18.4c、UI-18.4d1、UI-18.4d2 与 UI-18.4d3 已交付；
-下一步应在交互优先级、HAR-10.7 独立 Worker、CC-03 行为对齐与其他路线间选择最小切片。
+下一步应在 HAR-10.7 Worker 调度、CC-03 行为对齐与其他路线间选择最小切片。
 
 ## UI-17.2b parity 补充
 

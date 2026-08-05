@@ -46,7 +46,7 @@ import {
   updateBridgeHeartbeat,
 } from "../src/state.js";
 
-function interactionRecord(requestId, question = "请选择方案") {
+function interactionRecord(requestId, question = "请选择方案", priority = "normal") {
   return {
     type: "interaction/request",
     request_id: requestId,
@@ -61,9 +61,42 @@ function interactionRecord(requestId, question = "请选择方案") {
       allow_custom: true,
       custom_label: "其他方案",
       status: "needs_input",
+      priority,
     },
   };
 }
+
+test("interaction queue uses weighted priority without preempting active input", () => {
+  const state = createInitialState();
+  reduceServerEvent(state, interactionRecord("ask-active", "当前问题", "low"));
+  for (const [requestId, priority] of [
+    ["ask-low", "low"],
+    ["ask-normal", "normal"],
+    ["ask-high-1", "high"],
+    ["ask-critical-1", "critical"],
+    ["ask-critical-2", "critical"],
+    ["ask-high-2", "high"],
+    ["ask-critical-3", "critical"],
+    ["ask-critical-4", "critical"],
+  ]) {
+    reduceServerEvent(state, interactionRecord(requestId, requestId, priority));
+  }
+
+  assert.equal(state.interaction.requestId, "ask-active");
+  const selected = [];
+  for (let index = 0; index < 8; index += 1) {
+    reduceServerEvent(state, {
+      type: "interaction/resolved",
+      payload: { request_id: state.interaction.requestId, status: "answered" },
+    });
+    if (state.interaction) selected.push(state.interaction.requestId);
+  }
+
+  assert.deepEqual(selected, [
+    "ask-critical-1", "ask-high-1", "ask-critical-2", "ask-normal",
+    "ask-critical-3", "ask-high-2", "ask-critical-4", "ask-low",
+  ]);
+});
 
 test("typed task snapshot drives stable selection without parsing display text", () => {
   const state = createInitialState();

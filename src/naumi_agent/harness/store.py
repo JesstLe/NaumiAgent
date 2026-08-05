@@ -81,8 +81,9 @@ from naumi_agent.harness.tombstone import (
 )
 from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
+from naumi_agent.user_interaction import INTERACTION_PRIORITY_SCHEDULE
 
-HARNESS_STORE_SCHEMA_VERSION = 23
+HARNESS_STORE_SCHEMA_VERSION = 24
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -3808,13 +3809,13 @@ class HarnessStore:
                     """
                     INSERT INTO harness_interactions (
                         workspace_root, interaction_id, subject_kind, subject_id,
-                        latest_sequence, state, owner_id, owner_epoch,
+                        priority, latest_sequence, state, owner_id, owner_epoch,
                         owner_lease_expires_at, expires_at, payload_json, payload_sha256
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         workspace, record.interaction_id, record.subject_kind,
-                        record.subject_id, record.sequence, record.state,
+                        record.subject_id, record.priority, record.sequence, record.state,
                         record.owner_id, record.owner_epoch,
                         record.owner_lease_expires_at, record.expires_at,
                         record.canonical_json(), record.digest(),
@@ -3871,26 +3872,31 @@ class HarnessStore:
         if not self._db_path.is_file():
             return ()
         await self._ensure_schema()
-        query = (
-            "SELECT interaction_id FROM harness_interactions "
-            "WHERE workspace_root = ? AND state = 'pending'"
-        )
-        params: list[object] = [workspace]
-        if kind is not None:
-            query += " AND subject_kind = ?"
-            params.append(kind.value)
-        if subject:
-            query += " AND subject_id = ?"
-            params.append(subject)
-        query += " ORDER BY rowid ASC LIMIT ?"
-        params.append(limit)
         try:
             async with self._connection() as db:
-                rows = await (await db.execute(query, tuple(params))).fetchall()
+                lanes: dict[str, list[str]] = {}
+                for priority in ("critical", "high", "normal", "low"):
+                    query = (
+                        "SELECT interaction_id FROM harness_interactions "
+                        "WHERE workspace_root = ? AND state = 'pending' "
+                        "AND priority = ?"
+                    )
+                    params: list[object] = [workspace, priority]
+                    if kind is not None:
+                        query += " AND subject_kind = ?"
+                        params.append(kind.value)
+                    if subject:
+                        query += " AND subject_id = ?"
+                        params.append(subject)
+                    query += " ORDER BY rowid ASC LIMIT ?"
+                    params.append(limit)
+                    rows = await (await db.execute(query, tuple(params))).fetchall()
+                    lanes[priority] = [str(row["interaction_id"]) for row in rows]
+                interaction_ids = _merge_interaction_priority_lanes(lanes, limit=limit)
                 records = []
-                for row in rows:
+                for interaction_id in interaction_ids:
                     record = await self._get_interaction_with_connection(
-                        db, workspace, str(row["interaction_id"]),
+                        db, workspace, interaction_id,
                     )
                     if record is not None:
                         records.append(record)
@@ -4153,9 +4159,9 @@ class HarnessStore:
                 if candidate.interaction_id != current.interaction_id:
                     raise HarnessStoreConflictError("interaction transition 改写了稳定 ID。")
                 immutable_fields = (
-                    "subject_kind", "subject_id", "session_id", "agent_name",
+                    "schema_version", "subject_kind", "subject_id", "session_id", "agent_name",
                     "header", "question", "options", "allow_custom",
-                    "custom_label", "created_at", "expires_at",
+                    "custom_label", "priority", "created_at", "expires_at",
                 )
                 if any(
                     getattr(candidate, field) != getattr(current, field)
@@ -4254,6 +4260,7 @@ class HarnessStore:
             or str(row["state"]) != latest.state
             or str(row["subject_kind"]) != latest.subject_kind
             or str(row["subject_id"]) != latest.subject_id
+            or str(row["priority"]) != latest.priority
             or str(row["owner_id"]) != latest.owner_id
             or int(row["owner_epoch"]) != latest.owner_epoch
             or str(row["owner_lease_expires_at"])
@@ -7817,6 +7824,8 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V21)
                             await db.executescript(_SCHEMA_V22)
                             await db.executescript(_SCHEMA_V23)
+                            await _migrate_interaction_priority_v24(db)
+                            await db.executescript(_SCHEMA_V24)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -11386,6 +11395,50 @@ async def _migrate_eval_baseline_purpose_v16(db: aiosqlite.Connection) -> None:
             raise
 
 
+async def _migrate_interaction_priority_v24(db: aiosqlite.Connection) -> None:
+    """Add a scheduling hint without rewriting authenticated v1 payloads."""
+    cursor = await db.execute("PRAGMA table_info(harness_interactions)")
+    columns = {str(row["name"]) for row in await cursor.fetchall()}
+    if "priority" in columns:
+        return
+    try:
+        await db.execute(
+            "ALTER TABLE harness_interactions "
+            "ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal' "
+            "CHECK (priority IN ('critical', 'high', 'normal', 'low'))"
+        )
+    except aiosqlite.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+        cursor = await db.execute("PRAGMA table_info(harness_interactions)")
+        concurrent_columns = {str(row["name"]) for row in await cursor.fetchall()}
+        if "priority" not in concurrent_columns:
+            raise
+
+
+def _merge_interaction_priority_lanes(
+    lanes: Mapping[str, Sequence[str]],
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    """Merge FIFO lanes with a deterministic 4:2:1:1 starvation-free cycle."""
+    remaining = {priority: list(values) for priority, values in lanes.items()}
+    merged: list[str] = []
+    cursor = 0
+    while len(merged) < limit and any(remaining.values()):
+        selected = False
+        for offset in range(len(INTERACTION_PRIORITY_SCHEDULE)):
+            index = (cursor + offset) % len(INTERACTION_PRIORITY_SCHEDULE)
+            priority = INTERACTION_PRIORITY_SCHEDULE[index]
+            lane = remaining.get(priority, [])
+            if lane:
+                merged.append(lane.pop(0))
+                cursor = (index + 1) % len(INTERACTION_PRIORITY_SCHEDULE)
+                selected = True
+                break
+        if not selected:
+            break
+    return tuple(merged)
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS harness_profiles (
     workspace_root TEXT NOT NULL,
@@ -12145,5 +12198,12 @@ WHERE decision = 'executed';
 CREATE INDEX IF NOT EXISTS idx_harness_sandbox_retry_prune_execution_audit
 ON harness_sandbox_retry_prune_executions (
     workspace_root, dispatch_id, created_at, action_id
+);
+"""
+
+_SCHEMA_V24 = """
+CREATE INDEX IF NOT EXISTS idx_harness_interactions_priority
+ON harness_interactions (
+    workspace_root, state, priority, subject_kind, subject_id, interaction_id
 );
 """

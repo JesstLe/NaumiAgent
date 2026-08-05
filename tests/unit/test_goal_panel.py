@@ -345,6 +345,7 @@ async def test_goal_snapshot_projects_only_linked_interaction_public_state(tmp_p
         "pursuit_run_id": run.id,
         "state": "pending",
         "sequence": 1,
+        "priority": "normal",
         "header": "继续方式",
         "question": "是否继续执行？",
         "created_at": "2026-07-18T00:00:00+00:00",

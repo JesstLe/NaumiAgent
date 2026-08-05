@@ -518,6 +518,10 @@ function normalizeInteractionRequest(payload) {
   if (timeoutSeconds != null && (timeoutSeconds < 3 || timeoutSeconds > 604_800)) {
     throw new Error("interaction/request timeout_seconds 必须在 3..604800 之间");
   }
+  const priority = String(payload.priority ?? "normal").trim().toLowerCase();
+  if (!["critical", "high", "normal", "low"].includes(priority)) {
+    throw new Error("interaction/request priority 无效");
+  }
   return {
     request_id: interactionRequestId(payload.request_id),
     session_id: interactionText(payload.session_id, "interaction session_id", 128),
@@ -529,6 +533,7 @@ function normalizeInteractionRequest(payload) {
     allow_custom: payload.allow_custom,
     custom_label: interactionText(payload.custom_label ?? "其他", "自定义标签", 80, { required: true }),
     timeout_seconds: timeoutSeconds,
+    priority,
     expires_at: interactionText(payload.expires_at, "interaction expires_at", 64),
     status,
   };
@@ -5026,6 +5031,11 @@ function normalizeGoalInteraction(item) {
     pursuit_run_id: pursuitRunId,
     state,
     sequence,
+    priority: harnessChoice(
+      item.priority ?? "normal",
+      "goals/snapshot interaction.priority",
+      new Set(["critical", "high", "normal", "low"]),
+    ),
     header: harnessText(item.header, "goals/snapshot interaction.header"),
     question: harnessText(item.question, "goals/snapshot interaction.question"),
     created_at: harnessText(item.created_at, "goals/snapshot interaction.created_at"),
