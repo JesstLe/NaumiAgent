@@ -364,9 +364,19 @@ def _worker_authority_check(snapshot: WorkerAuthoritySnapshot) -> DoctorCheck:
         suggestion = "暂停新任务派发，核对 Worker instance/epoch 与 Harness heartbeat 后再恢复。"
     elif status == "warn":
         if dispatch_disabled:
+            owner_lease_ready = any(
+                "agent_job_owner_lease" in worker.capabilities
+                for worker in dispatch_disabled
+            )
             suggestion = (
-                "独立 Agent 控制进程已就绪，但任务仍由 embedded Runtime 执行；"
-                "完成 durable dispatch 接入前不要向该 Worker 派发任务。"
+                "独立 Agent Worker 已能安全持有 durable Job owner lease，"
+                "但模型执行仍由 embedded Runtime 完成；"
+                "完整执行能力开放前不要把 staged Job 标记为 running。"
+                if owner_lease_ready
+                else (
+                    "独立 Agent 控制进程已就绪，但任务仍由 embedded Runtime 执行；"
+                    "完成 durable dispatch 接入前不要向该 Worker 派发任务。"
+                )
             )
         else:
             suggestion = "等待启动或排空完成后刷新；若状态持续不变，请检查 Worker 日志。"
@@ -443,7 +453,14 @@ def _worker_authority_summary(worker: WorkerAuthorityEntry) -> str:
         f"{worker.platform}/{machine} "
     )
     if not worker.dispatch_ready:
-        return identity + f"控制通道就绪、任务调度未开放 心跳{health}{age}"
+        staged = "agent_job_owner_lease" in worker.capabilities
+        readiness = (
+            f"Job owner lease 就绪、模型执行未开放 "
+            f"持有 {worker.reserved_jobs}/{worker.max_concurrent_jobs} "
+            if staged
+            else "控制通道就绪、任务调度未开放 "
+        )
+        return identity + readiness + f"心跳{health}{age}"
     return (
         identity
         + f"容量占用 {worker.reserved_jobs}/{worker.max_concurrent_jobs}、"

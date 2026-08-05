@@ -195,6 +195,36 @@ async def test_capacity_reservations_are_atomic_bounded_and_releasable(tmp_path:
         ttl_seconds=10,
     )
     assert replayed == admitted[0]
+    renewed = await store.renew_capacity(
+        reservation_id=admitted[0].reservation_id,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        job_id=admitted[0].job_id,
+        renewed_at=T3,
+        ttl_seconds=20,
+    )
+    assert renewed.expires_at == "2026-07-19T00:00:23+00:00"
+    with pytest.raises(WorkerRegistryConflictError, match="不能缩短"):
+        await store.renew_capacity(
+            reservation_id=admitted[0].reservation_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id=admitted[0].job_id,
+            renewed_at=T4,
+            ttl_seconds=5,
+        )
+    with pytest.raises(WorkerRegistryConflictError, match="owner 不匹配"):
+        await store.renew_capacity(
+            reservation_id=admitted[0].reservation_id,
+            worker_id=contract.worker_id,
+            instance_id=contract.instance_id,
+            epoch=contract.epoch,
+            job_id="job-forged",
+            renewed_at=T4,
+            ttl_seconds=20,
+        )
 
     released = await store.release_capacity(
         reservation_id=admitted[0].reservation_id,

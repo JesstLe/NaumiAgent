@@ -981,6 +981,127 @@ class AgentJobStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise AgentJobError("无法 claim AgentJob capacity。") from exc
 
+    async def claim_admitted_for_worker(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        expected_request_sha256: str,
+        lease_seconds: int,
+    ) -> AgentJobTransitionResult:
+        """Claim only an admitted job for an exact independent Worker owner.
+
+        This boundary deliberately refuses expired-claim takeover. A future
+        Supervisor must first establish the takeover evidence and fencing
+        decision instead of treating lease expiry as proof of safety.
+        """
+        _require_identifier(job_id, field="job_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_sha256(expected_request_sha256, field="expected_request_sha256")
+        _require_lease_seconds(lease_seconds)
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                stored = await _require_stored(db, job_id, key=key)
+                if not hmac.compare_digest(
+                    stored.request_sha256,
+                    expected_request_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob Worker claim request fence 已变化。"
+                    )
+                if stored.state is not AgentJobState.ADMITTED:
+                    raise AgentJobLifecycleConflictError(
+                        "独立 Agent Worker 只能 claim admitted Job；"
+                        "过期 owner 必须由 Supervisor 显式 fencing。"
+                    )
+                policy = await _capacity_policy_locked(db)
+                if policy is None:
+                    result = await self._claim_locked(
+                        db,
+                        stored=stored,
+                        owner_id=owner_id,
+                        lease_seconds=lease_seconds,
+                        now=now,
+                        key=key,
+                    )
+                else:
+                    result = await self._claim_for_capacity_locked(
+                        db,
+                        stored=stored,
+                        owner_id=owner_id,
+                        lease_seconds=lease_seconds,
+                        now=now,
+                        key=key,
+                        policy=policy,
+                    )
+                    if not result.applied:
+                        raise AgentJobCapacityExhaustedError(
+                            "AgentJob 尚未轮到持久 FIFO 或共享容量已满。"
+                        )
+                await db.commit()
+                return result
+        except (AgentJobError, AgentJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法为独立 Agent Worker claim Job。") from exc
+
+    async def release_prestart_worker_claim(
+        self,
+        job_id: str,
+        *,
+        owner_id: str,
+        claim_epoch: int,
+        expected_request_sha256: str,
+    ) -> AgentJobTransitionResult:
+        """Return one exact live pre-start Worker claim to the durable FIFO."""
+        _require_identifier(job_id, field="job_id")
+        _require_identifier(owner_id, field="owner_id")
+        _require_positive_int(claim_epoch, field="claim_epoch")
+        _require_sha256(expected_request_sha256, field="expected_request_sha256")
+        key = self._runtime_key()
+        await self._ensure_schema()
+        now = self._now()
+        try:
+            async with self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                stored = await _require_stored(db, job_id, key=key)
+                if not hmac.compare_digest(
+                    stored.request_sha256,
+                    expected_request_sha256,
+                ):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob Worker release request fence 已变化。"
+                    )
+                _require_live_owner(
+                    stored,
+                    owner_id=owner_id,
+                    claim_epoch=claim_epoch,
+                    now=now,
+                    allowed_states=frozenset({AgentJobState.CLAIMED}),
+                )
+                result = await _append_transition(
+                    db,
+                    stored=stored,
+                    target_state=AgentJobState.ADMITTED,
+                    owner_id=None,
+                    claim_epoch=claim_epoch,
+                    claim_expires_at=None,
+                    result=None,
+                    reason_code="agent_worker_job_released",
+                    occurred_at=now.isoformat(),
+                    key=key,
+                )
+                await db.commit()
+                return result
+        except (AgentJobError, AgentJobLifecycleConflictError):
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise AgentJobError("无法释放独立 Agent Worker pre-start claim。") from exc
+
     async def recover_payload(
         self,
         job_id: str,
@@ -1044,6 +1165,10 @@ class AgentJobStore:
                         {AgentJobState.CLAIMED, AgentJobState.RUNNING}
                     ),
                 )
+                if datetime.fromisoformat(expires_at) < _required_claim_expiry(stored):
+                    raise AgentJobLifecycleConflictError(
+                        "AgentJob claim renewal 不能缩短现有 lease。"
+                    )
                 result = await _append_transition(
                     db,
                     stored=stored,
@@ -4446,6 +4571,28 @@ def _verify_payload_binding(
         raise ValueError("AgentJob payload context 长度与 request 不一致。")
 
 
+def encode_agent_job_dispatch_payload(
+    request: AgentWorkerRequest,
+    payload: AgentJobPayload,
+) -> bytes:
+    """Encode a validated request and raw payload for encrypted IPC staging."""
+    if not isinstance(request, AgentWorkerRequest):
+        raise TypeError("request 必须是 AgentWorkerRequest。")
+    if not isinstance(payload, AgentJobPayload):
+        raise TypeError("payload 必须是 AgentJobPayload。")
+    _verify_payload_binding(request, payload)
+    return _encode_payload(request, payload)
+
+
+def decode_agent_job_dispatch_payload(
+    value: bytes,
+) -> tuple[AgentWorkerRequest, AgentJobPayload]:
+    """Decode and revalidate one authenticated IPC dispatch plaintext."""
+    request, payload = _decode_payload(value)
+    _verify_payload_binding(request, payload)
+    return request, payload
+
+
 def _encode_payload(
     request: AgentWorkerRequest,
     payload: AgentJobPayload,
@@ -4690,6 +4837,11 @@ def _validate_receipt_semantics(receipt: AgentJobLifecycleReceipt) -> None:
             AgentJobState.RUNNING,
             "agent_job_claim_renewed",
         ),
+        (
+            AgentJobState.CLAIMED,
+            AgentJobState.ADMITTED,
+            "agent_worker_job_released",
+        ),
     }
     result_transitions = {
         (
@@ -4733,6 +4885,10 @@ def _validate_receipt_semantics(receipt: AgentJobLifecycleReceipt) -> None:
     if transition in active_transitions:
         if receipt.result_sha256 is not None:
             raise ValueError("AgentJob active receipt 不能绑定 result。")
+        if receipt.state is AgentJobState.ADMITTED and (
+            receipt.owner_id is not None or receipt.claim_expires_at is not None
+        ):
+            raise ValueError("AgentJob released receipt 不能保留 live owner。")
         return
     if transition in result_transitions:
         if receipt.result_sha256 is None:

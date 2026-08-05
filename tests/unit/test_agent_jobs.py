@@ -287,6 +287,51 @@ async def test_expired_prestart_claim_can_take_over_but_running_cannot_retry(
 
 
 @pytest.mark.asyncio
+async def test_independent_worker_claim_refuses_takeover_and_releases_to_fifo(
+    tmp_path,
+) -> None:
+    clock = _Clock(datetime(2026, 7, 24, 12, 0, tzinfo=UTC))
+    store = AgentJobStore(
+        tmp_path / "agent-jobs.db",
+        key_provider=lambda: bytes(range(32)),
+        clock=clock,
+    )
+    request, payload = _facts(clock, task_id="independent-worker-claim")
+    admitted = await store.admit(request=request, payload=payload)
+
+    claimed = await store.claim_admitted_for_worker(
+        admitted.job_id,
+        owner_id="agent-worker-owner:exact",
+        expected_request_sha256=admitted.request_sha256,
+        lease_seconds=10,
+    )
+    assert claimed.job.state is AgentJobState.CLAIMED
+    assert claimed.job.claim_epoch == 1
+
+    clock.advance(seconds=11)
+    with pytest.raises(AgentJobLifecycleConflictError, match="只能 claim admitted"):
+        await store.claim_admitted_for_worker(
+            admitted.job_id,
+            owner_id="agent-worker-owner:other",
+            expected_request_sha256=admitted.request_sha256,
+            lease_seconds=10,
+        )
+
+    clock.advance(seconds=-2)
+    released = await store.release_prestart_worker_claim(
+        admitted.job_id,
+        owner_id="agent-worker-owner:exact",
+        claim_epoch=claimed.job.claim_epoch,
+        expected_request_sha256=admitted.request_sha256,
+    )
+    assert released.job.state is AgentJobState.ADMITTED
+    assert released.job.claim_owner_id is None
+    assert released.job.claim_expires_at is None
+    assert released.job.claim_epoch == 1
+    assert released.job.latest_receipt.reason_code == "agent_worker_job_released"
+
+
+@pytest.mark.asyncio
 async def test_recovery_catalog_is_bounded_authenticated_and_content_free(
     tmp_path,
 ) -> None:
@@ -436,6 +481,15 @@ async def test_renew_running_finish_and_terminal_retry_are_fenced(
         claim_epoch=1,
         lease_seconds=30,
     )
+    clock.advance(seconds=-4)
+    with pytest.raises(AgentJobLifecycleConflictError, match="不能缩短"):
+        await store.renew_claim(
+            job.job_id,
+            owner_id="worker-a",
+            claim_epoch=1,
+            lease_seconds=5,
+        )
+    clock.advance(seconds=4)
     result = issue_agent_worker_result(
         request=request,
         status="completed",

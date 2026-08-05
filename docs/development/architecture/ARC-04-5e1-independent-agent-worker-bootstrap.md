@@ -140,6 +140,8 @@ python3 -m pytest -q \
   打包矩阵仍需 CI/真实主机证据；
 - 进程当前不接触用户数据，因此没有宣称 context isolation 或 resource enforcement。
 
-下一步应比较 `ARC-04.5e2` 的 exact AgentJob owner lease + encrypted dispatch 与 `ARC-04.6a` 最小
-Supervisor owner/fencing。因为自动 dispatch 不能缺少合法 takeover 和 crash 收口，优先完成能让一个 Worker
-安全持有一个 durable Job 的最小 owner lease，不直接实现完整多 Worker scheduler。
+`ARC-04.5e2 / HAR-10.7h2` 已完成 exact AgentJob owner lease、物理 slot reservation、进程级一次性密钥
+加密 staging、双续租和 pre-start 安全释放，见
+[`ARC-04-5e2-independent-agent-worker-owner-lease.md`](ARC-04-5e2-independent-agent-worker-owner-lease.md)。
+下一步进入 `ARC-04.6a` 最小 Supervisor owner/fencing；在合法 takeover 与 crash 收口完成前，仍不开放
+`mark_running` 或完整多 Worker scheduler。

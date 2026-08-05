@@ -46,6 +46,7 @@ class WorkerCapability(StrEnum):
     ARTIFACT_DIGEST = "artifact_digest"
     BROWSER_PROFILE_ISOLATION = "browser_profile_isolation"
     AGENT_CONTROL_TRANSPORT = "agent_control_transport"
+    AGENT_JOB_OWNER_LEASE = "agent_job_owner_lease"
     AGENT_CONTEXT_SCOPE = "agent_context_scope"
 
 
@@ -517,6 +518,7 @@ def _validate_capability_consistency(contract: WorkerContract) -> None:
         WorkerCapability.SHELL_PTY: WorkerKind.TOOL,
         WorkerCapability.BROWSER_PROFILE_ISOLATION: WorkerKind.BROWSER,
         WorkerCapability.AGENT_CONTROL_TRANSPORT: WorkerKind.AGENT,
+        WorkerCapability.AGENT_JOB_OWNER_LEASE: WorkerKind.AGENT,
         WorkerCapability.AGENT_CONTEXT_SCOPE: WorkerKind.AGENT,
     }
     incompatible = [
@@ -526,6 +528,11 @@ def _validate_capability_consistency(contract: WorkerContract) -> None:
     ]
     if incompatible:
         raise ValueError("Worker kind 与能力不兼容: " + ", ".join(sorted(incompatible)))
+    if (
+        WorkerCapability.AGENT_JOB_OWNER_LEASE in capabilities
+        and WorkerCapability.AGENT_CONTROL_TRANSPORT not in capabilities
+    ):
+        raise ValueError("Agent Job owner lease 能力必须绑定认证控制通道。")
 
 
 def _require_identifier(value: str, *, field: str) -> None:

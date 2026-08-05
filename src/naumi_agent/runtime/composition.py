@@ -318,6 +318,7 @@ def build_runtime_services(
         agent_worker_factory = AgentWorkerProcessFactory(
             worker_registry=resources.worker_registry_store,
             heartbeat_store=resources.harness_store,
+            agent_job_store=resources.agent_job_store,
             workspace_root=paths.workspace_root,
             runtime_dir=paths.agent_worker_runtime_dir,
             software_version=__version__,

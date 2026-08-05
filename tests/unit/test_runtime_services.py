@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from naumi_agent.config.settings import AppConfig, RuntimeHeartbeatRetentionConfig
+from naumi_agent.daemons.agent_jobs import AgentJobStore
 from naumi_agent.daemons.agent_worker_process import AgentWorkerProcessFactory
 from naumi_agent.daemons.worker_registry import WorkerRegistryStore
 from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
@@ -87,6 +88,10 @@ def _agent_worker_factory(tmp_path) -> AgentWorkerProcessFactory:
     return AgentWorkerProcessFactory(
         worker_registry=WorkerRegistryStore(tmp_path / "worker-registry.db"),
         heartbeat_store=HarnessStore(tmp_path / "agent-worker-harness.db"),
+        agent_job_store=AgentJobStore(
+            tmp_path / "agent-jobs.db",
+            key_provider=lambda: b"j" * 32,
+        ),
         workspace_root=tmp_path,
         runtime_dir=tmp_path / "agent-worker-runtime",
         software_version="0.1.214",
@@ -122,6 +127,7 @@ def test_composition_builds_service_from_exact_resources_and_copies_policy(
         resources.worker_registry_store
     )
     assert services.agent_worker_process_factory.heartbeat_store is resources.harness_store
+    assert services.agent_worker_process_factory.agent_job_store is resources.agent_job_store
     assert services.agent_worker_process_factory.runtime_dir == paths.agent_worker_runtime_dir
     assert not paths.harness_db_path.exists()
     assert not paths.agent_worker_runtime_dir.exists()

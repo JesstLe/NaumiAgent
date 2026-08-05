@@ -1,19 +1,24 @@
-"""Authenticated lifecycle for one real, dispatch-disabled Agent worker process.
+"""Authenticated lifecycle and pre-start owner lease for one Agent worker.
 
 This module establishes the OS-process, local-credential, registration, and
 heartbeat boundary required before durable Agent jobs may move out of the
-embedded Runtime.  It intentionally does not consume Agent jobs yet.  The
-issued contract therefore advertises ``agent_control_transport`` only, and its
-health report always has ``accepting_jobs=False``.
+embedded Runtime. The process can reserve and claim one admitted durable Job,
+authenticate an ephemeral AES-GCM dispatch into child memory, and renew both
+authorities. It still cannot mark a Job running or invoke a model, so its
+health report remains ``accepting_jobs=False``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
+import json
 import math
 import multiprocessing
 import os
+import re
 import secrets
 import stat
 import uuid
@@ -24,6 +29,14 @@ from enum import StrEnum
 from multiprocessing.connection import Client, Connection, Listener
 from pathlib import Path
 
+from naumi_agent.daemons.agent_jobs import (
+    AgentJobError,
+    AgentJobPayload,
+    AgentJobState,
+    AgentJobStore,
+    decode_agent_job_dispatch_payload,
+    encode_agent_job_dispatch_payload,
+)
 from naumi_agent.daemons.worker_contract import (
     WorkerCapability,
     WorkerContract,
@@ -42,9 +55,20 @@ from naumi_agent.daemons.worker_registry import (
 from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.safety.payload_envelope import (
+    PayloadEnvelope,
+    PayloadEnvelopeError,
+    RuntimePayloadKey,
+    open_runtime_payload,
+    seal_runtime_payload,
+)
 
 _PROTOCOL_VERSION = 1
 _CONTROL_CAPABILITY = WorkerCapability.AGENT_CONTROL_TRANSPORT
+_OWNER_LEASE_CAPABILITY = WorkerCapability.AGENT_JOB_OWNER_LEASE
+_JOB_DISPATCH_AAD_PREFIX = b"NAUMI_AGENT_WORKER_JOB_DISPATCH_V1\x00"
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AgentWorkerProcessError(RuntimeError):
@@ -71,6 +95,40 @@ class AgentWorkerProcessSnapshot:
     accepting_jobs: bool
     heartbeat_sequence: int
     failure_code: str
+    bound_job_id: str
+    bound_claim_epoch: int
+    capacity_reservation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentWorkerJobBinding:
+    job_id: str
+    request_sha256: str
+    owner_id: str
+    claim_epoch: int
+    claim_expires_at: str
+    reservation_id: str
+    dispatch_envelope_sha256: str
+
+    def __post_init__(self) -> None:
+        for field in ("job_id", "owner_id", "reservation_id"):
+            if not _IDENTIFIER_RE.fullmatch(getattr(self, field)):
+                raise ValueError(f"Agent Worker Job {field} 格式无效。")
+        for field in ("request_sha256", "dispatch_envelope_sha256"):
+            if not _SHA256_RE.fullmatch(getattr(self, field)):
+                raise ValueError(f"Agent Worker Job {field} 格式无效。")
+        if (
+            isinstance(self.claim_epoch, bool)
+            or not isinstance(self.claim_epoch, int)
+            or self.claim_epoch < 1
+        ):
+            raise ValueError("Agent Worker Job claim_epoch 必须是正整数。")
+        try:
+            expiry = datetime.fromisoformat(self.claim_expires_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Agent Worker Job claim_expires_at 无效。") from exc
+        if expiry.tzinfo is None or expiry.utcoffset() is None:
+            raise ValueError("Agent Worker Job claim_expires_at 必须包含时区。")
 
 
 NowProvider = Callable[[], str]
@@ -84,6 +142,7 @@ class AuthenticatedAgentWorkerProcess:
         *,
         worker_registry: WorkerRegistryStore,
         heartbeat_store: HarnessStore,
+        agent_job_store: AgentJobStore,
         workspace_root: str | Path,
         runtime_dir: str | Path,
         software_version: str,
@@ -93,12 +152,16 @@ class AuthenticatedAgentWorkerProcess:
         heartbeat_timeout_seconds: int = 30,
         handshake_timeout_seconds: float = 15.0,
         shutdown_timeout_seconds: float = 5.0,
+        job_claim_lease_seconds: int = 90,
+        job_claim_renewal_interval_seconds: float = 30.0,
         now_provider: NowProvider = lambda: datetime.now(UTC).isoformat(),
     ) -> None:
         if not isinstance(worker_registry, WorkerRegistryStore):
             raise TypeError("worker_registry 必须是 WorkerRegistryStore。")
         if not isinstance(heartbeat_store, HarnessStore):
             raise TypeError("heartbeat_store 必须是 HarnessStore。")
+        if not isinstance(agent_job_store, AgentJobStore):
+            raise TypeError("agent_job_store 必须是 AgentJobStore。")
         workspace = Path(workspace_root).expanduser()
         runtime = Path(runtime_dir).expanduser()
         if not workspace.is_absolute():
@@ -128,11 +191,25 @@ class AuthenticatedAgentWorkerProcess:
             raise ValueError("Agent Worker handshake timeout 必须大于 0。")
         if not math.isfinite(shutdown_timeout_seconds) or shutdown_timeout_seconds <= 0:
             raise ValueError("Agent Worker shutdown timeout 必须大于 0。")
+        if (
+            isinstance(job_claim_lease_seconds, bool)
+            or not isinstance(job_claim_lease_seconds, int)
+            or not 3 <= job_claim_lease_seconds <= 86_400
+        ):
+            raise ValueError("Agent Worker Job lease 必须在 3 到 86400 秒之间。")
+        renewal_interval = float(job_claim_renewal_interval_seconds)
+        if (
+            not math.isfinite(renewal_interval)
+            or renewal_interval <= 0
+            or renewal_interval >= job_claim_lease_seconds
+        ):
+            raise ValueError("Agent Worker Job renewal interval 必须大于 0 且小于 lease。")
         if not callable(now_provider):
             raise TypeError("now_provider 必须可调用。")
 
         self._registry = worker_registry
         self._heartbeats = heartbeat_store
+        self._agent_jobs = agent_job_store
         self._workspace_root = workspace.resolve(strict=False)
         self._runtime_dir = runtime.resolve(strict=False)
         self._software_version = software_version
@@ -142,6 +219,8 @@ class AuthenticatedAgentWorkerProcess:
         self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self._handshake_timeout_seconds = float(handshake_timeout_seconds)
         self._shutdown_timeout_seconds = float(shutdown_timeout_seconds)
+        self._job_claim_lease_seconds = job_claim_lease_seconds
+        self._job_claim_renewal_interval_seconds = renewal_interval
         self._now = now_provider
 
         self._state = AgentWorkerProcessState.CREATED
@@ -158,8 +237,14 @@ class AuthenticatedAgentWorkerProcess:
         self._connection: Connection | None = None
         self._process: multiprocessing.Process | None = None
         self._monitor_task: asyncio.Task[None] | None = None
+        self._job_renewal_task: asyncio.Task[None] | None = None
+        self._job_ack: asyncio.Future[str] | None = None
+        self._job_binding: AgentWorkerJobBinding | None = None
+        self._dispatch_key: RuntimePayloadKey | None = None
         self._terminal_event = asyncio.Event()
         self._lifecycle_lock = asyncio.Lock()
+        self._command_lock = asyncio.Lock()
+        self._failure_lock = asyncio.Lock()
         self._expected_shutdown = False
 
     @property
@@ -279,6 +364,8 @@ class AuthenticatedAgentWorkerProcess:
 
     async def close(self) -> AgentWorkerProcessSnapshot:
         """Drain, stop, and revoke this exact incarnation."""
+        if self._job_binding is not None:
+            await self.release_job()
         async with self._lifecycle_lock:
             if self._state in {
                 AgentWorkerProcessState.STOPPED,
@@ -314,6 +401,195 @@ class AuthenticatedAgentWorkerProcess:
         await self._cleanup_transport()
         return self.snapshot()
 
+    async def bind_job(self, job_id: str) -> AgentWorkerJobBinding:
+        """Reserve, claim, and encrypt one admitted Job into child memory.
+
+        The child only authenticates and stages the request. It cannot mark the
+        Job running or invoke a model in this slice.
+        """
+        if not isinstance(job_id, str) or not job_id.strip():
+            raise ValueError("Agent Worker job_id 不能为空。")
+        async with self._command_lock:
+            if self._state is not AgentWorkerProcessState.RUNNING:
+                raise AgentWorkerProcessError("Agent Worker 尚未处于可绑定状态。")
+            if self._job_binding is not None:
+                raise AgentWorkerProcessError("Agent Worker 已持有一个 Job owner lease。")
+            stored = await self._agent_jobs.get(job_id)
+            if stored is None:
+                raise AgentWorkerProcessError("AgentJob 不存在。")
+            if stored.state is not AgentJobState.ADMITTED:
+                raise AgentWorkerProcessError(
+                    "独立 Agent Worker 只接受 admitted Job；过期 claim 需要 Supervisor。"
+                )
+            contract = self._required_contract()
+            owner_id = _job_owner_id(contract)
+            reservation_id = _job_reservation_id(contract, stored.job_id)
+            reserved = False
+            claimed_job = None
+            dispatch_sent = False
+            try:
+                await self._registry.reserve_capacity(
+                    reservation_id=reservation_id,
+                    worker_id=contract.worker_id,
+                    instance_id=contract.instance_id,
+                    epoch=contract.epoch,
+                    job_id=stored.job_id,
+                    reserved_at=self._timestamp("reserved_at"),
+                    ttl_seconds=self._job_claim_lease_seconds,
+                )
+                reserved = True
+                transition = await self._agent_jobs.claim_admitted_for_worker(
+                    stored.job_id,
+                    owner_id=owner_id,
+                    expected_request_sha256=stored.request_sha256,
+                    lease_seconds=self._job_claim_lease_seconds,
+                )
+                claimed_job = transition.job
+                payload = await self._agent_jobs.recover_payload(
+                    claimed_job.job_id,
+                    owner_id=owner_id,
+                    claim_epoch=claimed_job.claim_epoch,
+                )
+                dispatch_plaintext = encode_agent_job_dispatch_payload(
+                    claimed_job.request,
+                    payload,
+                )
+                aad = _job_dispatch_aad(
+                    contract=contract,
+                    job_id=claimed_job.job_id,
+                    request_sha256=claimed_job.request_sha256,
+                    owner_id=owner_id,
+                    claim_epoch=claimed_job.claim_epoch,
+                    claim_expires_at=claimed_job.claim_expires_at or "",
+                    reservation_id=reservation_id,
+                )
+                envelope = seal_runtime_payload(
+                    dispatch_plaintext,
+                    aad=aad,
+                    key=self._required_dispatch_key(),
+                )
+                binding = AgentWorkerJobBinding(
+                    job_id=claimed_job.job_id,
+                    request_sha256=claimed_job.request_sha256,
+                    owner_id=owner_id,
+                    claim_epoch=claimed_job.claim_epoch,
+                    claim_expires_at=claimed_job.claim_expires_at or "",
+                    reservation_id=reservation_id,
+                    dispatch_envelope_sha256=envelope.envelope_sha256,
+                )
+                self._job_binding = binding
+                ack = asyncio.get_running_loop().create_future()
+                self._job_ack = ack
+                dispatch_sent = True
+                await asyncio.to_thread(
+                    self._required_connection().send,
+                    _parent_job_message(
+                        "bind_job",
+                        nonce=self._nonce,
+                        contract=contract,
+                        binding=binding,
+                        envelope=envelope,
+                    ),
+                )
+                ack_type = await asyncio.wait_for(
+                    asyncio.shield(ack),
+                    timeout=self._handshake_timeout_seconds,
+                )
+                if ack_type != "job_bound":
+                    raise AgentWorkerProcessError("Agent Worker Job bind 回执类型无效。")
+                self._job_ack = None
+                self._job_renewal_task = asyncio.create_task(
+                    self._renew_bound_job(),
+                    name=f"naumi-agent-worker-job-renew-{contract.epoch}",
+                )
+                return binding
+            except BaseException as exc:
+                self._job_ack = None
+                if dispatch_sent:
+                    await self._mark_failed("agent_worker_job_bind_failed")
+                elif claimed_job is not None:
+                    self._job_binding = AgentWorkerJobBinding(
+                        job_id=claimed_job.job_id,
+                        request_sha256=claimed_job.request_sha256,
+                        owner_id=owner_id,
+                        claim_epoch=claimed_job.claim_epoch,
+                        claim_expires_at=claimed_job.claim_expires_at or "",
+                        reservation_id=reservation_id,
+                        dispatch_envelope_sha256="0" * 64,
+                    )
+                    await self._release_job_authority(
+                        release_claim=True,
+                        release_capacity=reserved,
+                    )
+                elif reserved:
+                    with contextlib.suppress(Exception):
+                        await self._registry.release_capacity(
+                            reservation_id=reservation_id,
+                            worker_id=contract.worker_id,
+                            instance_id=contract.instance_id,
+                            epoch=contract.epoch,
+                            reason_code="agent_worker_job_bind_failed",
+                            released_at=self._timestamp("released_at"),
+                            accept_terminal=True,
+                        )
+                self._job_binding = None
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                if isinstance(exc, AgentWorkerProcessError):
+                    raise
+                raise AgentWorkerProcessError(
+                    f"Agent Worker Job owner lease 建立失败：{type(exc).__name__}。"
+                ) from exc
+
+    async def release_job(self) -> None:
+        """Clear child plaintext, then release the exact pre-start authorities."""
+        async with self._command_lock:
+            binding = self._job_binding
+            if binding is None:
+                return
+            await self._stop_job_renewal()
+            if self._state is AgentWorkerProcessState.RUNNING:
+                ack = asyncio.get_running_loop().create_future()
+                self._job_ack = ack
+                try:
+                    await asyncio.to_thread(
+                        self._required_connection().send,
+                        _parent_job_message(
+                            "release_job",
+                            nonce=self._nonce,
+                            contract=self._required_contract(),
+                            binding=binding,
+                        ),
+                    )
+                    ack_type = await asyncio.wait_for(
+                        asyncio.shield(ack),
+                        timeout=self._shutdown_timeout_seconds,
+                    )
+                    if ack_type != "job_released":
+                        raise AgentWorkerProcessError(
+                            "Agent Worker Job release 回执类型无效。"
+                        )
+                except BaseException as exc:
+                    self._job_ack = None
+                    await self._mark_failed("agent_worker_job_release_failed")
+                    if isinstance(exc, asyncio.CancelledError):
+                        raise
+                    raise AgentWorkerProcessError(
+                        "Agent Worker 未能确认清除加密 Job payload。"
+                    ) from exc
+                finally:
+                    self._job_ack = None
+            try:
+                await self._release_job_authority(
+                    release_claim=True,
+                    release_capacity=True,
+                )
+            except AgentWorkerProcessError:
+                await self._mark_failed("agent_worker_job_authority_release_failed")
+                raise
+            else:
+                self._job_binding = None
+
     def health_report(self) -> WorkerHealthReport:
         """Return authenticated liveness while keeping dispatch fail-closed."""
         contract = self._required_contract()
@@ -323,13 +599,14 @@ class AuthenticatedAgentWorkerProcess:
         return issue_worker_health_report(
             contract=contract,
             heartbeat=heartbeat,
-            active_jobs=0,
+            active_jobs=1 if self._job_binding is not None else 0,
             accepting_jobs=False,
         )
 
     def snapshot(self) -> AgentWorkerProcessSnapshot:
         process_id = self._process.pid if self._process is not None else None
         digest = self._contract.contract_sha256 if self._contract is not None else ""
+        binding = self._job_binding
         return AgentWorkerProcessSnapshot(
             worker_id=self._worker_id,
             instance_id=self._instance_id,
@@ -340,6 +617,11 @@ class AuthenticatedAgentWorkerProcess:
             accepting_jobs=False,
             heartbeat_sequence=self._sequence,
             failure_code=self._failure_code,
+            bound_job_id=binding.job_id if binding is not None else "",
+            bound_claim_epoch=binding.claim_epoch if binding is not None else 0,
+            capacity_reservation_id=(
+                binding.reservation_id if binding is not None else ""
+            ),
         )
 
     async def _monitor_child(self) -> None:
@@ -349,14 +631,15 @@ class AuthenticatedAgentWorkerProcess:
                 message = await asyncio.to_thread(connection.recv)
                 message_type = str(message.get("type")) if isinstance(message, dict) else ""
                 expected_sequence = self._sequence + 1
-                _validate_child_message(
-                    message,
-                    expected_type=message_type,
-                    nonce=self._nonce,
-                    contract=self._required_contract(),
-                    process_id=self._required_process().pid,
-                    expected_sequence=expected_sequence,
-                )
+                if message_type in {"hello", "running", "pulse", "draining", "stopped"}:
+                    _validate_child_message(
+                        message,
+                        expected_type=message_type,
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        process_id=self._required_process().pid,
+                        expected_sequence=expected_sequence,
+                    )
                 if message_type == "pulse":
                     await self._record_heartbeat(
                         sequence=expected_sequence,
@@ -379,6 +662,36 @@ class AuthenticatedAgentWorkerProcess:
                     self._state = AgentWorkerProcessState.STOPPED
                     self._terminal_event.set()
                     return
+                elif message_type in {"job_bound", "job_released"}:
+                    binding = self._job_binding
+                    if binding is None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 返回了无对应 authority 的 Job 回执。"
+                        )
+                    _validate_child_job_message(
+                        message,
+                        expected_type=message_type,
+                        nonce=self._nonce,
+                        contract=self._required_contract(),
+                        process_id=self._required_process().pid,
+                        expected_sequence=expected_sequence,
+                        binding=binding,
+                    )
+                    await self._record_heartbeat(
+                        sequence=expected_sequence,
+                        phase=HarnessHeartbeatPhase.RUNNING,
+                        detail_code=(
+                            "agent_worker_job_owner_lease_bound"
+                            if message_type == "job_bound"
+                            else "agent_worker_job_owner_lease_released"
+                        ),
+                    )
+                    ack = self._job_ack
+                    if ack is None or ack.done():
+                        raise AgentWorkerProcessError(
+                            "Agent Worker Job 回执没有等待中的命令。"
+                        )
+                    ack.set_result(message_type)
                 else:
                     raise AgentWorkerProcessError("Agent Worker 返回未知生命周期消息。")
         except asyncio.CancelledError:
@@ -391,23 +704,118 @@ class AuthenticatedAgentWorkerProcess:
                     else "agent_worker_shutdown_incomplete"
                 )
 
-    async def _mark_failed(self, code: str) -> None:
-        if self._state is AgentWorkerProcessState.FAILED:
-            return
-        self._failure_code = code
-        self._state = AgentWorkerProcessState.FAILED
-        if self._contract is not None:
-            with contextlib.suppress(Exception):
-                await self._record_heartbeat(
-                    sequence=self._sequence + 1,
-                    phase=HarnessHeartbeatPhase.FAILED,
-                    detail_code=code,
+    async def _renew_bound_job(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._job_claim_renewal_interval_seconds)
+                binding = self._job_binding
+                if binding is None:
+                    return
+                contract = self._required_contract()
+                renewed_at = self._timestamp("renewed_at")
+                await self._registry.renew_capacity(
+                    reservation_id=binding.reservation_id,
+                    worker_id=contract.worker_id,
+                    instance_id=contract.instance_id,
+                    epoch=contract.epoch,
+                    job_id=binding.job_id,
+                    renewed_at=renewed_at,
+                    ttl_seconds=self._job_claim_lease_seconds,
                 )
-            with contextlib.suppress(Exception):
-                await self._revoke(code)
-        self._terminal_event.set()
-        await self._terminate_process()
-        await self._cleanup_transport()
+                await self._agent_jobs.renew_claim(
+                    binding.job_id,
+                    owner_id=binding.owner_id,
+                    claim_epoch=binding.claim_epoch,
+                    lease_seconds=self._job_claim_lease_seconds,
+                )
+        except asyncio.CancelledError:
+            raise
+        except (AgentJobError, WorkerRegistryConflictError, OSError, ValueError):
+            await self._mark_failed("agent_worker_job_owner_lease_renewal_failed")
+
+    async def _stop_job_renewal(self) -> None:
+        task = self._job_renewal_task
+        current = asyncio.current_task()
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if task is not current:
+            self._job_renewal_task = None
+
+    async def _release_job_authority(
+        self,
+        *,
+        release_claim: bool,
+        release_capacity: bool,
+    ) -> None:
+        binding = self._job_binding
+        if binding is None:
+            return
+        contract = self._required_contract()
+        errors: list[BaseException] = []
+        if release_claim:
+            try:
+                await self._agent_jobs.release_prestart_worker_claim(
+                    binding.job_id,
+                    owner_id=binding.owner_id,
+                    claim_epoch=binding.claim_epoch,
+                    expected_request_sha256=binding.request_sha256,
+                )
+            except BaseException as exc:
+                errors.append(exc)
+        if release_capacity:
+            try:
+                await self._registry.release_capacity(
+                    reservation_id=binding.reservation_id,
+                    worker_id=contract.worker_id,
+                    instance_id=contract.instance_id,
+                    epoch=contract.epoch,
+                    reason_code="agent_worker_job_released",
+                    released_at=self._timestamp("released_at"),
+                    accept_terminal=True,
+                )
+            except BaseException as exc:
+                errors.append(exc)
+        if errors:
+            raise AgentWorkerProcessError(
+                "Agent Worker Job authority 未能完整释放。"
+            ) from errors[0]
+
+    async def _mark_failed(self, code: str) -> None:
+        async with self._failure_lock:
+            if (
+                self._state is AgentWorkerProcessState.FAILED
+                and self._terminal_event.is_set()
+            ):
+                return
+            self._failure_code = code
+            self._state = AgentWorkerProcessState.FAILED
+            ack = self._job_ack
+            if ack is not None and not ack.done():
+                ack.set_exception(
+                    AgentWorkerProcessError("Agent Worker Job 控制通道已失败。")
+                )
+            await self._stop_job_renewal()
+            await self._terminate_process()
+            if self._job_binding is not None:
+                with contextlib.suppress(Exception):
+                    await self._release_job_authority(
+                        release_claim=True,
+                        release_capacity=True,
+                    )
+                self._job_binding = None
+            if self._contract is not None:
+                with contextlib.suppress(Exception):
+                    await self._record_heartbeat(
+                        sequence=self._sequence + 1,
+                        phase=HarnessHeartbeatPhase.FAILED,
+                        detail_code=code,
+                    )
+                with contextlib.suppress(Exception):
+                    await self._revoke(code)
+            self._terminal_event.set()
+            await self._cleanup_transport()
 
     async def _abort_start(self, exc: BaseException) -> None:
         self._failure_code = (
@@ -547,7 +955,10 @@ class AuthenticatedAgentWorkerProcess:
             protocol_max=_PROTOCOL_VERSION,
             software_version=self._software_version,
             platform=detect_worker_platform(),
-            capabilities=(_CONTROL_CAPABILITY,),
+            capabilities=tuple(sorted(
+                (_CONTROL_CAPABILITY, _OWNER_LEASE_CAPABILITY),
+                key=str,
+            )),
             resources=WorkerResourceEnvelope(
                 max_concurrent_jobs=self._max_concurrent_jobs,
                 max_memory_bytes=16 * 1024 * 1024,
@@ -567,6 +978,7 @@ class AuthenticatedAgentWorkerProcess:
         )
         self._nonce = secrets.token_hex(16)
         authkey = secrets.token_bytes(32)
+        self._dispatch_key = RuntimePayloadKey.from_bytes(secrets.token_bytes(32))
         self._address, self._family = _transport_address(self._runtime_dir)
         self._listener = Listener(
             address=self._address,
@@ -585,6 +997,7 @@ class AuthenticatedAgentWorkerProcess:
                 self._contract.epoch,
                 self._contract.contract_sha256,
                 self._heartbeat_interval_seconds,
+                self._dispatch_key.key_bytes,
             ),
             name=f"naumi-agent-worker-{self._epoch}",
             daemon=False,
@@ -617,6 +1030,11 @@ class AuthenticatedAgentWorkerProcess:
             raise AgentWorkerProcessError("Agent Worker 认证连接尚未建立。")
         return self._connection
 
+    def _required_dispatch_key(self) -> RuntimePayloadKey:
+        if self._dispatch_key is None:
+            raise AgentWorkerProcessError("Agent Worker dispatch key 尚未创建。")
+        return self._dispatch_key
+
 
 class AgentWorkerProcessFactory:
     """Create independent Agent worker control processes from Runtime authority."""
@@ -626,6 +1044,7 @@ class AgentWorkerProcessFactory:
         *,
         worker_registry: WorkerRegistryStore,
         heartbeat_store: HarnessStore,
+        agent_job_store: AgentJobStore,
         workspace_root: str | Path,
         runtime_dir: str | Path,
         software_version: str,
@@ -633,6 +1052,7 @@ class AgentWorkerProcessFactory:
     ) -> None:
         self.worker_registry = worker_registry
         self.heartbeat_store = heartbeat_store
+        self.agent_job_store = agent_job_store
         self.workspace_root = Path(workspace_root).expanduser().resolve(strict=False)
         self.runtime_dir = Path(runtime_dir).expanduser().resolve(strict=False)
         self.software_version = software_version
@@ -641,6 +1061,7 @@ class AgentWorkerProcessFactory:
         AuthenticatedAgentWorkerProcess(
             worker_registry=worker_registry,
             heartbeat_store=heartbeat_store,
+            agent_job_store=agent_job_store,
             workspace_root=self.workspace_root,
             runtime_dir=self.runtime_dir,
             software_version=software_version,
@@ -655,11 +1076,14 @@ class AgentWorkerProcessFactory:
         heartbeat_timeout_seconds: int = 30,
         handshake_timeout_seconds: float = 15.0,
         shutdown_timeout_seconds: float = 5.0,
+        job_claim_lease_seconds: int = 90,
+        job_claim_renewal_interval_seconds: float = 30.0,
         now_provider: NowProvider = lambda: datetime.now(UTC).isoformat(),
     ) -> AuthenticatedAgentWorkerProcess:
         return AuthenticatedAgentWorkerProcess(
             worker_registry=self.worker_registry,
             heartbeat_store=self.heartbeat_store,
+            agent_job_store=self.agent_job_store,
             workspace_root=self.workspace_root,
             runtime_dir=self.runtime_dir,
             software_version=self.software_version,
@@ -669,6 +1093,10 @@ class AgentWorkerProcessFactory:
             heartbeat_timeout_seconds=heartbeat_timeout_seconds,
             handshake_timeout_seconds=handshake_timeout_seconds,
             shutdown_timeout_seconds=shutdown_timeout_seconds,
+            job_claim_lease_seconds=job_claim_lease_seconds,
+            job_claim_renewal_interval_seconds=(
+                job_claim_renewal_interval_seconds
+            ),
             now_provider=now_provider,
         )
 
@@ -683,9 +1111,12 @@ def _agent_worker_child_main(
     epoch: int,
     contract_sha256: str,
     interval_seconds: float,
+    dispatch_key_bytes: bytes,
 ) -> None:
     connection: Connection | None = None
+    bound_job: tuple[AgentWorkerJobBinding, AgentJobPayload] | None = None
     try:
+        dispatch_key = RuntimePayloadKey.from_bytes(dispatch_key_bytes)
         connection = Client(address=address, family=family, authkey=authkey)
         process_id = os.getpid()
         sequence = 0
@@ -734,6 +1165,70 @@ def _agent_worker_child_main(
         while True:
             if connection.poll(interval_seconds):
                 control = connection.recv()
+                control_type = (
+                    str(control.get("type")) if isinstance(control, dict) else ""
+                )
+                if control_type == "bind_job":
+                    if bound_job is not None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 子进程不能重复绑定 Job。"
+                        )
+                    binding, payload = _open_parent_job_message(
+                        control,
+                        expected_type="bind_job",
+                        nonce=nonce,
+                        worker_id=worker_id,
+                        instance_id=instance_id,
+                        epoch=epoch,
+                        contract_sha256=contract_sha256,
+                        dispatch_key=dispatch_key,
+                    )
+                    bound_job = (binding, payload)
+                    sequence += 1
+                    connection.send(
+                        _child_job_message(
+                            "job_bound",
+                            nonce=nonce,
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            process_id=process_id,
+                            sequence=sequence,
+                            binding=binding,
+                        )
+                    )
+                    continue
+                if control_type == "release_job":
+                    if bound_job is None:
+                        raise AgentWorkerProcessError(
+                            "Agent Worker 子进程没有可释放的 Job。"
+                        )
+                    binding = _validate_parent_job_release_message(
+                        control,
+                        nonce=nonce,
+                        worker_id=worker_id,
+                        instance_id=instance_id,
+                        epoch=epoch,
+                        contract_sha256=contract_sha256,
+                        expected_binding=bound_job[0],
+                    )
+                    bound_job = None
+                    sequence += 1
+                    connection.send(
+                        _child_job_message(
+                            "job_released",
+                            nonce=nonce,
+                            worker_id=worker_id,
+                            instance_id=instance_id,
+                            epoch=epoch,
+                            contract_sha256=contract_sha256,
+                            process_id=process_id,
+                            sequence=sequence,
+                            binding=binding,
+                        )
+                    )
+                    continue
                 _validate_parent_message(
                     control,
                     expected_type="shutdown",
@@ -743,6 +1238,10 @@ def _agent_worker_child_main(
                     epoch=epoch,
                     contract_sha256=contract_sha256,
                 )
+                if bound_job is not None:
+                    raise AgentWorkerProcessError(
+                        "Agent Worker shutdown 前必须先清除 Job payload。"
+                    )
                 sequence += 1
                 connection.send(
                     _child_message(
@@ -805,6 +1304,229 @@ def _parent_message(
         "instance_id": contract.instance_id,
         "epoch": contract.epoch,
         "contract_sha256": contract.contract_sha256,
+    }
+
+
+def _parent_job_message(
+    message_type: str,
+    *,
+    nonce: str,
+    contract: WorkerContract,
+    binding: AgentWorkerJobBinding,
+    envelope: PayloadEnvelope | None = None,
+) -> dict[str, object]:
+    if message_type not in {"bind_job", "release_job"}:
+        raise AgentWorkerProcessError("Agent Worker Job 控制消息类型无效。")
+    message = {
+        **_parent_message(message_type, nonce=nonce, contract=contract),
+        **_job_binding_message_fields(binding),
+    }
+    if message_type == "bind_job":
+        if not isinstance(envelope, PayloadEnvelope):
+            raise AgentWorkerProcessError("Agent Worker bind 缺少加密 payload。")
+        message["dispatch_envelope"] = envelope.to_dict()
+    elif envelope is not None:
+        raise AgentWorkerProcessError("Agent Worker release 不得携带 payload。")
+    return message
+
+
+def _child_job_message(
+    message_type: str,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    process_id: int,
+    sequence: int,
+    binding: AgentWorkerJobBinding,
+) -> dict[str, object]:
+    if message_type not in {"job_bound", "job_released"}:
+        raise AgentWorkerProcessError("Agent Worker Job 回执类型无效。")
+    return {
+        **_child_message(
+            message_type,
+            nonce=nonce,
+            worker_id=worker_id,
+            instance_id=instance_id,
+            epoch=epoch,
+            contract_sha256=contract_sha256,
+            process_id=process_id,
+            sequence=sequence,
+        ),
+        **_job_binding_message_fields(binding),
+    }
+
+
+def _open_parent_job_message(
+    message: object,
+    *,
+    expected_type: str,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    dispatch_key: RuntimePayloadKey,
+) -> tuple[AgentWorkerJobBinding, AgentJobPayload]:
+    if expected_type != "bind_job" or not isinstance(message, dict):
+        raise AgentWorkerProcessError("Agent Worker bind 消息形状无效。")
+    binding = _binding_from_message(message)
+    expected_owner = _job_owner_id_values(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+    )
+    expected_reservation = _job_reservation_id_values(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        job_id=binding.job_id,
+    )
+    if not hmac.compare_digest(binding.owner_id, expected_owner):
+        raise AgentWorkerProcessError("Agent Worker Job owner identity 无效。")
+    if not hmac.compare_digest(binding.reservation_id, expected_reservation):
+        raise AgentWorkerProcessError("Agent Worker Job reservation identity 无效。")
+    envelope_value = message.get("dispatch_envelope")
+    try:
+        envelope = PayloadEnvelope.from_dict(envelope_value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError("Agent Worker dispatch envelope 无效。") from exc
+    expected = {
+        "type": expected_type,
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(binding),
+        "dispatch_envelope": envelope.to_dict(),
+    }
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker Job bind 消息认证失败。")
+    if not hmac.compare_digest(
+        binding.dispatch_envelope_sha256,
+        envelope.envelope_sha256,
+    ):
+        raise AgentWorkerProcessError("Agent Worker dispatch envelope fence 无效。")
+    aad = _job_dispatch_aad_values(
+        worker_id=worker_id,
+        instance_id=instance_id,
+        epoch=epoch,
+        contract_sha256=contract_sha256,
+        job_id=binding.job_id,
+        request_sha256=binding.request_sha256,
+        owner_id=binding.owner_id,
+        claim_epoch=binding.claim_epoch,
+        claim_expires_at=binding.claim_expires_at,
+        reservation_id=binding.reservation_id,
+    )
+    try:
+        plaintext = open_runtime_payload(envelope, aad=aad, key=dispatch_key)
+        request, payload = decode_agent_job_dispatch_payload(plaintext)
+    except (PayloadEnvelopeError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError(
+            "Agent Worker dispatch payload 无法认证。"
+        ) from exc
+    if not hmac.compare_digest(request.request_sha256, binding.request_sha256):
+        raise AgentWorkerProcessError("Agent Worker dispatch request fence 无效。")
+    return binding, payload
+
+
+def _validate_parent_job_release_message(
+    message: object,
+    *,
+    nonce: str,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    expected_binding: AgentWorkerJobBinding,
+) -> AgentWorkerJobBinding:
+    expected = {
+        "type": "release_job",
+        "protocol_version": _PROTOCOL_VERSION,
+        "nonce": nonce,
+        "worker_id": worker_id,
+        "instance_id": instance_id,
+        "epoch": epoch,
+        "contract_sha256": contract_sha256,
+        **_job_binding_message_fields(expected_binding),
+    }
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker Job release 消息认证失败。")
+    return expected_binding
+
+
+def _validate_child_job_message(
+    message: object,
+    *,
+    expected_type: str,
+    nonce: str,
+    contract: WorkerContract,
+    process_id: int | None,
+    expected_sequence: int,
+    binding: AgentWorkerJobBinding,
+) -> None:
+    if process_id is None or process_id <= 0:
+        raise AgentWorkerProcessError("Agent Worker 子进程 PID 不可信。")
+    expected = _child_job_message(
+        expected_type,
+        nonce=nonce,
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        process_id=process_id,
+        sequence=expected_sequence,
+        binding=binding,
+    )
+    if not _secure_exact_message_matches(message, expected):
+        raise AgentWorkerProcessError("Agent Worker Job 回执认证失败。")
+
+
+def _binding_from_message(message: dict[str, object]) -> AgentWorkerJobBinding:
+    try:
+        binding = AgentWorkerJobBinding(
+            job_id=str(message["job_id"]),
+            request_sha256=str(message["request_sha256"]),
+            owner_id=str(message["owner_id"]),
+            claim_epoch=int(message["claim_epoch"]),
+            claim_expires_at=str(message["claim_expires_at"]),
+            reservation_id=str(message["reservation_id"]),
+            dispatch_envelope_sha256=str(message["dispatch_envelope_sha256"]),
+        )
+        for field in ("job_id", "owner_id", "reservation_id"):
+            if not _IDENTIFIER_RE.fullmatch(getattr(binding, field)):
+                raise ValueError(field)
+        for field in ("request_sha256", "dispatch_envelope_sha256"):
+            if not _SHA256_RE.fullmatch(getattr(binding, field)):
+                raise ValueError(field)
+        if binding.claim_epoch < 1:
+            raise ValueError("claim_epoch")
+        expiry = datetime.fromisoformat(binding.claim_expires_at)
+        if expiry.tzinfo is None or expiry.utcoffset() is None:
+            raise ValueError("claim_expires_at")
+        return binding
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AgentWorkerProcessError("Agent Worker Job binding 字段无效。") from exc
+
+
+def _job_binding_message_fields(
+    binding: AgentWorkerJobBinding,
+) -> dict[str, object]:
+    return {
+        "job_id": binding.job_id,
+        "request_sha256": binding.request_sha256,
+        "owner_id": binding.owner_id,
+        "claim_epoch": binding.claim_epoch,
+        "claim_expires_at": binding.claim_expires_at,
+        "reservation_id": binding.reservation_id,
+        "dispatch_envelope_sha256": binding.dispatch_envelope_sha256,
     }
 
 
@@ -904,6 +1626,113 @@ def _secure_exact_message_matches(
     )
 
 
+def _job_owner_id(contract: WorkerContract) -> str:
+    return _job_owner_id_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+    )
+
+
+def _job_owner_id_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+) -> str:
+    digest = hashlib.sha256(
+        f"{worker_id}\x00{instance_id}\x00{epoch}\x00{contract_sha256}".encode()
+    ).hexdigest()
+    return f"agent-worker-owner:{digest}"
+
+
+def _job_reservation_id(contract: WorkerContract, job_id: str) -> str:
+    return _job_reservation_id_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        job_id=job_id,
+    )
+
+
+def _job_reservation_id_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    job_id: str,
+) -> str:
+    digest = hashlib.sha256(
+        (
+            f"{worker_id}\x00{instance_id}\x00{epoch}\x00"
+            f"{contract_sha256}\x00{job_id}"
+        ).encode()
+    ).hexdigest()
+    return f"agent-job-slot:{digest}"
+
+
+def _job_dispatch_aad(
+    *,
+    contract: WorkerContract,
+    job_id: str,
+    request_sha256: str,
+    owner_id: str,
+    claim_epoch: int,
+    claim_expires_at: str,
+    reservation_id: str,
+) -> bytes:
+    return _job_dispatch_aad_values(
+        worker_id=contract.worker_id,
+        instance_id=contract.instance_id,
+        epoch=contract.epoch,
+        contract_sha256=contract.contract_sha256,
+        job_id=job_id,
+        request_sha256=request_sha256,
+        owner_id=owner_id,
+        claim_epoch=claim_epoch,
+        claim_expires_at=claim_expires_at,
+        reservation_id=reservation_id,
+    )
+
+
+def _job_dispatch_aad_values(
+    *,
+    worker_id: str,
+    instance_id: str,
+    epoch: int,
+    contract_sha256: str,
+    job_id: str,
+    request_sha256: str,
+    owner_id: str,
+    claim_epoch: int,
+    claim_expires_at: str,
+    reservation_id: str,
+) -> bytes:
+    payload = json.dumps(
+        {
+            "protocol_version": _PROTOCOL_VERSION,
+            "worker_id": worker_id,
+            "instance_id": instance_id,
+            "epoch": epoch,
+            "contract_sha256": contract_sha256,
+            "job_id": job_id,
+            "request_sha256": request_sha256,
+            "owner_id": owner_id,
+            "claim_epoch": claim_epoch,
+            "claim_expires_at": claim_expires_at,
+            "reservation_id": reservation_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return _JOB_DISPATCH_AAD_PREFIX + payload
+
+
 def _transport_address(runtime_dir: Path) -> tuple[object, str]:
     token = secrets.token_hex(12)
     if os.name == "nt":
@@ -915,6 +1744,7 @@ def _transport_address(runtime_dir: Path) -> tuple[object, str]:
 
 
 __all__ = [
+    "AgentWorkerJobBinding",
     "AgentWorkerProcessError",
     "AgentWorkerProcessFactory",
     "AgentWorkerProcessSnapshot",
