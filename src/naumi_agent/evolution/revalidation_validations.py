@@ -9,6 +9,7 @@ import re
 import secrets
 import subprocess
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -175,6 +176,16 @@ class EvolutionHarnessRevalidationRunner(Protocol):
         source: HarnessEvolutionRevalidationSource,
         source_is_current: Callable[[], Awaitable[bool]],
     ) -> HarnessEvolutionRevalidationRun: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedValidationSource:
+    execution: EvolutionRevalidationExecutionOutcome
+    request_sha256: str
+    package: EvolutionPromotionPackageInput
+    lease: ExperimentWorktreeLease
+    source: HarnessEvolutionRevalidationSource
+    plan: HarnessEvolutionRevalidationPlan
 
 
 class _Claim(_StrictModel):
@@ -373,47 +384,20 @@ class EvolutionRevalidationValidationService:
         workspace_root: str | Path,
         request_id: str,
     ) -> EvolutionRevalidationValidationReceipt:
-        execution = await self._execution_service.execute(
-            workspace_root=workspace_root,
-            request_id=request_id,
+        prepared = await self._prepare_source(
+            workspace_root=workspace_root, request_id=request_id
         )
-        _require_successful_execution(execution)
-        view = await self._request_service.inspect(
-            workspace_root=workspace_root,
-            request_id=request_id,
-        )
-        package_view = await self._package_input_store.get(
-            view.request.promotion_input_id
-        )
-        if package_view is None or not package_view.promotion_review_eligible:
-            raise EvolutionRevalidationValidationError(
-                "revalidation_validation_package_ineligible",
-                "Promotion Package Input 当前不可用于再验证。",
-            )
-        package = package_view.package_input
-        lease = await self._lease_store.get(package.experiment_contract_id)
-        if lease is None:
-            raise EvolutionRevalidationValidationError(
-                "revalidation_validation_lease_missing",
-                "Candidate Lease 不存在，无法重新构造验证源码。",
-            )
+        execution = prepared.execution
+        package = prepared.package
+        lease = prepared.lease
+        source = prepared.source
+        plan = prepared.plan
         now = _aware(self._clock())
-        _require_live_lease(lease, package, now)
-        source = _materialize_source(
-            Path(workspace_root).resolve(strict=True),
-            execution,
-            package,
-            lease,
-        )
-        paths = tuple(item.path for item in package.patch.files)
-        plan = await self._harness.prepare_evolution_revalidation(
-            changed_paths=paths
-        )
         execution_id, execution_sha = _execution_identity(execution)
         authority_sha = _sha256_payload(
             {
                 "policy": EVOLUTION_REVALIDATION_VALIDATION_POLICY,
-                "request_sha256": view.request.request_sha256,
+                "request_sha256": prepared.request_sha256,
                 "execution_sha256": execution_sha,
                 "overlay_source_sha256": source.overlay_source_sha256,
                 "harness_plan_sha256": plan.plan_sha256,
@@ -456,7 +440,7 @@ class EvolutionRevalidationValidationService:
                 source_is_current=source_is_current,
             )
             receipt = _build_receipt(
-                view_request_sha256=view.request.request_sha256,
+                view_request_sha256=prepared.request_sha256,
                 request_id=request_id,
                 execution=execution,
                 execution_id=execution_id,
@@ -469,7 +453,7 @@ class EvolutionRevalidationValidationService:
             )
         except HarnessEvolutionRevalidationRunError as exc:
             receipt = _build_failed_receipt(
-                view_request_sha256=view.request.request_sha256,
+                view_request_sha256=prepared.request_sha256,
                 request_id=request_id,
                 execution=execution,
                 execution_id=execution_id,
@@ -486,7 +470,7 @@ class EvolutionRevalidationValidationService:
             )
         except (OSError, subprocess.SubprocessError, TypeError, ValueError) as exc:
             receipt = _build_failed_receipt(
-                view_request_sha256=view.request.request_sha256,
+                view_request_sha256=prepared.request_sha256,
                 request_id=request_id,
                 execution=execution,
                 execution_id=execution_id,
@@ -501,6 +485,68 @@ class EvolutionRevalidationValidationService:
             claim=claim,
             receipt=receipt,
             now=self._clock(),
+        )
+
+    async def materialize_current_source(
+        self,
+        *,
+        workspace_root: str | Path,
+        request_id: str,
+    ) -> tuple[HarnessEvolutionRevalidationSource, HarnessEvolutionRevalidationPlan]:
+        """Rebuild the exact current source without executing Harness checks."""
+        prepared = await self._prepare_source(
+            workspace_root=workspace_root,
+            request_id=request_id,
+        )
+        return prepared.source, prepared.plan
+
+    async def _prepare_source(
+        self,
+        *,
+        workspace_root: str | Path,
+        request_id: str,
+    ) -> _PreparedValidationSource:
+        execution = await self._execution_service.execute(
+            workspace_root=workspace_root,
+            request_id=request_id,
+        )
+        _require_successful_execution(execution)
+        view = await self._request_service.inspect(
+            workspace_root=workspace_root,
+            request_id=request_id,
+        )
+        package_view = await self._package_input_store.get(
+            view.request.promotion_input_id
+        )
+        if package_view is None or not package_view.promotion_review_eligible:
+            raise EvolutionRevalidationValidationError(
+                "revalidation_validation_package_ineligible",
+                "Promotion Package Input 当前不可用于再验证。",
+            )
+        package = package_view.package_input
+        lease = await self._lease_store.get(package.experiment_contract_id)
+        if lease is None:
+            raise EvolutionRevalidationValidationError(
+                "revalidation_validation_lease_missing",
+                "Candidate Lease 不存在，无法重新构造验证源码。",
+            )
+        _require_live_lease(lease, package, _aware(self._clock()))
+        source = _materialize_source(
+            Path(workspace_root).resolve(strict=True),
+            execution,
+            package,
+            lease,
+        )
+        plan = await self._harness.prepare_evolution_revalidation(
+            changed_paths=tuple(item.path for item in package.patch.files)
+        )
+        return _PreparedValidationSource(
+            execution=execution,
+            request_sha256=view.request.request_sha256,
+            package=package,
+            lease=lease,
+            source=source,
+            plan=plan,
         )
 
 

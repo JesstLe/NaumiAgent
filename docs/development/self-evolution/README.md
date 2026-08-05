@@ -81,3 +81,6 @@ source overlays，并通过 Harness Sandbox + ARC-04 Worker 执行当前受信�
 [EVO-05.3e](EVO-05-3e-fresh-evaluation-plan.md) 已把 current validated Outcome 机械转换成完整 fresh evaluation
 matrix，明确要求重跑 Interventional、跨平台 Adversarial RED/GREEN、comparison、attribution 与 lane receipts；尚未
 执行重评或开放 rollout。
+[EVO-05.3f1](EVO-05-3f1-immutable-evaluation-source.md) 已把 exact target + revalidation overlay 捕获为经过 symlink、
+size、digest 和 regular-file 防护的 content-addressed immutable blobs；后续 GREEN 评测可脱离旧 Lease worktree，
+但完整重评仍未执行。

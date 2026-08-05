@@ -426,6 +426,16 @@ if TYPE_CHECKING:
         EvolutionRevalidationEvaluationPlanView,
         render_evolution_revalidation_evaluation_plan,
     )
+    from naumi_agent.evolution.revalidation_evaluation_sources import (
+        EVOLUTION_REVALIDATION_EVALUATION_SOURCE_POLICY,
+        EvolutionRevalidationEvaluationSourceBlob,
+        EvolutionRevalidationEvaluationSourceError,
+        EvolutionRevalidationEvaluationSourceService,
+        EvolutionRevalidationEvaluationSourceSnapshot,
+        EvolutionRevalidationEvaluationSourceStore,
+        EvolutionRevalidationSourceProvider,
+        render_evolution_revalidation_evaluation_source,
+    )
     from naumi_agent.evolution.revalidation_execution import (
         EvolutionRevalidationExecutionOutcome,
         EvolutionRevalidationExecutionService,
@@ -630,6 +640,14 @@ __all__ = [
     "EvolutionRevalidationEvaluationPlanStore",
     "EvolutionRevalidationEvaluationPlanView",
     "render_evolution_revalidation_evaluation_plan",
+    "EVOLUTION_REVALIDATION_EVALUATION_SOURCE_POLICY",
+    "EvolutionRevalidationEvaluationSourceBlob",
+    "EvolutionRevalidationEvaluationSourceError",
+    "EvolutionRevalidationEvaluationSourceService",
+    "EvolutionRevalidationEvaluationSourceSnapshot",
+    "EvolutionRevalidationEvaluationSourceStore",
+    "EvolutionRevalidationSourceProvider",
+    "render_evolution_revalidation_evaluation_source",
     "EVOLUTION_PROMOTION_APPROVAL_REQUIREMENT_POLICY",
     "EvolutionPromotionApprovalReason",
     "EvolutionPromotionApprovalRequirement",
@@ -1107,6 +1125,16 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationEvaluationPlanStore",
         "EvolutionRevalidationEvaluationPlanView",
         "render_evolution_revalidation_evaluation_plan",
+    }
+    revalidation_evaluation_source_exports = {
+        "EVOLUTION_REVALIDATION_EVALUATION_SOURCE_POLICY",
+        "EvolutionRevalidationEvaluationSourceBlob",
+        "EvolutionRevalidationEvaluationSourceError",
+        "EvolutionRevalidationEvaluationSourceService",
+        "EvolutionRevalidationEvaluationSourceSnapshot",
+        "EvolutionRevalidationEvaluationSourceStore",
+        "EvolutionRevalidationSourceProvider",
+        "render_evolution_revalidation_evaluation_source",
     }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
@@ -1586,6 +1614,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_outcomes"
     elif name in revalidation_evaluation_plan_exports:
         module_name = "revalidation_evaluation_plans"
+    elif name in revalidation_evaluation_source_exports:
+        module_name = "revalidation_evaluation_sources"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
