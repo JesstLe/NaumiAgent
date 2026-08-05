@@ -76,7 +76,9 @@ percentage/stable 阶段最多扩展为 base 的 3/4 倍，critical stable 上�
 
 ## 当前不足与下一切片
 
-本切片证明“候选真实运行并留下可信终态”，还没有证明“候选长期更好”。EVO-05.5 必须从 terminal journal 构建 runtime monitor：
+本切片证明“候选真实运行并留下可信终态”，还没有证明“候选长期更好”。
+[EVO-05.5a](EVO-05-5a-rollout-monitor-baseline.md) 已从 Fresh Final/Interventional GREEN raw H5a 冻结可信比较基线。
+EVO-05.5b 必须从 terminal journal 构建 runtime monitor：
 
 1. 聚合 completed run 数、错误率、p95 latency、completion rate 与 cost；
 2. 绑定 Rollout Plan 的 frozen threshold 和 minimum observation window；

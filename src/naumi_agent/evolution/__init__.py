@@ -669,6 +669,15 @@ if TYPE_CHECKING:
         EvolutionRevalidationRequestView,
         render_evolution_revalidation_request,
     )
+    from naumi_agent.evolution.revalidation_rollout_baselines import (
+        EVOLUTION_REVALIDATION_ROLLOUT_BASELINE_POLICY,
+        EvolutionRevalidationRolloutBaseline,
+        EvolutionRevalidationRolloutBaselineError,
+        EvolutionRevalidationRolloutBaselineService,
+        EvolutionRevalidationRolloutBaselineStore,
+        EvolutionRevalidationRolloutBaselineView,
+        EvolutionRevalidationRolloutCostSource,
+    )
     from naumi_agent.evolution.revalidation_rollout_plans import (
         EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY,
         EvolutionRevalidationRolloutExposure,
@@ -945,6 +954,13 @@ __all__ = [
     "EvolutionRevalidationLocalCanaryRunError",
     "EvolutionRevalidationLocalCanaryRunView",
     "EvolutionRevalidationLocalCanaryState",
+    "EVOLUTION_REVALIDATION_ROLLOUT_BASELINE_POLICY",
+    "EvolutionRevalidationRolloutBaseline",
+    "EvolutionRevalidationRolloutBaselineError",
+    "EvolutionRevalidationRolloutBaselineService",
+    "EvolutionRevalidationRolloutBaselineStore",
+    "EvolutionRevalidationRolloutBaselineView",
+    "EvolutionRevalidationRolloutCostSource",
     "EVOLUTION_REVALIDATION_ROLLOUT_PLAN_POLICY",
     "EvolutionRevalidationRolloutExposure",
     "EvolutionRevalidationRolloutPlan",
@@ -1735,6 +1751,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRolloutStage",
         "EvolutionRevalidationRolloutStageName",
     }
+    revalidation_rollout_baseline_exports = {
+        "EVOLUTION_REVALIDATION_ROLLOUT_BASELINE_POLICY",
+        "EvolutionRevalidationRolloutBaseline",
+        "EvolutionRevalidationRolloutBaselineError",
+        "EvolutionRevalidationRolloutBaselineService",
+        "EvolutionRevalidationRolloutBaselineStore",
+        "EvolutionRevalidationRolloutBaselineView",
+        "EvolutionRevalidationRolloutCostSource",
+    }
     revalidation_local_canary_run_exports = {
         "EVOLUTION_REVALIDATION_LOCAL_CANARY_RUN_POLICY",
         "EvolutionRevalidationLocalCanaryCheckEvidence",
@@ -2327,6 +2352,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_results"
     elif name in revalidation_local_canary_run_exports:
         module_name = "revalidation_local_canary_runs"
+    elif name in revalidation_rollout_baseline_exports:
+        module_name = "revalidation_rollout_baselines"
     elif name in revalidation_rollout_plan_exports:
         module_name = "revalidation_rollout_plans"
     elif name in revalidation_rollout_stage_entry_exports:

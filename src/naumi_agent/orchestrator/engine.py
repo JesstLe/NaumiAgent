@@ -324,6 +324,10 @@ from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestService,
     EvolutionRevalidationRequestStore,
 )
+from naumi_agent.evolution.revalidation_rollout_baselines import (
+    EvolutionRevalidationRolloutBaselineService,
+    EvolutionRevalidationRolloutBaselineStore,
+)
 from naumi_agent.evolution.revalidation_rollout_plans import (
     EvolutionRevalidationRolloutPlanService,
     EvolutionRevalidationRolloutPlanStore,
@@ -2113,6 +2117,23 @@ class AgentEngine:
                     self.evolution_revalidation_promotion_input_service
                 ),
                 store=self.evolution_revalidation_rollout_plan_store,
+            )
+        )
+        self.evolution_revalidation_rollout_baseline_store = (
+            EvolutionRevalidationRolloutBaselineStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_revalidation_rollout_baseline_service = (
+            EvolutionRevalidationRolloutBaselineService(
+                workspace_root=paths.workspace_root,
+                plan_service=self.evolution_revalidation_rollout_plan_service,
+                final_store=self.evolution_revalidation_final_evaluation_store,
+                cohort_store=(
+                    self.evolution_revalidation_interventional_cohort_store
+                ),
+                harness_store=self._harness_store,
+                store=self.evolution_revalidation_rollout_baseline_store,
             )
         )
         self.evolution_revalidation_rollout_control_store = (
