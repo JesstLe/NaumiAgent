@@ -114,3 +114,6 @@ probe/identity/summary 后生成原生 H5b2/H5c；跨平台归因与新的 Final
 Adversarial cohort/H5c/attribution 的新 Final Evaluation，并将证据完整与重新审批资格严格分离。
 [EVO-05.3f3a](EVO-05-3f3a-fresh-reapproval-authority.md) 已增加动态重新审批门禁；只有 eligible Fresh Final 才能进入
 后续 Approval Input，并强制旧审批/签名不可复用、专业角色重新签名。
+[EVO-05.3f3b1](EVO-05-3f3b1-fresh-promotion-input.md) 已生成版本化 Fresh Promotion Input；它把旧 input 降为
+patch/rollback 的只读基线，并原子绑定 current Contract、Fresh Final 与 Reapproval Authority，旧 Decision、Approval
+和签名均不可复用。
