@@ -670,6 +670,22 @@ if TYPE_CHECKING:
         EvolutionRevalidationRolloutStage,
         EvolutionRevalidationRolloutStageName,
     )
+    from naumi_agent.evolution.revalidation_rollout_stage_entries import (
+        EVOLUTION_REVALIDATION_ROLLOUT_CONTROL_POLICY,
+        EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ENTRY_POLICY,
+        EvolutionRevalidationRolloutControlAction,
+        EvolutionRevalidationRolloutControlActor,
+        EvolutionRevalidationRolloutControlEvent,
+        EvolutionRevalidationRolloutControlService,
+        EvolutionRevalidationRolloutControlState,
+        EvolutionRevalidationRolloutControlStore,
+        EvolutionRevalidationRolloutEntryStatus,
+        EvolutionRevalidationRolloutStageEntryError,
+        EvolutionRevalidationRolloutStageEntryReceipt,
+        EvolutionRevalidationRolloutStageEntryService,
+        EvolutionRevalidationRolloutStageEntryStore,
+        EvolutionRevalidationRolloutStageEntryView,
+    )
     from naumi_agent.evolution.revalidation_runtime_contracts import (
         EVOLUTION_REVALIDATION_RUNTIME_CONTRACT_POLICY,
         EvolutionRevalidationRuntimeContract,
@@ -920,6 +936,20 @@ __all__ = [
     "EvolutionRevalidationRolloutPlanView",
     "EvolutionRevalidationRolloutStage",
     "EvolutionRevalidationRolloutStageName",
+    "EVOLUTION_REVALIDATION_ROLLOUT_CONTROL_POLICY",
+    "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ENTRY_POLICY",
+    "EvolutionRevalidationRolloutControlAction",
+    "EvolutionRevalidationRolloutControlActor",
+    "EvolutionRevalidationRolloutControlEvent",
+    "EvolutionRevalidationRolloutControlService",
+    "EvolutionRevalidationRolloutControlState",
+    "EvolutionRevalidationRolloutControlStore",
+    "EvolutionRevalidationRolloutEntryStatus",
+    "EvolutionRevalidationRolloutStageEntryError",
+    "EvolutionRevalidationRolloutStageEntryReceipt",
+    "EvolutionRevalidationRolloutStageEntryService",
+    "EvolutionRevalidationRolloutStageEntryStore",
+    "EvolutionRevalidationRolloutStageEntryView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1687,6 +1717,22 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationRolloutStage",
         "EvolutionRevalidationRolloutStageName",
     }
+    revalidation_rollout_stage_entry_exports = {
+        "EVOLUTION_REVALIDATION_ROLLOUT_CONTROL_POLICY",
+        "EVOLUTION_REVALIDATION_ROLLOUT_STAGE_ENTRY_POLICY",
+        "EvolutionRevalidationRolloutControlAction",
+        "EvolutionRevalidationRolloutControlActor",
+        "EvolutionRevalidationRolloutControlEvent",
+        "EvolutionRevalidationRolloutControlService",
+        "EvolutionRevalidationRolloutControlState",
+        "EvolutionRevalidationRolloutControlStore",
+        "EvolutionRevalidationRolloutEntryStatus",
+        "EvolutionRevalidationRolloutStageEntryError",
+        "EvolutionRevalidationRolloutStageEntryReceipt",
+        "EvolutionRevalidationRolloutStageEntryService",
+        "EvolutionRevalidationRolloutStageEntryStore",
+        "EvolutionRevalidationRolloutStageEntryView",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2253,6 +2299,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_results"
     elif name in revalidation_rollout_plan_exports:
         module_name = "revalidation_rollout_plans"
+    elif name in revalidation_rollout_stage_entry_exports:
+        module_name = "revalidation_rollout_stage_entries"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:

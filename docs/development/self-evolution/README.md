@@ -127,6 +127,8 @@ target branch 来自原 Request，revision/tree 来自 Fresh Plan/Outcome，所�
 gates，形成 append-only Fresh Decision；只有动态 current 的 approved Decision 才开放 staged rollout 输入资格。
 [EVO-05.4a](EVO-05-4a-immutable-rollout-plan.md) 已将 current approved Decision 与 exact Input/patch/migration/rollback
 冻结为 local-canary→opt-in→percentage→stable 的风险分级计划；计划不授予 stage-entry 或执行权限。
+[EVO-05.4b1](EVO-05-4b1-fenced-local-canary-entry.md) 已增加 HMAC-attested local-canary stage-entry 与 workspace kill switch；
+pause/resume、expiry 或 Decision 漂移会动态 fence entry，且后续 stage/Git/publish 权限保持关闭。
 [EVO-05.3f2c3b1](EVO-05-3f2c3b1-platform-dispatch-outbox.md) 已把实时准入的 required-platform Worker lane 转为 durable
 queued dispatch，并在 exact Worker incarnation 上预留容量。[EVO-05.3f2c3b2a](EVO-05-3f2c3b2a-authenticated-worker-claim.md)
 已增加 supervisor-attested Ed25519 Worker Identity、一次性 claim challenge 和可续期 lease hash chain。
