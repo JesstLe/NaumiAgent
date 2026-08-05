@@ -450,39 +450,11 @@ class EvolutionRevalidationAdversarialSampleExecutor:
 
     async def _current_checks(self, contract, profile_sha256):
         status = await self.profile_service.status()
-        if not status.trusted:
-            raise EvolutionRevalidationAdversarialSampleError(
-                "fresh_adversarial_profile_untrusted",
-                "Harness Profile 信任已失效。",
-            )
-        if status.profile_digest != profile_sha256:
-            raise EvolutionRevalidationAdversarialSampleError(
-                "fresh_adversarial_profile_drifted",
-                "Harness Profile 已偏离 Fresh Validation Plan。",
-            )
-        profile = status.snapshot.profile
-        if profile is None:
-            raise EvolutionRevalidationAdversarialSampleError(
-                "fresh_adversarial_profile_missing", "Harness Profile 不存在。"
-            )
-        by_id = {item.id: item for item in profile.checks}
-        checks = []
-        for binding in contract.probe_checks:
-            check = by_id.get(binding.check_id)
-            if check is None or not _check_matches(check, binding):
-                raise EvolutionRevalidationAdversarialSampleError(
-                    "fresh_adversarial_profile_check_drifted",
-                    f"Adversarial check {binding.check_id} 已漂移。",
-                )
-            checks.append(check)
-        if not checks or {item.check_id for item in contract.probe_coverage} != {
-            item.id for item in checks
-        }:
-            raise EvolutionRevalidationAdversarialSampleError(
-                "fresh_adversarial_probe_coverage_invalid",
-                "Runtime Contract probe coverage 无法由当前 checks 完整覆盖。",
-            )
-        return tuple(checks)
+        return validate_revalidation_adversarial_profile(
+            status,
+            contract,
+            profile_sha256,
+        )
 
     async def _phase(
         self, phase, contract, platform, pair, checks, identity, authority,
@@ -594,6 +566,43 @@ class EvolutionRevalidationAdversarialSampleExecutor:
                 stored, view.contract, receipt.platform, phase, checks, identity,
                 receipt.run_scope,
             )
+
+
+def validate_revalidation_adversarial_profile(status, contract, profile_sha256):
+    """Select the exact current Profile checks bound by a Runtime Contract."""
+    if not status.trusted:
+        raise EvolutionRevalidationAdversarialSampleError(
+            "fresh_adversarial_profile_untrusted",
+            "Harness Profile 信任已失效。",
+        )
+    if status.profile_digest != profile_sha256:
+        raise EvolutionRevalidationAdversarialSampleError(
+            "fresh_adversarial_profile_drifted",
+            "Harness Profile 已偏离 Fresh Validation Plan。",
+        )
+    profile = status.snapshot.profile
+    if profile is None:
+        raise EvolutionRevalidationAdversarialSampleError(
+            "fresh_adversarial_profile_missing", "Harness Profile 不存在。"
+        )
+    by_id = {item.id: item for item in profile.checks}
+    checks = []
+    for binding in contract.probe_checks:
+        check = by_id.get(binding.check_id)
+        if check is None or not _check_matches(check, binding):
+            raise EvolutionRevalidationAdversarialSampleError(
+                "fresh_adversarial_profile_check_drifted",
+                f"Adversarial check {binding.check_id} 已漂移。",
+            )
+        checks.append(check)
+    if not checks or {item.check_id for item in contract.probe_coverage} != {
+        item.id for item in checks
+    }:
+        raise EvolutionRevalidationAdversarialSampleError(
+            "fresh_adversarial_probe_coverage_invalid",
+            "Runtime Contract probe coverage 无法由当前 checks 完整覆盖。",
+        )
+    return tuple(checks)
 
 
 def _configuration(contract, profile_sha256):
@@ -827,6 +836,65 @@ def adversarial_batch_id(contract, platform, phase, run_scope):
     return f"evreval-adv-{platform}-{run_scope}-{phase}-{contract.contract_sha256[:24]}"
 
 
+def revalidation_adversarial_configuration(contract, profile_sha256):
+    """Build the canonical H5a configuration identity for remote ingestion."""
+    return _configuration(contract, profile_sha256)
+
+
+def revalidation_adversarial_sample_seed(seed, sample_index):
+    """Derive the canonical deterministic sample seed."""
+    return _sample_seed(seed, sample_index)
+
+
+def require_revalidation_adversarial_source_pair(pair, contract):
+    """Fail closed unless an immutable source pair matches the Runtime Contract."""
+    _require_pair_matches_contract(pair, contract)
+
+
+def validate_revalidation_adversarial_h5a(
+    stored,
+    contract,
+    platform,
+    phase,
+    checks,
+    identity,
+    run_scope="cohort",
+):
+    """Revalidate one stored or proposed H5a result against exact authority."""
+    _validate_stored(
+        stored,
+        contract,
+        platform,
+        phase,
+        checks,
+        identity,
+        run_scope,
+    )
+
+
+def build_revalidation_adversarial_sample_receipt(
+    contract,
+    platform_identity,
+    sample_index,
+    red,
+    green,
+    *,
+    completed_at,
+    run_scope="cohort",
+):
+    """Build the same pair receipt used by the local adversarial executor."""
+    return _build_receipt(
+        contract,
+        platform_identity.system,
+        platform_identity,
+        sample_index,
+        run_scope,
+        red,
+        green,
+        completed_at=completed_at,
+    )
+
+
 def _authority_key(contract, platform, run_scope):
     return hashlib.sha256(
         f"{contract.contract_sha256}:{platform}:{run_scope}".encode()
@@ -887,4 +955,10 @@ __all__ = [
     "EvolutionRevalidationAdversarialSampleReceipt",
     "EvolutionRevalidationAdversarialSampleStore",
     "adversarial_batch_id",
+    "build_revalidation_adversarial_sample_receipt",
+    "require_revalidation_adversarial_source_pair",
+    "revalidation_adversarial_configuration",
+    "revalidation_adversarial_sample_seed",
+    "validate_revalidation_adversarial_h5a",
+    "validate_revalidation_adversarial_profile",
 ]

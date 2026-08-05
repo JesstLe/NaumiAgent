@@ -86,6 +86,6 @@ HMAC durable attestation 不替代网络侧 server authentication。未来 HTTP/
 
 ## 下一切片
 
-EVO-05.3f2c3b2b2 将在 current authorization 下接收 Worker Ed25519-signed、内容寻址且有大小上限的 result manifest；逐项验证
-platform/source/configuration/sample/phase、H5a typed JSON、lifecycle/Grant provenance 与 artifact digest，在本地不可变 Store 成功摄取后
-才设置 `result_received=true`。任何部分结果只能作为可恢复前缀，不能形成 cohort 或 Matrix completed authority。
+[EVO-05.3f2c3b2b2](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md) 已在 current authorization 下接收 Worker
+Ed25519-signed、内容寻址且有大小上限的 typed result manifest，并在本地重算后写入既有 H5a/pair Store。部分结果仍只是可恢复前缀，
+不会形成 cohort 或 Matrix completed authority。下一步 EVO-05.3f2c3b2b3 负责完整 prefix 的 cohort/Dispatch/Matrix 机械收口。

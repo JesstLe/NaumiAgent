@@ -291,6 +291,10 @@ from naumi_agent.evolution.revalidation_platform_execution_authorizations import
     EvolutionRevalidationPlatformExecutionAuthorizationService,
     EvolutionRevalidationPlatformExecutionAuthorizationStore,
 )
+from naumi_agent.evolution.revalidation_platform_results import (
+    EvolutionRevalidationPlatformResultService,
+    EvolutionRevalidationPlatformResultStore,
+)
 from naumi_agent.evolution.revalidation_promotion_inputs import (
     EvolutionRevalidationPromotionInputService,
     EvolutionRevalidationPromotionInputStore,
@@ -1881,6 +1885,22 @@ class AgentEngine:
                 store=(
                     self.evolution_revalidation_platform_execution_authorization_store
                 ),
+            )
+        )
+        self.evolution_revalidation_platform_result_store = (
+            EvolutionRevalidationPlatformResultStore(config.memory.session_db_path)
+        )
+        self.evolution_revalidation_platform_result_service = (
+            EvolutionRevalidationPlatformResultService(
+                workspace_root=paths.workspace_root,
+                authorization_service=(
+                    self.evolution_revalidation_platform_execution_authorization_service
+                ),
+                source_service=self.evolution_revalidation_runtime_source_service,
+                profile_service=self.harness_service,
+                harness_store=self._harness_store,
+                sample_store=self.evolution_revalidation_adversarial_sample_store,
+                store=self.evolution_revalidation_platform_result_store,
             )
         )
         self.evolution_revalidation_adversarial_comparison_executor = (

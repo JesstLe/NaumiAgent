@@ -67,6 +67,9 @@
 - [EVO-05.3f2c3b2b1 Claim-Bound Execution Authorization](EVO-05-3f2c3b2b1-claim-bound-execution-authorization.md)：
   已交付；由父权限、current Claim、Runtime lease 和可撤销 Run Grant 派生完整远端执行范围，并支持 generation renewal、显式撤销
   与失败补偿；尚未接受 execution/result 事实。
+- [EVO-05.3f2c3b2b2 Signed Result H5a Ingestion](EVO-05-3f2c3b2b2-signed-result-h5a-ingestion.md)：
+  已交付；验证 exact Worker Ed25519 signature、typed result content digest、source/configuration/probe/Grant/lifecycle binding，支持
+  durable admission 后的 H5a/pair prefix 恢复；仍不授予 cohort/Matrix/promotion authority。
 - [EVO-05.3f2c4 Fresh Adversarial Comparison](EVO-05-3f2c4-fresh-adversarial-comparison.md)：已交付；完整 matrix 后
   对每个平台从原始 H5a 重算 probe/identity/summary，并持久化 HAR-08 原生 H5b2/H5c。
 - [EVO-05.3f2c5 Fresh Adversarial Attribution](EVO-05-3f2c5-fresh-adversarial-attribution.md)：已交付；逐平台复验
@@ -105,5 +108,5 @@
 Harness revalidation、旧证据失效、Fresh Interventional/Adversarial comparison 与 attribution、Fresh Final、Reapproval
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
 现可形成 exact Worker/capacity 绑定的 queued Dispatch，由持有 attested Ed25519 私钥的 Worker 领取，并从父权限派生短期远端执行授权；
-但尚未实现 result manifest、H5a 摄取、rollout、monitor、rollback executor 或最终 Outcome 回注。任何界面和回执都不得把 authorization
-宣称为跨平台执行完成。
+已实现签名 result manifest 和本地 H5a/pair prefix 摄取，但尚未实现 remote cohort/Matrix 收口、rollout、monitor、rollback executor
+或最终 Outcome 回注。任何界面和回执都不得把 authorization 或 result ingestion 宣称为跨平台执行或自进化闭环完成。

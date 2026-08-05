@@ -25,6 +25,12 @@
 - 每个能力有 owner、版本、兼容、SLO 和退休标准。
 - A5：长期 soak、能力引入/禁用/回退、反馈闭环和预算审计。
 
+## 真实闭环入口条件
+
+EVO-06 不得从“LLM 生成了改进建议”直接开始。每次循环必须可追溯地消费 EVO-01..05 的真实 Outcome：候选源码与补丁、隔离执行、
+RED/GREEN H5a、H5c comparison、失败归因、签名 Decision、staged rollout、运行监控、rollback/accept Outcome 缺一不可。Outcome 必须回注
+opportunity discovery，并以新 Candidate ID 开启下一轮；不得原地改写上一轮证据或把未执行建议计为能力提升。
+
 ## 终极边界
 
 “自主进化”意味着自主提出并验证候选，不意味着绕过用户、权限、审核、签名和可回滚发布。
