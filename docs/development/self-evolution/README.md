@@ -102,4 +102,5 @@ summary 并生成原生 H5b2/H5c；该 decision 仍不覆盖 Adversarial、attri
 [EVO-05.3f2c1](EVO-05-3f2c1-fresh-adversarial-sample.md) 已在 Contract 指定且与 Worker 实际一致的平台执行一个
 Fresh Adversarial RED/GREEN pair；platform cohort、跨平台 matrix 与 Adversarial H5c 尚未完成。
 [EVO-05.3f2c2](EVO-05-3f2c2-fresh-adversarial-cohort.md) 已形成当前平台的连续 probe cohort，并支持中断后只恢复
-缺失后缀；required-platform matrix 与各平台 H5c 尚未完成。
+缺失后缀。[EVO-05.3f2c3a](EVO-05-3f2c3a-fresh-adversarial-matrix-status.md) 已对 required-platform matrix 建立
+completed/runnable/pending 状态权威，且仅在全部 cohort 齐全后持久化完成矩阵；远端调度与各平台 H5c 尚未完成。
