@@ -97,3 +97,5 @@ comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成�
 [EVO-05.3f2b2b2](EVO-05-3f2b2b2-fresh-interventional-cohort.md) 已将 pair 扩展为连续 Fresh cohort，在一个
 cohort-scoped Run Grant 与共享 batch admission 下运行全部 RED/GREEN 样本，并支持复验连续前缀后只恢复缺失后缀；
 paired comparison、Adversarial lanes、attribution 与 Final Evaluation 仍未完成。
+[EVO-05.3f2b2b3](EVO-05-3f2b2b3-fresh-interventional-comparison.md) 已从 ordered H5a 重新验证 Identity、metric/check
+summary 并生成原生 H5b2/H5c；该 decision 仍不覆盖 Adversarial、attribution、Final Evaluation 或 promotion。

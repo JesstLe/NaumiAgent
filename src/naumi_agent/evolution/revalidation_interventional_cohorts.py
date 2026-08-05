@@ -232,6 +232,31 @@ class EvolutionRevalidationInterventionalCohortStore:
             await db.commit()
         return receipt
 
+    async def get_by_contract(
+        self,
+        contract_id: str,
+    ) -> EvolutionRevalidationInterventionalCohortReceipt | None:
+        if not self._db_path.exists():
+            return None
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await _ensure_schema(db)
+            row = await (
+                await db.execute(
+                    "SELECT receipt_json FROM "
+                    "evolution_revalidation_interventional_cohorts "
+                    "WHERE contract_id = ?",
+                    (contract_id,),
+                )
+            ).fetchone()
+        return (
+            None
+            if row is None
+            else EvolutionRevalidationInterventionalCohortReceipt.model_validate_json(
+                row["receipt_json"]
+            )
+        )
+
 
 class EvolutionRevalidationInterventionalCohortExecutor:
     def __init__(
