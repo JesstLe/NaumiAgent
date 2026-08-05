@@ -1243,11 +1243,8 @@ class HarnessStore:
             raise ValueError("result 必须是 HarnessEvalSuiteResult。")
         suite_id = _normalize_text(result.suite_id, field="suite_id", max_length=64)
         created = _normalize_timestamp(created_at, field="created_at")
-        safe_payload = _redact_json_value(result.model_dump(mode="json"))
-        safe_result = HarnessEvalSuiteResult.model_validate(safe_payload)
+        safe_result = canonicalize_harness_eval_result(result)
         result_json = _json_dumps(safe_result.model_dump(mode="json"))
-        if len(result_json.encode("utf-8")) > _MAX_EVAL_RESULT_BYTES:
-            raise ValueError("Eval Result 不能超过 4 MiB。")
         result_sha256 = _stable_digest(result_json)
         identity_sha256 = (
             safe_result.baseline_identity.identity_sha256
@@ -11262,6 +11259,31 @@ def _json_dumps(value: Any) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def canonicalize_harness_eval_result(
+    result: HarnessEvalSuiteResult,
+) -> HarnessEvalSuiteResult:
+    """Apply the exact H5a redaction and size policy before persistence."""
+    if not isinstance(result, HarnessEvalSuiteResult):
+        raise ValueError("result 必须是 HarnessEvalSuiteResult。")
+    safe_payload = _redact_json_value(result.model_dump(mode="json"))
+    safe_result = HarnessEvalSuiteResult.model_validate(safe_payload)
+    result_json = _json_dumps(safe_result.model_dump(mode="json"))
+    if len(result_json.encode("utf-8")) > _MAX_EVAL_RESULT_BYTES:
+        raise ValueError("Eval Result 不能超过 4 MiB。")
+    return safe_result
+
+
+def harness_eval_result_canonical_json(result: HarnessEvalSuiteResult) -> str:
+    """Return the exact redacted canonical JSON persisted by HarnessStore."""
+    safe_result = canonicalize_harness_eval_result(result)
+    return _json_dumps(safe_result.model_dump(mode="json"))
+
+
+def harness_eval_result_sha256(result: HarnessEvalSuiteResult) -> str:
+    """Return the digest HarnessStore will persist for one typed H5a result."""
+    return _stable_digest(harness_eval_result_canonical_json(result))
 
 
 def _stable_id(*parts: str) -> str:

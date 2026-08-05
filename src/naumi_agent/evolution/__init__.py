@@ -595,6 +595,18 @@ if TYPE_CHECKING:
         EvolutionRevalidationPlatformExecutionRevocation,
         EvolutionRevalidationPlatformRunGrantEnvelope,
     )
+    from naumi_agent.evolution.revalidation_platform_results import (
+        EVOLUTION_REVALIDATION_PLATFORM_RESULT_DOMAIN,
+        EVOLUTION_REVALIDATION_PLATFORM_RESULT_POLICY,
+        EvolutionRevalidationPlatformResultArtifact,
+        EvolutionRevalidationPlatformResultError,
+        EvolutionRevalidationPlatformResultIngestionReceipt,
+        EvolutionRevalidationPlatformResultManifest,
+        EvolutionRevalidationPlatformResultPayload,
+        EvolutionRevalidationPlatformResultService,
+        EvolutionRevalidationPlatformResultStore,
+        issue_evolution_revalidation_platform_result_manifest,
+    )
     from naumi_agent.evolution.revalidation_promotion_inputs import (
         EVOLUTION_REVALIDATION_PROMOTION_INPUT_POLICY,
         EvolutionRevalidationPromotionInput,
@@ -864,6 +876,16 @@ __all__ = [
     "EvolutionRevalidationPlatformExecutionAuthorizationView",
     "EvolutionRevalidationPlatformExecutionRevocation",
     "EvolutionRevalidationPlatformRunGrantEnvelope",
+    "EVOLUTION_REVALIDATION_PLATFORM_RESULT_DOMAIN",
+    "EVOLUTION_REVALIDATION_PLATFORM_RESULT_POLICY",
+    "EvolutionRevalidationPlatformResultArtifact",
+    "EvolutionRevalidationPlatformResultError",
+    "EvolutionRevalidationPlatformResultIngestionReceipt",
+    "EvolutionRevalidationPlatformResultManifest",
+    "EvolutionRevalidationPlatformResultPayload",
+    "EvolutionRevalidationPlatformResultService",
+    "EvolutionRevalidationPlatformResultStore",
+    "issue_evolution_revalidation_platform_result_manifest",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1600,6 +1622,18 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPlatformExecutionRevocation",
         "EvolutionRevalidationPlatformRunGrantEnvelope",
     }
+    revalidation_platform_result_exports = {
+        "EVOLUTION_REVALIDATION_PLATFORM_RESULT_DOMAIN",
+        "EVOLUTION_REVALIDATION_PLATFORM_RESULT_POLICY",
+        "EvolutionRevalidationPlatformResultArtifact",
+        "EvolutionRevalidationPlatformResultError",
+        "EvolutionRevalidationPlatformResultIngestionReceipt",
+        "EvolutionRevalidationPlatformResultManifest",
+        "EvolutionRevalidationPlatformResultPayload",
+        "EvolutionRevalidationPlatformResultService",
+        "EvolutionRevalidationPlatformResultStore",
+        "issue_evolution_revalidation_platform_result_manifest",
+    }
     revalidation_approval_requirement_exports = {
         "EVOLUTION_REVALIDATION_APPROVAL_REQUIREMENT_POLICY",
         "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_DOMAIN",
@@ -2160,6 +2194,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_platform_claims"
     elif name in revalidation_platform_execution_authorization_exports:
         module_name = "revalidation_platform_execution_authorizations"
+    elif name in revalidation_platform_result_exports:
+        module_name = "revalidation_platform_results"
     elif name in revalidation_approval_requirement_exports:
         module_name = "revalidation_approval_requirements"
     elif name in revalidation_approval_request_exports:
