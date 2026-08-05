@@ -212,6 +212,11 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_replays import (
+    EvolutionRevalidationReplayExecutor,
+    EvolutionRevalidationReplayService,
+    EvolutionRevalidationReplayStore,
+)
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestBuilder,
     EvolutionRevalidationRequestService,
@@ -1496,6 +1501,21 @@ class AgentEngine:
             package_executor=self.evolution_promotion_package_executor,
             request_store=self.evolution_revalidation_request_store,
             builder=self.evolution_revalidation_request_builder,
+        )
+        self.evolution_revalidation_replay_store = EvolutionRevalidationReplayStore(
+            config.memory.session_db_path
+        )
+        self.evolution_revalidation_replay_executor = (
+            EvolutionRevalidationReplayExecutor(
+                store=self.evolution_revalidation_replay_store,
+                worktree_storage_dir=self._worktree_storage_dir,
+            )
+        )
+        self.evolution_revalidation_replay_service = EvolutionRevalidationReplayService(
+            request_service=self.evolution_revalidation_request_service,
+            package_input_store=self.evolution_promotion_package_input_store,
+            lease_store=self.evolution_experiment_lease_store,
+            replay_executor=self.evolution_revalidation_replay_executor,
         )
         self.evolution_patch_recovery = EvolutionPatchRecoveryCoordinator(
             journal_store=self.evolution_patch_journal_store,

@@ -3207,6 +3207,10 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
         EvolutionReflectionMemoryError,
         render_evolution_reflection_memory,
     )
+    from naumi_agent.evolution.revalidation_replays import (
+        EvolutionRevalidationReplayError,
+        render_evolution_revalidation_replay,
+    )
     from naumi_agent.evolution.revalidation_requests import (
         EvolutionRevalidationRequestError,
         render_evolution_revalidation_request,
@@ -3516,6 +3520,17 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 )
             console.print(Markdown(render_evolution_revalidation_request(view)))
             return
+        if action == "revalidation-replay":
+            if len(parts) != 2:
+                raise ValueError(
+                    "revalidation-replay 需要一个 Revalidation Request ID。"
+                )
+            receipt = await engine.evolution_revalidation_replay_service.execute(
+                workspace_root=engine.workspace_root,
+                request_id=parts[1],
+            )
+            console.print(Markdown(render_evolution_revalidation_replay(receipt)))
+            return
         service = engine.evolution_review_service
         if action == "detail":
             if len(parts) != 2:
@@ -3725,6 +3740,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "/evolution approval-decision show <approval-decision-id>；"
             "/evolution revalidation-request <approval-decision-id>；"
             "/evolution revalidation-request show <revalidation-request-id>；"
+            "/evolution revalidation-replay <revalidation-request-id>；"
             "/evolution enqueue <candidate-id> --mission <id> --task <id> "
             "[--agent <name>]",
             style="yellow",
@@ -3867,6 +3883,13 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
     except EvolutionRevalidationRequestError as exc:
         console.print(
             f"Evolution Revalidation Request 未签发：{exc}",
+            style="yellow",
+            markup=False,
+        )
+        return
+    except EvolutionRevalidationReplayError as exc:
+        console.print(
+            f"Evolution Revalidation Replay 未完成：{exc}",
             style="yellow",
             markup=False,
         )
