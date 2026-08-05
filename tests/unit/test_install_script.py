@@ -42,11 +42,11 @@ def test_binary_installer_verifies_checksum_before_extracting() -> None:
     script = _unix_script()
 
     download = script.index("curl --fail")
-    checksum = script.index('actual=$(shasum')
+    checksum = script.index("actual=$(shasum")
     extract = script.index('tar -xzf "$tmp/$asset"')
     assert download < checksum < extract
     assert "--proto '=https' --tlsv1.2" in script
-    assert 'SHA-256 校验失败，已拒绝安装' in script
+    assert "SHA-256 校验失败，已拒绝安装" in script
     assert 'tar -tzf "$tmp/$asset"' in script
     assert "安装包含不安全路径" in script
 
@@ -54,12 +54,12 @@ def test_binary_installer_verifies_checksum_before_extracting() -> None:
 def test_binary_installer_keeps_versioned_releases_and_atomic_links() -> None:
     script = _unix_script()
 
-    assert 'mkdir -p "$INSTALL_ROOT/releases"' in script
-    assert 'destination="$INSTALL_ROOT/releases/$(basename "$bundle")"' in script
-    assert 'ln -s "$destination" "$INSTALL_ROOT/current.new"' in script
-    assert 'mv -f "$INSTALL_ROOT/current.new" "$INSTALL_ROOT/current"' in script
-    assert 'rm -f "$INSTALL_ROOT/current.new" "$BIN_DIR/naumi.new"' in script
-    assert '该版本已安装' in script
+    assert 'launchers_dir="$INSTALL_ROOT/launchers"' in script
+    assert '"$launcher" --launcher-self-test' in script
+    assert '"$launcher" --launcher-install "$bundle"' in script
+    assert 'diff -qr "$bundle/launcher" "$launcher_destination"' in script
+    assert 'ln -s "$launcher" "$BIN_DIR/naumi.new"' in script
+    assert "active version slot 已原子切换" in script
 
 
 def test_windows_installer_verifies_sha256_and_uses_binary_zip() -> None:
@@ -80,8 +80,23 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
 ) -> None:
     backend = tmp_path / "backend"
     backend.mkdir()
-    (backend / "naumi").write_bytes(b"backend")
-    (backend / "naumi").chmod(0o755)
+    runtime = backend / "naumi-runtime"
+    runtime.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = '--version' ]; then echo 'naumi 1.2.3'; exit 0; fi\n"
+        "printf 'runtime:'\n"
+        "printf '%s|' \"$@\"\n"
+        "printf '\\n'\n",
+        encoding="utf-8",
+    )
+    runtime.chmod(0o755)
+    launcher = tmp_path / "launcher" / "naumi"
+    launcher.parent.mkdir()
+    launcher.write_text(
+        f'#!/bin/sh\nexec {os.sys.executable} -m naumi_agent.release_launcher_entry "$@"\n',
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
     ui = tmp_path / "naumi-ui"
     ui.write_bytes(b"ui")
     ui.chmod(0o755)
@@ -89,6 +104,7 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     config.write_text("models: {}\n", encoding="utf-8")
     artifact = assemble_release_artifact(
         backend_dir=backend,
+        launcher_dir=launcher.parent,
         ui_binary=ui,
         config_example=config,
         output_dir=tmp_path / "fixture-release",
@@ -112,12 +128,12 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     curl.write_text(
         "#!/bin/sh\n"
         "url=''\nout=''\n"
-        "while [ \"$#\" -gt 0 ]; do\n"
+        'while [ "$#" -gt 0 ]; do\n'
         "  if [ \"$1\" = '--output' ]; then out=$2; shift 2; continue; fi\n"
-        "  case \"$1\" in https://*) url=$1 ;; esac\n"
+        '  case "$1" in https://*) url=$1 ;; esac\n'
         "  shift\n"
         "done\n"
-        "cp \"$FIXTURE_DIR/${url##*/}\" \"$out\"\n",
+        'cp "$FIXTURE_DIR/${url##*/}" "$out"\n',
         encoding="utf-8",
     )
     curl.chmod(0o755)
@@ -136,6 +152,7 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
         "NAUMI_INSTALL_ROOT": str(tmp_path / "install"),
         "NAUMI_BIN_DIR": str(tmp_path / "bin"),
         "HOME": str(tmp_path / "home"),
+        "PYTHONPATH": str(ROOT / "src"),
     }
     first = subprocess.run(
         ["bash", str(ROOT / "scripts" / "install.sh")],
@@ -155,10 +172,20 @@ def test_unix_installer_installs_verified_fixture_and_preserves_it_on_repeat(
     assert first.returncode == 0, first.stderr
     command = tmp_path / "bin" / "naumi"
     assert command.is_symlink()
-    assert command.resolve().read_bytes() == b"backend"
-    assert second.returncode != 0
-    assert "该版本已安装" in second.stderr
-    assert command.resolve().read_bytes() == b"backend"
+    assert command.resolve() == (
+        tmp_path / "install" / "launchers" / "naumi-1.2.3-macos-arm64" / "naumi"
+    )
+    launched = subprocess.run(
+        [str(command), "one", "two words"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert launched.returncode == 0, launched.stderr
+    assert launched.stdout == "runtime:one|two words|\n"
+    assert second.returncode == 0, second.stderr
+    assert len(tuple((tmp_path / "install" / "slots").glob("relslot_*"))) == 1
 
 
 def test_readme_declares_terminal_ui_as_default_entry() -> None:

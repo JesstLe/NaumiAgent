@@ -19,12 +19,8 @@ from typing import Literal
 ArchiveFormat = Literal["tar.gz", "zip"]
 
 _SAFE_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_FORBIDDEN_COMPONENTS = frozenset(
-    {".git", "__pycache__", "docs", "frontend", "src", "tests"}
-)
-_FORBIDDEN_NAMES = frozenset(
-    {"package.json", "pyproject.toml", "manifest.in", "uv.lock"}
-)
+_FORBIDDEN_COMPONENTS = frozenset({".git", "__pycache__", "docs", "frontend", "src", "tests"})
+_FORBIDDEN_NAMES = frozenset({"package.json", "pyproject.toml", "manifest.in", "uv.lock"})
 _FORBIDDEN_SUFFIXES = (
     ".py",
     ".pyc",
@@ -53,6 +49,7 @@ class ReleaseArtifact:
 def assemble_release_artifact(
     *,
     backend_dir: Path,
+    launcher_dir: Path,
     ui_binary: Path,
     config_example: Path,
     output_dir: Path,
@@ -66,23 +63,32 @@ def assemble_release_artifact(
     if archive_format not in {"tar.gz", "zip"}:
         raise ArtifactError("archive_format 仅支持 tar.gz 或 zip。")
     backend_dir = backend_dir.resolve()
+    launcher_dir = launcher_dir.resolve()
     ui_binary = ui_binary.resolve()
     config_example = config_example.resolve()
     if not backend_dir.is_dir():
         raise ArtifactError(f"后端目录不存在：{backend_dir}")
     if not ui_binary.is_file() or ui_binary.stat().st_size <= 0:
         raise ArtifactError(f"Terminal UI 二进制不存在或为空：{ui_binary}")
+    if not launcher_dir.is_dir():
+        raise ArtifactError(f"稳定 Launcher 目录不存在：{launcher_dir}")
     if not config_example.is_file():
         raise ArtifactError(f"示例配置不存在：{config_example}")
     _validate_tree_symlinks(backend_dir)
     _validate_source_free_tree(backend_dir)
 
     windows = target.casefold().startswith("windows-")
-    backend_name = "naumi.exe" if windows else "naumi"
+    backend_name = "naumi-runtime.exe" if windows else "naumi-runtime"
+    launcher_name = "naumi.exe" if windows else "naumi"
     ui_name = "naumi-ui.exe" if windows else "naumi-ui"
     backend_binary = backend_dir / backend_name
     if not backend_binary.is_file() or backend_binary.stat().st_size <= 0:
         raise ArtifactError(f"冻结后端缺少入口：{backend_binary}")
+    launcher_binary = launcher_dir / launcher_name
+    if not launcher_binary.is_file() or launcher_binary.stat().st_size <= 0:
+        raise ArtifactError(f"稳定 Launcher 二进制不存在或为空：{launcher_binary}")
+    _validate_tree_symlinks(launcher_dir)
+    _validate_source_free_tree(launcher_dir)
 
     bundle_name = f"naumi-{version}-{target}"
     archive_name = f"{bundle_name}.{archive_format}"
@@ -91,25 +97,26 @@ def assemble_release_artifact(
     final_archive = output_dir / archive_name
     final_checksum = output_dir / f"{archive_name}.sha256"
 
-    transaction = Path(
-        tempfile.mkdtemp(prefix=f".{bundle_name}.tmp-", dir=output_dir)
-    )
+    transaction = Path(tempfile.mkdtemp(prefix=f".{bundle_name}.tmp-", dir=output_dir))
     staged_bundle = transaction / bundle_name
     staged_archive = transaction / archive_name
     staged_checksum = transaction / final_checksum.name
     try:
         shutil.copytree(backend_dir, staged_bundle, symlinks=True)
-        if (staged_bundle / ui_name).exists():
-            raise ArtifactError(f"后端目录意外占用 UI 入口：{ui_name}")
+        for reserved in ("launcher", ui_name):
+            if (staged_bundle / reserved).exists():
+                raise ArtifactError(f"后端目录意外占用发行入口：{reserved}")
+        shutil.copytree(launcher_dir, staged_bundle / "launcher", symlinks=True)
         shutil.copy2(ui_binary, staged_bundle / ui_name)
         shutil.copy2(config_example, staged_bundle / "config.yaml.example")
         if os.name != "nt":
             (staged_bundle / backend_name).chmod(
                 (staged_bundle / backend_name).stat().st_mode | stat.S_IXUSR
             )
-            (staged_bundle / ui_name).chmod(
-                (staged_bundle / ui_name).stat().st_mode | stat.S_IXUSR
+            (staged_bundle / "launcher" / launcher_name).chmod(
+                (staged_bundle / "launcher" / launcher_name).stat().st_mode | stat.S_IXUSR
             )
+            (staged_bundle / ui_name).chmod((staged_bundle / ui_name).stat().st_mode | stat.S_IXUSR)
         _validate_tree_symlinks(staged_bundle)
         _validate_source_free_tree(staged_bundle)
         manifest_path = staged_bundle / "manifest.json"
@@ -141,9 +148,7 @@ def assemble_release_artifact(
             encoding="utf-8",
         )
         collisions = [
-            path
-            for path in (final_bundle, final_archive, final_checksum)
-            if path.exists()
+            path for path in (final_bundle, final_archive, final_checksum) if path.exists()
         ]
         if collisions:
             raise ArtifactError(
@@ -190,20 +195,24 @@ def _validate_source_free_tree(root: Path) -> None:
             relative = relative_root / name
             lowered_parts = {part.casefold() for part in relative.parts}
             lowered_name = name.casefold()
-            inside_third_party_runtime = (
-                len(relative.parts) >= 2
-                and relative.parts[0].casefold() == "_internal"
-                and relative.parts[1].casefold() != "naumi_agent"
-            )
+            inside_third_party_runtime = _inside_third_party_runtime(relative.parts)
             if (
-                (
-                    lowered_parts & _FORBIDDEN_COMPONENTS
-                    or lowered_name in _FORBIDDEN_NAMES
-                    or lowered_name.endswith(_FORBIDDEN_SUFFIXES)
-                )
-                and not inside_third_party_runtime
-            ):
+                lowered_parts & _FORBIDDEN_COMPONENTS
+                or lowered_name in _FORBIDDEN_NAMES
+                or lowered_name.endswith(_FORBIDDEN_SUFFIXES)
+            ) and not inside_third_party_runtime:
                 raise ArtifactError(f"发行产物检测到源码泄漏：{relative.as_posix()}")
+
+
+def _inside_third_party_runtime(parts: tuple[str, ...]) -> bool:
+    lowered = tuple(part.casefold() for part in parts)
+    if len(lowered) >= 2 and lowered[0] == "_internal":
+        return lowered[1] != "naumi_agent"
+    return bool(
+        len(lowered) >= 3
+        and lowered[:2] == ("launcher", "_internal")
+        and lowered[2] != "naumi_agent"
+    )
 
 
 def _manifest_files(root: Path) -> list[dict[str, object]]:

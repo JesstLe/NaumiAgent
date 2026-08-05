@@ -78,7 +78,7 @@ exe = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="naumi",
+    name="naumi-runtime",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -91,5 +91,5 @@ collection = COLLECT(
     analysis.datas,
     strip=False,
     upx=False,
-    name="naumi",
+    name="naumi-runtime",
 )

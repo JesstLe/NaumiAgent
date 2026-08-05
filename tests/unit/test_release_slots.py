@@ -26,7 +26,8 @@ def _binary(path: Path, content: bytes) -> Path:
 def _bundle(root: Path, *, version: str, output_name: str, reported=None) -> Path:
     target = host_release_target()
     windows = target.startswith("windows-")
-    backend_name = "naumi.exe" if windows else "naumi"
+    backend_name = "naumi-runtime.exe" if windows else "naumi-runtime"
+    launcher_name = "naumi.exe" if windows else "naumi"
     ui_name = "naumi-ui.exe" if windows else "naumi-ui"
     reported = version if reported is None else reported
     backend = root / f"backend-{output_name}"
@@ -37,11 +38,16 @@ def _bundle(root: Path, *, version: str, output_name: str, reported=None) -> Pat
         backend_content = f"#!/bin/sh\necho 'naumi {reported}'\n".encode()
         ui_content = b"#!/bin/sh\nexit 0\n"
     _binary(backend / backend_name, backend_content)
+    launcher = _binary(
+        root / f"launcher-{output_name}" / launcher_name,
+        b"not-a-real-windows-launcher" if windows else b"#!/bin/sh\nexit 0\n",
+    )
     ui = _binary(root / f"ui-{output_name}" / ui_name, ui_content)
     config = root / f"config-{output_name}.yaml.example"
     config.write_text("models: {}\n", encoding="utf-8")
     return assemble_release_artifact(
         backend_dir=backend,
+        launcher_dir=launcher.parent,
         ui_binary=ui,
         config_example=config,
         output_dir=root / output_name,
@@ -79,7 +85,7 @@ def test_install_boot_activate_upgrade_and_atomic_rollback(tmp_path: Path) -> No
     assert rolled_back.previous_slot_id == v2.slot_id
     assert store.active() == rolled_back
     assert Path(v1.bundle_dir).is_dir() and Path(v2.bundle_dir).is_dir()
-    assert not (Path(v1.bundle_dir) / "naumi").stat().st_mode & 0o200
+    assert not (Path(v1.bundle_dir) / "naumi-runtime").stat().st_mode & 0o200
 
 
 def test_install_is_cross_thread_idempotent(tmp_path: Path) -> None:

@@ -3,6 +3,16 @@ Set-StrictMode -Version Latest
 
 function Write-Info([string]$Message) { Write-Host "[naumi] $Message" -ForegroundColor Cyan }
 
+function Get-DirectoryFingerprint([string]$Root) {
+    $Resolved = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')
+    return @(
+        Get-ChildItem -LiteralPath $Resolved -Recurse -File | ForEach-Object {
+            $Relative = $_.FullName.Substring($Resolved.Length).TrimStart('\').Replace('\', '/')
+            "$Relative $((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)"
+        } | Sort-Object
+    ) -join "`n"
+}
+
 $ReleaseRepo = if ($env:NAUMI_RELEASE_REPO) { $env:NAUMI_RELEASE_REPO } else { "JesstLe/NaumiAgent-Releases" }
 $Version = if ($env:NAUMI_VERSION) { $env:NAUMI_VERSION } else { "latest" }
 $InstallRoot = if ($env:NAUMI_INSTALL_ROOT) { $env:NAUMI_INSTALL_ROOT } else { Join-Path $env:LOCALAPPDATA "NaumiAgent" }
@@ -60,23 +70,42 @@ try {
     $Bundles = @(Get-ChildItem -LiteralPath $Extract -Directory | Where-Object { $_.Name -match "^naumi-.+-windows-$Arch$" })
     if ($Bundles.Count -ne 1) { throw "安装包顶层目录不符合发行契约。" }
     $Bundle = $Bundles[0]
-    foreach ($Required in @("manifest.json", "naumi.exe", "naumi-ui.exe")) {
+    foreach ($Required in @("manifest.json", "launcher\naumi.exe", "naumi-runtime.exe", "naumi-ui.exe")) {
         if (-not (Test-Path -LiteralPath (Join-Path $Bundle.FullName $Required) -PathType Leaf)) {
             throw "安装包缺少 $Required。"
         }
     }
 
-    $Releases = Join-Path $InstallRoot "releases"
-    New-Item -ItemType Directory -Force -Path $Releases, $BinDir | Out-Null
-    $Destination = Join-Path $Releases $Bundle.Name
-    if (Test-Path -LiteralPath $Destination) { throw "该版本已安装：$Destination" }
-    $Staged = Join-Path $InstallRoot (".install-" + $Bundle.Name + "-" + $PID)
-    Move-Item -LiteralPath $Bundle.FullName -Destination $Staged
-    Move-Item -LiteralPath $Staged -Destination $Destination
+    $LaunchersDir = Join-Path $InstallRoot "launchers"
+    $LauncherDestination = Join-Path $LaunchersDir $Bundle.Name
+    $Launcher = Join-Path $LauncherDestination "naumi.exe"
+    New-Item -ItemType Directory -Force -Path $LaunchersDir, $BinDir | Out-Null
+    if (Test-Path -LiteralPath $LauncherDestination) {
+        $ExpectedLauncher = Get-DirectoryFingerprint (Join-Path $Bundle.FullName "launcher")
+        $InstalledLauncher = Get-DirectoryFingerprint $LauncherDestination
+        if ($ExpectedLauncher -ne $InstalledLauncher) {
+            throw "同版本 Launcher 内容冲突，拒绝覆盖：$LauncherDestination"
+        }
+    } else {
+        $LauncherStaged = Join-Path $LaunchersDir (".install-" + $Bundle.Name + "-" + $PID)
+        Remove-Item -Recurse -Force $LauncherStaged -ErrorAction SilentlyContinue
+        Copy-Item -Recurse -LiteralPath (Join-Path $Bundle.FullName "launcher") -Destination $LauncherStaged
+        Move-Item -LiteralPath $LauncherStaged -Destination $LauncherDestination
+        Get-ChildItem -LiteralPath $LauncherDestination -Recurse -File | ForEach-Object {
+            $_.IsReadOnly = $true
+        }
+    }
+    & $Launcher --launcher-self-test | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "稳定 Launcher 自检失败，拒绝安装。" }
+    $env:NAUMI_INSTALL_ROOT = $InstallRoot
+    & $Launcher --launcher-install $Bundle.FullName
+    if ($LASTEXITCODE -ne 0) {
+        throw "版本槽安装或激活失败，PATH 仍指向上一稳定 Launcher。"
+    }
 
     $ShimTemp = Join-Path $BinDir "naumi.cmd.new"
     $Shim = Join-Path $BinDir "naumi.cmd"
-    Set-Content -LiteralPath $ShimTemp -Encoding ASCII -Value "@`"$Destination\naumi.exe`" %*"
+    Set-Content -LiteralPath $ShimTemp -Encoding ASCII -Value "@`"$Launcher`" %*"
     Move-Item -Force -LiteralPath $ShimTemp -Destination $Shim
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -85,7 +114,7 @@ try {
         [Environment]::SetEnvironmentVariable("Path", (($PathEntries + $BinDir) -join ';'), "User")
         Write-Warning "$BinDir 已加入用户 PATH；请重新打开终端。"
     }
-    Write-Info "安装完成：$Destination"
+    Write-Info "安装完成：active version slot 已原子切换。"
     Write-Info "运行：naumi"
 } finally {
     Remove-Item -Recurse -Force $Temp -ErrorAction SilentlyContinue
