@@ -26,7 +26,15 @@ def _binary(path: Path, content: bytes) -> Path:
     return path
 
 
-def _bundle(root: Path, *, version: str, output_name: str, reported=None) -> Path:
+def _bundle(
+    root: Path,
+    *,
+    version: str,
+    output_name: str,
+    reported=None,
+    source_commit: str = SOURCE_COMMIT,
+    source_tree_sha256: str = SOURCE_TREE_SHA256,
+) -> Path:
     target = host_release_target()
     windows = target.startswith("windows-")
     backend_name = "naumi-runtime.exe" if windows else "naumi-runtime"
@@ -56,8 +64,8 @@ def _bundle(root: Path, *, version: str, output_name: str, reported=None) -> Pat
         output_dir=root / output_name,
         version=version,
         target=target,
-        source_commit=SOURCE_COMMIT,
-        source_tree_sha256=SOURCE_TREE_SHA256,
+        source_commit=source_commit,
+        source_tree_sha256=source_tree_sha256,
         archive_format="zip" if windows else "tar.gz",
     ).bundle_dir
 

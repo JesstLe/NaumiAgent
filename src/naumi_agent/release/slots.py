@@ -161,6 +161,13 @@ class ResolvedReleaseSlot:
     backend: Path
 
 
+@dataclass(frozen=True)
+class ResolvedBootedReleaseSlot:
+    slot: ReleaseInstalledSlot
+    boot_receipt: ReleaseSlotBootReceipt
+    backend: Path
+
+
 class ReleaseSlotStore:
     def __init__(self, release_root: str | Path) -> None:
         self.release_root = Path(release_root).expanduser().resolve()
@@ -567,6 +574,46 @@ class ReleaseSlotStore:
             ).fetchone()
         return None if row is None else ReleaseInstalledSlot.model_validate_json(row["slot_json"])
 
+    def get_boot_receipt(self, receipt_id: str) -> ReleaseSlotBootReceipt | None:
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            return self._boot_row(db, receipt_id)
+
+    def resolve_booted_slot(
+        self,
+        slot_id: str,
+        boot_receipt_id: str,
+    ) -> ResolvedBootedReleaseSlot:
+        with self._connect() as db:
+            slot = self._slot_row(db, slot_id)
+            boot = self._boot_row(db, boot_receipt_id)
+        if slot is None or boot is None:
+            raise ReleaseSlotError(
+                "release_booted_slot_missing",
+                "版本槽或指定 Boot Receipt 不存在。",
+            )
+        _require_host_target(slot.target)
+        bundle = Path(slot.bundle_dir)
+        _verify_bundle(bundle, expected_manifest_sha256=slot.manifest_sha256)
+        _verify_immutable(bundle)
+        backend = bundle / slot.backend_path
+        if not (
+            boot.slot_id == slot.slot_id
+            and boot.slot_sha256 == slot.slot_sha256
+            and boot.manifest_sha256 == slot.manifest_sha256
+            and boot.binary_sha256 == _sha256_file(backend)
+        ):
+            raise ReleaseSlotError(
+                "release_booted_slot_receipt_stale",
+                "Boot Receipt 与当前版本槽 runtime bytes 不匹配。",
+            )
+        return ResolvedBootedReleaseSlot(
+            slot=slot,
+            boot_receipt=boot,
+            backend=backend,
+        )
+
     def _require_slot(self, slot_id: str) -> ReleaseInstalledSlot:
         slot = self.get_slot(slot_id)
         if slot is None:
@@ -949,6 +996,7 @@ __all__ = [
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
+    "ResolvedBootedReleaseSlot",
     "ResolvedReleaseSlot",
     "host_release_target",
 ]

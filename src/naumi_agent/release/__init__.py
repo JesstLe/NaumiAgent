@@ -15,6 +15,7 @@ from naumi_agent.release.slots import (
     ReleaseSlotBootReceipt,
     ReleaseSlotError,
     ReleaseSlotStore,
+    ResolvedBootedReleaseSlot,
     host_release_target,
 )
 
@@ -29,6 +30,7 @@ __all__ = [
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
+    "ResolvedBootedReleaseSlot",
     "default_release_root",
     "host_release_target",
     "resolve_launch",

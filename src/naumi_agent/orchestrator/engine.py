@@ -246,6 +246,10 @@ from naumi_agent.evolution.revalidation_approval_signatures import (
     EvolutionRevalidationApprovalSignatureService,
     EvolutionRevalidationApprovalSignatureStore,
 )
+from naumi_agent.evolution.revalidation_candidate_bundle_admissions import (
+    EvolutionRevalidationCandidateBundleAdmissionService,
+    EvolutionRevalidationCandidateBundleAdmissionStore,
+)
 from naumi_agent.evolution.revalidation_evaluation_plans import (
     EvolutionRevalidationEvaluationPlanService,
     EvolutionRevalidationEvaluationPlanStore,
@@ -480,6 +484,7 @@ from naumi_agent.orchestrator.tool_batches import (
     build_tool_batches,
     execute_tool_batch,
 )
+from naumi_agent.release import ReleaseSlotStore, default_release_root
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
@@ -2265,6 +2270,25 @@ class AgentEngine:
                 interaction_store=self._harness_store,
                 store=self.evolution_revalidation_rollout_stage_advance_store,
                 request_user_input=self.request_user_input,
+            )
+        )
+        self.evolution_revalidation_candidate_bundle_admission_store = (
+            EvolutionRevalidationCandidateBundleAdmissionStore(
+                config.memory.session_db_path
+            )
+        )
+        self.evolution_release_slot_store = ReleaseSlotStore(default_release_root())
+        self.evolution_revalidation_candidate_bundle_admission_service = (
+            EvolutionRevalidationCandidateBundleAdmissionService(
+                workspace_root=paths.workspace_root,
+                stage_advance_service=(
+                    self.evolution_revalidation_rollout_stage_advance_service
+                ),
+                plan_service=self.evolution_revalidation_rollout_plan_service,
+                release_slot_store=self.evolution_release_slot_store,
+                store=(
+                    self.evolution_revalidation_candidate_bundle_admission_store
+                ),
             )
         )
         self.evolution_revalidation_rollback_request_store = (
