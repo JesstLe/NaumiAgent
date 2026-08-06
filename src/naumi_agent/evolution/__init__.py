@@ -493,6 +493,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationApprovalSignatureStatus,
         EvolutionRevalidationApprovalSignatureStore,
     )
+    from naumi_agent.evolution.revalidation_candidate_bundle_admissions import (
+        EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY,
+        EvolutionRevalidationCandidateBundleAdmission,
+        EvolutionRevalidationCandidateBundleAdmissionError,
+        EvolutionRevalidationCandidateBundleAdmissionService,
+        EvolutionRevalidationCandidateBundleAdmissionStore,
+        EvolutionRevalidationCandidateBundleAdmissionView,
+    )
     from naumi_agent.evolution.revalidation_evaluation_plans import (
         EVOLUTION_REVALIDATION_EVALUATION_PLAN_POLICY,
         EvolutionRevalidationEvaluationLane,
@@ -1050,6 +1058,12 @@ __all__ = [
     "EvolutionRevalidationRolloutStageAdvanceService",
     "EvolutionRevalidationRolloutStageAdvanceStore",
     "EvolutionRevalidationRolloutStageAdvanceView",
+    "EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY",
+    "EvolutionRevalidationCandidateBundleAdmission",
+    "EvolutionRevalidationCandidateBundleAdmissionError",
+    "EvolutionRevalidationCandidateBundleAdmissionService",
+    "EvolutionRevalidationCandidateBundleAdmissionStore",
+    "EvolutionRevalidationCandidateBundleAdmissionView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1934,6 +1948,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationApprovalSignatureStatus",
         "EvolutionRevalidationApprovalSignatureStore",
     }
+    revalidation_candidate_bundle_admission_exports = {
+        "EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY",
+        "EvolutionRevalidationCandidateBundleAdmission",
+        "EvolutionRevalidationCandidateBundleAdmissionError",
+        "EvolutionRevalidationCandidateBundleAdmissionService",
+        "EvolutionRevalidationCandidateBundleAdmissionStore",
+        "EvolutionRevalidationCandidateBundleAdmissionView",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -2480,6 +2502,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_approval_decisions"
     elif name in revalidation_approval_signature_exports:
         module_name = "revalidation_approval_signatures"
+    elif name in revalidation_candidate_bundle_admission_exports:
+        module_name = "revalidation_candidate_bundle_admissions"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
