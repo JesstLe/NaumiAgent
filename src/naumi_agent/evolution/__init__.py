@@ -664,6 +664,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationPercentageCohortAssignmentStore,
         EvolutionRevalidationPercentageCohortAssignmentView,
     )
+    from naumi_agent.evolution.revalidation_percentage_deployment_intents import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_INTENT_POLICY,
+        EvolutionRevalidationPercentageDeploymentIntent,
+        EvolutionRevalidationPercentageDeploymentIntentError,
+        EvolutionRevalidationPercentageDeploymentIntentService,
+        EvolutionRevalidationPercentageDeploymentIntentStore,
+        EvolutionRevalidationPercentageDeploymentIntentView,
+    )
     from naumi_agent.evolution.revalidation_platform_claims import (
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN,
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY,
@@ -1208,6 +1216,12 @@ __all__ = [
     "EvolutionRevalidationPercentageCohortAssignmentService",
     "EvolutionRevalidationPercentageCohortAssignmentStore",
     "EvolutionRevalidationPercentageCohortAssignmentView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_INTENT_POLICY",
+    "EvolutionRevalidationPercentageDeploymentIntent",
+    "EvolutionRevalidationPercentageDeploymentIntentError",
+    "EvolutionRevalidationPercentageDeploymentIntentService",
+    "EvolutionRevalidationPercentageDeploymentIntentStore",
+    "EvolutionRevalidationPercentageDeploymentIntentView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -2160,6 +2174,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageCohortAssignmentStore",
         "EvolutionRevalidationPercentageCohortAssignmentView",
     }
+    revalidation_percentage_deployment_intent_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_INTENT_POLICY",
+        "EvolutionRevalidationPercentageDeploymentIntent",
+        "EvolutionRevalidationPercentageDeploymentIntentError",
+        "EvolutionRevalidationPercentageDeploymentIntentService",
+        "EvolutionRevalidationPercentageDeploymentIntentStore",
+        "EvolutionRevalidationPercentageDeploymentIntentView",
+    }
     revalidation_opt_in_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationOptInObservationAssessmentError",
@@ -2744,6 +2766,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_stage_completions"
     elif name in revalidation_percentage_cohort_assignment_exports:
         module_name = "revalidation_percentage_cohort_assignments"
+    elif name in revalidation_percentage_deployment_intent_exports:
+        module_name = "revalidation_percentage_deployment_intents"
     elif name in revalidation_opt_in_observation_assessment_exports:
         module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:

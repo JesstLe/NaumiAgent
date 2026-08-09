@@ -73,8 +73,8 @@ installed slot。若进程在 slot install 后、Receipt 写入前崩溃，重�
 
 ## 当前边界与下一步
 
-Admission 已产生 exact current inactive candidate slot，但没有 installation-specific population selection binding、durable user intent、
-bootability、activation CAS 或 exposure evidence。下一最小切片回到 `EVO-05.5f5b Percentage Deployment Intent`：它必须组合
-current percentage Assignment、current Archive Admission、managed installation credential/target 与当时的 previous pointer CAS，
-只签发一次短期 intent。Intent 仍不能被解释为 activation 或 rollout；后续 executor 必须 boot candidate、原子切换并形成独立
-Deployment Receipt。
+Admission 已产生 exact current inactive candidate slot，但没有 installation-specific population selection binding、bootability、
+activation CAS 或 exposure evidence。[EVO-05.5f5b](../self-evolution/EVO-05-5f5b-percentage-deployment-intent.md) 已组合 current
+percentage Assignment、current Archive Admission、managed installation Credential、本机 target 与当时的 previous pointer CAS，
+只签发一次 5 分钟控制面 Intent。Intent 仍不能被解释为 activation 或 rollout；下一最小切片必须先 boot candidate 并形成
+独立 Prepared Receipt，之后才能进入 CAS activation/reconciliation。
