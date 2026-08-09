@@ -103,6 +103,10 @@ def test_install_boot_activate_upgrade_and_atomic_rollback(tmp_path: Path) -> No
     assert rolled_back.current_slot_id == v1.slot_id
     assert rolled_back.previous_slot_id == v2.slot_id
     assert store.active() == rolled_back
+    assert store.get_activation_event(1) == active1
+    assert store.get_activation_event(2) == active2
+    assert store.get_activation_event(3) == rolled_back
+    assert store.get_activation_event(4) is None
     assert Path(v1.bundle_dir).is_dir() and Path(v2.bundle_dir).is_dir()
     assert not (Path(v1.bundle_dir) / "naumi-runtime").stat().st_mode & 0o200
 
@@ -231,6 +235,6 @@ def test_active_pointer_rejects_deleted_intermediate_generation(tmp_path: Path) 
         db.execute("DELETE FROM release_active_events WHERE generation = 1")
 
     with pytest.raises(ReleaseSlotError) as blocked:
-        store.active()
+        store.get_activation_event(2)
 
     assert blocked.value.code == "release_active_chain_broken"

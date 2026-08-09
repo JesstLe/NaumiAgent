@@ -35,6 +35,8 @@ Active Pointer 和 append-only event 在同一 SQLite FULL-synchronous 事务中
 
 - generation 连续增长并链接 previous pointer digest；
 - 每次读取和切换都重放完整 `1..N` event chain，并要求 singleton pointer 等于 history tail；
+- `get_activation_event(generation)` 只在完整重放并验证 event chain 后返回指定 immutable generation，
+  供部署/回滚崩溃对账读取已经不再是 tail 的历史切换；
 - activation 前重新验证目标 slot、Boot Receipt 的 binary digest，以及当前旧 slot 仍存在且不可写；
 - rollback 只能选择 current pointer 的 exact previous slot，并用 expected pointer digest 防止并发误回滚；
 - 切换永不删除旧 slot，因此进程崩溃时数据库只会呈现完整旧 generation 或完整新 generation。
@@ -46,6 +48,7 @@ SQLite pointer 是权威，避免 Windows 不可靠 symlink/junction 语义；
 
 - POSIX 真实脚本完成 install → boot → activate v1 → activate v2 → rollback v1；
 - 两个 slot 均保留，generation 为 1/2/3，rollback previous 指向 v2；
+- 完整链验证后可精确读取 generation 1/2/3，越过 tail 返回 missing，链中缺口失败关闭；
 - 八线程并发安装同一 bundle 只形成一个 slot；
 - 未 boot、版本输出不匹配、文件篡改、源码泄漏全部失败关闭；
 - target 由 macOS/Linux/Windows 与 arm64/x64 机械映射；
