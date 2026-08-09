@@ -23,9 +23,18 @@ from naumi_agent.harness.heartbeat_runtime import (
     RuntimeHeartbeatProducer,
 )
 from naumi_agent.harness.run_lease import HarnessRunKind
+from naumi_agent.harness.runtime_release_binding import (
+    HarnessRuntimeReleaseBinding,
+    build_runtime_release_binding,
+)
 from naumi_agent.harness.store import HarnessStore
+from naumi_agent.release.runtime_identity import (
+    ReleaseRuntimeIdentity,
+    ReleaseRuntimeIdentityError,
+)
 
 TerminalSurface = Literal["new_ui", "tui"]
+RuntimeIdentityProvider = Callable[[], ReleaseRuntimeIdentity | None]
 
 
 class TerminalRuntimeState(StrEnum):
@@ -46,6 +55,10 @@ class TerminalRuntimeSnapshot:
     heartbeat_failure_code: str
     retention: RuntimeHeartbeatRetentionSnapshot | None
     last_error_code: str
+    managed_release: bool
+    release_binding_id: str
+    release_identity_id: str
+    release_binding_error_code: str
 
 
 class TerminalRuntimeLifecycle:
@@ -57,11 +70,17 @@ class TerminalRuntimeLifecycle:
         surface: TerminalSurface,
         producer: RuntimeHeartbeatProducer,
         retention: RuntimeHeartbeatRetentionService | None,
+        runtime_identity_provider: RuntimeIdentityProvider | None = None,
+        binding_now_provider: Callable[[], str] = lambda: datetime.now(UTC).isoformat(),
     ) -> None:
         self.surface = surface
         self.subject_id = producer.subject_id
         self._producer = producer
         self._retention = retention
+        self._runtime_identity_provider = runtime_identity_provider
+        self._binding_now = binding_now_provider
+        self._release_binding: HarnessRuntimeReleaseBinding | None = None
+        self._release_binding_error_code = ""
         self._state = TerminalRuntimeState.CREATED
         self._last_error_code = ""
         self._terminal_closed = False
@@ -72,8 +91,9 @@ class TerminalRuntimeLifecycle:
             if self._state is not TerminalRuntimeState.CREATED:
                 return False
             self._state = TerminalRuntimeState.STARTING
+            startup_binding = self._resolve_release_binding()
             try:
-                await self._producer.start()
+                await self._producer.start(startup_binding=startup_binding)
             except Exception:
                 self._state = TerminalRuntimeState.FAILED
                 self._last_error_code = "heartbeat_start_failed"
@@ -145,7 +165,43 @@ class TerminalRuntimeLifecycle:
                 else None
             ),
             last_error_code=self._last_error_code,
+            managed_release=self._release_binding is not None,
+            release_binding_id=(
+                "" if self._release_binding is None else self._release_binding.binding_id
+            ),
+            release_identity_id=(
+                ""
+                if self._release_binding is None
+                else self._release_binding.runtime_identity.identity_id
+            ),
+            release_binding_error_code=self._release_binding_error_code,
         )
+
+    def _resolve_release_binding(self) -> HarnessRuntimeReleaseBinding | None:
+        provider = self._runtime_identity_provider
+        if provider is None:
+            return None
+        try:
+            identity = provider()
+            if identity is None:
+                return None
+            binding = build_runtime_release_binding(
+                workspace_root=self._producer.workspace_root,
+                surface=self.surface,
+                subject_id=self._producer.subject_id,
+                instance_id=self._producer.instance_id,
+                epoch=self._producer.epoch,
+                runtime_identity=identity,
+                bound_at=self._binding_now(),
+            )
+        except ReleaseRuntimeIdentityError as exc:
+            self._release_binding_error_code = exc.code
+            return None
+        except (OSError, TypeError, ValueError):
+            self._release_binding_error_code = "runtime_release_binding_invalid"
+            return None
+        self._release_binding = binding
+        return binding
 
     async def _stop_retention(self) -> None:
         if self._retention is None:
@@ -168,6 +224,7 @@ class TerminalRuntimeLifecycleFactory:
         heartbeat_interval_seconds: float = 10.0,
         heartbeat_timeout_seconds: int = 30,
         now_provider: Callable[[], str] = lambda: datetime.now(UTC).isoformat(),
+        runtime_identity_provider: RuntimeIdentityProvider | None = None,
     ) -> None:
         if not isinstance(store, HarnessStore):
             raise TypeError("store 必须是 HarnessStore。")
@@ -181,6 +238,7 @@ class TerminalRuntimeLifecycleFactory:
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
         self._now = now_provider
+        self._runtime_identity_provider = runtime_identity_provider
 
     def create(
         self,
@@ -227,6 +285,8 @@ class TerminalRuntimeLifecycleFactory:
             surface=surface,
             producer=producer,
             retention=retention,
+            runtime_identity_provider=self._runtime_identity_provider,
+            binding_now_provider=self._now,
         )
 
 
@@ -236,4 +296,5 @@ __all__ = [
     "TerminalRuntimeSnapshot",
     "TerminalRuntimeState",
     "TerminalSurface",
+    "RuntimeIdentityProvider",
 ]

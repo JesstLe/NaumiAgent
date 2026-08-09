@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,6 +31,7 @@ from naumi_agent.model.catalog import load_provider_catalog
 from naumi_agent.model.router import ModelRouter
 from naumi_agent.orchestrator.goal_store import GoalStore
 from naumi_agent.orchestrator.pursuit_store import PursuitStore
+from naumi_agent.release.runtime_identity import discover_runtime_identity
 from naumi_agent.runs.store import ChatRunStore
 from naumi_agent.runtime.agent_heartbeat import AgentExecutionHeartbeatFactory
 from naumi_agent.runtime.browser_heartbeat import BrowserExecutionHeartbeatFactory
@@ -278,6 +281,10 @@ def build_runtime_services(
             store=resources.harness_store,
             workspace_root=paths.workspace_root,
             retention_config=config.harness.runtime_heartbeat_retention,
+            runtime_identity_provider=lambda: discover_runtime_identity(
+                environment=os.environ,
+                runtime_path=sys.executable,
+            ),
         )
     agent_factory = resolved.agent_execution_heartbeat_factory
     if agent_factory is not None and not isinstance(

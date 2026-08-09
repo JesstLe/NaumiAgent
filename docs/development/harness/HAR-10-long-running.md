@@ -36,9 +36,12 @@
     双端可见降级；见 [设计](HAR-10-2g-agent-execution-heartbeat.md)。
   - HAR-10.2h 已实现：浏览器 run 的稳定脱敏 subject、并发隔离、持续 waiting pulse、resume/terminal、重启
     interrupted epoch 和 Task Panel 双端可见降级；见 [设计](HAR-10-2h-browser-execution-heartbeat.md)。
+  - HAR-10.2i 已实现：ARC-07.5e managed terminal identity 与 runtime heartbeat subject/instance/epoch 的原子
+    startup binding，New UI/TUI 复用同一 factory，retention 同事务清理 binding；见
+    [设计](HAR-10-2i-runtime-release-identity-binding.md)。
   - UI-13.1c 已实现：New UI Doctor 展示真实 retention 调度状态，TUI fallback 明确显示不可观测边界；见
     [设计](../cli-ui/UI-13-1c-runtime-heartbeat-retention-health.md)。
-  - 未完成：retention 历史详情与控制动作、heartbeat 历史统计、跨 kind 批量查询与
+  - 未完成：release-bound append-only observation history/window、retention 历史详情与控制动作、heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见
