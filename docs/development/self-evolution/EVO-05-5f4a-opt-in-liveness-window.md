@@ -56,8 +56,8 @@ Builder 重新验证全部输入 artifact，并要求：
 - 样本链跳号/摘要断裂、错误 binding 组合和 completed-run authority 篡改均被拒绝；
 - 公共 lazy export、ruff 与真实小模块测试通过；未运行全量测试。
 
-## 当前边界与下一步
+## 后续交付
 
-EVO-05.5f4b 必须把本合同接入 durable Store/Service：从 HAR ledger 有界分页取证，重验 current Deployment/Health、处理
-并发 assessment，并在 inspect 时检测 receipt 后新增 gap/failure/control/pointer 漂移。其后还需要 release-bound 的真实用户
+[EVO-05.5f4b](EVO-05-5f4b-durable-opt-in-liveness-assessment.md) 已把本合同接入 durable Store/Service，完成 HAR ledger
+有界分页、并发收敛以及 receipt 后新增 gap/failure/control/pointer 漂移的动态失效。下一步仍需 release-bound 的真实用户
 execution outcome ledger，才能满足 `minimum_completed_runs` 并形成独立 opt-in Stage Completion Evidence。

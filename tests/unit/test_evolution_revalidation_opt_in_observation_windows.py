@@ -107,13 +107,22 @@ async def _record_chain(
                 else "runtime_terminal"
             ),
         )
-    page = await store.list_runtime_release_observations(
-        workspace_root=workspace_root,
-        subject_id=subject_id,
-        limit=500,
-    )
-    assert page is not None and not page.has_more
-    return binding, page.items
+    items = []
+    after_sequence = 0
+    while True:
+        page = await store.list_runtime_release_observations(
+            workspace_root=workspace_root,
+            subject_id=subject_id,
+            after_sequence=after_sequence,
+            limit=500,
+        )
+        assert page is not None
+        items.extend(page.items)
+        if not page.has_more:
+            break
+        assert page.items and page.next_sequence > after_sequence
+        after_sequence = page.next_sequence
+    return binding, tuple(items)
 
 
 @pytest.mark.asyncio

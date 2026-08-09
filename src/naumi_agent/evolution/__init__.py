@@ -589,6 +589,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInDeploymentStore,
         EvolutionRevalidationOptInDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_observation_window_assessments import (
+        EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY,
+        EvolutionRevalidationOptInObservationAssessmentError,
+        EvolutionRevalidationOptInObservationWindowService,
+        EvolutionRevalidationOptInObservationWindowStore,
+        EvolutionRevalidationOptInObservationWindowView,
+    )
     from naumi_agent.evolution.revalidation_opt_in_observation_windows import (
         EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY,
         EvolutionRevalidationOptInObservationWindow,
@@ -1111,6 +1118,11 @@ __all__ = [
     "EvolutionRevalidationOptInDeploymentService",
     "EvolutionRevalidationOptInDeploymentStore",
     "EvolutionRevalidationOptInDeploymentView",
+    "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
+    "EvolutionRevalidationOptInObservationAssessmentError",
+    "EvolutionRevalidationOptInObservationWindowService",
+    "EvolutionRevalidationOptInObservationWindowStore",
+    "EvolutionRevalidationOptInObservationWindowView",
     "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY",
     "EvolutionRevalidationOptInObservationWindow",
     "EvolutionRevalidationOptInObservationWindowError",
@@ -2032,6 +2044,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInDeploymentStore",
         "EvolutionRevalidationOptInDeploymentView",
     }
+    revalidation_opt_in_observation_assessment_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
+        "EvolutionRevalidationOptInObservationAssessmentError",
+        "EvolutionRevalidationOptInObservationWindowService",
+        "EvolutionRevalidationOptInObservationWindowStore",
+        "EvolutionRevalidationOptInObservationWindowView",
+    }
     revalidation_opt_in_observation_window_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY",
         "EvolutionRevalidationOptInObservationWindow",
@@ -2599,6 +2618,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_deployment_intents"
     elif name in revalidation_opt_in_deployment_exports:
         module_name = "revalidation_opt_in_deployments"
+    elif name in revalidation_opt_in_observation_assessment_exports:
+        module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:
         module_name = "revalidation_opt_in_observation_windows"
     elif name in revalidation_opt_in_runtime_health_exports:
