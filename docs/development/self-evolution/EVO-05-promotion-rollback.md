@@ -130,6 +130,8 @@
   动态聚合 current Outcome、passing liveness、GREEN Baseline 与 opt-in guardrails，形成独立 Stage Completion Evidence；
 - [EVO-05.5f4e Opt-in Stage Advance Authorization](EVO-05-5f4e-opt-in-stage-advance-authorization.md)：已交付；
   通过 exact Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；
+- [EVO-05.5f5a Percentage Cohort Assignment](EVO-05-5f5a-percentage-cohort-assignment.md)：已交付；
+  消费 signed population 与 installation proof-of-possession，确定性冻结 exact limited cohort；不执行部署或流量扩大；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

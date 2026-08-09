@@ -162,9 +162,12 @@ coverage，形成 release-bound Execution Outcome；[EVO-05.5f4d](EVO-05-5f4d-op
 current Outcome authority、passing liveness、GREEN Baseline 与冻结 guardrails 聚合独立 opt-in Stage Completion Evidence，
 并对不可比较的零成本基线 fail closed。[EVO-05.5f4e](EVO-05-5f4e-opt-in-stage-advance-authorization.md) 已进一步通过
 current Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；它不冒充
-percentage population assignment、deployment 或真实流量扩大。下一步是 deterministic percentage cohort assignment。
+percentage population assignment、deployment 或真实流量扩大。
 [ARC-07.5c](../architecture/ARC-07-5c-signed-installation-population.md) 已补齐独立 Registry trust、隐私化安装凭证和完整
-hash-chained population snapshot，使下一步分桶拥有不可由本地客户端编造的 denominator；远端 Registry 服务仍是明确外部边界。
+hash-chained population snapshot，使分桶拥有不可由本地客户端编造的 denominator；远端 Registry 服务仍是明确外部边界。
+[EVO-05.5f5a](EVO-05-5f5a-percentage-cohort-assignment.md) 已将 current Stage Entry、Snapshot、Credential 与安装
+proof-of-possession 组合为稳定 ranked cohort，精确冻结 denominator、target count、selected set 和 member rank；Snapshot、Plan
+或 trust 更新会动态撤权。它仍不下载、激活或扩大真实流量，下一步是核对 ARC-07 distribution port 后签发 percentage Deployment Intent。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
