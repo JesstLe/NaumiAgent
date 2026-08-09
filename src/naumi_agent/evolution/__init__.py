@@ -624,6 +624,15 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInRuntimeHealthStore,
         EvolutionRevalidationOptInRuntimeHealthView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_stage_completions import (
+        EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY,
+        EvolutionRevalidationOptInStageCompletion,
+        EvolutionRevalidationOptInStageCompletionError,
+        EvolutionRevalidationOptInStageCompletionService,
+        EvolutionRevalidationOptInStageCompletionStatus,
+        EvolutionRevalidationOptInStageCompletionStore,
+        EvolutionRevalidationOptInStageCompletionView,
+    )
     from naumi_agent.evolution.revalidation_outcomes import (
         EVOLUTION_REVALIDATION_OUTCOME_POLICY,
         EvolutionInvalidatedAuthority,
@@ -1156,6 +1165,13 @@ __all__ = [
     "EvolutionRevalidationOptInRuntimeHealthService",
     "EvolutionRevalidationOptInRuntimeHealthStore",
     "EvolutionRevalidationOptInRuntimeHealthView",
+    "EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY",
+    "EvolutionRevalidationOptInStageCompletion",
+    "EvolutionRevalidationOptInStageCompletionError",
+    "EvolutionRevalidationOptInStageCompletionService",
+    "EvolutionRevalidationOptInStageCompletionStatus",
+    "EvolutionRevalidationOptInStageCompletionStore",
+    "EvolutionRevalidationOptInStageCompletionView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -2079,6 +2095,15 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInLivenessSourceRef",
         "build_opt_in_execution_outcome",
     }
+    revalidation_opt_in_stage_completion_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY",
+        "EvolutionRevalidationOptInStageCompletion",
+        "EvolutionRevalidationOptInStageCompletionError",
+        "EvolutionRevalidationOptInStageCompletionService",
+        "EvolutionRevalidationOptInStageCompletionStatus",
+        "EvolutionRevalidationOptInStageCompletionStore",
+        "EvolutionRevalidationOptInStageCompletionView",
+    }
     revalidation_opt_in_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationOptInObservationAssessmentError",
@@ -2657,6 +2682,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_execution_outcome_ledger"
     elif name in revalidation_opt_in_execution_outcome_exports:
         module_name = "revalidation_opt_in_execution_outcomes"
+    elif name in revalidation_opt_in_stage_completion_exports:
+        module_name = "revalidation_opt_in_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:
         module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:
