@@ -125,8 +125,9 @@
   持久化 Window Receipt，以 HAR 有界分页重建 current assessment，并动态响应新增 failure 与 Deployment/pointer 漂移；
   不把 liveness 冒充用户任务成功。
 - [EVO-05.5f4c Release-bound Execution Outcome Ledger](EVO-05-5f4c-release-bound-execution-outcome-ledger.md)：已交付；
-  把 exact release provenance、真实终态回执、单次运行用量和完整 heartbeat 区间冻结为不可变 Outcome；仍不聚合
-  `minimum_completed_runs` 或完成 opt-in stage。
+  把 managed terminal run 的 release provenance、Completion Receipt、Run Usage 与 heartbeat coverage 冻结为 Outcome；
+- [EVO-05.5f4d Opt-in Completed-run Aggregation](EVO-05-5f4d-opt-in-completed-run-aggregation.md)：已交付；
+  动态聚合 current Outcome、passing liveness、GREEN Baseline 与 opt-in guardrails，形成独立 Stage Completion Evidence；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

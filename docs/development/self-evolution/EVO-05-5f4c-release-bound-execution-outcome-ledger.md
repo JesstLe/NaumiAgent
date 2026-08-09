@@ -61,8 +61,7 @@
 
 ## 当前边界与下一步
 
-EVO-05.5f4c 只建立“一次真实运行”的历史事实，不聚合 Stage Completion。下一最小切片应实现
-`EVO-05.5f4d Opt-in Completed-run Aggregation`：对同一 completion 的不同 `run_id` 逐条动态 inspect，只统计当前仍具备
-`successful_completed_run_authority` 的 Outcome，并与当前 passing liveness、冻结的 `minimum_completed_runs`、错误率、完成率、
-延迟和 reported cost 门槛共同形成独立 Stage Completion Evidence。该聚合完成前，不向 `/evolution`、New UI/TUI 或自动
-advance 暴露“Opt-in 已完成”。
+EVO-05.5f4c 只建立“一次真实运行”的历史事实。[EVO-05.5f4d](EVO-05-5f4d-opt-in-completed-run-aggregation.md)
+已对同一 completion 的不同 `run_id` 逐条动态 inspect，并把 current passing liveness、GREEN Baseline、冻结阈值与
+current Outcome 集合聚合为独立 Stage Completion Evidence。下一步仍需 exact `opt_in → percentage` Advance
+Authorization；在该 authority 完成前，不向 `/evolution`、New UI/TUI 或自动调度暴露可执行的“进入 percentage”状态。
