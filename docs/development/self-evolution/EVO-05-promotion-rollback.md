@@ -112,8 +112,9 @@
 - [EVO-05.5f1 Local Opt-in Deployment Intent](EVO-05-5f1-opt-in-deployment-intent.md)：已交付；通过 HAR durable
   interaction 登记当前本机安装的显式 opt-in，冻结 exact previous-pointer CAS 与 candidate slot/boot/trust 绑定；
   不执行 pointer switch，不把本机 enrollment 虚报成全局 1% rollout。
-- EVO-05.5f2 Opt-in Activation and Reconciliation：消费 current Intent，执行 ARC-07 pointer CAS，重读 active chain，
-  并在切换后崩溃场景按 generation 机械补写 Deployment Receipt。
+- [EVO-05.5f2 Opt-in Activation and Reconciliation](EVO-05-5f2-opt-in-activation-reconciliation.md)：已交付；
+  把 exact Intent authority 纳入 ARC-07 v2 pointer digest，执行 expected-pointer CAS，并在 Receipt 落盘前崩溃、
+  甚至后续 rollback 后按历史 generation 机械补写；仍不启动进程或开放全局 percentage rollout。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
@@ -138,6 +139,7 @@ Harness revalidation、旧证据失效、Fresh Interventional/Adversarial compar
 Authority、版本化 Fresh Promotion Input、新 Approval Requirement/Response、专业 Ed25519 签名和 Fresh Decision。平台 lane
 现可形成 exact Worker/capacity 绑定的 queued Dispatch，由持有 attested Ed25519 私钥的 Worker 领取，并从父权限派生短期远端执行授权；
 已实现签名 result manifest、本地 H5a/pair prefix 摄取、remote cohort/Matrix 收口、immutable rollout plan、fenced local-canary entry、
-真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Deployment Intent 与 automatic
-pause/rollback request，但尚未实现 opt-in pointer activation/reconcile、version-slot rollback executor 或最终 Outcome 回注。
-任何界面和回执都不得把 Deployment Intent 宣称为已部署，也不得把 rollback source 冻结宣称为已回滚。
+真实 local-canary executor、可信 monitor baseline、runtime observation、显式本机 opt-in Intent、authority-bound pointer
+activation/crash reconcile 与 automatic pause/rollback request，但尚未实现 opt-in runtime health/completion、全局 percentage
+assignment、version-slot rollback executor 或最终 Outcome 回注。任何界面不得把单机 opt-in 宣称为全局 1% rollout，
+也不得把 rollback source 冻结宣称为已回滚。

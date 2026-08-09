@@ -76,7 +76,7 @@ Store 不信任 Service 构造的对象：它独立重读 authoritative Harness 
 
 ## 下一切片
 
-EVO-05.5f2 Opt-in Activation and Reconciliation 必须只消费 current 5f1 Intent：
+[EVO-05.5f2](EVO-05-5f2-opt-in-activation-reconciliation.md) 已只消费 current 5f1 Intent：
 
 1. 最后一次重验 trust、slot、boot、interaction、control 与 expiry；
 2. 用 `expected_previous_pointer_sha256` 调用 ARC-07 atomic CAS activation；
@@ -84,3 +84,6 @@ EVO-05.5f2 Opt-in Activation and Reconciliation 必须只消费 current 5f1 Inte
 4. append-only 写入 Deployment Receipt；
 5. 若 pointer 已切换但 Receipt 未落盘，按 generation 与 target slot 机械补写；
 6. 若 pointer 未切换则安全重试；若 pointer 指向其他目标则冲突失败，绝不重复切换或虚报部署。
+
+5f2 额外把 exact Intent authority 纳入 v2 pointer event digest，避免未授权的同 slot activation 被 reconcile
+错误认领。后续进入 opt-in runtime observation 前，仍需保持 population/percentage/stable authority 关闭。
