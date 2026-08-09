@@ -105,7 +105,7 @@ deployment 已发生。以下字段始终为 false：
 
 ## 当前边界与下一步
 
-5f5b 已补齐 selected managed installation 的短期控制面 Intent，但 candidate 尚未证明能在该主机启动。下一最小切片为
-`EVO-05.5f5c Percentage Boot Preparation`：它只能消费 current 5f5b Intent，执行 exact candidate `--version` boot probe，
-并冻结独立 Prepared Receipt。5f5c 仍不得切换 pointer；后续 CAS activation/reconciliation 必须再次重验 Intent、Prepared
-Receipt 与 expected previous pointer，成功后才形成 Deployment Receipt 和真实 exposure evidence。
+5f5b 已补齐 selected managed installation 的短期控制面 Intent。[EVO-05.5f5c](EVO-05-5f5c-percentage-boot-preparation.md)
+已通过跨进程 claim/lease 对 exact candidate 执行真实 `--version` probe，并冻结独立 Prepared Receipt；它仍未切换 pointer。
+下一最小切片为 `EVO-05.5f5d Percentage Activation Reconciliation`，必须再次重验 Intent、Prepared Receipt 与 expected
+previous pointer，成功后才形成 Deployment Receipt，且不能把本机切换虚报成完整 percentage exposure。

@@ -135,6 +135,8 @@
 - [EVO-05.5f5b Percentage Deployment Intent](EVO-05-5f5b-percentage-deployment-intent.md)：已交付；
   将 selected Assignment、verified inactive slot、Credential/host target 与 previous pointer CAS 冻结为一次性短期 Intent；
   不执行 boot、activation 或真实 exposure；
+- [EVO-05.5f5c Percentage Boot Preparation](EVO-05-5f5c-percentage-boot-preparation.md)：已交付；
+  以跨进程 claim/epoch 只执行一次 exact candidate boot probe，冻结 Prepared Receipt；不切换 pointer 或声明 deployment；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

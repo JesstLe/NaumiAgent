@@ -27,7 +27,9 @@ manifest，以检测新增、删除或替换。
 激活仅接受当前主机 target。`verify_bootable()` 在重新验证完整 bundle 和只读权限后，真实执行 exact backend
 `--version`，限制 20 秒与 64 KiB 输出，并要求 manifest version 是独立 token，而非模糊子串。Receipt 保存最多
 4096 字符的 UTF-8 version output，并绑定 slot/manifest/binary digest、参数、output digest、duration 与检查时间；失败
-不产生 activation authority。
+不产生 activation authority。subprocess timeout 使用独立 `release_slot_boot_timeout` 错误，不与执行失败或版本不匹配混淆；
+[EVO-05.5f5c](../self-evolution/EVO-05-5f5c-percentage-boot-preparation.md) 已在该固定探测之上增加跨进程 claim/lease 和
+Prepared Receipt，但仍不切换 active pointer。
 
 ## Atomic Active Pointer
 
