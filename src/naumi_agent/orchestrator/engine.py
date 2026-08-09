@@ -446,11 +446,13 @@ from naumi_agent.harness.retention_planner import (
     SessionRetentionPreview,
     plan_session_retention,
 )
+from naumi_agent.harness.runtime_release_binding import HarnessRuntimeReleaseBinding
 from naumi_agent.harness.sandbox_batch import HarnessSandboxBatchAdmission
 from naumi_agent.harness.sandbox_checks import HarnessSandboxCheckRunner
 from naumi_agent.harness.sandbox_eval import HarnessSandboxEvalExecutionKernel
 from naumi_agent.harness.sandbox_service import HarnessSandboxEvalExecutor
 from naumi_agent.harness.service import HarnessService
+from naumi_agent.harness.store import HarnessStoreError
 from naumi_agent.harness.tools import create_harness_tools
 from naumi_agent.hooks import HookContext, HookManager, HookPoint
 from naumi_agent.inspector import RuntimeInspectorEventSink, RuntimeInspectorService
@@ -517,6 +519,9 @@ from naumi_agent.runtime.ports.session import SessionPort
 from naumi_agent.runtime.ports.tool_execution import ToolExecutionPort
 from naumi_agent.runtime.resources import RuntimeResources
 from naumi_agent.runtime.services import RuntimeServices
+from naumi_agent.runtime.terminal_runtime import (
+    current_terminal_run_release_binding,
+)
 from naumi_agent.safety.budget import BudgetTracker, TokenBudget
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.safety.permission_grants import PermissionGrant, PermissionGrantStore
@@ -4974,11 +4979,13 @@ class AgentEngine:
         """Execute and durably record one streamed Agent run."""
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
+        release_binding = await self._verified_terminal_run_release_binding()
         recorder = await ChatRunRecorder.start(
             store=self.chat_run_store,
             workspace_root=self.workspace_root,
             session_id=session.id,
             task=task,
+            release_binding=release_binding,
         )
         caller_sink = coerce_event_sink(on_event)
         publisher = RuntimeEventPublisher(
@@ -5037,6 +5044,28 @@ class AgentEngine:
         )
         result.receipt = receipt
         return result
+
+    async def _verified_terminal_run_release_binding(
+        self,
+    ) -> HarnessRuntimeReleaseBinding | None:
+        binding = current_terminal_run_release_binding()
+        if binding is None or binding.workspace_root != str(self.workspace_root):
+            return None
+        try:
+            current = await self._harness_store.get_runtime_release_binding(
+                workspace_root=self.workspace_root,
+                subject_id=binding.subject_id,
+            )
+        except (HarnessStoreError, OSError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Run release provenance source unavailable (%s)",
+                type(exc).__name__,
+            )
+            return None
+        if current != binding:
+            logger.warning("Run release provenance source changed; authority omitted")
+            return None
+        return binding
 
     async def _finish_streaming_run(
         self,

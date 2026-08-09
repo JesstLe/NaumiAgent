@@ -57,4 +57,5 @@ Store 故障后的下一次写入也不会形成不可恢复缺口。
 [EVO-05.5f4a](../self-evolution/EVO-05-5f4a-opt-in-liveness-window.md) 已定义独立、content-addressed liveness-window
 policy/receipt；[EVO-05.5f4b](../self-evolution/EVO-05-5f4b-durable-opt-in-liveness-assessment.md) 已继续完成 durable
 分页取证与动态失效。真实 completed-run evidence 仍必须独立建立，分页结果和 liveness window 都不得直接冒充 Stage
-Completion Evidence。
+Completion Evidence。[HAR-10.2k](HAR-10-2k-release-bound-chat-run-provenance.md) 已先把真实 New UI/TUI chat run
+绑定到 exact release；下一步仍需将该 provenance、终态 Completion Receipt 与覆盖运行区间的 observation 组合成独立 outcome。

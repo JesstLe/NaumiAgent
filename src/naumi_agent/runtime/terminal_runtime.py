@@ -6,6 +6,8 @@ import asyncio
 import re
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -35,6 +37,9 @@ from naumi_agent.release.runtime_identity import (
 
 TerminalSurface = Literal["new_ui", "tui"]
 RuntimeIdentityProvider = Callable[[], ReleaseRuntimeIdentity | None]
+_RUN_RELEASE_BINDING_CONTEXT: ContextVar[HarnessRuntimeReleaseBinding | None] = (
+    ContextVar("naumi_run_release_binding", default=None)
+)
 
 
 class TerminalRuntimeState(StrEnum):
@@ -177,6 +182,24 @@ class TerminalRuntimeLifecycle:
             release_binding_error_code=self._release_binding_error_code,
         )
 
+    def release_binding(self) -> HarnessRuntimeReleaseBinding | None:
+        """Return the immutable managed-release source fact, if startup created one."""
+        return self._release_binding
+
+    @contextmanager
+    def run_release_context(self):
+        """Scope this lifecycle's exact binding to one task-local engine run."""
+        binding = (
+            self._release_binding
+            if self._state is TerminalRuntimeState.RUNNING and not self._terminal_closed
+            else None
+        )
+        token = _RUN_RELEASE_BINDING_CONTEXT.set(binding)
+        try:
+            yield binding
+        finally:
+            _RUN_RELEASE_BINDING_CONTEXT.reset(token)
+
     def _resolve_release_binding(self) -> HarnessRuntimeReleaseBinding | None:
         provider = self._runtime_identity_provider
         if provider is None:
@@ -290,6 +313,29 @@ class TerminalRuntimeLifecycleFactory:
         )
 
 
+def current_terminal_run_release_binding() -> HarnessRuntimeReleaseBinding | None:
+    """Read the task-local release source without leaking it to concurrent runs."""
+    return _RUN_RELEASE_BINDING_CONTEXT.get()
+
+
+@contextmanager
+def terminal_run_release_context(
+    lifecycle: TerminalRuntimeLifecycle | None,
+):
+    """Bind one optional lifecycle while keeping concurrent task contexts isolated."""
+    if lifecycle is not None and not isinstance(lifecycle, TerminalRuntimeLifecycle):
+        raise TypeError("terminal run release context 需要 TerminalRuntimeLifecycle。")
+    if lifecycle is not None:
+        with lifecycle.run_release_context() as binding:
+            yield binding
+        return
+    token = _RUN_RELEASE_BINDING_CONTEXT.set(None)
+    try:
+        yield None
+    finally:
+        _RUN_RELEASE_BINDING_CONTEXT.reset(token)
+
+
 __all__ = [
     "TerminalRuntimeLifecycle",
     "TerminalRuntimeLifecycleFactory",
@@ -297,4 +343,6 @@ __all__ = [
     "TerminalRuntimeState",
     "TerminalSurface",
     "RuntimeIdentityProvider",
+    "current_terminal_run_release_binding",
+    "terminal_run_release_context",
 ]

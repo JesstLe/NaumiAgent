@@ -10,6 +10,11 @@ from naumi_agent.runs.models import (
     ReceiptValidation,
 )
 from naumi_agent.runs.recorder import ChatRunRecorder
+from naumi_agent.runs.release_provenance import (
+    RUN_RELEASE_PROVENANCE_POLICY,
+    RunReleaseProvenance,
+    build_run_release_provenance,
+)
 from naumi_agent.runs.store import (
     ChatArtifactRecord,
     ChatRunRecord,
@@ -31,5 +36,8 @@ __all__ = [
     "ReceiptGitState",
     "ReceiptRisk",
     "ReceiptValidation",
+    "RUN_RELEASE_PROVENANCE_POLICY",
+    "RunReleaseProvenance",
     "SourceReferenceRecord",
+    "build_run_release_provenance",
 ]

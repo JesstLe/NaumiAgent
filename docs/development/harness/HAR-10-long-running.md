@@ -42,9 +42,11 @@
   - HAR-10.2j 已实现：managed heartbeat 的 append-only content-addressed observation ledger、原子写入、hash-chain
     分页、v25 legacy baseline、失败 sequence 恢复与 retention 联动；见
     [设计](HAR-10-2j-runtime-release-observation-ledger.md)。
+  - HAR-10.2k 已实现：New UI/TUI chat run 的 task-local exact release binding、Engine 持久事实重验、content-addressed
+    provenance 与 ChatRunStore 原子落库；见 [设计](HAR-10-2k-release-bound-chat-run-provenance.md)。
   - UI-13.1c 已实现：New UI Doctor 展示真实 retention 调度状态，TUI fallback 明确显示不可观测边界；见
     [设计](../cli-ui/UI-13-1c-runtime-heartbeat-retention-health.md)。
-  - 未完成：EVO-05 release-bound observation window/exposure policy、retention 历史详情与控制动作、通用 heartbeat 历史统计、跨 kind 批量查询与
+  - 未完成：release-bound execution outcome、retention 历史详情与控制动作、通用 heartbeat 历史统计、跨 kind 批量查询与
     Supervisor 动作。
 - HAR-10.3 Durable queue（partial）：
   - HAR-10.3a 已实现 New UI `/send-now`、明确目标协议、队列稳定重排和下一安全边界回执；见

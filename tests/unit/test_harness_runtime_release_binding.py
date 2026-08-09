@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +21,10 @@ from naumi_agent.release.runtime_identity import (
     ReleaseRuntimeIdentityError,
     inspect_runtime_identity,
 )
-from naumi_agent.runtime.terminal_runtime import TerminalRuntimeLifecycleFactory
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycleFactory,
+    current_terminal_run_release_binding,
+)
 from tests.unit.test_release_launcher import _active_store
 
 
@@ -33,7 +37,11 @@ class _Clock:
         return self._value.isoformat()
 
 
-def _managed_identity(tmp_path: Path):
+def _managed_identity(
+    tmp_path: Path,
+    *,
+    verified_at: str = "2026-08-10T10:00:00+00:00",
+):
     release_store = _active_store(tmp_path / "release-fixture")
     target = release_store.resolve_active_backend()
     environment = {
@@ -45,7 +53,7 @@ def _managed_identity(tmp_path: Path):
         release_store,
         environment=environment,
         runtime_path=target.backend,
-        verified_at="2026-08-10T10:00:00+00:00",
+        verified_at=verified_at,
     )
 
 
@@ -99,6 +107,21 @@ async def test_new_ui_and_tui_bind_the_same_exact_managed_release(tmp_path) -> N
     assert new_binding.release_identity_authority
     assert not new_binding.heartbeat_liveness_authority
     assert not new_binding.rollout_observation_authority
+
+    async def scoped_binding(lifecycle):
+        with lifecycle.run_release_context():
+            await asyncio.sleep(0)
+            return current_terminal_run_release_binding()
+
+    assert current_terminal_run_release_binding() is None
+    scoped = await asyncio.gather(
+        scoped_binding(new_ui),
+        scoped_binding(tui),
+    )
+    assert scoped == [new_binding, tui_binding]
+    assert new_ui.release_binding() == new_binding
+    assert tui.release_binding() == tui_binding
+    assert current_terminal_run_release_binding() is None
 
     assert await new_ui.close()
     assert await tui.close()

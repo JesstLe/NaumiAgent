@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from naumi_agent.config.settings import AppConfig, MemoryConfig
+from naumi_agent.config.settings import (
+    AppConfig,
+    MemoryConfig,
+    RuntimeHeartbeatRetentionConfig,
+)
 from naumi_agent.orchestrator.engine import AgentEngine, AgentResult
 from naumi_agent.runtime.ports.events import RuntimeEvent, RuntimeEventType
+from naumi_agent.runtime.terminal_runtime import (
+    TerminalRuntimeLifecycleFactory,
+    terminal_run_release_context,
+)
 from naumi_agent.streaming.publisher import RuntimeEventPublisher
+from tests.unit.test_harness_runtime_release_binding import _managed_identity
 
 
 class _RecordingSink:
@@ -63,6 +73,7 @@ async def test_run_streaming_delivers_one_identity_to_base_and_caller_sinks(
         restored = await engine.chat_run_store.get_run(session.id, result.receipt.run_id)
         assert restored is not None
         assert restored.receipt == result.receipt
+        assert restored.release_provenance is None
         assert restored.steps[-1].event_id == next(
             event.id for name, event in trace
             if name == "caller" and event.type is RuntimeEventType.TOOL_START
@@ -81,6 +92,54 @@ async def test_run_streaming_delivers_one_identity_to_base_and_caller_sinks(
             "base", "caller", "base", "caller", "base", "caller",
         ]
     finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_persists_only_current_terminal_release_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    identity_verified_at = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    factory = TerminalRuntimeLifecycleFactory(
+        store=engine.terminal_runtime_lifecycle_factory.store,
+        workspace_root=tmp_path,
+        retention_config=RuntimeHeartbeatRetentionConfig(enabled=False),
+        runtime_identity_provider=lambda: _managed_identity(
+            tmp_path,
+            verified_at=identity_verified_at,
+        ),
+    )
+    lifecycle = factory.create(
+        surface="new_ui",
+        identity="new-ui-engine-run",
+    )
+
+    async def fake_core(*_: object, **__: object) -> AgentResult:
+        return AgentResult(status="completed", response="绑定运行完成")
+
+    monkeypatch.setattr(engine, "_run_streaming_core", fake_core)
+    await lifecycle.start()
+    try:
+        with terminal_run_release_context(lifecycle):
+            result = await engine.run_streaming(
+                "运行 candidate",
+                _RecordingSink("caller", []),
+            )
+        session = await engine.get_or_create_session()
+        assert result.receipt is not None
+        restored = await engine.chat_run_store.get_run(
+            session.id,
+            result.receipt.run_id,
+        )
+        assert restored is not None and restored.release_provenance is not None
+        provenance = restored.release_provenance
+        assert provenance.binding == lifecycle.release_binding()
+        assert provenance.run_id == result.receipt.run_id
+        assert not provenance.execution_outcome_authority
+    finally:
+        await lifecycle.close()
         await engine.shutdown()
 
 
