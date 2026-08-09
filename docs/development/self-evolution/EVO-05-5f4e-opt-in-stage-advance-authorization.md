@@ -69,6 +69,7 @@ View 每次重新读取 Receipt、Stage Completion、Plan、control 和 interact
 
 ## 当前边界与下一步
 
-EVO-05.5f4e 只签发入口 authority，尚未创建 percentage population assignment，也没有执行 release exposure。下一最小切片应实现
-`EVO-05.5f5a Percentage Cohort Assignment`：消费 current 5f4e View，以稳定、可复现且隐私安全的 subject hashing 形成 exact
-limited cohort，冻结 population denominator、exposure percentage 与 assignment provenance；assignment 自身仍不得声称已部署或已观察。
+EVO-05.5f4e 只签发入口 authority，尚未创建 percentage population assignment，也没有执行 release exposure。
+[ARC-07.5c](../architecture/ARC-07-5c-signed-installation-population.md) 已补齐不能由客户端编造的 signed population snapshot 前置。
+下一最小切片 `EVO-05.5f5a Percentage Cohort Assignment` 必须同时消费 current 5f4e View、current Snapshot 与安装
+proof-of-possession，以稳定、可复现且隐私安全的 hashing 形成 exact limited cohort；assignment 自身仍不得声称已部署或已观察。
