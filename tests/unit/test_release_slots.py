@@ -10,6 +10,7 @@ import pytest
 
 from naumi_agent.release.artifact import assemble_release_artifact
 from naumi_agent.release.slots import (
+    ReleaseActivationAuthority,
     ReleaseSlotError,
     ReleaseSlotStore,
     host_release_target,
@@ -109,6 +110,45 @@ def test_install_boot_activate_upgrade_and_atomic_rollback(tmp_path: Path) -> No
     assert store.get_activation_event(4) is None
     assert Path(v1.bundle_dir).is_dir() and Path(v2.bundle_dir).is_dir()
     assert not (Path(v1.bundle_dir) / "naumi-runtime").stat().st_mode & 0o200
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
+def test_activation_event_binds_exact_external_authority_without_changing_v1(
+    tmp_path: Path,
+) -> None:
+    store = ReleaseSlotStore(tmp_path / "installed")
+    v1 = store.install(_bundle(tmp_path, version="1.0.0", output_name="release-v1"))
+    store.verify_bootable(v1.slot_id)
+    legacy = store.activate(v1.slot_id, activated_at="2026-08-06T01:00:00+00:00")
+    v2 = store.install(_bundle(tmp_path, version="1.1.0", output_name="release-v2"))
+    store.verify_bootable(v2.slot_id)
+    authority = ReleaseActivationAuthority(
+        kind="evolution_opt_in_deployment_intent",
+        authority_id="evredeployintent_" + "1" * 24,
+        authority_sha256="2" * 64,
+    )
+
+    activated = store.activate(
+        v2.slot_id,
+        activated_at="2026-08-06T02:00:00+00:00",
+        _expected_pointer_sha256=legacy.pointer_sha256,
+        _activation_authority=authority,
+    )
+
+    assert legacy.schema_version == 1
+    assert legacy.activation_authority is None
+    assert "activation_authority" not in legacy.model_dump(mode="json")
+    assert activated.schema_version == 2
+    assert activated.activation_authority == authority
+    assert store.get_activation_event(2) == activated
+
+    with pytest.raises(ReleaseSlotError) as blocked:
+        store.activate(
+            v1.slot_id,
+            action="rollback",
+            _activation_authority=authority,
+        )
+    assert blocked.value.code == "release_activation_authority_forbidden"
 
 
 def test_install_is_cross_thread_idempotent(tmp_path: Path) -> None:

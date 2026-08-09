@@ -111,8 +111,14 @@ class ReleaseSlotBootReceipt(_StrictModel):
         return self
 
 
+class ReleaseActivationAuthority(_StrictModel):
+    kind: Literal["evolution_opt_in_deployment_intent"]
+    authority_id: str = Field(pattern=r"^evredeployintent_[0-9a-f]{24}$")
+    authority_sha256: str = Field(pattern=_SHA256_RE)
+
+
 class ReleaseActivePointer(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     policy_version: Literal["naumi-release-active-pointer-v1"] = RELEASE_ACTIVE_POINTER_POLICY
     pointer_id: str = Field(pattern=r"^relactive_[0-9a-f]{24}$")
     pointer_sha256: str = Field(pattern=_SHA256_RE)
@@ -125,12 +131,20 @@ class ReleaseActivePointer(_StrictModel):
     previous_slot_sha256: str | None = Field(default=None, pattern=_SHA256_RE)
     boot_receipt_id: str = Field(pattern=r"^relboot_[0-9a-f]{24}$")
     boot_receipt_sha256: str = Field(pattern=_SHA256_RE)
+    activation_authority: ReleaseActivationAuthority | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     atomic_switch_satisfied: Literal[True] = True
     old_slot_retained: Literal[True] = True
     activated_at: str = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def _exact(self) -> Self:
+        if (self.schema_version == 1) is not (self.activation_authority is None):
+            raise ValueError("Release Active Pointer authority schema 不一致。")
+        if self.activation_authority is not None and self.action != "activate":
+            raise ValueError("Release Active Pointer rollback 不得携带 activation authority。")
         if (self.previous_slot_id is None) is not (self.previous_slot_sha256 is None):
             raise ValueError("Release Active Pointer previous slot 投影不一致。")
         if self.generation == 1 and (
@@ -370,7 +384,17 @@ class ReleaseSlotStore:
         activated_at: str | None = None,
         action: Literal["activate", "rollback"] = "activate",
         _expected_pointer_sha256: str | None = None,
+        _activation_authority: ReleaseActivationAuthority | None = None,
     ) -> ReleaseActivePointer:
+        if _activation_authority is not None:
+            _activation_authority = ReleaseActivationAuthority.model_validate_json(
+                _activation_authority.model_dump_json()
+            )
+        if action == "rollback" and _activation_authority is not None:
+            raise ReleaseSlotError(
+                "release_activation_authority_forbidden",
+                "Rollback 不接受 activation authority。",
+            )
         slot = self._require_slot(slot_id)
         _require_host_target(slot.target)
         _verify_bundle(Path(slot.bundle_dir), expected_manifest_sha256=slot.manifest_sha256)
@@ -422,7 +446,7 @@ class ReleaseSlotStore:
                     "版本槽缺少 current bootability receipt。",
                 )
             core = {
-                "schema_version": 1,
+                "schema_version": 2 if _activation_authority is not None else 1,
                 "policy_version": RELEASE_ACTIVE_POINTER_POLICY,
                 "generation": 1 if current is None else current.generation + 1,
                 "previous_pointer_sha256": None if current is None else current.pointer_sha256,
@@ -433,6 +457,15 @@ class ReleaseSlotStore:
                 "previous_slot_sha256": None if current is None else current.current_slot_sha256,
                 "boot_receipt_id": boot.receipt_id,
                 "boot_receipt_sha256": boot.receipt_sha256,
+                **(
+                    {
+                        "activation_authority": _activation_authority.model_dump(
+                            mode="json"
+                        )
+                    }
+                    if _activation_authority is not None
+                    else {}
+                ),
                 "atomic_switch_satisfied": True,
                 "old_slot_retained": True,
                 "activated_at": _aware(activated_at or datetime.now(UTC).isoformat()).isoformat(),
@@ -1022,6 +1055,7 @@ __all__ = [
     "RELEASE_ACTIVE_POINTER_POLICY",
     "RELEASE_BOOT_RECEIPT_POLICY",
     "RELEASE_SLOT_POLICY",
+    "ReleaseActivationAuthority",
     "ReleaseActivePointer",
     "ReleaseInstalledSlot",
     "ReleaseSlotBootReceipt",
