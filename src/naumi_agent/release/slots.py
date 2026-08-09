@@ -484,6 +484,28 @@ class ReleaseSlotStore:
         with self._connect() as db:
             return self._validated_active(db)
 
+    def get_activation_event(self, generation: int) -> ReleaseActivePointer | None:
+        """Resolve one immutable event only after validating the complete chain."""
+        if isinstance(generation, bool) or not isinstance(generation, int):
+            raise TypeError("Release activation generation 必须是整数。")
+        if not 1 <= generation <= 1_000_000_000:
+            raise ValueError("Release activation generation 超出支持范围。")
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            db.execute("BEGIN")
+            self._validated_active(db)
+            row = db.execute(
+                "SELECT pointer_json FROM release_active_events WHERE generation = ?",
+                (generation,),
+            ).fetchone()
+            db.rollback()
+        return (
+            None
+            if row is None
+            else ReleaseActivePointer.model_validate_json(row["pointer_json"])
+        )
+
     def resolve_active_backend(self) -> ResolvedReleaseSlot:
         with self._connect() as db:
             db.execute("BEGIN")
