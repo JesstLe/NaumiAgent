@@ -73,11 +73,10 @@ Entry 必须与 Build Attestation 的 target/version/archive/manifest projection
 - 错误 Catalog signature、未知 target、path traversal、chain gap、release generation 回退与 SQLite JSON 篡改全部 fail closed；
 - Channel Catalog 与 Build Attestation 两个小模块共 7 项测试通过；未运行全量测试。
 
-## 当前边界与下一步
+## 后续切片
 
-本切片没有 transport，也没有把 archive bytes 写入磁盘。下一最小切片 `ARC-07.5d2 Verified Artifact Fetch` 应消费 current
-Resolution，通过受限 HTTPS transport 执行有界 streaming download，验证 content length、最大字节数和 archive SHA-256，
-使用同文件系统临时文件 + fsync + atomic rename 形成 Download Receipt，并在 Catalog/Trust 更新时拒绝产生安装输入。
+[ARC-07.5d2 Verified Artifact Fetch](ARC-07-5d2-verified-artifact-fetch.md) 已消费 current Resolution，以受限 HTTPS
+transport、有界 raw stream、claim fencing、同文件系统 staging、fsync 和 atomic rename 形成动态撤权 Download Receipt。
 
-完成 fetch 后，percentage deployment 仍需把 verified archive 安全解包、重验 manifest/Build Attestation，并通过 ARC-07.5a
+下一最小切片 `ARC-07.5d3 Verified Archive Admission` 仍需安全解包、重验 manifest/Build Attestation，并通过 ARC-07.5a
 安装 immutable inactive slot；这些执行 Receipt 完成之前，EVO-05.5f5b 不能声称 rollout 已发生。

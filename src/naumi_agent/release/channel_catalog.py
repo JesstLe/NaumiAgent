@@ -711,6 +711,12 @@ class ReleaseChannelCatalogStore:
         _verify_channel_signature(catalog, channel_policy)
         _verify_builders(catalog, build_policy)
 
+    def current_trust_policies(
+        self,
+    ) -> tuple[ReleaseChannelTrustPolicyDocument, ReleaseBuildTrustPolicyDocument]:
+        """Return validated current public trust documents for downstream receipts."""
+        return self._policies()
+
     def _policies(
         self,
     ) -> tuple[ReleaseChannelTrustPolicyDocument, ReleaseBuildTrustPolicyDocument]:
