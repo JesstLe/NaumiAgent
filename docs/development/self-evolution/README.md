@@ -163,6 +163,8 @@ current Outcome authority、passing liveness、GREEN Baseline 与冻结 guardrai
 并对不可比较的零成本基线 fail closed。[EVO-05.5f4e](EVO-05-5f4e-opt-in-stage-advance-authorization.md) 已进一步通过
 current Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；它不冒充
 percentage population assignment、deployment 或真实流量扩大。下一步是 deterministic percentage cohort assignment。
+[ARC-07.5c](../architecture/ARC-07-5c-signed-installation-population.md) 已补齐独立 Registry trust、隐私化安装凭证和完整
+hash-chained population snapshot，使下一步分桶拥有不可由本地客户端编造的 denominator；远端 Registry 服务仍是明确外部边界。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
