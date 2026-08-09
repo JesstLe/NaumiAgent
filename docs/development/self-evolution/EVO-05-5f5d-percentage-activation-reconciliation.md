@@ -87,7 +87,6 @@ activation 仍需在 Windows CI runner 上完成端到端验证，不能由本�
 
 ## 当前边界与下一步
 
-5f5d 已完成 selected installation 的可对账 activation，但 stable launcher 尚未为 percentage 路线启动受管 runtime，也没有真实
-exposure ledger。下一最小切片为 `EVO-05.5f5e Percentage Runtime Launch and Exposure Receipt`：消费 current
-`percentage_runtime_launch_input_authority`，绑定 ARC-07.5e runtime identity 与 HAR heartbeat/provenance，记录 exact
-installation 首次真实 exposure；它仍不能凭单机样本声明 cohort health 或 stage completion。
+5f5d 已完成 selected installation 的可对账 activation。[EVO-05.5f5e](EVO-05-5f5e-percentage-runtime-exposure.md) 已进一步消费
+current `percentage_runtime_launch_input_authority`，绑定 ARC-07.5e Runtime Identity 与 HAR starting/running observation，记录
+exact installation 的 managed terminal exposure；它仍不能凭单机 startup 声明 cohort health 或 stage completion。

@@ -42,3 +42,5 @@ HAR-10.2j 已建立 append-only、bounded page 的 release-bound heartbeat obser
 [HAR-10.2j](HAR-10-2j-runtime-release-observation-ledger.md)。它仍不证明最小持续时间、最小样本数、连续 exposure 或
 中途是否出现 unhealthy gap。下一步由 EVO-05 独立聚合 observation window；不得从 binding 或单个 sample 直接签发
 Stage Completion Evidence。
+[EVO-05.5f5e](../self-evolution/EVO-05-5f5e-percentage-runtime-exposure.md) 已把 exact percentage Deployment、Binding 与
+sequence 1/2 startup pair 组合成单 installation Exposure Receipt；该 Receipt 仍固定 completed-run/rollout authority 为 false。

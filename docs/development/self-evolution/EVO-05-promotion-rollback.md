@@ -140,6 +140,9 @@
 - [EVO-05.5f5d Percentage Activation Reconciliation](EVO-05-5f5d-percentage-activation-reconciliation.md)：已交付；
   将 Prepared content identity 写入 ARC-07 v2 pointer，执行 expected-pointer CAS，并可在 Receipt 写入崩溃、Intent 过期或
   后续 rollback 后从历史 generation 机械补写；不启动 runtime 或声明真实 exposure；
+- [EVO-05.5f5e Percentage Runtime Launch and Exposure Receipt](EVO-05-5f5e-percentage-runtime-exposure.md)：已交付；
+  将 5f5d Deployment 与 ARC-07.5e managed terminal identity、HAR starting→running observation chain 绑定，形成单 installation
+  startup exposure；不声明用户请求、cohort health 或 rollout completion；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
