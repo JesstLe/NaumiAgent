@@ -14,6 +14,7 @@ from naumi_agent.release.build_attestations import (
     create_release_build_attestation,
     create_release_build_trust_policy,
     load_release_build_attestation,
+    load_release_build_trust_policy,
     verify_release_build_attestation,
 )
 from naumi_agent.release.launcher import (
@@ -62,6 +63,7 @@ __all__ = [
     "default_release_root",
     "host_release_target",
     "load_release_build_attestation",
+    "load_release_build_trust_policy",
     "resolve_launch",
     "verify_release_build_attestation",
 ]

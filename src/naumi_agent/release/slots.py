@@ -174,7 +174,13 @@ class ReleaseSlotStore:
         self.slots_dir = self.release_root / "slots"
         self.db_path = self.release_root / "release-slots.db"
 
-    def install(self, bundle_dir: str | Path, *, installed_at: str | None = None):
+    def install(
+        self,
+        bundle_dir: str | Path,
+        *,
+        installed_at: str | None = None,
+        expected_manifest_sha256: str | None = None,
+    ):
         source = Path(bundle_dir).expanduser().resolve(strict=True)
         if not source.is_dir():
             raise ReleaseSlotError("release_bundle_missing", "发行 bundle 目录不存在。")
@@ -183,7 +189,10 @@ class ReleaseSlotStore:
                 "release_bundle_overlaps_slots",
                 "发行 bundle 不得与版本槽目录重叠。",
             )
-        manifest, manifest_sha, file_count, total_bytes = _verify_bundle(source)
+        manifest, manifest_sha, file_count, total_bytes = _verify_bundle(
+            source,
+            expected_manifest_sha256=expected_manifest_sha256,
+        )
         installed = _aware(installed_at or datetime.now(UTC).isoformat()).isoformat()
         target = manifest["target"]
         windows = str(target).casefold().startswith("windows-")
