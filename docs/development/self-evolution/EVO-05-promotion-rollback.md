@@ -118,6 +118,9 @@
 - [EVO-05.5f3 Opt-in Runtime Launch and Health Receipt](EVO-05-5f3-opt-in-runtime-health.md)：已交付；通过
   stable launcher 真实启动 exact candidate health probe，以 lease/epoch fencing 收敛并发和崩溃重试，冻结
   healthy/unhealthy 终态；不启动用户 session、不完成 opt-in stage 或开放 percentage/stable authority。
+- [EVO-05.5f4a Opt-in Runtime Liveness Window](EVO-05-5f4a-opt-in-liveness-window.md)：已交付；把 exact Health、
+  Deployment/exposure、release binding 与 heartbeat ledger 聚合为 insufficient/passing/breached，但明确不把 heartbeat
+  冒充 completed run；durable assessment/dynamic view 与真实 execution outcomes 仍待 5f4b/后续切片。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

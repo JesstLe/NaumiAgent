@@ -151,6 +151,9 @@ key 撤销或 trust-policy 轮换会动态撤权，只开放 activation input，
 [EVO-05.5f3](EVO-05-5f3-opt-in-runtime-health.md) 已通过 stable launcher 启动 exact active candidate 的隐藏
 health machine interface，以 claim lease/epoch fencing 收敛并发与 crash retry，并把真实进程终态冻结为
 healthy/unhealthy Receipt；它明确不启动用户 session、不完成 opt-in stage，也不把单次本机探测虚报成 percentage rollout。
+[EVO-05.5f4a](EVO-05-5f4a-opt-in-liveness-window.md) 已继续把 Health、显式 opt-in exposure、release identity 和
+HAR heartbeat ledger 聚合为严格 liveness window；passing 仍固定 completed-run/stage-completion authority 为 false，
+持久 assessment、动态失效和真实用户 execution outcome 由 5f4b/后续切片完成。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
