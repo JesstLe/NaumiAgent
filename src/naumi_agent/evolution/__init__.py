@@ -652,6 +652,18 @@ if TYPE_CHECKING:
         EvolutionRevalidationOutcomeView,
         render_evolution_revalidation_outcome,
     )
+    from naumi_agent.evolution.revalidation_percentage_cohort_assignments import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_ALGORITHM,
+        EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_PROOF_DOMAIN,
+        EVOLUTION_REVALIDATION_PERCENTAGE_COHORT_ASSIGNMENT_POLICY,
+        EvolutionRevalidationPercentageAssignmentProof,
+        EvolutionRevalidationPercentageAssignmentProofPayload,
+        EvolutionRevalidationPercentageCohortAssignment,
+        EvolutionRevalidationPercentageCohortAssignmentError,
+        EvolutionRevalidationPercentageCohortAssignmentService,
+        EvolutionRevalidationPercentageCohortAssignmentStore,
+        EvolutionRevalidationPercentageCohortAssignmentView,
+    )
     from naumi_agent.evolution.revalidation_platform_claims import (
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN,
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY,
@@ -1186,6 +1198,16 @@ __all__ = [
     "EvolutionRevalidationOptInStageCompletionStatus",
     "EvolutionRevalidationOptInStageCompletionStore",
     "EvolutionRevalidationOptInStageCompletionView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_ALGORITHM",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_PROOF_DOMAIN",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_COHORT_ASSIGNMENT_POLICY",
+    "EvolutionRevalidationPercentageAssignmentProof",
+    "EvolutionRevalidationPercentageAssignmentProofPayload",
+    "EvolutionRevalidationPercentageCohortAssignment",
+    "EvolutionRevalidationPercentageCohortAssignmentError",
+    "EvolutionRevalidationPercentageCohortAssignmentService",
+    "EvolutionRevalidationPercentageCohortAssignmentStore",
+    "EvolutionRevalidationPercentageCohortAssignmentView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -2126,6 +2148,18 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInStageCompletionStore",
         "EvolutionRevalidationOptInStageCompletionView",
     }
+    revalidation_percentage_cohort_assignment_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_ALGORITHM",
+        "EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_PROOF_DOMAIN",
+        "EVOLUTION_REVALIDATION_PERCENTAGE_COHORT_ASSIGNMENT_POLICY",
+        "EvolutionRevalidationPercentageAssignmentProof",
+        "EvolutionRevalidationPercentageAssignmentProofPayload",
+        "EvolutionRevalidationPercentageCohortAssignment",
+        "EvolutionRevalidationPercentageCohortAssignmentError",
+        "EvolutionRevalidationPercentageCohortAssignmentService",
+        "EvolutionRevalidationPercentageCohortAssignmentStore",
+        "EvolutionRevalidationPercentageCohortAssignmentView",
+    }
     revalidation_opt_in_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationOptInObservationAssessmentError",
@@ -2708,6 +2742,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_stage_advances"
     elif name in revalidation_opt_in_stage_completion_exports:
         module_name = "revalidation_opt_in_stage_completions"
+    elif name in revalidation_percentage_cohort_assignment_exports:
+        module_name = "revalidation_percentage_cohort_assignments"
     elif name in revalidation_opt_in_observation_assessment_exports:
         module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:
