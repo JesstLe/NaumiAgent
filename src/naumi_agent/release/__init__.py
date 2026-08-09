@@ -31,6 +31,13 @@ from naumi_agent.release.runtime_health import (
     inspect_runtime_health,
     parse_runtime_health_report,
 )
+from naumi_agent.release.runtime_identity import (
+    RELEASE_RUNTIME_IDENTITY_POLICY,
+    ReleaseRuntimeIdentity,
+    ReleaseRuntimeIdentityError,
+    discover_runtime_identity,
+    inspect_runtime_identity,
+)
 from naumi_agent.release.slots import (
     RELEASE_ACTIVE_POINTER_POLICY,
     RELEASE_BOOT_RECEIPT_POLICY,
@@ -53,6 +60,7 @@ __all__ = [
     "RELEASE_SLOT_POLICY",
     "RELEASE_LAUNCH_RESOLUTION_POLICY",
     "RELEASE_RUNTIME_HEALTH_POLICY",
+    "RELEASE_RUNTIME_IDENTITY_POLICY",
     "ReleaseActivePointer",
     "ReleaseBuildAttestation",
     "ReleaseBuildAttestationError",
@@ -64,6 +72,8 @@ __all__ = [
     "ReleaseLaunchResolution",
     "ReleaseRuntimeHealthError",
     "ReleaseRuntimeHealthReport",
+    "ReleaseRuntimeIdentity",
+    "ReleaseRuntimeIdentityError",
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
@@ -72,8 +82,10 @@ __all__ = [
     "create_release_build_attestation",
     "create_release_build_trust_policy",
     "default_release_root",
+    "discover_runtime_identity",
     "host_release_target",
     "inspect_runtime_health",
+    "inspect_runtime_identity",
     "load_release_build_attestation",
     "load_release_build_trust_policy",
     "resolve_and_record_launch",

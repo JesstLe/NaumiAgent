@@ -1,4 +1,4 @@
-"""Machine-readable self-verification contract for an active release runtime."""
+"""Content-addressed identity for a managed terminal runtime process."""
 
 from __future__ import annotations
 
@@ -17,10 +17,13 @@ from naumi_agent.release.runtime_binding import (
 )
 from naumi_agent.release.slots import ReleaseSlotStore
 
-RELEASE_RUNTIME_HEALTH_POLICY = "naumi-release-runtime-health-v1"
+RELEASE_RUNTIME_IDENTITY_POLICY = "naumi-release-runtime-identity-v1"
 _SHA256_RE = r"^[0-9a-f]{64}$"
-_SLOT_RE = r"^relslot_[0-9a-f]{24}$"
-_MAX_REPORT_BYTES = 64 * 1024
+_BINDING_ENVIRONMENT = (
+    "NAUMI_ACTIVE_SLOT_ID",
+    "NAUMI_ACTIVE_POINTER_GENERATION",
+    "NAUMI_INSTALL_ROOT",
+)
 _CHECKS = (
     "active_chain_verified",
     "manifest_verified",
@@ -39,19 +42,18 @@ class _StrictModel(BaseModel):
     )
 
 
-class ReleaseRuntimeHealthReport(_StrictModel):
+class ReleaseRuntimeIdentity(_StrictModel):
     schema_version: Literal[1] = 1
-    policy_version: Literal["naumi-release-runtime-health-v1"] = (
-        RELEASE_RUNTIME_HEALTH_POLICY
+    policy_version: Literal["naumi-release-runtime-identity-v1"] = (
+        RELEASE_RUNTIME_IDENTITY_POLICY
     )
-    report_id: str = Field(pattern=r"^relruntimehealth_[0-9a-f]{24}$")
-    report_sha256: str = Field(pattern=_SHA256_RE)
-    component: Literal["naumi-runtime"] = "naumi-runtime"
-    status: Literal["healthy"] = "healthy"
+    identity_id: str = Field(pattern=r"^relruntimeidentity_[0-9a-f]{24}$")
+    identity_sha256: str = Field(pattern=_SHA256_RE)
+    invocation_kind: Literal["terminal_session"] = "terminal_session"
     pointer_id: str = Field(pattern=r"^relactive_[0-9a-f]{24}$")
     pointer_sha256: str = Field(pattern=_SHA256_RE)
     pointer_generation: int = Field(ge=1)
-    slot_id: str = Field(pattern=_SLOT_RE)
+    slot_id: str = Field(pattern=r"^relslot_[0-9a-f]{24}$")
     slot_sha256: str = Field(pattern=_SHA256_RE)
     version: str = Field(min_length=1, max_length=128)
     target: str = Field(min_length=1, max_length=128)
@@ -60,47 +62,43 @@ class ReleaseRuntimeHealthReport(_StrictModel):
     binary_sha256: str = Field(pattern=_SHA256_RE)
     runtime_path: str = Field(min_length=1, max_length=4096)
     install_root: str = Field(min_length=1, max_length=4096)
-    command: tuple[Literal["--runtime-health-check"], ...] = Field(
-        default=("--runtime-health-check",), min_length=1, max_length=1
-    )
     checks: tuple[str, ...] = Field(min_length=5, max_length=5)
-    process_started: Literal[True] = True
-    user_session_started: Literal[False] = False
-    checked_at: str = Field(min_length=1, max_length=100)
+    runtime_process_started: Literal[True] = True
+    terminal_session_process: Literal[True] = True
+    health_probe_process: Literal[False] = False
+    verified_at: str = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def _exact(self) -> Self:
         if self.runtime_path != str(Path(self.runtime_path).expanduser().resolve()):
-            raise ValueError("Runtime Health runtime_path 必须 canonical。")
+            raise ValueError("Runtime Identity runtime_path 必须 canonical。")
         if self.install_root != str(Path(self.install_root).expanduser().resolve()):
-            raise ValueError("Runtime Health install_root 必须 canonical。")
+            raise ValueError("Runtime Identity install_root 必须 canonical。")
         if self.checks != _CHECKS:
-            raise ValueError("Runtime Health checks 必须是完整固定集合。")
-        _aware(self.checked_at)
-        core = self.model_dump(mode="json", exclude={"report_id", "report_sha256"})
+            raise ValueError("Runtime Identity checks 必须是完整固定集合。")
+        _aware(self.verified_at)
+        core = self.model_dump(mode="json", exclude={"identity_id", "identity_sha256"})
         digest = _digest(core)
-        if self.report_sha256 != digest or self.report_id != (
-            f"relruntimehealth_{digest[:24]}"
+        if self.identity_sha256 != digest or self.identity_id != (
+            f"relruntimeidentity_{digest[:24]}"
         ):
-            raise ValueError("Runtime Health identity 不一致。")
+            raise ValueError("Runtime Identity content identity 不一致。")
         return self
 
 
-class ReleaseRuntimeHealthError(RuntimeError):
+class ReleaseRuntimeIdentityError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
 
 
-def inspect_runtime_health(
+def inspect_runtime_identity(
     store: ReleaseSlotStore,
     *,
     environment: Mapping[str, str],
     runtime_path: str | Path,
-    checked_at: str | None = None,
-) -> ReleaseRuntimeHealthReport:
-    if not isinstance(store, ReleaseSlotStore):
-        raise TypeError("Runtime Health 需要 ReleaseSlotStore。")
+    verified_at: str | None = None,
+) -> ReleaseRuntimeIdentity:
     try:
         binding = verify_active_runtime_binding(
             store,
@@ -109,16 +107,15 @@ def inspect_runtime_health(
         )
     except ReleaseRuntimeBindingError as exc:
         suffix = exc.code.removeprefix("release_runtime_binding_")
-        raise ReleaseRuntimeHealthError(
-            f"release_runtime_health_{suffix}",
+        raise ReleaseRuntimeIdentityError(
+            f"release_runtime_identity_{suffix}",
             str(exc),
         ) from exc
     target = binding.target
     core = {
         "schema_version": 1,
-        "policy_version": RELEASE_RUNTIME_HEALTH_POLICY,
-        "component": "naumi-runtime",
-        "status": "healthy",
+        "policy_version": RELEASE_RUNTIME_IDENTITY_POLICY,
+        "invocation_kind": "terminal_session",
         "pointer_id": target.pointer.pointer_id,
         "pointer_sha256": target.pointer.pointer_sha256,
         "pointer_generation": target.pointer.generation,
@@ -131,48 +128,54 @@ def inspect_runtime_health(
         "binary_sha256": target.boot_receipt.binary_sha256,
         "runtime_path": str(binding.runtime_path),
         "install_root": str(binding.install_root),
-        "command": ["--runtime-health-check"],
         "checks": list(_CHECKS),
-        "process_started": True,
-        "user_session_started": False,
-        "checked_at": _aware(
-            checked_at or datetime.now(UTC).isoformat()
+        "runtime_process_started": True,
+        "terminal_session_process": True,
+        "health_probe_process": False,
+        "verified_at": _aware(
+            verified_at or datetime.now(UTC).isoformat()
         ).isoformat(),
     }
     digest = _digest(core)
-    return ReleaseRuntimeHealthReport.model_validate(
+    return ReleaseRuntimeIdentity.model_validate(
         {
             **core,
-            "report_id": f"relruntimehealth_{digest[:24]}",
-            "report_sha256": digest,
+            "identity_id": f"relruntimeidentity_{digest[:24]}",
+            "identity_sha256": digest,
         }
     )
 
 
-def parse_runtime_health_report(payload: str | bytes) -> ReleaseRuntimeHealthReport:
-    raw = payload.encode("utf-8") if isinstance(payload, str) else bytes(payload)
-    if not raw or len(raw) > _MAX_REPORT_BYTES:
-        raise ReleaseRuntimeHealthError(
-            "release_runtime_health_output_size",
-            "Runtime Health 输出为空或超过 64 KiB。",
+def discover_runtime_identity(
+    *,
+    environment: Mapping[str, str],
+    runtime_path: str | Path,
+    verified_at: str | None = None,
+) -> ReleaseRuntimeIdentity | None:
+    values = {
+        name: str(environment.get(name, "")).strip()
+        for name in _BINDING_ENVIRONMENT
+    }
+    present = tuple(name for name, value in values.items() if value)
+    if not present:
+        return None
+    if len(present) != len(_BINDING_ENVIRONMENT):
+        raise ReleaseRuntimeIdentityError(
+            "release_runtime_identity_environment_incomplete",
+            "Managed Runtime 环境绑定不完整，不能签发 terminal identity。",
         )
-    try:
-        text = raw.decode("utf-8")
-        decoded = json.loads(text)
-        if not isinstance(decoded, dict):
-            raise TypeError("report must be an object")
-        return ReleaseRuntimeHealthReport.model_validate(decoded)
-    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        raise ReleaseRuntimeHealthError(
-            "release_runtime_health_output_invalid",
-            "Runtime Health 输出不是严格、完整的可信 JSON report。",
-        ) from exc
+    return inspect_runtime_identity(
+        ReleaseSlotStore(values["NAUMI_INSTALL_ROOT"]),
+        environment=environment,
+        runtime_path=runtime_path,
+        verified_at=verified_at,
+    )
 
 
 def _aware(value) -> datetime:
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("Runtime Health timestamp 必须包含时区。")
+        raise ValueError("Runtime Identity timestamp 必须包含时区。")
     return parsed.astimezone(UTC)
 
 
@@ -189,9 +192,9 @@ def _digest(payload) -> str:
 
 
 __all__ = [
-    "RELEASE_RUNTIME_HEALTH_POLICY",
-    "ReleaseRuntimeHealthError",
-    "ReleaseRuntimeHealthReport",
-    "inspect_runtime_health",
-    "parse_runtime_health_report",
+    "RELEASE_RUNTIME_IDENTITY_POLICY",
+    "ReleaseRuntimeIdentity",
+    "ReleaseRuntimeIdentityError",
+    "discover_runtime_identity",
+    "inspect_runtime_identity",
 ]
