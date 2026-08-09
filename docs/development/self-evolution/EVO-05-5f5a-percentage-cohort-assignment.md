@@ -86,6 +86,6 @@ EVO-05.5f5a 只有 assignment authority，没有安装回执、percentage activa
 observation。[ARC-07.5d1](../architecture/ARC-07-5d1-signed-release-channel-catalog.md) 已补齐 signed distribution catalog 与
 target Resolution，[ARC-07.5d2](../architecture/ARC-07-5d2-verified-artifact-fetch.md) 已补齐有界下载、原子落盘和动态撤权
 Download Receipt；[ARC-07.5d3](../architecture/ARC-07-5d3-verified-archive-admission.md) 已补齐安全解包、构建证明重验和
-immutable inactive-slot Admission。下一最小切片是 `EVO-05.5f5b Percentage Deployment Intent`，它只能允许 current selected
-Assignment 请求 exact verified candidate slot，且仍需与真实
-installation/activation/exposure Receipt 分开，不能把 Intent 虚报为 rollout 已发生。
+immutable inactive-slot Admission。[EVO-05.5f5b](EVO-05-5f5b-percentage-deployment-intent.md) 已进一步把 current selected
+Assignment、exact Admission、Credential、本机 target 与 previous pointer CAS 冻结为一次性 5 分钟 Intent。它没有执行 boot、
+activation 或真实 exposure；下一最小切片为 `EVO-05.5f5c Percentage Boot Preparation`。

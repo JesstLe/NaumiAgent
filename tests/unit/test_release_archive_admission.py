@@ -64,10 +64,18 @@ def _binary(path: Path, content: bytes) -> Path:
     return path
 
 
-def _artifact(root: Path, *, archive_format: str):
+def _artifact(
+    root: Path,
+    *,
+    archive_format: str,
+    target: str | None = None,
+    source_commit: str = SOURCE_COMMIT,
+    source_tree_sha256: str = SOURCE_TREE_SHA256,
+):
     signer, _private = _signer()
     windows = archive_format == "zip"
-    target = "windows-x64" if windows else "linux-x64"
+    target = target or ("windows-x64" if windows else "linux-x64")
+    windows = target.startswith("windows-")
     backend_name = "naumi-runtime.exe" if windows else "naumi-runtime"
     launcher_name = "naumi.exe" if windows else "naumi"
     backend = root / "backend"
@@ -84,8 +92,8 @@ def _artifact(root: Path, *, archive_format: str):
         output_dir=root / "release",
         version="1.2.3",
         target=target,
-        source_commit=SOURCE_COMMIT,
-        source_tree_sha256=SOURCE_TREE_SHA256,
+        source_commit=source_commit,
+        source_tree_sha256=source_tree_sha256,
         archive_format=archive_format,
         build_signer=signer,
         build_context=_build_context(),
@@ -98,10 +106,17 @@ async def _runtime(
     *,
     archive_format: str = "tar.gz",
     archive_builder=None,
+    target: str | None = None,
+    source_commit: str = SOURCE_COMMIT,
+    source_tree_sha256: str = SOURCE_TREE_SHA256,
+    base_time=T0,
 ):
     signer, artifact, target = _artifact(
         tmp_path / "artifact-input",
         archive_format=archive_format,
+        target=target,
+        source_commit=source_commit,
+        source_tree_sha256=source_tree_sha256,
     )
     archive = artifact.archive
     if archive_builder is not None:
@@ -135,15 +150,15 @@ async def _runtime(
         channel="stable",
         entries=(entry,),
         previous=None,
-        generated_at=T0.isoformat(),
-        valid_from=(T0 + timedelta(seconds=1)).isoformat(),
-        expires_at=(T0 + timedelta(days=7)).isoformat(),
+        generated_at=base_time.isoformat(),
+        valid_from=(base_time + timedelta(seconds=1)).isoformat(),
+        expires_at=(base_time + timedelta(days=7)).isoformat(),
     )
     catalog_store = ReleaseChannelCatalogStore(
         tmp_path / ".naumi" / "release-channel.db",
         channel_trust_policy_provider=lambda: policies[0],
         build_trust_policy_provider=lambda: policies[1],
-        clock=lambda: T0 + timedelta(seconds=2),
+        clock=lambda: base_time + timedelta(seconds=2),
     )
     await catalog_store.record(catalog)
     resolution = await catalog_store.resolve(channel="stable", target=target)
@@ -159,7 +174,7 @@ async def _runtime(
     download_store = ReleaseArtifactDownloadStore(
         catalog_store.db_path,
         catalog_store=catalog_store,
-        clock=lambda: T0 + timedelta(seconds=3),
+        clock=lambda: base_time + timedelta(seconds=3),
     )
     fetch_service = ReleaseArtifactFetchService(
         download_root=tmp_path / ".naumi" / "downloads",
@@ -168,7 +183,7 @@ async def _runtime(
         transport=HttpxReleaseArtifactTransport(transport=httpx.MockTransport(handler)),
         owner_id="archive-admission-fetch",
         lease_seconds=5,
-        clock=lambda: T0 + timedelta(seconds=3),
+        clock=lambda: base_time + timedelta(seconds=3),
     )
     download = await fetch_service.fetch(resolution)
     slot_store = ReleaseSlotStore(tmp_path / "install-root")

@@ -132,6 +132,9 @@
   通过 exact Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；
 - [EVO-05.5f5a Percentage Cohort Assignment](EVO-05-5f5a-percentage-cohort-assignment.md)：已交付；
   消费 signed population 与 installation proof-of-possession，确定性冻结 exact limited cohort；不执行部署或流量扩大；
+- [EVO-05.5f5b Percentage Deployment Intent](EVO-05-5f5b-percentage-deployment-intent.md)：已交付；
+  将 selected Assignment、verified inactive slot、Credential/host target 与 previous pointer CAS 冻结为一次性短期 Intent；
+  不执行 boot、activation 或真实 exposure；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
