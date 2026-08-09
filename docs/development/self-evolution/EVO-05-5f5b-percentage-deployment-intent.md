@@ -107,5 +107,5 @@ deployment 已发生。以下字段始终为 false：
 
 5f5b 已补齐 selected managed installation 的短期控制面 Intent。[EVO-05.5f5c](EVO-05-5f5c-percentage-boot-preparation.md)
 已通过跨进程 claim/lease 对 exact candidate 执行真实 `--version` probe，并冻结独立 Prepared Receipt；它仍未切换 pointer。
-下一最小切片为 `EVO-05.5f5d Percentage Activation Reconciliation`，必须再次重验 Intent、Prepared Receipt 与 expected
-previous pointer，成功后才形成 Deployment Receipt，且不能把本机切换虚报成完整 percentage exposure。
+[EVO-05.5f5d](EVO-05-5f5d-percentage-activation-reconciliation.md) 已再次重验 Intent、Prepared Receipt 与 expected
+previous pointer，形成可崩溃对账的 Deployment Receipt；本机 pointer 切换仍不能被解释为完整 percentage exposure。
