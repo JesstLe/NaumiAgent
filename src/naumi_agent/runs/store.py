@@ -13,7 +13,12 @@ from typing import Any
 
 import aiosqlite
 
+from naumi_agent.harness.runtime_release_binding import HarnessRuntimeReleaseBinding
 from naumi_agent.runs.models import CompletionReceipt
+from naumi_agent.runs.release_provenance import (
+    RunReleaseProvenance,
+    build_run_release_provenance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,7 @@ class ChatRunRecord:
     steps: list[ChatRunStepRecord] = field(default_factory=list)
     artifacts: list[ChatArtifactRecord] = field(default_factory=list)
     receipt: CompletionReceipt | None = None
+    release_provenance: RunReleaseProvenance | None = None
 
 
 @dataclass(slots=True)
@@ -87,15 +93,28 @@ class ChatRunStore:
         session_id: str,
         user_message_id: str,
         run_id: str | None = None,
+        release_binding: HarnessRuntimeReleaseBinding | None = None,
     ) -> ChatRunRecord:
         now = _now_iso()
+        normalized_run_id = run_id or uuid.uuid4().hex[:12]
+        provenance = (
+            None
+            if release_binding is None
+            else build_run_release_provenance(
+                workspace_root=release_binding.workspace_root,
+                run_id=normalized_run_id,
+                binding=release_binding,
+                run_started_at=now,
+            )
+        )
         record = ChatRunRecord(
-            id=run_id or uuid.uuid4().hex[:12],
+            id=normalized_run_id,
             session_id=session_id,
             user_message_id=user_message_id,
             status="running",
             started_at=now,
             updated_at=now,
+            release_provenance=provenance,
         )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
@@ -103,8 +122,9 @@ class ChatRunStore:
                 """
                 INSERT INTO chat_runs (
                     id, session_id, user_message_id, status, started_at, updated_at,
-                    completed_at, assistant_message_id
-                ) VALUES (?, ?, ?, ?, ?, ?, '', '')
+                    completed_at, assistant_message_id, release_provenance_id,
+                    release_provenance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, '', '', ?, ?)
                 """,
                 (
                     record.id,
@@ -113,6 +133,8 @@ class ChatRunStore:
                     record.status,
                     record.started_at,
                     record.updated_at,
+                    "" if provenance is None else provenance.provenance_id,
+                    "" if provenance is None else provenance.model_dump_json(),
                 ),
             )
             await db.commit()
@@ -407,6 +429,10 @@ class ChatRunStore:
             completed_at=row["completed_at"],
             assistant_message_id=row["assistant_message_id"],
             receipt=_receipt_from_json(row["receipt_json"]),
+            release_provenance=_release_provenance_from_json(
+                row["release_provenance_json"],
+                expected_id=row["release_provenance_id"],
+            ),
             steps=[
                 ChatRunStepRecord(
                     sequence=step["sequence"],
@@ -454,7 +480,9 @@ class ChatRunStore:
                     completed_at TEXT NOT NULL DEFAULT '',
                     assistant_message_id TEXT NOT NULL DEFAULT '',
                     receipt_id TEXT NOT NULL DEFAULT '',
-                    receipt_json TEXT NOT NULL DEFAULT ''
+                    receipt_json TEXT NOT NULL DEFAULT '',
+                    release_provenance_id TEXT NOT NULL DEFAULT '',
+                    release_provenance_json TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_chat_runs_session_started
                     ON chat_runs(session_id, started_at DESC);
@@ -506,6 +534,16 @@ class ChatRunStore:
                 await db.execute(
                     "ALTER TABLE chat_runs ADD COLUMN receipt_json TEXT NOT NULL DEFAULT ''"
                 )
+            if "release_provenance_id" not in columns:
+                await db.execute(
+                    "ALTER TABLE chat_runs ADD COLUMN "
+                    "release_provenance_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "release_provenance_json" not in columns:
+                await db.execute(
+                    "ALTER TABLE chat_runs ADD COLUMN "
+                    "release_provenance_json TEXT NOT NULL DEFAULT ''"
+                )
             await self._backfill_receipt_ids(db)
             await db.execute(
                 """
@@ -545,4 +583,21 @@ def _receipt_from_json(value: str) -> CompletionReceipt | None:
         return CompletionReceipt.from_dict(decoded)
     except (json.JSONDecodeError, ValueError, TypeError) as exc:
         logger.warning("Ignoring invalid completion receipt JSON: %s", exc)
+        return None
+
+
+def _release_provenance_from_json(
+    value: str,
+    *,
+    expected_id: str,
+) -> RunReleaseProvenance | None:
+    if not value:
+        return None
+    try:
+        provenance = RunReleaseProvenance.model_validate_json(value)
+        if not expected_id or provenance.provenance_id != expected_id:
+            raise ValueError("Run Release Provenance ID 与 payload 不一致。")
+        return provenance
+    except (TypeError, ValueError) as exc:
+        logger.warning("Ignoring invalid run release provenance JSON: %s", exc)
         return None

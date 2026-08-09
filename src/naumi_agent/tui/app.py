@@ -59,6 +59,7 @@ from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycleFactory,
     TerminalRuntimeState,
+    terminal_run_release_context,
 )
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tools.base import ToolCall, ToolResult
@@ -3434,10 +3435,13 @@ class NaumiApp(App):
                 self._queue_claim_lost = False
                 self._start_queue_claim_renewal(queue_authority, queue_claim)
             with _capture_tui_terminal_noise() as (stdout_buf, stderr_buf):
-                result = await self.engine.run_streaming(
-                    task,
-                    CallbackEventSink(on_event),
-                )
+                with terminal_run_release_context(
+                    self._terminal_runtime_lifecycle
+                ):
+                    result = await self.engine.run_streaming(
+                        task,
+                        CallbackEventSink(on_event),
+                    )
                 captured_noise = _captured_terminal_text(stdout_buf, stderr_buf)
             if self.debug_trace is not None:
                 self.debug_trace.event(

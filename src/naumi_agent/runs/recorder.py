@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from naumi_agent.harness.runtime_release_binding import HarnessRuntimeReleaseBinding
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.receipt_builder import RunReceiptBuilder
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore
@@ -49,11 +50,19 @@ class ChatRunRecorder:
         session_id: str,
         task: str,
         run_id: str | None = None,
+        release_binding: HarnessRuntimeReleaseBinding | None = None,
     ) -> ChatRunRecorder:
+        canonical_workspace = str(Path(workspace_root).expanduser().resolve())
+        if (
+            release_binding is not None
+            and release_binding.workspace_root != canonical_workspace
+        ):
+            raise ValueError("运行发布绑定与当前工作区不一致。")
         record = await store.start_run(
             session_id=session_id,
             user_message_id=f"msg-{uuid.uuid4().hex[:12]}",
             run_id=run_id,
+            release_binding=release_binding,
         )
         builder = await RunReceiptBuilder.start(
             workspace_root=workspace_root,

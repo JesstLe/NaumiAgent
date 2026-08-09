@@ -3,12 +3,17 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 import pytest
 
 from naumi_agent.api.chat_runs import ChatRunStore
+from naumi_agent.harness.runtime_release_binding import build_runtime_release_binding
 from naumi_agent.runs.models import CompletionReceipt, ReceiptChange
+from naumi_agent.runs.recorder import ChatRunRecorder
+from naumi_agent.runs.release_provenance import RunReleaseProvenance
+from tests.unit.test_harness_runtime_release_binding import _managed_identity
 
 
 def _minimal_receipt(run_id: str, *, receipt_id: str = "receipt-1") -> CompletionReceipt:
@@ -235,6 +240,81 @@ async def test_run_store_persists_receipt_and_isolates_receipt_lookup(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_store_persists_content_addressed_release_provenance(tmp_path):
+    db_path = tmp_path / "chat-runs.db"
+    store = ChatRunStore(db_path)
+    now = datetime.now(UTC)
+    binding = build_runtime_release_binding(
+        workspace_root=tmp_path,
+        surface="new_ui",
+        subject_id="new-ui-run-provenance",
+        instance_id="new-ui-run-provenance",
+        epoch=1,
+        runtime_identity=_managed_identity(
+            tmp_path,
+            verified_at=(now - timedelta(seconds=2)).isoformat(),
+        ),
+        bound_at=(now - timedelta(seconds=1)).isoformat(),
+    )
+    run = await store.start_run(
+        session_id="s1",
+        user_message_id="m1",
+        release_binding=binding,
+    )
+
+    assert run.release_provenance is not None
+    provenance = run.release_provenance
+    assert provenance.run_id == run.id
+    assert provenance.binding == binding
+    assert provenance.surface == "new_ui"
+    assert provenance.release_binding_source_authority
+    assert not provenance.completion_receipt_authority
+    assert not provenance.execution_outcome_authority
+    restored = await ChatRunStore(db_path).get_run("s1", run.id)
+    assert restored is not None and restored.release_provenance == provenance
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "UPDATE chat_runs SET release_provenance_id = ? WHERE id = ?",
+            ("runrelease_" + "0" * 24, run.id),
+        )
+        await db.commit()
+    mismatched = await ChatRunStore(db_path).get_run("s1", run.id)
+    assert mismatched is not None and mismatched.release_provenance is None
+
+    forged = provenance.model_dump(mode="json")
+    forged["execution_outcome_authority"] = True
+    with pytest.raises(ValueError):
+        RunReleaseProvenance.model_validate(forged)
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            "UPDATE chat_runs SET release_provenance_id = ?, "
+            "release_provenance_json = ? WHERE id = ?",
+            (
+                provenance.provenance_id,
+                provenance.model_dump_json().replace(
+                    provenance.provenance_sha256,
+                    "0" * 64,
+                ),
+                run.id,
+            ),
+        )
+        await db.commit()
+    corrupted = await ChatRunStore(db_path).get_run("s1", run.id)
+    assert corrupted is not None and corrupted.release_provenance is None
+
+    with pytest.raises(ValueError, match="工作区不一致"):
+        await ChatRunRecorder.start(
+            store=store,
+            workspace_root=tmp_path / "other-workspace",
+            session_id="s1",
+            task="不应创建运行",
+            release_binding=binding,
+        )
+
+
+@pytest.mark.asyncio
 async def test_run_store_migrates_old_chat_runs_table_without_data_loss(tmp_path):
     db_path = tmp_path / "chat-runs.db"
     async with aiosqlite.connect(db_path) as db:
@@ -269,7 +349,12 @@ async def test_run_store_migrates_old_chat_runs_table_without_data_loss(tmp_path
     async with aiosqlite.connect(db_path) as db:
         columns = await (await db.execute("PRAGMA table_info(chat_runs)")).fetchall()
     column_names = {column[1] for column in columns}
-    assert {"receipt_id", "receipt_json"}.issubset(column_names)
+    assert {
+        "receipt_id",
+        "receipt_json",
+        "release_provenance_id",
+        "release_provenance_json",
+    }.issubset(column_names)
 
 
 @pytest.mark.asyncio

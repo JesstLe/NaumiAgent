@@ -80,6 +80,7 @@ from naumi_agent.runtime.terminal_runtime import (
     TerminalRuntimeLifecycle,
     TerminalRuntimeLifecycleFactory,
     TerminalRuntimeState,
+    terminal_run_release_context,
 )
 from naumi_agent.streaming.sinks import CallbackEventSink
 from naumi_agent.tasks.models import TaskStatus
@@ -1922,10 +1923,13 @@ class JsonlEngineBridge:
             queue_commit_ok = True
             deferred_completion_payload: dict[str, Any] | None = None
             try:
-                result = await self.engine.run_streaming(
-                    text,
-                    CallbackEventSink(self.handle_engine_event),
-                )
+                with terminal_run_release_context(
+                    self._terminal_runtime_service()
+                ):
+                    result = await self.engine.run_streaming(
+                        text,
+                        CallbackEventSink(self.handle_engine_event),
+                    )
                 completion_payload = {
                     "status": result.status,
                     "response": result.response or "",
@@ -2352,11 +2356,14 @@ class JsonlEngineBridge:
         async def run() -> None:
             was_cancelled = False
             try:
-                result = await self.engine.run_streaming(
-                    text,
-                    CallbackEventSink(self.handle_engine_event),
-                    turn_context=context,
-                )
+                with terminal_run_release_context(
+                    self._terminal_runtime_service()
+                ):
+                    result = await self.engine.run_streaming(
+                        text,
+                        CallbackEventSink(self.handle_engine_event),
+                        turn_context=context,
+                    )
                 final_status = (
                     TaskStatus.COMPLETED
                     if result.status == "completed"
