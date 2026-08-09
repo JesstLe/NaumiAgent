@@ -581,6 +581,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInDeploymentIntentStore,
         EvolutionRevalidationOptInDeploymentIntentView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_deployments import (
+        EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_POLICY,
+        EvolutionRevalidationOptInDeploymentError,
+        EvolutionRevalidationOptInDeploymentReceipt,
+        EvolutionRevalidationOptInDeploymentService,
+        EvolutionRevalidationOptInDeploymentStore,
+        EvolutionRevalidationOptInDeploymentView,
+    )
     from naumi_agent.evolution.revalidation_outcomes import (
         EVOLUTION_REVALIDATION_OUTCOME_POLICY,
         EvolutionInvalidatedAuthority,
@@ -1082,6 +1090,12 @@ __all__ = [
     "EvolutionRevalidationOptInDeploymentIntentService",
     "EvolutionRevalidationOptInDeploymentIntentStore",
     "EvolutionRevalidationOptInDeploymentIntentView",
+    "EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_POLICY",
+    "EvolutionRevalidationOptInDeploymentError",
+    "EvolutionRevalidationOptInDeploymentReceipt",
+    "EvolutionRevalidationOptInDeploymentService",
+    "EvolutionRevalidationOptInDeploymentStore",
+    "EvolutionRevalidationOptInDeploymentView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1984,6 +1998,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInDeploymentIntentStore",
         "EvolutionRevalidationOptInDeploymentIntentView",
     }
+    revalidation_opt_in_deployment_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_POLICY",
+        "EvolutionRevalidationOptInDeploymentError",
+        "EvolutionRevalidationOptInDeploymentReceipt",
+        "EvolutionRevalidationOptInDeploymentService",
+        "EvolutionRevalidationOptInDeploymentStore",
+        "EvolutionRevalidationOptInDeploymentView",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -2534,6 +2556,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_candidate_bundle_admissions"
     elif name in revalidation_opt_in_deployment_intent_exports:
         module_name = "revalidation_opt_in_deployment_intents"
+    elif name in revalidation_opt_in_deployment_exports:
+        module_name = "revalidation_opt_in_deployments"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
