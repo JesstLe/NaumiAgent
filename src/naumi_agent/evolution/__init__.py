@@ -688,6 +688,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationPercentageDeploymentStore,
         EvolutionRevalidationPercentageDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_percentage_runtime_exposures import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY,
+        EvolutionRevalidationPercentageRuntimeExposureError,
+        EvolutionRevalidationPercentageRuntimeExposureReceipt,
+        EvolutionRevalidationPercentageRuntimeExposureService,
+        EvolutionRevalidationPercentageRuntimeExposureStore,
+        EvolutionRevalidationPercentageRuntimeExposureView,
+    )
     from naumi_agent.evolution.revalidation_platform_claims import (
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_DOMAIN,
         EVOLUTION_REVALIDATION_PLATFORM_CLAIM_POLICY,
@@ -1250,6 +1258,12 @@ __all__ = [
     "EvolutionRevalidationPercentageDeploymentService",
     "EvolutionRevalidationPercentageDeploymentStore",
     "EvolutionRevalidationPercentageDeploymentView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY",
+    "EvolutionRevalidationPercentageRuntimeExposureError",
+    "EvolutionRevalidationPercentageRuntimeExposureReceipt",
+    "EvolutionRevalidationPercentageRuntimeExposureService",
+    "EvolutionRevalidationPercentageRuntimeExposureStore",
+    "EvolutionRevalidationPercentageRuntimeExposureView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -2226,6 +2240,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageDeploymentStore",
         "EvolutionRevalidationPercentageDeploymentView",
     }
+    revalidation_percentage_runtime_exposure_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY",
+        "EvolutionRevalidationPercentageRuntimeExposureError",
+        "EvolutionRevalidationPercentageRuntimeExposureReceipt",
+        "EvolutionRevalidationPercentageRuntimeExposureService",
+        "EvolutionRevalidationPercentageRuntimeExposureStore",
+        "EvolutionRevalidationPercentageRuntimeExposureView",
+    }
     revalidation_opt_in_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationOptInObservationAssessmentError",
@@ -2816,6 +2838,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_deployment_intents"
     elif name in revalidation_percentage_deployment_exports:
         module_name = "revalidation_percentage_deployments"
+    elif name in revalidation_percentage_runtime_exposure_exports:
+        module_name = "revalidation_percentage_runtime_exposures"
     elif name in revalidation_opt_in_observation_assessment_exports:
         module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:

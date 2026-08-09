@@ -59,3 +59,5 @@ policy/receipt；[EVO-05.5f4b](../self-evolution/EVO-05-5f4b-durable-opt-in-live
 分页取证与动态失效。真实 completed-run evidence 仍必须独立建立，分页结果和 liveness window 都不得直接冒充 Stage
 Completion Evidence。[HAR-10.2k](HAR-10-2k-release-bound-chat-run-provenance.md) 已先把真实 New UI/TUI chat run
 绑定到 exact release；下一步仍需将该 provenance、终态 Completion Receipt 与覆盖运行区间的 observation 组合成独立 outcome。
+[EVO-05.5f5e](../self-evolution/EVO-05-5f5e-percentage-runtime-exposure.md) 已严格消费 startup origin 的 sequence 1 starting 与
+sequence 2 running，形成单 installation Exposure Receipt；后续 window 仍必须继续读取完整 sample chain。

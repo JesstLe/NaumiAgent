@@ -177,7 +177,9 @@ immutable inactive-slot Admission。
 真实 exposure。[EVO-05.5f5c](EVO-05-5f5c-percentage-boot-preparation.md) 已以 durable claim/lease 执行 exact candidate
 `--version` probe 并形成 Prepared Receipt；[EVO-05.5f5d](EVO-05-5f5d-percentage-activation-reconciliation.md) 已将 Prepared
 identity 写入 ARC-07 v2 pointer、执行 expected-pointer CAS，并支持从历史 generation 恢复 Deployment Receipt。它仍未启动
-用户 runtime 或记录真实 percentage exposure。
+用户 runtime 或记录真实 percentage exposure。[EVO-05.5f5e](EVO-05-5f5e-percentage-runtime-exposure.md) 已进一步将生产
+TerminalRuntimeLifecycle 的 managed release binding 与 starting→running observation 绑定为单 installation Exposure Receipt；
+它不把 terminal startup 冒充用户请求或 cohort rollout completion。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

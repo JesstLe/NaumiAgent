@@ -50,3 +50,5 @@ release identity authority，不阻断开发态 heartbeat/UI。
 HAR-10.2j 已交付 append-only、bounded page 的 release-bound heartbeat observation ledger；见
 [HAR-10.2j](../harness/HAR-10-2j-runtime-release-observation-ledger.md)。下一步仍需 EVO-05 聚合最小持续时间、样本数、
 gap、pointer/exposure 连续性；identity binding 和 sample ledger 都不能直接形成 rollout window 或 Stage Completion Evidence。
+[EVO-05.5f5e](../self-evolution/EVO-05-5f5e-percentage-runtime-exposure.md) 已先要求 exact percentage Deployment 与
+startup→running sample pair 一致，形成单 installation Exposure Receipt；它仍不是持续健康窗口。
