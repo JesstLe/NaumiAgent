@@ -55,6 +55,6 @@ Store 故障后的下一次写入也不会形成不可恢复缺口。
 ## 当前边界与下一步
 
 [EVO-05.5f4a](../self-evolution/EVO-05-5f4a-opt-in-liveness-window.md) 已定义独立、content-addressed liveness-window
-policy/receipt，覆盖最小持续时间/样本数、gap、phase、stale、terminal、legacy origin 及 exact Deployment/exposure binding。
-下一步 5f4b 负责 durable 分页取证与动态失效；真实 completed-run evidence 仍必须独立建立，分页结果和 liveness window
-都不得直接冒充 Stage Completion Evidence。
+policy/receipt；[EVO-05.5f4b](../self-evolution/EVO-05-5f4b-durable-opt-in-liveness-assessment.md) 已继续完成 durable
+分页取证与动态失效。真实 completed-run evidence 仍必须独立建立，分页结果和 liveness window 都不得直接冒充 Stage
+Completion Evidence。
