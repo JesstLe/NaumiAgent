@@ -43,6 +43,10 @@ jobs:
 
   build:
     needs: prepare
+    env:
+      NAUMI_RELEASE_BUILDER_ID: ${{ vars.NAUMI_RELEASE_BUILDER_ID }}
+      NAUMI_RELEASE_BUILDER_KEY_ID: ${{ vars.NAUMI_RELEASE_BUILDER_KEY_ID }}
+      NAUMI_RELEASE_BUILDER_KEY_GENERATION: ${{ vars.NAUMI_RELEASE_BUILDER_KEY_GENERATION }}
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +82,7 @@ jobs:
         if: matrix.platform == 'unix'
         shell: bash
         env:
+          NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64: ${{ secrets.NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64 }}
           VERSION: ${{ needs.prepare.outputs.version }}
           TARGET: ${{ matrix.target }}
           OUTPUT_DIR: ${{ github.workspace }}/release-output
@@ -87,6 +92,7 @@ jobs:
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
+          NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64: ${{ secrets.NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64 }}
           VERSION: ${{ needs.prepare.outputs.version }}
           TARGET: ${{ matrix.target }}
           OUTPUT_DIR: ${{ github.workspace }}\release-output
@@ -99,6 +105,7 @@ jobs:
             release-output/*.tar.gz
             release-output/*.zip
             release-output/*.sha256
+            release-output/*.attestation.json
           if-no-files-found: error
           retention-days: 7
 
@@ -125,13 +132,18 @@ jobs:
           for archive in assets/naumi-"$VERSION"-*.tar.gz assets/naumi-"$VERSION"-*.zip; do
             [ -f "$archive" ] || continue
             stable=${archive/naumi-$VERSION-/naumi-}
+            [ -f "$archive.attestation.json" ] || {
+              printf '缺少构建证明：%s\n' "$archive.attestation.json" >&2
+              exit 1
+            }
             cp "$archive" "$stable"
+            cp "$archive.attestation.json" "$stable.attestation.json"
             (
               cd assets
               sha256sum "$(basename "$stable")" > "$(basename "$stable").sha256"
             )
           done
-      - name: Publish unsigned internal prerelease
+      - name: Publish build-attested internal prerelease
         shell: bash
         run: |
           set -euo pipefail
@@ -142,6 +154,6 @@ jobs:
             gh release create "v$VERSION" assets/* \
               --repo "$DISTRIBUTION_REPO" \
               --title "NaumiAgent v$VERSION internal binary preview" \
-              --notes "Source-free unsigned preview. GA remains blocked until macOS and Windows signing/notarization are configured." \
+              --notes "Source-free preview with detached trusted-builder attestations. GA remains blocked until trust-root distribution plus macOS and Windows signing/notarization are configured." \
               --prerelease
           fi

@@ -256,6 +256,8 @@ def test_release_builder_collects_runtime_plugins_and_runs_real_bridge_smoke() -
     assert "COLLECT(" in launcher_spec
     assert "dist/naumi-launcher/naumi" in unix
     assert "dist/naumi-launcher/naumi.exe" in windows
+    assert "unset NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64" in unix
+    assert "Remove-Item Env:NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64" in windows
 
 
 def test_release_workflow_covers_mainstream_targets_without_uploading_checkout() -> None:
@@ -273,4 +275,8 @@ def test_release_workflow_covers_mainstream_targets_without_uploading_checkout()
     assert "--prerelease" in workflow
     assert "release-output/*.tar.gz" in workflow
     assert "release-output/*.zip" in workflow
+    assert "release-output/*.attestation.json" in workflow
+    assert "NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64" in workflow
+    assert "Publish build-attested internal prerelease" in workflow
+    assert "unsigned internal prerelease" not in workflow
     assert "path: ." not in workflow

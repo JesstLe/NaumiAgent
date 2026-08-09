@@ -8,6 +8,8 @@ cd "$ROOT"
 VERSION=${VERSION:-$(sed -n 's/^version = "\([^"]*\)"/\1/p' pyproject.toml | head -1)}
 TARGET=${TARGET:-}
 OUTPUT_DIR=${OUTPUT_DIR:-dist/release}
+SIGNING_KEY=${NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64:-}
+unset NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64
 
 if [ -z "$VERSION" ]; then
     printf '无法从 pyproject.toml 读取版本。\n' >&2
@@ -28,6 +30,10 @@ if [ -z "$TARGET" ]; then
     esac
     TARGET="$platform-$arch"
 fi
+if [ -z "$SIGNING_KEY" ]; then
+    printf '缺少可信构建签名私钥。\n' >&2
+    exit 1
+fi
 
 command -v bun >/dev/null 2>&1 || { printf '缺少 bun。\n' >&2; exit 1; }
 command -v pyinstaller >/dev/null 2>&1 || { printf '缺少 pyinstaller。\n' >&2; exit 1; }
@@ -44,6 +50,7 @@ dist/naumi-launcher/naumi --launcher-self-test >/dev/null
 python_cmd=${PYTHON:-python3}
 "$python_cmd" scripts/release/verify_frozen_bridge.py \
     dist/naumi-runtime/naumi-runtime
+NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64="$SIGNING_KEY" \
 "$python_cmd" scripts/release/assemble_artifact.py \
     --backend-dir dist/naumi-runtime \
     --launcher-dir dist/naumi-launcher \
@@ -53,3 +60,4 @@ python_cmd=${PYTHON:-python3}
     --version "$VERSION" \
     --target "$TARGET" \
     --archive-format tar.gz
+unset SIGNING_KEY

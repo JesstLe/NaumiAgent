@@ -11,6 +11,10 @@ $Version = if ($env:VERSION) { $env:VERSION } else {
 }
 $Target = if ($env:TARGET) { $env:TARGET } else { "windows-x64" }
 $OutputDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "dist\release" }
+$SigningKey = $env:NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64
+Remove-Item Env:NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64 -ErrorAction SilentlyContinue
+
+if (-not $SigningKey) { throw "缺少可信构建签名私钥。" }
 
 if (-not (Get-Command bun -ErrorAction SilentlyContinue)) { throw "缺少 bun。" }
 if (-not (Get-Command pyinstaller -ErrorAction SilentlyContinue)) { throw "缺少 pyinstaller。" }
@@ -26,12 +30,19 @@ pyinstaller --noconfirm --clean "packaging/naumi_launcher.spec"
 & "dist/naumi-launcher/naumi.exe" --launcher-self-test | Out-Null
 python "scripts/release/verify_frozen_bridge.py" "dist/naumi-runtime/naumi-runtime.exe"
 
-python "scripts/release/assemble_artifact.py" `
-    --backend-dir "dist/naumi-runtime" `
-    --launcher-dir "dist/naumi-launcher" `
-    --ui-binary "dist/naumi-ui.exe" `
-    --config-example "config.yaml.example" `
-    --output-dir $OutputDir `
-    --version $Version `
-    --target $Target `
-    --archive-format zip
+try {
+    $env:NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64 = $SigningKey
+    python "scripts/release/assemble_artifact.py" `
+        --backend-dir "dist/naumi-runtime" `
+        --launcher-dir "dist/naumi-launcher" `
+        --ui-binary "dist/naumi-ui.exe" `
+        --config-example "config.yaml.example" `
+        --output-dir $OutputDir `
+        --version $Version `
+        --target $Target `
+        --archive-format zip
+}
+finally {
+    Remove-Item Env:NAUMI_RELEASE_BUILDER_PRIVATE_KEY_BASE64 -ErrorAction SilentlyContinue
+    $SigningKey = $null
+}

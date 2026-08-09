@@ -1,5 +1,21 @@
 """Release artifact construction, installed slots, and atomic activation."""
 
+from naumi_agent.release.build_attestations import (
+    RELEASE_BUILD_ATTESTATION_DOMAIN,
+    RELEASE_BUILD_ATTESTATION_POLICY,
+    RELEASE_BUILD_TRUST_POLICY,
+    ReleaseBuildAttestation,
+    ReleaseBuildAttestationError,
+    ReleaseBuildContext,
+    ReleaseBuilderIdentity,
+    ReleaseBuildSigner,
+    ReleaseBuildTrustPolicyDocument,
+    ReleaseTrustedBuilderKey,
+    create_release_build_attestation,
+    create_release_build_trust_policy,
+    load_release_build_attestation,
+    verify_release_build_attestation,
+)
 from naumi_agent.release.launcher import (
     RELEASE_LAUNCH_RESOLUTION_POLICY,
     ReleaseLaunchResolution,
@@ -20,18 +36,32 @@ from naumi_agent.release.slots import (
 )
 
 __all__ = [
+    "RELEASE_BUILD_ATTESTATION_DOMAIN",
+    "RELEASE_BUILD_ATTESTATION_POLICY",
+    "RELEASE_BUILD_TRUST_POLICY",
     "RELEASE_ACTIVE_POINTER_POLICY",
     "RELEASE_BOOT_RECEIPT_POLICY",
     "RELEASE_SLOT_POLICY",
     "RELEASE_LAUNCH_RESOLUTION_POLICY",
     "ReleaseActivePointer",
+    "ReleaseBuildAttestation",
+    "ReleaseBuildAttestationError",
+    "ReleaseBuildContext",
+    "ReleaseBuildSigner",
+    "ReleaseBuildTrustPolicyDocument",
+    "ReleaseBuilderIdentity",
     "ReleaseInstalledSlot",
     "ReleaseLaunchResolution",
     "ReleaseSlotBootReceipt",
     "ReleaseSlotError",
     "ReleaseSlotStore",
+    "ReleaseTrustedBuilderKey",
     "ResolvedBootedReleaseSlot",
+    "create_release_build_attestation",
+    "create_release_build_trust_policy",
     "default_release_root",
     "host_release_target",
+    "load_release_build_attestation",
     "resolve_launch",
+    "verify_release_build_attestation",
 ]
