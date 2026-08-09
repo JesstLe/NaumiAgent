@@ -137,6 +137,8 @@
   `/harness check` 和 Agent Tool 消费 ARC-04.3a/3b 的真实隔离与委托链；HAR-08.4e 又提供共享的成组
   Check execution kernel，HAR-08.4f 负责连续 Batch lease/grant/恢复/清理。通用 surface 仍不得直接复用旧
   subprocess 路径冒充 Sandbox。
+- `ValidationExecutor` 已支持调用方传入完整受控 environment，并继续保留 argv-only、进程组取消、wall timeout
+  与有界内存输出；该能力供 ARC-07 本机 runtime health probe 使用，但它仍不是 sandbox/network/resource authority。
 
 ## 已完成的最小前置
 

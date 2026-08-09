@@ -8,7 +8,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -58,6 +58,7 @@ class ValidationExecutor:
         timeout_seconds: float,
         cancel_event: asyncio.Event | None = None,
         artifact_path: str | Path | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> CommandExecutionResult:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds 必须大于 0。")
@@ -68,6 +69,7 @@ class ValidationExecutor:
             proc = await asyncio.create_subprocess_exec(
                 *runtime_argv,
                 cwd=str(Path(cwd)),
+                env=None if env is None else dict(env),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 **_process_group_kwargs(),
