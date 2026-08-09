@@ -40,7 +40,7 @@ def _b64(value: bytes) -> str:
     return base64.b64encode(value).decode("ascii")
 
 
-async def _context(tmp_path: Path):
+async def _context(tmp_path: Path, *, candidate_backend_content: bytes | None = None):
     passing, _declined, plan, _control, build_advance, now = await _fixture(tmp_path)
     advance_service = build_advance("advance", [])
     advance = await advance_service.authorize(
@@ -136,6 +136,7 @@ async def _context(tmp_path: Path):
         source_commit=plan.target_head,
         source_tree_sha256=plan.target_tree_sha256,
         base_time=now,
+        backend_content=candidate_backend_content,
     )
     slots = release["slot_store"]
     baseline = slots.install(

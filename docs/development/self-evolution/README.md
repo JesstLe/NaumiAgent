@@ -174,7 +174,8 @@ Resolution；[ARC-07.5d2](../architecture/ARC-07-5d2-verified-artifact-fetch.md)
 immutable inactive-slot Admission。
 [EVO-05.5f5b](EVO-05-5f5b-percentage-deployment-intent.md) 已将 selected Assignment、exact Admission、Registry Credential、
 当前主机 target 与 previous pointer CAS 冻结为一次性 5 分钟 Intent；它不重复逐安装询问，不执行 boot、pointer switch 或
-真实 exposure。下一步是 `EVO-05.5f5c Percentage Boot Preparation`。
+真实 exposure。[EVO-05.5f5c](EVO-05-5f5c-percentage-boot-preparation.md) 已以 durable claim/lease 执行 exact candidate
+`--version` probe 并形成 Prepared Receipt；下一步是 `EVO-05.5f5d Percentage Activation Reconciliation`。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

@@ -71,6 +71,7 @@ def _artifact(
     target: str | None = None,
     source_commit: str = SOURCE_COMMIT,
     source_tree_sha256: str = SOURCE_TREE_SHA256,
+    backend_content: bytes | None = None,
 ):
     signer, _private = _signer()
     windows = archive_format == "zip"
@@ -79,7 +80,10 @@ def _artifact(
     backend_name = "naumi-runtime.exe" if windows else "naumi-runtime"
     launcher_name = "naumi.exe" if windows else "naumi"
     backend = root / "backend"
-    _binary(backend / backend_name, b"frozen-runtime")
+    _binary(
+        backend / backend_name,
+        b"frozen-runtime" if backend_content is None else backend_content,
+    )
     launcher = _binary(root / "launcher" / launcher_name, b"stable-launcher")
     ui = _binary(root / ("naumi-ui.exe" if windows else "naumi-ui"), b"terminal-ui")
     config = root / "config.yaml.example"
@@ -110,6 +114,7 @@ async def _runtime(
     source_commit: str = SOURCE_COMMIT,
     source_tree_sha256: str = SOURCE_TREE_SHA256,
     base_time=T0,
+    backend_content: bytes | None = None,
 ):
     signer, artifact, target = _artifact(
         tmp_path / "artifact-input",
@@ -117,6 +122,7 @@ async def _runtime(
         target=target,
         source_commit=source_commit,
         source_tree_sha256=source_tree_sha256,
+        backend_content=backend_content,
     )
     archive = artifact.archive
     if archive_builder is not None:

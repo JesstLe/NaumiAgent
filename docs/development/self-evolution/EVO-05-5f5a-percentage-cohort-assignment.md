@@ -87,5 +87,6 @@ observation。[ARC-07.5d1](../architecture/ARC-07-5d1-signed-release-channel-cat
 target Resolution，[ARC-07.5d2](../architecture/ARC-07-5d2-verified-artifact-fetch.md) 已补齐有界下载、原子落盘和动态撤权
 Download Receipt；[ARC-07.5d3](../architecture/ARC-07-5d3-verified-archive-admission.md) 已补齐安全解包、构建证明重验和
 immutable inactive-slot Admission。[EVO-05.5f5b](EVO-05-5f5b-percentage-deployment-intent.md) 已进一步把 current selected
-Assignment、exact Admission、Credential、本机 target 与 previous pointer CAS 冻结为一次性 5 分钟 Intent。它没有执行 boot、
-activation 或真实 exposure；下一最小切片为 `EVO-05.5f5c Percentage Boot Preparation`。
+Assignment、exact Admission、Credential、本机 target 与 previous pointer CAS 冻结为一次性 5 分钟 Intent；
+[EVO-05.5f5c](EVO-05-5f5c-percentage-boot-preparation.md) 已进一步形成 current candidate Prepared Receipt。两者均未执行
+activation 或真实 exposure；下一最小切片为 `EVO-05.5f5d Percentage Activation Reconciliation`。

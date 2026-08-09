@@ -652,6 +652,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationOutcomeView,
         render_evolution_revalidation_outcome,
     )
+    from naumi_agent.evolution.revalidation_percentage_boot_preparations import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_BOOT_PREPARATION_POLICY,
+        EvolutionRevalidationPercentageBootPreparation,
+        EvolutionRevalidationPercentageBootPreparationError,
+        EvolutionRevalidationPercentageBootPreparationService,
+        EvolutionRevalidationPercentageBootPreparationStore,
+        EvolutionRevalidationPercentageBootPreparationView,
+    )
     from naumi_agent.evolution.revalidation_percentage_cohort_assignments import (
         EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_ALGORITHM,
         EVOLUTION_REVALIDATION_PERCENTAGE_ASSIGNMENT_PROOF_DOMAIN,
@@ -1216,6 +1224,12 @@ __all__ = [
     "EvolutionRevalidationPercentageCohortAssignmentService",
     "EvolutionRevalidationPercentageCohortAssignmentStore",
     "EvolutionRevalidationPercentageCohortAssignmentView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_BOOT_PREPARATION_POLICY",
+    "EvolutionRevalidationPercentageBootPreparation",
+    "EvolutionRevalidationPercentageBootPreparationError",
+    "EvolutionRevalidationPercentageBootPreparationService",
+    "EvolutionRevalidationPercentageBootPreparationStore",
+    "EvolutionRevalidationPercentageBootPreparationView",
     "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_INTENT_POLICY",
     "EvolutionRevalidationPercentageDeploymentIntent",
     "EvolutionRevalidationPercentageDeploymentIntentError",
@@ -2174,6 +2188,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageCohortAssignmentStore",
         "EvolutionRevalidationPercentageCohortAssignmentView",
     }
+    revalidation_percentage_boot_preparation_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_BOOT_PREPARATION_POLICY",
+        "EvolutionRevalidationPercentageBootPreparation",
+        "EvolutionRevalidationPercentageBootPreparationError",
+        "EvolutionRevalidationPercentageBootPreparationService",
+        "EvolutionRevalidationPercentageBootPreparationStore",
+        "EvolutionRevalidationPercentageBootPreparationView",
+    }
     revalidation_percentage_deployment_intent_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_DEPLOYMENT_INTENT_POLICY",
         "EvolutionRevalidationPercentageDeploymentIntent",
@@ -2766,6 +2788,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_stage_completions"
     elif name in revalidation_percentage_cohort_assignment_exports:
         module_name = "revalidation_percentage_cohort_assignments"
+    elif name in revalidation_percentage_boot_preparation_exports:
+        module_name = "revalidation_percentage_boot_preparations"
     elif name in revalidation_percentage_deployment_intent_exports:
         module_name = "revalidation_percentage_deployment_intents"
     elif name in revalidation_opt_in_observation_assessment_exports:

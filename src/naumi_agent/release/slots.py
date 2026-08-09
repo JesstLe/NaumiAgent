@@ -316,6 +316,11 @@ class ReleaseSlotStore:
                 timeout=max(1, min(timeout_seconds, _BOOT_TIMEOUT_SECONDS)),
                 env={**os.environ, "NAUMI_RELEASE_BOOT_CHECK": "1"},
             )
+        except subprocess.TimeoutExpired as exc:
+            raise ReleaseSlotError(
+                "release_slot_boot_timeout",
+                "版本槽启动探测超过允许时间。",
+            ) from exc
         except (OSError, subprocess.SubprocessError) as exc:
             raise ReleaseSlotError("release_slot_boot_failed", "版本槽启动探测无法执行。") from exc
         duration = min(int((time.monotonic() - started) * 1000), _BOOT_TIMEOUT_SECONDS * 1000)
