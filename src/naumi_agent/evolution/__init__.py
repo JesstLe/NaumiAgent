@@ -688,6 +688,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationPercentageDeploymentStore,
         EvolutionRevalidationPercentageDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_percentage_observation_windows import (
+        EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_WINDOW_POLICY,
+        EvolutionRevalidationPercentageObservationWindow,
+        EvolutionRevalidationPercentageObservationWindowError,
+        EvolutionRevalidationPercentageObservationWindowStatus,
+        build_percentage_observation_window,
+    )
     from naumi_agent.evolution.revalidation_percentage_runtime_exposures import (
         EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY,
         EvolutionRevalidationPercentageRuntimeExposureError,
@@ -1258,6 +1265,11 @@ __all__ = [
     "EvolutionRevalidationPercentageDeploymentService",
     "EvolutionRevalidationPercentageDeploymentStore",
     "EvolutionRevalidationPercentageDeploymentView",
+    "EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_WINDOW_POLICY",
+    "EvolutionRevalidationPercentageObservationWindow",
+    "EvolutionRevalidationPercentageObservationWindowError",
+    "EvolutionRevalidationPercentageObservationWindowStatus",
+    "build_percentage_observation_window",
     "EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY",
     "EvolutionRevalidationPercentageRuntimeExposureError",
     "EvolutionRevalidationPercentageRuntimeExposureReceipt",
@@ -2240,6 +2252,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationPercentageDeploymentStore",
         "EvolutionRevalidationPercentageDeploymentView",
     }
+    revalidation_percentage_observation_window_exports = {
+        "EVOLUTION_REVALIDATION_PERCENTAGE_OBSERVATION_WINDOW_POLICY",
+        "EvolutionRevalidationPercentageObservationWindow",
+        "EvolutionRevalidationPercentageObservationWindowError",
+        "EvolutionRevalidationPercentageObservationWindowStatus",
+        "build_percentage_observation_window",
+    }
     revalidation_percentage_runtime_exposure_exports = {
         "EVOLUTION_REVALIDATION_PERCENTAGE_RUNTIME_EXPOSURE_POLICY",
         "EvolutionRevalidationPercentageRuntimeExposureError",
@@ -2838,6 +2857,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_percentage_deployment_intents"
     elif name in revalidation_percentage_deployment_exports:
         module_name = "revalidation_percentage_deployments"
+    elif name in revalidation_percentage_observation_window_exports:
+        module_name = "revalidation_percentage_observation_windows"
     elif name in revalidation_percentage_runtime_exposure_exports:
         module_name = "revalidation_percentage_runtime_exposures"
     elif name in revalidation_opt_in_observation_assessment_exports:

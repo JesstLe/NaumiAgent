@@ -180,6 +180,10 @@ identity 写入 ARC-07 v2 pointer、执行 expected-pointer CAS，并支持从�
 用户 runtime 或记录真实 percentage exposure。[EVO-05.5f5e](EVO-05-5f5e-percentage-runtime-exposure.md) 已进一步将生产
 TerminalRuntimeLifecycle 的 managed release binding 与 starting→running observation 绑定为单 installation Exposure Receipt；
 它不把 terminal startup 冒充用户请求或 cohort rollout completion。
+[EVO-05.5f5f](EVO-05-5f5f-percentage-observation-window.md) 已继续从 exact Exposure origin 验证完整 heartbeat hash chain，
+按冻结 percentage guardrail 区分 insufficient/passing/breached，并在 stopped/failed/gap/stale 时停止签发 runtime-window
+authority；它仍固定 completed-run、cohort、stage-completion、stable 与 promotion authority 为 false。下一步 5f5g 建立
+durable bounded-paging assessment 与 current-source 动态撤权。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
