@@ -137,6 +137,9 @@
   不执行 boot、activation 或真实 exposure；
 - [EVO-05.5f5c Percentage Boot Preparation](EVO-05-5f5c-percentage-boot-preparation.md)：已交付；
   以跨进程 claim/epoch 只执行一次 exact candidate boot probe，冻结 Prepared Receipt；不切换 pointer 或声明 deployment；
+- [EVO-05.5f5d Percentage Activation Reconciliation](EVO-05-5f5d-percentage-activation-reconciliation.md)：已交付；
+  将 Prepared content identity 写入 ARC-07 v2 pointer，执行 expected-pointer CAS，并可在 Receipt 写入崩溃、Intent 过期或
+  后续 rollback 后从历史 generation 机械补写；不启动 runtime 或声明真实 exposure；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

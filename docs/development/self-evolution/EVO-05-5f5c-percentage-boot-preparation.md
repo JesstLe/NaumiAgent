@@ -59,7 +59,7 @@ Artifact 冻结：
 - manifest digest 与 Intent 完全一致；
 - arguments 只能是 `("--version",)`；
 - exit code 为 0、version matched、bootable 和 activation input authority 均为 true；
-- checked time 等于 claim start，Prepared 在原 Intent 过期前形成。
+- claim start 不晚于 probe checked time，probe checked time 不晚于 Prepared time，且 Prepared 在原 Intent 过期前形成。
 
 `boot_executed=true` 和 `probe_process_started=true` 只表示短生命周期版本探测确实发生；
 `user_process_started=false`、`process_started=false` 表示没有启动 Naumi 用户 runtime/session。
@@ -106,8 +106,7 @@ false：
 
 ## 当前边界与下一步
 
-5f5c 已证明 exact candidate 在 current installation 上可启动，但 active pointer 仍指向 previous slot。下一最小切片为
-`EVO-05.5f5d Percentage Activation Reconciliation`：只消费 current 5f5c Prepared Receipt，用 5f5b 冻结的
-`expected_previous_pointer_sha256` 执行 ARC-07 authority-bound atomic CAS，随后重读 generation/history 并形成独立 Percentage
-Deployment Receipt。它必须覆盖“pointer 已切换但 Receipt 尚未落盘”的崩溃窗口，并继续把真实 exposure accounting 与健康观察
-留给后续切片。
+5f5c 已证明 exact candidate 在 current installation 上可启动，但 active pointer 仍指向 previous slot。
+[EVO-05.5f5d](EVO-05-5f5d-percentage-activation-reconciliation.md) 已消费 current Prepared Receipt，以 5f5b 冻结的
+`expected_previous_pointer_sha256` 执行 ARC-07 authority-bound atomic CAS，并覆盖“pointer 已切换但 Receipt 尚未落盘”的
+崩溃窗口。真实 runtime launch、exposure accounting 与健康观察仍留给后续切片。
