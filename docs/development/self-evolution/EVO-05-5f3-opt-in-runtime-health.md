@@ -76,8 +76,9 @@ invalid report 或 binding mismatch。基础设施启动失败明确 `process_st
 
 - HAR-10.2i 已把真实 New UI/TUI runtime heartbeat 与 exact ARC-07.5e release identity 原子绑定，HAR-10.2j 又建立
   append-only、bounded page 的 release-bound observation ledger；但单次 probe 和样本集合都不能自行证明持续健康。
-  下一切片应聚合有最小样本数、持续时间、最大 gap、连续 pointer/exposure 的 opt-in observation window，最后形成独立
-  Stage Completion Evidence；legacy baseline 之前的未知历史不得计入；
+  [EVO-05.5f4a](EVO-05-5f4a-opt-in-liveness-window.md) 已机械聚合最小样本数、持续时间、最大 gap 与
+  pointer/exposure，且拒绝 legacy history；下一切片 5f4b 负责 durable source/dynamic revalidation。真实 completed-run
+  evidence 与独立 Stage Completion 仍未完成；
 - Windows 使用共同 Python 核心与环境白名单，但本轮真实 subprocess 夹具是 POSIX shebang，仍需 Windows runner 演练；
 - percentage rollout 仍缺安装注册、稳定分桶、exposure accounting 与群体级 guardrail，不能由本机 Receipt 推导；
 - unhealthy Receipt 只能成为后续 pause/rollback input，EVO-05.6b2 仍需消费 exact Rollback Request 执行兼容回滚。

@@ -54,6 +54,7 @@ Store 故障后的下一次写入也不会形成不可恢复缺口。
 
 ## 当前边界与下一步
 
-下一切片应由 EVO-05 定义独立、content-addressed observation-window policy/receipt：最小持续时间、最小样本数、最大允许
-间隔、允许/禁止 phase、clock regression、terminal/gap 处理，并动态绑定 current Deployment Receipt、pointer 和真实
-exposure/enrollment。`legacy_snapshot` 之前的时长不得计入，分页结果也不得直接冒充 Stage Completion Evidence。
+[EVO-05.5f4a](../self-evolution/EVO-05-5f4a-opt-in-liveness-window.md) 已定义独立、content-addressed liveness-window
+policy/receipt，覆盖最小持续时间/样本数、gap、phase、stale、terminal、legacy origin 及 exact Deployment/exposure binding。
+下一步 5f4b 负责 durable 分页取证与动态失效；真实 completed-run evidence 仍必须独立建立，分页结果和 liveness window
+都不得直接冒充 Stage Completion Evidence。

@@ -589,6 +589,13 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInDeploymentStore,
         EvolutionRevalidationOptInDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_observation_windows import (
+        EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY,
+        EvolutionRevalidationOptInObservationWindow,
+        EvolutionRevalidationOptInObservationWindowError,
+        EvolutionRevalidationOptInObservationWindowStatus,
+        build_opt_in_observation_window,
+    )
     from naumi_agent.evolution.revalidation_opt_in_runtime_health import (
         EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY,
         EvolutionRevalidationOptInRuntimeHealthError,
@@ -1104,6 +1111,11 @@ __all__ = [
     "EvolutionRevalidationOptInDeploymentService",
     "EvolutionRevalidationOptInDeploymentStore",
     "EvolutionRevalidationOptInDeploymentView",
+    "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY",
+    "EvolutionRevalidationOptInObservationWindow",
+    "EvolutionRevalidationOptInObservationWindowError",
+    "EvolutionRevalidationOptInObservationWindowStatus",
+    "build_opt_in_observation_window",
     "EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY",
     "EvolutionRevalidationOptInRuntimeHealthError",
     "EvolutionRevalidationOptInRuntimeHealthReceipt",
@@ -2020,6 +2032,13 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInDeploymentStore",
         "EvolutionRevalidationOptInDeploymentView",
     }
+    revalidation_opt_in_observation_window_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_WINDOW_POLICY",
+        "EvolutionRevalidationOptInObservationWindow",
+        "EvolutionRevalidationOptInObservationWindowError",
+        "EvolutionRevalidationOptInObservationWindowStatus",
+        "build_opt_in_observation_window",
+    }
     revalidation_opt_in_runtime_health_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY",
         "EvolutionRevalidationOptInRuntimeHealthError",
@@ -2580,6 +2599,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_deployment_intents"
     elif name in revalidation_opt_in_deployment_exports:
         module_name = "revalidation_opt_in_deployments"
+    elif name in revalidation_opt_in_observation_window_exports:
+        module_name = "revalidation_opt_in_observation_windows"
     elif name in revalidation_opt_in_runtime_health_exports:
         module_name = "revalidation_opt_in_runtime_health"
     elif name in approval_requirement_exports:
