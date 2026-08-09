@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -86,6 +87,31 @@ async def test_executor_distinguishes_success_failure_and_infrastructure_error(
     assert missing.status is CommandExecutionStatus.INFRASTRUCTURE_ERROR
     assert missing.exit_code is None
     assert "无法启动验证命令" in missing.output
+
+
+@pytest.mark.asyncio
+async def test_executor_passes_an_exact_controlled_environment(tmp_path: Path) -> None:
+    executor = ValidationExecutor()
+    environment = {
+        "PATH": os.environ.get("PATH", ""),
+        "NAUMI_ACTIVE_SLOT_ID": "relslot_" + "1" * 24,
+        "NAUMI_ACTIVE_POINTER_GENERATION": "2",
+    }
+
+    result = await executor.run(
+        argv=(
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['NAUMI_ACTIVE_SLOT_ID']); "
+            "print(os.environ.get('SHOULD_NOT_LEAK', 'absent'))",
+        ),
+        cwd=tmp_path,
+        timeout_seconds=5,
+        env=environment,
+    )
+
+    assert result.status is CommandExecutionStatus.PASSED
+    assert result.output.splitlines() == [environment["NAUMI_ACTIVE_SLOT_ID"], "absent"]
 
 
 @pytest.mark.asyncio
