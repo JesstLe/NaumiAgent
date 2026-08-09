@@ -624,6 +624,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInRuntimeHealthStore,
         EvolutionRevalidationOptInRuntimeHealthView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_stage_advances import (
+        EVOLUTION_REVALIDATION_OPT_IN_STAGE_ADVANCE_POLICY,
+        EvolutionRevalidationOptInStageAdvanceError,
+        EvolutionRevalidationOptInStageAdvanceReceipt,
+        EvolutionRevalidationOptInStageAdvanceService,
+        EvolutionRevalidationOptInStageAdvanceStore,
+        EvolutionRevalidationOptInStageAdvanceView,
+    )
     from naumi_agent.evolution.revalidation_opt_in_stage_completions import (
         EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY,
         EvolutionRevalidationOptInStageCompletion,
@@ -1165,6 +1173,12 @@ __all__ = [
     "EvolutionRevalidationOptInRuntimeHealthService",
     "EvolutionRevalidationOptInRuntimeHealthStore",
     "EvolutionRevalidationOptInRuntimeHealthView",
+    "EVOLUTION_REVALIDATION_OPT_IN_STAGE_ADVANCE_POLICY",
+    "EvolutionRevalidationOptInStageAdvanceError",
+    "EvolutionRevalidationOptInStageAdvanceReceipt",
+    "EvolutionRevalidationOptInStageAdvanceService",
+    "EvolutionRevalidationOptInStageAdvanceStore",
+    "EvolutionRevalidationOptInStageAdvanceView",
     "EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY",
     "EvolutionRevalidationOptInStageCompletion",
     "EvolutionRevalidationOptInStageCompletionError",
@@ -2095,6 +2109,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInLivenessSourceRef",
         "build_opt_in_execution_outcome",
     }
+    revalidation_opt_in_stage_advance_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_STAGE_ADVANCE_POLICY",
+        "EvolutionRevalidationOptInStageAdvanceError",
+        "EvolutionRevalidationOptInStageAdvanceReceipt",
+        "EvolutionRevalidationOptInStageAdvanceService",
+        "EvolutionRevalidationOptInStageAdvanceStore",
+        "EvolutionRevalidationOptInStageAdvanceView",
+    }
     revalidation_opt_in_stage_completion_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_STAGE_COMPLETION_POLICY",
         "EvolutionRevalidationOptInStageCompletion",
@@ -2682,6 +2704,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_execution_outcome_ledger"
     elif name in revalidation_opt_in_execution_outcome_exports:
         module_name = "revalidation_opt_in_execution_outcomes"
+    elif name in revalidation_opt_in_stage_advance_exports:
+        module_name = "revalidation_opt_in_stage_advances"
     elif name in revalidation_opt_in_stage_completion_exports:
         module_name = "revalidation_opt_in_stage_completions"
     elif name in revalidation_opt_in_observation_assessment_exports:

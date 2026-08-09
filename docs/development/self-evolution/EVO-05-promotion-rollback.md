@@ -128,6 +128,8 @@
   把 managed terminal run 的 release provenance、Completion Receipt、Run Usage 与 heartbeat coverage 冻结为 Outcome；
 - [EVO-05.5f4d Opt-in Completed-run Aggregation](EVO-05-5f4d-opt-in-completed-run-aggregation.md)：已交付；
   动态聚合 current Outcome、passing liveness、GREEN Baseline 与 opt-in guardrails，形成独立 Stage Completion Evidence；
+- [EVO-05.5f4e Opt-in Stage Advance Authorization](EVO-05-5f4e-opt-in-stage-advance-authorization.md)：已交付；
+  通过 exact Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git
