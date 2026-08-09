@@ -32,6 +32,12 @@ EVO-05.6b2 自动回滚实际作用于用户进程，而不只是写入一条数
 5. pointer 在解析与写入间变化时最多重新解析三次，不能启动 stale slot；
 6. POSIX 使用 `execve` 保持信号/退出语义，Windows 子进程完整透传参数、环境和退出码。
 
+冻结 runtime 还提供隐藏的机器接口 `--runtime-health-check`。它不进入 onboarding/UI，而是在进程内部重新读取
+`NAUMI_INSTALL_ROOT`，重放 active chain，验证 manifest、Boot Receipt、runtime binary path/digest，并要求 launcher
+注入的 slot ID 与 pointer generation 完全一致。成功只输出一个不超过 64 KiB 的 content-addressed JSON Report；
+额外日志、环境漂移、非 active binary 或损坏链全部失败关闭。Report 明确区分 health probe 进程已启动与用户 session
+未启动，供 EVO-05 opt-in runtime observation 使用。
+
 Launch Resolution 只保存参数数量，不保存用户参数正文。`--launcher-status` 明确记录
 `process_start_requested=false` 和 `process_start_authority=false`；只有普通启动拥有 process-start authority。
 解析失败、链损坏、slot 篡改或 Boot Receipt 过期时输出中文错误码并以 78 退出，不静默猜测或退回未知版本。
@@ -41,6 +47,7 @@ Launch Resolution 只保存参数数量，不保存用户参数正文。`--launc
 - 真实 POSIX 安装夹具完成 archive 下载、checksum、launcher 自检、slot install、boot、activate 和参数转发；
 - 重复安装成功且只产生一个 immutable slot；
 - status 解析 active slot 但不授予进程启动权限，数据库不持久化原始参数；
+- runtime health machine interface 反向验证 exact active binary/environment，并严格解析单一 JSON Report；
 - 篡改 active runtime 后 launcher 失败关闭；
 - artifact/slot/launcher/installer 相关 28 项小模块测试通过；
 - ruff、shell syntax 和 diff whitespace 检查通过；未运行全量测试。
@@ -51,5 +58,6 @@ Launch Resolution 只保存参数数量，不保存用户参数正文。`--launc
   commit/tree，但 ARC-07.4 仍必须增加可信签名、SBOM 和平台 notarization；
 - Windows 脚本完成静态契约与共同 Python 核心覆盖，但仍需 Windows runner 的真实安装/进程演练；
 - ARC-07.6 必须在涉及 config/schema/data 的升级前建立 snapshot 与兼容性 gate；
-- 下一最小闭环切片是 EVO-05.6b2：只消费 exact Rollback Request、Immutable Rollback Source 和已验证
-  previous slot，执行 fenced rollback 并验证新启动解析；EVO-05.7 再持久化 Outcome 并回注反馈。
+- 下一最小闭环切片是 EVO-05.5f3：消费 exact Deployment Receipt，通过 stable launcher 解析并启动冻结
+  runtime 的 health machine interface，持久化带执行终态的健康观测回执；它不启动用户 session，也不据此宣称
+  percentage/stable rollout。EVO-05.6b2 再消费失败观测形成的 exact Rollback Request。

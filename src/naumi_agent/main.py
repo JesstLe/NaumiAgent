@@ -225,8 +225,38 @@ def _default_command(
     config: str = typer.Option(DEFAULT_CONFIG_PATH, "--config", "-c", help="配置文件路径"),
     tui: bool = typer.Option(False, "--tui", help="显式启动 Textual TUI fallback"),
     version: bool = typer.Option(False, "--version", "-v", help="显示版本"),
+    runtime_health_check: bool = typer.Option(
+        False,
+        "--runtime-health-check",
+        hidden=True,
+    ),
 ) -> None:
     """默认无子命令时启动新一代终端 UI."""
+    if runtime_health_check:
+        from naumi_agent.release.runtime_health import (
+            ReleaseRuntimeHealthError,
+            inspect_runtime_health,
+        )
+        from naumi_agent.release.slots import ReleaseSlotStore
+
+        try:
+            install_root = os.environ.get("NAUMI_INSTALL_ROOT", "").strip()
+            if not install_root:
+                raise ReleaseRuntimeHealthError(
+                    "release_runtime_health_environment_missing",
+                    "Runtime Health 缺少 NAUMI_INSTALL_ROOT。",
+                )
+            report = inspect_runtime_health(
+                ReleaseSlotStore(install_root),
+                environment=os.environ,
+                runtime_path=sys.executable,
+            )
+        except (OSError, TypeError, ValueError, ReleaseRuntimeHealthError) as exc:
+            code = getattr(exc, "code", "release_runtime_health_failed")
+            typer.echo(f"Naumi Runtime Health 错误 [{code}]：{exc}", err=True)
+            raise typer.Exit(78) from exc
+        typer.echo(report.model_dump_json())
+        raise typer.Exit()
     if version:
         import importlib.metadata
 
