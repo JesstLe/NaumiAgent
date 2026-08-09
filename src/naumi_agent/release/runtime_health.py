@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +11,11 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from naumi_agent.release.slots import ReleaseSlotError, ReleaseSlotStore
+from naumi_agent.release.runtime_binding import (
+    ReleaseRuntimeBindingError,
+    verify_active_runtime_binding,
+)
+from naumi_agent.release.slots import ReleaseSlotStore
 
 RELEASE_RUNTIME_HEALTH_POLICY = "naumi-release-runtime-health-v1"
 _SHA256_RE = r"^[0-9a-f]{64}$"
@@ -98,33 +101,19 @@ def inspect_runtime_health(
 ) -> ReleaseRuntimeHealthReport:
     if not isinstance(store, ReleaseSlotStore):
         raise TypeError("Runtime Health 需要 ReleaseSlotStore。")
-    path = Path(runtime_path).expanduser().resolve()
     try:
-        target = store.resolve_active_backend()
-    except (OSError, TypeError, ValueError, ReleaseSlotError) as exc:
+        binding = verify_active_runtime_binding(
+            store,
+            environment=environment,
+            runtime_path=runtime_path,
+        )
+    except ReleaseRuntimeBindingError as exc:
+        suffix = exc.code.removeprefix("release_runtime_binding_")
         raise ReleaseRuntimeHealthError(
-            "release_runtime_health_active_invalid",
-            "Runtime 无法验证 active release chain。",
+            f"release_runtime_health_{suffix}",
+            str(exc),
         ) from exc
-    expected_environment = {
-        "NAUMI_ACTIVE_SLOT_ID": target.slot.slot_id,
-        "NAUMI_ACTIVE_POINTER_GENERATION": str(target.pointer.generation),
-        "NAUMI_INSTALL_ROOT": str(store.release_root),
-    }
-    actual_environment = {
-        name: str(environment.get(name, "")).strip()
-        for name in expected_environment
-    }
-    if actual_environment != expected_environment:
-        raise ReleaseRuntimeHealthError(
-            "release_runtime_health_environment_mismatch",
-            "Runtime 环境未绑定 exact active slot、pointer generation 与 install root。",
-        )
-    if os.path.normcase(str(path)) != os.path.normcase(str(target.backend.resolve())):
-        raise ReleaseRuntimeHealthError(
-            "release_runtime_health_binary_mismatch",
-            "执行中的 Runtime 不是 active pointer 绑定的 exact binary。",
-        )
+    target = binding.target
     core = {
         "schema_version": 1,
         "policy_version": RELEASE_RUNTIME_HEALTH_POLICY,
@@ -140,8 +129,8 @@ def inspect_runtime_health(
         "boot_receipt_id": target.boot_receipt.receipt_id,
         "boot_receipt_sha256": target.boot_receipt.receipt_sha256,
         "binary_sha256": target.boot_receipt.binary_sha256,
-        "runtime_path": str(target.backend.resolve()),
-        "install_root": str(store.release_root),
+        "runtime_path": str(binding.runtime_path),
+        "install_root": str(binding.install_root),
         "command": ["--runtime-health-check"],
         "checks": list(_CHECKS),
         "process_started": True,
