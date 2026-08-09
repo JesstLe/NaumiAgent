@@ -143,6 +143,9 @@
 - [EVO-05.5f5e Percentage Runtime Launch and Exposure Receipt](EVO-05-5f5e-percentage-runtime-exposure.md)：已交付；
   将 5f5d Deployment 与 ARC-07.5e managed terminal identity、HAR starting→running observation chain 绑定，形成单 installation
   startup exposure；不声明用户请求、cohort health 或 rollout completion；
+- [EVO-05.5f5f Percentage Runtime Observation Window](EVO-05-5f5f-percentage-observation-window.md)：已交付；
+  从 exact Exposure startup pair 开始校验完整 heartbeat hash chain、连续运行时长、样本数、最大 gap 与 stale 状态；只签发
+  单 installation runtime-window authority，不声明 completed run 或 percentage stage completion；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

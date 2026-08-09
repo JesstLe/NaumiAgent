@@ -88,6 +88,6 @@ Harness retention 或 ledger/binding 篡改会使历史 source 不可验证，�
 launcher 启动一个完整交互式子进程；Windows 真 `.exe` 与 packaged New UI/TUI 启动仍需三平台 CI 做端到端证明。
 
 5f5e 只形成单 installation 的一条 exact startup exposure；它没有跨所有 Harness subject 排序，因此不声称这是全局时间上
-最早的 runtime。下一最小切片为 `EVO-05.5f5f Percentage Runtime Observation Window`：消费
-current Exposure、后续 append-only heartbeat samples 与 Plan guardrails，机械检查 minimum duration、sample count、maximum gap、
-pointer/exposure continuity；它仍不能把单 installation window 冒充整个 cohort 的 rollout completion。
+最早的 runtime。[EVO-05.5f5f](EVO-05-5f5f-percentage-observation-window.md) 已消费 Exposure、后续 append-only
+heartbeat samples 与 Plan guardrails，机械检查 minimum duration、sample count 与 maximum gap；它仍不会把单 installation
+window 冒充整个 cohort 的 rollout completion。下一步由 5f5g 补 durable paging 与 current-source 动态重验。

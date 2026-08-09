@@ -60,4 +60,6 @@ policy/receipt；[EVO-05.5f4b](../self-evolution/EVO-05-5f4b-durable-opt-in-live
 Completion Evidence。[HAR-10.2k](HAR-10-2k-release-bound-chat-run-provenance.md) 已先把真实 New UI/TUI chat run
 绑定到 exact release；下一步仍需将该 provenance、终态 Completion Receipt 与覆盖运行区间的 observation 组合成独立 outcome。
 [EVO-05.5f5e](../self-evolution/EVO-05-5f5e-percentage-runtime-exposure.md) 已严格消费 startup origin 的 sequence 1 starting 与
-sequence 2 running，形成单 installation Exposure Receipt；后续 window 仍必须继续读取完整 sample chain。
+sequence 2 running，形成单 installation Exposure Receipt；
+[EVO-05.5f5f](../self-evolution/EVO-05-5f5f-percentage-observation-window.md) 已进一步消费完整 sample chain，按冻结 guardrail
+机械区分 insufficient/passing/breached。5f5g 仍需用本 Ledger 的 bounded paging 建立 durable current assessment。
