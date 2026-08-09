@@ -26,8 +26,15 @@ from tests.unit.test_evolution_revalidation_opt_in_deployment_intents import (
 )
 
 
-async def _deployment_service(root: Path):
-    fixture = await _intent_service(root)
+async def _deployment_service(
+    root: Path,
+    *,
+    candidate_backend_content: bytes | None = None,
+):
+    fixture = await _intent_service(
+        root,
+        candidate_backend_content=candidate_backend_content,
+    )
     intent_service = fixture[0]
     completion = fixture[1]
     admission = fixture[2]

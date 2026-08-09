@@ -90,5 +90,6 @@ authority-bound activation fact。
 - 当前 cohort 仍是单机显式 enrollment，`population_assignment_enforced=false`；
 - pointer switch 只决定稳定 launcher 下次启动的版本，本切片没有启动或重启用户进程；
 - percentage rollout 需要安装注册、稳定分桶与 exposure accounting，不能复用单机 opt-in Receipt 虚报；
-- 下一切片应建立 opt-in runtime launch/health observation 与 completion evidence，再决定是否进入 percentage；
+- [EVO-05.5f3](EVO-05-5f3-opt-in-runtime-health.md) 已建立 opt-in runtime launch 与单次 terminal health receipt；
+  后续仍需 observation window 与独立 completion evidence，不能由单次 probe 直接进入 percentage；
 - EVO-05.6b2 仍负责消费 rollback authority，执行兼容回滚并生成独立 Rollback Receipt。

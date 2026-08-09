@@ -37,6 +37,7 @@ def _bundle(
     source_tree_sha256: str = SOURCE_TREE_SHA256,
     build_signer=None,
     build_context=None,
+    backend_content: bytes | None = None,
 ) -> Path:
     target = host_release_target()
     windows = target.startswith("windows-")
@@ -45,7 +46,12 @@ def _bundle(
     ui_name = "naumi-ui.exe" if windows else "naumi-ui"
     reported = version if reported is None else reported
     backend = root / f"backend-{output_name}"
-    if windows:
+    if backend_content is not None:
+        backend_content = bytes(backend_content)
+        ui_content = (
+            b"not-a-real-windows-ui" if windows else b"#!/bin/sh\nexit 0\n"
+        )
+    elif windows:
         backend_content = b"not-a-real-windows-binary"
         ui_content = b"not-a-real-windows-ui"
     else:

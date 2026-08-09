@@ -164,6 +164,10 @@ from naumi_agent.evolution.revalidation_opt_in_deployments import (
     EvolutionRevalidationOptInDeploymentService,
     EvolutionRevalidationOptInDeploymentStore,
 )
+from naumi_agent.evolution.revalidation_opt_in_runtime_health import (
+    EvolutionRevalidationOptInRuntimeHealthService,
+    EvolutionRevalidationOptInRuntimeHealthStore,
+)
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestBuilder,
     EvolutionRevalidationRequestService,
@@ -675,6 +679,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     )
     assert (
         engine.evolution_revalidation_opt_in_deployment_store.release_slot_store
+        is engine.evolution_release_slot_store
+    )
+    assert isinstance(
+        engine.evolution_revalidation_opt_in_runtime_health_store,
+        EvolutionRevalidationOptInRuntimeHealthStore,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_opt_in_runtime_health_service,
+        EvolutionRevalidationOptInRuntimeHealthService,
+    )
+    assert (
+        engine.evolution_revalidation_opt_in_runtime_health_store.release_slot_store
         is engine.evolution_release_slot_store
     )
     assert engine.evolution_release_build_trust_policy_path == (

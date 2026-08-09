@@ -589,6 +589,14 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInDeploymentStore,
         EvolutionRevalidationOptInDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_runtime_health import (
+        EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY,
+        EvolutionRevalidationOptInRuntimeHealthError,
+        EvolutionRevalidationOptInRuntimeHealthReceipt,
+        EvolutionRevalidationOptInRuntimeHealthService,
+        EvolutionRevalidationOptInRuntimeHealthStore,
+        EvolutionRevalidationOptInRuntimeHealthView,
+    )
     from naumi_agent.evolution.revalidation_outcomes import (
         EVOLUTION_REVALIDATION_OUTCOME_POLICY,
         EvolutionInvalidatedAuthority,
@@ -1096,6 +1104,12 @@ __all__ = [
     "EvolutionRevalidationOptInDeploymentService",
     "EvolutionRevalidationOptInDeploymentStore",
     "EvolutionRevalidationOptInDeploymentView",
+    "EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY",
+    "EvolutionRevalidationOptInRuntimeHealthError",
+    "EvolutionRevalidationOptInRuntimeHealthReceipt",
+    "EvolutionRevalidationOptInRuntimeHealthService",
+    "EvolutionRevalidationOptInRuntimeHealthStore",
+    "EvolutionRevalidationOptInRuntimeHealthView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -2006,6 +2020,14 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInDeploymentStore",
         "EvolutionRevalidationOptInDeploymentView",
     }
+    revalidation_opt_in_runtime_health_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_RUNTIME_HEALTH_POLICY",
+        "EvolutionRevalidationOptInRuntimeHealthError",
+        "EvolutionRevalidationOptInRuntimeHealthReceipt",
+        "EvolutionRevalidationOptInRuntimeHealthService",
+        "EvolutionRevalidationOptInRuntimeHealthStore",
+        "EvolutionRevalidationOptInRuntimeHealthView",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -2558,6 +2580,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_deployment_intents"
     elif name in revalidation_opt_in_deployment_exports:
         module_name = "revalidation_opt_in_deployments"
+    elif name in revalidation_opt_in_runtime_health_exports:
+        module_name = "revalidation_opt_in_runtime_health"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:
