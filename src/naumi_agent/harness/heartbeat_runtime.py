@@ -116,6 +116,7 @@ class RuntimeHeartbeatProducer:
         self._started = False
         self._closed = False
         self._failure_code = ""
+        self._record_lock = asyncio.Lock()
 
     @property
     def sequence(self) -> int:
@@ -172,15 +173,16 @@ class RuntimeHeartbeatProducer:
             and binding.epoch == self.epoch
         ):
             raise ValueError("Runtime Release Binding 与 heartbeat producer 不一致。")
-        self._sequence += 1
-        heartbeat = await self._port.record_runtime_release_binding_startup(
-            binding=binding,
-            observed_at=self._now(),
-            timeout_seconds=self.timeout_seconds,
-            detail_code=self.detail_codes.starting,
-        )
-        self._phase = heartbeat.phase
-        return heartbeat
+        async with self._record_lock:
+            heartbeat = await self._port.record_runtime_release_binding_startup(
+                binding=binding,
+                observed_at=self._now(),
+                timeout_seconds=self.timeout_seconds,
+                detail_code=self.detail_codes.starting,
+            )
+            self._sequence = heartbeat.sequence
+            self._phase = heartbeat.phase
+            return heartbeat
 
     async def pulse_now(self) -> HarnessHeartbeat:
         """Write one liveness observation without erasing a waiting boundary."""
@@ -310,21 +312,22 @@ class RuntimeHeartbeatProducer:
         phase: HarnessHeartbeatPhase,
         detail_code: str,
     ) -> HarnessHeartbeat:
-        self._sequence += 1
-        heartbeat = await self._port.record_heartbeat(
-            workspace_root=self.workspace_root,
-            subject_kind=self.subject_kind,
-            subject_id=self.subject_id,
-            instance_id=self.instance_id,
-            epoch=self.epoch,
-            sequence=self._sequence,
-            phase=phase,
-            observed_at=self._now(),
-            timeout_seconds=self.timeout_seconds,
-            detail_code=detail_code,
-        )
-        self._phase = heartbeat.phase
-        return heartbeat
+        async with self._record_lock:
+            heartbeat = await self._port.record_heartbeat(
+                workspace_root=self.workspace_root,
+                subject_kind=self.subject_kind,
+                subject_id=self.subject_id,
+                instance_id=self.instance_id,
+                epoch=self.epoch,
+                sequence=self._sequence + 1,
+                phase=phase,
+                observed_at=self._now(),
+                timeout_seconds=self.timeout_seconds,
+                detail_code=detail_code,
+            )
+            self._sequence = heartbeat.sequence
+            self._phase = heartbeat.phase
+            return heartbeat
 
 
 __all__ = [

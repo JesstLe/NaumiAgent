@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -234,3 +235,9 @@ async def test_binding_startup_is_idempotent_conflict_safe_and_pruned(
         subject_kind="runtime",
         subject_id="tui-atomic-binding",
     ) is None
+    with sqlite3.connect(store.db_path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM harness_runtime_release_observations "
+            "WHERE subject_id = ?",
+            ("tui-atomic-binding",),
+        ).fetchone()[0] == 0

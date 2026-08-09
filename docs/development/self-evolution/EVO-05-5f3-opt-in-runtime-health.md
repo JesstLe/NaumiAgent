@@ -74,10 +74,10 @@ invalid report 或 binding mismatch。基础设施启动失败明确 `process_st
 
 ## 当前边界与下一步
 
-- HAR-10.2i 已把真实 New UI/TUI runtime heartbeat 与 exact ARC-07.5e release identity 原子绑定，但 Store 仍只保存
-  latest heartbeat；单次 probe 和 latest snapshot 都不能证明持续健康。下一切片应先建立 append-only、bounded 的
-  release-bound observation sample，再聚合有最小样本数、持续时间、连续 pointer/exposure 的 opt-in observation window，
-  最后形成独立 Stage Completion Evidence；
+- HAR-10.2i 已把真实 New UI/TUI runtime heartbeat 与 exact ARC-07.5e release identity 原子绑定，HAR-10.2j 又建立
+  append-only、bounded page 的 release-bound observation ledger；但单次 probe 和样本集合都不能自行证明持续健康。
+  下一切片应聚合有最小样本数、持续时间、最大 gap、连续 pointer/exposure 的 opt-in observation window，最后形成独立
+  Stage Completion Evidence；legacy baseline 之前的未知历史不得计入；
 - Windows 使用共同 Python 核心与环境白名单，但本轮真实 subprocess 夹具是 POSIX shebang，仍需 Windows runner 演练；
 - percentage rollout 仍缺安装注册、稳定分桶、exposure accounting 与群体级 guardrail，不能由本机 Receipt 推导；
 - unhealthy Receipt 只能成为后续 pause/rollback input，EVO-05.6b2 仍需消费 exact Rollback Request 执行兼容回滚。
