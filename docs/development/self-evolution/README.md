@@ -170,7 +170,8 @@ proof-of-possession 组合为稳定 ranked cohort，精确冻结 denominator、t
 或 trust 更新会动态撤权。它仍不下载、激活或扩大真实流量；
 [ARC-07.5d1](../architecture/ARC-07-5d1-signed-release-channel-catalog.md) 已提供 signed channel/build 双信任目录与 target
 Resolution；[ARC-07.5d2](../architecture/ARC-07-5d2-verified-artifact-fetch.md) 已提供有界 HTTPS fetch、原子落盘、崩溃恢复和
-动态撤权 Download Receipt。下一步先完成 verified archive admission，再签发 percentage Deployment Intent。
+动态撤权 Download Receipt；[ARC-07.5d3](../architecture/ARC-07-5d3-verified-archive-admission.md) 已完成安全解包、构建证明重验和
+immutable inactive-slot Admission。下一步签发 percentage Deployment Intent。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个

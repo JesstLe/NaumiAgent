@@ -70,10 +70,8 @@ Policy 以及磁盘文件；任一漂移都会撤销 `verified_archive_authority
 - archive 文件篡改、next Catalog 和 SQLite Receipt 篡改都会即时撤权或 fail closed；
 - ruff、compile、公共 import、静态自审与相关 release 小模块 11 项测试通过；未运行全量测试。
 
-## 当前边界与下一步
+## 后续切片
 
-Download Receipt 证明的是 archive bytes 已可信落盘，不证明 archive 内路径安全、manifest 完整、平台签名有效或 bundle 已安装。
-下一最小切片 `ARC-07.5d3 Verified Archive Admission` 应消费 current Download Receipt，在隔离 staging 中防止 absolute path、
-`..`、symlink/hardlink、设备文件、大小/文件数炸弹和覆盖攻击，重验 ARC-07.4b manifest/Build Attestation 后，才允许把
-validated bundle 交给 ARC-07.5a immutable inactive-slot installation。该 Receipt 完成前不能实现
-`EVO-05.5f5b Percentage Deployment Intent`。
+[ARC-07.5d3 Verified Archive Admission](ARC-07-5d3-verified-archive-admission.md) 已消费 current Download Receipt，通过
+隔离解包、防路径/链接/设备/炸弹攻击、manifest/Build Attestation 重验和 ARC-07.5a 安装形成 immutable inactive-slot
+Admission。下一最小切片是 `EVO-05.5f5b Percentage Deployment Intent`。

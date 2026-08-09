@@ -85,6 +85,7 @@ source current 时：
 EVO-05.5f5a 只有 assignment authority，没有安装回执、percentage activation、群体 exposure accounting 或 guardrail
 observation。[ARC-07.5d1](../architecture/ARC-07-5d1-signed-release-channel-catalog.md) 已补齐 signed distribution catalog 与
 target Resolution，[ARC-07.5d2](../architecture/ARC-07-5d2-verified-artifact-fetch.md) 已补齐有界下载、原子落盘和动态撤权
-Download Receipt。下一最小前置是 `ARC-07.5d3 Verified Archive Admission`；随后 `EVO-05.5f5b Percentage Deployment
-Intent` 才能只允许 current selected Assignment 请求 exact verified candidate build，且仍需与真实
+Download Receipt；[ARC-07.5d3](../architecture/ARC-07-5d3-verified-archive-admission.md) 已补齐安全解包、构建证明重验和
+immutable inactive-slot Admission。下一最小切片是 `EVO-05.5f5b Percentage Deployment Intent`，它只能允许 current selected
+Assignment 请求 exact verified candidate slot，且仍需与真实
 installation/activation/exposure Receipt 分开，不能把 Intent 虚报为 rollout 已发生。

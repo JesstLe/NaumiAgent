@@ -29,7 +29,10 @@
     Resolution。
   - [ARC-07.5d2 Verified Artifact Fetch](ARC-07-5d2-verified-artifact-fetch.md)：已交付 current Resolution 重验、
     有界 HTTPS raw stream、origin fallback、跨进程 claim/lease fencing、content-addressed 原子落盘、崩溃恢复与动态撤权
-    Download Receipt；安全解包和安装仍未实现。
+    Download Receipt。
+  - [ARC-07.5d3 Verified Archive Admission](ARC-07-5d3-verified-archive-admission.md)：已交付跨平台受限 tar/zip
+    解包、防路径/链接/设备/炸弹攻击、manifest/Build Attestation 重验、完整 slot fsync 与 immutable inactive-slot
+    Admission；boot、activation 和 deployment 仍未执行。
   - [ARC-07.5e Managed Terminal Runtime Identity](ARC-07-5e-terminal-runtime-identity.md)：已交付普通 terminal
     session 的进程内 active-chain/environment/binary 自校验与 content-addressed identity；HAR-10.2i 已完成
     New UI/TUI runtime heartbeat exact binding，HAR-10.2j 已完成 append-only observation history；持续 window、
