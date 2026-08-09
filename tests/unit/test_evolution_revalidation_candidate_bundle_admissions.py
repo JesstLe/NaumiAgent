@@ -24,7 +24,12 @@ from tests.unit.test_evolution_revalidation_rollout_stage_advances import _servi
 from tests.unit.test_release_slots import _bundle
 
 
-async def _admission_service(root: Path, *, candidate_source_matches=True):
+async def _admission_service(
+    root: Path,
+    *,
+    candidate_source_matches=True,
+    candidate_backend_content: bytes | None = None,
+):
     advance_service, completion, _control, _observed = await _service(root)
     await advance_service.authorize(completion_id=completion.completion_id)
     plan_service = advance_service.completion_service.plan_service
@@ -70,6 +75,7 @@ async def _admission_service(root: Path, *, candidate_source_matches=True):
         source_tree_sha256=(plan.target_tree_sha256 if candidate_source_matches else "e" * 64),
         build_signer=signer,
         build_context=build_context,
+        backend_content=candidate_backend_content,
     )
     target = host_release_target()
     archive_suffix = "zip" if target.startswith("windows-") else "tar.gz"

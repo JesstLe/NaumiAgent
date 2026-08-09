@@ -629,6 +629,22 @@ class ReleaseSlotStore:
             )
             db.commit()
 
+    def get_launch_resolution(self, resolution_id: str):
+        """Read one immutable launch fact after validating its typed identity."""
+        if not self.db_path.is_file():
+            return None
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT resolution_json FROM release_launch_resolutions "
+                "WHERE resolution_id = ?",
+                (resolution_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        from naumi_agent.release.launcher import ReleaseLaunchResolution
+
+        return ReleaseLaunchResolution.model_validate_json(row["resolution_json"])
+
     def get_slot(self, slot_id: str) -> ReleaseInstalledSlot | None:
         if not self.db_path.is_file():
             return None

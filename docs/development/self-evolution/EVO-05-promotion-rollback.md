@@ -115,6 +115,9 @@
 - [EVO-05.5f2 Opt-in Activation and Reconciliation](EVO-05-5f2-opt-in-activation-reconciliation.md)：已交付；
   把 exact Intent authority 纳入 ARC-07 v2 pointer digest，执行 expected-pointer CAS，并在 Receipt 落盘前崩溃、
   甚至后续 rollback 后按历史 generation 机械补写；仍不启动进程或开放全局 percentage rollout。
+- [EVO-05.5f3 Opt-in Runtime Launch and Health Receipt](EVO-05-5f3-opt-in-runtime-health.md)：已交付；通过
+  stable launcher 真实启动 exact candidate health probe，以 lease/epoch fencing 收敛并发和崩溃重试，冻结
+  healthy/unhealthy 终态；不启动用户 session、不完成 opt-in stage 或开放 percentage/stable authority。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

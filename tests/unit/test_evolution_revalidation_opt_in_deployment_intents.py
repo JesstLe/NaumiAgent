@@ -31,7 +31,13 @@ from tests.unit.test_evolution_revalidation_rollout_stage_advances import (
 )
 
 
-async def _intent_service(root: Path, *, answer="enroll", after_answer=None):
+async def _intent_service(
+    root: Path,
+    *,
+    answer="enroll",
+    after_answer=None,
+    candidate_backend_content: bytes | None = None,
+):
     (
         candidate_service,
         completion,
@@ -42,7 +48,10 @@ async def _intent_service(root: Path, *, answer="enroll", after_answer=None):
         plan,
         policy_box,
         signer,
-    ) = await _admission_service(root)
+    ) = await _admission_service(
+        root,
+        candidate_backend_content=candidate_backend_content,
+    )
     admission = await candidate_service.admit(
         completion_id=completion.completion_id,
         bundle_dir=bundle,

@@ -291,6 +291,10 @@ from naumi_agent.evolution.revalidation_opt_in_deployments import (
     EvolutionRevalidationOptInDeploymentService,
     EvolutionRevalidationOptInDeploymentStore,
 )
+from naumi_agent.evolution.revalidation_opt_in_runtime_health import (
+    EvolutionRevalidationOptInRuntimeHealthService,
+    EvolutionRevalidationOptInRuntimeHealthStore,
+)
 from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
@@ -2345,6 +2349,22 @@ class AgentEngine:
                 ),
                 interaction_store=self._harness_store,
                 store=self.evolution_revalidation_opt_in_deployment_store,
+            )
+        )
+        self.evolution_revalidation_opt_in_runtime_health_store = (
+            EvolutionRevalidationOptInRuntimeHealthStore(
+                config.memory.session_db_path,
+                deployment_store=self.evolution_revalidation_opt_in_deployment_store,
+                release_slot_store=self.evolution_release_slot_store,
+            )
+        )
+        self.evolution_revalidation_opt_in_runtime_health_service = (
+            EvolutionRevalidationOptInRuntimeHealthService(
+                workspace_root=paths.workspace_root,
+                deployment_service=(
+                    self.evolution_revalidation_opt_in_deployment_service
+                ),
+                store=self.evolution_revalidation_opt_in_runtime_health_store,
             )
         )
         self.evolution_revalidation_rollback_request_store = (
