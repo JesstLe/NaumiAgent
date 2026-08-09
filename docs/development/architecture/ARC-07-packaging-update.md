@@ -24,6 +24,9 @@
   - [ARC-07.5c Signed Managed-installation Population Snapshot](ARC-07-5c-signed-installation-population.md)：
     已交付独立 Registry Trust Policy、隐私化 signed installation credential、完整 hash-chained population snapshot 与客户端
     动态撤权 Store；远端 Registry 服务、安装 key provisioning 和大规模 Merkle 分页仍未实现。
+  - [ARC-07.5d1 Signed Release Channel Catalog](ARC-07-5d1-signed-release-channel-catalog.md)：已交付独立
+    channel/build 双信任根、hash-chained target catalog、release generation rollback resistance 与 pinned-origin
+    Resolution；真实 HTTPS fetch、解包和安装仍未实现。
   - [ARC-07.5e Managed Terminal Runtime Identity](ARC-07-5e-terminal-runtime-identity.md)：已交付普通 terminal
     session 的进程内 active-chain/environment/binary 自校验与 content-addressed identity；HAR-10.2i 已完成
     New UI/TUI runtime heartbeat exact binding，HAR-10.2j 已完成 append-only observation history；持续 window、
