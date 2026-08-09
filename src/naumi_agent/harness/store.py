@@ -71,6 +71,9 @@ from naumi_agent.harness.run_lease import (
     HarnessRunLease,
     HarnessRunLeaseState,
 )
+from naumi_agent.harness.runtime_release_binding import (
+    HarnessRuntimeReleaseBinding,
+)
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequest
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
@@ -83,7 +86,7 @@ from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.user_interaction import INTERACTION_PRIORITY_SCHEDULE
 
-HARNESS_STORE_SCHEMA_VERSION = 24
+HARNESS_STORE_SCHEMA_VERSION = 25
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -2967,6 +2970,164 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, ValueError) as exc:
             raise HarnessStoreError("无法保存 Harness 心跳。") from exc
 
+    async def record_runtime_release_binding_startup(
+        self,
+        *,
+        binding: HarnessRuntimeReleaseBinding,
+        observed_at: str,
+        timeout_seconds: int,
+        detail_code: str,
+    ) -> HarnessHeartbeat:
+        """Atomically bind exact release identity and the starting heartbeat."""
+        try:
+            item = HarnessRuntimeReleaseBinding.model_validate_json(
+                binding.model_dump_json()
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("Runtime Release Binding artifact 无效。") from exc
+        workspace = _canonical_workspace(item.workspace_root)
+        subject = _normalize_run_lease_id(item.subject_id, field="subject_id")
+        instance = _normalize_run_lease_id(item.instance_id, field="instance_id")
+        timestamp = _normalize_utc_timestamp(observed_at, field="observed_at")
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, int)
+            or not 3 <= timeout_seconds <= 86_400
+        ):
+            raise ValueError("timeout_seconds 必须是 3 到 86400 之间的整数。")
+        detail = _normalize_run_lease_id(detail_code, field="detail_code")
+        if datetime.fromisoformat(item.bound_at) > datetime.fromisoformat(timestamp):
+            raise ValueError("Runtime Release Binding 不能晚于 starting heartbeat。")
+        incoming = HarnessHeartbeat(
+            workspace_root=workspace,
+            subject_kind=HarnessRunKind.RUNTIME,
+            subject_id=subject,
+            instance_id=instance,
+            epoch=item.epoch,
+            sequence=1,
+            phase=HarnessHeartbeatPhase.STARTING,
+            observed_at=timestamp,
+            timeout_seconds=timeout_seconds,
+            detail_code=detail,
+        )
+        await self._ensure_schema()
+        try:
+            async with self._write_lock, self._connection() as db:
+                await db.execute("BEGIN IMMEDIATE")
+                binding_row = await (
+                    await db.execute(
+                        "SELECT binding_json FROM harness_runtime_release_bindings "
+                        "WHERE workspace_root = ? AND subject_id = ?",
+                        (workspace, subject),
+                    )
+                ).fetchone()
+                heartbeat_row = await _select_heartbeat_row(
+                    db,
+                    workspace_root=workspace,
+                    subject_kind=HarnessRunKind.RUNTIME,
+                    subject_id=subject,
+                )
+                if binding_row is not None or heartbeat_row is not None:
+                    existing_binding = (
+                        None
+                        if binding_row is None
+                        else HarnessRuntimeReleaseBinding.model_validate_json(
+                            binding_row["binding_json"]
+                        )
+                    )
+                    existing_heartbeat = (
+                        None
+                        if heartbeat_row is None
+                        else _heartbeat_from_row(heartbeat_row)
+                    )
+                    if existing_binding == item and existing_heartbeat == incoming:
+                        await db.commit()
+                        return incoming
+                    await db.rollback()
+                    raise HarnessStoreConflictError(
+                        "Runtime heartbeat subject 已绑定不同 release identity 或 startup。"
+                    )
+                await db.execute(
+                    """
+                    INSERT INTO harness_runtime_release_bindings (
+                        workspace_root, subject_id, instance_id, epoch, surface,
+                        binding_id, binding_sha256, runtime_identity_id,
+                        runtime_identity_sha256, binding_json, bound_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        subject,
+                        instance,
+                        item.epoch,
+                        item.surface,
+                        item.binding_id,
+                        item.binding_sha256,
+                        item.runtime_identity.identity_id,
+                        item.runtime_identity.identity_sha256,
+                        item.model_dump_json(),
+                        item.bound_at,
+                    ),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO harness_heartbeats (
+                        workspace_root, subject_kind, subject_id, instance_id,
+                        epoch, sequence, phase, observed_at, timeout_seconds,
+                        detail_code
+                    ) VALUES (?, 'runtime', ?, ?, ?, 1, 'starting', ?, ?, ?)
+                    """,
+                    (
+                        workspace,
+                        subject,
+                        instance,
+                        item.epoch,
+                        timestamp,
+                        timeout_seconds,
+                        detail,
+                    ),
+                )
+                await db.commit()
+                return incoming
+        except HarnessStoreConflictError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise HarnessStoreError(
+                "无法原子保存 Runtime Release Binding 与 starting heartbeat。"
+            ) from exc
+
+    async def get_runtime_release_binding(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_id: str,
+    ) -> HarnessRuntimeReleaseBinding | None:
+        workspace = _canonical_workspace(workspace_root)
+        subject = _normalize_run_lease_id(subject_id, field="subject_id")
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                row = await (
+                    await db.execute(
+                        "SELECT binding_json FROM harness_runtime_release_bindings "
+                        "WHERE workspace_root = ? AND subject_id = ?",
+                        (workspace, subject),
+                    )
+                ).fetchone()
+            return (
+                None
+                if row is None
+                else HarnessRuntimeReleaseBinding.model_validate_json(
+                    row["binding_json"]
+                )
+            )
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise HarnessStoreError(
+                "无法读取 Runtime Release Binding。"
+            ) from exc
+
     async def get_heartbeat(
         self,
         *,
@@ -3130,6 +3291,13 @@ class HarnessStore:
                     if assess_heartbeat(heartbeat, now=now).health in allowed_health:
                         eligible.append(heartbeat.subject_id)
                 if eligible:
+                    await db.executemany(
+                        """
+                        DELETE FROM harness_runtime_release_bindings
+                        WHERE workspace_root = ? AND subject_id = ?
+                        """,
+                        [(workspace, subject_id) for subject_id in eligible],
+                    )
                     await db.executemany(
                         """
                         DELETE FROM harness_heartbeats
@@ -7823,6 +7991,7 @@ class HarnessStore:
                             await db.executescript(_SCHEMA_V23)
                             await _migrate_interaction_priority_v24(db)
                             await db.executescript(_SCHEMA_V24)
+                            await db.executescript(_SCHEMA_V25)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -12227,5 +12396,28 @@ _SCHEMA_V24 = """
 CREATE INDEX IF NOT EXISTS idx_harness_interactions_priority
 ON harness_interactions (
     workspace_root, state, priority, subject_kind, subject_id, interaction_id
+);
+"""
+
+_SCHEMA_V25 = """
+CREATE TABLE IF NOT EXISTS harness_runtime_release_bindings (
+    workspace_root TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    epoch INTEGER NOT NULL CHECK (epoch >= 1),
+    surface TEXT NOT NULL CHECK (surface IN ('new_ui', 'tui')),
+    binding_id TEXT NOT NULL,
+    binding_sha256 TEXT NOT NULL,
+    runtime_identity_id TEXT NOT NULL,
+    runtime_identity_sha256 TEXT NOT NULL,
+    binding_json TEXT NOT NULL,
+    bound_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, subject_id),
+    UNIQUE (workspace_root, binding_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_runtime_release_bindings_identity
+ON harness_runtime_release_bindings (
+    workspace_root, runtime_identity_id, bound_at, subject_id
 );
 """

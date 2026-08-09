@@ -11,6 +11,9 @@ from typing import Protocol
 
 from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
 from naumi_agent.harness.run_lease import HarnessRunKind
+from naumi_agent.harness.runtime_release_binding import (
+    HarnessRuntimeReleaseBinding,
+)
 
 NowProvider = Callable[[], str]
 SleepProvider = Callable[[float], Awaitable[None]]
@@ -48,6 +51,15 @@ class HeartbeatProducerPort(Protocol):
         observed_at: str,
         timeout_seconds: int,
         detail_code: str = "ok",
+    ) -> HarnessHeartbeat: ...
+
+    async def record_runtime_release_binding_startup(
+        self,
+        *,
+        binding: HarnessRuntimeReleaseBinding,
+        observed_at: str,
+        timeout_seconds: int,
+        detail_code: str,
     ) -> HarnessHeartbeat: ...
 
 
@@ -117,16 +129,23 @@ class RuntimeHeartbeatProducer:
     def failure_code(self) -> str:
         return self._failure_code
 
-    async def start(self) -> HarnessHeartbeat:
+    async def start(
+        self,
+        *,
+        startup_binding: HarnessRuntimeReleaseBinding | None = None,
+    ) -> HarnessHeartbeat:
         """Persist startup and ready boundaries before scheduling pulses."""
         if self._started or self._closed:
             raise RuntimeError("Heartbeat producer 不能重复启动。")
         self._started = True
         try:
-            await self._record(
-                HarnessHeartbeatPhase.STARTING,
-                self.detail_codes.starting,
-            )
+            if startup_binding is None:
+                await self._record(
+                    HarnessHeartbeatPhase.STARTING,
+                    self.detail_codes.starting,
+                )
+            else:
+                await self._record_starting_with_binding(startup_binding)
             heartbeat = await self._record(
                 HarnessHeartbeatPhase.RUNNING,
                 self.detail_codes.running,
@@ -140,6 +159,27 @@ class RuntimeHeartbeatProducer:
                 self._pulse_loop(),
                 name=f"naumi-heartbeat-{self.subject_id}",
             )
+        return heartbeat
+
+    async def _record_starting_with_binding(
+        self,
+        binding: HarnessRuntimeReleaseBinding,
+    ) -> HarnessHeartbeat:
+        if not (
+            binding.workspace_root == str(self.workspace_root)
+            and binding.subject_id == self.subject_id
+            and binding.instance_id == self.instance_id
+            and binding.epoch == self.epoch
+        ):
+            raise ValueError("Runtime Release Binding 与 heartbeat producer 不一致。")
+        self._sequence += 1
+        heartbeat = await self._port.record_runtime_release_binding_startup(
+            binding=binding,
+            observed_at=self._now(),
+            timeout_seconds=self.timeout_seconds,
+            detail_code=self.detail_codes.starting,
+        )
+        self._phase = heartbeat.phase
         return heartbeat
 
     async def pulse_now(self) -> HarnessHeartbeat:

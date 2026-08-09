@@ -69,7 +69,8 @@ HAR-10.2e 已建立可跨 Store 翻页的 typed runtime worker catalog；
 HAR-10.2f1/2 已建立删除前精确续租、活跃保护和稳定状态的周期 retention core，并以 7 天安全默认值接入 Bridge；
 HAR-10.2g 已让每次 Agent 委派产生 durable heartbeat，并在 New UI/TUI Agent Control 显示阶段和降级码；
 HAR-10.2h 已让每次真实 browser run 产生 durable heartbeat，在等待指令/人工接管时保持 waiting pulse，并由 Task Panel
-双端展示 phase、epoch 与降级码；
+双端展示 phase、epoch 与降级码；HAR-10.2i 又把 ARC-07.5e managed terminal identity 与 New UI/TUI runtime
+heartbeat startup 原子绑定，但 latest heartbeat 尚不能冒充持续 observation window；
 HAR-10.3b4 已让 TUI 运行中输入复用相同持久队列、claim/renew/terminal 与
 `/send-now`，并修复两端在本 owner live claim 期间无法重排后缀的问题。HAR-10.3b5 又补齐未 claim 普通消息的
 精确取消和双端回执。跨客户端公平与 active worker 取消传播仍未完成。

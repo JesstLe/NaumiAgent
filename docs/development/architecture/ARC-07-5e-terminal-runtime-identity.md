@@ -43,6 +43,9 @@ Identity 绑定 pointer、slot、version、target、Boot Receipt、binary digest
 
 ## 下一步
 
-HAR-10 下一切片把 Identity 与 runtime heartbeat subject/instance/epoch 绑定，在 heartbeat startup 前持久化；New UI 与
-TUI 必须复用 Composition-owned factory。绑定失败只撤销 release-observation authority，不把 heartbeat 诊断故障误作
-工具执行权限或隐式终止已有开发态 session。
+HAR-10.2i 已把 Identity 与 runtime heartbeat subject/instance/epoch 原子绑定，并让 New UI/TUI 复用
+Composition-owned factory；见 [HAR-10.2i](../harness/HAR-10-2i-runtime-release-identity-binding.md)。绑定失败只撤销
+release identity authority，不阻断开发态 heartbeat/UI。
+
+下一步需要 append-only、bounded 的 release-bound heartbeat observation sample。当前 latest heartbeat + identity binding
+不能证明持续健康，也不能形成 rollout observation 或 Stage Completion Evidence。
