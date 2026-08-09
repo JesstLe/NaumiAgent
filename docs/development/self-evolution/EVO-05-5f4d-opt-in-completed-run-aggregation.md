@@ -63,7 +63,7 @@ next-stage-entry authority 全部固定 false。
 
 ## 当前边界与下一步
 
-EVO-05.5f4d 已闭合内部 opt-in Stage Completion Evidence，但当前产品入口尚未展示或执行它。下一最小切片应先实现
-`EVO-05.5f4e Opt-in Stage Advance Authorization`：消费 current passing 5f4d Evidence，结合 stage 的
-`manual_advance_required` 和 durable user interaction 签发 exact `opt_in → percentage` authority；它仍不得直接部署或扩大
-population。随后再把 assessment/advance 状态统一接入 `/evolution`、New UI/TUI 与自动调度，避免 UI 读取历史 receipt 后误报完成。
+EVO-05.5f4d 已闭合内部 opt-in Stage Completion Evidence。[EVO-05.5f4e](EVO-05-5f4e-opt-in-stage-advance-authorization.md)
+已消费 current passing Evidence，并按 stage 的 `manual_advance_required` 通过 durable user interaction 或明确 automatic policy
+签发 exact `opt_in → percentage` Stage Entry authority。下一步仍需 percentage cohort assignment 与真实 exposure 执行；在这些
+事实完成前，不能把入口授权展示成“已扩大流量”。

@@ -160,7 +160,9 @@ Health/Deployment/Binding 重验，在 inspect 时即时发现新增 failure 与
 [EVO-05.5f4c](EVO-05-5f4c-release-bound-execution-outcome-ledger.md) 已进一步组合终态回执、单次运行用量和完整 heartbeat
 coverage，形成 release-bound Execution Outcome；[EVO-05.5f4d](EVO-05-5f4d-opt-in-completed-run-aggregation.md) 已按
 current Outcome authority、passing liveness、GREEN Baseline 与冻结 guardrails 聚合独立 opt-in Stage Completion Evidence，
-并对不可比较的零成本基线 fail closed。下一步是 exact `opt_in → percentage` Advance Authorization 与统一产品入口。
+并对不可比较的零成本基线 fail closed。[EVO-05.5f4e](EVO-05-5f4e-opt-in-stage-advance-authorization.md) 已进一步通过
+current Completion、Plan、control 与 durable user decision 签发短期 `opt_in → percentage` Stage Entry authority；它不冒充
+percentage population assignment、deployment 或真实流量扩大。下一步是 deterministic percentage cohort assignment。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
