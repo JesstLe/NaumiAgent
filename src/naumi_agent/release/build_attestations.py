@@ -354,46 +354,12 @@ def verify_release_build_attestation(
     manifest_path: Path,
     archive_path: Path | None = None,
 ) -> ReleaseTrustedBuilderKey:
+    trusted_key = verify_release_build_attestation_signature(
+        attestation,
+        trust_policy=trust_policy,
+    )
     payload = attestation.payload
-    trusted_key = trust_policy.find(payload.builder)
-    if trusted_key is None:
-        raise ReleaseBuildAttestationError(
-            "release_builder_untrusted",
-            "构建证明的 builder key 不在当前信任策略中。",
-        )
-    if trusted_key.state != "active":
-        raise ReleaseBuildAttestationError(
-            "release_builder_revoked",
-            "构建证明使用的 builder key 已撤销。",
-        )
-    built_at = _aware(payload.build.built_at)
-    valid_from = _aware(trusted_key.valid_from)
-    valid_until = _aware(trusted_key.valid_until) if trusted_key.valid_until else None
-    if built_at < valid_from or (valid_until is not None and built_at >= valid_until):
-        raise ReleaseBuildAttestationError(
-            "release_builder_outside_validity",
-            "构建时间不在 trusted builder key 有效期内。",
-        )
-    signature = _decode_base64(
-        attestation.signature_base64,
-        expected_bytes=64,
-        label="builder signature",
-    )
-    public_key = _decode_base64(
-        trusted_key.identity.public_key_base64,
-        expected_bytes=32,
-        label="builder public key",
-    )
-    try:
-        Ed25519PublicKey.from_public_bytes(public_key).verify(
-            signature,
-            payload.canonical_bytes(),
-        )
-    except (InvalidSignature, ValueError) as exc:
-        raise ReleaseBuildAttestationError(
-            "release_build_signature_invalid",
-            "构建证明的 Ed25519 signature 无效。",
-        ) from exc
+
     manifest_bytes = _read_bounded(manifest_path, 8 * 1024 * 1024, "release manifest")
     if not hmac.compare_digest(
         hashlib.sha256(manifest_bytes).hexdigest(),
@@ -435,6 +401,55 @@ def verify_release_build_attestation(
                 "release_build_archive_mismatch",
                 "构建证明未绑定当前 release archive。",
             )
+    return trusted_key
+
+
+def verify_release_build_attestation_signature(
+    attestation: ReleaseBuildAttestation,
+    *,
+    trust_policy: ReleaseBuildTrustPolicyDocument,
+) -> ReleaseTrustedBuilderKey:
+    """Verify builder trust and signature before release bytes are downloaded."""
+    payload = attestation.payload
+    trusted_key = trust_policy.find(payload.builder)
+    if trusted_key is None:
+        raise ReleaseBuildAttestationError(
+            "release_builder_untrusted",
+            "构建证明的 builder key 不在当前信任策略中。",
+        )
+    if trusted_key.state != "active":
+        raise ReleaseBuildAttestationError(
+            "release_builder_revoked",
+            "构建证明使用的 builder key 已撤销。",
+        )
+    built_at = _aware(payload.build.built_at)
+    valid_from = _aware(trusted_key.valid_from)
+    valid_until = _aware(trusted_key.valid_until) if trusted_key.valid_until else None
+    if built_at < valid_from or (valid_until is not None and built_at >= valid_until):
+        raise ReleaseBuildAttestationError(
+            "release_builder_outside_validity",
+            "构建时间不在 trusted builder key 有效期内。",
+        )
+    signature = _decode_base64(
+        attestation.signature_base64,
+        expected_bytes=64,
+        label="builder signature",
+    )
+    public_key = _decode_base64(
+        trusted_key.identity.public_key_base64,
+        expected_bytes=32,
+        label="builder public key",
+    )
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            signature,
+            payload.canonical_bytes(),
+        )
+    except (InvalidSignature, ValueError) as exc:
+        raise ReleaseBuildAttestationError(
+            "release_build_signature_invalid",
+            "构建证明的 Ed25519 signature 无效。",
+        ) from exc
     return trusted_key
 
 
