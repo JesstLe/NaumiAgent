@@ -60,10 +60,10 @@ View 同时返回持久 `receipt` 与按当前时间重建的 `current_assessmen
 ## 当前边界与下一步
 
 EVO-05.5f4b 已完成“运行时是否持续存活”的持久动态闭环，但没有真实用户任务结果。
-[HAR-10.2k](../harness/HAR-10-2k-release-bound-chat-run-provenance.md) 已完成下一步前置：把每个 managed terminal run
-绑定到 exact deployment/release identity，但明确不授予 outcome authority。下一最小切片应建立 release-bound execution
-outcome ledger：每个 terminal run 必须再绑定 completion、覆盖执行区间的 observation、真实执行起止时间、结果、成本和
-不可变摘要；随后才能按 `minimum_completed_runs` 聚合独立 opt-in Stage Completion Evidence。Windows runner 的真实 health
+[HAR-10.2k](../harness/HAR-10-2k-release-bound-chat-run-provenance.md) 已把每个 managed terminal run 绑定到 exact
+deployment/release identity；[EVO-05.5f4c](EVO-05-5f4c-release-bound-execution-outcome-ledger.md) 已继续把 provenance、
+终态 Completion Receipt、单次运行用量与覆盖执行区间的 observation 冻结为不可变 Outcome。下一最小切片应按
+`minimum_completed_runs` 聚合不同 run ID，并把完成率、错误率、延迟和成本门槛纳入独立 opt-in Stage Completion Evidence。Windows runner 的真实 health
 subprocess 夹具仍需在 Windows CI 单独验收。该内部证据 Service 尚未接入 `/evolution`、New UI/TUI 或自动调度入口；应在
 execution outcome 与 Stage Completion 权限链闭合后统一暴露，避免提前展示不可执行的“完成”状态。长期 Receipt retention/export
 策略也仍需后续治理切片定义。

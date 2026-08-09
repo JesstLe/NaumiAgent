@@ -19,8 +19,13 @@ from naumi_agent.runs.release_provenance import (
     RunReleaseProvenance,
     build_run_release_provenance,
 )
+from naumi_agent.runs.usage import RunUsage
 
 logger = logging.getLogger(__name__)
+
+
+class ChatRunStoreConflictError(RuntimeError):
+    """Raised when a terminal run is asked to accept conflicting evidence."""
 
 
 @dataclass(slots=True)
@@ -61,6 +66,7 @@ class ChatRunRecord:
     artifacts: list[ChatArtifactRecord] = field(default_factory=list)
     receipt: CompletionReceipt | None = None
     release_provenance: RunReleaseProvenance | None = None
+    usage: RunUsage | None = None
 
 
 @dataclass(slots=True)
@@ -312,6 +318,7 @@ class ChatRunStore:
         status: str,
         assistant_message_id: str = "",
         receipt: CompletionReceipt | None = None,
+        usage: RunUsage | None = None,
     ) -> None:
         normalized_receipt = (
             CompletionReceipt.from_dict(receipt.to_dict())
@@ -333,13 +340,86 @@ class ChatRunStore:
         receipt_id = (
             normalized_receipt.receipt_id if normalized_receipt is not None else ""
         )
+        normalized_usage = _validated_usage(usage, run_id=run_id)
+        usage_id = "" if normalized_usage is None else normalized_usage.usage_id
+        usage_json = (
+            "" if normalized_usage is None else normalized_usage.model_dump_json()
+        )
         async with aiosqlite.connect(self._db_path) as db:
             await self._ensure_tables(db)
+            db.row_factory = aiosqlite.Row
+            await db.execute("BEGIN IMMEDIATE")
+            existing = await (
+                await db.execute(
+                    "SELECT status, assistant_message_id, receipt_json, usage_json "
+                    "FROM chat_runs WHERE id = ?",
+                    (run_id,),
+                )
+            ).fetchone()
+            if existing is None:
+                await db.rollback()
+                return
+            if existing["status"] != "running":
+                if existing["status"] != status:
+                    await db.rollback()
+                    raise ChatRunStoreConflictError(
+                        "Chat run 终态不能改写为其他状态。"
+                    )
+                if (
+                    receipt_json
+                    and existing["receipt_json"]
+                    and existing["receipt_json"] != receipt_json
+                ):
+                    await db.rollback()
+                    raise ChatRunStoreConflictError(
+                        "Chat run 已绑定不同 Completion Receipt。"
+                    )
+                if (
+                    usage_json
+                    and existing["usage_json"]
+                    and existing["usage_json"] != usage_json
+                ):
+                    await db.rollback()
+                    raise ChatRunStoreConflictError(
+                        "Chat run 已绑定不同 Run Usage。"
+                    )
+                await db.execute(
+                    """
+                    UPDATE chat_runs
+                    SET assistant_message_id = CASE
+                            WHEN assistant_message_id = '' THEN ?
+                            ELSE assistant_message_id
+                        END,
+                        receipt_id = CASE
+                            WHEN receipt_json = '' THEN ? ELSE receipt_id
+                        END,
+                        receipt_json = CASE
+                            WHEN receipt_json = '' THEN ? ELSE receipt_json
+                        END,
+                        usage_id = CASE
+                            WHEN usage_json = '' THEN ? ELSE usage_id
+                        END,
+                        usage_json = CASE
+                            WHEN usage_json = '' THEN ? ELSE usage_json
+                        END
+                    WHERE id = ?
+                    """,
+                    (
+                        assistant_message_id,
+                        receipt_id,
+                        receipt_json,
+                        usage_id,
+                        usage_json,
+                        run_id,
+                    ),
+                )
+                await db.commit()
+                return
             await db.execute(
                 """
                 UPDATE chat_runs
                 SET status = ?, updated_at = ?, completed_at = ?, assistant_message_id = ?,
-                    receipt_id = ?, receipt_json = ?
+                    receipt_id = ?, receipt_json = ?, usage_id = ?, usage_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -349,6 +429,8 @@ class ChatRunStore:
                     assistant_message_id,
                     receipt_id,
                     receipt_json,
+                    usage_id,
+                    usage_json,
                     run_id,
                 ),
             )
@@ -433,6 +515,7 @@ class ChatRunStore:
                 row["release_provenance_json"],
                 expected_id=row["release_provenance_id"],
             ),
+            usage=_usage_from_json(row["usage_json"], expected_id=row["usage_id"]),
             steps=[
                 ChatRunStepRecord(
                     sequence=step["sequence"],
@@ -482,7 +565,9 @@ class ChatRunStore:
                     receipt_id TEXT NOT NULL DEFAULT '',
                     receipt_json TEXT NOT NULL DEFAULT '',
                     release_provenance_id TEXT NOT NULL DEFAULT '',
-                    release_provenance_json TEXT NOT NULL DEFAULT ''
+                    release_provenance_json TEXT NOT NULL DEFAULT '',
+                    usage_id TEXT NOT NULL DEFAULT '',
+                    usage_json TEXT NOT NULL DEFAULT ''
                 );
                 CREATE INDEX IF NOT EXISTS idx_chat_runs_session_started
                     ON chat_runs(session_id, started_at DESC);
@@ -544,6 +629,14 @@ class ChatRunStore:
                     "ALTER TABLE chat_runs ADD COLUMN "
                     "release_provenance_json TEXT NOT NULL DEFAULT ''"
                 )
+            if "usage_id" not in columns:
+                await db.execute(
+                    "ALTER TABLE chat_runs ADD COLUMN usage_id TEXT NOT NULL DEFAULT ''"
+                )
+            if "usage_json" not in columns:
+                await db.execute(
+                    "ALTER TABLE chat_runs ADD COLUMN usage_json TEXT NOT NULL DEFAULT ''"
+                )
             await self._backfill_receipt_ids(db)
             await db.execute(
                 """
@@ -601,3 +694,38 @@ def _release_provenance_from_json(
     except (TypeError, ValueError) as exc:
         logger.warning("Ignoring invalid run release provenance JSON: %s", exc)
         return None
+
+
+def _validated_usage(value: RunUsage | None, *, run_id: str) -> RunUsage | None:
+    if value is None:
+        return None
+    try:
+        usage = RunUsage.model_validate_json(value.model_dump_json())
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("Run Usage artifact 无效。") from exc
+    if usage.run_id != run_id:
+        raise ValueError("Run Usage 与 chat run 不一致。")
+    return usage
+
+
+def _usage_from_json(value: str, *, expected_id: str) -> RunUsage | None:
+    if not value:
+        return None
+    try:
+        usage = RunUsage.model_validate_json(value)
+        if not expected_id or usage.usage_id != expected_id:
+            raise ValueError("Run Usage ID 与 payload 不一致。")
+        return usage
+    except (TypeError, ValueError) as exc:
+        logger.warning("Ignoring invalid run usage JSON: %s", exc)
+        return None
+
+
+__all__ = [
+    "ChatArtifactRecord",
+    "ChatRunRecord",
+    "ChatRunStepRecord",
+    "ChatRunStore",
+    "ChatRunStoreConflictError",
+    "SourceReferenceRecord",
+]

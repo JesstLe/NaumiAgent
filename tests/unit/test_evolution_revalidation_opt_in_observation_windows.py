@@ -66,8 +66,10 @@ async def _record_chain(
     operational_samples: int,
     interval_seconds: float,
     final_phase: HarnessHeartbeatPhase = HarnessHeartbeatPhase.RUNNING,
+    origin_offset_seconds: float = 1,
+    first_operational_offset_seconds: float = 1,
 ):
-    origin = _aware(health.completed_at) + timedelta(seconds=1)
+    origin = _aware(health.completed_at) + timedelta(seconds=origin_offset_seconds)
     binding = build_runtime_release_binding(
         workspace_root=workspace_root,
         surface="new_ui",
@@ -98,7 +100,13 @@ async def _record_chain(
             sequence=index + 2,
             phase=phase,
             observed_at=(
-                origin + timedelta(seconds=1 + index * interval_seconds)
+                origin
+                + timedelta(
+                    seconds=(
+                        first_operational_offset_seconds
+                        + index * interval_seconds
+                    )
+                )
             ).isoformat(),
             timeout_seconds=timeout_seconds,
             detail_code=(

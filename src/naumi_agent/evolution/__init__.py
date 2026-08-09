@@ -589,6 +589,19 @@ if TYPE_CHECKING:
         EvolutionRevalidationOptInDeploymentStore,
         EvolutionRevalidationOptInDeploymentView,
     )
+    from naumi_agent.evolution.revalidation_opt_in_execution_outcome_ledger import (
+        EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_LEDGER_POLICY,
+        EvolutionRevalidationOptInExecutionOutcomeLedgerService,
+        EvolutionRevalidationOptInExecutionOutcomeLedgerStore,
+        EvolutionRevalidationOptInExecutionOutcomeView,
+    )
+    from naumi_agent.evolution.revalidation_opt_in_execution_outcomes import (
+        EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_POLICY,
+        EvolutionRevalidationOptInExecutionOutcome,
+        EvolutionRevalidationOptInExecutionOutcomeError,
+        EvolutionRevalidationOptInLivenessSourceRef,
+        build_opt_in_execution_outcome,
+    )
     from naumi_agent.evolution.revalidation_opt_in_observation_window_assessments import (
         EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY,
         EvolutionRevalidationOptInObservationAssessmentError,
@@ -1118,6 +1131,15 @@ __all__ = [
     "EvolutionRevalidationOptInDeploymentService",
     "EvolutionRevalidationOptInDeploymentStore",
     "EvolutionRevalidationOptInDeploymentView",
+    "EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_LEDGER_POLICY",
+    "EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_POLICY",
+    "EvolutionRevalidationOptInExecutionOutcome",
+    "EvolutionRevalidationOptInExecutionOutcomeError",
+    "EvolutionRevalidationOptInExecutionOutcomeLedgerService",
+    "EvolutionRevalidationOptInExecutionOutcomeLedgerStore",
+    "EvolutionRevalidationOptInExecutionOutcomeView",
+    "EvolutionRevalidationOptInLivenessSourceRef",
+    "build_opt_in_execution_outcome",
     "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
     "EvolutionRevalidationOptInObservationAssessmentError",
     "EvolutionRevalidationOptInObservationWindowService",
@@ -2044,6 +2066,19 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationOptInDeploymentStore",
         "EvolutionRevalidationOptInDeploymentView",
     }
+    revalidation_opt_in_execution_outcome_ledger_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_LEDGER_POLICY",
+        "EvolutionRevalidationOptInExecutionOutcomeLedgerService",
+        "EvolutionRevalidationOptInExecutionOutcomeLedgerStore",
+        "EvolutionRevalidationOptInExecutionOutcomeView",
+    }
+    revalidation_opt_in_execution_outcome_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_EXECUTION_OUTCOME_POLICY",
+        "EvolutionRevalidationOptInExecutionOutcome",
+        "EvolutionRevalidationOptInExecutionOutcomeError",
+        "EvolutionRevalidationOptInLivenessSourceRef",
+        "build_opt_in_execution_outcome",
+    }
     revalidation_opt_in_observation_assessment_exports = {
         "EVOLUTION_REVALIDATION_OPT_IN_OBSERVATION_ASSESSMENT_POLICY",
         "EvolutionRevalidationOptInObservationAssessmentError",
@@ -2618,6 +2653,10 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_opt_in_deployment_intents"
     elif name in revalidation_opt_in_deployment_exports:
         module_name = "revalidation_opt_in_deployments"
+    elif name in revalidation_opt_in_execution_outcome_ledger_exports:
+        module_name = "revalidation_opt_in_execution_outcome_ledger"
+    elif name in revalidation_opt_in_execution_outcome_exports:
+        module_name = "revalidation_opt_in_execution_outcomes"
     elif name in revalidation_opt_in_observation_assessment_exports:
         module_name = "revalidation_opt_in_observation_window_assessments"
     elif name in revalidation_opt_in_observation_window_exports:

@@ -757,7 +757,7 @@ def _unique(items: list[str]) -> tuple[str, ...]:
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 __all__ = ["RunReceiptBuilder"]

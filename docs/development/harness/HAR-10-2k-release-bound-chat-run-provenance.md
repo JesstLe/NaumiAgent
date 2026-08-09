@@ -47,7 +47,7 @@
 
 ## 下一步
 
-下一最小 EVO 切片建立 release-bound execution outcome ledger：只消费本 provenance、同一 `ChatRunStore` 中的真实终态
-`CompletionReceipt`，以及覆盖运行起止区间的 HAR observation evidence，生成独立 content-addressed outcome。只有 outcome
-达到 policy 要求后，后续聚合器才可以计算 `minimum_completed_runs`，本 provenance 本身永远不能直接成为 Stage Completion
-Evidence。
+[EVO-05.5f4c](../self-evolution/EVO-05-5f4c-release-bound-execution-outcome-ledger.md) 已消费本 provenance、同一
+`ChatRunStore` 中的真实终态 `CompletionReceipt`、单次运行用量和覆盖运行区间的 HAR observation，形成独立
+content-addressed Outcome。下一步仍需对不同 run ID 动态重验并聚合 `minimum_completed_runs`；本 provenance 与单个 Outcome
+都不能直接成为 Stage Completion Evidence。

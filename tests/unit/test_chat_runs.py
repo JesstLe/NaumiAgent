@@ -4,6 +4,8 @@ import importlib
 import importlib.util
 import json
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
@@ -13,6 +15,8 @@ from naumi_agent.harness.runtime_release_binding import build_runtime_release_bi
 from naumi_agent.runs.models import CompletionReceipt, ReceiptChange
 from naumi_agent.runs.recorder import ChatRunRecorder
 from naumi_agent.runs.release_provenance import RunReleaseProvenance
+from naumi_agent.runs.store import ChatRunStoreConflictError
+from naumi_agent.runs.usage import RunUsage, RunUsageTotals, build_run_usage
 from tests.unit.test_harness_runtime_release_binding import _managed_identity
 
 
@@ -130,6 +134,51 @@ def test_completion_receipt_rejects_unsupported_schema_version() -> None:
         )
 
 
+def test_run_usage_is_content_addressed_delta_and_rejects_counter_regression() -> None:
+    before = RunUsageTotals.capture(
+        SimpleNamespace(
+            total_input_tokens=100,
+            total_output_tokens=20,
+            cache_tokens=10,
+            turns=2,
+            total_cost_usd=0.125,
+        )
+    )
+    after = RunUsageTotals.capture(
+        SimpleNamespace(
+            total_input_tokens=140,
+            total_output_tokens=29,
+            cache_tokens=16,
+            turns=3,
+            total_cost_usd=0.13000000000000003,
+        )
+    )
+
+    usage = build_run_usage(run_id="run-usage-1", before=before, after=after)
+
+    assert usage.input_tokens == 40
+    assert usage.output_tokens == 9
+    assert usage.cache_tokens == 6
+    assert usage.turns == 1
+    assert usage.reported_cost_usd == Decimal("0.005000000000")
+    assert usage.usage_source_authority
+    assert not usage.billing_authority
+    assert RunUsage.model_validate_json(usage.model_dump_json()) == usage
+
+    with pytest.raises(ValueError, match="倒退"):
+        build_run_usage(run_id="run-usage-1", before=after, after=before)
+    with pytest.raises(ValueError, match="有限"):
+        RunUsageTotals.capture(
+            SimpleNamespace(
+                total_input_tokens=1,
+                total_output_tokens=1,
+                cache_tokens=0,
+                turns=1,
+                total_cost_usd=float("nan"),
+            )
+        )
+
+
 @pytest.mark.asyncio
 async def test_run_store_restores_ordered_steps_and_artifacts_after_restart(tmp_path):
     db_path = tmp_path / "chat-runs.db"
@@ -229,14 +278,51 @@ async def test_run_store_persists_receipt_and_isolates_receipt_lookup(tmp_path):
     run = await store.start_run(session_id="s1", user_message_id="m1")
     receipt = _minimal_receipt(run.id)
 
-    await store.finish_run(run.id, status="completed", receipt=receipt)
+    usage = build_run_usage(
+        run_id=run.id,
+        before=RunUsageTotals(0, 0, 0, 0, Decimal("0")),
+        after=RunUsageTotals(12, 3, 1, 1, Decimal("0.001")),
+    )
+    await store.finish_run(
+        run.id,
+        status="completed",
+        receipt=receipt,
+        usage=usage,
+    )
 
     reopened = ChatRunStore(db_path)
     restored_run = await reopened.get_run("s1", run.id)
     assert restored_run is not None
     assert restored_run.receipt == receipt
+    assert restored_run.usage == usage
     assert await reopened.get_receipt("s1", receipt.receipt_id) == receipt
     assert await reopened.get_receipt("s2", receipt.receipt_id) is None
+
+    await reopened.finish_run(run.id, status="completed")
+    idempotent = await reopened.get_run("s1", run.id)
+    assert idempotent is not None
+    assert idempotent.completed_at == restored_run.completed_at
+    assert idempotent.receipt == receipt
+    assert idempotent.usage == usage
+
+    with pytest.raises(ChatRunStoreConflictError, match="Completion Receipt"):
+        await reopened.finish_run(
+            run.id,
+            status="completed",
+            receipt=_minimal_receipt(run.id, receipt_id="receipt-conflict"),
+        )
+    with pytest.raises(ChatRunStoreConflictError, match="Run Usage"):
+        await reopened.finish_run(
+            run.id,
+            status="completed",
+            usage=build_run_usage(
+                run_id=run.id,
+                before=RunUsageTotals(0, 0, 0, 0, Decimal("0")),
+                after=RunUsageTotals(99, 3, 1, 1, Decimal("0.001")),
+            ),
+        )
+    with pytest.raises(ChatRunStoreConflictError, match="终态"):
+        await reopened.finish_run(run.id, status="failed")
 
 
 @pytest.mark.asyncio
@@ -354,6 +440,8 @@ async def test_run_store_migrates_old_chat_runs_table_without_data_loss(tmp_path
         "receipt_json",
         "release_provenance_id",
         "release_provenance_json",
+        "usage_id",
+        "usage_json",
     }.issubset(column_names)
 
 
