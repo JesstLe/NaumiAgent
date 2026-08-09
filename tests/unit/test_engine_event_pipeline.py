@@ -117,6 +117,11 @@ async def test_run_streaming_persists_only_current_terminal_release_context(
     )
 
     async def fake_core(*_: object, **__: object) -> AgentResult:
+        engine._usage.total_input_tokens += 31
+        engine._usage.total_output_tokens += 7
+        engine._usage.cache_tokens += 4
+        engine._usage.total_cost_usd += 0.0125
+        engine._usage.turns += 1
         return AgentResult(status="completed", response="绑定运行完成")
 
     monkeypatch.setattr(engine, "_run_streaming_core", fake_core)
@@ -138,8 +143,45 @@ async def test_run_streaming_persists_only_current_terminal_release_context(
         assert provenance.binding == lifecycle.release_binding()
         assert provenance.run_id == result.receipt.run_id
         assert not provenance.execution_outcome_authority
+        assert restored.usage is not None
+        assert restored.usage.input_tokens == 31
+        assert restored.usage.output_tokens == 7
+        assert restored.usage.cache_tokens == 4
+        assert restored.usage.turns == 1
+        assert str(restored.usage.reported_cost_usd) == "0.012500000000"
     finally:
         await lifecycle.close()
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_run_streaming_keeps_terminal_receipt_when_usage_delta_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = AgentEngine(_config(tmp_path))
+    engine._usage.total_input_tokens = 10
+
+    async def fake_core(*_: object, **__: object) -> AgentResult:
+        engine._usage.total_input_tokens = 5
+        return AgentResult(status="completed", response="运行仍应完成")
+
+    monkeypatch.setattr(engine, "_run_streaming_core", fake_core)
+    try:
+        result = await engine.run_streaming(
+            "用量来源异常时仍保存回执",
+            _RecordingSink("caller", []),
+        )
+        session = await engine.get_or_create_session()
+        assert result.receipt is not None
+        restored = await engine.chat_run_store.get_run(
+            session.id,
+            result.receipt.run_id,
+        )
+        assert restored is not None
+        assert restored.receipt == result.receipt
+        assert restored.usage is None
+    finally:
         await engine.shutdown()
 
 

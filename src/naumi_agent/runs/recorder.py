@@ -11,6 +11,7 @@ from naumi_agent.harness.runtime_release_binding import HarnessRuntimeReleaseBin
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.receipt_builder import RunReceiptBuilder
 from naumi_agent.runs.store import ChatRunRecord, ChatRunStore
+from naumi_agent.runs.usage import RunUsage
 from naumi_agent.runtime.ports.events import RuntimeEvent
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.streaming.sinks import CallbackEventSink
@@ -108,7 +109,13 @@ class ChatRunRecorder:
                     status=str(data.get("status") or "success"),
                 )
 
-    async def finish(self, status: str, summary: str) -> CompletionReceipt:
+    async def finish(
+        self,
+        status: str,
+        summary: str,
+        *,
+        usage: RunUsage | None = None,
+    ) -> CompletionReceipt:
         """Build and durably store the receipt exactly once."""
         async with self._finish_lock:
             if self._receipt is not None:
@@ -118,6 +125,7 @@ class ChatRunRecorder:
                 self.run_id,
                 status=_stored_status(status),
                 receipt=receipt,
+                usage=usage,
             )
             self._receipt = receipt
             return receipt

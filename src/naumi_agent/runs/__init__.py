@@ -20,7 +20,14 @@ from naumi_agent.runs.store import (
     ChatRunRecord,
     ChatRunStepRecord,
     ChatRunStore,
+    ChatRunStoreConflictError,
     SourceReferenceRecord,
+)
+from naumi_agent.runs.usage import (
+    RUN_USAGE_POLICY,
+    RunUsage,
+    RunUsageTotals,
+    build_run_usage,
 )
 
 __all__ = [
@@ -29,6 +36,7 @@ __all__ = [
     "ChatRunRecorder",
     "ChatRunStepRecord",
     "ChatRunStore",
+    "ChatRunStoreConflictError",
     "CompletionReceipt",
     "ReceiptAction",
     "ReceiptApproval",
@@ -37,7 +45,11 @@ __all__ = [
     "ReceiptRisk",
     "ReceiptValidation",
     "RUN_RELEASE_PROVENANCE_POLICY",
+    "RUN_USAGE_POLICY",
     "RunReleaseProvenance",
+    "RunUsage",
+    "RunUsageTotals",
     "SourceReferenceRecord",
     "build_run_release_provenance",
+    "build_run_usage",
 ]

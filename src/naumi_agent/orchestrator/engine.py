@@ -505,6 +505,7 @@ from naumi_agent.release import (
 )
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
+from naumi_agent.runs.usage import RunUsageTotals, build_run_usage
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
 from naumi_agent.runtime.paths import RuntimePaths
 from naumi_agent.runtime.ports.events import (
@@ -4979,6 +4980,11 @@ class AgentEngine:
         """Execute and durably record one streamed Agent run."""
         session = await self.get_or_create_session()
         self.task_store.set_session(session.id)
+        try:
+            usage_before = RunUsageTotals.capture(self._usage)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Run usage baseline unavailable: %s", exc)
+            usage_before = None
         release_binding = await self._verified_terminal_run_release_binding()
         recorder = await ChatRunRecorder.start(
             store=self.chat_run_store,
@@ -5022,6 +5028,7 @@ class AgentEngine:
                 publisher=publisher,
                 status="cancelled",
                 summary="运行已由用户取消。",
+                usage_before=usage_before,
                 original_error=exc,
             )
             raise
@@ -5031,6 +5038,7 @@ class AgentEngine:
                 publisher=publisher,
                 status="failed",
                 summary=self._format_error(exc),
+                usage_before=usage_before,
                 original_error=exc,
             )
             raise
@@ -5041,6 +5049,7 @@ class AgentEngine:
             publisher=publisher,
             status=result.status,
             summary=summary,
+            usage_before=usage_before,
         )
         result.receipt = receipt
         return result
@@ -5074,10 +5083,21 @@ class AgentEngine:
         publisher: RuntimeEventPublisher,
         status: str,
         summary: str,
+        usage_before: RunUsageTotals | None,
         original_error: BaseException | None = None,
     ) -> CompletionReceipt:
         """Persist one terminal receipt before attempting terminal delivery."""
-        receipt = await recorder.finish(status, summary)
+        usage = None
+        if usage_before is not None:
+            try:
+                usage = build_run_usage(
+                    run_id=recorder.run_id,
+                    before=usage_before,
+                    after=RunUsageTotals.capture(self._usage),
+                )
+            except (TypeError, ValueError) as exc:
+                logger.warning("Run usage delta unavailable: %s", exc)
+        receipt = await recorder.finish(status, summary, usage=usage)
         try:
             await publisher.publish(
                 RuntimeEventType.COMPLETION_RECEIPT,
