@@ -156,6 +156,10 @@ from naumi_agent.evolution.reflection_memories import (
 from naumi_agent.evolution.revalidation_candidate_bundle_admissions import (
     EvolutionRevalidationCandidateBundleAdmissionService,
 )
+from naumi_agent.evolution.revalidation_opt_in_deployment_intents import (
+    EvolutionRevalidationOptInDeploymentIntentService,
+    EvolutionRevalidationOptInDeploymentIntentStore,
+)
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestBuilder,
     EvolutionRevalidationRequestService,
@@ -644,6 +648,18 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
     assert isinstance(
         engine.evolution_revalidation_candidate_bundle_admission_service,
         EvolutionRevalidationCandidateBundleAdmissionService,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_opt_in_deployment_intent_store,
+        EvolutionRevalidationOptInDeploymentIntentStore,
+    )
+    assert isinstance(
+        engine.evolution_revalidation_opt_in_deployment_intent_service,
+        EvolutionRevalidationOptInDeploymentIntentService,
+    )
+    assert (
+        engine.evolution_revalidation_opt_in_deployment_intent_store.release_root
+        == engine.evolution_release_slot_store.release_root
     )
     assert engine.evolution_release_build_trust_policy_path == (
         engine.evolution_release_slot_store.release_root

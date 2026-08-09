@@ -571,6 +571,16 @@ if TYPE_CHECKING:
         EvolutionRevalidationLocalCanaryRunView,
         EvolutionRevalidationLocalCanaryState,
     )
+    from naumi_agent.evolution.revalidation_opt_in_deployment_intents import (
+        EVOLUTION_REVALIDATION_OPT_IN_COHORT_POLICY,
+        EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_INTENT_POLICY,
+        EvolutionRevalidationOptInCohort,
+        EvolutionRevalidationOptInDeploymentIntent,
+        EvolutionRevalidationOptInDeploymentIntentError,
+        EvolutionRevalidationOptInDeploymentIntentService,
+        EvolutionRevalidationOptInDeploymentIntentStore,
+        EvolutionRevalidationOptInDeploymentIntentView,
+    )
     from naumi_agent.evolution.revalidation_outcomes import (
         EVOLUTION_REVALIDATION_OUTCOME_POLICY,
         EvolutionInvalidatedAuthority,
@@ -1064,6 +1074,14 @@ __all__ = [
     "EvolutionRevalidationCandidateBundleAdmissionService",
     "EvolutionRevalidationCandidateBundleAdmissionStore",
     "EvolutionRevalidationCandidateBundleAdmissionView",
+    "EVOLUTION_REVALIDATION_OPT_IN_COHORT_POLICY",
+    "EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_INTENT_POLICY",
+    "EvolutionRevalidationOptInCohort",
+    "EvolutionRevalidationOptInDeploymentIntent",
+    "EvolutionRevalidationOptInDeploymentIntentError",
+    "EvolutionRevalidationOptInDeploymentIntentService",
+    "EvolutionRevalidationOptInDeploymentIntentStore",
+    "EvolutionRevalidationOptInDeploymentIntentView",
     "EVOLUTION_REVALIDATION_APPROVAL_SIGNATURE_POLICY",
     "EVOLUTION_REVALIDATION_PROFESSIONAL_SIGNATURE_DOMAIN",
     "EvolutionRevalidationApprovalSignatureChallenge",
@@ -1956,6 +1974,16 @@ def __getattr__(name: str) -> object:
         "EvolutionRevalidationCandidateBundleAdmissionStore",
         "EvolutionRevalidationCandidateBundleAdmissionView",
     }
+    revalidation_opt_in_deployment_intent_exports = {
+        "EVOLUTION_REVALIDATION_OPT_IN_COHORT_POLICY",
+        "EVOLUTION_REVALIDATION_OPT_IN_DEPLOYMENT_INTENT_POLICY",
+        "EvolutionRevalidationOptInCohort",
+        "EvolutionRevalidationOptInDeploymentIntent",
+        "EvolutionRevalidationOptInDeploymentIntentError",
+        "EvolutionRevalidationOptInDeploymentIntentService",
+        "EvolutionRevalidationOptInDeploymentIntentStore",
+        "EvolutionRevalidationOptInDeploymentIntentView",
+    }
     approval_request_exports = {
         "EVOLUTION_PROMOTION_APPROVAL_REQUEST_POLICY",
         "EvolutionPromotionApprovalIdentityAssurance",
@@ -2504,6 +2532,8 @@ def __getattr__(name: str) -> object:
         module_name = "revalidation_approval_signatures"
     elif name in revalidation_candidate_bundle_admission_exports:
         module_name = "revalidation_candidate_bundle_admissions"
+    elif name in revalidation_opt_in_deployment_intent_exports:
+        module_name = "revalidation_opt_in_deployment_intents"
     elif name in approval_requirement_exports:
         module_name = "approval_requirements"
     elif name in approval_request_exports:

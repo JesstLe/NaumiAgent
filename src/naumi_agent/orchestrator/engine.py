@@ -283,6 +283,10 @@ from naumi_agent.evolution.revalidation_local_canary_runs import (
     EvolutionRevalidationLocalCanaryExecutor,
     EvolutionRevalidationLocalCanaryJournalStore,
 )
+from naumi_agent.evolution.revalidation_opt_in_deployment_intents import (
+    EvolutionRevalidationOptInDeploymentIntentService,
+    EvolutionRevalidationOptInDeploymentIntentStore,
+)
 from naumi_agent.evolution.revalidation_outcomes import (
     EvolutionRevalidationOutcomeService,
     EvolutionRevalidationOutcomeStore,
@@ -2300,6 +2304,24 @@ class AgentEngine:
                 store=(
                     self.evolution_revalidation_candidate_bundle_admission_store
                 ),
+            )
+        )
+        self.evolution_revalidation_opt_in_deployment_intent_store = (
+            EvolutionRevalidationOptInDeploymentIntentStore(
+                config.memory.session_db_path,
+                interaction_store=self._harness_store,
+                release_root=release_root,
+            )
+        )
+        self.evolution_revalidation_opt_in_deployment_intent_service = (
+            EvolutionRevalidationOptInDeploymentIntentService(
+                workspace_root=paths.workspace_root,
+                candidate_service=(
+                    self.evolution_revalidation_candidate_bundle_admission_service
+                ),
+                interaction_store=self._harness_store,
+                store=self.evolution_revalidation_opt_in_deployment_intent_store,
+                request_user_input=self.request_user_input,
             )
         )
         self.evolution_revalidation_rollback_request_store = (
