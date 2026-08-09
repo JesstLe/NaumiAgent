@@ -16,6 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from naumi_agent.release.build_attestations import (
+    ReleaseBuildContext,
+    ReleaseBuildSigner,
+    create_release_build_attestation,
+    write_release_build_attestation,
+)
+
 ArchiveFormat = Literal["tar.gz", "zip"]
 
 _SAFE_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -46,6 +53,7 @@ class ReleaseArtifact:
     archive: Path
     checksum: Path
     manifest: Path
+    attestation: Path | None
 
 
 def assemble_release_artifact(
@@ -60,6 +68,8 @@ def assemble_release_artifact(
     source_commit: str,
     source_tree_sha256: str,
     archive_format: ArchiveFormat,
+    build_signer: ReleaseBuildSigner | None = None,
+    build_context: ReleaseBuildContext | None = None,
 ) -> ReleaseArtifact:
     """Build and validate one platform bundle without replacing existing output."""
     version = _safe_label(version, "version")
@@ -72,6 +82,8 @@ def assemble_release_artifact(
         raise ArtifactError("source_tree_sha256 不是 SHA-256。")
     if archive_format not in {"tar.gz", "zip"}:
         raise ArtifactError("archive_format 仅支持 tar.gz 或 zip。")
+    if (build_signer is None) is not (build_context is None):
+        raise ArtifactError("build_signer 与 build_context 必须同时提供。")
     backend_dir = backend_dir.resolve()
     launcher_dir = launcher_dir.resolve()
     ui_binary = ui_binary.resolve()
@@ -106,11 +118,19 @@ def assemble_release_artifact(
     final_bundle = output_dir / bundle_name
     final_archive = output_dir / archive_name
     final_checksum = output_dir / f"{archive_name}.sha256"
+    final_attestation = (
+        output_dir / f"{archive_name}.attestation.json"
+        if build_signer is not None
+        else None
+    )
 
     transaction = Path(tempfile.mkdtemp(prefix=f".{bundle_name}.tmp-", dir=output_dir))
     staged_bundle = transaction / bundle_name
     staged_archive = transaction / archive_name
     staged_checksum = transaction / final_checksum.name
+    staged_attestation = (
+        transaction / final_attestation.name if final_attestation is not None else None
+    )
     try:
         shutil.copytree(backend_dir, staged_bundle, symlinks=True)
         for reserved in ("launcher", ui_name):
@@ -159,8 +179,19 @@ def assemble_release_artifact(
             f"{archive_hash}  {archive_name}\n",
             encoding="utf-8",
         )
+        if build_signer is not None and build_context is not None:
+            assert staged_attestation is not None
+            attestation = create_release_build_attestation(
+                signer=build_signer,
+                context=build_context,
+                manifest_path=manifest_path,
+                archive_path=staged_archive,
+            )
+            write_release_build_attestation(staged_attestation, attestation)
         collisions = [
-            path for path in (final_bundle, final_archive, final_checksum) if path.exists()
+            path
+            for path in (final_bundle, final_archive, final_checksum, final_attestation)
+            if path is not None and path.exists()
         ]
         if collisions:
             raise ArtifactError(
@@ -169,6 +200,8 @@ def assemble_release_artifact(
         staged_bundle.replace(final_bundle)
         staged_archive.replace(final_archive)
         staged_checksum.replace(final_checksum)
+        if staged_attestation is not None and final_attestation is not None:
+            staged_attestation.replace(final_attestation)
     finally:
         shutil.rmtree(transaction, ignore_errors=True)
 
@@ -177,6 +210,7 @@ def assemble_release_artifact(
         archive=final_archive,
         checksum=final_checksum,
         manifest=final_bundle / "manifest.json",
+        attestation=final_attestation,
     )
 
 

@@ -27,7 +27,7 @@
 
 ## 当前边界与下一步
 
-- SHA-256/commit 只形成可复算 provenance，尚未证明发布者身份；ARC-07.4 后续仍需签名、SBOM、builder identity
-  与平台 notarization；
+- SHA-256/commit 只形成可复算 provenance；[ARC-07.4b](ARC-07-4b-trusted-build-attestation.md) 已增加
+  builder identity 与 detached Ed25519 build attestation，但独立 trust-root 分发、SBOM 与平台 notarization 仍未完成；
 - EVO-05.6b2 仍必须要求 current pointer 的 exact previous slot provenance 等于 Rollback Source baseline，并验证
   current pause/request/source 依赖；只凭 provenance 不产生 rollback authority。

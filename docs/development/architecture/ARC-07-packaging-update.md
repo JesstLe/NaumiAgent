@@ -12,7 +12,10 @@
 - ARC-07.3 Source exposure audit：wheel/sdist/cache/debug/source map 中的源码和 secret。
 - ARC-07.4 Signing/notarization：macOS codesign/notary、Windows signing、checksums/SBOM。
   - [ARC-07.4a Exact Source Provenance](ARC-07-4a-exact-source-provenance.md)：已交付 exact Git commit/tree
-    到 artifact/slot 的机械绑定；发布者签名与构建证明仍未实现。
+    到 artifact/slot 的机械绑定。
+  - [ARC-07.4b Trusted Builder Identity and Build Attestation](ARC-07-4b-trusted-build-attestation.md)：
+    已交付 detached Ed25519 构建证明、key rotation/revocation trust policy 与 release matrix 接线；独立
+    trust-root 分发、SBOM 和平台签名/notarization 仍未实现。
 - ARC-07.5 Updater：channel、manifest、signature、download、atomic switch、rollback。
   - [ARC-07.5a Immutable Installed-Version Slots](ARC-07-5a-installed-version-slots.md)：已交付本地 bundle
     校验、真实 boot receipt、SQLite atomic pointer 与 previous-slot rollback。
