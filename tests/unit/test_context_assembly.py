@@ -153,6 +153,9 @@ from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryRevoker,
     EvolutionReflectionMemoryStore,
 )
+from naumi_agent.evolution.revalidation_candidate_bundle_admissions import (
+    EvolutionRevalidationCandidateBundleAdmissionService,
+)
 from naumi_agent.evolution.revalidation_requests import (
     EvolutionRevalidationRequestBuilder,
     EvolutionRevalidationRequestService,
@@ -638,6 +641,15 @@ def test_engine_composes_experiment_contract_and_worktree_lease_services(
         EvolutionPatchSetRecoveryCoordinator,
     )
     assert isinstance(engine.evolution_patch_writer, EvolutionPatchWriter)
+    assert isinstance(
+        engine.evolution_revalidation_candidate_bundle_admission_service,
+        EvolutionRevalidationCandidateBundleAdmissionService,
+    )
+    assert engine.evolution_release_build_trust_policy_path == (
+        engine.evolution_release_slot_store.release_root
+        / "trust"
+        / "trusted-builders.json"
+    )
     assert (
         engine.evolution_experiment_lease_manager._worktree_manager
         is engine.worktree_manager

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -21,6 +22,14 @@ from naumi_agent.evolution.revalidation_rollout_stage_advances import (
     EvolutionRevalidationRolloutStageAdvanceReceipt,
     EvolutionRevalidationRolloutStageAdvanceService,
 )
+from naumi_agent.release.build_attestations import (
+    ReleaseBuildAttestation,
+    ReleaseBuildAttestationError,
+    ReleaseBuildTrustPolicyDocument,
+    ReleaseTrustedBuilderKey,
+    load_release_build_attestation,
+    verify_release_build_attestation,
+)
 from naumi_agent.release.slots import (
     ReleaseActivePointer,
     ReleaseInstalledSlot,
@@ -30,7 +39,7 @@ from naumi_agent.release.slots import (
 )
 
 EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY = (
-    "evolution-revalidation-candidate-bundle-admission-v1"
+    "evolution-revalidation-candidate-bundle-admission-v2"
 )
 _SHA256_RE = r"^[0-9a-f]{64}$"
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
@@ -43,16 +52,14 @@ class _StrictModel(BaseModel):
 
 
 class EvolutionRevalidationCandidateBundleAdmission(_StrictModel):
-    schema_version: Literal[1] = 1
-    policy_version: Literal[
-        "evolution-revalidation-candidate-bundle-admission-v1"
-    ] = EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY
+    schema_version: Literal[2] = 2
+    policy_version: Literal["evolution-revalidation-candidate-bundle-admission-v2"] = (
+        EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY
+    )
     admission_id: str = Field(pattern=r"^evrecandidatebundle_[0-9a-f]{24}$")
     admission_sha256: str = Field(pattern=_SHA256_RE)
     workspace_root: str = Field(min_length=1, max_length=4096)
-    stage_advance_receipt_id: str = Field(
-        pattern=r"^evrerolloutadvance_[0-9a-f]{24}$"
-    )
+    stage_advance_receipt_id: str = Field(pattern=r"^evrerolloutadvance_[0-9a-f]{24}$")
     stage_advance_receipt_sha256: str = Field(pattern=_SHA256_RE)
     completion_id: str = Field(pattern=r"^evrerolloutcomplete_[0-9a-f]{24}$")
     plan_id: str = Field(pattern=r"^evrerolloutplan_[0-9a-f]{24}$")
@@ -61,14 +68,18 @@ class EvolutionRevalidationCandidateBundleAdmission(_StrictModel):
     candidate_revision: int = Field(ge=1)
     target_commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
     target_tree_sha256: str = Field(pattern=_SHA256_RE)
-    rollback_baseline_commit: str = Field(
-        pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
-    )
+    rollback_baseline_commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
     rollback_baseline_tree_sha256: str = Field(pattern=_SHA256_RE)
     previous_pointer: ReleaseActivePointer
     previous_slot: ReleaseInstalledSlot
     candidate_slot: ReleaseInstalledSlot
     boot_receipt: ReleaseSlotBootReceipt
+    build_trust_policy_id: str = Field(pattern=r"^relbuildtrust_[0-9a-f]{24}$")
+    build_trust_policy_sha256: str = Field(pattern=_SHA256_RE)
+    build_attestation: ReleaseBuildAttestation
+    trusted_builder_key: ReleaseTrustedBuilderKey
+    trusted_build_signature_verified: Literal[True] = True
+    trusted_builder_current_at_admission: Literal[True] = True
     exact_candidate_source_verified: Literal[True] = True
     rollback_slot_verified: Literal[True] = True
     immutable_slot_installed: Literal[True] = True
@@ -91,8 +102,7 @@ class EvolutionRevalidationCandidateBundleAdmission(_StrictModel):
             self.previous_pointer.current_slot_id == self.previous_slot.slot_id
             and self.previous_pointer.current_slot_sha256 == self.previous_slot.slot_sha256
             and self.previous_slot.source_commit == self.rollback_baseline_commit
-            and self.previous_slot.source_tree_sha256
-            == self.rollback_baseline_tree_sha256
+            and self.previous_slot.source_tree_sha256 == self.rollback_baseline_tree_sha256
         ):
             raise ValueError("Candidate Bundle Admission rollback slot 投影不一致。")
         if not (
@@ -100,10 +110,20 @@ class EvolutionRevalidationCandidateBundleAdmission(_StrictModel):
             and self.candidate_slot.source_tree_sha256 == self.target_tree_sha256
             and self.boot_receipt.slot_id == self.candidate_slot.slot_id
             and self.boot_receipt.slot_sha256 == self.candidate_slot.slot_sha256
-            and self.boot_receipt.manifest_sha256
-            == self.candidate_slot.manifest_sha256
+            and self.boot_receipt.manifest_sha256 == self.candidate_slot.manifest_sha256
         ):
             raise ValueError("Candidate Bundle Admission candidate/boot 投影不一致。")
+        payload = self.build_attestation.payload
+        if not (
+            payload.builder == self.trusted_builder_key.identity
+            and self.trusted_builder_key.state == "active"
+            and payload.version == self.candidate_slot.version
+            and payload.target == self.candidate_slot.target
+            and payload.source_commit == self.candidate_slot.source_commit
+            and payload.source_tree_sha256 == self.candidate_slot.source_tree_sha256
+            and payload.manifest_sha256 == self.candidate_slot.manifest_sha256
+        ):
+            raise ValueError("Candidate Bundle Admission trusted build 投影不一致。")
         _aware(self.admitted_at)
         core = self.model_dump(mode="json", exclude={"admission_id", "admission_sha256"})
         digest = _digest(core)
@@ -120,6 +140,8 @@ class EvolutionRevalidationCandidateBundleAdmissionView(_StrictModel):
     active_pointer_current: bool
     slot_current: bool
     boot_receipt_current: bool
+    trust_policy_current: bool
+    build_attestation_current: bool
     activation_input_authority: bool
 
     @model_validator(mode="after")
@@ -130,6 +152,8 @@ class EvolutionRevalidationCandidateBundleAdmissionView(_StrictModel):
             and self.active_pointer_current
             and self.slot_current
             and self.boot_receipt_current
+            and self.trust_policy_current
+            and self.build_attestation_current
         )
         if self.activation_input_authority is not expected:
             raise ValueError("Candidate Bundle Admission view authority 投影不一致。")
@@ -155,7 +179,7 @@ class EvolutionRevalidationCandidateBundleAdmissionStore:
             row = await (
                 await db.execute(
                     "SELECT admission_json FROM "
-                    "evolution_revalidation_candidate_bundle_admissions "
+                    "evolution_revalidation_candidate_bundle_admissions_v2 "
                     "WHERE stage_advance_receipt_id = ?",
                     (receipt_id,),
                 )
@@ -210,14 +234,11 @@ class EvolutionRevalidationCandidateBundleAdmissionStore:
                 source_plan = (
                     None
                     if plan is None
-                    else EvolutionRevalidationRolloutPlan.model_validate_json(
-                        plan["plan_json"]
-                    )
+                    else EvolutionRevalidationRolloutPlan.model_validate_json(plan["plan_json"])
                 )
                 if not (
                     advance is not None
-                    and advance["receipt_sha256"]
-                    == item.stage_advance_receipt_sha256
+                    and advance["receipt_sha256"] == item.stage_advance_receipt_sha256
                     and advance["decision"] == "advance"
                     and plan is not None
                     and plan["plan_sha256"] == item.plan_sha256
@@ -233,7 +254,7 @@ class EvolutionRevalidationCandidateBundleAdmissionStore:
                 existing = await (
                     await db.execute(
                         "SELECT admission_json FROM "
-                        "evolution_revalidation_candidate_bundle_admissions "
+                        "evolution_revalidation_candidate_bundle_admissions_v2 "
                         "WHERE stage_advance_receipt_id = ?",
                         (item.stage_advance_receipt_id,),
                     )
@@ -248,7 +269,7 @@ class EvolutionRevalidationCandidateBundleAdmissionStore:
                         )
                     return restored
                 await db.execute(
-                    "INSERT INTO evolution_revalidation_candidate_bundle_admissions "
+                    "INSERT INTO evolution_revalidation_candidate_bundle_admissions_v2 "
                     "(admission_id, admission_sha256, stage_advance_receipt_id, "
                     "plan_id, slot_id, admission_json, admitted_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -281,6 +302,7 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
         stage_advance_service: EvolutionRevalidationRolloutStageAdvanceService,
         plan_service: EvolutionRevalidationRolloutPlanService,
         release_slot_store: ReleaseSlotStore,
+        trust_policy_provider: Callable[[], ReleaseBuildTrustPolicyDocument],
         store: EvolutionRevalidationCandidateBundleAdmissionStore,
         now=None,
     ) -> None:
@@ -288,18 +310,33 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
         self.stage_advance_service = stage_advance_service
         self.plan_service = plan_service
         self.release_slot_store = release_slot_store
+        self.trust_policy_provider = trust_policy_provider
         self.store = store
         self.now = now or (lambda: datetime.now(UTC).isoformat())
         self._locks: dict[str, asyncio.Lock] = {}
 
-    async def admit(self, *, completion_id: str, bundle_dir: str | Path):
+    async def admit(
+        self,
+        *,
+        completion_id: str,
+        bundle_dir: str | Path,
+        build_attestation_path: str | Path,
+    ):
         lock = self._locks.setdefault(completion_id, asyncio.Lock())
         async with lock:
             advance = await self._current_advance(completion_id)
-            existing = await self.store.get_by_stage_advance(
-                advance.receipt.receipt_id
+            bundle_path, attestation, trust_policy, trusted_key = await asyncio.to_thread(
+                self._verified_build,
+                bundle_dir,
+                build_attestation_path,
             )
+            existing = await self.store.get_by_stage_advance(advance.receipt.receipt_id)
             if existing is not None:
+                if existing.build_attestation != attestation:
+                    raise EvolutionRevalidationCandidateBundleAdmissionError(
+                        "candidate_build_attestation_conflict",
+                        "同一 Stage Advance 已绑定不同构建证明。",
+                    )
                 return await self._view(existing, completion_id)
             plan_view = await self.plan_service.inspect(plan_id=advance.receipt.plan_id)
             if not plan_view.current_rollout_eligible:
@@ -311,6 +348,14 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
                 contract_id=plan.contract_id
             )
             rollback = promotion_input.prior_input.rollback
+            if not (
+                attestation.payload.source_commit == plan.target_head
+                and attestation.payload.source_tree_sha256 == plan.target_tree_sha256
+            ):
+                raise EvolutionRevalidationCandidateBundleAdmissionError(
+                    "candidate_build_attestation_source_mismatch",
+                    "可信构建证明的 source provenance 与获批 target 不一致。",
+                )
             previous_pointer, previous_slot = await asyncio.to_thread(
                 self._rollback_slot,
                 rollback.baseline_commit,
@@ -318,7 +363,9 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
             )
             try:
                 candidate_slot = await asyncio.to_thread(
-                    self.release_slot_store.install, bundle_dir
+                    self.release_slot_store.install,
+                    bundle_path,
+                    expected_manifest_sha256=attestation.payload.manifest_sha256,
                 )
             except (ReleaseSlotError, OSError, TypeError, ValueError) as exc:
                 raise EvolutionRevalidationCandidateBundleAdmissionError(
@@ -328,6 +375,9 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
             if not (
                 candidate_slot.source_commit == plan.target_head
                 and candidate_slot.source_tree_sha256 == plan.target_tree_sha256
+                and candidate_slot.manifest_sha256 == attestation.payload.manifest_sha256
+                and candidate_slot.version == attestation.payload.version
+                and candidate_slot.target == attestation.payload.target
             ):
                 raise EvolutionRevalidationCandidateBundleAdmissionError(
                     "candidate_bundle_source_mismatch",
@@ -349,6 +399,16 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
                     "candidate_bundle_authority_changed",
                     "安装/启动探测期间 Stage Advance 或 active pointer 已变化。",
                 )
+            refreshed_policy, refreshed_key = await asyncio.to_thread(
+                self._verify_stored_build,
+                attestation,
+                Path(candidate_slot.bundle_dir) / "manifest.json",
+            )
+            if refreshed_policy != trust_policy or refreshed_key != trusted_key:
+                raise EvolutionRevalidationCandidateBundleAdmissionError(
+                    "candidate_build_trust_policy_changed",
+                    "安装/启动探测期间 Build Trust Policy 已变化。",
+                )
             item = _build(
                 workspace_root=self.workspace_root,
                 advance=advance,
@@ -358,6 +418,9 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
                 previous_slot=previous_slot,
                 candidate_slot=candidate_slot,
                 boot=boot,
+                trust_policy=trust_policy,
+                attestation=attestation,
+                trusted_key=trusted_key,
                 admitted_at=self.now(),
             )
             stored = await self.store.record(item)
@@ -397,23 +460,59 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
             ) from exc
         pointer = resolved.pointer
         slot = resolved.slot
-        if not (
-            slot.source_commit == baseline_commit
-            and slot.source_tree_sha256 == baseline_tree
-        ):
+        if not (slot.source_commit == baseline_commit and slot.source_tree_sha256 == baseline_tree):
             raise EvolutionRevalidationCandidateBundleAdmissionError(
                 "candidate_bundle_rollback_slot_mismatch",
                 "Current slot 不是获批 Rollback Plan 的 exact baseline。",
             )
         return pointer, slot
 
+    def _verified_build(self, bundle_dir, attestation_path):
+        try:
+            bundle = Path(bundle_dir).expanduser().resolve(strict=True)
+            if not bundle.is_dir():
+                raise ValueError("candidate bundle 不是目录")
+            attestation = load_release_build_attestation(
+                Path(attestation_path).expanduser().resolve(strict=True)
+            )
+            policy, trusted_key = self._verify_stored_build(
+                attestation,
+                bundle / "manifest.json",
+            )
+        except EvolutionRevalidationCandidateBundleAdmissionError:
+            raise
+        except (OSError, TypeError, ValueError, ReleaseBuildAttestationError) as exc:
+            raise EvolutionRevalidationCandidateBundleAdmissionError(
+                "candidate_build_attestation_invalid",
+                "候选 bundle 缺少有效的可信构建证明。",
+            ) from exc
+        return bundle, attestation, policy, trusted_key
+
+    def _verify_stored_build(self, attestation, manifest_path):
+        try:
+            policy = self.trust_policy_provider()
+            if not isinstance(policy, ReleaseBuildTrustPolicyDocument):
+                raise TypeError("trust policy provider 返回类型无效")
+            trusted_key = verify_release_build_attestation(
+                attestation,
+                trust_policy=policy,
+                manifest_path=manifest_path,
+            )
+        except EvolutionRevalidationCandidateBundleAdmissionError:
+            raise
+        except (OSError, TypeError, ValueError, ReleaseBuildAttestationError) as exc:
+            raise EvolutionRevalidationCandidateBundleAdmissionError(
+                "candidate_build_attestation_invalid",
+                "候选 bundle 的可信构建证明当前无效。",
+            ) from exc
+        return policy, trusted_key
+
     async def _view(self, item, completion_id):
         try:
             advance = await self._current_advance(completion_id)
             advance_current = (
                 advance.receipt.receipt_id == item.stage_advance_receipt_id
-                and advance.receipt.receipt_sha256
-                == item.stage_advance_receipt_sha256
+                and advance.receipt.receipt_sha256 == item.stage_advance_receipt_sha256
             )
         except EvolutionRevalidationCandidateBundleAdmissionError:
             advance_current = False
@@ -432,17 +531,35 @@ class EvolutionRevalidationCandidateBundleAdmissionService:
         pointer_current = pointer == item.previous_pointer
         slot_current = slot == item.candidate_slot
         boot_current = boot == item.boot_receipt
+        try:
+            policy, trusted_key = await asyncio.to_thread(
+                self._verify_stored_build,
+                item.build_attestation,
+                Path(item.candidate_slot.bundle_dir) / "manifest.json",
+            )
+            trust_policy_current = bool(
+                policy.policy_id == item.build_trust_policy_id
+                and policy.policy_sha256 == item.build_trust_policy_sha256
+            )
+            build_attestation_current = trusted_key == item.trusted_builder_key
+        except EvolutionRevalidationCandidateBundleAdmissionError:
+            trust_policy_current = False
+            build_attestation_current = False
         return EvolutionRevalidationCandidateBundleAdmissionView(
             admission=item,
             stage_advance_current=advance_current,
             active_pointer_current=pointer_current,
             slot_current=slot_current,
             boot_receipt_current=boot_current,
+            trust_policy_current=trust_policy_current,
+            build_attestation_current=build_attestation_current,
             activation_input_authority=(
                 advance_current
                 and pointer_current
                 and slot_current
                 and boot_current
+                and trust_policy_current
+                and build_attestation_current
             ),
         )
 
@@ -457,10 +574,13 @@ def _build(
     previous_slot,
     candidate_slot,
     boot,
+    trust_policy,
+    attestation,
+    trusted_key,
     admitted_at,
 ):
     core = {
-        "schema_version": 1,
+        "schema_version": 2,
         "policy_version": EVOLUTION_REVALIDATION_CANDIDATE_BUNDLE_ADMISSION_POLICY,
         "workspace_root": str(workspace_root),
         "stage_advance_receipt_id": advance.receipt.receipt_id,
@@ -478,6 +598,12 @@ def _build(
         "previous_slot": previous_slot,
         "candidate_slot": candidate_slot,
         "boot_receipt": boot,
+        "build_trust_policy_id": trust_policy.policy_id,
+        "build_trust_policy_sha256": trust_policy.policy_sha256,
+        "build_attestation": attestation,
+        "trusted_builder_key": trusted_key,
+        "trusted_build_signature_verified": True,
+        "trusted_builder_current_at_admission": True,
         "exact_candidate_source_verified": True,
         "rollback_slot_verified": True,
         "immutable_slot_installed": True,
@@ -542,7 +668,7 @@ def _restore(encoded: str):
 
 async def _ensure_schema(db) -> None:
     await db.execute(
-        "CREATE TABLE IF NOT EXISTS evolution_revalidation_candidate_bundle_admissions ("
+        "CREATE TABLE IF NOT EXISTS evolution_revalidation_candidate_bundle_admissions_v2 ("
         "admission_id TEXT PRIMARY KEY, admission_sha256 TEXT NOT NULL UNIQUE, "
         "stage_advance_receipt_id TEXT NOT NULL UNIQUE, plan_id TEXT NOT NULL, "
         "slot_id TEXT NOT NULL, admission_json TEXT NOT NULL, admitted_at TEXT NOT NULL)"

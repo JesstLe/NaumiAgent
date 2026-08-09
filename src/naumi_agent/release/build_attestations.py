@@ -449,6 +449,17 @@ def load_release_build_attestation(path: Path) -> ReleaseBuildAttestation:
         ) from exc
 
 
+def load_release_build_trust_policy(path: Path) -> ReleaseBuildTrustPolicyDocument:
+    encoded = _read_bounded(path, _MAX_ATTESTATION_BYTES, "build trust policy")
+    try:
+        return ReleaseBuildTrustPolicyDocument.model_validate_json(encoded)
+    except ValueError as exc:
+        raise ReleaseBuildAttestationError(
+            "release_build_trust_policy_invalid",
+            "Build Trust Policy 不是受支持的 exact artifact。",
+        ) from exc
+
+
 def write_release_build_attestation(path: Path, attestation: ReleaseBuildAttestation) -> None:
     if path.exists():
         raise ReleaseBuildAttestationError(

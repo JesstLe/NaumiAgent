@@ -107,7 +107,8 @@
   通过 durable user interaction 决定推进或拒绝，automatic path 只接受计划显式资格；短期 authority 绑定 control generation，
   仍不部署 candidate。
 - [EVO-05.5e Candidate Bundle Admission](EVO-05-5e-candidate-bundle-admission.md)：已交付；验证 current rollback
-  slot 与获批 baseline，真实 install/boot exact candidate source-free bundle，并动态检测 pointer/bytes 漂移，但不执行 activation。
+  slot 与获批 baseline，消费 ARC-07.4b Ed25519 trusted-builder attestation 后真实 install/boot exact candidate bundle，
+  并动态检测 pointer/bytes/trust-policy 漂移，但不执行 activation。
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

@@ -21,6 +21,7 @@ from naumi_agent.release.build_attestations import (
     ReleaseTrustedBuilderKey,
     create_release_build_trust_policy,
     load_release_build_attestation,
+    load_release_build_trust_policy,
     verify_release_build_attestation,
 )
 
@@ -101,6 +102,9 @@ def test_real_detached_attestation_binds_archive_manifest_source_and_ci_identity
     assert artifact.attestation is not None
     attestation = load_release_build_attestation(artifact.attestation)
     trust_policy = create_release_build_trust_policy((_trusted_key(signer),))
+    policy_path = tmp_path / "trusted-builders.json"
+    policy_path.write_text(trust_policy.model_dump_json(), encoding="utf-8")
+    assert load_release_build_trust_policy(policy_path) == trust_policy
 
     trusted = verify_release_build_attestation(
         attestation,

@@ -484,7 +484,11 @@ from naumi_agent.orchestrator.tool_batches import (
     build_tool_batches,
     execute_tool_batch,
 )
-from naumi_agent.release import ReleaseSlotStore, default_release_root
+from naumi_agent.release import (
+    ReleaseSlotStore,
+    default_release_root,
+    load_release_build_trust_policy,
+)
 from naumi_agent.runs.models import CompletionReceipt
 from naumi_agent.runs.recorder import ChatRunRecorder, ChatRunRecorderEventSink
 from naumi_agent.runtime.dependencies import RuntimePortOverrides, RuntimePorts
@@ -2277,7 +2281,11 @@ class AgentEngine:
                 config.memory.session_db_path
             )
         )
-        self.evolution_release_slot_store = ReleaseSlotStore(default_release_root())
+        release_root = default_release_root()
+        self.evolution_release_slot_store = ReleaseSlotStore(release_root)
+        self.evolution_release_build_trust_policy_path = (
+            release_root / "trust" / "trusted-builders.json"
+        )
         self.evolution_revalidation_candidate_bundle_admission_service = (
             EvolutionRevalidationCandidateBundleAdmissionService(
                 workspace_root=paths.workspace_root,
@@ -2286,6 +2294,9 @@ class AgentEngine:
                 ),
                 plan_service=self.evolution_revalidation_rollout_plan_service,
                 release_slot_store=self.evolution_release_slot_store,
+                trust_policy_provider=lambda: load_release_build_trust_policy(
+                    self.evolution_release_build_trust_policy_path
+                ),
                 store=(
                     self.evolution_revalidation_candidate_bundle_admission_store
                 ),

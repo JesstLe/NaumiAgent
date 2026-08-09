@@ -34,6 +34,8 @@ def _bundle(
     reported=None,
     source_commit: str = SOURCE_COMMIT,
     source_tree_sha256: str = SOURCE_TREE_SHA256,
+    build_signer=None,
+    build_context=None,
 ) -> Path:
     target = host_release_target()
     windows = target.startswith("windows-")
@@ -67,6 +69,8 @@ def _bundle(
         source_commit=source_commit,
         source_tree_sha256=source_tree_sha256,
         archive_format="zip" if windows else "tar.gz",
+        build_signer=build_signer,
+        build_context=build_context,
     ).bundle_dir
 
 
@@ -112,6 +116,19 @@ def test_install_is_cross_thread_idempotent(tmp_path: Path) -> None:
 
     assert all(item.slot_id == slots[0].slot_id for item in slots)
     assert len(tuple(store.slots_dir.glob("relslot_*"))) == 1
+
+
+def test_install_rejects_bundle_outside_signed_manifest_precondition(
+    tmp_path: Path,
+) -> None:
+    bundle = _bundle(tmp_path, version="1.0.0", output_name="release")
+    store = ReleaseSlotStore(tmp_path / "installed")
+
+    with pytest.raises(ReleaseSlotError) as blocked:
+        store.install(bundle, expected_manifest_sha256="0" * 64)
+
+    assert blocked.value.code == "release_manifest_digest_mismatch"
+    assert not store.slots_dir.exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="fixture is a POSIX executable")
