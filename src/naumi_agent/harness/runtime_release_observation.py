@@ -120,6 +120,8 @@ def build_runtime_release_observation(
         and heartbeat.epoch == binding.epoch
     ):
         raise ValueError("Runtime Release Binding 与 heartbeat observation 不一致。")
+    if _aware(heartbeat.observed_at) < _aware(binding.bound_at):
+        raise ValueError("Runtime Release Observation 不能早于 release binding。")
     previous = previous_sample_sha256.strip()
     if previous and not re.fullmatch(_SHA256_RE, previous):
         raise ValueError("previous_sample_sha256 必须为空或 64 位小写 SHA-256。")

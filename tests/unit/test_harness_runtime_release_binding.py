@@ -7,9 +7,13 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.config.settings import RuntimeHeartbeatRetentionConfig
-from naumi_agent.harness.heartbeat import HarnessHeartbeatPhase
+from naumi_agent.harness.heartbeat import HarnessHeartbeat, HarnessHeartbeatPhase
+from naumi_agent.harness.run_lease import HarnessRunKind
 from naumi_agent.harness.runtime_release_binding import (
     build_runtime_release_binding,
+)
+from naumi_agent.harness.runtime_release_observation import (
+    build_runtime_release_observation,
 )
 from naumi_agent.harness.store import HarnessStore, HarnessStoreConflictError
 from naumi_agent.release.runtime_identity import (
@@ -149,6 +153,25 @@ async def test_binding_startup_is_idempotent_conflict_safe_and_pruned(
         runtime_identity=identity,
         bound_at="2026-08-10T10:00:01+00:00",
     )
+    with pytest.raises(ValueError, match="不能早于 release binding"):
+        build_runtime_release_observation(
+            binding=binding,
+            heartbeat=HarnessHeartbeat(
+                workspace_root=str(tmp_path.resolve()),
+                subject_kind=HarnessRunKind.RUNTIME,
+                subject_id="tui-atomic-binding",
+                instance_id="tui-atomic-binding",
+                epoch=1,
+                sequence=1,
+                phase=HarnessHeartbeatPhase.STARTING,
+                observed_at="2026-08-10T10:00:00+00:00",
+                timeout_seconds=3,
+                detail_code="runtime_starting",
+            ),
+            previous_sample_sha256="",
+            chain_origin_sequence=1,
+            chain_origin_kind="startup",
+        )
     request = {
         "binding": binding,
         "observed_at": "2026-08-10T10:00:02+00:00",
