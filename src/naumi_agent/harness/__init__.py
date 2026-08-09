@@ -49,6 +49,12 @@ from naumi_agent.harness.runtime_release_binding import (
     HarnessRuntimeReleaseBinding,
     build_runtime_release_binding,
 )
+from naumi_agent.harness.runtime_release_observation import (
+    HARNESS_RUNTIME_RELEASE_OBSERVATION_POLICY,
+    HarnessRuntimeReleaseObservation,
+    RuntimeReleaseObservationPage,
+    build_runtime_release_observation,
+)
 
 __all__ = [
     "HarnessKnowledgeContextComposer",
@@ -68,6 +74,7 @@ __all__ = [
     "HarnessRunLease",
     "HarnessRunLeaseState",
     "HarnessRuntimeReleaseBinding",
+    "HarnessRuntimeReleaseObservation",
     "KnowledgeBudget",
     "KnowledgeCandidate",
     "KnowledgeContextBundle",
@@ -82,8 +89,11 @@ __all__ = [
     "RuntimeHeartbeatRetentionService",
     "RuntimeHeartbeatRetentionSnapshot",
     "RuntimeHeartbeatRetentionState",
+    "RuntimeReleaseObservationPage",
     "HARNESS_RUNTIME_RELEASE_BINDING_POLICY",
+    "HARNESS_RUNTIME_RELEASE_OBSERVATION_POLICY",
     "assess_heartbeat",
     "build_runtime_release_binding",
+    "build_runtime_release_observation",
     "load_harness_profile",
 ]

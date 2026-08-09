@@ -23,7 +23,8 @@
     active-slot 启动解析与 Launch Resolution；远端更新 channel 和签名仍未实现。
   - [ARC-07.5e Managed Terminal Runtime Identity](ARC-07-5e-terminal-runtime-identity.md)：已交付普通 terminal
     session 的进程内 active-chain/environment/binary 自校验与 content-addressed identity；HAR-10.2i 已完成
-    New UI/TUI runtime heartbeat exact binding，持续 observation history/window 仍由后续切片实现。
+    New UI/TUI runtime heartbeat exact binding，HAR-10.2j 已完成 append-only observation history；持续 window、
+    exposure 与 Stage Completion 仍由 EVO-05 后续切片实现。
 - ARC-07.6 Config/data compatibility：用户 `.naumi` 与 state 不被覆盖，迁移前备份。
 - ARC-07.7 Offline/enterprise：离线包、代理、镜像、禁用自动更新。
 - ARC-07.8 Crash/diagnostic symbols：保护源码与可诊断性的平衡。

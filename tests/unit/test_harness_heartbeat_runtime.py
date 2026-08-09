@@ -117,6 +117,30 @@ async def test_runtime_heartbeat_preserves_waiting_during_pulse_and_resume(
 
 
 @pytest.mark.asyncio
+async def test_runtime_heartbeat_serializes_concurrent_state_records(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = HarnessStore(tmp_path / "harness.db")
+    producer = _producer(store, workspace)
+    await producer.start()
+
+    pulse, waiting = await asyncio.gather(
+        producer.pulse_now(),
+        producer.enter_waiting(detail_code="waiting_for_user"),
+    )
+
+    assert {pulse.sequence, waiting.sequence} == {3, 4}
+    assert producer.sequence == 4
+    heartbeat = await store.get_heartbeat(
+        workspace_root=workspace,
+        subject_kind=HarnessRunKind.RUNTIME,
+        subject_id=producer.subject_id,
+    )
+    assert heartbeat is not None and heartbeat.sequence == 4
+    assert await producer.close()
+
+
+@pytest.mark.asyncio
 async def test_runtime_heartbeat_reports_periodic_write_failure_once(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()

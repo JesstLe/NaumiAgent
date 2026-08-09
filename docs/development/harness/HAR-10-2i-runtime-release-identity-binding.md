@@ -38,7 +38,7 @@ runtime、Agent、Browser 与 Pursuit，不被 ARC-07 字段污染。
 
 ## 当前边界与下一步
 
-`harness_heartbeats` 仍只保存每个 subject 的最新状态，因此不能证明最小持续时间、最小样本数、连续
-pointer/exposure 或中途是否出现 unhealthy gap。下一最小切片应建立 append-only、bounded 的 release-bound
-heartbeat observation sample/receipt，再由 EVO-05 独立聚合 observation window；不得从当前 binding 直接签发
+HAR-10.2j 已建立 append-only、bounded page 的 release-bound heartbeat observation ledger；见
+[HAR-10.2j](HAR-10-2j-runtime-release-observation-ledger.md)。它仍不证明最小持续时间、最小样本数、连续 exposure 或
+中途是否出现 unhealthy gap。下一步由 EVO-05 独立聚合 observation window；不得从 binding 或单个 sample 直接签发
 Stage Completion Evidence。

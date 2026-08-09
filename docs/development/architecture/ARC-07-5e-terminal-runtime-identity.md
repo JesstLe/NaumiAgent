@@ -47,5 +47,6 @@ HAR-10.2i 已把 Identity 与 runtime heartbeat subject/instance/epoch 原子绑
 Composition-owned factory；见 [HAR-10.2i](../harness/HAR-10-2i-runtime-release-identity-binding.md)。绑定失败只撤销
 release identity authority，不阻断开发态 heartbeat/UI。
 
-下一步需要 append-only、bounded 的 release-bound heartbeat observation sample。当前 latest heartbeat + identity binding
-不能证明持续健康，也不能形成 rollout observation 或 Stage Completion Evidence。
+HAR-10.2j 已交付 append-only、bounded page 的 release-bound heartbeat observation ledger；见
+[HAR-10.2j](../harness/HAR-10-2j-runtime-release-observation-ledger.md)。下一步仍需 EVO-05 聚合最小持续时间、样本数、
+gap、pointer/exposure 连续性；identity binding 和 sample ledger 都不能直接形成 rollout window 或 Stage Completion Evidence。

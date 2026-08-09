@@ -74,6 +74,11 @@ from naumi_agent.harness.run_lease import (
 from naumi_agent.harness.runtime_release_binding import (
     HarnessRuntimeReleaseBinding,
 )
+from naumi_agent.harness.runtime_release_observation import (
+    HarnessRuntimeReleaseObservation,
+    RuntimeReleaseObservationPage,
+    build_runtime_release_observation,
+)
 from naumi_agent.harness.sandbox_request import HarnessSandboxEvalRequest
 from naumi_agent.harness.tombstone import (
     ReconciliationFailureCode,
@@ -86,7 +91,7 @@ from naumi_agent.harness.trust import resolve_harness_trust_db_path
 from naumi_agent.safety.guardrails import OutputGuardrail
 from naumi_agent.user_interaction import INTERACTION_PRIORITY_SCHEDULE
 
-HARNESS_STORE_SCHEMA_VERSION = 25
+HARNESS_STORE_SCHEMA_VERSION = 26
 _EVAL_BASELINE_PURPOSES = frozenset({"promotion", "comparison_reference"})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EVAL_BATCH_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -2930,9 +2935,33 @@ class HarnessStore:
                 if row is not None:
                     current = _heartbeat_from_row(row)
                     if incoming == current:
+                        binding = await _select_runtime_release_binding(
+                            db,
+                            workspace_root=workspace,
+                            subject_kind=kind,
+                            subject_id=subject,
+                        )
+                        if binding is not None:
+                            await _ensure_runtime_release_observation(
+                                db,
+                                binding=binding,
+                                heartbeat=current,
+                            )
                         await db.commit()
                         return current
                     _validate_heartbeat_advance(current, incoming)
+                binding = await _select_runtime_release_binding(
+                    db,
+                    workspace_root=workspace,
+                    subject_kind=kind,
+                    subject_id=subject,
+                )
+                if binding is not None and row is not None:
+                    await _ensure_runtime_release_observation(
+                        db,
+                        binding=binding,
+                        heartbeat=current,
+                    )
                 await db.execute(
                     """
                     INSERT INTO harness_heartbeats (
@@ -2963,6 +2992,12 @@ class HarnessStore:
                         detail,
                     ),
                 )
+                if binding is not None:
+                    await _append_runtime_release_observation(
+                        db,
+                        binding=binding,
+                        heartbeat=incoming,
+                    )
                 await db.commit()
                 return incoming
         except HarnessStoreConflictError:
@@ -3041,6 +3076,11 @@ class HarnessStore:
                         else _heartbeat_from_row(heartbeat_row)
                     )
                     if existing_binding == item and existing_heartbeat == incoming:
+                        await _ensure_runtime_release_observation(
+                            db,
+                            binding=item,
+                            heartbeat=incoming,
+                        )
                         await db.commit()
                         return incoming
                     await db.rollback()
@@ -3087,6 +3127,11 @@ class HarnessStore:
                         detail,
                     ),
                 )
+                await _append_runtime_release_observation(
+                    db,
+                    binding=item,
+                    heartbeat=incoming,
+                )
                 await db.commit()
                 return incoming
         except HarnessStoreConflictError:
@@ -3126,6 +3171,106 @@ class HarnessStore:
         except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
             raise HarnessStoreError(
                 "无法读取 Runtime Release Binding。"
+            ) from exc
+
+    async def list_runtime_release_observations(
+        self,
+        *,
+        workspace_root: str | Path,
+        subject_id: str,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> RuntimeReleaseObservationPage | None:
+        """Read one bounded, continuity-checked page of exact observations."""
+        workspace = _canonical_workspace(workspace_root)
+        subject = _normalize_run_lease_id(subject_id, field="subject_id")
+        if (
+            isinstance(after_sequence, bool)
+            or not isinstance(after_sequence, int)
+            or after_sequence < 0
+        ):
+            raise ValueError("after_sequence 必须是大于或等于 0 的整数。")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("Runtime observation page limit 必须在 1 到 500 之间。")
+        if not self._db_path.is_file():
+            return None
+        await self._ensure_schema()
+        try:
+            async with self._connection() as db:
+                binding = await _select_runtime_release_binding(
+                    db,
+                    workspace_root=workspace,
+                    subject_kind=HarnessRunKind.RUNTIME,
+                    subject_id=subject,
+                )
+                if binding is None:
+                    return None
+                previous_sha256 = ""
+                if after_sequence:
+                    previous_row = await (
+                        await db.execute(
+                            "SELECT * FROM harness_runtime_release_observations "
+                            "WHERE workspace_root = ? AND subject_id = ? "
+                            "AND heartbeat_sequence = ?",
+                            (workspace, subject, after_sequence),
+                        )
+                    ).fetchone()
+                    if previous_row is None:
+                        raise HarnessStoreError(
+                            "Runtime observation cursor 不对应已验证样本。"
+                        )
+                    previous = _runtime_release_observation_from_row(
+                        previous_row,
+                        binding=binding,
+                    )
+                    previous_sha256 = previous.sample_sha256
+                rows = await (
+                    await db.execute(
+                        "SELECT * FROM harness_runtime_release_observations "
+                        "WHERE workspace_root = ? AND subject_id = ? "
+                        "AND heartbeat_sequence > ? "
+                        "ORDER BY heartbeat_sequence ASC LIMIT ?",
+                        (workspace, subject, after_sequence, limit + 1),
+                    )
+                ).fetchall()
+                has_more = len(rows) > limit
+                items: list[HarnessRuntimeReleaseObservation] = []
+                expected_sequence = after_sequence + 1
+                for index, row in enumerate(rows[:limit]):
+                    item = _runtime_release_observation_from_row(
+                        row,
+                        binding=binding,
+                    )
+                    if after_sequence == 0 and index == 0:
+                        expected_sequence = item.chain_origin_sequence
+                    if item.heartbeat_sequence != expected_sequence:
+                        raise HarnessStoreError(
+                            "Runtime observation sequence 不连续。"
+                        )
+                    if not hmac.compare_digest(
+                        item.previous_sample_sha256,
+                        previous_sha256,
+                    ):
+                        raise HarnessStoreError(
+                            "Runtime observation hash chain 断裂。"
+                        )
+                    items.append(item)
+                    previous_sha256 = item.sample_sha256
+                    expected_sequence += 1
+                return RuntimeReleaseObservationPage(
+                    workspace_root=workspace,
+                    subject_id=subject,
+                    binding_id=binding.binding_id,
+                    binding_sha256=binding.binding_sha256,
+                    after_sequence=after_sequence,
+                    items=tuple(items),
+                    next_sequence=(items[-1].heartbeat_sequence if has_more else 0),
+                )
+        except HarnessStoreError:
+            raise
+        except (aiosqlite.Error, OSError, TypeError, ValueError) as exc:
+            raise HarnessStoreError(
+                "无法读取 Runtime Release Observation。"
             ) from exc
 
     async def get_heartbeat(
@@ -3291,6 +3436,13 @@ class HarnessStore:
                     if assess_heartbeat(heartbeat, now=now).health in allowed_health:
                         eligible.append(heartbeat.subject_id)
                 if eligible:
+                    await db.executemany(
+                        """
+                        DELETE FROM harness_runtime_release_observations
+                        WHERE workspace_root = ? AND subject_id = ?
+                        """,
+                        [(workspace, subject_id) for subject_id in eligible],
+                    )
                     await db.executemany(
                         """
                         DELETE FROM harness_runtime_release_bindings
@@ -7992,6 +8144,7 @@ class HarnessStore:
                             await _migrate_interaction_priority_v24(db)
                             await db.executescript(_SCHEMA_V24)
                             await db.executescript(_SCHEMA_V25)
+                            await db.executescript(_SCHEMA_V26)
                             await db.execute(
                                 "PRAGMA user_version = "
                                 f"{HARNESS_STORE_SCHEMA_VERSION}"
@@ -11134,6 +11287,194 @@ def _heartbeat_from_row(row: aiosqlite.Row) -> HarnessHeartbeat:
     )
 
 
+async def _select_runtime_release_binding(
+    db: aiosqlite.Connection,
+    *,
+    workspace_root: str,
+    subject_kind: HarnessRunKind,
+    subject_id: str,
+) -> HarnessRuntimeReleaseBinding | None:
+    if subject_kind is not HarnessRunKind.RUNTIME:
+        return None
+    row = await (
+        await db.execute(
+            "SELECT * FROM harness_runtime_release_bindings "
+            "WHERE workspace_root = ? AND subject_id = ?",
+            (workspace_root, subject_id),
+        )
+    ).fetchone()
+    if row is None:
+        return None
+    binding = HarnessRuntimeReleaseBinding.model_validate_json(
+        row["binding_json"]
+    )
+    if not (
+        binding.workspace_root == workspace_root
+        and binding.subject_id == subject_id
+        and binding.instance_id == str(row["instance_id"])
+        and binding.epoch == int(row["epoch"])
+        and binding.surface == str(row["surface"])
+        and binding.binding_id == str(row["binding_id"])
+        and hmac.compare_digest(
+            binding.binding_sha256,
+            str(row["binding_sha256"]),
+        )
+        and binding.runtime_identity.identity_id
+        == str(row["runtime_identity_id"])
+        and hmac.compare_digest(
+            binding.runtime_identity.identity_sha256,
+            str(row["runtime_identity_sha256"]),
+        )
+        and binding.bound_at == str(row["bound_at"])
+    ):
+        raise HarnessStoreError("Runtime Release Binding 索引与 artifact 不一致。")
+    return binding
+
+
+def _runtime_release_observation_from_row(
+    row: aiosqlite.Row,
+    *,
+    binding: HarnessRuntimeReleaseBinding,
+) -> HarnessRuntimeReleaseObservation:
+    item = HarnessRuntimeReleaseObservation.model_validate_json(row["sample_json"])
+    if not (
+        item.workspace_root == binding.workspace_root == str(row["workspace_root"])
+        and item.subject_id == binding.subject_id == str(row["subject_id"])
+        and item.heartbeat_sequence == int(row["heartbeat_sequence"])
+        and item.binding_id == binding.binding_id == str(row["binding_id"])
+        and hmac.compare_digest(item.binding_sha256, binding.binding_sha256)
+        and hmac.compare_digest(item.binding_sha256, str(row["binding_sha256"]))
+        and item.sample_id == str(row["sample_id"])
+        and hmac.compare_digest(item.sample_sha256, str(row["sample_sha256"]))
+        and hmac.compare_digest(
+            item.previous_sample_sha256,
+            str(row["previous_sample_sha256"]),
+        )
+        and item.phase.value == str(row["phase"])
+        and item.observed_at == str(row["observed_at"])
+        and item.runtime_identity_id == binding.runtime_identity.identity_id
+        and hmac.compare_digest(
+            item.runtime_identity_sha256,
+            binding.runtime_identity.identity_sha256,
+        )
+        and item.surface == binding.surface
+        and item.instance_id == binding.instance_id
+        and item.epoch == binding.epoch
+    ):
+        raise HarnessStoreError(
+            "Runtime Release Observation 索引与 artifact 不一致。"
+        )
+    return item
+
+
+async def _append_runtime_release_observation(
+    db: aiosqlite.Connection,
+    *,
+    binding: HarnessRuntimeReleaseBinding,
+    heartbeat: HarnessHeartbeat,
+) -> HarnessRuntimeReleaseObservation:
+    row = await (
+        await db.execute(
+            "SELECT * FROM harness_runtime_release_observations "
+            "WHERE workspace_root = ? AND subject_id = ? "
+            "ORDER BY heartbeat_sequence DESC LIMIT 1",
+            (binding.workspace_root, binding.subject_id),
+        )
+    ).fetchone()
+    previous_sha256 = ""
+    expected_sequence = heartbeat.sequence
+    chain_origin_sequence = heartbeat.sequence
+    chain_origin_kind = (
+        "startup" if heartbeat.sequence == 1 else "legacy_snapshot"
+    )
+    if row is not None:
+        previous = _runtime_release_observation_from_row(row, binding=binding)
+        previous_sha256 = previous.sample_sha256
+        expected_sequence = previous.heartbeat_sequence + 1
+        chain_origin_sequence = previous.chain_origin_sequence
+        chain_origin_kind = previous.chain_origin_kind
+    if heartbeat.sequence != expected_sequence:
+        raise HarnessStoreConflictError(
+            "Runtime observation 必须与 heartbeat sequence 连续提交。"
+        )
+    item = build_runtime_release_observation(
+        binding=binding,
+        heartbeat=heartbeat,
+        previous_sample_sha256=previous_sha256,
+        chain_origin_sequence=chain_origin_sequence,
+        chain_origin_kind=chain_origin_kind,
+    )
+    await db.execute(
+        """
+        INSERT INTO harness_runtime_release_observations (
+            workspace_root, subject_id, heartbeat_sequence, binding_id,
+            binding_sha256, sample_id, sample_sha256, previous_sample_sha256,
+            phase, observed_at, sample_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item.workspace_root,
+            item.subject_id,
+            item.heartbeat_sequence,
+            item.binding_id,
+            item.binding_sha256,
+            item.sample_id,
+            item.sample_sha256,
+            item.previous_sample_sha256,
+            item.phase.value,
+            item.observed_at,
+            item.model_dump_json(),
+        ),
+    )
+    return item
+
+
+async def _ensure_runtime_release_observation(
+    db: aiosqlite.Connection,
+    *,
+    binding: HarnessRuntimeReleaseBinding,
+    heartbeat: HarnessHeartbeat,
+) -> HarnessRuntimeReleaseObservation:
+    row = await (
+        await db.execute(
+            "SELECT * FROM harness_runtime_release_observations "
+            "WHERE workspace_root = ? AND subject_id = ? "
+            "AND heartbeat_sequence = ?",
+            (binding.workspace_root, binding.subject_id, heartbeat.sequence),
+        )
+    ).fetchone()
+    if row is None:
+        latest = await (
+            await db.execute(
+                "SELECT 1 FROM harness_runtime_release_observations "
+                "WHERE workspace_root = ? AND subject_id = ? LIMIT 1",
+                (binding.workspace_root, binding.subject_id),
+            )
+        ).fetchone()
+        if latest is None:
+            return await _append_runtime_release_observation(
+                db,
+                binding=binding,
+                heartbeat=heartbeat,
+            )
+        raise HarnessStoreConflictError(
+            "Runtime heartbeat 缺少连续 observation sample。"
+        )
+    item = _runtime_release_observation_from_row(row, binding=binding)
+    expected = build_runtime_release_observation(
+        binding=binding,
+        heartbeat=heartbeat,
+        previous_sample_sha256=item.previous_sample_sha256,
+        chain_origin_sequence=item.chain_origin_sequence,
+        chain_origin_kind=item.chain_origin_kind,
+    )
+    if item != expected:
+        raise HarnessStoreConflictError(
+            "Runtime heartbeat 与 observation sample 不一致。"
+        )
+    return item
+
+
 def _validate_heartbeat_advance(
     current: HarnessHeartbeat,
     incoming: HarnessHeartbeat,
@@ -12419,5 +12760,30 @@ CREATE TABLE IF NOT EXISTS harness_runtime_release_bindings (
 CREATE INDEX IF NOT EXISTS idx_harness_runtime_release_bindings_identity
 ON harness_runtime_release_bindings (
     workspace_root, runtime_identity_id, bound_at, subject_id
+);
+"""
+
+_SCHEMA_V26 = """
+CREATE TABLE IF NOT EXISTS harness_runtime_release_observations (
+    workspace_root TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    heartbeat_sequence INTEGER NOT NULL CHECK (heartbeat_sequence >= 1),
+    binding_id TEXT NOT NULL,
+    binding_sha256 TEXT NOT NULL,
+    sample_id TEXT NOT NULL,
+    sample_sha256 TEXT NOT NULL,
+    previous_sample_sha256 TEXT NOT NULL,
+    phase TEXT NOT NULL CHECK (
+        phase IN ('starting', 'running', 'waiting', 'draining', 'stopped', 'failed')
+    ),
+    observed_at TEXT NOT NULL,
+    sample_json TEXT NOT NULL,
+    PRIMARY KEY (workspace_root, subject_id, heartbeat_sequence),
+    UNIQUE (workspace_root, sample_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_harness_runtime_release_observations_binding
+ON harness_runtime_release_observations (
+    workspace_root, binding_id, observed_at, heartbeat_sequence
 );
 """
