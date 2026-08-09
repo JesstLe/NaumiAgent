@@ -17,7 +17,10 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal, Self
+from typing import TYPE_CHECKING, Literal, Self
+
+if TYPE_CHECKING:
+    from naumi_agent.release.launcher import ReleaseLaunchResolution
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -194,7 +197,7 @@ class ReleaseSlotStore:
         *,
         installed_at: str | None = None,
         expected_manifest_sha256: str | None = None,
-    ):
+    ) -> ReleaseInstalledSlot:
         source = Path(bundle_dir).expanduser().resolve(strict=True)
         if not source.is_dir():
             raise ReleaseSlotError("release_bundle_missing", "发行 bundle 目录不存在。")
@@ -248,6 +251,7 @@ class ReleaseSlotStore:
         try:
             shutil.copytree(source, staged_bundle, symlinks=True)
             _verify_bundle(staged_bundle, expected_manifest_sha256=manifest_sha)
+            _fsync_tree(staged_bundle)
             try:
                 os.rename(staged_bundle, slot_dir)
                 _fsync_directory(self.slots_dir)
@@ -256,6 +260,7 @@ class ReleaseSlotStore:
                     raise
                 _verify_bundle(slot_dir, expected_manifest_sha256=manifest_sha)
             _make_immutable(slot_dir)
+            _fsync_tree(slot_dir)
             _verify_bundle(slot_dir, expected_manifest_sha256=manifest_sha)
             _verify_immutable(slot_dir)
         finally:
@@ -629,7 +634,10 @@ class ReleaseSlotStore:
             )
             db.commit()
 
-    def get_launch_resolution(self, resolution_id: str):
+    def get_launch_resolution(
+        self,
+        resolution_id: str,
+    ) -> ReleaseLaunchResolution | None:
         """Read one immutable launch fact after validating its typed identity."""
         if not self.db_path.is_file():
             return None
@@ -653,6 +661,14 @@ class ReleaseSlotStore:
                 "SELECT slot_json FROM release_slots WHERE slot_id = ?", (slot_id,)
             ).fetchone()
         return None if row is None else ReleaseInstalledSlot.model_validate_json(row["slot_json"])
+
+    def inspect_installed_slot(self, slot_id: str) -> ReleaseInstalledSlot:
+        """Return one installed slot only after revalidating bytes and immutability."""
+        slot = self._require_slot(slot_id)
+        bundle = Path(slot.bundle_dir)
+        _verify_bundle(bundle, expected_manifest_sha256=slot.manifest_sha256)
+        _verify_immutable(bundle)
+        return slot
 
     def get_boot_receipt(self, receipt_id: str) -> ReleaseSlotBootReceipt | None:
         if not self.db_path.is_file():
@@ -1025,6 +1041,21 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _fsync_tree(root: Path) -> None:
+    directories: list[Path] = []
+    for current, _dirs, files in os.walk(root, followlinks=False):
+        directory = Path(current)
+        directories.append(directory)
+        for name in files:
+            path = directory / name
+            if path.is_symlink():
+                continue
+            with path.open("rb") as stream:
+                os.fsync(stream.fileno())
+    for directory in reversed(directories):
+        _fsync_directory(directory)
 
 
 def _aware(value):

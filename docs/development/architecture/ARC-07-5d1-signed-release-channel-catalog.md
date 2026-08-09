@@ -78,5 +78,6 @@ Entry 必须与 Build Attestation 的 target/version/archive/manifest projection
 [ARC-07.5d2 Verified Artifact Fetch](ARC-07-5d2-verified-artifact-fetch.md) 已消费 current Resolution，以受限 HTTPS
 transport、有界 raw stream、claim fencing、同文件系统 staging、fsync 和 atomic rename 形成动态撤权 Download Receipt。
 
-下一最小切片 `ARC-07.5d3 Verified Archive Admission` 仍需安全解包、重验 manifest/Build Attestation，并通过 ARC-07.5a
-安装 immutable inactive slot；这些执行 Receipt 完成之前，EVO-05.5f5b 不能声称 rollout 已发生。
+[ARC-07.5d3 Verified Archive Admission](ARC-07-5d3-verified-archive-admission.md) 已进一步完成安全解包、重验
+manifest/Build Attestation，并通过 ARC-07.5a 安装 immutable inactive slot。下一最小切片是
+`EVO-05.5f5b Percentage Deployment Intent`，它仍不能把 intent 声称为 rollout 已发生。

@@ -1,5 +1,13 @@
 """Release artifact construction, installed slots, and atomic activation."""
 
+from naumi_agent.release.archive_admission import (
+    RELEASE_ARCHIVE_ADMISSION_POLICY,
+    ReleaseArchiveAdmissionError,
+    ReleaseArchiveAdmissionReceipt,
+    ReleaseArchiveAdmissionService,
+    ReleaseArchiveAdmissionStore,
+    ReleaseArchiveAdmissionView,
+)
 from naumi_agent.release.artifact_fetch import (
     RELEASE_ARTIFACT_DOWNLOAD_POLICY,
     HttpxReleaseArtifactTransport,
@@ -103,6 +111,7 @@ from naumi_agent.release.slots import (
 )
 
 __all__ = [
+    "RELEASE_ARCHIVE_ADMISSION_POLICY",
     "RELEASE_ARTIFACT_DOWNLOAD_POLICY",
     "RELEASE_BUILD_ATTESTATION_DOMAIN",
     "RELEASE_BUILD_ATTESTATION_POLICY",
@@ -124,6 +133,11 @@ __all__ = [
     "RELEASE_RUNTIME_IDENTITY_POLICY",
     "HttpxReleaseArtifactTransport",
     "ReleaseActivePointer",
+    "ReleaseArchiveAdmissionError",
+    "ReleaseArchiveAdmissionReceipt",
+    "ReleaseArchiveAdmissionService",
+    "ReleaseArchiveAdmissionStore",
+    "ReleaseArchiveAdmissionView",
     "ReleaseArtifactDownloadReceipt",
     "ReleaseArtifactDownloadStore",
     "ReleaseArtifactDownloadView",
