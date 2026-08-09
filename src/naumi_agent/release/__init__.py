@@ -21,6 +21,7 @@ from naumi_agent.release.launcher import (
     RELEASE_LAUNCH_RESOLUTION_POLICY,
     ReleaseLaunchResolution,
     default_release_root,
+    resolve_and_record_launch,
     resolve_launch,
 )
 from naumi_agent.release.runtime_health import (
@@ -75,6 +76,7 @@ __all__ = [
     "inspect_runtime_health",
     "load_release_build_attestation",
     "load_release_build_trust_policy",
+    "resolve_and_record_launch",
     "resolve_launch",
     "parse_runtime_health_report",
     "verify_release_build_attestation",

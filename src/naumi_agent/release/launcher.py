@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
         return _install_bundle(store, Path(args[1]))
     status_only = args == ["--launcher-status"]
     try:
-        resolution = _resolve_and_record(
+        resolution = resolve_and_record_launch(
             store,
             argument_count=0 if status_only else len(args),
             process_start_requested=not status_only,
@@ -199,17 +199,19 @@ def _install_bundle(store: ReleaseSlotStore, bundle: Path) -> int:
     return 0
 
 
-def _resolve_and_record(
+def resolve_and_record_launch(
     store: ReleaseSlotStore,
     *,
     argument_count: int,
     process_start_requested: bool,
+    resolved_at: str | None = None,
 ) -> ReleaseLaunchResolution:
     for attempt in range(3):
         resolution = resolve_launch(
             store,
             argument_count=argument_count,
             process_start_requested=process_start_requested,
+            resolved_at=resolved_at,
         )
         try:
             store.record_launch_resolution(resolution)
@@ -249,5 +251,6 @@ __all__ = [
     "ReleaseLaunchResolution",
     "default_release_root",
     "main",
+    "resolve_and_record_launch",
     "resolve_launch",
 ]

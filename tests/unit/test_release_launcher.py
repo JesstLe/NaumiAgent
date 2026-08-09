@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from naumi_agent.release.artifact import assemble_release_artifact
-from naumi_agent.release.launcher import _resolve_and_record, main, resolve_launch
+from naumi_agent.release.launcher import (
+    main,
+    resolve_and_record_launch,
+    resolve_launch,
+)
 from naumi_agent.release.slots import ReleaseSlotError, ReleaseSlotStore, host_release_target
 
 SOURCE_COMMIT = "a" * 40
@@ -113,7 +117,7 @@ def test_resolution_retries_bounded_pointer_race(
 
     monkeypatch.setattr(store, "record_launch_resolution", race_once)
 
-    resolution = _resolve_and_record(
+    resolution = resolve_and_record_launch(
         store,
         argument_count=1,
         process_start_requested=True,
