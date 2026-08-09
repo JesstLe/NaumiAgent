@@ -72,7 +72,8 @@ Hardened Admission 使用 v2 schema 和独立 append-only v2 表。早期只绑�
 
 ## 下一切片
 
-EVO-05.5f Opt-in Deployment Executor 必须消费 current Admission，重新验证 exact trust policy/attestation，以冻结的
-previous pointer digest 作为 CAS 前提，
-调用 ARC-07 atomic activation；激活后重读 active chain 与 candidate slot，绑定 opt-in exposure cohort 并形成 Deployment Receipt。
-若激活后 Receipt 落盘前崩溃，reconcile 必须根据 pointer generation 机械补写，而不能重复切换或虚报失败。
+[EVO-05.5f1](EVO-05-5f1-opt-in-deployment-intent.md) 已消费 current Admission，通过 durable user interaction
+形成当前本机安装的 explicit opt-in cohort，并冻结 previous pointer CAS digest；它仍不切换 active pointer。
+EVO-05.5f2 必须消费 current 5f1 Intent，执行 ARC-07 atomic activation，激活后重读 active chain 与 candidate slot，
+再形成 Deployment Receipt。若激活后 Receipt 落盘前崩溃，reconcile 必须根据 pointer generation 机械补写，
+不能重复切换或虚报失败。

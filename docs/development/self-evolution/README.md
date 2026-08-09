@@ -143,6 +143,9 @@ Completion、control generation 与短期有效期冻结为 Stage Advance Receip
 [EVO-05.5e](EVO-05-5e-candidate-bundle-admission.md) 已将 exact candidate source-free bundle 真实安装到 immutable slot，
 先验证 ARC-07.4b detached Ed25519 Build Attestation，再绑定获批 source provenance、rollback baseline 与 Boot Receipt；
 key 撤销或 trust-policy 轮换会动态撤权，只开放 activation input，不切换 active pointer。
+[EVO-05.5f1](EVO-05-5f1-opt-in-deployment-intent.md) 已通过 HAR durable interaction 登记当前本机安装的显式 opt-in，
+冻结 exact previous-pointer CAS、candidate slot/boot 与 build trust 绑定；它不切换 pointer，也不把本机 enrollment
+虚报成已执行全局 1% rollout。下一切片 5f2 才负责 CAS activation、崩溃对账与 Deployment Receipt。
 [EVO-05.6a](EVO-05-6a-automatic-pause-rollback-request.md) 已让 exact breach 幂等触发或复用 HMAC kill switch，并冻结
 绑定 exact prior Rollback Plan 的只读 Request；它不写 workspace/Git，也不把请求虚报成已回滚。
 [EVO-05.6b1](EVO-05-6b1-immutable-rollback-source.md) 已从 exact Git commit/tree 读取 baseline blob，验证每个
