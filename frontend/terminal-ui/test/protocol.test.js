@@ -3816,6 +3816,8 @@ test("normalizes workbench snapshot events", () => {
       active_baseline: true,
       contract_issue_allowed: false,
       before_after_recorded: false,
+      before_after_evidence: null,
+      post_rollback_evaluation_recorded: false,
       long_term_metrics_recorded: false,
       promoted: false,
       learning_authority: false,
@@ -3881,6 +3883,86 @@ test("normalizes workbench snapshot events", () => {
   assert.equal(record.payload.worktrees[0].agent_id, "Agent-1");
   assert.equal(record.payload.worktrees[0].task.private_prompt, undefined);
   assert.equal(record.payload.worktrees[0].lease.private_token, undefined);
+
+  const cohort = {
+    batch_id: "implementation:red", samples: 5,
+    passed_samples: 0, failed_samples: 5, evaluation_error_samples: 0,
+  };
+  const beforeAfter = {
+    schema_version: 1,
+    policy_version: "evolution-proposal-before-after-evidence-v1",
+    evidence_id: `evbeforeafter_${"6".repeat(24)}`,
+    evidence_sha256: "6".repeat(64),
+    evidence_kind: "implementation_before_after",
+    outcome_id: proposal.outcome.outcome_id,
+    outcome_sha256: proposal.outcome.outcome_sha256,
+    workbench_session_id: "s",
+    workbench_proposal_id: "proposal-1",
+    experiment_contract_id: proposal.outcome.experiment_contract_id,
+    final_evaluation_id: `evfinal_${"7".repeat(24)}`,
+    candidate_id: proposal.outcome.candidate_id,
+    candidate_revision: proposal.outcome.candidate_revision,
+    lane_count: 2,
+    lanes: ["interventional", "adversarial"].map((lane_kind, index) => ({
+      order: index + 1,
+      lane_kind,
+      platform: "macos",
+      suite_id: `implementation_${index + 1}`,
+      comparison_id: String(index + 1).repeat(64),
+      decision: "passed",
+      statistical_verdict: "improved",
+      before: cohort,
+      after: {
+        ...cohort,
+        batch_id: `implementation:green:${index + 1}`,
+        passed_samples: 5,
+        failed_samples: 0,
+      },
+    })),
+    before_after_recorded: true,
+    post_rollback_evaluation_recorded: false,
+    long_term_metrics_recorded: false,
+    promoted: false,
+    learning_authority: false,
+    promotion_authority: false,
+  };
+  const evidenced = normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: {
+          ...proposal.outcome,
+          before_after_evidence: beforeAfter,
+          before_after_recorded: true,
+        },
+      }],
+    },
+  });
+  assert.equal(evidenced.payload.proposals[0].outcome.before_after_recorded, true);
+  assert.equal(evidenced.payload.proposals[0].outcome.before_after_evidence.lanes.length, 2);
+  assert.equal(
+    evidenced.payload.proposals[0].outcome.before_after_evidence.lanes[0].before.failed_samples,
+    5,
+  );
+  assert.throws(() => normalizeServerRecord({
+    type: "workbench/snapshot",
+    payload: {
+      ...record.payload,
+      proposals: [{
+        ...proposal,
+        outcome: {
+          ...proposal.outcome,
+          before_after_evidence: {
+            ...beforeAfter,
+            post_rollback_evaluation_recorded: true,
+          },
+          before_after_recorded: true,
+        },
+      }],
+    },
+  }), /authority 字段无效/);
 
   for (const mergeTargetIds of [
     ["proposal-2", "proposal-2"],

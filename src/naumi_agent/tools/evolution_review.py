@@ -77,6 +77,10 @@ from naumi_agent.evolution.promotion_packages import (
     EvolutionPromotionPackageError,
     render_evolution_promotion_package,
 )
+from naumi_agent.evolution.proposal_before_after_evidence import (
+    EvolutionProposalBeforeAfterEvidenceError,
+    render_proposal_before_after_evidence,
+)
 from naumi_agent.evolution.queue import render_queue_result
 from naumi_agent.evolution.reflection_memories import (
     EvolutionReflectionMemoryError,
@@ -2543,6 +2547,73 @@ class EvolutionRevalidationRollbackOutcomeTool(Tool):
         return render_revalidation_rollback_outcome(view)
 
 
+class EvolutionProposalBeforeAfterEvidenceTool(Tool):
+    """Record Proposal-bound HAR-08 implementation comparisons."""
+
+    def __init__(self, engine: Any) -> None:
+        self._engine = engine
+
+    @property
+    def name(self) -> str:
+        return "evolution_proposal_before_after_evidence"
+
+    @property
+    def description(self) -> str:
+        return (
+            "把 rolled_back Outcome 绑定到原 Promotion Input 的 Final Evaluation 与 "
+            "HAR-08 RED/GREEN Comparison，幂等登记实施前后证据。"
+        )
+
+    @property
+    def parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "pattern": "^evrerollbackreq_[0-9a-f]{24}$",
+                },
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        }
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            read_only=False,
+            destructive=False,
+            concurrency_safe=True,
+            requires_confirmation=False,
+            path_argument_names=(),
+            command_argument_names=(),
+            user_facing_name="Evolution 实施前后证据",
+            search_hint=(
+                "evolution proposal before after final evaluation comparison "
+                "自进化 实施 前后 评测"
+            ),
+        )
+
+    async def execute(self, request_id: str) -> str:
+        try:
+            view = (
+                await self._engine.evolution_proposal_before_after_evidence_service.record(
+                    request_id=str(request_id or "").strip(),
+                )
+            )
+        except (
+            AttributeError,
+            EvolutionProposalBeforeAfterEvidenceError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            code = getattr(exc, "code", "proposal_before_after_failed")
+            return f"Evolution 实施前后证据未完成（`{code}`）：{exc}"
+        return render_proposal_before_after_evidence(view)
+
+
 def create_evolution_review_tools(
     engine: Any,
     service: EvolutionReviewService,
@@ -2584,6 +2655,7 @@ def create_evolution_review_tools(
         EvolutionRevalidationRuntimeContractTool(engine),
         EvolutionRevalidationRollbackExecutionTool(engine),
         EvolutionRevalidationRollbackOutcomeTool(engine),
+        EvolutionProposalBeforeAfterEvidenceTool(engine),
         EvolutionProposalQueueTool(engine),
     ]
 
@@ -2611,6 +2683,7 @@ __all__ = [
     "EvolutionPromotionApprovalDecisionTool",
     "EvolutionPromotionPackageInputTool",
     "EvolutionPromotionPackageTool",
+    "EvolutionProposalBeforeAfterEvidenceTool",
     "EvolutionRewardHackingEvidenceTool",
     "EvolutionRevalidationRequestAuthorityTool",
     "EvolutionRevalidationRequestTool",

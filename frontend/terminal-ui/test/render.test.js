@@ -611,6 +611,11 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
       experiment_contract_id: `evx_${"3".repeat(24)}`,
       breach_reasons: ["runtime_guardrail_breach"],
       authority_valid: true,
+      before_after_recorded: true,
+      before_after_evidence: {
+        evidence_id: `evbeforeafter_${"4".repeat(24)}`,
+        lanes: [{ lane_kind: "interventional" }, { lane_kind: "adversarial" }],
+      },
     },
   };
   const view = {
@@ -632,6 +637,9 @@ test("workbench Reviews tab renders rollback Outcome and removes Contract action
     assert(plain.includes(proposal.outcome.outcome_id));
     assert(plain.includes("approved 治理记录保持不变"));
     assert(plain.includes("不能再次签发 Contract"));
+    assert(plain.includes("已记录 · 2 lanes"));
+    assert(plain.includes(proposal.outcome.before_after_evidence.evidence_id));
+    assert(plain.includes("不是回滚后评测"));
     assert(!plain.includes("c 签发/重开 Contract"));
     assert(rendered.join("\n").includes(ANSI.yellow));
     assert(rendered.join("\n").includes(ANSI.green));

@@ -3,11 +3,23 @@ from __future__ import annotations
 import asyncio
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import aiosqlite
 import pytest
 
-from naumi_agent.evolution.proposal_outcomes import EvolutionProposalOutcomeProjection
+from naumi_agent.evolution.proposal_before_after_evidence import (
+    EvolutionProposalBeforeAfterEvidence,
+)
+from naumi_agent.evolution.proposal_before_after_evidence import (
+    _digest as _before_after_digest,
+)
+from naumi_agent.evolution.proposal_outcomes import (
+    EvolutionProposalOutcomeProjection,
+    EvolutionProposalOutcomeProjectionError,
+    EvolutionProposalOutcomeProjectionService,
+)
 from naumi_agent.tasks.models import TaskStatus
 from naumi_agent.tasks.store import TaskStore
 from naumi_agent.workbench.models import (
@@ -24,6 +36,158 @@ from naumi_agent.workbench.proposal_governance import ProposalAction
 from naumi_agent.workbench.service import WorkbenchService
 from naumi_agent.workbench.store import WorkbenchStore
 from naumi_agent.workbench.validation import ValidationRunner
+
+
+def _before_after_evidence(*, outcome_id: str, outcome_sha256: str, proposal_id: str):
+    cohort = {
+        "batch_id": "implementation:red",
+        "identity_sha256": "6" * 64,
+        "samples": 5,
+        "samples_sha256": "7" * 64,
+        "passed_samples": 0,
+        "failed_samples": 5,
+        "evaluation_error_samples": 0,
+        "passed_cases": 0,
+        "implementation_failures": 5,
+        "evaluation_errors": 0,
+        "skipped_cases": 0,
+        "duration_ms": 10.0,
+        "observed_tokens": None,
+        "token_samples": 0,
+        "observed_cost_usd": None,
+        "cost_samples": 0,
+    }
+    lanes = []
+    for index, lane_kind in enumerate(("interventional", "adversarial"), start=1):
+        after = dict(cohort)
+        after.update(
+            batch_id=f"implementation:green:{index}",
+            identity_sha256=f"{index + 7:x}" * 64,
+            samples_sha256=f"{index + 9:x}" * 64,
+            passed_samples=5,
+            failed_samples=0,
+            passed_cases=5,
+            implementation_failures=0,
+        )
+        lanes.append({
+            "order": index,
+            "lane_kind": lane_kind,
+            "platform": "macos",
+            "suite_id": f"implementation_{index}",
+            "comparison_id": f"{index:x}" * 64,
+            "comparison_receipt_sha256": f"{index + 2:x}" * 64,
+            "baseline_id": f"{index + 4:x}" * 64,
+            "decision": "passed",
+            "statistical_verdict": "improved",
+            "statistical_code": "",
+            "before": cohort,
+            "after": after,
+        })
+    payload = {
+        "schema_version": 1,
+        "policy_version": "evolution-proposal-before-after-evidence-v1",
+        "workspace_root": str(Path("/tmp/workbench-before-after").resolve()),
+        "evidence_kind": "implementation_before_after",
+        "outcome_id": outcome_id,
+        "outcome_sha256": outcome_sha256,
+        "request_id": f"evrerollbackreq_{'8' * 24}",
+        "workbench_session_id": "s",
+        "workbench_proposal_id": proposal_id,
+        "experiment_contract_id": f"evx_{'4' * 24}",
+        "experiment_contract_sha256": "4" * 64,
+        "fresh_promotion_input_id": f"evrevalpromoin_{'5' * 24}",
+        "fresh_promotion_input_sha256": "5" * 64,
+        "prior_promotion_input_id": f"evpromoin_{'6' * 24}",
+        "prior_promotion_input_sha256": "6" * 64,
+        "final_evaluation_id": f"evfinal_{'7' * 24}",
+        "final_evaluation_sha256": "7" * 64,
+        "candidate_id": f"evc_{'5' * 24}",
+        "candidate_revision": 2,
+        "candidate_sha256": "8" * 64,
+        "lane_count": 2,
+        "lanes": lanes,
+        "baseline_evidence_complete": True,
+        "candidate_evidence_complete": True,
+        "before_after_recorded": True,
+        "post_rollback_evaluation_recorded": False,
+        "long_term_metrics_recorded": False,
+        "promoted": False,
+        "learning_authority": False,
+        "promotion_authority": False,
+        "recorded_at": "2026-08-10T00:01:00+00:00",
+    }
+    digest = _before_after_digest(payload)
+    return EvolutionProposalBeforeAfterEvidence.model_validate({
+        **payload,
+        "evidence_id": f"evbeforeafter_{digest[:24]}",
+        "evidence_sha256": digest,
+    })
+
+
+@pytest.mark.asyncio
+async def test_proposal_outcome_projection_revalidates_before_after_authority() -> None:
+    outcome = SimpleNamespace(
+        workbench_session_id="s",
+        workbench_proposal_id="proposal-1",
+        status="rolled_back",
+        outcome_id=f"evrerollbackout_{'1' * 24}",
+        outcome_sha256="2" * 64,
+        request_id=f"evrerollbackreq_{'8' * 24}",
+        rollback_receipt_id=f"evrerollbackexec_{'3' * 24}",
+        experiment_contract_id=f"evx_{'4' * 24}",
+        candidate_id=f"evc_{'5' * 24}",
+        candidate_revision=2,
+        breach_reasons=("runtime_guardrail_breach",),
+        recorded_at="2026-08-10T00:00:00+00:00",
+    )
+    evidence = _before_after_evidence(
+        outcome_id=outcome.outcome_id,
+        outcome_sha256=outcome.outcome_sha256,
+        proposal_id=outcome.workbench_proposal_id,
+    )
+
+    class _OutcomeStore:
+        async def list_by_session(self, session_id):
+            return (outcome,)
+
+    class _OutcomeService:
+        async def inspect(self, *, request_id):
+            return SimpleNamespace(
+                outcome=outcome,
+                outcome_authority=True,
+                active_baseline_authority=True,
+            )
+
+    class _EvidenceStore:
+        async def get_by_outcome(self, outcome_id):
+            return evidence
+
+    class _EvidenceService:
+        before_after_authority = True
+
+        async def inspect(self, *, evidence):
+            return SimpleNamespace(
+                evidence=evidence,
+                before_after_authority=self.before_after_authority,
+            )
+
+    evidence_service = _EvidenceService()
+    service = EvolutionProposalOutcomeProjectionService(
+        rollback_outcome_store=_OutcomeStore(),  # type: ignore[arg-type]
+        rollback_outcome_service=_OutcomeService(),  # type: ignore[arg-type]
+        before_after_store=_EvidenceStore(),  # type: ignore[arg-type]
+        before_after_service=evidence_service,  # type: ignore[arg-type]
+    )
+    projected = await service.project_session("s")
+    assert projected["proposal-1"].before_after_recorded
+    assert projected["proposal-1"].before_after_evidence == evidence
+    assert not projected["proposal-1"].post_rollback_evaluation_recorded
+    assert not projected["proposal-1"].learning_authority
+
+    evidence_service.before_after_authority = False
+    with pytest.raises(EvolutionProposalOutcomeProjectionError) as stale:
+        await service.project_session("s")
+    assert stale.value.code == "proposal_outcome_before_after_stale"
 
 
 @pytest.mark.asyncio
@@ -224,6 +388,29 @@ async def test_dashboard_keeps_approved_evolution_proposal_actionable(tmp_path) 
     assert rolled_back["proposals"][0]["outcome_status"] == "rolled_back"
     assert rolled_back["proposals"][0]["contract_issue_allowed"] is False
     assert rolled_back["proposals"][0]["outcome"]["outcome_id"] == projection.outcome_id
+
+    before_after = _before_after_evidence(
+        outcome_id=projection.outcome_id,
+        outcome_sha256=projection.outcome_sha256,
+        proposal_id=proposal["id"],
+    )
+    with_evidence = EvolutionProposalOutcomeProjection.model_validate({
+        **projection.model_dump(mode="json"),
+        "before_after_evidence": before_after.model_dump(mode="json"),
+        "before_after_recorded": True,
+    })
+
+    class _BeforeAfterReader:
+        async def project_session(self, session_id: str):
+            return {proposal["id"]: with_evidence}
+
+    service.bind_proposal_outcome_reader(_BeforeAfterReader())
+    evidenced = await service.dashboard_snapshot("s")
+    projected_evidence = evidenced["proposals"][0]["outcome"]
+    assert projected_evidence["before_after_recorded"] is True
+    assert projected_evidence["before_after_evidence"]["lane_count"] == 2
+    assert projected_evidence["post_rollback_evaluation_recorded"] is False
+    assert projected_evidence["long_term_metrics_recorded"] is False
 
     class _UnavailableOutcomeReader:
         async def project_session(self, session_id: str):

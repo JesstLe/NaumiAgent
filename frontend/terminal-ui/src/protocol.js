@@ -1306,6 +1306,194 @@ function normalizeWorkbenchProposal(value) {
   return normalized;
 }
 
+function normalizeWorkbenchBeforeAfterCohort(value, field) {
+  const item = harnessObject(value, field);
+  const normalized = {
+    batch_id: workbenchText(item.batch_id, `${field}.batch_id`, 128),
+    samples: harnessNonnegativeInteger(item.samples, `${field}.samples`),
+    passed_samples: harnessNonnegativeInteger(item.passed_samples, `${field}.passed_samples`),
+    failed_samples: harnessNonnegativeInteger(item.failed_samples, `${field}.failed_samples`),
+    evaluation_error_samples: harnessNonnegativeInteger(
+      item.evaluation_error_samples,
+      `${field}.evaluation_error_samples`,
+    ),
+  };
+  if (
+    normalized.samples < 1
+    || normalized.passed_samples + normalized.failed_samples
+      + normalized.evaluation_error_samples !== normalized.samples
+  ) {
+    throw new Error(`${field} coverage 无效`);
+  }
+  return normalized;
+}
+
+function normalizeWorkbenchBeforeAfterEvidence(value) {
+  const item = harnessObject(value, "workbench proposal before/after evidence");
+  if (Number(item.schema_version) !== 1) {
+    throw new Error("workbench proposal before/after schema_version 不兼容");
+  }
+  const policy = workbenchText(
+    item.policy_version,
+    "workbench proposal before/after policy_version",
+    80,
+  );
+  if (policy !== "evolution-proposal-before-after-evidence-v1") {
+    throw new Error("workbench proposal before/after policy_version 不兼容");
+  }
+  const lanes = harnessObjectArray(
+    item.lanes,
+    "workbench proposal before/after lanes",
+    4,
+  ).map(
+    (raw, index) => {
+      const lane = harnessObject(raw, `workbench proposal before/after lane ${index + 1}`);
+      return {
+        order: harnessNonnegativeInteger(lane.order, "workbench proposal before/after lane.order"),
+        lane_kind: harnessChoice(
+          lane.lane_kind,
+          "workbench proposal before/after lane.lane_kind",
+          new Set(["interventional", "adversarial"]),
+        ),
+        platform: harnessChoice(
+          lane.platform,
+          "workbench proposal before/after lane.platform",
+          new Set(["linux", "macos", "windows", "unknown"]),
+        ),
+        suite_id: workbenchText(lane.suite_id, "workbench proposal before/after lane.suite_id", 64),
+        comparison_id: workbenchText(
+          lane.comparison_id,
+          "workbench proposal before/after lane.comparison_id",
+          64,
+        ),
+        decision: harnessChoice(
+          lane.decision,
+          "workbench proposal before/after lane.decision",
+          new Set(["passed", "failed", "flaky", "inconclusive", "incompatible"]),
+        ),
+        statistical_verdict: harnessChoice(
+          lane.statistical_verdict,
+          "workbench proposal before/after lane.statistical_verdict",
+          new Set(["unchanged", "improved", "regressed", "flaky", "inconclusive", "incompatible"]),
+        ),
+        before: normalizeWorkbenchBeforeAfterCohort(
+          lane.before,
+          "workbench proposal before/after lane.before",
+        ),
+        after: normalizeWorkbenchBeforeAfterCohort(
+          lane.after,
+          "workbench proposal before/after lane.after",
+        ),
+      };
+    },
+  );
+  const normalized = {
+    schema_version: 1,
+    policy_version: policy,
+    evidence_id: workbenchText(item.evidence_id, "workbench proposal before/after evidence_id", 128),
+    evidence_sha256: workbenchText(
+      item.evidence_sha256,
+      "workbench proposal before/after evidence_sha256",
+      64,
+    ),
+    evidence_kind: harnessChoice(
+      item.evidence_kind,
+      "workbench proposal before/after evidence_kind",
+      new Set(["implementation_before_after"]),
+    ),
+    outcome_id: workbenchText(item.outcome_id, "workbench proposal before/after outcome_id", 128),
+    outcome_sha256: workbenchText(
+      item.outcome_sha256,
+      "workbench proposal before/after outcome_sha256",
+      64,
+    ),
+    workbench_session_id: workbenchText(
+      item.workbench_session_id,
+      "workbench proposal before/after workbench_session_id",
+      128,
+    ),
+    workbench_proposal_id: workbenchText(
+      item.workbench_proposal_id,
+      "workbench proposal before/after workbench_proposal_id",
+      128,
+    ),
+    experiment_contract_id: workbenchText(
+      item.experiment_contract_id,
+      "workbench proposal before/after experiment_contract_id",
+      128,
+    ),
+    final_evaluation_id: workbenchText(
+      item.final_evaluation_id,
+      "workbench proposal before/after final_evaluation_id",
+      128,
+    ),
+    candidate_id: workbenchText(
+      item.candidate_id,
+      "workbench proposal before/after candidate_id",
+      128,
+    ),
+    candidate_revision: harnessNonnegativeInteger(
+      item.candidate_revision,
+      "workbench proposal before/after candidate_revision",
+    ),
+    lane_count: harnessNonnegativeInteger(
+      item.lane_count,
+      "workbench proposal before/after lane_count",
+    ),
+    lanes,
+    before_after_recorded: harnessBoolean(
+      item.before_after_recorded,
+      "workbench proposal before/after before_after_recorded",
+    ),
+    post_rollback_evaluation_recorded: harnessBoolean(
+      item.post_rollback_evaluation_recorded,
+      "workbench proposal before/after post_rollback_evaluation_recorded",
+    ),
+    long_term_metrics_recorded: harnessBoolean(
+      item.long_term_metrics_recorded,
+      "workbench proposal before/after long_term_metrics_recorded",
+    ),
+    promoted: harnessBoolean(item.promoted, "workbench proposal before/after promoted"),
+    learning_authority: harnessBoolean(
+      item.learning_authority,
+      "workbench proposal before/after learning_authority",
+    ),
+    promotion_authority: harnessBoolean(
+      item.promotion_authority,
+      "workbench proposal before/after promotion_authority",
+    ),
+  };
+  if (
+    normalized.lane_count !== lanes.length
+    || lanes.length < 2
+    || lanes.length > 4
+    || lanes.some((lane, index) => lane.order !== index + 1)
+    || lanes.some((lane) => (
+      !lane.suite_id
+      || !/^[0-9a-f]{64}$/.test(lane.comparison_id)
+      || !lane.before.batch_id
+      || !lane.after.batch_id
+    ))
+    || lanes[0].lane_kind !== "interventional"
+    || lanes.slice(1).some((lane) => lane.lane_kind !== "adversarial")
+    || !/^evbeforeafter_[0-9a-f]{24}$/.test(normalized.evidence_id)
+    || !/^[0-9a-f]{64}$/.test(normalized.evidence_sha256)
+    || !/^evx_[0-9a-f]{24}$/.test(normalized.experiment_contract_id)
+    || !/^evfinal_[0-9a-f]{24}$/.test(normalized.final_evaluation_id)
+    || !/^evc_[0-9a-f]{24}$/.test(normalized.candidate_id)
+    || normalized.candidate_revision < 1
+    || normalized.before_after_recorded !== true
+    || normalized.post_rollback_evaluation_recorded !== false
+    || normalized.long_term_metrics_recorded !== false
+    || normalized.promoted !== false
+    || normalized.learning_authority !== false
+    || normalized.promotion_authority !== false
+  ) {
+    throw new Error("workbench proposal before/after authority 字段无效");
+  }
+  return normalized;
+}
+
 function normalizeWorkbenchProposalOutcome(value) {
   const item = harnessObject(value, "workbench proposal outcome");
   if (Number(item.schema_version) !== 1) {
@@ -1319,6 +1507,9 @@ function normalizeWorkbenchProposalOutcome(value) {
   if (policy !== "evolution-proposal-outcome-projection-v1") {
     throw new Error(`workbench proposal outcome policy_version 不兼容: ${policy}`);
   }
+  const beforeAfter = item.before_after_evidence == null
+    ? null
+    : normalizeWorkbenchBeforeAfterEvidence(item.before_after_evidence);
   const normalized = {
     schema_version: 1,
     policy_version: policy,
@@ -1378,6 +1569,11 @@ function normalizeWorkbenchProposalOutcome(value) {
       item.before_after_recorded,
       "workbench proposal outcome.before_after_recorded",
     ),
+    before_after_evidence: beforeAfter,
+    post_rollback_evaluation_recorded: harnessBoolean(
+      item.post_rollback_evaluation_recorded,
+      "workbench proposal outcome.post_rollback_evaluation_recorded",
+    ),
     long_term_metrics_recorded: harnessBoolean(
       item.long_term_metrics_recorded,
       "workbench proposal outcome.long_term_metrics_recorded",
@@ -1395,7 +1591,8 @@ function normalizeWorkbenchProposalOutcome(value) {
   if (
     normalized.governance_state_unchanged !== true
     || normalized.contract_issue_allowed !== false
-    || normalized.before_after_recorded !== false
+    || normalized.before_after_recorded !== (beforeAfter !== null)
+    || normalized.post_rollback_evaluation_recorded !== false
     || normalized.long_term_metrics_recorded !== false
     || normalized.promoted !== false
     || normalized.learning_authority !== false
@@ -1405,6 +1602,20 @@ function normalizeWorkbenchProposalOutcome(value) {
     || (normalized.active_baseline && !normalized.authority_valid)
   ) {
     throw new Error("workbench proposal outcome authority 字段无效");
+  }
+  if (
+    beforeAfter
+    && (
+      beforeAfter.outcome_id !== normalized.outcome_id
+      || beforeAfter.outcome_sha256 !== normalized.outcome_sha256
+      || beforeAfter.workbench_session_id !== normalized.workbench_session_id
+      || beforeAfter.workbench_proposal_id !== normalized.workbench_proposal_id
+      || beforeAfter.experiment_contract_id !== normalized.experiment_contract_id
+      || beforeAfter.candidate_id !== normalized.candidate_id
+      || beforeAfter.candidate_revision !== normalized.candidate_revision
+    )
+  ) {
+    throw new Error("workbench proposal before/after 外层绑定无效");
   }
   const identities = [
     [normalized.outcome_id, /^evrerollbackout_[0-9a-f]{24}$/, "outcome_id"],

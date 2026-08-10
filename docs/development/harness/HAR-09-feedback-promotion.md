@@ -88,8 +88,10 @@
 - HAR-09.6a 已把该 Outcome 以只读方式投影到 Workbench/New UI/TUI：Proposal 治理状态继续保留 `approved`，
   实施轴显示 `rolled_back`；Outcome 存在或来源不可用时，issuer 在服务端对所有入口阻止再次签发 Contract。
   协议拒绝跨 Proposal 绑定和 `promoted/learning` 提权。详见 `HAR-09-6a-proposal-outcome-projection.md`。
-- HAR-09 outcome tracking 已有 `rolled_back` authority 与产品 projection，但尚未完成 HAR-08 before/after、
-  长期指标、promoted Outcome 和 supersede ledger，因此整体继续保持 partial。
+- HAR-09.6b 已把原 Promotion Input 绑定的 Final Evaluation 和全部 HAR-08 H5c RED/GREEN lane 登记为
+  `implementation_before_after`，并在每次读取时复验 Outcome、Proposal、Candidate 和 H5c authority。该 evidence
+  不是 post-rollback 或长期结果，不授予 learning/promotion authority。长期指标、回滚后恢复证明、promoted
+  Outcome 和 supersede ledger 尚未完成，因此整体继续保持 partial。
 
 EVO-02.1b 已把不可执行 Contract 包装为 workspace-bound durable Authority；HAR-09.5c 在其上补齐产品动作、
 Proposal 单飞键和历史 projection 迁移。Contract 仍不是执行或 promotion 许可。

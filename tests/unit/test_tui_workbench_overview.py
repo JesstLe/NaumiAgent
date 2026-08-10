@@ -177,6 +177,9 @@ def test_reviews_formatter_renders_rollback_outcome_without_contract_action() ->
     assert "evrerollbackout" in rendered
     assert "治理状态仍保留 approved 审计" in rendered
     assert "不能再次签发 Experiment Contract" in rendered
+    assert "已记录 · 2 lanes" in rendered
+    assert "Before/After Evidence" in rendered
+    assert "不代表回滚后评测" in rendered
     assert "`c` 签发" not in rendered
 
 
@@ -830,6 +833,14 @@ def _rolled_back_proposal_snapshot() -> dict[str, object]:
         "experiment_contract_id": f"evx_{'3' * 24}",
         "breach_reasons": ["runtime_guardrail_breach"],
         "authority_valid": True,
+        "before_after_recorded": True,
+        "before_after_evidence": {
+            "evidence_id": f"evbeforeafter_{'4' * 24}",
+            "lanes": [
+                {"lane_kind": "interventional"},
+                {"lane_kind": "adversarial"},
+            ],
+        },
     }
     return snapshot
 

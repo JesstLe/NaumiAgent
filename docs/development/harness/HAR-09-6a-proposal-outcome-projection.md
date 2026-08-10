@@ -75,5 +75,6 @@ HAR-09 整体仍为 partial。本切片没有实现：
 4. Outcome supersede ledger；
 5. 由长期结果驱动的 EVO-06 policy learning。
 
-下一切片应消费 HAR-08 的同源 baseline/evaluation authority，形成 `HAR-09.6b Before/After Outcome Evidence`，
-而不是提前开放 learning 或 promotion。
+HAR-09.6b 已消费原 Promotion Input 中 proposal-bound Final Evaluation 与 HAR-08 H5c authority，形成
+`implementation_before_after` durable evidence；它没有把历史实验结果冒充为回滚后评测，也没有开放 learning
+或 promotion。详见 `HAR-09-6b-before-after-outcome-evidence.md`。

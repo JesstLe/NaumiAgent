@@ -361,6 +361,12 @@ def _append_proposal_review(
     outcome_status = _normalized(proposal.get("outcome_status"))
     if outcome:
         authority = "可验证" if outcome.get("authority_valid") is True else "证据已失效"
+        before_after = _mapping(outcome.get("before_after_evidence"))
+        before_after_label = (
+            f"已记录 · {len(before_after.get('lanes') or [])} lanes"
+            if outcome.get("before_after_recorded") is True and before_after
+            else "尚未记录"
+        )
         lines.extend(
             [
                 "",
@@ -370,9 +376,16 @@ def _append_proposal_review(
                 f"- Rollback Receipt：`{_code(outcome.get('rollback_receipt_id'))}`",
                 f"- Experiment Contract：`{_code(outcome.get('experiment_contract_id'))}`",
                 f"- Breach：{', '.join(_strings(outcome.get('breach_reasons'))) or '-'}",
-                "- HAR-08 before/after：尚未记录；长期指标：尚未记录",
+                f"- HAR-08 before/after：{before_after_label}；长期指标：尚未记录",
             ]
         )
+        if before_after:
+            lines.extend(
+                [
+                    f"- Before/After Evidence：`{_code(before_after.get('evidence_id'))}`",
+                    "- 口径：实施前 RED baseline → 实施后 GREEN candidate；不代表回滚后评测",
+                ]
+            )
     elif proposal.get("outcome_error"):
         lines.extend(
             [
