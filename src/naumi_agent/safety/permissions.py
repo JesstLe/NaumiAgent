@@ -858,6 +858,19 @@ TOOL_PERMISSIONS: dict[str, PermissionRule] = {
         risk_level=PermissionRiskLevel.MEDIUM,
         tool_family="evolution_release_completion",
     ),
+    "evolution_stable_rollback_readiness": PermissionRule(
+        tool_name="evolution_stable_rollback_readiness",
+        allowed_modes=[
+            PermissionMode.BYPASS,
+            PermissionMode.PERMISSIVE,
+            PermissionMode.MODERATE,
+            PermissionMode.STRICT,
+        ],
+        requires_confirmation=False,
+        max_calls_per_session=100,
+        risk_level=PermissionRiskLevel.LOW,
+        tool_family="evolution_release_observation",
+    ),
     "evolution_revalidation_rollback_outcome": PermissionRule(
         tool_name="evolution_revalidation_rollback_outcome",
         allowed_modes=[

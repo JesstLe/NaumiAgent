@@ -2917,6 +2917,7 @@ def _print_help() -> None:
         (
             "/evolution [list|detail|experiment-contract|evaluation|"
             "stable-population-preview|stable-population-completion|"
+            "stable-rollback-readiness|"
             "revalidation-rollback-execute|revalidation-rollback-outcome|"
             "outcome-before-after|outcome-verify-runtime|"
             "outcome-verify-behavior|outcome-behavior-coverage|"
@@ -3768,6 +3769,23 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 arg="",
             )
             return
+        if action == "stable-rollback-readiness":
+            if len(parts) != 3:
+                raise ValueError(
+                    "stable-rollback-readiness 需要 Completion Receipt ID 和 "
+                    "Stable Intent ID。"
+                )
+            await _run_tool_slash_command(
+                engine,
+                slash_command="/evolution",
+                tool_name="evolution_stable_rollback_readiness",
+                parse_args=lambda _arg: {
+                    "completion_receipt_id": parts[1],
+                    "intent_id": parts[2],
+                },
+                arg="",
+            )
+            return
         if action == "revalidation-rollback-outcome":
             if len(parts) != 2:
                 raise ValueError(
@@ -4102,6 +4120,7 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
                 "approval-requirement、approval-request、approval-principal、"
                 "approval-signature、approval-decision、revalidation-request、"
                 "stable-population-preview、stable-population-completion、"
+                "stable-rollback-readiness、"
                 "revalidation-rollback-execute、revalidation-rollback-outcome、"
                 "outcome-before-after、outcome-verify-runtime、"
                 "outcome-verify-behavior、outcome-behavior-coverage、"
@@ -4300,6 +4319,8 @@ async def _run_evolution_review(engine: Any, arg: str) -> None:
             "[population-snapshot-id]；"
             "/evolution stable-population-completion inspect "
             "<completion-receipt-id>；"
+            "/evolution stable-rollback-readiness <completion-receipt-id> "
+            "<stable-intent-id>；"
             "/evolution revalidation-rollback-execute <rollback-request-id>；"
             "/evolution revalidation-rollback-outcome <rollback-request-id>；"
             "/evolution outcome-before-after <rollback-request-id>；"

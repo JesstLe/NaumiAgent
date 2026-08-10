@@ -104,6 +104,10 @@ Engine 默认复用 5f5v 的 source-lazy read graph；空候选仍不会初始�
 本切片形成了 durable Population Completion，但它不是 rollout executor 的授权票据，也没有 expected-pointer、release slot、kill switch、
 rollback plan 或 single-use execution nonce。当前 content-addressed Receipt 适用于同一本地控制面；尚未提供跨控制面签名/透明日志证明。
 
-下一最小切片应为 EVO-05.5f5x Stable Rollout Authorization：消费一个 current 5f5w View，冻结 expected active pointer、candidate
-slot/build identity、Rollback Request/Plan readiness、kill-switch epoch 与短期 single-use authorization；执行器必须在 CAS 前再次动态
-重验。Promotion authority 继续独立，不能与 stable rollout authorization 合并。
+[EVO-05.5f5x1](EVO-05-5f5x1-stable-rollback-readiness.md) 已先完成最小安全前置：消费 current 5f5w View 与 current Stable
+Deployment，绑定真实 expected active pointer、retained prior slot 和原始 Boot Receipt，形成 binary-only Readiness。健康 rollout
+不消费 6a breach-only Rollback Request；配置/数据 rollback authority 仍关闭。
+
+下一最小切片是 EVO-05.5f5x2 Stable Rollout Authorization：重新消费 current 5f5w View 与 5f5x1 Readiness，冻结 kill-switch
+generation、短期 expiry 和 single-use nonce；执行器必须在 CAS 前再次动态重验。Promotion authority 继续独立，不能与 stable
+rollout authorization 合并。

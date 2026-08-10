@@ -64,6 +64,8 @@ def _passing_receipt(
     snapshot_sha256: str = "3" * 64,
     snapshot_sequence: int = 7,
     population_denominator: int = 2,
+    candidate_version: str = "1.2.3",
+    candidate_target: str = "darwin-arm64",
 ):
     member_index = index if member is None else member
     durations = (1_000,) * 10
@@ -98,8 +100,8 @@ def _passing_receipt(
             "liveness_window_sha256": f"{index + 3:x}" * 64,
             "binding_id": f"hrreleasebinding_{hex_id}",
             "binding_sha256": f"{index + 5:x}" * 64,
-            "candidate_version": "1.2.3",
-            "candidate_target": "darwin-arm64",
+            "candidate_version": candidate_version,
+            "candidate_target": candidate_target,
             "population_snapshot_id": snapshot_id,
             "population_snapshot_sha256": snapshot_sha256,
             "population_snapshot_sequence": snapshot_sequence,
@@ -637,6 +639,15 @@ async def test_engine_composes_candidate_preview_service_and_tool(
             is service
         )
         assert "evolution_stable_population_completion" in engine.tool_registry.names
+        assert engine.evolution_stable_rollback_readiness_service.release_slot_store is (
+            engine.evolution_release_slot_store
+        )
+        assert (
+            engine.evolution_stable_rollback_readiness_service.deployment_inspector
+            is service.stage_completion_inspector
+        )
+        assert not service.stage_completion_inspector.initialized
+        assert "evolution_stable_rollback_readiness" in engine.tool_registry.names
         result = await engine.execute_tool(
             ToolCall(
                 id="stable-population-preview-engine",

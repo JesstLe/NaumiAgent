@@ -27,6 +27,7 @@ from naumi_agent.evolution.stable_population_completions import (
     _build_receipt as _build_completion_receipt,
 )
 from naumi_agent.release.population_registry import ReleasePopulationSnapshotStore
+from naumi_agent.release.slots import host_release_target
 from naumi_agent.tools.base import ToolCall, ToolRegistry, ToolResult
 from naumi_agent.tools.evolution_review import EvolutionStablePopulationCompletionTool
 from tests.unit.test_evolution_stable_population_candidate_previews import (
@@ -70,6 +71,7 @@ async def _authority_services(tmp_path: Path):
             snapshot_sha256=snapshot.snapshot_sha256,
             snapshot_sequence=snapshot.payload.sequence,
             population_denominator=snapshot.payload.population_denominator,
+            candidate_target=host_release_target(),
         )
         for index, credential in enumerate(credentials, start=1)
     )

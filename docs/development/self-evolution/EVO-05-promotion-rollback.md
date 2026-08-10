@@ -190,6 +190,9 @@
 - [EVO-05.5f5w Stable Population Completion Authority](EVO-05-5f5w-stable-population-completion-authority.md)：已交付；
   writer-fenced exact member source-set 形成 durable Completion Receipt，并对 Snapshot/trust/member evidence 动态撤权；仍不授予
   stable rollout 或 promotion authority；
+- [EVO-05.5f5x1 Stable Rollback Readiness](EVO-05-5f5x1-stable-rollback-readiness.md)：已交付；
+  current Completion/Deployment 与真实 active/prior pointer、retained slot 和原始 Boot Receipt 形成 binary-only readiness；不预造
+  breach-only Rollback Request，配置/数据、stable rollout 与 promotion authority 仍关闭；
 - [EVO-05.6a Automatic Pause and Rollback Request](EVO-05-6a-automatic-pause-rollback-request.md)：已交付；
   exact breach 会触发或复用 kill switch，并冻结只读 exact Rollback Request，不虚报执行完成。
 - [EVO-05.6b1 Immutable Rollback Source](EVO-05-6b1-immutable-rollback-source.md)：已交付；从 exact Git

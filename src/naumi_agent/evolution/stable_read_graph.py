@@ -82,6 +82,7 @@ from naumi_agent.evolution.revalidation_stable_deployment_intents import (
 from naumi_agent.evolution.revalidation_stable_deployments import (
     EvolutionRevalidationStableDeploymentService,
     EvolutionRevalidationStableDeploymentStore,
+    EvolutionRevalidationStableDeploymentView,
 )
 from naumi_agent.evolution.revalidation_stable_execution_outcome_ledger import (
     EvolutionRevalidationStableExecutionOutcomeLedgerService,
@@ -120,6 +121,7 @@ class EvolutionStableReadGraphInspector:
     """Narrow wrapper that deliberately exposes no assess/write operation."""
 
     _service: EvolutionRevalidationStableStageCompletionService
+    _deployment_service: EvolutionRevalidationStableDeploymentService
 
     def __post_init__(self) -> None:
         if not isinstance(
@@ -127,6 +129,11 @@ class EvolutionStableReadGraphInspector:
             EvolutionRevalidationStableStageCompletionService,
         ):
             raise TypeError("Stable read graph 需要 exact 5f5r Service。")
+        if not isinstance(
+            self._deployment_service,
+            EvolutionRevalidationStableDeploymentService,
+        ):
+            raise TypeError("Stable read graph 需要 exact Stable Deployment Service。")
 
     async def inspect(
         self,
@@ -138,6 +145,13 @@ class EvolutionStableReadGraphInspector:
             evidence_id=evidence_id,
             subject_id=subject_id,
         )
+
+    async def inspect_stable_deployment(
+        self,
+        *,
+        intent_id: str,
+    ) -> EvolutionRevalidationStableDeploymentView:
+        return await self._deployment_service.inspect(intent_id=intent_id)
 
 
 class EvolutionLazyStableReadGraphInspector:
@@ -163,6 +177,21 @@ class EvolutionLazyStableReadGraphInspector:
         evidence_id: str,
         subject_id: str,
     ) -> EvolutionRevalidationStableStageCompletionView:
+        inspector = await self._resolve()
+        return await inspector.inspect(
+            evidence_id=evidence_id,
+            subject_id=subject_id,
+        )
+
+    async def inspect_stable_deployment(
+        self,
+        *,
+        intent_id: str,
+    ) -> EvolutionRevalidationStableDeploymentView:
+        inspector = await self._resolve()
+        return await inspector.inspect_stable_deployment(intent_id=intent_id)
+
+    async def _resolve(self) -> EvolutionStableReadGraphInspector:
         inspector = self._inspector
         if inspector is None:
             async with self._lock:
@@ -172,10 +201,7 @@ class EvolutionLazyStableReadGraphInspector:
                     if not isinstance(inspector, EvolutionStableReadGraphInspector):
                         raise TypeError("Stable read graph factory 返回类型无效。")
                     self._inspector = inspector
-        return await inspector.inspect(
-            evidence_id=evidence_id,
-            subject_id=subject_id,
-        )
+        return inspector
 
 
 def build_evolution_stable_read_graph_inspector(
@@ -481,7 +507,10 @@ def build_evolution_stable_read_graph_inspector(
         baseline_service=baseline_service,
         store=stable_completion_store,
     )
-    return EvolutionStableReadGraphInspector(stable_completion_service)
+    return EvolutionStableReadGraphInspector(
+        stable_completion_service,
+        stable_deployment_service,
+    )
 
 
 __all__ = [
